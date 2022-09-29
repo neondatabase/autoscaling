@@ -1,0 +1,38 @@
+
+---
+apiVersion: virt.virtink.smartx.com/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: postgres
+spec:
+  instance:
+#    cpu:
+#      sockets: 4
+#      coresPerSocket: 1
+    memory:
+      size: 4Gi
+    kernel:
+      image: smartxworks/virtink-kernel-5.15.12
+      imagePullPolicy: IfNotPresent
+      cmdline: "console=ttyS0 root=/dev/vda rw"
+    disks:
+      - name: rootfs
+        #readOnly: true
+    interfaces:
+      - name: pod
+        masquerade: {}
+      - name: overlay
+        bridge: {}
+  networks:
+    - name: pod
+      pod: {}
+    - name: overlay
+      multus:
+        networkName: overlay
+  volumes:
+    - name: rootfs
+      containerRootfs:
+        #image: cicdteam/vm-postgres-rootfs:20
+        image: cicdteam/vm-postgres:1
+        imagePullPolicy: IfNotPresent
+        size: 16Gi

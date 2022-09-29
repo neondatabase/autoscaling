@@ -1,0 +1,53 @@
+---
+apiVersion: virt.virtink.smartx.com/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: ubuntu
+spec:
+  instance:
+#    cpu:
+#      sockets: 4
+#      coresPerSocket: 1
+    memory:
+      size: 4Gi
+    kernel:
+      image: smartxworks/virtink-kernel-5.15.12
+      imagePullPolicy: IfNotPresent
+      cmdline: "console=ttyS0 root=/dev/vda rw"
+    disks:
+      - name: ubuntu
+      - name: cloud-init
+    interfaces:
+      - name: pod
+        masquerade: {}
+      - name: overlay
+        bridge: {}
+  networks:
+    - name: pod
+      pod: {}
+    - name: overlay
+      multus:
+        networkName: overlay
+  volumes:
+    - name: ubuntu
+      containerRootfs:
+        image: smartxworks/virtink-container-rootfs-ubuntu
+        imagePullPolicy: IfNotPresent
+        size: 16Gi
+    - name: cloud-init
+      cloudInit:
+        userData: |-
+          #cloud-config
+          password: password
+          chpasswd: { expire: False }
+          ssh_pwauth: True
+          write_files:
+          - content: |
+              network:
+                version: 2
+                ethernets:
+                  ens5:
+                    dhcp4: true
+            path: /etc/netplan/10-overlay-init.yaml
+          runcmd:
+          - netplan apply

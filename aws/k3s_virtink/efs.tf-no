@@ -1,0 +1,40 @@
+resource "aws_efs_file_system" "this" {
+  creation_token = var.name
+  performance_mode = "maxIO"
+
+  lifecycle_policy {
+    transition_to_ia = "AFTER_7_DAYS"
+  }
+}
+
+resource "aws_efs_mount_target" "this" {
+  count = length(var.public_subnets)
+  file_system_id = aws_efs_file_system.this.id
+  subnet_id = var.public_subnets[count.index] # spread instances over subnets
+  security_groups = [module.security_group_efs.security_group_id]
+}
+
+module "security_group_efs" {
+  source  = "terraform-aws-modules/security-group/aws"
+  version = "~> 4.0"
+
+  name        = "${var.name}-efs"
+  description = "${var.name} EFS security group"
+  vpc_id      = var.vpc_id
+
+  #ingress_cidr_blocks = ["0.0.0.0/0"]
+  #ingress_rules = ["all-all"]
+
+  egress_cidr_blocks = ["0.0.0.0/0"]
+  egress_rules       = ["all-all"]
+
+  ingress_with_cidr_blocks = [
+    {
+      description = "EFS inbound"
+      from_port   = 2049
+      to_port     = 2049
+      protocol    = "tcp"
+      cidr_blocks = var.vpc_cidr
+    },
+  ]
+}
