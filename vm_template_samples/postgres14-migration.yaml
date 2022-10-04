@@ -1,0 +1,6 @@
+apiVersion: virt.virtink.smartx.com/v1alpha1
+kind: VirtualMachineMigration
+metadata:
+  name: sample
+spec:
+  vmName: postgres14-tmpfs

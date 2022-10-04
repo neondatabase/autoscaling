@@ -1,0 +1,53 @@
+#!/bin/sh
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# system mounts
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+mount -t tmpfs -o size=32M none /tmp
+mount -t tmpfs -o size=32M none /run
+#ln -s /proc/self/fd /dev/fd
+
+# networking
+ip link set up dev lo
+ip link set up dev eth0
+ip link set up dev eth1
+udhcpc -q -i eth0
+udhcpc -q -i eth1
+ip address show
+ip route show
+
+# postgresql init and start (data on NFS server)
+echo "search default.svc.cluster.local svc.cluster.local cluster.local" | tee -a /run/resolv.conf
+echo "options ndots:5" | tee -a /run/resolv.conf
+NFS_SHARE="nfs-server:/share"
+mount.nfs4 ${NFS_SHARE} -o rw,nolock,vers=4.2,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,async,noatime /mnt
+export PGDATA=/mnt/data
+rm -rf   ${PGDATA}
+mkdir -p ${PGDATA} /run/postgresql
+chown -R postgres:postgres ${PGDATA} /run/postgresql
+su-exec postgres pg_ctl init -o '--no-sync'
+echo 'host all all 10.0.0.0/8     trust' | tee -a /mnt/data/pg_hba.conf
+echo 'host all all 172.16.0.0/16  trust' | tee -a /mnt/data/pg_hba.conf
+echo 'host all all 192.168.0.0/16 trust' | tee -a /mnt/data/pg_hba.conf
+su-exec postgres pg_ctl start -o '-c config_file=/etc/postgresql.conf'
+
+echo; cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2
+echo -e "\nBoot took $(cut -d' ' -f1 /proc/uptime) seconds\n"
+
+graceful () {
+  su-exec postgres pg_ctl stop
+  umount /mnt
+  poweroff -f
+}
+
+trap graceful TERM INT KILL
+
+echo "Start getty for console"
+while true; do setsid -w /sbin/agetty -a root --keep-baud -p 115200,38400,9600 hvc0; sleep 1; done
+
+echo "Exiting and shuting down vm"
+graveful

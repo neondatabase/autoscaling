@@ -1,0 +1,55 @@
+---
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: static-tmpfs
+spec:
+  config: '{
+    "cniVersion": "0.3.1",
+    "name": "overlay",
+    "type": "bridge",
+    "bridge": "vm-bridge0",
+    "isDefaultGateway": false,
+    "isGateway": false,
+    "ipam": {
+      "type": "static",
+      "addresses": [{"address": "10.77.77.1/24"}],
+      "routes": [{ "dst": "10.77.0.0/16" }]
+    }
+  }'
+
+---
+apiVersion: virt.virtink.smartx.com/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: postgres14-tmpfs
+spec:
+  instance:
+    memory:
+      size: 8Gi
+    kernel:
+      image: cicdteam/clh-kernel:5.15.12
+      imagePullPolicy: IfNotPresent
+      cmdline: "console=ttyS0 root=/dev/vda rw"
+    disks:
+      - name: rootfs
+        readOnly: true
+    interfaces:
+      - name: pod
+        masquerade:
+          cidr: 10.0.2.0/30
+      - name: overlay
+        masquerade:
+          cidr: 10.0.3.0/30
+  networks:
+    - name: pod
+      pod: {}
+    - name: overlay
+      multus:
+        networkName: static-tmpfs
+  volumes:
+    - name: rootfs
+      containerRootfs:
+        image: cicdteam/vm-alpine-p14-rootfs-tmpfs:3
+        imagePullPolicy: IfNotPresent
+        size: 1Gi
