@@ -17,6 +17,44 @@ References:
 [Install Scheduler-plugins]: https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/doc/install.md
 [k8s docs: Scheduling Framework]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
 
+## Summary of ideas
+
+The basic issue with integrating VM migration and autoscaling into the scheduler is that we can't
+*directly* add to the scheduling queue from within the plugin (i.e., there isn't anywhere we can
+just modify the scheduling queue directly, so we have to make an API call).
+
+What we *can* do is some kind of filtering / binding modification based on VM states. Here's a
+hypothetical series of actions, within & outside of the scheduler, modelling what should happen as
+we migrate a VM to make room for another's upscaling:
+
+ 1. Label the upscaling VM as `vm-A` and the one we're kicking out to make room as `vm-B`. VMs A and
+    B are on the same node.
+ 2. Create a new pod for the receiving pseudo-VM that we're migrating into (call it `vm-C`)
+     * This also includes waiting for the pod to get bound to a node.
+ 3. Transfer the VM state from `vm-B` to `vm-C` (i.e., perform the migration)
+ 4. Delete the pod for `vm-B` and *at the same time* upscale the pod for `vm-A`, using up some of
+    the space freed by removing `vm-B` from the node
+     * After upscaling the *pod*, we can do the same for the VM itself
+
+Edge cases to consider:
+
+ * Step 2 can bind `vm-C` to the same node as `vm-B`, if something was removed between the creation
+   request and the scheduler's binding
+ * \[optimization\]: In between steps 2 and 4, there might be other unrelated pods removed from
+   `vm-A/B`'s node, freeing up space for `vm-A` to expand *without* migrating `vm-B`
+   * Note: we need to be careful not to take advantage of the removal of a pod removed from *some
+       other* migration to make room for a *different* scale-up.
+
+Finishing thoughts:
+
+ * Basically, it seems pretty clear to me that this can't really be done without patching or
+     extending kubernetes itself. Thankfully, there's a kubernetes PR for this:
+     https://github.com/kubernetes/kubernetes/pull/102884
+ * The "pseudo-VM we're migrating into" is the `VirtualMachineMigration` object from
+     virtink AFAICT?
+   * Related PR from virtink: https://github.com/smartxworks/virtink/pull/59
+
+## Information about plugins (see below)
 
 [K8S - Creating a kube-scheduler plugin]\:
 
@@ -73,6 +111,9 @@ out for us:
 
 ## Notes for plugin points
 
+Framework types from <https://pkg.go.dev/k8s.io/kubernetes@v1.25.2/pkg/scheduler/framework>.
+Descriptions taken from <https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/#extension-points>.
+
 | Name | Framework type name | Description |
 |------|---------------------|-------------|
 | `QueueSort` | [`QueueSortPlugin`] | These plugins are used to sort Pods in the scheduling queue. A queue sort plugin essentially provides a `Less(Pod1, Pod2)` function. Only one queue sort plugin may be enabled at a time. |
@@ -100,6 +141,3 @@ out for us:
 [`PreBindPlugin`]: https://pkg.go.dev/k8s.io/kubernetes@v1.25.2/pkg/scheduler/framework#PreBindPlugin
 [`BindPlugin`]: https://pkg.go.dev/k8s.io/kubernetes@v1.25.2/pkg/scheduler/framework#BindPlugin
 [`PostBindPlugin`]: https://pkg.go.dev/k8s.io/kubernetes@v1.25.2/pkg/scheduler/framework#PostBindPlugin
-
-Framework types from <https://pkg.go.dev/k8s.io/kubernetes@v1.25.2/pkg/scheduler/framework>.
-Descriptions taken from <https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/#extension-points>.
