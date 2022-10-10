@@ -58,4 +58,4 @@ echo "Start getty for console"
 while true; do setsid -w /sbin/agetty -a root --keep-baud -p 115200,38400,9600 hvc0; sleep 1; done
 
 echo "Exiting and shuting down vm"
-graveful
+graceful
