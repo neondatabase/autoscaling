@@ -284,8 +284,11 @@ And now the VM should be up and running!
     private-key:  2602 bytes
     ```
 13. With everything built, launch the VM image:
-    ```sh
-    kubectl apply -f local-vm-postgres-disk.yaml
+    ```console
+    $ kubectl apply -f local-vm-postgres-disk.yaml
+    networkattachmentdefinition.k8s.cni.cncf.io/static-disk created
+    virtualmachine.virt.virtink.smartx.com/postgres14-disk created
+    service/postgres-connect created
     ```
     Everything should now work. Try `ssh-into-vm.sh` to access it directly, `run-bench.sh` to put
     some load on Postgres, or `start-autoscaler.sh` to start the autoscaling script running.
@@ -313,6 +316,4 @@ And now the VM should be up and running!
     **Note**: The VM's hostname is `cloud-supervisor`. This is set by kubernetes, and we *could*
     change it in the init script if we wanted, but technically speaking the running container *is*
     the `cloud-supervisor` image; it's just mounted the VM data alongside it.
-15. Run `run-bench.sh` and `start-autoscaler.sh` to watch it scale up
-
-    **Note**: Todo - there are adjustments that need to be made to `run-bench.sh` still.
+15. Run `run-bench.sh` and `start-autoscaler.sh` in separate sessions to watch it scale up :)

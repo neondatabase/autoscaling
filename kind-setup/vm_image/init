@@ -27,6 +27,17 @@ udhcpc -q -i eth1
 ip address show
 ip route show
 
+# node_exporter metrics (/metrics on :9100)
+run_metrics () {
+    while true; do
+        node_exporter 2>>/var/log/node_exporter >>/var/log/node_exporter
+        echo "$(date -R): node_exporter exited, retrying in 1s" | tee -a /var/log/node_exporter
+        sleep 1s
+    done
+}
+
+run_metrics &
+
 # postgresql init and start
 export PGDATA=/mnt/data
 mkdir -p $PGDATA /run/postgresql

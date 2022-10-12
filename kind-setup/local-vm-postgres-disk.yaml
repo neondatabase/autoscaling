@@ -27,6 +27,11 @@ spec:
   # run policy could be Always, RerunOnFailure, Once, Manual,Halted
   runPolicy: Always
   instance:
+    # If we don't define socketsMax here, then virtink refuses to allow more than 1
+    cpu:
+      sockets: 1
+      socketsMax: 8
+      coresPerSocket: 1
     memory:
       size: 1Gi
     kernel:

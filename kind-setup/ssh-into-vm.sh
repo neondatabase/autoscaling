@@ -11,6 +11,14 @@ source 'scripts-common.sh'
 vm_name="$(get_vm_name)"
 set -u
 
+SECRET_NAME='vm-ssh'
+
+# Check if the secret vm-ssh exists; we need it to grab the private key.
+echo "Checking secret exists..."
+if ! { kubectl get secret "$SECRET_NAME" 1>&3; } 2>&1 3>/dev/null | indent; then
+    exit 1
+fi
+
 echo "get vmPodName (vm_name = $vm_name)"
 pod="$(kubectl get vm "$vm_name" -o jsonpath='{.status.vmPodName}')"
 echo "get pod ip (pod = $pod)"
@@ -47,7 +55,7 @@ CONTAINER_CFG='
         "volumes": [{
             "name": "ssh-id",
             "secret": {
-                "secretName": "vm-ssh",
+                "secretName": "'"$SECRET_NAME"'",
                 "optional": false,
                 "defaultMode": 384,
                 "items": [{

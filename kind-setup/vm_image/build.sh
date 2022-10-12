@@ -13,12 +13,7 @@ fi
 # Allow this script to be run from outside the vm_image directory
 cd -P -- "$(dirname -- "$0")"
 
-# Usage: <cmd> | indent
-#
-# Helper function to clarify output a little better by indenting it.
-indent () {
-    sed -u -e "s/^/    /g"
-}
+source '../scripts-common.sh'
 
 if [ -a 'ssh_id_rsa' ]; then
     echo "Skipping keygen because 'ssh_id_rsa' already exists"

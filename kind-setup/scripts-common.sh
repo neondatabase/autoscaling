@@ -1,5 +1,12 @@
 # Common tools for scripts in this directory. Requires bash.
 
+# Usage: <cmd> | indent
+#
+# Helper function to clarify output a little better by indenting it.
+indent () {
+    sed -u -e "s/^/    /g"
+}
+
 # Usage: VM_NAME="$(get_vm_name)"
 #
 # Gets the VM name if it the VM_NAME variable isn't already set. Otherwise echo $VM_NAME
