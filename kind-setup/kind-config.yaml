@@ -13,10 +13,6 @@ nodes:
   - hostPath: cni-bin
     containerPath: /opt/cni/bin
 
-  # # SPECULATIVE:
-  # - hostPath: /dev/kvm
-  #   containerPath: /dev/kvm
-
   # virtink requires kube-apiserver to be run with `--allow-privileged=true`
   #
   # For more on the config here, see:
