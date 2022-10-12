@@ -1,0 +1,13 @@
+# Configuration file used to ovveride some variables
+# This file not synces with GitHub repo.
+#
+# Put 'settings.local' near with 'settings' file and
+# it will be loaded AFTER main 'settings' file.
+#
+# You can override any variables specified in 'settings' file
+#
+
+AWS_NAME=andrey-lab
+EC2_TYPE=m6i.large
+
+K3S_CLUSTER_SIZE=3
