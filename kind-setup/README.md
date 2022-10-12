@@ -176,10 +176,10 @@ Before we continue with a Postgres VM image, install the CRD for `NetworkAttachm
   ```sh
   # as user:
   REPO="k8snetworkplumbingwg/multus-cni"
-  PATH="deployments/multus-daemonset-thick.yml"
-  curl "https://raw.githubusercontent.com/$REPO/master/$PATH" -o multus-daemonset-thick.yaml
+  PATH="deployments/multus-daemonset.yml"
+  curl "https://raw.githubusercontent.com/$REPO/master/$PATH" -o multus-daemonset.yaml
   # as root:
-  kubectl apply -f multus-daemonset-thick.yaml
+  kubectl apply -f multus-daemonset.yaml
   ```
   This adds a `kube-system` pod:
   ```console
