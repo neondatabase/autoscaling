@@ -4,7 +4,7 @@ Simple Bash-script to create K3S cluster in AWS
 
 ## Configration
 
-Copy file `[settings.local.example](settings.local.example)` to `settings.local` and override
+Copy file [settings.local.example](settings.local.example) to `settings.local` and override
 necessary variables there (usually AWS_NAME, EC2_TYPE, K3S_CLUSTER_SIZE).
 
 Settings:
@@ -439,11 +439,13 @@ done
 After cluster creation kubernetes context configured with name as specified in `AWS_NAME`
 
 ```console
+% kubectl config current-context
+andrey-lab
+
 % kubectl version --short
 Client Version: v1.24.3
 Kustomize Version: v4.5.4
 Server Version: v1.24.6+k3s1
-
 
 % kubectl get nodes
 NAME           STATUS   ROLES                  AGE     VERSION
@@ -451,3 +453,17 @@ andrey-lab-1   Ready    control-plane,master   4m13s   v1.24.6+k3s1
 andrey-lab-2   Ready    <none>                 85s     v1.24.6+k3s1
 andrey-lab-3   Ready    <none>                 43s     v1.24.6+k3s1
 ```
+
+### Notes
+
+AWS resources script creates/removes:
+
+- AWS VPC
+- AWS Subnet
+- Internet Gateway
+- Association Internet Gateway with VPC
+- Subnet attachment with route table in VPC
+- Security Group
+- Rule for Security group (simple rule full open to World)
+- KeyPair and private SSH key (stored locally near script)
+- EC2 Instances with public IP address

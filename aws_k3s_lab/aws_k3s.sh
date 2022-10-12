@@ -96,7 +96,7 @@ _create_vpc() {
     if [ -z $rtid ]; then
         echo '   obtain default route table'; rtid=`aws ec2 describe-route-tables --filters Name=vpc-id,Values=${vpcid} | jq -r '.RouteTables[]|select(.Associations[].Main == true)|.RouteTableId'`
         echo '   tag route table'; aws ec2 create-tags --resources ${rtid} --tags Key=Name,Value=${AWS_NAME}
-        echo '   add default route tp gateway'; aws ec2 create-route --route-table-id ${rtid} --destination-cidr-block 0.0.0.0/0 --gateway-id ${gatewayid} >/dev/null
+        echo '   add default route to gateway'; aws ec2 create-route --route-table-id ${rtid} --destination-cidr-block 0.0.0.0/0 --gateway-id ${gatewayid} >/dev/null
         echo '   attach subnet to route table'; aws ec2 associate-route-table --subnet-id ${subnetid} --route-table-id ${rtid} >/dev/null
     else
         echo '   route table configured already'
