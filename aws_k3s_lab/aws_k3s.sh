@@ -25,6 +25,15 @@ _is_sourced() {
         && [ "${FUNCNAME[1]}" = 'source' ]
 }
 
+# check utils used in script present
+_check_utils() {
+    utils=("$@")
+    for util in "${utils[@]}"; do
+        [ -z "$(which ${util})" ] && echo "${bold}${red}${util}${normal} not found" && util_not_found=true
+    done
+    [ -n "${util_not_found}" ] && exit 1
+}
+
 # check vaiables are set (not empty)
 _check_vars()
 {
@@ -33,7 +42,6 @@ _check_vars()
         [ -z "${!var_name}" ] && echo "${bold}${red}${var_name}${normal} is unset, check your settings and/or settings.local files" && var_unset=true
     done
     [ -n "$var_unset" ] && exit 1
-    return 0
 }
 
 _usage() {
@@ -52,7 +60,7 @@ EOT
 }
 
 _get_vpc_data() {
-    echo "${bold}Getting VPC data${normal}"
+    echo "${bold}Retrieving data from AWS${normal}"
     vpcid=$(aws ec2 describe-vpcs --filters Name=tag-value,Values=${AWS_NAME} | jq -r '.Vpcs[].VpcId')
     if [ "${vpcid}" ]; then
         subnetid=$(aws ec2 describe-subnets --filters Name=tag-value,Values=${AWS_NAME} Name=vpc-id,Values=${vpcid} | jq -r '.Subnets[].SubnetId')
@@ -258,7 +266,7 @@ _del_nodes() {
 }
 
 _get_nodes() {
-    echo "${bold}Getting data about instances${normal}"
+    echo "${bold}Retrieving instances details${normal}"
     for i in $(seq 1 ${K3S_CLUSTER_SIZE}); do
         nodeid[${i}]=$(aws ec2 describe-instances        --filters Name=tag-value,Values=${AWS_NAME}-${i} Name=vpc-id,Values=${vpcid} | jq -r '.Reservations[].Instances[].InstanceId')
         nodeippublic[${i}]=$(aws ec2 describe-instances  --filters Name=tag-value,Values=${AWS_NAME}-${i} Name=vpc-id,Values=${vpcid} | jq -r '.Reservations[].Instances[].PublicIpAddress')
@@ -332,6 +340,7 @@ _kubectldel() {
 
 _initiate() {
     _check_vars AWS_PROFILE AWS_REGION EC2_TYPE AWS_VPC_CIDR AWS_SUBNET_CIDR AWS_NAME K3S_CLUSTER_SIZE K3S_TOKEN K3S_MASTER_SCRIPT K3S_WORKER_SCRIPT
+    _check_utils aws jq curl ssh grep awk mktemp base64 kubectl
     if [ "${AWS_NAME}" = "change-me" ]; then
         echo "Cluster name '${AWS_NAME}'"
         echo "Seems you haven't changed AWS_NAME variable in settings.local file"
@@ -344,97 +353,37 @@ _initiate() {
 
 
 _main() {
-
     echo
     echo -e "${bold}=== Dev AWS infra and K3S cluster ===${normal}"
     echo
-case "$1" in
-    help)
-        _usage
-        ;;
-    create)
-        _initiate
-        _create_vpc
-        _create_nodes
-        _wait_nodes
-        _provision
-        _kubectlset
-        ;;
-    destroy)
-        _initiate
-        _del_nodes
-        _kubectldel
-        _del_vpc
-        ;;
-    status)
-        _initiate
-        _status
-        ;;
-    *)
-        _usage
-        ;;
-esac
-
-
-exit
-
-
-    _create_vpc
-    _status
-    _del_vpc
-    _status
+    case "$1" in
+        help)
+            _usage
+            ;;
+        create)
+            _initiate
+            _create_vpc
+            _create_nodes
+            _wait_nodes
+            _provision
+            _kubectlset
+            ;;
+        destroy)
+            _initiate
+            _del_nodes
+            _kubectldel
+            _del_vpc
+            ;;
+        status)
+            _initiate
+            _status
+            ;;
+        *)
+            _usage
+            ;;
+    esac
 }
 
 if ! _is_sourced; then
     _main "$@"
 fi
-
-
-exit
-
-
-
-[ -z "$AWS_DEFAULT_REGION" ]    && die "AWS region not specified"
-[ -z "$AWS_ACCESS_KEY_ID" ]     && die "AWS access key not specified"
-[ -z "$AWS_SECRET_ACCESS_KEY" ] && die "AWS secret key not specified"
-[ -z "$aws_tag" ]               && die "'aws_tag' not specified, check your settings file"
-[ -z "$userdata" ]              && die "'userdata' not specified, check your settings file"
-[ -z "$ec2type" ]               && die "'ec2type' not specified, check your settings file"
-
-
-check_utils () {
-    greencolor 'Checking utils'
-    [ -z "$(which aws)" ]   && die "AWS Command Line Interface not found! Please install it by 'sudo pip install awscli' for Linux or 'brew install awscli' for Mac"
-    [ -z "$(which unzip)" ] && die "Unzip not found! Please install it by 'sudo apt-get install unzip' for Linux or 'brew install unzip' for Mac"
-    [ -z "$(which jq)" ]    && die "Command-line JSON processor not found! Please install it by 'sudo apt-get install jq'"
-    [ -z "$(which curl)" ]  && die "curl not found! Please install it"
-    [ -z "$(which ssh)" ]   && die "ssh not found! Please install it"
-    [ -z "$(which grep)" ]  && die "grep not found! Please install it"
-    [ -z "$(which awk)" ]   && die "awk not found! Please install it"
-    [ -z "$(which mktemp)" ] && die "mktemp not found! Please install it"
-}
-
-
-
-sshterm () {
-    [ -z $nodeIP ] && die "Node IP mot specified"
-    ssh -i ${aws_tag}.pem -o StrictHostKeyChecking=no -t ubuntu@${nodeIP} $1
-}
-
-
-
-
-
-
-
-
-initiate () {
-    check_utils
-    get_vpc
-    get_node
-}
-
-#
-# main
-#
-

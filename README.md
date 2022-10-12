@@ -7,7 +7,7 @@ Vertical autoscaling for fleet of postgres instances running in k8s cluster.
 We want to dynamicly change amount of CPUs and memory on running postgres instances, maintaining the following principle:
 
 ```
-change of resources shoud not break TCP connections to postgres
+change of resources should not break TCP connections to postgres
 ```
 
 It is easy to follow this principle when there are spare resources on the current physical node. On the contrary, if there are no spare resources moving running proces between physical nodes without breaking TCP connections requires some amount of engineering.
