@@ -28,4 +28,8 @@ nodes:
     apiServer:
       extraArgs:
         allow-privileged: "true"
-
+# Ensure that our local registry is visible within the cluster as `kind-registry`
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
+  endpoint = ["http://kind-registry:5000"]

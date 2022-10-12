@@ -1,0 +1,3 @@
+FROM smartxworks/virtink-container-disk-base
+
+ADD disk.qcow2 /disk

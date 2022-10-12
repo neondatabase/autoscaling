@@ -190,7 +190,7 @@ Before we continue with a Postgres VM image, install the CRD for `NetworkAttachm
   ... skipped ...
   ```
 
-Continue with an existing Postgres VM image:
+## Option A: Continue with an existing Postgres VM image
 
 11. Using the neighboring file `sample-vm-postgres-disk.yaml`, run:
   ```sh
@@ -203,11 +203,116 @@ Continue with an existing Postgres VM image:
 
 And now the VM should be up and running!
 
-## Future work
+## Option B: Continue with a locally built VM image
 
-Looks like it's probably super feasible to build container/VM images locally & use them in `kind` --
-it _does_ involve [creating a local registry] though. For playing around with the scheduler, this
-seems pretty crucial to me, because modified scheduler builds are supplied via a container image
-containing the scheduler.
+11. Make sure that the local regsitry is running, with `vm_image/start-local-registry.sh`:
+    ```sh
+    vm_image/start-local-registry.sh
+    ```
+    It'll output the hash of the `registry` image it's running. If you're repeating steps, you don't
+    need to run this script again.
 
-[creating a local registry]: https://kind.sigs.k8s.io/docs/user/local-registry/
+11. Run `vm_image/build.sh` to create a new VM image. This runs a few different steps, and the
+    [README](./vm_image) in there has some more information. Of note: it generates ssh keys, adds
+    the public key to the VM's `authorized_keys`, and disables password authentication. It will
+    look something like this:
+    ```console
+    $ vm_image/build.sh
+    Generating new keypair...
+    Enter passphrase (empty for no passphrase):
+    Enter same passphrase again:
+        Generating public/private rsa key pair.
+        Your identification has been saved in ssh_id_rsa
+        Your public key has been saved in ssh_id_rsa.pub
+        The key fingerprint is:
+        -- omitted --
+        The key's randomart image is:
+        -- omitted --
+    Building 'Dockerfile.vmdata'...
+        -- omitted (sha256 hash) --
+    Creating disk.raw ext4 filesystem...
+    > dd:
+        1+0 records in
+        1+0 records out
+        1 byte copied, 5.0271e-05 s, 19.9 kB/s
+    > mkfs.ext4:
+        mke2fs 1.46.5 (30-Dec-2021)
+        Discarding device blocks: done
+        Creating filesystem with 524288 4k blocks and 131072 inodes
+        Filesystem UUID: c88a7fb9-d2ee-400b-b293-da87c2df8cba
+        Superblock backups stored on blocks:
+        	32768, 98304, 163840, 229376, 294912
+    
+        Allocating group tables: done
+        Writing inode tables: done
+        Creating journal (16384 blocks): done
+        Writing superblocks and filesystem accounting information: done
+    
+    Mount 'disk.raw' at ./tmp.7U7uiSD0X3
+    Exporting vmdata image into disk.raw
+    Unmount ./tmp.7U7uiSD0X3
+    Clean up temporary docker artifacts
+        -- omitted (sha256 hash) --
+        Untagged: vmdata-build:latest
+        -- omitted (many "Deleted: <hash>") --
+    Convert 'disk.raw' -> 'disk.qcow2'
+    Clean up 'disk.raw'
+    Build final 'Dockerfile.img'...
+        -- omitted (sha256 hash) --
+    Push completed image
+        localhost:5001/pg14-disk-test:latest
+    ```
+
+12. \[Optional\] Add the ssh private key as a secret, so that `ssh-into-vm.sh` works. Alternatively,
+    you can wait to add the secret until you need it.
+    ```console
+    $ kubectl create secret generic vm-ssh --from-file=private-key=vm_image/ssh_id_rsa
+    secret/vm-ssh created
+    ```
+    Check that it was created ok:
+    ```console
+    $ kubectl describe secret vm-ssh
+    Name:         vm-ssh
+    Namespace:    default
+    Labels:       <none>
+    Annotations:  <none>
+    
+    Type:  Opaque
+    
+    Data
+    ====
+    private-key:  2602 bytes
+    ```
+13. With everything built, launch the VM image:
+    ```sh
+    kubectl apply -f local-vm-postgres-disk.yaml
+    ```
+    Everything should now work. Try `ssh-into-vm.sh` to access it directly, `run-bench.sh` to put
+    some load on Postgres, or `start-autoscaler.sh` to start the autoscaling script running.
+14. Trying `ssh-into-vm.sh` (requires the `vm-ssh` secret from before):
+    ```console
+    $ ./ssh-into-vm.sh
+    get vmPodName (vm_name = postgres14-disk)
+    get pod ip (pod = vm-postgres14-disk-wtlwm)
+    pod_ip = 10.244.0.41
+    If you don't see a command prompt, try pressing enter.
+    fetch https://dl-cdn.alpinelinux.org/alpine/v3.16/community/x86_64/APKINDEX.tar.gz
+    (1/6) Installing openssh-keygen (9.0_p1-r2)
+    (2/6) Installing ncurses-terminfo-base (6.3_p20220521-r0)
+    (3/6) Installing ncurses-libs (6.3_p20220521-r0)
+    (4/6) Installing libedit (20210910.3.1-r0)
+    (5/6) Installing openssh-client-common (9.0_p1-r2)
+    (6/6) Installing openssh-client-default (9.0_p1-r2)
+    Executing busybox-1.35.0-r17.trigger
+    OK: 11 MiB in 20 packages
+    Warning: Permanently added '10.244.0.41' (ED25519) to the list of known hosts.
+    Welcome to Alpine!
+     ~ This is the VM :) ~
+    cloud-hypervisor:~#
+    ```
+    **Note**: The VM's hostname is `cloud-supervisor`. This is set by kubernetes, and we *could*
+    change it in the init script if we wanted, but technically speaking the running container *is*
+    the `cloud-supervisor` image; it's just mounted the VM data alongside it.
+15. Run `run-bench.sh` and `start-autoscaler.sh` to watch it scale up
+
+    **Note**: Todo - there are adjustments that need to be made to `run-bench.sh` still.

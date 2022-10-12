@@ -6,6 +6,9 @@
 # Alternatively, you can modify 'kind-config.yaml' to point to your system's CNI plugins, if they've
 # been installed on the host.
 
+# Allow the script to be run from outside this directory
+cd -P -- "$(dirname -- "$0")"
+
 # Extract final binary files into 'cni-bin'
 TARGET_DIR='cni-bin'
 
