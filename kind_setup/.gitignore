@@ -1,0 +1,7 @@
+cni-bin
+cni-plugins-linux-amd64-v1.1.1.tgz
+
+flannel.yaml
+cert-manager.yaml
+virtink-sergey.yaml
+multus-daemonset.yaml
