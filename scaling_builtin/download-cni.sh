@@ -1,0 +1,1 @@
+../kind_setup/download-cni.sh
