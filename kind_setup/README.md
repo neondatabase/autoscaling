@@ -99,7 +99,7 @@ check.
 
 7. Install `flannel` for networking:
   ```console
-  $ curl https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml \
+  $ curl https://raw.githubusercontent.com/flannel-io/flannel/v0.19.2/Documentation/kube-flannel.yml \
       -o flannel.yaml
   ... skipped ...
   $ kubectl apply -f flannel.yaml
