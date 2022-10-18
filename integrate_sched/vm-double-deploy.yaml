@@ -1,0 +1,200 @@
+---
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: static-disk-1
+spec:
+  config: '{
+    "cniVersion": "0.3.1",
+    "name": "overlay",
+    "type": "bridge",
+    "bridge": "vm-bridge0",
+    "isDefaultGateway": false,
+    "isGateway": false,
+    "ipam": {
+      "type": "static",
+      "addresses": [{"address": "10.77.77.3/24"}],
+      "routes": [{ "dst": "10.77.0.0/16" }]
+    }
+  }'
+---
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: static-disk-2
+spec:
+  config: '{
+    "cniVersion": "0.3.1",
+    "name": "overlay",
+    "type": "bridge",
+    "bridge": "vm-bridge0",
+    "isDefaultGateway": false,
+    "isGateway": false,
+    "ipam": {
+      "type": "static",
+      "addresses": [{"address": "10.78.78.3/24"}],
+      "routes": [{ "dst": "10.78.0.0/16" }]
+    }
+  }'
+---
+apiVersion: virt.virtink.smartx.com/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: postgres14-disk-1
+  labels:
+    autoscaler/init-cpu: "1"
+spec:
+  schedulerName: autoscale-scheduler
+  serviceAccountName: autoscaling-vm
+  # run policy could be Always, RerunOnFailure, Once, Manual,Halted
+  runPolicy: Always
+  instance:
+    # If we don't define socketsMax here, then virtink refuses to allow more than 1
+    cpu:
+      sockets: 1
+      socketsMax: 8 # TODO: change virtink so socketsMax=0 means it allows any size.
+      coresPerSocket: 1
+    memory:
+      size: 1Gi
+    kernel:
+      image: cicdteam/clh-kernel:5.15.12
+      imagePullPolicy: IfNotPresent
+      cmdline: "console=ttyS0 root=/dev/vda rw"
+    disks:
+      - name: disk
+    interfaces:
+      - name: pod
+        masquerade:
+          cidr: 10.0.2.0/30
+      - name: overlay
+        masquerade:
+          cidr: 10.0.3.0/30
+  sidecars:
+    - name: autoscaler-agent
+      image: localhost:5001/autoscaler-agent:latest
+      env:
+        - name: K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: K8S_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: CONFIG_PATH
+          value: /etc/autoscaler-agent-config/config.json
+        - name: MIN_VCPU
+          value: "1"
+        - name: INIT_VCPU
+          value: "1" # must match spec.instance.cpu.sockets above
+        - name: MAX_VCPU
+          value: "8"
+        - name: METRICS_URL
+          # VM's IP address is always 10.0.2.2 within the pod. Also node_exporter is on port 9100 by
+          # default, with the /metrics endpoint.
+          value: "http://10.0.2.2:9100/metrics"
+        - name: READINESS_PORT
+          value: "0" # "10331" # must match readinessProbe.httpGet.port below
+        - name: POLITE_EXIT_PORT
+          value: "0" # "10332" # must match lifecycle.preStop.httpGet.port below
+      volumeMounts:
+        - name: virtink
+          mountPath: /var/run/virtink
+        - name: autoscaler-agent-config
+          mountPath: /etc/autoscaler-agent-config
+  networks:
+    - name: pod
+      pod: {}
+    - name: overlay
+      multus:
+        networkName: static-disk-1
+  volumes:
+    - name: disk
+      containerDisk:
+        image: localhost:5001/pg14-disk-test:latest
+        imagePullPolicy: Always
+  sidecarVolumes:
+    - name: autoscaler-agent-config
+      configMap:
+        name: autoscaler-agent-config
+---
+apiVersion: virt.virtink.smartx.com/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: postgres14-disk-2
+  labels:
+    autoscaler/init-cpu: "1"
+spec:
+  schedulerName: autoscale-scheduler
+  serviceAccountName: autoscaling-vm
+  # run policy could be Always, RerunOnFailure, Once, Manual,Halted
+  runPolicy: Always
+  instance:
+    # If we don't define socketsMax here, then virtink refuses to allow more than 1
+    cpu:
+      sockets: 1
+      socketsMax: 8 # TODO: change virtink so socketsMax=0 means it allows any size.
+      coresPerSocket: 1
+    memory:
+      size: 1Gi
+    kernel:
+      image: cicdteam/clh-kernel:5.15.12
+      imagePullPolicy: IfNotPresent
+      cmdline: "console=ttyS0 root=/dev/vda rw"
+    disks:
+      - name: disk
+    interfaces:
+      - name: pod
+        masquerade:
+          cidr: 10.0.2.0/30
+      - name: overlay
+        masquerade:
+          cidr: 10.0.3.0/30
+  sidecars:
+    - name: autoscaler-agent
+      image: localhost:5001/autoscaler-agent:latest
+      env:
+        - name: K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: K8S_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: CONFIG_PATH
+          value: /etc/autoscaler-agent-config/config.json
+        - name: MIN_VCPU
+          value: "1"
+        - name: INIT_VCPU
+          value: "1" # must match spec.instance.cpu.sockets above
+        - name: MAX_VCPU
+          value: "8"
+        - name: METRICS_URL
+          # VM's IP address is always 10.0.2.2 within the pod. Also node_exporter is on port 9100 by
+          # default, with the /metrics endpoint.
+          value: "http://10.0.2.2:9100/metrics"
+        - name: READINESS_PORT
+          value: "0" # "10331" # must match readinessProbe.httpGet.port below
+        - name: POLITE_EXIT_PORT
+          value: "0" # "10332" # must match lifecycle.preStop.httpGet.port below
+      volumeMounts:
+        - name: virtink
+          mountPath: /var/run/virtink
+        - name: autoscaler-agent-config
+          mountPath: /etc/autoscaler-agent-config
+  networks:
+    - name: pod
+      pod: {}
+    - name: overlay
+      multus:
+        networkName: static-disk-2
+  volumes:
+    - name: disk
+      containerDisk:
+        image: localhost:5001/pg14-disk-test:latest
+        imagePullPolicy: Always
+  sidecarVolumes:
+    - name: autoscaler-agent-config
+      configMap:
+        name: autoscaler-agent-config

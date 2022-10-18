@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: autoscale-scheduler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: autoscale-scheduler-as-kube-scheduler
+subjects:
+- kind: ServiceAccount
+  name: autoscale-scheduler
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:kube-scheduler
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: autoscale-scheduler-as-volume-scheduler
+subjects:
+- kind: ServiceAccount
+  name: autoscale-scheduler
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:volume-scheduler
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: autoscale-scheduler-temp
+  namespace: kube-system
+subjects:
+- kind: ServiceAccount
+  name: autoscale-scheduler
+  namespace: kube-system
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: extension-apiserver-authentication-reader
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoscale-scheduler-config
+  namespace: kube-system
+data:
+  scheduler-config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: false
+    profiles:
+      - schedulerName: autoscale-scheduler
+        plugins:
+          multiPoint:
+            enabled:
+              - name: AutoscaleEnforcer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autoscale-scheduler # unstable name
+  namespace: kube-system
+  labels:
+    component: scheduler
+    tier: control-plane
+spec:
+  selector:
+    matchLabels:
+      component: scheduler
+      tier: control-plane
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        component: scheduler
+        name: autoscale-scheduler # stable name
+        tier: control-plane
+    spec:
+      serviceAccountName: autoscale-scheduler
+      containers:
+      - image: localhost:5001/kube-autoscale-scheduler:latest
+        command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 10259
+            scheme: HTTPS
+          initialDelaySeconds: 15
+        name: kube-second-scheduler
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 10259
+            scheme: HTTPS
+        resources:
+          requests:
+            cpu: '0.1'
+        securityContext:
+          privileged: false
+        volumeMounts:
+          - name: scheduler-config-volume
+            mountPath: /etc/kubernetes/autoscale-scheduler-config
+      hostNetwork: false
+      hostPID: false
+      volumes:
+        - name: scheduler-config-volume
+          configMap:
+            name: autoscale-scheduler-config

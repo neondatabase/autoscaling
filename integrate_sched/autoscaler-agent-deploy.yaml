@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: autoscaling-vm
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: autoscaling-vm-view
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: autoscaling-vm
+  namespace: default
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoscaler-agent-config
+  namespace: default
+data:
+  config.json: '{
+    "scaling": {
+      "cpu": {
+        "doubleRatio": 0.9,
+        "halveRatio": 0.4
+      }
+    },
+    "metrics": {
+      "requestTimeoutSeconds": 2,
+      "secondsBetweenRequests": 5,
+      "initialDelaySeconds": 5
+    },
+    "scheduler": {
+      "requestTimeoutSeconds": 0,
+      "requestPort": 10299
+    }
+  }'
