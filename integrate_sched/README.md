@@ -89,13 +89,10 @@ Some basics on the `autoscaler-agent` \<-\> `scheduler` protocol:
   * When the scheduler responds to an increase request by not allowing *any* increase, we log that
       request as "denied" (in the `autoscaler-agent`).
 
-The files implementing the protocol are in `autoscaler-agent/src/run.go` and `scheduler/main.go`.
+The files implementing the protocol are in `autoscaler-agent/src/run.go` and `scheduler/src/run.go`.
 
-Currently, the scheduler also appropriately handles pre-bind rejection if there isn't capacity to
-add a particular pod to a node. Future changes will move this to the `Filter` step, and add
-"reserved" vs "committed" resources (from `PreBind` vs `PostBind`, respectively). Pre-bind will
-still need to reject when over-reserving is attempted (i.e., more VMs than we can fit are being
-added to a node).
+Currently, the scheduler also appropriately handles pod un-scheduling via `Reserve`/`Unreserve`,
+with some initial (but non-binding) capacity checks in the `Filter` step.
 
 Also: the scheduler currently does not handle VM/pod deletion, so it will "leak" the space reserved
 for deleted pods.
