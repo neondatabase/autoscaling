@@ -7,6 +7,16 @@ indent () {
     sed -u -e "s/^/    /g"
 }
 
+# Usage: require_root
+#
+# Helper function to require that the script is being run as root
+require_root () {
+    if [[ "$EUID" != 0 ]]; then
+        echo "Must be running as root (EUID != 0)"
+        exit 1
+    fi
+}
+
 # Usage: VM_NAME="$(get_vm_name)"
 #
 # Gets the VM name if it the VM_NAME variable isn't already set. Otherwise echo $VM_NAME
