@@ -34,6 +34,17 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 			// zero values are ok for the rest here
 		},
 	}
+	vmDeletions := make(chan podName)
+	if err := p.watchVMDeletions(context.Background(), vmDeletions); err != nil {
+		return nil, fmt.Errorf("Error starting VM deletion watcher: %s", err)
+	}
+
+	go func() {
+		for name := range vmDeletions {
+			p.handleVMDeletion(name)
+		}
+	}()
+
 	go p.runPermitHandler()
 
 	return &p, nil
@@ -213,5 +224,11 @@ func (e *AutoscaleEnforcer) Unreserve(
 	// Mark the vCPU as no longer reserved and delete the pod
 	delete(e.state.podMap, pName)
 	delete(ps.node.pods, pName)
+	oldReserved := ps.node.reservedCPU
 	ps.node.reservedCPU -= ps.reservedCPU
+
+	klog.Infof(
+		"[autoscale-enforcer] Unreserved pod %v (%d vCPU) from node %s: node.reservedCPU %d -> %d",
+		pName, ps.reservedCPU, ps.node.name, oldReserved, ps.node.reservedCPU,
+	)
 }

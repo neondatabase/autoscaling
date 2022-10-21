@@ -93,6 +93,3 @@ The files implementing the protocol are in `autoscaler-agent/src/run.go` and `sc
 
 Currently, the scheduler also appropriately handles pod un-scheduling via `Reserve`/`Unreserve`,
 with some initial (but non-binding) capacity checks in the `Filter` step.
-
-Also: the scheduler currently does not handle VM/pod deletion, so it will "leak" the space reserved
-for deleted pods.

@@ -198,3 +198,29 @@ func (s *pluginState) getOrFetchNodeState(
 	s.nodeMap[nodeName] = n
 	return n, nil
 }
+
+// This method is /basically/ the same as e.Unreserve, but the API is different and it has different
+// logs, so IMO it's worthwhile to have this separate.
+func (e *AutoscaleEnforcer) handleVMDeletion(pName podName) {
+	klog.Infof("[autoscale-enforcer] Handling deletion of pod %v", pName)
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	ps, ok := e.state.podMap[pName]
+	if !ok {
+		klog.Warningf("[autoscale-enforcer] delete: Cannot find pod %v in podMap", pName)
+		return
+	}
+
+	// Mark the resources as no longer reserved and delete the pod
+	delete(e.state.podMap, pName)
+	delete(ps.node.pods, pName)
+	oldReserved := ps.node.reservedCPU
+	ps.node.reservedCPU -= ps.reservedCPU
+
+	klog.Infof(
+		"[autoscale-enforcer] Deleted pod %v (%d vCPU) from node %s: node.reservedCPU %d -> %d",
+		pName, ps.reservedCPU, ps.node.name, oldReserved, ps.node.reservedCPU,
+	)
+}
