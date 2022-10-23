@@ -121,14 +121,14 @@ func getPodInitCPU(ctx context.Context, pod *corev1.Pod) (uint16, error) {
 		return 0, fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
 	}
 
-	initVCPUString, ok := pod.Labels[LabelInitCPU]
+	initVCPUString, ok := pod.Labels[LabelInitVCPU]
 	if !ok {
-		return 0, fmt.Errorf("Missing init vCPU label %s", LabelInitCPU)
+		return 0, fmt.Errorf("Missing init vCPU label %s", LabelInitVCPU)
 	}
 
 	initVCPU, err := strconv.ParseUint(initVCPUString, 10, 16)
 	if err != nil {
-		return 0, fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitCPU, err)
+		return 0, fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitVCPU, err)
 	}
 
 	return uint16(initVCPU), nil

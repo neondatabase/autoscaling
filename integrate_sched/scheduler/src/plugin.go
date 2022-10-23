@@ -12,7 +12,7 @@ import (
 
 const Name = "AutoscaleEnforcer"
 const LabelVM = "virtink.io/vm.name"
-const LabelInitCPU = "autoscaler/init-cpu"
+const LabelInitVCPU = "autoscaler/init-vcpu"
 
 // AutoscaleEnforcer is the scheduler plugin to coordinate autoscaling
 type AutoscaleEnforcer struct {

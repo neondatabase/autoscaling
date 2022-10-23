@@ -23,7 +23,9 @@ kind: VirtualMachine
 metadata:
   name: postgres14-disk
   labels:
-    autoscaler/init-cpu: "4"
+    autoscaler/min-vcpu: "1"
+    autoscaler/init-vcpu: "4"
+    autoscaler/max-vcpu: "8"
 spec:
   schedulerName: autoscale-scheduler
   serviceAccountName: autoscaling-vm
@@ -64,12 +66,6 @@ spec:
               fieldPath: metadata.namespace
         - name: CONFIG_PATH
           value: /etc/autoscaler-agent-config/config.json
-        - name: MIN_VCPU
-          value: "1"
-        - name: INIT_VCPU
-          value: "4" # must match spec.instance.cpu.sockets above
-        - name: MAX_VCPU
-          value: "8"
         - name: METRICS_URL
           # VM's IP address is always 10.0.2.2 within the pod. Also node_exporter is on port 9100 by
           # default, with the /metrics endpoint.
