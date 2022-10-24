@@ -2,25 +2,20 @@ package plugin
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/google/uuid"
 
 	klog "k8s.io/klog/v2"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-// Duplicated from autoscaler-agent. TODO: extract into separate "types" library
-type resourceRequest struct {
-	ID    uuid.UUID `json:"id"`
-	VCPUs uint16    `json:"vCPUs"`
-	Pod   podName   `json:"pod"`
-}
-
-// Duplicated from autoscaler-agent.
-type permit struct {
-	RequestID uuid.UUID `json:"requestId"`
-	VCPUs     uint16    `json:"vCPUs"`
-}
+var MaxHTTPBodySize int64 = 1 << 10 // 1 KiB
+var ContentTypeJSON string = "application/json"
+var ContentTypeError string = "text/plain"
 
 // runPermitHandler runs the server for handling each resourceRequest from a pod
 func (e *AutoscaleEnforcer) runPermitHandler() {
@@ -32,21 +27,23 @@ func (e *AutoscaleEnforcer) runPermitHandler() {
 			return
 		}
 
-		var req resourceRequest
-		jsonDecoder := json.NewDecoder(r.Body)
-		jsonDecoder.DisallowUnknownFields()
-		if err := jsonDecoder.Decode(&req); err != nil {
-			klog.Warningf("[autoscale-enforcer] Received bad JSON resource request: %s", err)
+		defer r.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(r.Body, MaxHTTPBodySize))
+		if err != nil {
+			klog.Warningf("[autoscale-enforcer] Error reading HTTP body: %s", err)
+		}
+
+		var msg api.AgentMessage
+		if err = json.Unmarshal(body, &msg); err != nil {
+			klog.Warningf("[autoscale-enforcer] Received bad JSON request: %s", err)
 			w.WriteHeader(400)
 			w.Write([]byte("bad JSON"))
 			return
 		}
 
-		klog.Infof("[autoscale-enforcer] Received resource request %+v", req)
-		body, contentType, statusCode := e.handleResourceRequest(req)
-		if contentType != "" {
-			w.Header().Add("Content-Type", contentType)
-		}
+		klog.Infof("[autoscale-enforcer] Received autoscaler-agent message %+v", msg)
+		body, contentType, statusCode := e.handleAgentMessage(msg)
+		w.Header().Add("Content-Type", contentType)
 		w.WriteHeader(statusCode)
 		w.Write(body)
 		return
@@ -56,10 +53,39 @@ func (e *AutoscaleEnforcer) runPermitHandler() {
 	klog.Fatalf("[autoscale-enforcer] Resource request server failed: %s", server.ListenAndServe())
 }
 
-// handleResourceRequest handles a single resourceRequest
-//
 // Returns response body, Content-Type header, and status code.
-func (e *AutoscaleEnforcer) handleResourceRequest(req resourceRequest) ([]byte, string, int) {
+func (e *AutoscaleEnforcer) handleAgentMessage(msg api.AgentMessage) ([]byte, string, int) {
+	msgKind := msg.Kind()
+	switch msgKind {
+	case api.MessageKindResource:
+		req, err := msg.AsResourceRequest()
+		if err != nil {
+			klog.Errorf("[autoscale-enforcer] message has kind %q but casting failed: %s", msgKind, err)
+			return []byte("internal error"), ContentTypeError, 500
+		}
+
+		resp, status, err := e.handleResourceRequest(msg.ID, req)
+		if err != nil {
+			return []byte(err.Error()), ContentTypeError, status
+		}
+		klog.Infof("[autoscale-enforcer] Responding to pod %v with %+v", req.Pod, resp)
+
+		responseBody, err := json.Marshal(resp)
+		if err != nil {
+			klog.Fatalf("[autoscale-enforcer] Error encoding response JSON: %s", err)
+		}
+		return responseBody, ContentTypeJSON, 200
+	default:
+		klog.Errorf("[autoscale-enforcer] Unexpected autoscaler-agent message kind %q", msgKind)
+		return []byte("internal error"), ContentTypeError, 500
+	}
+}
+
+// handleResourceRequest handles a single api.ResourceRequest
+func (e *AutoscaleEnforcer) handleResourceRequest(
+	requestID uuid.UUID,
+	req *api.ResourceRequest,
+) (*api.PluginMessage, int, error) {
 	locked := true
 	e.state.lock.Lock()
 	defer func() {
@@ -71,7 +97,7 @@ func (e *AutoscaleEnforcer) handleResourceRequest(req resourceRequest) ([]byte, 
 	pod, ok := e.state.podMap[req.Pod]
 	if !ok {
 		klog.Warningf("[autoscale-enforcer] Received request for pod we don't know: %+v", req)
-		return []byte("pod not found"), "", 404
+		return nil, 404, fmt.Errorf("pod not found")
 	}
 
 	node := pod.node
@@ -112,20 +138,12 @@ func (e *AutoscaleEnforcer) handleResourceRequest(req resourceRequest) ([]byte, 
 		)
 	}
 
-	resp := permit{
-		RequestID: req.ID,
-		VCPUs:     pod.reservedCPU, // We've updated reservedCPU, so this is the amount it's ok to hand out
-	}
-
 	// We're done *handling* this request, so we can release the lock early.
 	locked = false
 	e.state.lock.Unlock()
 
-	responseBody, err := json.Marshal(&resp)
-	if err != nil {
-		klog.Fatalf("[autoscale-enforcer] Error encoding response JSON: %s", err)
-	}
-
-	klog.Infof("[autoscale-enforcer] Responding to pod %v with %+v", req.Pod, resp)
-	return responseBody, "application/json", 200
+	// We've updated reservedCPU, so this is the amount it's ok to hand out
+	permit := api.ResourcePermit{VCPUs: pod.reservedCPU}
+	resp := permit.Response(requestID)
+	return &resp, 200, nil
 }

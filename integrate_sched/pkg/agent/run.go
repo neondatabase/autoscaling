@@ -15,46 +15,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	klog "k8s.io/klog/v2"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 type Runner struct {
-	podName struct {
-		Name      string
-		Namespace string
-	}
+	podName                 api.PodName
 	schedulerIP             net.IP
 	cloudHypervisorSockPath string
 	metricsURL              *url.URL
 	minVCPU                 uint16
 	maxVCPU                 uint16
 	currentVCPU             uint16
-	readinessPort  uint16
-	politeExitPort uint16
-}
-
-// ResourceRequest stores an individual request we made to the scheduler plugin
-type ResourceRequest struct {
-	ID    uuid.UUID `json:"id"`
-	VCPUs uint16    `json:"vCPUs"`
-	Pod   struct {
-		Name      string `json:"name"`
-		Namespace string `json:"namespace"`
-	} `json:"pod"`
-}
-
-// Permit records the response from the scheduler plugin for a particular request
-//
-// The plugin guarantees that it returns responses in the same order, but RequestID still exists for
-// double-checking.
-type Permit struct {
-	RequestID uuid.UUID `json:"requestId"`
-	VCPUs     uint16    `json:"vCPUs"`
-}
-
-func (p Permit) matches(r ResourceRequest) bool {
-	return p.RequestID == r.ID && p.VCPUs <= r.VCPUs
+	readinessPort           uint16
+	politeExitPort          uint16
 }
 
 func NewRunner(args Args, schedulerIP string, cloudHypervisorSockPath string) (*Runner, error) {
@@ -68,10 +43,7 @@ func NewRunner(args Args, schedulerIP string, cloudHypervisorSockPath string) (*
 	}
 
 	return &Runner{
-		podName: struct {
-			Name      string
-			Namespace string
-		}{Name: args.K8sPodName, Namespace: args.K8sPodNamespace},
+		podName:                 api.PodName{Name: args.K8sPodName, Namespace: args.K8sPodNamespace},
 		schedulerIP:             parsedSchedulerIP,
 		cloudHypervisorSockPath: cloudHypervisorSockPath,
 		metricsURL:              args.MetricsURL,
@@ -139,16 +111,12 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 			}
 
 			// Request a new amount of CPU
-			req := ResourceRequest{
-				ID:    uuid.New(),
+			req := api.ResourceRequest{
 				VCPUs: newCpuCount,
-				Pod: struct {
-					Name      string `json:"name"`
-					Namespace string `json:"namespace"`
-				}{Name: r.podName.Name, Namespace: r.podName.Namespace},
+				Pod:   r.podName,
 			}
 
-			permit, err := r.doResourceRequest(config, req)
+			permit, err := r.doResourceRequest(config, &req)
 			if err != nil {
 				klog.Errorf("Error from resource request: %s", err)
 				goto badScheduler // assume something's permanently wrong with the scheduler
@@ -372,7 +340,7 @@ func (r *Runner) getMetricsLoop(config *Config, metrics chan<- Metrics) {
 	}
 }
 
-func (r *Runner) doResourceRequest(config *Config, req ResourceRequest) (*Permit, error) {
+func (r *Runner) doResourceRequest(config *Config, req *api.ResourceRequest) (*api.ResourcePermit, error) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			err := fmt.Errorf("Unexpected redirect while sending scheduler request")
@@ -382,10 +350,13 @@ func (r *Runner) doResourceRequest(config *Config, req ResourceRequest) (*Permit
 		Timeout: time.Second * time.Duration(config.Scheduler.RequestTimeoutSeconds),
 	}
 
-	requestBody, err := json.Marshal(&req)
+	agentMsg := req.Request()
+	requestBody, err := json.Marshal(&agentMsg)
 	if err != nil {
 		klog.Fatalf("Error encoding scheduler request into JSON", err)
 	}
+
+	klog.Infof("Sending AgentMessage: %+v", agentMsg)
 
 	url := fmt.Sprintf("http://%s:%d/", r.schedulerIP.String(), config.Scheduler.RequestPort)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(requestBody))
@@ -394,19 +365,28 @@ func (r *Runner) doResourceRequest(config *Config, req ResourceRequest) (*Permit
 	}
 
 	defer resp.Body.Close()
-	var permit Permit
+	var pluginMsg api.PluginMessage
 	jsonDecoder := json.NewDecoder(resp.Body)
-	jsonDecoder.DisallowUnknownFields()
-	if err := jsonDecoder.Decode(&permit); err != nil {
+	if err := jsonDecoder.Decode(&pluginMsg); err != nil {
 		return nil, fmt.Errorf("Bad JSON response: %s", err)
 	}
 
-	klog.Infof("Received permit: %+v", permit)
-	if !permit.matches(req) {
-		return nil, fmt.Errorf("Permit doesn't match request")
+	klog.Infof("Received PluginMessage: %+v", pluginMsg)
+	if pluginMsg.ID != agentMsg.ID {
+		return nil, fmt.Errorf("Response ID from plugin doesn't match request ID: %v != %v", pluginMsg.ID, agentMsg.ID)
 	}
 
-	return &permit, nil
+	permit, err := pluginMsg.AsResourcePermit()
+	if err != nil {
+		return nil, fmt.Errorf("Error casting response into ResourcePermit: %s", err)
+	} else if permit.VCPUs > req.VCPUs {
+		return nil, fmt.Errorf(
+			"ResourcePermit doesn't match request: permit vCPUs %d > request vCPUs %d",
+			permit.VCPUs, req.VCPUs,
+		)
+	}
+
+	return permit, nil
 }
 
 func (r *Runner) setCpus(ctx context.Context, newCpuCount uint16) error {

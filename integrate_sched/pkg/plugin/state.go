@@ -13,6 +13,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 // pluginState stores the private state for the plugin, used both within and outside of the
@@ -22,7 +24,7 @@ import (
 type pluginState struct {
 	lock sync.Mutex
 
-	podMap  map[podName]*podState
+	podMap  map[api.PodName]*podState
 	nodeMap map[string]*nodeState
 }
 
@@ -41,30 +43,19 @@ type nodeState struct {
 	//
 	// This includes both bound pods (i.e., pods fully committed to the node) and reserved pods
 	// (still may be unreserved)
-	pods map[podName]*podState
+	pods map[api.PodName]*podState
 }
 
 // podState is the information we track for an individual
 type podState struct {
 	// name is the namespace'd name of the pod
-	name podName
+	name api.PodName
 
 	// node provides information about the node that this pod is bound to or reserved onto.
 	node *nodeState
 	// reservedCPU gives the amount of CPU reserved for this pod. It is guaranteed that the pod is
 	// using AT MOST reservedCPU.
 	reservedCPU uint16
-}
-
-// podName stores the namespace'd name of a pod. We *could* use a similar type provided by the
-// kubernetes Go libraries, but it doesn't have JSON tags.
-type podName struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
-
-func (n podName) String() string {
-	return fmt.Sprintf("%s:%s", n.Namespace, n.Name)
 }
 
 // totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
@@ -185,7 +176,7 @@ func (s *pluginState) getOrFetchNodeState(
 		name:        nodeName,
 		maxCPU:      maxCPU,
 		reservedCPU: 0,
-		pods:        make(map[podName]*podState),
+		pods:        make(map[api.PodName]*podState),
 	}
 
 	klog.Infof(
@@ -201,7 +192,7 @@ func (s *pluginState) getOrFetchNodeState(
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
 // logs, so IMO it's worthwhile to have this separate.
-func (e *AutoscaleEnforcer) handleVMDeletion(pName podName) {
+func (e *AutoscaleEnforcer) handleVMDeletion(pName api.PodName) {
 	klog.Infof("[autoscale-enforcer] Handling deletion of pod %v", pName)
 
 	e.state.lock.Lock()

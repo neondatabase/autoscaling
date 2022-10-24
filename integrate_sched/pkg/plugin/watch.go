@@ -10,6 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	klog "k8s.io/klog/v2"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 // watchVMDeletions continuously tracks pod deletion events and sends each deleted VM podName on
@@ -19,7 +21,7 @@ import (
 // events once it returns (unless it returns error).
 //
 // Events occuring before this method is called will not be sent.
-func (e *AutoscaleEnforcer) watchVMDeletions(ctx context.Context, deletions chan<- podName) error {
+func (e *AutoscaleEnforcer) watchVMDeletions(ctx context.Context, deletions chan<- api.PodName) error {
 	// Only listen for events on VM pods. We might get false positives where some pods are another
 	// scheduler's VMs, but that's ok.
 	//
@@ -41,7 +43,7 @@ func (e *AutoscaleEnforcer) watchVMDeletions(ctx context.Context, deletions chan
 		for event := range events {
 			if event.Type == watch.Deleted {
 				pod := event.Object.(*corev1.Pod)
-				name := podName{Name: pod.Name, Namespace: pod.Namespace}
+				name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
 				deletions <- name
 			}

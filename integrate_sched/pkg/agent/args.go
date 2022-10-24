@@ -1,15 +1,15 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
 	"strconv"
-	"context"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Args encapsulates the arguments from both EnvArgs and PodArgs
@@ -160,11 +160,11 @@ func ArgsFromPod(ctx context.Context, client *kubernetes.Clientset, envArgs EnvA
 		return n, err
 	}
 
-	args := PodArgs {
+	args := PodArgs{
 		SchedulerName: pod.Spec.SchedulerName,
-		InitVCPU: getPodLabel(&err, pod, "autoscaler/init-vcpu", parseVCPU),
-		MinVCPU:  getPodLabel(&err, pod, "autoscaler/min-vcpu", parseVCPU),
-		MaxVCPU:  getPodLabel(&err, pod, "autoscaler/max-vcpu", parseVCPU),
+		InitVCPU:      getPodLabel(&err, pod, "autoscaler/init-vcpu", parseVCPU),
+		MinVCPU:       getPodLabel(&err, pod, "autoscaler/min-vcpu", parseVCPU),
+		MaxVCPU:       getPodLabel(&err, pod, "autoscaler/max-vcpu", parseVCPU),
 	}
 
 	if err != nil {

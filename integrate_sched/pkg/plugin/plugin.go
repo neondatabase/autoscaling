@@ -8,6 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	klog "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 const Name = "AutoscaleEnforcer"
@@ -30,11 +32,11 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		handle: h,
 		state: pluginState{
 			nodeMap: make(map[string]*nodeState),
-			podMap:  make(map[podName]*podState),
+			podMap:  make(map[api.PodName]*podState),
 			// zero values are ok for the rest here
 		},
 	}
-	vmDeletions := make(chan podName)
+	vmDeletions := make(chan api.PodName)
 	if err := p.watchVMDeletions(context.Background(), vmDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %s", err)
 	}
@@ -65,7 +67,7 @@ func (e *AutoscaleEnforcer) Filter(
 ) *framework.Status {
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
 
-	pName := podName{Name: pod.Name, Namespace: pod.Namespace}
+	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
 
 	podInitVCPU, err := getPodInitCPU(ctx, pod)
@@ -100,7 +102,7 @@ func (e *AutoscaleEnforcer) Filter(
 	// So we have to actually count up the resource usage of all pods in nodeInfo:
 	totalNodeVCPU := uint16(0)
 	for _, podInfo := range nodeInfo.Pods {
-		pn := podName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
+		pn := api.PodName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
 			totalNodeVCPU += podState.reservedCPU
 		}
@@ -147,7 +149,7 @@ func (e *AutoscaleEnforcer) Filter(
 func (e *AutoscaleEnforcer) Reserve(
 	ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeName string,
 ) *framework.Status {
-	pName := podName{Name: pod.Name, Namespace: pod.Namespace}
+	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
 	podInitVCPU, err := getPodInitCPU(ctx, pod)
@@ -209,7 +211,7 @@ func (e *AutoscaleEnforcer) Reserve(
 func (e *AutoscaleEnforcer) Unreserve(
 	ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeName string,
 ) {
-	pName := podName{Name: pod.Name, Namespace: pod.Namespace}
+	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Unreserve: Handling request for pod %v, node %s", pName, nodeName)
 
 	e.state.lock.Lock()

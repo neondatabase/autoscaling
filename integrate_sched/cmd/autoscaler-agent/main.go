@@ -42,7 +42,7 @@ func main() {
 	}
 	klog.Infof("Got scheduler IP address: %s", schedulerIP)
 
-	args := agent.Args{ EnvArgs: envArgs, PodArgs: podArgs }
+	args := agent.Args{EnvArgs: envArgs, PodArgs: podArgs}
 
 	cloudHypervisorSockPath := "/var/run/virtink/ch.sock"
 	runner, err := agent.NewRunner(args, schedulerIP, cloudHypervisorSockPath)
@@ -55,11 +55,6 @@ func main() {
 		klog.Fatalf("Main loop failed: %s", err)
 	}
 	klog.Info("Main loop returned without issue. Exiting.")
-}
-
-type PodName struct {
-	Name      string
-	Namespace string
 }
 
 func makeKubeClientSet() (*kubernetes.Clientset, error) {
