@@ -6,10 +6,10 @@ import (
 
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
 
-	plugin "github.com/neondatabase/autoscaling/scheduler/src"
+	"github.com/neondatabase/autoscaling/pkg/plugin"
 )
 
-// all of the juicy bits are defined in ./src
+// all of the juicy bits are defined in pkg/plugin/
 
 func main() {
 	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, plugin.NewAutoscaleEnforcerPlugin))

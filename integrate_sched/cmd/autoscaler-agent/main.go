@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	agent "github.com/neondatabase/autoscaling/agent/src"
+	"github.com/neondatabase/autoscaling/pkg/agent"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"

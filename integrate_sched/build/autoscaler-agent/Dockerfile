@@ -17,9 +17,14 @@ RUN set -eux; \
     esac; \
     chmod +x /usr/bin/ch-remote
 
-COPY . .
+COPY go.mod go.mod
+COPY go.sum go.sum
 RUN go mod download
-RUN --mount=type=cache,target=/root/.cache/go-build go build -a main.go
+
+COPY pkg/ pkg/
+COPY cmd/ cmd/
+
+RUN --mount=type=cache,target=/root/.cache/go-build go build -a cmd/autoscaler-agent/main.go
 
 FROM alpine
 COPY --from=builder /usr/bin/ch-remote /usr/bin/ch-remote

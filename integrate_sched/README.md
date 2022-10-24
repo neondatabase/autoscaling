@@ -13,8 +13,8 @@ Build everything:
 ```sh
 vm_image/start-local-registry.sh # required for everything below. Does nothing on repeat
 vm_image/build.sh
-scheduler/build.sh
-autoscaler-agent/build.sh
+build/autoscale-scheduler/build.sh
+build/autoscaler-agent/build.sh
 ```
 
 Download kubernetes dependencies:
@@ -89,7 +89,7 @@ Some basics on the `autoscaler-agent` \<-\> `scheduler` protocol:
   * When the scheduler responds to an increase request by not allowing *any* increase, we log that
       request as "denied" (in the `autoscaler-agent`).
 
-The files implementing the protocol are in `autoscaler-agent/src/run.go` and `scheduler/src/run.go`.
+The files implementing the protocol are in `pkg/agent/run.go` and `pkg/plugin/run.go`.
 
 Currently, the scheduler also appropriately handles pod un-scheduling via `Reserve`/`Unreserve`,
 with some initial (but non-binding) capacity checks in the `Filter` step.
