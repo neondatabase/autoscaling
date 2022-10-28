@@ -104,7 +104,7 @@ func (e *AutoscaleEnforcer) Filter(
 	for _, podInfo := range nodeInfo.Pods {
 		pn := api.PodName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
-			totalNodeVCPU += podState.reservedCPU
+			totalNodeVCPU += podState.vCPU.reserved
 		}
 	}
 
@@ -179,14 +179,19 @@ func (e *AutoscaleEnforcer) Reserve(
 	// in between the calls to Filter and Reserve, removing the resource availability that we
 	// thought we had.
 	if podInitVCPU <= node.remainingReservableCPU() {
-		newNodeReservedCPU := node.reservedCPU + podInitVCPU
+		newNodeReservedCPU := node.vCPU.reserved + podInitVCPU
 		klog.Infof(
 			"[autoscale-enforcer] Allowing pod %v (%d vCPU) in node %s: node.reservedCPU %d -> %d",
-			pName, podInitVCPU, nodeName, node.reservedCPU, newNodeReservedCPU,
+			pName, podInitVCPU, nodeName, node.vCPU.reserved, newNodeReservedCPU,
 		)
 
-		node.reservedCPU = newNodeReservedCPU
-		ps := &podState{name: pName, node: node, reservedCPU: podInitVCPU}
+		node.vCPU.reserved = newNodeReservedCPU
+		ps := &podState{
+			name: pName,
+			node: node,
+			vCPU: podResourceState[uint16]{reserved: podInitVCPU, pressure: 0},
+			mqIndex: -1,
+		}
 		node.pods[pName] = ps
 		e.state.podMap[pName] = ps
 		return nil // nil is success
@@ -226,11 +231,14 @@ func (e *AutoscaleEnforcer) Unreserve(
 	// Mark the vCPU as no longer reserved and delete the pod
 	delete(e.state.podMap, pName)
 	delete(ps.node.pods, pName)
-	oldReserved := ps.node.reservedCPU
-	ps.node.reservedCPU -= ps.reservedCPU
+	ps.node.mq.removeIfPresent(ps)
+	oldReserved := ps.node.vCPU.reserved
+	oldPressure := ps.node.vCPU.pressure
+	ps.node.vCPU.reserved -= ps.vCPU.reserved
+	ps.node.vCPU.pressure -= ps.vCPU.pressure
 
 	klog.Infof(
-		"[autoscale-enforcer] Unreserved pod %v (%d vCPU) from node %s: node.reservedCPU %d -> %d",
-		pName, ps.reservedCPU, ps.node.name, oldReserved, ps.node.reservedCPU,
+		"[autoscale-enforcer] Unreserved pod %v (%d vCPU) from node %s: node.vCPU.reserved %d -> %d, node.vCPU.pressure %d -> %d",
+		pName, ps.vCPU.reserved, ps.node.name, oldReserved, ps.node.vCPU.reserved, oldPressure, ps.node.vCPU.pressure,
 	)
 }

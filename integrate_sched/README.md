@@ -77,20 +77,24 @@ Broadly speaking, the components are:
 
 Some basics on the `autoscaler-agent` \<-\> `scheduler` protocol:
 
-* All messages (currently) are `autoscaler-agent` -> `scheduler`, sending a `ResourceRequest` and
-  expecting a `ResourcePermit` as the response.
+* All messages are `autoscaler-agent` -> `scheduler`, plus response. The agent sends an
+    `AgentRequest` and the scheduler plugin replies with a `PluginResponse`
+* All `AgentRequest` contain metrics information and a resource request (may be equal to current)
 * When the `autoscaler-agent` wants to *decrease* vCPU, it does that immediately and the
-    `ResourceRequest` is informative (i.e., "Hey scheduler, just so you know, I've decreased my
+    `AgentRequest` is informative (i.e., "Hey scheduler, just so you know, I've decreased my
     vCPU. You can allocate that elsewhere").
-* When the `autoscaler-agent` wants to *increase* vCPU, it submits the `ResourceRequest` and the
-    scheduler returns a `ResourcePermit` that may be lower than the requested vCPU amount, but not
-    lower than the current vCPU (i.e., "Hey scheduler, can I increase to `X` vCPUs?" ... "You can
-    only go to `Y`", where `current <= Y <= X`).
-  * When the scheduler responds to an increase request by not allowing *any* increase, we log that
-      request as "denied" (in the `autoscaler-agent`).
+* When the `autoscaler-agent` wants to *increase* vCPU, it submits the `AgentRequest` and the
+    `PluginResponse` contains a `ResourcePermit` that may be lower than the requested vCPU amount,
+    but not lower than the current vCPU (i.e., "Hey scheduler, can I increase to `X` vCPUs?" ...
+    "You can only go to `Y`", where `current <= Y <= X`).
+  * When there aren't enough resources to satisfy all of the request, the amount unavailable is
+      added as "pressure"
+* If a node's "pressure" is more than the amount currently being migrated, new pods will selected
+    for migration, prioritized based on their reported metrics (lower means more likely).
 
 The files implementing the protocol are in `pkg/agent/run.go` and `pkg/plugin/run.go`, plus API
-types and JSON (un)marshalling in `pkg/api/types.go`.
+types in `pkg/api/types.go`.
 
 Currently, the scheduler also appropriately handles pod un-scheduling via `Reserve`/`Unreserve`,
-with some initial (but non-binding) capacity checks in the `Filter` step.
+with some initial (but non-binding) capacity checks in the `Filter` step. Pod deletion events are
+similarly tracked to release reserved resources.

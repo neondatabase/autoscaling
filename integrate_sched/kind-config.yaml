@@ -24,6 +24,14 @@ nodes:
     apiServer:
       extraArgs:
         allow-privileged: "true"
+- role: worker
+  extraMounts:
+  - hostPath: cni-bin
+    containerPath: /opt/cni/bin
+- role: worker
+  extraMounts:
+  - hostPath: cni-bin
+    containerPath: /opt/cni/bin
 # Ensure that our local registry is visible within the cluster as `kind-registry`
 containerdConfigPatches:
 - |-

@@ -33,40 +33,108 @@ type nodeState struct {
 	// name is the name of the node, guaranteed by kubernetes to be unique
 	name string
 
-	// maxCPU gives the total CPU available to the node, including both
-	maxCPU uint16
-	// reservedCPU is the total CPU allocated to all VM pods in the node. Guaranteed to be equal to
-	// the sum of p.reservedCPU for all p in pods.
-	reservedCPU uint16
+	// vCPU tracks the state of vCPU resources -- what's available and how 
+	vCPU nodeResourceState[uint16]
 
 	// pods tracks all the VM pods assigned to this node
 	//
 	// This includes both bound pods (i.e., pods fully committed to the node) and reserved pods
 	// (still may be unreserved)
 	pods map[api.PodName]*podState
+
+	// mq is the priority queue tracking which pods should be chosen first for migration
+	mq migrationQueue
+}
+
+// nodeResourceState describes the state of a resource allocated to a node
+type nodeResourceState[T any] struct {
+	// max is the maximum value amount of T that can be reserved. reserved must always be less than
+	// or equal to max.
+	max T
+	// reserved is the current amount of T reserved, and must be less than or equal to max. reserved
+	// is always exactly equal to the sum of all of this node's pods' reserved T.
+	reserved T
+	// pressure is -- roughly speaking -- the amount of T that we're currently denying to pods in
+	// this node when they request it.
+	pressure T
+	// pressureAccountedFor gives the total pressure expected to be relieved by ongoing migrations.
+	// This is equal to the sum of reserved + pressure for all pods currently migrating.
+	//
+	// The value may be larger than pressure.
+	pressureAccountedFor T
 }
 
 // podState is the information we track for an individual
 type podState struct {
 	// name is the namespace'd name of the pod
+	//
+	// name will not change after initialization, so it can be accessed without holding a lock.
 	name api.PodName
 
 	// node provides information about the node that this pod is bound to or reserved onto.
 	node *nodeState
-	// reservedCPU gives the amount of CPU reserved for this pod. It is guaranteed that the pod is
-	// using AT MOST reservedCPU.
-	reservedCPU uint16
+	// vCPU is the current state of vCPU utilization and pressure
+	vCPU podResourceState[uint16]
+
+	// metrics is the most recent metrics update we received for this pod. A nil pointer means that
+	// we have not yet received metrics.
+	metrics *api.Metrics
+
+	// mqIndex stores this pod's index in the migrationQueue. This value is -1 iff metrics is nil or
+	// it is currently migrating.
+	mqIndex int
+
+	// migrationState gives current information about an ongoing migration, if this pod is currently
+	// migrating.
+	migrationState *podMigrationState
+}
+
+// podMigrationState tracks the information about an ongoing pod's migration
+type podMigrationState struct{}
+
+type podResourceState[T any] struct {
+	// reserved is the amount of T that this pod has reserved. It is guaranteed that the pod is
+	// using AT MOST reserved T.
+	reserved T
+	// pressure is this pod's contribution to this pod's node's pressure for this resource
+	pressure T
 }
 
 // totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
 // excluding the CPU pre-reserved for system tasks.
 func (s *nodeState) totalReservableCPU() uint16 {
-	return uint16(float32(s.maxCPU) * 0.8) // reserve min 20% CPU for system tasks
+	// TODO: Just for now, we're testing with a much lower allowed CPU so that we can have
+	// meaningful splits across nodes.
+	// return uint16(float32(s.vCPU.max) * 0.8) // reserve min 20% CPU for system tasks
+	return uint16(float32(s.vCPU.max) * 0.5)
 }
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
 func (s *nodeState) remainingReservableCPU() uint16 {
-	return s.totalReservableCPU() - s.reservedCPU
+	return s.totalReservableCPU() - s.vCPU.reserved
+}
+
+// tooMuchPressure is used to signal whether the node should start migrating pods out in order to
+// relieve some of the pressure
+func (s *nodeState) tooMuchPressure() bool {
+	// TODO: for now, migrate whenever there's any pressure that's not accounted for. In the future,
+	// this might be done somewhat proactively so that we migrate when we're *close* to 100% of
+	// resources reserved.
+	return s.vCPU.pressure > s.vCPU.pressureAccountedFor
+}
+
+// checkOkToMigrate allows us to check that it's still ok to start migrating a pod, after it was
+// previously selected for migration
+//
+// A returned error indicates that the pod's resource usage has changed enough that we should try to
+// migrate something else first. The error provides justification for this.
+func (s *podState) checkOkToMigrate(oldMetrics api.Metrics) error {
+	// TODO
+	return nil
+}
+
+func (s *podState) currentlyMigrating() bool {
+	return s.migrationState != nil
 }
 
 // getNodeCPU fetches the CPU capacity for a particualr node, through the Kubernetes APIs
@@ -174,13 +242,12 @@ func (s *pluginState) getOrFetchNodeState(
 	maxCPU := uint16(cpu.MilliValue() / 1000) // cpu.Value rounds up. We don't want to do that.
 	n := &nodeState{
 		name:        nodeName,
-		maxCPU:      maxCPU,
-		reservedCPU: 0,
+		vCPU: nodeResourceState[uint16]{max: maxCPU, reserved: 0, pressure: 0},
 		pods:        make(map[api.PodName]*podState),
 	}
 
 	klog.Infof(
-		"[autoscale-enforcer] Fetched node %s CPU total = %d (milli = %d), max reservable = %d. Setting reservedCPU = 0",
+		"[autoscale-enforcer] Fetched node %s CPU total = %d (milli = %d), max reservable = %d. Setting vCPU.reserved = 0",
 		nodeName, maxCPU, cpu.MilliValue(), n.totalReservableCPU(),
 	)
 
@@ -207,11 +274,19 @@ func (e *AutoscaleEnforcer) handleVMDeletion(pName api.PodName) {
 	// Mark the resources as no longer reserved and delete the pod
 	delete(e.state.podMap, pName)
 	delete(ps.node.pods, pName)
-	oldReserved := ps.node.reservedCPU
-	ps.node.reservedCPU -= ps.reservedCPU
+	ps.node.mq.removeIfPresent(ps)
+	oldReserved := ps.node.vCPU.reserved
+	oldPressure := ps.node.vCPU.pressure
+	ps.node.vCPU.reserved -= ps.vCPU.reserved
+	ps.node.vCPU.pressure -= ps.vCPU.pressure
 
 	klog.Infof(
-		"[autoscale-enforcer] Deleted pod %v (%d vCPU) from node %s: node.reservedCPU %d -> %d",
-		pName, ps.reservedCPU, ps.node.name, oldReserved, ps.node.reservedCPU,
+		"[autoscale-enforcer] Deleted pod %v (%d vCPU) from node %s: node.vCPU.reserved %d -> %d, node.vCPU.pressure %d -> %d",
+		pName, ps.vCPU.reserved, ps.node.name, oldReserved, ps.node.vCPU.reserved, oldPressure, ps.node.vCPU.pressure,
 	)
+}
+
+func (s *podState) isBetterMigrationTarget(other *podState) bool {
+	// TODO - this is just a first-pass approximation. Maybe it's ok for now? Maybe it's not. Idk.
+	return s.metrics.LoadAverage1Min < other.metrics.LoadAverage1Min
 }

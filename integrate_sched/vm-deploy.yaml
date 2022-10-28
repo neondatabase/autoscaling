@@ -70,11 +70,11 @@ spec:
           # VM's IP address is always 10.0.2.2 within the pod. Also node_exporter is on port 9100 by
           # default, with the /metrics endpoint.
           value: "http://10.0.2.2:9100/metrics"
-        - name: READINESS_PORT
-          value: "0" # "10331" # must match readinessProbe.httpGet.port below
-        - name: POLITE_EXIT_PORT
-          value: "0" # "10332" # must match lifecycle.preStop.httpGet.port below
-      # TODO: these *should* be working, but something's going wrong... need to figure out what.
+        # TODO: these *should* be working, but something's going wrong... need to figure out what.
+        #  - name: READINESS_PORT
+        #    value: "10331" # must match readinessProbe.httpGet.port below
+        #  - name: POLITE_EXIT_PORT
+        #    value: "10332" # must match lifecycle.preStop.httpGet.port below
       # readinessProbe:
       #   httpGet:
       #     path: /healthz

@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os/exec"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -23,11 +22,13 @@ import (
 type Runner struct {
 	podName                 api.PodName
 	schedulerIP             net.IP
+	ipv6Address             string
 	cloudHypervisorSockPath string
 	metricsURL              *url.URL
 	minVCPU                 uint16
 	maxVCPU                 uint16
 	currentVCPU             uint16
+	servePort               uint16
 	readinessPort           uint16
 	politeExitPort          uint16
 }
@@ -45,6 +46,7 @@ func NewRunner(args Args, schedulerIP string, cloudHypervisorSockPath string) (*
 	return &Runner{
 		podName:                 api.PodName{Name: args.K8sPodName, Namespace: args.K8sPodNamespace},
 		schedulerIP:             parsedSchedulerIP,
+		ipv6Address: args.IPv6Address,
 		cloudHypervisorSockPath: cloudHypervisorSockPath,
 		metricsURL:              args.MetricsURL,
 		minVCPU:                 args.MinVCPU,
@@ -53,12 +55,6 @@ func NewRunner(args Args, schedulerIP string, cloudHypervisorSockPath string) (*
 		readinessPort:           args.ReadinessPort,
 		politeExitPort:          args.PoliteExitPort,
 	}, nil
-}
-
-// Metrics is the type summarizing the
-type Metrics struct {
-	// LoadAverage is the current value of the VM's load average, as reported by node_exporter
-	LoadAverage float32
 }
 
 func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
@@ -77,7 +73,7 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 		klog.V(1).Info("Skipping readiness server because port is set to zero")
 	}
 
-	metrics := make(chan Metrics)
+	metrics := make(chan api.Metrics)
 	go r.getMetricsLoop(config, metrics)
 
 	klog.Infof(
@@ -91,39 +87,44 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case m := <-metrics:
-			newCpuCount := r.newGoalCPUCount(m)
-			if newCpuCount == r.currentVCPU {
-				continue
-			}
+			newVCPUCount := r.newGoalCPUCount(m)
+			changedVCPU := newVCPUCount != r.currentVCPU
 
-			klog.Infof("New goal vCPU = %d", newCpuCount)
+			klog.Infof("New goal vCPU = %d", newVCPUCount)
 
 			// If the goal is less than the current amount, decrease right away.
-			if newCpuCount < r.currentVCPU {
+			if newVCPUCount < r.currentVCPU {
 				klog.Infof(
 					"Goal vCPU %d < Current vCPU %d, decrease immediately",
-					newCpuCount, r.currentVCPU,
+					newVCPUCount, r.currentVCPU,
 				)
-				if err := r.setCpus(ctx, newCpuCount); err != nil {
+				if err := r.setCpus(ctx, newVCPUCount); err != nil {
 					return fmt.Errorf("Error while setting CPU count: %s", err)
 				}
-				r.currentVCPU = newCpuCount
+				r.currentVCPU = newVCPUCount
 			}
 
 			// Request a new amount of CPU
-			req := api.ResourceRequest{
-				VCPUs: newCpuCount,
-				Pod:   r.podName,
+			req := api.AgentRequest{
+				Pod: r.podName,
+				Resources: api.Resources{VCPU: newVCPUCount},
+				Metrics: m,
 			}
-
-			permit, err := r.doResourceRequest(config, &req)
+			resp, err := r.sendRequestToPlugin(config, &req)
 			if err != nil {
 				klog.Errorf("Error from resource request: %s", err)
 				goto badScheduler // assume something's permanently wrong with the scheduler
+			} else if resp.Permit.VCPU > req.Resources.VCPU {
+				klog.Errorf("Plugin returned permit with vCPU greater than requested")
+				goto badScheduler // assume something's permanently wrong with the scheduler
 			}
 
-			if permit.VCPUs != r.currentVCPU {
-				if permit.VCPUs < r.currentVCPU {
+			if !changedVCPU {
+				continue;
+			}
+
+			if resp.Permit.VCPU != r.currentVCPU {
+				if resp.Permit.VCPU < r.currentVCPU {
 					// We shoudln't reach this, because req.VCPUs < r.currentVCPU is already handled
 					// above, after which r.currentVCPU == req.VCPUs, so that would mean that the
 					// permit caused a decrease beyond what we're expecting.
@@ -131,25 +132,25 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 				}
 
 				maybeLessThanDesired := ""
-				if permit.VCPUs < req.VCPUs {
+				if resp.Permit.VCPU < newVCPUCount {
 					maybeLessThanDesired = " (less than desired)"
 				}
-				klog.Infof("Setting vCPU = %d%s", permit.VCPUs, maybeLessThanDesired)
+				klog.Infof("Setting vCPU = %d%s", resp.Permit.VCPU, maybeLessThanDesired)
 
-				if err := r.setCpus(ctx, permit.VCPUs); err != nil {
+				if err := r.setCpus(ctx, resp.Permit.VCPU); err != nil {
 					return fmt.Errorf("Error while setting vCPU count: %s", err)
 				}
 
-				r.currentVCPU = permit.VCPUs
+				r.currentVCPU = resp.Permit.VCPU
 
 			} else /* permit.VCPUs == r.currentVCPU */ {
-				if r.currentVCPU == req.VCPUs {
+				if r.currentVCPU == newVCPUCount {
 					// We actually already set the CPU for this (see above), the returned permit
 					// just confirmed that
-					klog.Infof("Scheduler confirmed decrease to %d vCPU", req.VCPUs)
+					klog.Infof("Scheduler confirmed decrease to %d vCPU", newVCPUCount)
 				} else {
 					// We wanted to increase vCPUs, but the scheduler didn't allow it.
-					klog.Infof("Scheduler denied increase to %d vCPU, staying at %d", req.VCPUs, r.currentVCPU)
+					klog.Infof("Scheduler denied increase to %d vCPU, staying at %d", newVCPUCount, r.currentVCPU)
 				}
 			}
 		}
@@ -198,11 +199,11 @@ badScheduler:
 //
 // It is the caller's responsibility to make sure that they don't over-commit beyond what the
 // scheduler plugin has permitted.
-func (r *Runner) newGoalCPUCount(metrics Metrics) uint16 {
+func (r *Runner) newGoalCPUCount(metrics api.Metrics) uint16 {
 	goal := r.currentVCPU
-	if metrics.LoadAverage > 0.9*float32(r.currentVCPU) {
+	if metrics.LoadAverage1Min > 0.9*float32(r.currentVCPU) {
 		goal *= 2
-	} else if metrics.LoadAverage < 0.4*float32(r.currentVCPU) {
+	} else if metrics.LoadAverage1Min < 0.4*float32(r.currentVCPU) {
 		goal /= 2
 	}
 
@@ -252,7 +253,7 @@ func (r *Runner) signalReadiness(gotMetrics *atomic.Bool) {
 	))
 }
 
-func (r *Runner) getMetricsLoop(config *Config, metrics chan<- Metrics) {
+func (r *Runner) getMetricsLoop(config *Config, metrics chan<- api.Metrics) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			err := fmt.Errorf("Unexpected redirect while getting metrics")
@@ -300,38 +301,12 @@ func (r *Runner) getMetricsLoop(config *Config, metrics chan<- Metrics) {
 				return
 			}
 
-			// TODO: This could be more efficient, performing the split + search while reading the
-			// body. But that's annoying to do in Go, so I've left it as an exercise for the reader.
-			lines := strings.Split(string(body), "\n")
-			var loadLine string
-			prefix := "node_load1"
-			for _, line := range lines {
-				if strings.HasPrefix(line, prefix) {
-					loadLine = line
-					break
-				}
-			}
-			if loadLine == "" {
-				klog.Errorf("No line in metrics output starting with %q", prefix)
-				return
-			}
-
-			fields := strings.Fields(loadLine)
-			if len(fields) < 2 {
-				klog.Errorf(
-					"Expected >= 2 fields in metrics output for %q. Got %v",
-					prefix, len(fields),
-				)
-				return
-			}
-
-			loadAverage, err := strconv.ParseFloat(fields[1], 32)
+			m, err := api.ReadMetrics(body)
 			if err != nil {
-				klog.Errorf("Error parsing %q as LoadAverage float: %s", fields[1], err)
+				klog.Errorf("Error reading metrics from node_exporter output: %s", err);
 				return
 			}
 
-			m := Metrics{LoadAverage: float32(loadAverage)}
 			klog.Infof("Processed metrics from VM: %+v", m)
 			metrics <- m
 		}()
@@ -340,53 +315,46 @@ func (r *Runner) getMetricsLoop(config *Config, metrics chan<- Metrics) {
 	}
 }
 
-func (r *Runner) doResourceRequest(config *Config, req *api.ResourceRequest) (*api.ResourcePermit, error) {
+func (r *Runner) sendRequestToPlugin(config *Config, req *api.AgentRequest) (*api.PluginResponse, error) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			err := fmt.Errorf("Unexpected redirect while sending scheduler request")
+			err := fmt.Errorf("Unexpected redirect while sending message to plugin")
 			klog.Warning(err)
 			return err
 		},
 		Timeout: time.Second * time.Duration(config.Scheduler.RequestTimeoutSeconds),
 	}
 
-	agentMsg := req.Request()
-	requestBody, err := json.Marshal(&agentMsg)
+	requestBody, err := json.Marshal(req)
 	if err != nil {
-		klog.Fatalf("Error encoding scheduler request into JSON", err)
+		klog.Fatalf("Error encoding scheduer request into JSON: %s", err)
 	}
 
-	klog.Infof("Sending AgentMessage: %+v", agentMsg)
+	klog.Infof("Sending AgentRequest: %+v", req)
 
 	url := fmt.Sprintf("http://%s:%d/", r.schedulerIP.String(), config.Scheduler.RequestPort)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("Error sending scheduler request: %s", err)
 	}
-
 	defer resp.Body.Close()
-	var pluginMsg api.PluginMessage
-	jsonDecoder := json.NewDecoder(resp.Body)
-	if err := jsonDecoder.Decode(&pluginMsg); err != nil {
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading body for response: %s", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Received response status %d body %q", resp.StatusCode, string(body))
+	}
+
+	var respMsg api.PluginResponse
+	if err := json.Unmarshal(body, &respMsg); err != nil {
 		return nil, fmt.Errorf("Bad JSON response: %s", err)
 	}
 
-	klog.Infof("Received PluginMessage: %+v", pluginMsg)
-	if pluginMsg.ID != agentMsg.ID {
-		return nil, fmt.Errorf("Response ID from plugin doesn't match request ID: %v != %v", pluginMsg.ID, agentMsg.ID)
-	}
-
-	permit, err := pluginMsg.AsResourcePermit()
-	if err != nil {
-		return nil, fmt.Errorf("Error casting response into ResourcePermit: %s", err)
-	} else if permit.VCPUs > req.VCPUs {
-		return nil, fmt.Errorf(
-			"ResourcePermit doesn't match request: permit vCPUs %d > request vCPUs %d",
-			permit.VCPUs, req.VCPUs,
-		)
-	}
-
-	return permit, nil
+	klog.Infof("Received PluginResponse: %+v", respMsg)
+	return &respMsg, nil
 }
 
 func (r *Runner) setCpus(ctx context.Context, newCpuCount uint16) error {
