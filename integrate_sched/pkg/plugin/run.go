@@ -76,21 +76,30 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	}
 
 	node := pod.node
+	permit := e.handleResources(pod, node, req.Resources)
+	migrateDecision, status, err := e.handleMetricsAndMigration(pod, node, req.Metrics)
+	if err != nil {
+		return nil, status, err
+	}
 
-	//////////////////////////////////////
-	// Handle api.ResourceRequest piece //
-	//////////////////////////////////////
+	resp := api.PluginResponse{
+		Permit: permit,
+		Migrate: migrateDecision,
+	}
+	return &resp, 200, nil
+}
 
+func (e *AutoscaleEnforcer) handleResources(pod *podState, node *nodeState, req api.Resources) api.ResourcePermit {
 	oldNodeVCPUReserved := node.vCPU.reserved
 	oldNodeVCPUPressure := node.vCPU.pressure
 	oldNodeVCPUPressureAccountedFor := node.vCPU.pressureAccountedFor
 	oldPodVCPUReserved := pod.vCPU.reserved
 	oldPodVCPUPressure := pod.vCPU.pressure
 
-	if req.Resources.VCPU <= pod.vCPU.reserved {
+	if req.VCPU <= pod.vCPU.reserved {
 		// Decrease "requests" are actually just notifications it's already happened.
-		node.vCPU.reserved -= pod.vCPU.reserved - req.Resources.VCPU
-		pod.vCPU.reserved = req.Resources.VCPU
+		node.vCPU.reserved -= pod.vCPU.reserved - req.VCPU
+		pod.vCPU.reserved = req.VCPU
 		// pressure is now zero, because the pod no longer wants to increase resources.
 		pod.vCPU.pressure = 0
 		node.vCPU.pressure -= oldPodVCPUPressure
@@ -98,7 +107,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 			node.vCPU.pressureAccountedFor -= oldPodVCPUPressure + (oldPodVCPUReserved - pod.vCPU.reserved)
 		}
 	} else {
-		increase := req.Resources.VCPU - pod.vCPU.reserved
+		increase := req.VCPU - pod.vCPU.reserved
 		// Increases are bounded by what's left in the node:
 		maxIncrease := node.remainingReservableCPU()
 		if increase > maxIncrease /* increases are bounded by what's left in the node */ {
@@ -125,15 +134,15 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 		}
 	}
 
-	if oldPodVCPUReserved == req.Resources.VCPU {
+	if oldPodVCPUReserved == req.VCPU {
 		klog.Infof(
 			"[autoscale-enforcer] Received request for pod %v staying at current vCPU count %d",
-			req.Pod, oldPodVCPUReserved,
+			pod.name, oldPodVCPUReserved,
 		)
 	} else {
 		var wanted string
-		if pod.vCPU.reserved != req.Resources.VCPU {
-			wanted = fmt.Sprintf(" (wanted %d)", req.Resources.VCPU)
+		if pod.vCPU.reserved != req.VCPU {
+			wanted = fmt.Sprintf(" (wanted %d)", req.VCPU)
 		}
 		klog.Infof(
 			"[autoscale-enforcer] Register pod %v vCPU %d -> %d%s (pressure %d -> %d); node.vCPU.reserved %d -> %d (of %d), node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
@@ -142,61 +151,54 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 		)
 	}
 
-	permit := api.ResourcePermit{VCPU: pod.vCPU.reserved}
+	return api.ResourcePermit{VCPU: pod.vCPU.reserved}
+}
 
-	/////////////////////////////////////
-	// Handle api.MetricsRequest piece //
-	/////////////////////////////////////
-
+func (e *AutoscaleEnforcer) handleMetricsAndMigration(pod *podState, node *nodeState, metrics api.Metrics) (*api.MigrateResponse, int, error) {
 	// This pod should migrate if (a) we're looking for migrations and (b) it's next up in the
 	// priority queue. We will give it a chance later to veto if the metrics have changed too much
 	shouldMigrate := node.mq.isNextInQueue(pod) && node.tooMuchPressure()
 
-	klog.Infof("[autoscale-enforcer] Updating pod %v metrics %+v -> %+v", pod.name, pod.metrics, req.Metrics)
+	klog.Infof("[autoscale-enforcer] Updating pod %v metrics %+v -> %+v", pod.name, pod.metrics, metrics)
 	oldMetrics := pod.metrics
-	pod.metrics = &req.Metrics
-	if !pod.currentlyMigrating() {
-		node.mq.addOrUpdate(pod)
+	pod.metrics = &metrics
+	if pod.currentlyMigrating() {
+		return nil, 200, nil // don't do anything else; it's already migrating.
 	}
 
-	var migrateDecision *api.MigrateResponse
+	node.mq.addOrUpdate(pod)
 
-	if shouldMigrate /* <- will be false if currently migrating */ {
+	if !shouldMigrate {
+		return nil, 200, nil;
+	}
 
-		// Give the pod a chance to veto migration if its metrics have significantly changed...
-		var veto error
-		if oldMetrics != nil {
-			veto = pod.checkOkToMigrate(*oldMetrics)
+	// Give the pod a chance to veto migration if its metrics have significantly changed...
+	var veto error
+	if oldMetrics != nil {
+		veto = pod.checkOkToMigrate(*oldMetrics)
+	}
+
+	// ... but override the veto if it's still the best candidate anyways.
+	stillFirst := node.mq.isNextInQueue(pod)
+
+	if stillFirst || veto == nil {
+		if veto != nil {
+			klog.Infof("[autoscale-enforcer] Pod attempted veto of self migration, still highest-priority: %s", veto)
+		}
+		klog.Infof("[autoscale-enforcer] Starting migration for pod %v", pod.name)
+
+		resp, err := e.startMigration(pod)
+		if err != nil {
+			klog.Errorf("[autoscale-enforcer] Error starting migration for pod %v: %s", pod.name, err)
+			return nil, 500, err
 		}
 
-		// ... but override the veto if it's still the best candidate anyways.
-		stillFirst := node.mq.isNextInQueue(pod)
-
-		if stillFirst || veto == nil {
-			if veto != nil {
-				klog.Infof("[autoscale-enforcer] Pod attempted veto of self migration, still highest-priority: %s", veto)
-			}
-			klog.Infof("[autoscale-enforcer] Starting migration for pod %v", pod.name)
-
-			var err error
-			migrateDecision, err = e.startMigration(pod)
-			if err != nil {
-				klog.Errorf("[autoscale-enforcer] Error starting migration for pod %v: %s", pod.name, err)
-				return nil, 500, err
-			}
-
-			// TODO: we'll add more stuff to this as the feature gets fleshed out
-			migrateDecision = &api.MigrateResponse{}
-		} else {
-			klog.Infof("[autoscale-enforcer] Pod vetoed self migration: %s", veto)
-		}
+		// TODO: we'll add more stuff to this as the feature gets fleshed out
+		return resp, 200, nil
+	} else {
+		klog.Infof("[autoscale-enforcer] Pod vetoed self migration: %s", veto)
+		return nil, 200, nil
 	}
-
-	resp := api.PluginResponse{
-		Permit: permit,
-		Migrate: migrateDecision,
-	}
-	return &resp, 200, nil
 }
 
 // startMigration starts the VM migration process for a single pod, returning the information it
