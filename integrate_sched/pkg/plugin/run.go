@@ -79,8 +79,11 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	}
 
 	node := pod.node
-	permit := e.handleResources(pod, node, req.Resources)
 	migrateDecision, status, err := e.handleMetricsAndMigration(pod, node, req.Metrics)
+	if err != nil {
+		return nil, status, err
+	}
+	permit, status, err := e.handleResources(pod, node, req.Resources, migrateDecision != nil)
 	if err != nil {
 		return nil, status, err
 	}
@@ -92,12 +95,52 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	return &resp, 200, nil
 }
 
-func (e *AutoscaleEnforcer) handleResources(pod *podState, node *nodeState, req api.Resources) api.ResourcePermit {
+// FIXME: this function has some duplicated sections. Ideally they wouldn't be (they don't have to!)
+// but it's a little tricky to sus out how to merge the logic in a way that makes sense..
+func (e *AutoscaleEnforcer) handleResources(
+	pod *podState, node *nodeState, req api.Resources, startingMigration bool,
+) (api.ResourcePermit, int, error) {
 	oldNodeVCPUReserved := node.vCPU.reserved
 	oldNodeVCPUPressure := node.vCPU.pressure
 	oldNodeVCPUPressureAccountedFor := node.vCPU.pressureAccountedFor
 	oldPodVCPUReserved := pod.vCPU.reserved
 	oldPodVCPUPressure := pod.vCPU.pressure
+
+	// Check that we aren't being asked to do something during migration:
+	if pod.currentlyMigrating() {
+		// The agent shouldn't have asked for a change after already receiving notice that it's
+		// migrating.
+		if req.VCPU != pod.vCPU.reserved && !startingMigration {
+			err := fmt.Errorf("cannot change vCPU: agent has already been informed that pod is migrating")
+			return api.ResourcePermit{}, 400, err
+		}
+
+		if req.VCPU > pod.vCPU.reserved /* `&& startingMigration` is implied */ {
+			pod.vCPU.pressure = req.VCPU - pod.vCPU.reserved
+			node.vCPU.pressure = node.vCPU.pressure + pod.vCPU.pressure - oldPodVCPUPressure
+			node.vCPU.pressureAccountedFor = node.vCPU.pressureAccountedFor + pod.vCPU.pressure - oldPodVCPUPressure
+			klog.Infof(
+				"[autoscale-enforcer] Denying pod %v vCPU increase %d -> %d because it is starting migration; node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
+				pod.name, pod.vCPU.reserved, req.VCPU, oldNodeVCPUPressure, node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
+			)
+		} else /* `req.VCPU <= pod.vCPU.reserved && startingMigration` is implied */ {
+			// Handle decrease-or-equal in the same way as below.
+			node.vCPU.reserved -= pod.vCPU.reserved - req.VCPU
+			pod.vCPU.reserved = req.VCPU
+			pod.vCPU.pressure = 0
+			node.vCPU.pressure -= oldPodVCPUPressure
+
+			if oldPodVCPUPressure != 0 || req.VCPU != oldPodVCPUReserved {
+				klog.Infof(
+					"[autoscale-enforcer] Register pod %v vCPU %d -> %d (pressure %d -> %d); node.vCPU.reserved %d -> %d (of %d), node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
+					pod.name, oldPodVCPUReserved, pod.vCPU.reserved, oldPodVCPUPressure, pod.vCPU.pressure,
+					oldNodeVCPUReserved, node.vCPU.reserved, node.totalReservableCPU(), oldNodeVCPUPressure, node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
+				)
+			}
+		}
+
+		return api.ResourcePermit{VCPU: pod.vCPU.reserved}, 200, nil
+	}
 
 	if req.VCPU <= pod.vCPU.reserved {
 		// Decrease "requests" are actually just notifications it's already happened.
@@ -106,9 +149,6 @@ func (e *AutoscaleEnforcer) handleResources(pod *podState, node *nodeState, req 
 		// pressure is now zero, because the pod no longer wants to increase resources.
 		pod.vCPU.pressure = 0
 		node.vCPU.pressure -= oldPodVCPUPressure
-		if pod.currentlyMigrating() {
-			node.vCPU.pressureAccountedFor -= oldPodVCPUPressure + (oldPodVCPUReserved - pod.vCPU.reserved)
-		}
 	} else {
 		increase := req.VCPU - pod.vCPU.reserved
 		// Increases are bounded by what's left in the node:
@@ -118,26 +158,17 @@ func (e *AutoscaleEnforcer) handleResources(pod *podState, node *nodeState, req 
 			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
 			// directly += or -= (implicitly relying on overflow).
 			node.vCPU.pressure = node.vCPU.pressure - oldPodVCPUPressure + pod.vCPU.pressure
-			if pod.currentlyMigrating() {
-				node.vCPU.pressureAccountedFor = node.vCPU.pressureAccountedFor - oldPodVCPUPressure + pod.vCPU.pressure
-			}
 			increase = maxIncrease // cap at maxIncrease.
 		} else {
 			// If we're not capped by maxIncrease, relieve pressure coming from this pod
-			if pod.currentlyMigrating() {
-				node.vCPU.pressureAccountedFor -= pod.vCPU.pressure
-			}
 			node.vCPU.pressure -= pod.vCPU.pressure
 			pod.vCPU.pressure = 0
 		}
 		pod.vCPU.reserved += increase
 		node.vCPU.reserved += increase
-		if pod.currentlyMigrating() {
-			node.vCPU.pressureAccountedFor += increase
-		}
 	}
 
-	if oldPodVCPUReserved == req.VCPU {
+	if oldPodVCPUReserved == req.VCPU && oldPodVCPUPressure == 0 {
 		klog.Infof(
 			"[autoscale-enforcer] Received request for pod %v staying at current vCPU count %d",
 			pod.name, oldPodVCPUReserved,
@@ -154,10 +185,12 @@ func (e *AutoscaleEnforcer) handleResources(pod *podState, node *nodeState, req 
 		)
 	}
 
-	return api.ResourcePermit{VCPU: pod.vCPU.reserved}
+	return api.ResourcePermit{VCPU: pod.vCPU.reserved}, 200, nil
 }
 
-func (e *AutoscaleEnforcer) handleMetricsAndMigration(pod *podState, node *nodeState, metrics api.Metrics) (*api.MigrateResponse, int, error) {
+func (e *AutoscaleEnforcer) handleMetricsAndMigration(
+	pod *podState, node *nodeState, metrics api.Metrics,
+) (*api.MigrateResponse, int, error) {
 	// This pod should migrate if (a) we're looking for migrations and (b) it's next up in the
 	// priority queue. We will give it a chance later to veto if the metrics have changed too much
 	shouldMigrate := node.mq.isNextInQueue(pod) && node.tooMuchPressure()
