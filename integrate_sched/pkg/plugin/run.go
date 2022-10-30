@@ -258,12 +258,13 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, pod *podState) (
 	// TODO: currently this is just a skeleton of the implementation; we'll fill this out more with
 	// actual functionality later.
 	pod.migrationState = &podMigrationState{}
+	oldNodeVCPUPressure := pod.node.vCPU.pressure
 	oldNodeVCPUPressureAccountedFor := pod.node.vCPU.pressureAccountedFor
 	pod.node.vCPU.pressureAccountedFor += pod.vCPU.reserved + pod.vCPU.pressure
 
 	klog.Infof(
-		"[autoscaler-enforcer] Migrate pod %v; node.vCPU.pressure = %d (%d -> %d spoken for)",
-		pod.name, pod.node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.pressureAccountedFor,
+		"[autoscaler-enforcer] Migrate pod %v; node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
+		pod.name, oldNodeVCPUPressure, pod.node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.pressureAccountedFor,
 	)
 
 	// Re-mark the VM's 'init-vcpu' label as the current value, so that when the migration is

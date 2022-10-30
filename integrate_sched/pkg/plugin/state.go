@@ -281,12 +281,20 @@ func (e *AutoscaleEnforcer) handleVMDeletion(pName api.PodName) {
 	ps.node.mq.removeIfPresent(ps)
 	oldReserved := ps.node.vCPU.reserved
 	oldPressure := ps.node.vCPU.pressure
+	oldPressureAccountedFor := ps.node.vCPU.pressureAccountedFor
 	ps.node.vCPU.reserved -= ps.vCPU.reserved
 	ps.node.vCPU.pressure -= ps.vCPU.pressure
 
+	// Something we have to handle here but not in Unreserve: the possibility of a VM being deleted
+	// mid-migration:
+	if ps.currentlyMigrating() {
+		ps.node.vCPU.pressureAccountedFor -= ps.vCPU.reserved + ps.vCPU.pressure
+	}
+
 	klog.Infof(
-		"[autoscale-enforcer] Deleted pod %v (%d vCPU) from node %s: node.vCPU.reserved %d -> %d, node.vCPU.pressure %d -> %d",
-		pName, ps.vCPU.reserved, ps.node.name, oldReserved, ps.node.vCPU.reserved, oldPressure, ps.node.vCPU.pressure,
+		"[autoscale-enforcer] Deleted pod %v (%d vCPU) from node %s: node.vCPU.reserved %d -> %d, node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
+		pName, ps.vCPU.reserved, ps.node.name, oldReserved, ps.node.vCPU.reserved,
+		oldPressure, ps.node.vCPU.pressure, oldPressureAccountedFor, ps.node.vCPU.pressureAccountedFor,
 	)
 }
 
