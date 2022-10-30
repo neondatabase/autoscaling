@@ -1,12 +1,15 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 
 	klog "k8s.io/klog/v2"
+	ktypes "k8s.io/apimachinery/pkg/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -187,7 +190,7 @@ func (e *AutoscaleEnforcer) handleMetricsAndMigration(pod *podState, node *nodeS
 		}
 		klog.Infof("[autoscale-enforcer] Starting migration for pod %v", pod.name)
 
-		resp, err := e.startMigration(pod)
+		resp, err := e.startMigration(context.Background(), pod)
 		if err != nil {
 			klog.Errorf("[autoscale-enforcer] Error starting migration for pod %v: %s", pod.name, err)
 			return nil, 500, err
@@ -201,11 +204,17 @@ func (e *AutoscaleEnforcer) handleMetricsAndMigration(pod *podState, node *nodeS
 	}
 }
 
+type patchValue[T any] struct{
+	Op string `json:"op"`
+	Path string `json:"path"`
+	Value T `json:"value"`
+}
+
 // startMigration starts the VM migration process for a single pod, returning the information it
 // needs
 //
 // This method assumes that the caller currently has a lock on the state.
-func (e *AutoscaleEnforcer) startMigration(pod *podState) (*api.MigrateResponse, error) {
+func (e *AutoscaleEnforcer) startMigration(ctx context.Context, pod *podState) (*api.MigrateResponse, error) {
 	if pod.currentlyMigrating() {
 		return nil, fmt.Errorf("Pod is already migrating: state = %+v", pod.migrationState)
 	}
@@ -224,5 +233,36 @@ func (e *AutoscaleEnforcer) startMigration(pod *podState) (*api.MigrateResponse,
 		pod.name, pod.node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.pressureAccountedFor,
 	)
 
+	// Re-mark the VM's 'init-vcpu' label as the current value, so that when the migration is
+	// created it'll have the correct initial vCPU:
+	if err := e.patchVMInitVCPU(ctx, pod); err != nil {
+		return nil, err
+	}
+
 	return &api.MigrateResponse{}, nil
+}
+
+func (e *AutoscaleEnforcer) patchVMInitVCPU(ctx context.Context, pod *podState) error {
+	patchPayload := []patchValue[string]{{
+		Op: "replace",
+		// if '/' is in the label, it's replaced by '~1'. Source:
+		//   https://stackoverflow.com/questions/36147137#comment98654379_36163917
+		Path: "/metadata/labels/autoscaler~1init-vcpu",
+		Value: fmt.Sprintf("%d", pod.vCPU.reserved), // labels are strings
+	}}
+	patchPayloadBytes, err := json.Marshal(patchPayload)
+	if err != nil {
+		err = fmt.Errorf("Error marshalling JSON patch payload: %s", err)
+		klog.Errorf("[autoscale-enforcer] %s", err)
+		return err
+	}
+
+	_, err = e.virtClient.VirtV1alpha1().
+		VirtualMachines("default").
+		Patch(ctx, pod.vmName, ktypes.JSONPatchType, patchPayloadBytes, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("Error executing VM patch request: %s", err)
+	}
+
+	return nil
 }

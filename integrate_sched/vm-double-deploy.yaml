@@ -116,7 +116,7 @@ metadata:
   name: postgres14-disk-2
   labels:
     autoscaler/min-vcpu: "1"
-    autoscaler/init-vcpu: "1"
+    autoscaler/init-vcpu: "2" # set this to 2, so that we can see when it's changed to 1 by the scheduler
     autoscaler/max-vcpu: "8"
 spec:
   schedulerName: autoscale-scheduler

@@ -1,8 +1,31 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vm-patcher
+rules:
+- apiGroups: ["virt.virtink.smartx.com"]
+  resources: ["virtualmachines"]
+  verbs: ["get", "list", "patch"]
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: autoscale-scheduler
   namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: autoscale-scheduler-as-vm-patcher
+  namespace: kube-system
+subjects:
+- kind: ServiceAccount
+  name: autoscale-scheduler
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: vm-patcher
+  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -33,7 +56,7 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: autoscale-scheduler-temp
+  name: autoscale-scheduler-apiserver-auth-config
   namespace: kube-system
 subjects:
 - kind: ServiceAccount

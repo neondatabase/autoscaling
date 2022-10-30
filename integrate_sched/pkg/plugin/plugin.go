@@ -8,6 +8,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	klog "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+	scheme "k8s.io/client-go/kubernetes/scheme"
+	rest "k8s.io/client-go/rest"
+
+	virtclient "github.com/neondatabase/virtink/pkg/generated/clientset/versioned"
+	virtapi "github.com/neondatabase/virtink/pkg/apis/virt/v1alpha1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -19,6 +24,7 @@ const LabelInitVCPU = "autoscaler/init-vcpu"
 // AutoscaleEnforcer is the scheduler plugin to coordinate autoscaling
 type AutoscaleEnforcer struct {
 	handle framework.Handle
+	virtClient *virtclient.Clientset
 	state  pluginState
 }
 
@@ -28,8 +34,18 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	// ^ obj can be used for taking in configuration. it's a bit tricky to figure out, and we don't
 	// quite need it yet.
 	klog.Info("[autoscale-enforcer] Initializing plugin")
+
+	// create the virtink client
+	virtapi.AddToScheme(scheme.Scheme)
+	vmConfig := rest.CopyConfig(h.KubeConfig())
+	virtClient, err := virtclient.NewForConfig(vmConfig)
+	if err != nil {
+		return nil, fmt.Errorf("Error creating virtink client: %s", err)
+	}
+
 	p := AutoscaleEnforcer{
 		handle: h,
+		virtClient: virtClient,
 		state: pluginState{
 			nodeMap: make(map[string]*nodeState),
 			podMap:  make(map[api.PodName]*podState),
@@ -70,7 +86,7 @@ func (e *AutoscaleEnforcer) Filter(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
 
-	podInitVCPU, err := getPodInitCPU(ctx, pod)
+	podInitVCPU, _, err := getPodInitCPUAndVMName(ctx, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Filter: Error getting pod %v init vCPU: %s", pName, err)
 		return framework.NewStatus(
@@ -152,7 +168,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
-	podInitVCPU, err := getPodInitCPU(ctx, pod)
+	podInitVCPU, vmName, err := getPodInitCPUAndVMName(ctx, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Error getting pod %v init vCPU: %s", pName, err)
 		return framework.NewStatus(
@@ -188,6 +204,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		node.vCPU.reserved = newNodeReservedCPU
 		ps := &podState{
 			name: pName,
+			vmName: vmName,
 			node: node,
 			vCPU: podResourceState[uint16]{reserved: podInitVCPU, pressure: 0},
 			mqIndex: -1,

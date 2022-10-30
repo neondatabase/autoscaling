@@ -71,6 +71,9 @@ type podState struct {
 	// name will not change after initialization, so it can be accessed without holding a lock.
 	name api.PodName
 
+	// vmName is the name of the VM, as given by the 'virtink.io/vm.name' label.
+	vmName string
+
 	// node provides information about the node that this pod is bound to or reserved onto.
 	node *nodeState
 	// vCPU is the current state of vCPU utilization and pressure
@@ -174,23 +177,24 @@ func getNodeCPU(ctx context.Context, clientSet kubernetes.Interface, nodeName st
 	return uint16(maxCPU), nil
 }
 
-func getPodInitCPU(ctx context.Context, pod *corev1.Pod) (uint16, error) {
+func getPodInitCPUAndVMName(ctx context.Context, pod *corev1.Pod) (uint16, string, error) {
 	// If this isn't a VM, it shouldn't have been scheduled with us
-	if _, ok := pod.Labels[LabelVM]; !ok {
-		return 0, fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
+	name, ok := pod.Labels[LabelVM]
+	if !ok {
+		return 0, "", fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
 	}
 
 	initVCPUString, ok := pod.Labels[LabelInitVCPU]
 	if !ok {
-		return 0, fmt.Errorf("Missing init vCPU label %s", LabelInitVCPU)
+		return 0, "", fmt.Errorf("Missing init vCPU label %s", LabelInitVCPU)
 	}
 
 	initVCPU, err := strconv.ParseUint(initVCPUString, 10, 16)
 	if err != nil {
-		return 0, fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitVCPU, err)
+		return 0, "", fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitVCPU, err)
 	}
 
-	return uint16(initVCPU), nil
+	return uint16(initVCPU), name, nil
 }
 
 // this method can only be called while holding a lock. If we don't have the necessary information
