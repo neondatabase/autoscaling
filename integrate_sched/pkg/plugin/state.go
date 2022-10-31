@@ -7,12 +7,17 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"encoding/json"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+
+	virtclient "github.com/neondatabase/virtink/pkg/generated/clientset/versioned"
+	virtapi "github.com/neondatabase/virtink/pkg/apis/virt/v1alpha1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -301,4 +306,79 @@ func (e *AutoscaleEnforcer) handleVMDeletion(pName api.PodName) {
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
 	// TODO - this is just a first-pass approximation. Maybe it's ok for now? Maybe it's not. Idk.
 	return s.metrics.LoadAverage1Min < other.metrics.LoadAverage1Min
+}
+
+type patchValue[T any] struct{
+	Op string `json:"op"`
+	Path string `json:"path"`
+	Value T `json:"value"`
+}
+
+// this method can only be called while holding a lock. It will be released temporarily while we
+// send requests to the API server
+//
+// A lock will ALWAYS be held on return from this function.
+func (s *pluginState) startMigration(ctx context.Context, pod *podState, virtClient *virtclient.Clientset) error {
+	if pod.currentlyMigrating() {
+		return fmt.Errorf("Pod is already migrating: state = %+v", pod.migrationState)
+	}
+
+	// Remove the pod from the migration queue.
+	pod.node.mq.removeIfPresent(pod)
+	// Mark the pod as migrating
+	pod.migrationState = &podMigrationState{}
+	// Update resource trackers
+	oldNodeVCPUPressure := pod.node.vCPU.pressure
+	oldNodeVCPUPressureAccountedFor := pod.node.vCPU.pressureAccountedFor
+	pod.node.vCPU.pressureAccountedFor += pod.vCPU.reserved + pod.vCPU.pressure
+
+	klog.Infof(
+		"[autoscaler-enforcer] Migrate pod %v; node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
+		pod.name, oldNodeVCPUPressure, pod.node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.pressureAccountedFor,
+	)
+	s.lock.Unlock() // Unlock while we make the API server requests
+
+	var locked bool // In order to prevent double-unlock panics, we always lock on return.
+	defer func() {
+		if !locked {
+			s.lock.Lock()
+		}
+	}()
+	
+	// Patch init vCPU for the VM, so that the migration target pod has the correct vCPU count
+	patchPayload := []patchValue[string]{{
+		Op: "replace",
+		// if '/' is in the label, it's replaced by '~1'. Source:
+		//   https://stackoverflow.com/questions/36147137#comment98654379_36163917
+		Path: "/metadata/labels/autoscaler~1init-vcpu",
+		Value: fmt.Sprintf("%d", pod.vCPU.reserved), // labels are strings
+	}}
+
+	patchPayloadBytes, err := json.Marshal(patchPayload)
+	if err != nil {
+		return fmt.Errorf("Error marshalling JSON patch payload: %s", err)
+	}
+	klog.Infof("[autoscale-enforcer] Sending VM %s:%s patch request", pod.name.Namespace, pod.vmName)
+	_, err = virtClient.VirtV1alpha1().
+		VirtualMachines("default").
+		Patch(ctx, pod.vmName, ktypes.JSONPatchType, patchPayloadBytes, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("Error executing VM patch request: %s", err)
+	}
+
+	// ... And then actually start the migration:
+	vmMigration := virtapi.VirtualMachineMigration{
+		Spec: virtapi.VirtualMachineMigrationSpec{
+			VMName: pod.vmName,
+		},
+	}
+	klog.Infof("[autoscale-enforcer] Sending VM Migration %s:%s create request", pod.name.Namespace, pod.vmName)
+	_, err = virtClient.VirtV1alpha1().
+		VirtualMachineMigrations(pod.name.Namespace).
+		Create(ctx, &vmMigration, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("Error executing VM Migration create request: %s", err)
+	}
+
+	return nil
 }

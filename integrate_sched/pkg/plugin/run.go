@@ -8,8 +8,6 @@ import (
 	"net/http"
 
 	klog "k8s.io/klog/v2"
-	ktypes "k8s.io/apimachinery/pkg/types"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -79,13 +77,22 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	}
 
 	node := pod.node
-	migrateDecision, status, err := e.handleMetricsAndMigration(pod, node, req.Metrics)
+
+	// Check whether the pod *will* migrate, then update its resources, and THEN start its
+	// migration, using the possibly-changed resources.
+	mustMigrate := e.updateMetricsAndCheckMustMigrate(pod, node, req.Metrics)
+	permit, status, err := e.handleResources(pod, node, req.Resources, mustMigrate)
 	if err != nil {
 		return nil, status, err
 	}
-	permit, status, err := e.handleResources(pod, node, req.Resources, migrateDecision != nil)
-	if err != nil {
-		return nil, status, err
+
+	var migrateDecision *api.MigrateResponse
+	if mustMigrate {
+		migrateDecision = &api.MigrateResponse{}
+		err = e.state.startMigration(context.Background(), pod, e.virtClient)
+		if err != nil {
+			return nil, 500, fmt.Errorf("Error starting migration for pod %v: %s", pod.name, err)
+		}
 	}
 
 	resp := api.PluginResponse{
@@ -110,20 +117,22 @@ func (e *AutoscaleEnforcer) handleResources(
 	if pod.currentlyMigrating() {
 		// The agent shouldn't have asked for a change after already receiving notice that it's
 		// migrating.
-		if req.VCPU != pod.vCPU.reserved && !startingMigration {
+		if req.VCPU != pod.vCPU.reserved {
 			err := fmt.Errorf("cannot change vCPU: agent has already been informed that pod is migrating")
 			return api.ResourcePermit{}, 400, err
 		}
-
-		if req.VCPU > pod.vCPU.reserved /* `&& startingMigration` is implied */ {
+		return api.ResourcePermit{VCPU: pod.vCPU.reserved}, 200, nil
+	} else if startingMigration {
+		if req.VCPU > pod.vCPU.reserved {
 			pod.vCPU.pressure = req.VCPU - pod.vCPU.reserved
 			node.vCPU.pressure = node.vCPU.pressure + pod.vCPU.pressure - oldPodVCPUPressure
-			node.vCPU.pressureAccountedFor = node.vCPU.pressureAccountedFor + pod.vCPU.pressure - oldPodVCPUPressure
+			// don't handle pressureAccountedFor here, that's taken care of in
+			// (*pluginState).startMigration()
 			klog.Infof(
 				"[autoscale-enforcer] Denying pod %v vCPU increase %d -> %d because it is starting migration; node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
 				pod.name, pod.vCPU.reserved, req.VCPU, oldNodeVCPUPressure, node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
 			)
-		} else /* `req.VCPU <= pod.vCPU.reserved && startingMigration` is implied */ {
+		} else /* `req.VCPU <= pod.vCPU.reserved` is implied */ {
 			// Handle decrease-or-equal in the same way as below.
 			node.vCPU.reserved -= pod.vCPU.reserved - req.VCPU
 			pod.vCPU.reserved = req.VCPU
@@ -188,9 +197,9 @@ func (e *AutoscaleEnforcer) handleResources(
 	return api.ResourcePermit{VCPU: pod.vCPU.reserved}, 200, nil
 }
 
-func (e *AutoscaleEnforcer) handleMetricsAndMigration(
+func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	pod *podState, node *nodeState, metrics api.Metrics,
-) (*api.MigrateResponse, int, error) {
+) bool {
 	// This pod should migrate if (a) we're looking for migrations and (b) it's next up in the
 	// priority queue. We will give it a chance later to veto if the metrics have changed too much
 	shouldMigrate := node.mq.isNextInQueue(pod) && node.tooMuchPressure()
@@ -199,13 +208,13 @@ func (e *AutoscaleEnforcer) handleMetricsAndMigration(
 	oldMetrics := pod.metrics
 	pod.metrics = &metrics
 	if pod.currentlyMigrating() {
-		return nil, 200, nil // don't do anything else; it's already migrating.
+		return false // don't do anything else; it's already migrating.
 	}
 
 	node.mq.addOrUpdate(pod)
 
 	if !shouldMigrate {
-		return nil, 200, nil;
+		return false
 	}
 
 	// Give the pod a chance to veto migration if its metrics have significantly changed...
@@ -221,82 +230,10 @@ func (e *AutoscaleEnforcer) handleMetricsAndMigration(
 		if veto != nil {
 			klog.Infof("[autoscale-enforcer] Pod attempted veto of self migration, still highest-priority: %s", veto)
 		}
-		klog.Infof("[autoscale-enforcer] Starting migration for pod %v", pod.name)
 
-		resp, err := e.startMigration(context.Background(), pod)
-		if err != nil {
-			klog.Errorf("[autoscale-enforcer] Error starting migration for pod %v: %s", pod.name, err)
-			return nil, 500, err
-		}
-
-		// TODO: we'll add more stuff to this as the feature gets fleshed out
-		return resp, 200, nil
+		return true
 	} else {
 		klog.Infof("[autoscale-enforcer] Pod vetoed self migration: %s", veto)
-		return nil, 200, nil
+		return false
 	}
-}
-
-type patchValue[T any] struct{
-	Op string `json:"op"`
-	Path string `json:"path"`
-	Value T `json:"value"`
-}
-
-// startMigration starts the VM migration process for a single pod, returning the information it
-// needs
-//
-// This method assumes that the caller currently has a lock on the state.
-func (e *AutoscaleEnforcer) startMigration(ctx context.Context, pod *podState) (*api.MigrateResponse, error) {
-	if pod.currentlyMigrating() {
-		return nil, fmt.Errorf("Pod is already migrating: state = %+v", pod.migrationState)
-	}
-
-	// Remove the pod from the migration queue.
-	pod.node.mq.removeIfPresent(pod)
-	
-	// TODO: currently this is just a skeleton of the implementation; we'll fill this out more with
-	// actual functionality later.
-	pod.migrationState = &podMigrationState{}
-	oldNodeVCPUPressure := pod.node.vCPU.pressure
-	oldNodeVCPUPressureAccountedFor := pod.node.vCPU.pressureAccountedFor
-	pod.node.vCPU.pressureAccountedFor += pod.vCPU.reserved + pod.vCPU.pressure
-
-	klog.Infof(
-		"[autoscaler-enforcer] Migrate pod %v; node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
-		pod.name, oldNodeVCPUPressure, pod.node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.pressureAccountedFor,
-	)
-
-	// Re-mark the VM's 'init-vcpu' label as the current value, so that when the migration is
-	// created it'll have the correct initial vCPU:
-	if err := e.patchVMInitVCPU(ctx, pod); err != nil {
-		return nil, err
-	}
-
-	return &api.MigrateResponse{}, nil
-}
-
-func (e *AutoscaleEnforcer) patchVMInitVCPU(ctx context.Context, pod *podState) error {
-	patchPayload := []patchValue[string]{{
-		Op: "replace",
-		// if '/' is in the label, it's replaced by '~1'. Source:
-		//   https://stackoverflow.com/questions/36147137#comment98654379_36163917
-		Path: "/metadata/labels/autoscaler~1init-vcpu",
-		Value: fmt.Sprintf("%d", pod.vCPU.reserved), // labels are strings
-	}}
-	patchPayloadBytes, err := json.Marshal(patchPayload)
-	if err != nil {
-		err = fmt.Errorf("Error marshalling JSON patch payload: %s", err)
-		klog.Errorf("[autoscale-enforcer] %s", err)
-		return err
-	}
-
-	_, err = e.virtClient.VirtV1alpha1().
-		VirtualMachines("default").
-		Patch(ctx, pod.vmName, ktypes.JSONPatchType, patchPayloadBytes, metav1.PatchOptions{})
-	if err != nil {
-		return fmt.Errorf("Error executing VM patch request: %s", err)
-	}
-
-	return nil
 }
