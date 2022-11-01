@@ -1,4 +1,16 @@
 #!/bin/bash
+#
+# Convenience script to ssh into a particular VM using the local private key that was generated for
+# it.
+#
+# This script takes arguments from environment variables -- all optional. They are:
+#
+#   * VM_NAME - the virtink.io/vm.name of the VM. Optional if there is only one VM, otherwise must
+#     be provided.
+#   * SSHCLIENT_IP - the IP address of the ssh client on the vm-bridge network. Defaults to
+#     10.77.77.213, but must be provided if there is already a pod using that IP address.
+#   * NODE_NAME - if provided, a node to require that the pod is bound to. Used to allow access
+#     to the VM when inter-node networking is not working.
 
 set -e -o pipefail
 
@@ -9,6 +21,8 @@ source 'scripts-common.sh'
 
 DEFAULT_SSHCLIENT_IP="10.77.77.213"
 SSHCLIENT_IP="$( ( set -u; echo "$SSHCLIENT_IP" ) 2>/dev/null || echo "$DEFAULT_SSHCLIENT_IP" )"
+
+NODE_NAME="$NODE_NAME" # because -u isn't set yet, this sets NODE_NAME to "" if it's undefined
 
 # can't enable `set -u` for get_vm_name because we might not have $VM_NAME
 vm_name="$(get_vm_name)"
@@ -62,6 +76,12 @@ trap cleanup EXIT INT TERM
 echo "$NAD" > "$nad_file"
 kubectl apply -f "$nad_file"
 
+if [ -n "$NODE_NAME" ]; then 
+    NODE_SELECTOR='"nodeSelector": { "kubernetes.io/hostname": "'"$NODE_NAME"'" },'
+else
+    NODE_SELECTOR=""
+fi
+
 # Provide a manual configuration for the container so that we can pass through the ssh private key
 #
 # Note: this requires creating the 'vm-ssh' secret, as described in the readme.
@@ -72,13 +92,14 @@ CONTAINER_CFG='
 {
     "apiVersion": "v1",
     "spec": {
+        '"$NODE_SELECTOR"'
         "containers": [{
             "name": "'"ssh-$vm_name"'",
             "image": "alpine:3.16",
             "args": [
                 "/bin/sh",
                 "-c",
-                "apk add openssh-client && ssh -i /ssh-private/id_rsa '"$SSH_OPTS"' root@'"$vm_ip"'"
+                "apk add openssh-client && ssh -i /ssh-private/id_rsa '"$SSH_OPTS"' root@'"$vm_ip"' || echo dumping into ssh pod shell && /bin/ash"
             ],
             "stdin": true,
             "stdinOnce": true,
