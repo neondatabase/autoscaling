@@ -32,11 +32,7 @@ curl -sS https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/maste
 Set up the cluster:
 
 ```sh
-kind create cluster -n autoscale-sched --config=kind-config.yaml
-kubectl apply -f flannel.yaml -f cert-manager.yaml -f multus-daemonset.yaml \
-    -f scheduler-deploy.yaml -f autoscaler-agent-deploy.yaml
-# (wait until cert manager has been ready for a bit)
-kubectl apply -f virtink_localhost:5001.yaml
+scripts/cluster-init.sh
 ```
 
 Run the VM(s):

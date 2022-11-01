@@ -8,6 +8,8 @@ set -eu -o pipefail
 cd -P -- "$(dirname -- "$0")"
 cd .. # but all of the references are to things in the upper directory
 
+source './scripts-common.sh'
+
 set -x
 
 kind create cluster -n autoscale-sched --config=kind-config.yaml
