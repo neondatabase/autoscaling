@@ -7,6 +7,9 @@ cd -P -- "$(dirname -- "$0")"
 
 source 'scripts-common.sh'
 
+DEFAULT_SSHCLIENT_IP="10.77.77.213"
+SSHCLIENT_IP="$( ( set -u; echo "$SSHCLIENT_IP" ) 2>/dev/null || echo "$DEFAULT_SSHCLIENT_IP" )"
+
 # can't enable `set -u` for get_vm_name because we might not have $VM_NAME
 vm_name="$(get_vm_name)"
 set -u
@@ -21,9 +24,43 @@ fi
 
 echo "get vmPodName (vm_name = $vm_name)"
 pod="$(kubectl get vm "$vm_name" -o jsonpath='{.status.vmPodName}')"
-echo "get pod ip (pod = $pod)"
-pod_ip="$(kubectl get pod "$pod" -o jsonpath='{.status.podIP}')"
-echo "pod_ip = $pod_ip"
+echo "get VM static ip (pod = $pod)"
+vm_ip="$(get_vm_ip "$pod")"
+echo "vm_ip = $vm_ip"
+
+NAD_NAME="vm-bridge-ssh-$vm_name"
+NAD='
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: '"$NAD_NAME"'
+spec:
+  config: '"'"'{
+    "cniVersion": "0.3.1",
+    "name": "overlay",
+    "type": "bridge",
+    "bridge": "vm-bridge",
+    "isGateway": false,
+    "isDefaultGateway": false,
+    "ipam": {
+      "type": "static",
+      "addresses": [{"address": "'"$SSHCLIENT_IP"'/24"}],
+      "routes": [{"dst": "10.77.77.0/24"}]
+    }
+  }'"'"'
+'
+
+nad_file="bench-nad-$NAD_NAME.tmp"
+
+cleanup () {
+    rm "$nad_file"
+    kubectl delete network-attachment-definitions.k8s.cni.cncf.io "$NAD_NAME"
+}
+
+trap cleanup EXIT INT TERM
+
+echo "$NAD" > "$nad_file"
+kubectl apply -f "$nad_file"
 
 # Provide a manual configuration for the container so that we can pass through the ssh private key
 #
@@ -41,7 +78,7 @@ CONTAINER_CFG='
             "args": [
                 "/bin/sh",
                 "-c",
-                "apk add openssh-client && ssh -i /ssh-private/id_rsa '"$SSH_OPTS"' root@'"$pod_ip"'"
+                "apk add openssh-client && ssh -i /ssh-private/id_rsa '"$SSH_OPTS"' root@'"$vm_ip"'"
             ],
             "stdin": true,
             "stdinOnce": true,
@@ -67,4 +104,5 @@ CONTAINER_CFG='
     }
 }'
 
-kubectl run ssh-"$vm_name" --rm --image=alpine --restart=Never -it --overrides="$CONTAINER_CFG"
+ANNOTATIONS="--annotations=k8s.v1.cni.cncf.io/networks=$NAD_NAME"
+kubectl run ssh-"$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" --overrides="$CONTAINER_CFG"

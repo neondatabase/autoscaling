@@ -48,3 +48,17 @@ get_vm_name() {
     echo "${candidates[0]}"
     return
 }
+
+# USAGE: VM_IP="$(get_vm_ip "$vm_pod")"
+#
+# Gets the static IP of the VM
+get_vm_ip() {
+    # This is actually a bit tricky, because we want to use the overlay network so we have a
+    # consistent IP across migrations. We can get it from the 'k8s.v1.cni.cncf.io/network-status'
+    # annotation.
+    #
+    # note: the network-status annotation is a JSON string. we need to unpack that with JQ first
+    kubectl get pod "$1" -o jsonpath='{.metadata.annotations}' \
+        | jq -er '.["k8s.v1.cni.cncf.io/network-status"]' \
+        | jq -er '.[] | select(.interface == "net1") | .ips[0]'
+}

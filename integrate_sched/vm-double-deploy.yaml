@@ -2,45 +2,45 @@
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
 metadata:
-  name: static-disk-1
+  name: static-pg14-tmpfs-1
 spec:
   config: '{
     "cniVersion": "0.3.1",
     "name": "overlay",
     "type": "bridge",
-    "bridge": "vm-bridge0",
-    "isDefaultGateway": false,
+    "bridge": "vm-bridge",
     "isGateway": false,
+    "isDefaultGateway": false,
     "ipam": {
       "type": "static",
-      "addresses": [{"address": "10.77.77.3/24"}],
-      "routes": [{ "dst": "10.77.0.0/16" }]
+      "addresses": [{"address": "10.77.77.1/24"}],
+      "routes": [{ "dst": "10.77.77.0/24" }]
     }
   }'
 ---
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
 metadata:
-  name: static-disk-2
+  name: static-pg14-tmpfs-2
 spec:
   config: '{
     "cniVersion": "0.3.1",
     "name": "overlay",
     "type": "bridge",
-    "bridge": "vm-bridge0",
-    "isDefaultGateway": false,
+    "bridge": "vm-bridge",
     "isGateway": false,
+    "isDefaultGateway": false,
     "ipam": {
       "type": "static",
-      "addresses": [{"address": "10.78.78.3/24"}],
-      "routes": [{ "dst": "10.78.0.0/16" }]
+      "addresses": [{"address": "10.77.77.2/24"}],
+      "routes": [{ "dst": "10.77.77.0/24" }]
     }
   }'
 ---
 apiVersion: virt.virtink.smartx.com/v1alpha1
 kind: VirtualMachine
 metadata:
-  name: postgres14-disk-1
+  name: postgres14-tmpfs-1
   labels:
     autoscaler/min-vcpu: "1"
     autoscaler/init-vcpu: "1"
@@ -57,13 +57,13 @@ spec:
       socketsMax: 8 # TODO: change virtink so socketsMax=0 means it allows any size.
       coresPerSocket: 1
     memory:
-      size: 1Gi
+      size: 2Gi
     kernel:
       image: cicdteam/clh-kernel:5.15.12
       imagePullPolicy: IfNotPresent
       cmdline: "console=ttyS0 root=/dev/vda rw"
     disks:
-      - name: disk
+      - name: rootfs
     interfaces:
       - name: pod
         masquerade:
@@ -99,12 +99,13 @@ spec:
       pod: {}
     - name: overlay
       multus:
-        networkName: static-disk-1
+        networkName: static-pg14-tmpfs-1
   volumes:
-    - name: disk
-      containerDisk:
-        image: localhost:5001/pg14-disk-test:latest
+    - name: rootfs
+      containerRootfs:
+        image: localhost:5001/pg14-tmpfs-test:latest
         imagePullPolicy: Always
+        size: 4G
   sidecarVolumes:
     - name: autoscaler-agent-config
       configMap:
@@ -113,7 +114,7 @@ spec:
 apiVersion: virt.virtink.smartx.com/v1alpha1
 kind: VirtualMachine
 metadata:
-  name: postgres14-disk-2
+  name: postgres14-tmpfs-2
   labels:
     autoscaler/min-vcpu: "1"
     autoscaler/init-vcpu: "2" # set this to 2, so that we can see when it's changed to 1 by the scheduler
@@ -130,7 +131,7 @@ spec:
       socketsMax: 8 # TODO: change virtink so socketsMax=0 means it allows any size.
       coresPerSocket: 1
     memory:
-      size: 1Gi
+      size: 2Gi
     kernel:
       image: cicdteam/clh-kernel:5.15.12
       imagePullPolicy: IfNotPresent
@@ -172,12 +173,13 @@ spec:
       pod: {}
     - name: overlay
       multus:
-        networkName: static-disk-2
+        networkName: static-pg14-tmpfs-2
   volumes:
-    - name: disk
-      containerDisk:
-        image: localhost:5001/pg14-disk-test:latest
+    - name: rootfs
+      containerRootfs:
+        image: localhost:5001/pg14-tmpfs-test:latest
         imagePullPolicy: Always
+        size: 4G
   sidecarVolumes:
     - name: autoscaler-agent-config
       configMap:
