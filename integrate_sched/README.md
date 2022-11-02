@@ -17,6 +17,15 @@ build/autoscale-scheduler/build.sh
 build/autoscaler-agent/build.sh
 ```
 
+We also require a local build of Virtink; which can be done by cloning the repository:
+```sh
+git clone -b cpu-scaling git@github.com:neondatabase/virtink
+cd virtink # ^^^^^^^^^^^ NOTE: needs to be the right branch.
+
+# as root:
+REGISTRY=localhost:5001 TAG=latest ./build_docker.sh
+```
+
 Download kubernetes dependencies:
 
 ```sh
