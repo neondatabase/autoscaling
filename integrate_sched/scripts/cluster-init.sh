@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Helper script to initialize the kind cluster, once everything is built.
 
@@ -27,5 +27,9 @@ kubectl apply -f virtink_localhost:5001.yaml | indent
 kubectl wait pod -n virtink-system --for=condition=Ready -l 'name=virt-controller' | indent
 
 kubectl create secret generic vm-ssh --from-file=private-key=vm_image/ssh_id_rsa | indent
+
+echo 'done initializing kubernetes specifics. setting up networking' >/dev/null
+
+scripts/cluster-init-vxlan.sh
 
 echo 'all done' >/dev/null # already printed because of set -x
