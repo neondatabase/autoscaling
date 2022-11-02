@@ -9,6 +9,8 @@ source 'scripts-common.sh'
 DEFAULT_BENCH_IP="10.77.77.203"
 BENCH_IP="$( ( set -u; echo "$BENCH_IP" ) 2>/dev/null || echo "$DEFAULT_BENCH_IP" )"
 
+NODE_NAME="$NODE_NAME"
+
 # can't enable `set -u` for get_vm_name because we might not have $VM_NAME
 vm_name="$(get_vm_name)"
 set -u
@@ -64,5 +66,16 @@ trap cleanup EXIT INT TERM
 echo "$NAD" > "$nad_file"
 kubectl apply -f "$nad_file"
 
+if [ -z "$NODE_NAME" ]; then
+    OVERRIDES=""
+else
+    OVERRIDES='--overrides={
+        "apiVersion": "v1",
+        "spec": {
+            "nodeSelector": { "kubernetes.io/hostname": "'"$NODE_NAME"'" }
+        }
+    }'
+fi
+
 ANNOTATIONS="--annotations=k8s.v1.cni.cncf.io/networks=$NAD_NAME"
-kubectl run "pgbench-$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" -- /bin/sh -c "$CMD"
+kubectl run "pgbench-$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" "$OVERRIDES" -- /bin/sh -c "$CMD"

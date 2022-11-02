@@ -126,4 +126,4 @@ CONTAINER_CFG='
 }'
 
 ANNOTATIONS="--annotations=k8s.v1.cni.cncf.io/networks=$NAD_NAME"
-kubectl run ssh-"$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" --overrides="$CONTAINER_CFG"
+kubectl run "ssh-$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" --overrides="$CONTAINER_CFG"
