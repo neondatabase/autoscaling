@@ -36,8 +36,7 @@ make deploy
 1. Run virtual machine
 
 ```console
-$ kubectl apply -f samples/vm-example.yaml
-virtualmachine.vm.neon.tech/example created
+kubectl apply -f samples/vm-example.yaml
 ```
 
 2. Check VM running
@@ -64,7 +63,7 @@ kubectl exec -it $VM_POD -- screen /dev/pts/0
 
 <press Enter to see output>
 ```
-to exit from console presss `CTRL-A K` (see manual for `screen` tool)
+to exit from console presss `CTRL-a k` (see manual for `screen` tool)
 
 5. Plug/Unplug CPUs in VM
 
@@ -129,6 +128,16 @@ make manifests
 **NOTE:** Run `make --help` for more information on all potential `make` targets
 
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+
+## Roadmap
+
+- [] Implement Webhooks for mutation and validation
+- [] Multus CNI support
+- [] Hot[un]plug CPUs and Memory (via resource patch)
+- [] Live migration CRDs
+- [] Simplify VM disk image creation from any docker image
+- [] ARM64 support
+
 
 ## License
 
