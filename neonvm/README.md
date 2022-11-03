@@ -131,12 +131,12 @@ More information can be found via the [Kubebuilder Documentation](https://book.k
 
 ## Roadmap
 
-- [] Implement Webhooks for mutation and validation
-- [] Multus CNI support
-- [] Hot[un]plug CPUs and Memory (via resource patch)
-- [] Live migration CRDs
-- [] Simplify VM disk image creation from any docker image
-- [] ARM64 support
+- [ ] Implement Webhooks for mutation and validation
+- [ ] Multus CNI support
+- [ ] Hot[un]plug CPUs and Memory (via resource patch)
+- [ ] Live migration CRDs
+- [ ] Simplify VM disk image creation from any docker image
+- [ ] ARM64 support
 
 
 ## License
