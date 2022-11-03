@@ -40,16 +40,25 @@ func (e *AutoscaleEnforcer) watchVMDeletions(ctx context.Context, deletions chan
 		events := watcher.ResultChan()
 		defer close(deletions)
 
-		for event := range events {
-			if event.Type == watch.Deleted {
-				pod := event.Object.(*corev1.Pod)
-				name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
-				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
-				deletions <- name
+		for {
+			for event := range events {
+				if event.Type == watch.Deleted {
+					pod := event.Object.(*corev1.Pod)
+					name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+					klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
+					deletions <- name
+				}
 			}
-		}
 
-		klog.Error("[autoscale-enforcer] watch: VM event listener unexpectedly stopped")
+			klog.Error("[autoscale-enforcer] watch: VM event listener unexpectedly stopped, restarting")
+
+			watcher, err := e.handle.ClientSet().CoreV1().Pods("").Watch(ctx, opts)
+			if err != nil {
+				klog.Fatalf("[autoscale-enforcer] watch: Failed to restart VM event listener: %s", err)
+			}
+
+			events = watcher.ResultChan()
+		}
 	}()
 
 	return nil
