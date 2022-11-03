@@ -26,16 +26,11 @@ cd virtink # ^^^^^^^^^^^ NOTE: needs to be the right branch.
 REGISTRY=localhost:5001 TAG=latest ./build_docker.sh
 ```
 
-Download kubernetes dependencies:
+Download various dependencies:
 
 ```sh
-./download-cni.sh
-curl -sS https://raw.githubusercontent.com/flannel-io/flannel/v0.19.2/Documentation/kube-flannel.yml \
-    -o flannel.yaml
-curl -sSL https://github.com/cert-manager/cert-manager/releases/download/v1.8.2/cert-manager.yaml \
-    -o cert-manager.yaml
-curl -sS https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml \
-    -o multus-daemonset.yaml
+scripts/download-cni.sh
+scripts/download-deployments.sh
 ```
 
 Set up the cluster:
@@ -55,10 +50,10 @@ kubectl apply -f vm-double-deploy.yaml
 Run pgbench and watch the vCPU allocation grow:
 
 ```sh
-./run-bench.sh
+scripts/run-bench.sh
 # or:
-VM_NAME=postgres14-disk-1 ./run-bench.sh
-VM_NAME=postgres14-disk-2 ./run-bench.sh
+VM_NAME=postgres14-disk-1 scripts/run-bench.sh
+VM_NAME=postgres14-disk-2 scripts/run-bench.sh
 ```
 
 ## Architecture

@@ -12,17 +12,17 @@ source './scripts-common.sh'
 
 set -x
 
-kind create cluster -n autoscale-sched --config=kind-config.yaml
+kind create cluster -n autoscale-sched --config=kind/config.yaml
 
-kubectl apply -f flannel.yaml -f multus-daemonset.yaml -f cert-manager.yaml \
-    -f scheduler-deploy.yaml -f autoscaler-agent-deploy.yaml \
+kubectl apply -f deploy/flannel.yaml -f deploy/multus-daemonset.yaml -f deploy/cert-manager.yaml \
+    -f deploy/scheduler-deploy.yaml -f deploy/autoscaler-agent-deploy.yaml \
     | indent
 
 kubectl wait pod -n cert-manager --for=condition=Ready --timeout=2m \
     -l 'app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=webhook' \
     | indent
 
-kubectl apply -f virtink_localhost:5001.yaml | indent
+kubectl apply -f deploy/virtink_localhost:5001.yaml | indent
 
 kubectl wait pod -n virtink-system --for=condition=Ready -l 'name=virt-controller' | indent
 

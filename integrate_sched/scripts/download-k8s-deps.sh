@@ -3,15 +3,22 @@
 # Source: https://suraj.io/post/2021/05/k8s-import/
 # Retreived 05 Oct 2022
 # Slightly modified.
+#
+# This script isn't *really* necessary now that go.mod is properly initialized, but it's crucial if
+# the k8s version needs to be changed, or something like that.
 
 VERSION=${1#"v"}
 if [ -z "$VERSION" ]; then
   echo "Please specify the Kubernetes version: e.g."
-  echo "./download-deps.sh v1.21.0"
+  echo "scripts/download-deps.sh v1.21.0"
   exit 1
 fi
 
 set -euo pipefail
+
+# Allow this script to be run from outside this directory
+cd -P -- "$(dirname -- "$0")"
+cd .. # but all of the references are to things in the upper directory
 
 # Find out all the replaced imports, make a list of them.
 MODS=($(
