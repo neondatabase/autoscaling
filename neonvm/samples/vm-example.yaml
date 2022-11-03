@@ -1,0 +1,17 @@
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+spec:
+  guest:
+    cpus:
+      min: 1
+      max: 4
+      use: 2
+    memorySlotSize: 1Gi
+    memorySlots:
+      min: 1
+      max: 4
+      use: 2
+    rootDisk:
+      image: vm-example:dev

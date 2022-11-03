@@ -1,0 +1,199 @@
+/*
+Copyright 2022.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+
+// VirtualMachineSpec defines the desired state of VirtualMachine
+type VirtualMachineSpec struct {
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default:=20183
+	// +optional
+	QMP int32 `json:"qmp"`
+
+	// +kubebuilder:default:=5
+	// +optional
+	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds"`
+
+	NodeSelector map[string]string           `json:"nodeSelector,omitempty"`
+	Affinity     *corev1.Affinity            `json:"affinity,omitempty"`
+	Tolerations  []corev1.Toleration         `json:"tolerations,omitempty"`
+	PodResources corev1.ResourceRequirements `json:"podResources,omitempty"`
+
+	// +kubebuilder:default:=Never
+	// +optional
+	RestartPolicy RestartPolicy `json:"restartPolicy"`
+
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+
+	Guest Guest `json:"guest"`
+}
+
+// +kubebuilder:validation:Enum=Always;OnFailure;Never
+type RestartPolicy string
+
+const (
+	RestartPolicyAlways    RestartPolicy = "Always"
+	RestartPolicyOnFailure RestartPolicy = "OnFailure"
+	RestartPolicyNever     RestartPolicy = "Never"
+)
+
+type Guest struct {
+	// +optional
+	CPUs CPUs `json:"cpus"`
+	// +optional
+	// +kubebuilder:default:="1Gi"
+	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
+	// +optional
+	MemorySlots MemorySlots `json:"memorySlots"`
+	// +optional
+	RootDisk RootDisk `json:"rootDisk"`
+}
+
+type CPUs struct {
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=255
+	// +kubebuilder:validation:ExclusiveMaximum=false
+	// +optional
+	// +kubebuilder:default:=1
+	Min *int32 `json:"min"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=128
+	// +kubebuilder:validation:ExclusiveMaximum=false
+	// +optional
+	Max *int32 `json:"max,omitempty"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=128
+	// +kubebuilder:validation:ExclusiveMaximum=false
+	// +optional
+	Use *int32 `json:"use,omitempty"`
+}
+
+type MemorySlots struct {
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=128
+	// +kubebuilder:validation:ExclusiveMaximum=false
+	// +optional
+	// +kubebuilder:default:=1
+	Min *int32 `json:"min"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=128
+	// +kubebuilder:validation:ExclusiveMaximum=false
+	// +optional
+	Max *int32 `json:"max,omitempty"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=128
+	// +kubebuilder:validation:ExclusiveMaximum=false
+	// +optional
+	Use *int32 `json:"use,omitempty"`
+}
+
+type RootDisk struct {
+	// +optional
+	// +kubebuilder:default:="kubevm/vm-alpine:3.16"
+	Image string `json:"image"`
+	// +optional
+	// +kubebuilder:default:="IfNotPresent"
+	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy"`
+	// +optional
+	Execute []string `json:"execute,omitempty"`
+}
+
+// VirtualMachineStatus defines the observed state of VirtualMachine
+type VirtualMachineStatus struct {
+	// Represents the observations of a VirtualMachine's current state.
+	// VirtualMachine.status.conditions.type are: "Available", "Progressing", and "Degraded"
+	// VirtualMachine.status.conditions.status are one of True, False, Unknown.
+	// VirtualMachine.status.conditions.reason the value should be a CamelCase string and producers of specific
+	// condition types may define expected values and meanings for this field, and whether the values
+	// are considered a guaranteed API.
+	// VirtualMachine.status.conditions.Message is a human readable message indicating details about the transition.
+	// For further information see: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
+	// The phase of a VM is a simple, high-level summary of where the VM is in its lifecycle.
+	// +optional
+	Phase VmPhase `json:"phase,omitempty"`
+	// +optional
+	PodName string `json:"podName,omitempty"`
+	// +optional
+	PodIP string `json:"podIP,omitempty"`
+	// +optional
+	Node string `json:"node,omitempty"`
+	// +optional
+	CPUs int `json:"cpus,omitempty"`
+	// +optional
+	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
+}
+
+type VmPhase string
+
+const (
+	// VmPending means the VM has been accepted by the system, but vm-runner pod
+	// has not been started. This includes time before being bound to a node, as well as time spent
+	// pulling images onto the host.
+	VmPending VmPhase = "Pending"
+	// VmRunning means the vm-runner pod has been bound to a node and have been started.
+	VmRunning VmPhase = "Running"
+	// VmSucceeded means that all containers in the vm-runner pod have voluntarily terminated
+	// with a container exit code of 0, and the system is not going to restart any of these containers.
+	VmSucceeded VmPhase = "Succeeded"
+	// VmFailed means that all containers in the vm-runner pod have terminated, and at least one container has
+	// terminated in a failure (exited with a non-zero exit code or was stopped by the system).
+	VmFailed VmPhase = "Failed"
+)
+
+//+kubebuilder:object:root=true
+//+kubebuilder:subresource:status
+//+kubebuilder:resource:singular=neonvm
+
+// VirtualMachine is the Schema for the virtualmachines API
+// +kubebuilder:printcolumn:name="Cpus",type=integer,JSONPath=`.status.cpus`
+// +kubebuilder:printcolumn:name="Memory",type=string,JSONPath=`.status.memorySize`
+// +kubebuilder:printcolumn:name="Pod",type=string,JSONPath=`.status.podName`
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Node",type=string,priority=1,JSONPath=`.status.node`
+// +kubebuilder:printcolumn:name="Image",type=string,priority=1,JSONPath=`.spec.guest.rootDisk.image`
+type VirtualMachine struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   VirtualMachineSpec   `json:"spec,omitempty"`
+	Status VirtualMachineStatus `json:"status,omitempty"`
+}
+
+//+kubebuilder:object:root=true
+
+// VirtualMachineList contains a list of VirtualMachine
+type VirtualMachineList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []VirtualMachine `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&VirtualMachine{}, &VirtualMachineList{})
+}
