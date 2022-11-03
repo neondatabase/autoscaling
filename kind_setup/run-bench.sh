@@ -66,8 +66,9 @@ trap cleanup EXIT INT TERM
 echo "$NAD" > "$nad_file"
 kubectl apply -f "$nad_file"
 
+ANNOTATIONS="--annotations=k8s.v1.cni.cncf.io/networks=$NAD_NAME"
 if [ -z "$NODE_NAME" ]; then
-    OVERRIDES=""
+    kubectl run "pgbench-$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" -- /bin/sh -c "$CMD"
 else
     OVERRIDES='--overrides={
         "apiVersion": "v1",
@@ -75,7 +76,7 @@ else
             "nodeSelector": { "kubernetes.io/hostname": "'"$NODE_NAME"'" }
         }
     }'
+
+    kubectl run "pgbench-$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" "$OVERRIDES" -- /bin/sh -c "$CMD"
 fi
 
-ANNOTATIONS="--annotations=k8s.v1.cni.cncf.io/networks=$NAD_NAME"
-kubectl run "pgbench-$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" "$OVERRIDES" -- /bin/sh -c "$CMD"
