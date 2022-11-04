@@ -30,6 +30,7 @@ for nodename in $nodenames; do
 
     docker cp scripts/start-vm-bridge.sh "$nodename:/etc/start-vm-bridge.sh"
     docker container exec -it "$nodename" \
-        /bin/bash /etc/start-vm-bridge.sh "$BRIDGE_NAME" "$VXLAN_NAME" "$node_ip" "$nodeips"
+        /bin/bash /etc/start-vm-bridge.sh "$BRIDGE_NAME" "$VXLAN_NAME" "$node_ip" "$nodeips" \
+        | indent
 done
 

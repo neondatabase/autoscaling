@@ -30,6 +30,6 @@ kubectl create secret generic vm-ssh --from-file=private-key=vm_image/ssh_id_rsa
 
 echo 'done initializing kubernetes specifics. setting up networking' >/dev/null
 
-scripts/cluster-init-vxlan.sh
+scripts/cluster-init-vxlan.sh 2>&1 | indent
 
 echo 'all done' >/dev/null # already printed because of set -x
