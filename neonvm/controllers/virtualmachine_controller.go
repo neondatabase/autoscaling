@@ -318,7 +318,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			log.Error(err, "Failed to get runner Pod")
 			return err
 		}
-		// vm-runner pod found, check/update phase now
+		// runner pod found, check/update phase now
 		switch vmRunner.Status.Phase {
 		case corev1.PodRunning:
 			// update status by IP of runner pod
@@ -328,8 +328,30 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// update Node name where runner working
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
+			// do hotplug/unplug CPU if .spec.guest.cpus.use defined
+			if virtualmachine.Spec.Guest.CPUs.Use != nil {
+				// firstly get current state from QEMU
+				cpusPlugged, _, err := QmpGetCpus(virtualmachine)
+				if err != nil {
+					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+					return err
+				}
+				// compare guest spec and count pf plugged
+				if *virtualmachine.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
+					// going to plug one CPU
+					if err := QmpPlugCpu(virtualmachine); err != nil {
+						return err
+					}
+				} else if *virtualmachine.Spec.Guest.CPUs.Use < int32(len(cpusPlugged)) {
+					// going to unplug one CPU
+					if err := QmpUnplugCpu(virtualmachine); err != nil {
+						return err
+					}
+				}
+			}
+
 			// get CPU details from QEMU and upate status
-			cpusPlugged, _, err := getCpusPlugged(virtualmachine)
+			cpusPlugged, _, err := QmpGetCpus(virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
@@ -345,7 +367,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// get Memory details from hypervisor and upate VM status
-			memorySize, err := getMemorySize(virtualmachine)
+			memorySize, err := QmpGetMemorySize(virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err

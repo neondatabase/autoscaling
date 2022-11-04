@@ -2,7 +2,9 @@ package controllers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/digitalocean/go-qemu/qmp"
@@ -11,7 +13,7 @@ import (
 	vmv1 "github.com/neondatabase/neonvm/api/v1"
 )
 
-type CpusQueryResult struct {
+type QmpCpusQueryResult struct {
 	Return []struct {
 		Props struct {
 			CoreId   int32 `json:"core-id"`
@@ -24,22 +26,37 @@ type CpusQueryResult struct {
 	} `json:"return"`
 }
 
-type MemorySizeQueryResult struct {
+type QmpMemorySizeQueryResult struct {
 	Return struct {
 		BaseMemory    int64 `json:"base-memory"`
 		PluggedMemory int64 `json:"plugged-memory"`
 	} `json:"return"`
 }
 
-func getCpusPlugged(virtualmachine *vmv1.VirtualMachine) ([]int32, []int32, error) {
+type QmpCpuSlot struct {
+	Core int32  `json:"core"`
+	QOM  string `json:"qom"`
+	Type string `json:"type"`
+}
+
+func QmpConnect(virtualmachine *vmv1.VirtualMachine) (*qmp.SocketMonitor, error) {
 	ip := virtualmachine.Status.PodIP
 	port := virtualmachine.Spec.QMP
 
 	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", ip, port), 2*time.Second)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := mon.Connect(); err != nil {
+		return nil, err
+	}
+
+	return mon, nil
+}
+
+func QmpGetCpus(virtualmachine *vmv1.VirtualMachine) ([]QmpCpuSlot, []QmpCpuSlot, error) {
+	mon, err := QmpConnect(virtualmachine)
+	if err != nil {
 		return nil, nil, err
 	}
 	defer mon.Disconnect()
@@ -50,30 +67,88 @@ func getCpusPlugged(virtualmachine *vmv1.VirtualMachine) ([]int32, []int32, erro
 		return nil, nil, err
 	}
 
-	var result CpusQueryResult
+	var result QmpCpusQueryResult
 	json.Unmarshal(raw, &result)
 
-	plugged := []int32{}
-	empty := []int32{}
+	plugged := []QmpCpuSlot{}
+	empty := []QmpCpuSlot{}
 	for _, entry := range result.Return {
 		if entry.QomPath != nil {
-			plugged = append(plugged, entry.Props.CoreId)
+			plugged = append(plugged, QmpCpuSlot{Core: entry.Props.CoreId, QOM: *entry.QomPath, Type: entry.Type})
 		} else {
-			empty = append(empty, entry.Props.CoreId)
+			empty = append(empty, QmpCpuSlot{Core: entry.Props.CoreId, QOM: "", Type: entry.Type})
 		}
 	}
+
 	return plugged, empty, nil
 }
 
-func getMemorySize(virtualmachine *vmv1.VirtualMachine) (*resource.Quantity, error) {
-	ip := virtualmachine.Status.PodIP
-	port := virtualmachine.Spec.QMP
-
-	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", ip, port), 2*time.Second)
+func QmpPlugCpu(virtualmachine *vmv1.VirtualMachine) error {
+	_, empty, err := QmpGetCpus(virtualmachine)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := mon.Connect(); err != nil {
+	if len(empty) == 0 {
+		return errors.New("No empy slots for CPU hotplug")
+	}
+
+	mon, err := QmpConnect(virtualmachine)
+	if err != nil {
+		return err
+	}
+	defer mon.Disconnect()
+
+	// empty list reversed, first cpu slot in the end of list and last cpu slot in the begining
+	slot := empty[len(empty)-1]
+	qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
+
+	_, err = mon.Run(qmpcmd)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func QmpUnplugCpu(virtualmachine *vmv1.VirtualMachine) error {
+	plugged, _, err := QmpGetCpus(virtualmachine)
+	if err != nil {
+		return err
+	}
+
+	slot := -1
+	found := false
+	for i, s := range plugged {
+		if strings.Contains(s.QOM, "machine/peripheral/cpu") {
+			found = true
+			slot = i
+			break
+		}
+	}
+	if !found {
+		return errors.New("There are no unpluggable CPUs")
+	}
+
+	mon, err := QmpConnect(virtualmachine)
+	if err != nil {
+		return err
+	}
+	defer mon.Disconnect()
+
+	cmd := []byte(fmt.Sprintf(`{"execute": "device_del", "arguments": {"id": "%s"}}`, plugged[slot].QOM))
+	_, err = mon.Run(cmd)
+	if err != nil {
+		return err
+	}
+	// small pause to let hypervisor do unplug
+	time.Sleep(100 * time.Millisecond)
+
+	return nil
+}
+
+func QmpGetMemorySize(virtualmachine *vmv1.VirtualMachine) (*resource.Quantity, error) {
+	mon, err := QmpConnect(virtualmachine)
+	if err != nil {
 		return nil, err
 	}
 	defer mon.Disconnect()
@@ -84,7 +159,7 @@ func getMemorySize(virtualmachine *vmv1.VirtualMachine) (*resource.Quantity, err
 		return nil, err
 	}
 
-	var result MemorySizeQueryResult
+	var result QmpMemorySizeQueryResult
 	json.Unmarshal(raw, &result)
 
 	return resource.NewQuantity(result.Return.BaseMemory+result.Return.PluggedMemory, resource.BinarySI), nil

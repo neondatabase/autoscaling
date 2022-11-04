@@ -17,6 +17,8 @@ limitations under the License.
 package v1
 
 import (
+	"fmt"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -31,8 +33,6 @@ func (r *VirtualMachine) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		For(r).
 		Complete()
 }
-
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
 //+kubebuilder:webhook:path=/mutate-vm-neon-tech-v1-virtualmachine,mutating=true,failurePolicy=fail,sideEffects=None,groups=vm.neon.tech,resources=virtualmachines,verbs=create;update,versions=v1,name=mvirtualmachine.kb.io,admissionReviewVersions=v1
 
@@ -54,7 +54,22 @@ var _ webhook.Validator = &VirtualMachine{}
 func (r *VirtualMachine) ValidateCreate() error {
 	virtualmachinelog.Info("validate create", "name", r.Name)
 
-	// TODO(user): fill in your validation logic upon object creation.
+	// validate .cpus.use and .cpus.max
+	if r.Spec.Guest.CPUs.Use != nil {
+		if r.Spec.Guest.CPUs.Max == nil {
+			return fmt.Errorf(".cpus.max must be defined if .cpus.use specified")
+		}
+		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
+			return fmt.Errorf(".cpus.use (%d) should be greater than or equal to the .cpus.min (%d)",
+				*r.Spec.Guest.CPUs.Use,
+				*r.Spec.Guest.CPUs.Min)
+		}
+		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
+			return fmt.Errorf(".cpus.use (%d) should be less than or equal to the .cpus.max (%d)",
+				*r.Spec.Guest.CPUs.Use,
+				*r.Spec.Guest.CPUs.Max)
+		}
+	}
 	return nil
 }
 
@@ -62,7 +77,28 @@ func (r *VirtualMachine) ValidateCreate() error {
 func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	virtualmachinelog.Info("validate update", "name", r.Name)
 
-	// TODO(user): fill in your validation logic upon object update.
+	// process immutable fields
+	before, _ := old.(*VirtualMachine)
+	if *r.Spec.Guest.CPUs.Min != *before.Spec.Guest.CPUs.Min {
+		return fmt.Errorf(".cpus.min is immutable")
+	}
+	if *r.Spec.Guest.CPUs.Max != *before.Spec.Guest.CPUs.Max {
+		return fmt.Errorf(".cpus.max is immutable")
+	}
+
+	// validate .spec.guest.cpu.use
+	if r.Spec.Guest.CPUs.Use != nil {
+		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
+			return fmt.Errorf(".cpus.use (%d) should be greater than or equal to the .cpus.min (%d)",
+				*r.Spec.Guest.CPUs.Use,
+				*r.Spec.Guest.CPUs.Min)
+		}
+		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
+			return fmt.Errorf(".cpus.use (%d) should be less than or equal to the .cpus.max (%d)",
+				*r.Spec.Guest.CPUs.Use,
+				*r.Spec.Guest.CPUs.Max)
+		}
+	}
 	return nil
 }
 

@@ -67,9 +67,19 @@ to exit from console presss `CTRL-a k` (see manual for `screen` tool)
 
 5. Plug/Unplug CPUs in VM
 
+edit `.spec.guest.cpus.use` field by editor
+
 ```sh
-...soon
+kubectl edit neonvm example
 ```
+
+or apply patch (set `use` to `2`)
+
+```sh
+kubectl patch neonvm example --type='json' -p='[{"op": "replace", "path": "/spec/guest/cpus/use", "value":2}]'
+```
+
+and then check status by `kubectl get neonvm example` and inspect `/sys/devices/system/cpu` folder inside VM
 
 6. Plug/Unplug Memory in VM
 
