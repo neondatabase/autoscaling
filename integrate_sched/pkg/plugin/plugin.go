@@ -20,6 +20,7 @@ import (
 const Name = "AutoscaleEnforcer"
 const LabelVM = "virtink.io/vm.name"
 const LabelInitVCPU = "autoscaler/init-vcpu"
+const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
 
 // AutoscaleEnforcer is the scheduler plugin to coordinate autoscaling
 type AutoscaleEnforcer struct {
@@ -86,7 +87,7 @@ func (e *AutoscaleEnforcer) Filter(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
 
-	podInitVCPU, _, err := getPodInitCPUAndVMName(ctx, pod)
+	podInfo, err := getPodInfo(ctx, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Filter: Error getting pod %v init vCPU: %s", pName, err)
 		return framework.NewStatus(
@@ -132,11 +133,11 @@ func (e *AutoscaleEnforcer) Filter(
 	setMsg := func(compareOp string) {
 		msg = fmt.Sprintf(
 			"proposed node vCPU usage %d + pod init vCPU %d %s node max %d",
-			totalNodeVCPU, podInitVCPU, compareOp, nodeTotalReservableCPU,
+			totalNodeVCPU, podInfo.initVCPU, compareOp, nodeTotalReservableCPU,
 		)
 	}
 
-	if totalNodeVCPU+podInitVCPU > nodeTotalReservableCPU {
+	if totalNodeVCPU + podInfo.initVCPU > nodeTotalReservableCPU {
 		setMsg(">")
 		status = framework.NewStatus(
 			framework.Unschedulable,
@@ -168,12 +169,12 @@ func (e *AutoscaleEnforcer) Reserve(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
-	podInitVCPU, vmName, err := getPodInitCPUAndVMName(ctx, pod)
+	podInfo, err := getPodInfo(ctx, pod)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Error getting pod %v init vCPU: %s", pName, err)
+		klog.Errorf("[autoscale-enforcer] Error getting pod %v info: %s", pName, err)
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
-			fmt.Sprintf("Error getting pod init vCPU: %s", err),
+			fmt.Sprintf("Error getting pod info: %s", err),
 		)
 	}
 
@@ -194,19 +195,20 @@ func (e *AutoscaleEnforcer) Reserve(
 	// checks will be handled in the calls to Filter, but it's possible for another VM to scale up
 	// in between the calls to Filter and Reserve, removing the resource availability that we
 	// thought we had.
-	if podInitVCPU <= node.remainingReservableCPU() {
-		newNodeReservedCPU := node.vCPU.reserved + podInitVCPU
+	if podInfo.initVCPU <= node.remainingReservableCPU() {
+		newNodeReservedCPU := node.vCPU.reserved + podInfo.initVCPU
 		klog.Infof(
 			"[autoscale-enforcer] Allowing pod %v (%d vCPU) in node %s: node.reservedCPU %d -> %d",
-			pName, podInitVCPU, nodeName, node.vCPU.reserved, newNodeReservedCPU,
+			pName, podInfo.initVCPU, nodeName, node.vCPU.reserved, newNodeReservedCPU,
 		)
 
 		node.vCPU.reserved = newNodeReservedCPU
 		ps := &podState{
 			name: pName,
-			vmName: vmName,
+			vmName: podInfo.vmName,
 			node: node,
-			vCPU: podResourceState[uint16]{reserved: podInitVCPU, pressure: 0},
+			vCPU: podResourceState[uint16]{reserved: podInfo.initVCPU, pressure: 0},
+			testingOnlyAlwaysMigrate: podInfo.alwaysMigrate,
 			mqIndex: -1,
 		}
 		node.pods[pName] = ps
@@ -215,7 +217,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	} else {
 		err := fmt.Errorf(
 			"Not enough available vCPU to reserve for pod init vCPU: need %d but have %d (of %d) remaining",
-			podInitVCPU, node.remainingReservableCPU(), node.totalReservableCPU(),
+			podInfo.initVCPU, node.remainingReservableCPU(), node.totalReservableCPU(),
 		)
 
 		klog.Errorf("[autoscale-enforcer] Can't schedule pod %v: %s", pName, err)

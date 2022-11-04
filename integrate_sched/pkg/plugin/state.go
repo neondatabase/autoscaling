@@ -79,6 +79,10 @@ type podState struct {
 	// vmName is the name of the VM, as given by the 'virtink.io/vm.name' label.
 	vmName string
 
+	// testingOnlyAlwaysMigrate is a test-only debugging flag that, if present in the pod's labels,
+	// will always prompt it to mgirate, regardless of whether the VM actually *needs* to.
+	testingOnlyAlwaysMigrate bool
+
 	// node provides information about the node that this pod is bound to or reserved onto.
 	node *nodeState
 	// vCPU is the current state of vCPU utilization and pressure
@@ -182,24 +186,35 @@ func getNodeCPU(ctx context.Context, clientSet kubernetes.Interface, nodeName st
 	return uint16(maxCPU), nil
 }
 
-func getPodInitCPUAndVMName(ctx context.Context, pod *corev1.Pod) (uint16, string, error) {
+func getPodInfo(
+	ctx context.Context, pod *corev1.Pod,
+) (
+	*struct{ initVCPU uint16; vmName string; alwaysMigrate bool},
+	error,
+) {
 	// If this isn't a VM, it shouldn't have been scheduled with us
 	name, ok := pod.Labels[LabelVM]
 	if !ok {
-		return 0, "", fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
+		return nil, fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
 	}
 
 	initVCPUString, ok := pod.Labels[LabelInitVCPU]
 	if !ok {
-		return 0, "", fmt.Errorf("Missing init vCPU label %s", LabelInitVCPU)
+		return nil, fmt.Errorf("Missing init vCPU label %s", LabelInitVCPU)
 	}
 
 	initVCPU, err := strconv.ParseUint(initVCPUString, 10, 16)
 	if err != nil {
-		return 0, "", fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitVCPU, err)
+		return nil, fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitVCPU, err)
 	}
 
-	return uint16(initVCPU), name, nil
+	_, alwaysMigrate := pod.Labels[LabelTestingOnlyAlwaysMigrate]
+
+	return &struct{initVCPU uint16; vmName string; alwaysMigrate bool}{
+		initVCPU: uint16(initVCPU),
+		vmName: name,
+		alwaysMigrate: alwaysMigrate,
+	}, nil
 }
 
 // this method can only be called while holding a lock. If we don't have the necessary information
