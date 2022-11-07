@@ -46,6 +46,7 @@ spec:
       cmdline: "console=ttyS0 root=/dev/vda rw"
     disks:
       - name: rootfs
+        readOnly: true
     interfaces:
       - name: pod
         masquerade:

@@ -10,7 +10,7 @@ mount -t sysfs sysfs /sys
 mkdir -p /dev/pts
 mount -t devpts devpts /dev/pts
 mount -t tmpfs -o size=32M none /tmp
-mount -t tmpfs -o size=32M none /run
+mount -t tmpfs -o size=256M none /run
 
 # networking
 ip link set up dev lo
@@ -24,12 +24,13 @@ ip route show
 # node_exporter metrics (/metrics on :9100)
 run_metrics () {
     while true; do
-        node_exporter 2>>/var/log/node_exporter >>/var/log/node_exporter
-        echo "$(date -R): node_exporter exited, retrying in 1s" | tee -a /var/log/node_exporter
+        node_exporter 2>>/run/node_exporter/log >>/run/node_exporter/log
+        echo "$(date -R): node_exporter exited, retrying in 1s" | tee -a /run/node_exporter/log
         sleep 1s
     done
 }
 
+mkdir -p /run/node_exporter
 run_metrics &
 
 # postgresql init and start (data in memory!)
@@ -54,9 +55,14 @@ graceful () {
 
 trap graceful TERM INT KILL
 
+mkdir -p /run/sshd
+
 # If we stored the ssh keys in the container data, they could be extracted.
 echo "Generating sshd keys"
-ssh-keygen -A
+mkdir -p /run/sshd/etc
+ln -s /run/sshd /run/sshd/etc/ssh
+ssh-keygen -A -f /run/sshd # using -f here just prefixes, so the paths are /run/sshd/etc/ssh/ssh_host_*
+rm /run/sshd/etc/ssh
 
 echo "Starting sshd"
 while true; do
@@ -65,8 +71,11 @@ while true; do
     # It'll print the logs directly here, with two debug levels. Then you can access them with
     # `kubectl logs <pod>` to see what's going on. (note: it exits after each connection ends)
     # For `ssh-into-vm.sh`, you can add debugging to the original ssh by adding `-vv` there.
-    setsid -w /usr/sbin/sshd -D -E /var/log/sshd
-    echo "$(date -R): sshd exited, retrying in 1s" | tee -a /var/log/sshd
+    setsid -w /usr/sbin/sshd -D -E /run/sshd/log \
+        -h /run/sshd/ssh_host_ecdsa_key \
+        -h /run/sshd/ssh_host_ed25519_key \
+        -h /run/sshd/ssh_host_rsa_key
+    echo "$(date -R): sshd exited, retrying in 1s" | tee -a /run/sshd/log
     sleep 1s
 done
 
