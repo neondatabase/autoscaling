@@ -64,7 +64,7 @@ spec:
   }'"'"'
 '
 
-nad_file="bench-nad-$NAD_NAME.tmp"
+nad_file="ssh-nad-$NAD_NAME.tmp"
 
 cleanup () {
     rm "$nad_file"
