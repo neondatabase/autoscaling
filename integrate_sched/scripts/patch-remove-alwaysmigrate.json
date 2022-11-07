@@ -1,0 +1,6 @@
+[
+  {
+    "op": "remove",
+    "path": "/metadata/labels/autoscaler~1testing-only-always-migrate"
+  }
+]
