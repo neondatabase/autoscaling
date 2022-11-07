@@ -44,6 +44,15 @@ func (e *AutoscaleEnforcer) runPermitHandler() {
 		)
 		resp, statusCode, err := e.handleAgentRequest(req)
 		if err != nil {
+			msg := fmt.Sprintf(
+				"[autscale-enforcer] Responding with status code %d to pod %v: %s",
+				statusCode, req.Pod, err,
+			)
+			if 500 <= statusCode && statusCode < 600 {
+				klog.Errorf("%s", msg)
+			} else {
+				klog.Warningf("%s", msg)
+			}
 			w.Header().Add("Content-Type", ContentTypeError)
 			w.WriteHeader(statusCode)
 			w.Write([]byte(err.Error()))
