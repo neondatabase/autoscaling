@@ -81,8 +81,6 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 		r.minVCPU, r.currentVCPU, r.maxVCPU,
 	)
 
-	migrating := false
-
 	for {
 		select {
 		// Simply exit if we're done
@@ -96,11 +94,6 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 				klog.Infof("Goal vCPU = %d unchanged", newVCPUCount)
 			} else {
 				klog.Infof("New goal vCPU = %d", newVCPUCount)
-				if migrating {
-					newVCPUCount = r.currentVCPU
-					changedVCPU = false
-					klog.Infof("Limiting goal vCPU due to ongoing migration, remain at vCPU = %d", newVCPUCount)
-				}
 			}
 
 			// If the goal is less than the current amount, decrease right away.
@@ -131,7 +124,8 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 			}
 
 			if resp.Migrate != nil {
-				migrating = true
+				klog.Infof("Scheduler responded with migration, exiting without further changes.")
+				return nil
 			}
 
 			if !changedVCPU {
@@ -189,13 +183,6 @@ badScheduler:
 			// We aren't allowed to communicate with the scheduling plugin, so we're upper-bounded
 			// by maxFutureVCPU, which was determined by our state at the time the scheduler failed.
 			newCpuCount := r.newGoalCPUCount(m)
-			if newCpuCount != r.currentVCPU && migrating {
-				klog.Infof(
-					"Want to change vCPU %d -> %d, but scheduler failed after signalling migration",
-					r.currentVCPU, newCpuCount,
-				)
-				continue
-			}
 
 			// Bound by our artificial maximum
 			if newCpuCount > maxFutureVCPU {
