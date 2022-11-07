@@ -320,6 +320,22 @@ func (e *AutoscaleEnforcer) handleVMDeletion(pName api.PodName) {
 	)
 }
 
+func (e *AutoscaleEnforcer) handleVMMFinished(ctx context.Context, vmmName api.PodName) {
+	// Currently, VM migration objects have unique names, so we don't need to worry about name
+	// reuse. However, the objects don't currently get cleaned up by Virtink, so we need to delete
+	// them ourselves.
+
+	klog.Infof("[autoscale-enforcer] Deleting VM Migration %v", vmmName)
+
+	err := e.virtClient.VirtV1alpha1().
+		VirtualMachineMigrations(vmmName.Namespace).
+		Delete(ctx, vmmName.Name, metav1.DeleteOptions{})
+
+	if err != nil {
+		klog.Errorf("[autoscale-enforcer] Error deleting VM Migration %v: %s", vmmName, err)
+	}
+}
+
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
 	// TODO - this is just a first-pass approximation. Maybe it's ok for now? Maybe it's not. Idk.
 	return s.metrics.LoadAverage1Min < other.metrics.LoadAverage1Min
@@ -385,6 +401,12 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, virtCli
 
 	// ... And then actually start the migration:
 	vmMigration := virtapi.VirtualMachineMigration{
+		ObjectMeta: metav1.ObjectMeta{
+			// migrations need to be named, but we might end up starting a new migration before the
+			// old one has been removed, so we use GenerateName instead of directly setting Name
+			GenerateName: fmt.Sprintf("%s-migration-", pod.vmName),
+			Namespace: pod.name.Namespace,
+		},
 		Spec: virtapi.VirtualMachineMigrationSpec{
 			VMName: pod.vmName,
 		},

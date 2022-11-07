@@ -26,7 +26,8 @@ metadata:
     autoscaler/min-vcpu: "1"
     autoscaler/init-vcpu: "4"
     autoscaler/max-vcpu: "8"
-    autoscaler/testing-only-always-migrate: ""
+    # Uncomment the line below to continuously migrate the VM (TESTING ONLY)
+    # autoscaler/testing-only-always-migrate: ""
 spec:
   schedulerName: autoscale-scheduler
   serviceAccountName: autoscaling-vm

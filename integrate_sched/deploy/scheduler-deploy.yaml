@@ -4,8 +4,8 @@ metadata:
   name: vm-patcher
 rules:
 - apiGroups: ["virt.virtink.smartx.com"]
-  resources: ["virtualmachines"]
-  verbs: ["get", "list", "patch"]
+  resources: ["virtualmachines", "virtualmachinemigrations"]
+  verbs: ["create", "delete", "get", "list", "patch"]
 ---
 apiVersion: v1
 kind: ServiceAccount

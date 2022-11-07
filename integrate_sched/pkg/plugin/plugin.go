@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,6 +40,9 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	// create the virtink client
 	virtapi.AddToScheme(scheme.Scheme)
 	vmConfig := rest.CopyConfig(h.KubeConfig())
+	// The handler's ContentType is not the default "application/json" (it's protobuf), so we need
+	// to set it back to JSON because Virtink doesn't support protobuf.
+	vmConfig.ContentType = "application/json"
 	virtClient, err := virtclient.NewForConfig(vmConfig)
 	if err != nil {
 		return nil, fmt.Errorf("Error creating virtink client: %s", err)
@@ -61,6 +65,23 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	go func() {
 		for name := range vmDeletions {
 			p.handleVMDeletion(name)
+		}
+	}()
+
+	// Run this once, to check that it works ...
+	if err := p.removeOldMigrations(context.Background()); err != nil {
+		return nil, fmt.Errorf("Error performing initial removal of old migrations")
+	}
+
+	// ... and then start it running in a loop:
+	go func() {
+		ctx := context.Background()
+		for {
+			time.Sleep(5 * time.Second)
+
+			if err := p.removeOldMigrations(ctx); err != nil {
+				klog.Errorf("[autoscale-enforcer] Error removing old migrations: %s", err)
+			}
 		}
 	}()
 
