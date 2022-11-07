@@ -21,7 +21,7 @@ import (
 const (
 	QEMU_BIN      = "qemu-system-x86_64"
 	kernelPath    = "/kernel/vmlinuz"
-	kernelCmdline = "console=ttyS1 loglevel=6 root=/dev/vda rw"
+	kernelCmdline = "memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath = "/images/rootdisk.qcow2"
 
@@ -54,7 +54,7 @@ func main() {
 	memory := []string{}
 	memory = append(memory, fmt.Sprintf("size=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Min)))
 	if vmSpec.Guest.MemorySlots.Max != nil {
-		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max))
+		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 

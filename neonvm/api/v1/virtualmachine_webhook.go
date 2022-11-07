@@ -85,6 +85,12 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	if *r.Spec.Guest.CPUs.Max != *before.Spec.Guest.CPUs.Max {
 		return fmt.Errorf(".cpus.max is immutable")
 	}
+	if *r.Spec.Guest.MemorySlots.Min != *before.Spec.Guest.MemorySlots.Min {
+		return fmt.Errorf(".memorySlots.min is immutable")
+	}
+	if *r.Spec.Guest.MemorySlots.Max != *before.Spec.Guest.MemorySlots.Max {
+		return fmt.Errorf(".memorySlots.max is immutable")
+	}
 
 	// validate .spec.guest.cpu.use
 	if r.Spec.Guest.CPUs.Use != nil {
@@ -99,6 +105,21 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 				*r.Spec.Guest.CPUs.Max)
 		}
 	}
+
+	// validate .spec.guest.memorySlots.use
+	if r.Spec.Guest.MemorySlots.Use != nil {
+		if *r.Spec.Guest.MemorySlots.Use < *r.Spec.Guest.MemorySlots.Min {
+			return fmt.Errorf(".memorySlots.use (%d) should be greater than or equal to the .memorySlots.min (%d)",
+				*r.Spec.Guest.MemorySlots.Use,
+				*r.Spec.Guest.MemorySlots.Min)
+		}
+		if *r.Spec.Guest.MemorySlots.Use > *r.Spec.Guest.MemorySlots.Max {
+			return fmt.Errorf(".memorySlots.use (%d) should be less than or equal to the .memorySlots.max (%d)",
+				*r.Spec.Guest.MemorySlots.Use,
+				*r.Spec.Guest.MemorySlots.Max)
+		}
+	}
+
 	return nil
 }
 

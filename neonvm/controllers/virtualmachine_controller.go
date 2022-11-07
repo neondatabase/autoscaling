@@ -336,7 +336,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 					return err
 				}
-				// compare guest spec and count pf plugged
+				// compare guest spec and count of plugged
 				if *virtualmachine.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
 					// going to plug one CPU
 					if err := QmpPlugCpu(virtualmachine); err != nil {
@@ -364,6 +364,28 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					fmt.Sprintf("VirtualMachine %s uses %d cpu cores",
 						virtualmachine.Name,
 						virtualmachine.Status.CPUs))
+			}
+
+			// do hotplug/unplug Memory if .spec.guest.memorySlots.use defined
+			if virtualmachine.Spec.Guest.MemorySlots.Use != nil {
+				// firstly get current state from QEMU
+				memoryDevices, err := QmpQueryMemoryDevices(virtualmachine)
+				if err != nil {
+					log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+					return err
+				}
+				// compare guest spec and count of plugged
+				if *virtualmachine.Spec.Guest.MemorySlots.Use > *virtualmachine.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
+					// going to plug one Memory Slot
+					if err := QmpPlugMemory(virtualmachine); err != nil {
+						return err
+					}
+				} else if *virtualmachine.Spec.Guest.MemorySlots.Use < *virtualmachine.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
+					// going to unplug one Memory Slot
+					if err := QmpUnplugMemory(virtualmachine); err != nil {
+						return err
+					}
+				}
 			}
 
 			// get Memory details from hypervisor and upate VM status
