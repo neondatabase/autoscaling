@@ -10,12 +10,30 @@ RUN set -e \
 		bind-tools \
 		tcpdump \
 		coreutils \
-	&& passwd -d root
+		udev \
+	&& passwd -d root \
+	&& echo 'SUBSYSTEM=="cpu", ACTION=="add", TEST=="online", ATTR{online}=="0", ATTR{online}="1"' | tee /lib/udev/rules.d/80-hotplug-cpu.rules
 
 ADD motd     /etc/motd
 RUN rm -f    /sbin/init
 ADD init     /sbin/init
 RUN chmod +x /sbin/init
+
+# postgresql stuff
+RUN set -e \
+	&& apk add --no-cache \
+		su-exec \
+		postgresql14
+# init postgres
+ENV PGDATA /var/lib/postgresql
+RUN set -e \
+    && mkdir -p ${PGDARA} /run/postgresql \
+    && chown -R postgres:postgres ${PGDATA} /run/postgresql \
+    && su-exec postgres pg_ctl init
+
+ADD postgresql.conf /etc/postgresql/
+ADD pg_hba.conf     /etc/postgresql/
+
 
 FROM alpine:3.16 AS image
 

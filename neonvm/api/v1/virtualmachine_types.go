@@ -69,6 +69,10 @@ type Guest struct {
 	MemorySlots MemorySlots `json:"memorySlots"`
 	// +optional
 	RootDisk RootDisk `json:"rootDisk"`
+	// List of ports to expose from the container.
+	// Cannot be updated.
+	// +optional
+	Ports []Port `json:"ports,omitempty"`
 }
 
 type CPUs struct {
@@ -119,6 +123,31 @@ type RootDisk struct {
 	// +optional
 	Execute []string `json:"execute,omitempty"`
 }
+
+type Port struct {
+	// If specified, this must be an IANA_SVC_NAME and unique within the pod. Each
+	// named port in a pod must have a unique name. Name for the port that can be
+	// referred to by services.
+	Name string `json:"name,omitempty"`
+	// Number of port to expose on the pod's IP address.
+	// This must be a valid port number, 0 < x < 65536.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int `json:"port"`
+	// Protocol for port. Must be UDP or TCP.
+	// Defaults to "TCP".
+	// +kubebuilder:default:="TCP"
+	Protocol Protocol `json:"protocol,omitempty"`
+}
+
+type Protocol string
+
+const (
+	// ProtocolTCP is the TCP protocol.
+	ProtocolTCP Protocol = "TCP"
+	// ProtocolUDP is the UDP protocol.
+	ProtocolUDP Protocol = "UDP"
+)
 
 // VirtualMachineStatus defines the observed state of VirtualMachine
 type VirtualMachineStatus struct {

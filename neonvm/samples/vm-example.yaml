@@ -7,7 +7,7 @@ spec:
     cpus:
       min: 1
       max: 4
-      use: 2
+      use: 1
     memorySlotSize: 1Gi
     memorySlots:
       min: 1
@@ -15,3 +15,5 @@ spec:
       use: 1
     rootDisk:
       image: vm-example:dev
+    ports:
+      - port: 5432

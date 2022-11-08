@@ -934,6 +934,32 @@ spec:
                         minimum: 1
                         type: integer
                     type: object
+                  ports:
+                    description: List of ports to expose from the container. Cannot
+                      be updated.
+                    items:
+                      properties:
+                        name:
+                          description: If specified, this must be an IANA_SVC_NAME
+                            and unique within the pod. Each named port in a pod must
+                            have a unique name. Name for the port that can be referred
+                            to by services.
+                          type: string
+                        port:
+                          description: Number of port to expose on the pod's IP address.
+                            This must be a valid port number, 0 < x < 65536.
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                        protocol:
+                          default: TCP
+                          description: Protocol for port. Must be UDP or TCP. Defaults
+                            to "TCP".
+                          type: string
+                      required:
+                      - port
+                      type: object
+                    type: array
                   rootDisk:
                     properties:
                       execute:

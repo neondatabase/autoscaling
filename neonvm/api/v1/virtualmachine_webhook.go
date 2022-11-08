@@ -18,6 +18,7 @@ package v1
 
 import (
 	"fmt"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -90,6 +91,9 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	}
 	if *r.Spec.Guest.MemorySlots.Max != *before.Spec.Guest.MemorySlots.Max {
 		return fmt.Errorf(".memorySlots.max is immutable")
+	}
+	if !reflect.DeepEqual(r.Spec.Guest.Ports, before.Spec.Guest.Ports) {
+		return fmt.Errorf(".ports is immutable")
 	}
 
 	// validate .spec.guest.cpu.use

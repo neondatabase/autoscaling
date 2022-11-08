@@ -11,6 +11,9 @@ mkdir -p /dev/shm
 chmod 1777 /dev/shm
 mount -t tmpfs tmp /dev/shm
 
+# start udev (mostlry used for auto-online hotplugged CPUs)
+udevd --daemon
+
 # networking
 ip link set up dev lo
 ETH_LIST=$(find /sys/class/net -mindepth 1 -maxdepth 1 -name "eth*")
@@ -19,6 +22,10 @@ for i in ${ETH_LIST}; do
     ip link set up dev $iface
     udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119
 done
+
+# postgresql init and start
+export PGDATA=/var/lib/postgresql
+su-exec postgres pg_ctl start -o '-c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf'
 
 echo -e "\nBoot took $(cut -d' ' -f1 /proc/uptime) seconds\n"
 
@@ -29,4 +36,5 @@ while true; do
 done
 
 echo "Exiting and shuting down vm"
+su-exec postgres pg_ctl stop
 poweroff -f

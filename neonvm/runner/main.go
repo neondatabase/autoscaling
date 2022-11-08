@@ -88,7 +88,7 @@ func main() {
 	qemuCmd = append(qemuCmd, "-m", strings.Join(memory, ","))
 
 	// net details
-	macDefault, err := defaultNetwork(defaultNetworkCIDR)
+	macDefault, err := defaultNetwork(defaultNetworkCIDR, vmSpec.Guest.Ports)
 	if err != nil {
 		log.Fatalf("can not setup default network: %s", err)
 	}
@@ -137,7 +137,7 @@ func execFg(name string, arg ...string) error {
 	return nil
 }
 
-func defaultNetwork(cidr string) (mac.MAC, error) {
+func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// gerenare random MAC for default Guest interface
 	mac, err := mac.GenerateRandMAC()
 	if err != nil {
@@ -196,6 +196,18 @@ func defaultNetwork(cidr string) (mac.MAC, error) {
 	// setup masquerading outgoing (from VM) traffic
 	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
 		return nil, err
+	}
+
+	// pass incoming traffic to .Guest.Spec.Ports into VM
+	for _, port := range ports {
+		iptablesArgs := []string{
+			"-t", "nat", "-A", "PREROUTING",
+			"-i", "eth0", "-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
+			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
+		}
+		if err := execFg("iptables", iptablesArgs...); err != nil {
+			return nil, err
+		}
 	}
 
 	// get dns details from /etc/resolv.conf
