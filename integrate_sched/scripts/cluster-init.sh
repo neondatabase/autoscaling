@@ -15,7 +15,6 @@ set -x
 kind create cluster -n autoscale-sched --config=kind/config.yaml
 
 kubectl apply -f deploy/flannel.yaml -f deploy/multus-daemonset.yaml -f deploy/cert-manager.yaml \
-    -f deploy/scheduler-deploy.yaml -f deploy/autoscaler-agent-deploy.yaml \
     | indent
 
 kubectl wait pod -n cert-manager --for=condition=Ready --timeout=2m \
@@ -25,6 +24,8 @@ kubectl wait pod -n cert-manager --for=condition=Ready --timeout=2m \
 kubectl apply -f deploy/virtink_localhost:5001.yaml | indent
 
 kubectl wait pod -n virtink-system --for=condition=Ready -l 'name=virt-controller' | indent
+
+kubectl apply -f deploy/scheduler-deploy.yaml -f deploy/autoscaler-agent-deploy.yaml | indent
 
 kubectl create secret generic vm-ssh --from-file=private-key=vm_image/ssh_id_rsa | indent
 
