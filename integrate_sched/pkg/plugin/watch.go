@@ -10,11 +10,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
-	"k8s.io/client-go/tools/cache"
 
 	virtapi "github.com/neondatabase/virtink/pkg/apis/virt/v1alpha1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 // watchVMDeletions continuously tracks pod deletion events and sends each deleted VM podName on
@@ -25,39 +25,30 @@ import (
 //
 // Events occuring before this method is called will not be sent.
 func (e *AutoscaleEnforcer) watchVMDeletions(ctx context.Context, deletions chan<- api.PodName) error {
-	// The content of this function was adapted from https://stackoverflow.com/a/49231503
-	//
-	// We're using the client-go cache here so that we don't miss deletion events. Otherwise, we can
-	// run into race conditions where events are missed in the small gap between event stream
-	// restarts. In practice the chance of that occuring is *incredibly* small, but it's still
-	// imperative that we avoid it.
+	// We're using the client-go cache here (indirectly through util.Watch) so that we don't miss
+	// deletion events. Otherwise, we can run into race conditions where events are missed in the
+	// small gap between event stream restarts. In practice the chance of that occuring is
+	// *incredibly* small, but it's still imperative that we avoid it.
 
-	watchlist := cache.NewFilteredListWatchFromClient(
+	stop := make(chan struct{})
+	_ = util.Watch(
 		e.handle.ClientSet().CoreV1().RESTClient(),
-		string(corev1.ResourcePods),
+		stop,
+		corev1.ResourcePods,
 		corev1.NamespaceAll,
+		util.WatchHandlerFuncs[*corev1.Pod]{
+			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
+				name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
+				deletions <- name
+			},
+		},
 		// Setting LabelSelector = LabelVM means that we're selecting for pods that *have* that
 		// label, ignoring the contents of that label.
 		func(options *metav1.ListOptions) {
 			options.LabelSelector = LabelVM
 		},
 	)
-
-	_, controller := cache.NewInformer(
-		watchlist,
-		&corev1.Pod{},
-		0, // Duration of 0 means that we don't re-list except when the watch stream times out
-		cache.ResourceEventHandlerFuncs{
-			DeleteFunc: func(obj interface{}) {
-				pod := obj.(*corev1.Pod)
-				name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
-				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
-				deletions <- name
-			},
-		},
-	)
-
-	go controller.Run(make(chan struct{}))
 
 	return nil
 }
