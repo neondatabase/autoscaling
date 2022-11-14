@@ -119,7 +119,7 @@ func (e *AutoscaleEnforcer) Filter(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
 
-	podInfo, err := getPodInfo(ctx, pod)
+	podInfo, err := getPodInfo(pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Filter: Error getting pod %v init vCPU: %s", pName, err)
 		return framework.NewStatus(
@@ -190,6 +190,59 @@ func (e *AutoscaleEnforcer) Filter(
 	return status
 }
 
+// Score allows our plugin to express which nodes should be preferred for scheduling new pods onto
+//
+// Even though this function is given (pod, node) pairs, our scoring is only really dependent on
+// values of the node. However, we have special handling for when the pod no longer fits in the node
+// (even though it might have during the Filter plugin) - we can't return a failure, because that
+// would cause *all* scheduling of the pod to fail, so we instead return the minimum score.
+//
+// The scores might not be consistent with each other, due to ongoing changes in the node. That's
+// ok, because nothing relies on strict correctness here, and they should be approximately correct
+// anyways.
+//
+// Required for framework.ScorePlugin
+func (e *AutoscaleEnforcer) Score(
+	ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeName string,
+) (int64, *framework.Status) {
+	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
+
+	podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+	podInfo, err := getPodInfo(pod)
+	if err != nil {
+		klog.Errorf("[autoscale-enforcer] Score: Error getting info for pod %v: %w", podName, err)
+		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
+	}
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	// Score by total resources available:
+	node, err := e.state.getOrFetchNodeState(ctx, e.handle, nodeName)
+	if err != nil {
+		klog.Errorf("[autoscale-enforcer] Score: Error fetching state for node %s: %w", nodeName, err)
+		return 0, framework.NewStatus(framework.Error, "Error fetching state for node")
+	}
+
+	// Special case: return minimum score if we don't have room
+	if podInfo.initVCPU > node.remainingReservableCPU() {
+		return framework.MinNodeScore, nil
+	}
+
+	total := int64(node.totalReservableCPU())
+	maxTotal := int64(e.state.maxTotalReservableCPU)
+
+	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
+	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
+	score := framework.MinNodeScore + scoreLen * total / maxTotal
+	return score, nil
+}
+
+// ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used
+func (e *AutoscaleEnforcer) ScoreExtensions() framework.ScoreExtensions {
+	return nil
+}
+
 // Reserve signals to our plugin that a particular pod will (probably) be bound to a node, giving us
 // a chance to both (a) reserve the resources it needs within the node and (b) reject the pod if
 // there aren't enough.
@@ -201,7 +254,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
-	podInfo, err := getPodInfo(ctx, pod)
+	podInfo, err := getPodInfo(pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Error getting pod %v info: %s", pName, err)
 		return framework.NewStatus(
@@ -239,7 +292,7 @@ func (e *AutoscaleEnforcer) Reserve(
 			name: pName,
 			vmName: podInfo.vmName,
 			node: node,
-			vCPU: podResourceState[uint16]{reserved: podInfo.initVCPU, pressure: 0},
+			vCPU: podResourceState[uint16]{reserved: podInfo.initVCPU, capacityPressure: 0},
 			testingOnlyAlwaysMigrate: podInfo.alwaysMigrate,
 			mqIndex: -1,
 		}
@@ -284,12 +337,12 @@ func (e *AutoscaleEnforcer) Unreserve(
 	delete(ps.node.pods, pName)
 	ps.node.mq.removeIfPresent(ps)
 	oldReserved := ps.node.vCPU.reserved
-	oldPressure := ps.node.vCPU.pressure
+	oldPressure := ps.node.vCPU.capacityPressure
 	ps.node.vCPU.reserved -= ps.vCPU.reserved
-	ps.node.vCPU.pressure -= ps.vCPU.pressure
+	ps.node.vCPU.capacityPressure -= ps.vCPU.capacityPressure
 
 	klog.Infof(
-		"[autoscale-enforcer] Unreserved pod %v (%d vCPU) from node %s: node.vCPU.reserved %d -> %d, node.vCPU.pressure %d -> %d",
-		pName, ps.vCPU.reserved, ps.node.name, oldReserved, ps.node.vCPU.reserved, oldPressure, ps.node.vCPU.pressure,
+		"[autoscale-enforcer] Unreserved pod %v (%d vCPU) from node %s: node.vCPU.reserved %d -> %d, node.vCPU.capacityPressure %d -> %d",
+		pName, ps.vCPU.reserved, ps.node.name, oldReserved, ps.node.vCPU.reserved, oldPressure, ps.node.vCPU.capacityPressure,
 	)
 }

@@ -35,6 +35,13 @@ type config struct {
 	// will be maintained.
 	MemBlockSize megabytesOrGigabytes `json:"memBlockSize"`
 
+	// FallbackToAllocatable is a flag that allows the scheduler to use a node's Status.Allocatable
+	// if a resource isn't present in its Status.Capacity.
+	//
+	// This flag *should* be false, but exists to allow a hotfix to quickly get things working if
+	// the appropriate information isn't there for some reason.
+	FallbackToAllocatable bool `json:"fallbackToAllocated"`
+
 	// JSONString is the JSON string that was used to generate this config struct
 	JSONString string `json:"-"`
 }
@@ -275,4 +282,39 @@ func (e *AutoscaleEnforcer) handleNewConfigMap(configMap *corev1.ConfigMap) erro
 
 	e.state.handleUpdatedConf()
 	return nil
+}
+
+//////////////////////////////////////
+// HELPER METHODS FOR USING CONFIGS //
+//////////////////////////////////////
+
+// forNode returns the individual nodeConfig for a node with a particualr name, taking override
+// settings into account
+func (c *config) forNode(nodeName string) *nodeConfig {
+	for i, set := range c.NodeOverrides {
+		for _, name := range set.Nodes {
+			if name == nodeName {
+				return &c.NodeOverrides[i].Config
+			}
+		}
+	}
+
+	return &c.NodeDefaults
+}
+
+func (c *nodeConfig) vCpuLimits(total uint16) (nodeResourceState[uint16], error) {
+	system := uint16(c.Cpu.System)
+	if system > total {
+		err := fmt.Errorf("desired system vCPU %d greater than node total %d", system, total)
+		return nodeResourceState[uint16]{}, err
+	}
+
+	return nodeResourceState[uint16]{
+		total: total,
+		system: system,
+		watermark: uint16(c.Cpu.Watermark * float32(total - system)),
+		reserved: 0,
+		capacityPressure: 0,
+		pressureAccountedFor: 0,
+	}, nil
 }

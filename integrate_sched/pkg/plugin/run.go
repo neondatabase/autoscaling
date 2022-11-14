@@ -117,10 +117,10 @@ func (e *AutoscaleEnforcer) handleResources(
 	pod *podState, node *nodeState, req api.Resources, startingMigration bool,
 ) (api.ResourcePermit, int, error) {
 	oldNodeVCPUReserved := node.vCPU.reserved
-	oldNodeVCPUPressure := node.vCPU.pressure
+	oldNodeVCPUPressure := node.vCPU.capacityPressure
 	oldNodeVCPUPressureAccountedFor := node.vCPU.pressureAccountedFor
 	oldPodVCPUReserved := pod.vCPU.reserved
-	oldPodVCPUPressure := pod.vCPU.pressure
+	oldPodVCPUPressure := pod.vCPU.capacityPressure
 
 	// Check that we aren't being asked to do something during migration:
 	if pod.currentlyMigrating() {
@@ -133,26 +133,26 @@ func (e *AutoscaleEnforcer) handleResources(
 		return api.ResourcePermit{VCPU: pod.vCPU.reserved}, 200, nil
 	} else if startingMigration {
 		if req.VCPU > pod.vCPU.reserved {
-			pod.vCPU.pressure = req.VCPU - pod.vCPU.reserved
-			node.vCPU.pressure = node.vCPU.pressure + pod.vCPU.pressure - oldPodVCPUPressure
+			pod.vCPU.capacityPressure = req.VCPU - pod.vCPU.reserved
+			node.vCPU.capacityPressure = node.vCPU.capacityPressure + pod.vCPU.capacityPressure - oldPodVCPUPressure
 			// don't handle pressureAccountedFor here, that's taken care of in
 			// (*pluginState).startMigration()
 			klog.Infof(
-				"[autoscale-enforcer] Denying pod %v vCPU increase %d -> %d because it is starting migration; node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
-				pod.name, pod.vCPU.reserved, req.VCPU, oldNodeVCPUPressure, node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
+				"[autoscale-enforcer] Denying pod %v vCPU increase %d -> %d because it is starting migration; node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
+				pod.name, pod.vCPU.reserved, req.VCPU, oldNodeVCPUPressure, node.vCPU.capacityPressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
 			)
 		} else /* `req.VCPU <= pod.vCPU.reserved` is implied */ {
 			// Handle decrease-or-equal in the same way as below.
 			node.vCPU.reserved -= pod.vCPU.reserved - req.VCPU
 			pod.vCPU.reserved = req.VCPU
-			pod.vCPU.pressure = 0
-			node.vCPU.pressure -= oldPodVCPUPressure
+			pod.vCPU.capacityPressure = 0
+			node.vCPU.capacityPressure -= oldPodVCPUPressure
 
 			if oldPodVCPUPressure != 0 || req.VCPU != oldPodVCPUReserved {
 				klog.Infof(
-					"[autoscale-enforcer] Register pod %v vCPU %d -> %d (pressure %d -> %d); node.vCPU.reserved %d -> %d (of %d), node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
-					pod.name, oldPodVCPUReserved, pod.vCPU.reserved, oldPodVCPUPressure, pod.vCPU.pressure,
-					oldNodeVCPUReserved, node.vCPU.reserved, node.totalReservableCPU(), oldNodeVCPUPressure, node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
+					"[autoscale-enforcer] Register pod %v vCPU %d -> %d (pressure %d -> %d); node.vCPU.reserved %d -> %d (of %d), node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
+					pod.name, oldPodVCPUReserved, pod.vCPU.reserved, oldPodVCPUPressure, pod.vCPU.capacityPressure,
+					oldNodeVCPUReserved, node.vCPU.reserved, node.totalReservableCPU(), oldNodeVCPUPressure, node.vCPU.capacityPressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
 				)
 			}
 		}
@@ -165,22 +165,22 @@ func (e *AutoscaleEnforcer) handleResources(
 		node.vCPU.reserved -= pod.vCPU.reserved - req.VCPU
 		pod.vCPU.reserved = req.VCPU
 		// pressure is now zero, because the pod no longer wants to increase resources.
-		pod.vCPU.pressure = 0
-		node.vCPU.pressure -= oldPodVCPUPressure
+		pod.vCPU.capacityPressure = 0
+		node.vCPU.capacityPressure -= oldPodVCPUPressure
 	} else {
 		increase := req.VCPU - pod.vCPU.reserved
 		// Increases are bounded by what's left in the node:
 		maxIncrease := node.remainingReservableCPU()
 		if increase > maxIncrease /* increases are bounded by what's left in the node */ {
-			pod.vCPU.pressure = increase - maxIncrease
+			pod.vCPU.capacityPressure = increase - maxIncrease
 			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
 			// directly += or -= (implicitly relying on overflow).
-			node.vCPU.pressure = node.vCPU.pressure - oldPodVCPUPressure + pod.vCPU.pressure
+			node.vCPU.capacityPressure = node.vCPU.capacityPressure - oldPodVCPUPressure + pod.vCPU.capacityPressure
 			increase = maxIncrease // cap at maxIncrease.
 		} else {
 			// If we're not capped by maxIncrease, relieve pressure coming from this pod
-			node.vCPU.pressure -= pod.vCPU.pressure
-			pod.vCPU.pressure = 0
+			node.vCPU.capacityPressure -= pod.vCPU.capacityPressure
+			pod.vCPU.capacityPressure = 0
 		}
 		pod.vCPU.reserved += increase
 		node.vCPU.reserved += increase
@@ -197,9 +197,9 @@ func (e *AutoscaleEnforcer) handleResources(
 			wanted = fmt.Sprintf(" (wanted %d)", req.VCPU)
 		}
 		klog.Infof(
-			"[autoscale-enforcer] Register pod %v vCPU %d -> %d%s (pressure %d -> %d); node.vCPU.reserved %d -> %d (of %d), node.vCPU.pressure %d -> %d (%d -> %d spoken for)",
-			pod.name, oldPodVCPUReserved, pod.vCPU.reserved, wanted, oldPodVCPUPressure, pod.vCPU.pressure,
-			oldNodeVCPUReserved, node.vCPU.reserved, node.totalReservableCPU(), oldNodeVCPUPressure, node.vCPU.pressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
+			"[autoscale-enforcer] Register pod %v vCPU %d -> %d%s (pressure %d -> %d); node.vCPU.reserved %d -> %d (of %d), node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
+			pod.name, oldPodVCPUReserved, pod.vCPU.reserved, wanted, oldPodVCPUPressure, pod.vCPU.capacityPressure,
+			oldNodeVCPUReserved, node.vCPU.reserved, node.totalReservableCPU(), oldNodeVCPUPressure, node.vCPU.capacityPressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
 		)
 	}
 

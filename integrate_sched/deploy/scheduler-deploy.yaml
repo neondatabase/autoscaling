@@ -130,7 +130,8 @@ data:
         "cpu": { "watermark": 0.7, "system": 1 },
         "memory": { "watermark": 0.7, "system": 1 }
       },
-      "nodeOverrides": []
+      "nodeOverrides": [],
+      "fallbackToAllocated": false
     }
 ---
 apiVersion: apps/v1

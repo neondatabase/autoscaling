@@ -2,6 +2,6 @@
   {
     "op": "replace",
     "path": "/data/autoscaler-enforcer-config.json",
-	"value": "{ \"memBlockSize\": \"2G\", \"nodeDefaults\": { \"cpu\": { \"watermark\": 0.7, \"system\": 1 }, \"memory\": { \"watermark\": 0.7, \"system\": 1 } }, \"nodeOverrides\": [] }"
+	"value": "{ \"memBlockSize\": \"2G\", \"nodeDefaults\": { \"cpu\": { \"watermark\": 0.7, \"system\": 1 }, \"memory\": { \"watermark\": 0.7, \"system\": 1 } }, \"nodeOverrides\": [], \"fallbackToAllocated\": false }"
   }
 ]
