@@ -31,6 +31,10 @@ type pluginState struct {
 
 	podMap  map[api.PodName]*podState
 	nodeMap map[string]*nodeState
+	// conf stores the current configuration, and is nil if the configuration has not yet been set
+	//
+	// Proper initialization of the plugin guarantees conf is not nil.
+	conf *config
 }
 
 // nodeState is the information that we track for a particular
@@ -420,4 +424,8 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, virtCli
 	}
 
 	return nil
+}
+
+func (s *pluginState) handleUpdatedConf() {
+	panic("todo")
 }

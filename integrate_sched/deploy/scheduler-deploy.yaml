@@ -7,6 +7,18 @@ rules:
   resources: ["virtualmachines", "virtualmachinemigrations"]
   verbs: ["create", "delete", "get", "list", "patch"]
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: autoscale-scheduler-config-reader
+  namespace: kube-system
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+  # watching is ok as long as we use ListOptions.FieldSelector to limit it to the appropriate name
+  resourceNames: ["scheduler-plugin-config"]
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -68,6 +80,24 @@ roleRef:
   name: extension-apiserver-authentication-reader
 ---
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: autoscaler-config
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: autoscale-scheduler-config-reader
+  namespace: kube-system
+subjects:
+- kind: ServiceAccount
+  name: autoscale-scheduler
+  namespace: kube-system
+roleRef:
+  kind: Role
+  name: autoscale-scheduler-config-reader
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: autoscale-scheduler-config
@@ -84,6 +114,24 @@ data:
           multiPoint:
             enabled:
               - name: AutoscaleEnforcer
+---
+# note: this ConfigMap is not meant to be mounted. For better responsiveness, the scheduler listens
+# for updates on the ConfigMap object directly.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scheduler-plugin-config
+  namespace: kube-system
+data:
+  autoscaler-enforcer-config.json: |
+    {
+      "memBlockSize": "1G",
+      "nodeDefaults": {
+        "cpu": { "watermark": 0.7, "system": 1 },
+        "memory": { "watermark": 0.7, "system": 1 }
+      },
+      "nodeOverrides": []
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment

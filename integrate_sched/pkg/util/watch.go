@@ -65,7 +65,9 @@ func Watch[T runtime.Object](
 	}
 
 	var objType T // Only needed to provide the type T to NewInformer
+
 	store, controller := cache.NewInformer(watchlist, objType, 0, eventHandler)
+
 	go controller.Run(stop)
 
 	return WatchStore[T]{store: store}

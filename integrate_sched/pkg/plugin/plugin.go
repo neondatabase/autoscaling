@@ -22,6 +22,11 @@ const Name = "AutoscaleEnforcer"
 const LabelVM = "virtink.io/vm.name"
 const LabelInitVCPU = "autoscaler/init-vcpu"
 const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
+const ConfigMapNamespace = "kube-system"
+const ConfigMapName = "scheduler-plugin-config"
+const ConfigMapKey = "autoscaler-enforcer-config.json"
+const PluginConfigPath = "/etc/kubernetes/autoscale-scheduler-config/autoscale-enforcer-config.json"
+const InitConfigMapTimeoutSeconds = 5
 
 // AutoscaleEnforcer is the scheduler plugin to coordinate autoscaling
 type AutoscaleEnforcer struct {
@@ -57,6 +62,12 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 			// zero values are ok for the rest here
 		},
 	}
+
+	if err := p.setConfigAndStartWatcher(); err != nil {
+		klog.Errorf("Error starting config watcher: %s", err)
+		return nil, err
+	}
+
 	vmDeletions := make(chan api.PodName)
 	if err := p.watchVMDeletions(context.Background(), vmDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %s", err)
