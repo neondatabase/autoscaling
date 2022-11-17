@@ -95,6 +95,9 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	if !reflect.DeepEqual(r.Spec.Guest.Ports, before.Spec.Guest.Ports) {
 		return fmt.Errorf(".ports is immutable")
 	}
+	if !reflect.DeepEqual(r.Spec.Guest.RootDisk, before.Spec.Guest.RootDisk) {
+		return fmt.Errorf(".rootDisk is immutable")
+	}
 
 	// validate .spec.guest.cpu.use
 	if r.Spec.Guest.CPUs.Use != nil {

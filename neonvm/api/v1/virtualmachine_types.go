@@ -118,6 +118,8 @@ type RootDisk struct {
 	// +kubebuilder:default:="kubevm/vm-alpine:3.16"
 	Image string `json:"image"`
 	// +optional
+	Size resource.Quantity `json:"size,omitempty"`
+	// +optional
 	// +kubebuilder:default:="IfNotPresent"
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy"`
 	// +optional

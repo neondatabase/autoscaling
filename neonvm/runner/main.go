@@ -11,15 +11,23 @@ import (
 	"os/exec"
 	"strings"
 
+	"bytes"
+	"io/ioutil"
+	"regexp"
+	"sync"
+
 	"github.com/cilium/cilium/pkg/mac"
-	"github.com/moby/libnetwork/resolvconf"
+	"github.com/docker/docker/pkg/ioutils"
+	"github.com/docker/libnetwork/types"
 	"github.com/vishvananda/netlink"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/neonvm/api/v1"
 )
 
 const (
 	QEMU_BIN      = "qemu-system-x86_64"
+	QEMU_IMG_BIN  = "qemu-img"
 	kernelPath    = "/kernel/vmlinuz"
 	kernelCmdline = "memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
@@ -28,7 +36,113 @@ const (
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
 	defaultNetworkCIDR       = "10.255.255.252/30"
+
+	// defaultPath is the default path to the resolv.conf that contains information to resolve DNS. See Path().
+	resolveDefaultPath = "/etc/resolv.conf"
+	// alternatePath is a path different from defaultPath, that may be used to resolve DNS. See Path().
+	resolveAlternatePath = "/run/systemd/resolve/resolv.conf"
 )
+
+var (
+	ipv4NumBlock      = `(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)`
+	ipv4Address       = `(` + ipv4NumBlock + `\.){3}` + ipv4NumBlock
+	ipv6Address       = `([0-9A-Fa-f]{0,4}:){2,7}([0-9A-Fa-f]{0,4})(%\w+)?`
+	nsRegexp          = regexp.MustCompile(`^\s*nameserver\s*((` + ipv4Address + `)|(` + ipv6Address + `))\s*$`)
+	nsIPv4Regexpmatch = regexp.MustCompile(`^\s*nameserver\s*((` + ipv4Address + `))\s*$`)
+	nsIPv6Regexpmatch = regexp.MustCompile(`^\s*nameserver\s*((` + ipv6Address + `))\s*$`)
+	searchRegexp      = regexp.MustCompile(`^\s*search\s*(([^\s]+\s*)*)$`)
+
+	detectSystemdResolvConfOnce sync.Once
+	pathAfterSystemdDetection   = resolveDefaultPath
+)
+
+// File contains the resolv.conf content and its hash
+type resolveFile struct {
+	Content []byte
+	Hash    string
+}
+
+// Get returns the contents of /etc/resolv.conf and its hash
+func getResolvConf() (*resolveFile, error) {
+	return getSpecific(resolvePath())
+}
+
+// GetSpecific returns the contents of the user specified resolv.conf file and its hash
+func getSpecific(path string) (*resolveFile, error) {
+	resolv, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	hash, err := ioutils.HashData(bytes.NewReader(resolv))
+	if err != nil {
+		return nil, err
+	}
+	return &resolveFile{Content: resolv, Hash: hash}, nil
+}
+
+// GetNameservers returns nameservers (if any) listed in /etc/resolv.conf
+func getNameservers(resolvConf []byte, kind int) []string {
+	nameservers := []string{}
+	for _, line := range getLines(resolvConf, []byte("#")) {
+		var ns [][]byte
+		if kind == types.IP {
+			ns = nsRegexp.FindSubmatch(line)
+		} else if kind == types.IPv4 {
+			ns = nsIPv4Regexpmatch.FindSubmatch(line)
+		} else if kind == types.IPv6 {
+			ns = nsIPv6Regexpmatch.FindSubmatch(line)
+		}
+		if len(ns) > 0 {
+			nameservers = append(nameservers, string(ns[1]))
+		}
+	}
+	return nameservers
+}
+
+// GetSearchDomains returns search domains (if any) listed in /etc/resolv.conf
+// If more than one search line is encountered, only the contents of the last
+// one is returned.
+func getSearchDomains(resolvConf []byte) []string {
+	domains := []string{}
+	for _, line := range getLines(resolvConf, []byte("#")) {
+		match := searchRegexp.FindSubmatch(line)
+		if match == nil {
+			continue
+		}
+		domains = strings.Fields(string(match[1]))
+	}
+	return domains
+}
+
+// getLines parses input into lines and strips away comments.
+func getLines(input []byte, commentMarker []byte) [][]byte {
+	lines := bytes.Split(input, []byte("\n"))
+	var output [][]byte
+	for _, currentLine := range lines {
+		var commentIndex = bytes.Index(currentLine, commentMarker)
+		if commentIndex == -1 {
+			output = append(output, currentLine)
+		} else {
+			output = append(output, currentLine[:commentIndex])
+		}
+	}
+	return output
+}
+
+func resolvePath() string {
+	detectSystemdResolvConfOnce.Do(func() {
+		candidateResolvConf, err := ioutil.ReadFile(resolveDefaultPath)
+		if err != nil {
+			// silencing error as it will resurface at next calls trying to read defaultPath
+			return
+		}
+		ns := getNameservers(candidateResolvConf, types.IP)
+		if len(ns) == 1 && ns[0] == "127.0.0.53" {
+			pathAfterSystemdDetection = resolveAlternatePath
+		}
+	})
+	return pathAfterSystemdDetection
+}
 
 func main() {
 	var vmSpecDump string
@@ -56,6 +170,29 @@ func main() {
 	if vmSpec.Guest.MemorySlots.Max != nil {
 		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
+	}
+
+	// resize rootDisk image of size specified and new size more than current
+	type QemuImgOutputPartial struct {
+		VirtualSize int64 `json:"virtual-size"`
+	}
+	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
+	if err != nil {
+		log.Fatal(err)
+	}
+	imageSize := QemuImgOutputPartial{}
+	json.Unmarshal(qemuImgOut, &imageSize)
+	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
+
+	if !vmSpec.Guest.RootDisk.Size.IsZero() {
+		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
+			log.Printf("resizing rootDisk from %s to %s\n", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
+			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			log.Printf("rootDisk.size (%s) should be more than size in image (%s)\n", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
+		}
 	}
 
 	// prepare qemu command line
@@ -211,12 +348,12 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	}
 
 	// get dns details from /etc/resolv.conf
-	resolvConf, err := resolvconf.Get()
+	resolvConf, err := getResolvConf()
 	if err != nil {
 		return nil, err
 	}
-	dns := resolvconf.GetNameservers(resolvConf.Content)[0]
-	dnsSearch := strings.Join(resolvconf.GetSearchDomains(resolvConf.Content), ",")
+	dns := getNameservers(resolvConf.Content, types.IP)[0]
+	dnsSearch := strings.Join(getSearchDomains(resolvConf.Content), ",")
 
 	// prepare dnsmask command line (instead of config file)
 	dnsMaskCmd := []string{

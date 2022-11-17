@@ -1,7 +1,8 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:dev
 IMG_RUNNER ?= runner:dev
-VM_EXAMPLE ?= vm-example:dev
+VM_EXAMPLE_SOURCE ?= postgres:14-alpine
+VM_EXAMPLE_IMAGE ?= vm-postgres:14-alpine
 
 # kernel for guests
 VM_KERNEL_VERSION ?= "5.15.76"
@@ -70,6 +71,7 @@ test: manifests generate fmt vet envtest ## Run tests.
 build: generate fmt vet ## Build controller binary.
 	go build -o bin/controller main.go
 	go build -o bin/runner runner/main.go
+	go build -o bin/vm-builder tools/vm-builder/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -79,10 +81,11 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: test ## Build docker image with the controller.
+docker-build: build test ## Build docker image with the controller.
 	docker build -t $(IMG) .
 	docker build -t $(IMG_RUNNER) -f runner/Dockerfile .
-	docker build -t $(VM_EXAMPLE) samples/vm-example
+	bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
+#	docker build -t $(VM_EXAMPLE) samples/vm-example
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
@@ -182,4 +185,4 @@ cert-manager: ## install cert-manager to cluster
 kind-load: docker-build  ## Push docker images to the kind cluster.
 	kind load docker-image $(IMG)
 	kind load docker-image $(IMG_RUNNER)
-	kind load docker-image $(VM_EXAMPLE)
+	kind load docker-image $(VM_EXAMPLE_IMAGE)

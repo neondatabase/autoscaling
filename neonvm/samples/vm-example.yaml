@@ -14,6 +14,7 @@ spec:
       max: 16
       use: 1
     rootDisk:
-      image: vm-example:dev
+      image: vm-postgres:14-alpine
+      size: 8Gi
     ports:
       - port: 5432
