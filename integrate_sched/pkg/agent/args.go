@@ -3,11 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,10 +113,6 @@ type PodArgs struct {
 	// our custom scheduler.
 	SchedulerName string
 
-	// IPv6Address is a temporary argument to circumvent networking shenanigans. We generate this by
-	// using ip addr to get the pod's eth0 IPv6 address, which Virtink doesn't remap.
-	IPv6Address string
-
 	// InitVCPU is the initial number of vCPUs assigned to the VM. It is taken from the
 	// "autoscaler/init-vcpu" label
 	//
@@ -174,12 +168,8 @@ func ArgsFromPod(ctx context.Context, client *kubernetes.Clientset, envArgs EnvA
 		return n, err
 	}
 
-	var ipAddr string
-	ipAddr, err = getIPv6Address()
-
 	args := PodArgs{
 		SchedulerName: pod.Spec.SchedulerName,
-		IPv6Address:   ipAddr,
 		InitVCPU:      getPodLabel(&err, pod, "autoscaler/init-vcpu", parseVCPU),
 		MinVCPU:       getPodLabel(&err, pod, "autoscaler/min-vcpu", parseVCPU),
 		MaxVCPU:       getPodLabel(&err, pod, "autoscaler/max-vcpu", parseVCPU),
@@ -197,23 +187,4 @@ func ArgsFromPod(ctx context.Context, client *kubernetes.Clientset, envArgs EnvA
 	} else {
 		return args, err
 	}
-}
-
-func getIPv6Address() (string, error) {
-	cmd := "ip addr show eth0 scope link | grep -oE 'inet6 [^[:space:]]+' | cut -d' ' -f2 | cut -d/ -f1"
-	c := exec.Command("/bin/sh", "-c", cmd)
-	out, err := c.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("Error running command to get IP addr: %s", err)
-	} else if len(out) == 0 {
-		return "", fmt.Errorf("Empty output from command to get IP addr")
-	}
-
-	// Remove the trailing newline that the shell gives us.
-	addr := strings.TrimRight(string(out), "\n")
-	if len(strings.Split(addr, "\n")) > 1 {
-		return "", fmt.Errorf("Command output has more than one line: %q", addr)
-	}
-
-	return addr, nil
 }

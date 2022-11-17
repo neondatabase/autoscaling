@@ -22,7 +22,6 @@ import (
 type Runner struct {
 	podName                 api.PodName
 	schedulerIP             net.IP
-	ipv6Address             string
 	cloudHypervisorSockPath string
 	metricsURL              *url.URL
 	minVCPU                 uint16
@@ -46,7 +45,6 @@ func NewRunner(args Args, schedulerIP string, cloudHypervisorSockPath string) (*
 	return &Runner{
 		podName:                 api.PodName{Name: args.K8sPodName, Namespace: args.K8sPodNamespace},
 		schedulerIP:             parsedSchedulerIP,
-		ipv6Address: args.IPv6Address,
 		cloudHypervisorSockPath: cloudHypervisorSockPath,
 		metricsURL:              args.MetricsURL,
 		minVCPU:                 args.MinVCPU,
