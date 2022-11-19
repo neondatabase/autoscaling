@@ -3,10 +3,12 @@ module github.com/neondatabase/neonvm
 go 1.19
 
 require (
+	github.com/alessio/shellescape v1.4.1
 	github.com/cilium/cilium v1.12.3
 	github.com/digitalocean/go-qemu v0.0.0-20220826173844-d5f5e3ceed89
 	github.com/docker/docker v20.10.17+incompatible
 	github.com/docker/libnetwork v0.8.0-dev.2.0.20210525090646-64b7a4574d14
+	github.com/kdomanski/iso9660 v0.3.3
 	github.com/onsi/ginkgo/v2 v2.1.6
 	github.com/onsi/gomega v1.20.1
 	github.com/vishvananda/netlink v1.1.1-0.20220125195016-0639e7e787ba

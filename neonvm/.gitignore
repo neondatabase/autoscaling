@@ -26,3 +26,4 @@ Dockerfile.cross
 *~
 
 *.qcow2
+vmlinuz

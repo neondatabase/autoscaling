@@ -16,9 +16,20 @@ spec:
     rootDisk:
       image: vm-postgres:14-alpine
       size: 8Gi
+    command: ["/bin/sh"]
+    args:
+      - -c
+      - |
+        echo "Hello First World"
+        echo Hello Second World
+        echo $VAR1
+        echo $VAR2
+        ping 8.8.8.8
     env:
       # for testing only - allows login without password
-      - name: POSTGRES_HOST_AUTH_METHOD
-        value: trust
+      - name: VAR1
+        value: value1
+      - name: VAR2
+        value: "value 2"
     ports:
       - port: 5432

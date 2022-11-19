@@ -3,22 +3,24 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+
+	"bytes"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"os/exec"
-	"strings"
-
-	"bytes"
-	"io/ioutil"
 	"regexp"
+	"strings"
 	"sync"
 
+	"github.com/alessio/shellescape"
 	"github.com/cilium/cilium/pkg/mac"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/libnetwork/types"
+	"github.com/kdomanski/iso9660"
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -31,7 +33,8 @@ const (
 	kernelPath    = "/kernel/vmlinuz"
 	kernelCmdline = "memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
-	rootDiskPath = "/images/rootdisk.qcow2"
+	rootDiskPath    = "/images/rootdisk.qcow2"
+	runtimeDiskPath = "/images/runtime.iso"
 
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
@@ -144,6 +147,53 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
+func createISO9660(diskPath string, command []string, args []string, env []vmv1.EnvVar) error {
+	writer, err := iso9660.NewWriter()
+	if err != nil {
+		return err
+	}
+	defer writer.Cleanup()
+
+	c := []string{}
+	c = append(c, command...)
+	c = append(c, args...)
+	if len(c) != 0 {
+		err = writer.AddFile(bytes.NewReader([]byte(shellescape.QuoteCommand(c))), "run.sh")
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(env) != 0 {
+		envstring := []string{}
+		for _, e := range env {
+			envstring = append(envstring, fmt.Sprintf(`export %s=%s`, e.Name, shellescape.Quote(e.Value)))
+		}
+		envstring = append(envstring, "")
+		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(envstring, "\n"))), "env.sh")
+		if err != nil {
+			return err
+		}
+	}
+
+	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+
+	err = writer.WriteTo(outputFile, "runtime")
+	if err != nil {
+		return err
+	}
+
+	err = outputFile.Close()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
 	var vmSpecDump string
 	flag.StringVar(&vmSpecDump, "vmdump", vmSpecDump, "Base64 encoded VirtualMachine json specification")
@@ -172,18 +222,24 @@ func main() {
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 
+	if err = createISO9660(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, vmSpec.Guest.Env); err != nil {
+		log.Fatalln(err)
+	}
+
 	// resize rootDisk image of size specified and new size more than current
 	type QemuImgOutputPartial struct {
 		VirtualSize int64 `json:"virtual-size"`
 	}
+	// get current disk size by qemu-img info command
 	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
 	imageSize := QemuImgOutputPartial{}
 	json.Unmarshal(qemuImgOut, &imageSize)
 	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
 
+	// going to resize
 	if !vmSpec.Guest.RootDisk.Size.IsZero() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
 			log.Printf("resizing rootDisk from %s to %s\n", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
@@ -216,6 +272,7 @@ func main() {
 
 	// disk details
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
 
 	// cpu details
 	qemuCmd = append(qemuCmd, "-cpu", "host")

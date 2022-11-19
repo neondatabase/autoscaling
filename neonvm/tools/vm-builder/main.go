@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -17,7 +18,7 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// vm-builder --src alpine:3.16 -e VAR1=value1 -e VAR2=value2 --dst vm-alpine:dev --file vm-alpine.qcow2
+// vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
 
 const (
 	dockerfileVmBuilder = `
@@ -27,7 +28,7 @@ FROM alpine:3.16 AS vm-runtime
 # add busybox
 ENV BUSYBOX_VERSION 1.35.0
 RUN set -e \
-	&& mkdir -p /neonvm/bin \
+	&& mkdir -p /neonvm/bin /neonvm/runtime \
 	&& wget -q https://busybox.net/downloads/binaries/${BUSYBOX_VERSION}-x86_64-linux-musl/busybox -O /neonvm/bin/busybox \
 	&& chmod +x /neonvm/bin/busybox \
 	&& /neonvm/bin/busybox --install -s /neonvm/bin
@@ -67,16 +68,15 @@ RUN set -e \
 # init scripts
 ADD inittab  /neonvm/bin/inittab
 ADD vminit   /neonvm/bin/vminit
+ADD vmstart  /neonvm/bin/vmstart
 ADD vmacpi   /neonvm/acpi/vmacpi
-RUN chmod +x /neonvm/bin/vminit
+RUN chmod +x /neonvm/bin/vminit /neonvm/bin/vmstart
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
 COPY --from=rootdisk / /rootdisk
 COPY --from=vm-runtime /neonvm /rootdisk/neonvm
-COPY vmstart /rootdisk/neonvm/bin/vmstart
 RUN set -e \
-    && chmod +x /rootdisk/neonvm/bin/vmstart \
     && mkdir -p /rootdisk/etc \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
     && mkfs.ext4 -d /rootdisk /disk.raw ${DISK_SIZE} \
@@ -90,22 +90,22 @@ COPY --from=builder /disk.qcow2 /
 {{ range .Env }}
 export {{.}}
 {{- end }}
-{{- range .ExtraEnv }}
-export {{.}}
-{{- end }}
 
-/neonvm/bin/su-exec {{.User}} {{- range .Entrypoint}} {{.}} {{- end }} {{- range .Cmd }} {{.}} {{- end }}
+/neonvm/bin/test -f /neonvm/runtime/env.sh && source /neonvm/runtime/env.sh
+
+if [ -f /neonvm/runtime/run.sh ]; then
+    /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/runtime/run.sh
+else
+    /neonvm/bin/su-exec {{.User}} {{- range .Entrypoint}} {{.}} {{- end }} {{- range .Cmd }} {{.}} {{- end }}
+fi
 `
 
 	scriptInitTab = `
 ::sysinit:/neonvm/bin/vminit
-
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
-
 ::respawn:/neonvm/bin/vmstart
-
-ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --autologin root 115200 ttyS0 linux
+ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
 	scriptVmAcpi = `
@@ -136,6 +136,9 @@ mount -t proc  proc  /proc
 mount -t sysfs sysfs /sys
 mount -t devpts -o noexec,nosuid       devpts    /dev/pts
 mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
+
+# neonvm runtime params mounted as iso9660 disk
+mount /dev/vdb /neonvm/runtime
 
 # try resize filesystem
 resize2fs /dev/vda
@@ -190,11 +193,11 @@ type ImageSpec struct {
 	Entrypoint []string
 	Cmd        []string
 	Env        []string
-	ExtraEnv   []string
 }
 
 func main() {
 	flag.Parse()
+	var dstIm string
 
 	if len(*srcImage) == 0 {
 		log.Println("-src not set, see usage info:")
@@ -202,9 +205,10 @@ func main() {
 		os.Exit(1)
 	}
 	if len(*dstImage) == 0 {
-		log.Println("-dst not set, see usage info:")
-		flag.PrintDefaults()
-		os.Exit(1)
+		dstIm = fmt.Sprintf("vm-%s", *srcImage)
+		log.Printf("-dst not set, using %s\n", dstIm)
+	} else {
+		dstIm = *dstImage
 	}
 
 	ctx := context.Background()
@@ -224,7 +228,7 @@ func main() {
 	}
 	defer pull.Close()
 
-	// dp quiet pull
+	// do quiet pull - discard output
 	io.Copy(io.Discard, pull)
 	/*
 	   if err = printReader(pull); err != nil {
@@ -232,34 +236,34 @@ func main() {
 	   }
 	*/
 
-	log.Printf("Build docker image for virtual machine (disk size %s): %s\n", *size, *dstImage)
+	log.Printf("Build docker image for virtual machine (disk size %s): %s\n", *size, dstIm)
 	imageSpec, _, err := cli.ImageInspectWithRaw(ctx, *srcImage)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	var SrcImageSpec ImageSpec
+
 	if len(imageSpec.Config.User) != 0 {
 		SrcImageSpec.User = imageSpec.Config.User
 	} else {
 		SrcImageSpec.User = "root"
 	}
+
 	SrcImageSpec.Entrypoint = imageSpec.Config.Entrypoint
 	SrcImageSpec.Cmd = imageSpec.Config.Cmd
+	// if no entrypoint and cmd in docker image then use sleep for 10 years as stub
 	if len(SrcImageSpec.Entrypoint) == 0 && len(SrcImageSpec.Cmd) == 0 {
 		SrcImageSpec.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
 	}
 
-	// !!!!!
-	// TODO: delete it as it temporary solution for debug
 	SrcImageSpec.Env = imageSpec.Config.Env
-	SrcImageSpec.ExtraEnv = []string{"POSTGRES_HOST_AUTH_METHOD=trust"}
-	// !!!!!
 
 	buf := new(bytes.Buffer)
 	tw := tar.NewWriter(buf)
 	defer tw.Close()
 
+	// generate Dockerfile from template
 	dockerfileVmBuilderTmpl, err := template.New("vm-builder").Parse(dockerfileVmBuilder)
 	if err != nil {
 		log.Fatal(err)
@@ -270,6 +274,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	// generate vmstart script from template
 	scriptVmStartTmpl, err := template.New("vmstart").Parse(scriptVmStart)
 	if err != nil {
 		log.Fatal(err)
@@ -280,16 +285,18 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	// add 'Dockerfile' file to docker build context
 	if err = AddToTar(tw, "Dockerfile", dockerfileVmBuilderBuffer); err != nil {
 		log.Fatalln(err)
 	}
-
+	// add 'vmstart' file to docker build context
 	if err = AddToTar(tw, "vmstart", scriptVmStartBuffer); err != nil {
 		log.Fatalln(err)
 	}
 
 	var b bytes.Buffer
 
+	// add 'inittab' file to docker build context
 	_, err = b.WriteString(scriptInitTab)
 	if err != nil {
 		log.Fatalln(err)
@@ -298,6 +305,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	// add 'vmacpi' file to docker build context
 	b.Reset()
 	_, err = b.WriteString(scriptVmAcpi)
 	if err != nil {
@@ -307,6 +315,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	// add 'vminit' file to docker build context
 	b.Reset()
 	_, err = b.WriteString(scriptVmInit)
 	if err != nil {
@@ -323,7 +332,7 @@ func main() {
 
 	opt := types.ImageBuildOptions{
 		Tags: []string{
-			*dstImage,
+			dstIm,
 		},
 		BuildArgs:      buildArgs,
 		SuppressOutput: true,
@@ -338,7 +347,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	// quiet build
+	// do quiet build - discard output
 	io.Copy(io.Discard, buildResp.Body)
 	/*
 	   if err = printReader(buildResp.Body); err != nil {
@@ -348,8 +357,9 @@ func main() {
 
 	if len(*outFile) != 0 {
 		log.Printf("Save disk image as %s", *outFile)
+		// create container from docker image we just built
 		containerResp, err := cli.ContainerCreate(ctx, &container.Config{
-			Image:      *dstImage,
+			Image:      dstIm,
 			Tty:        false,
 			Entrypoint: imageSpec.Config.Entrypoint,
 			Cmd:        imageSpec.Config.Cmd,
@@ -361,13 +371,14 @@ func main() {
 			log.Println(containerResp.Warnings)
 		}
 
+		// copy file from container as tar archive
 		fromContainer, _, err := cli.CopyFromContainer(ctx, containerResp.ID, "/disk.qcow2")
 		if err != nil {
 			log.Fatalln(err)
 		}
 
+		// untar file from tar archive
 		tarReader := tar.NewReader(fromContainer)
-
 		for {
 			header, err := tarReader.Next()
 			if err == io.EOF {
@@ -393,7 +404,7 @@ func main() {
 				log.Fatalln(err)
 			}
 		}
-
+		// remove container
 		if err = cli.ContainerRemove(ctx, containerResp.ID, types.ContainerRemoveOptions{}); err != nil {
 			log.Println(err)
 		}

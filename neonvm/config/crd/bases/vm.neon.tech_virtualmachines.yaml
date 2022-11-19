@@ -889,6 +889,17 @@ spec:
                 type: object
               guest:
                 properties:
+                  args:
+                    description: Arguments to the entrypoint. The docker image's cmd
+                      is used if this is not provided.
+                    items:
+                      type: string
+                    type: array
+                  command:
+                    description: Docker image Entrypoint array replcacement.
+                    items:
+                      type: string
+                    type: array
                   cpus:
                     properties:
                       max:
@@ -908,6 +919,22 @@ spec:
                         minimum: 1
                         type: integer
                     type: object
+                  env:
+                    description: List of environment variables to set in the vmstart
+                      process.
+                    items:
+                      properties:
+                        name:
+                          description: Name of the environment variable. Must be a
+                            C_IDENTIFIER.
+                          type: string
+                        value:
+                          default: ""
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
                   memorySlotSize:
                     anyOf:
                     - type: integer

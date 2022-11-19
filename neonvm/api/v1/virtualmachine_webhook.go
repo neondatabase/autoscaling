@@ -98,6 +98,15 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	if !reflect.DeepEqual(r.Spec.Guest.RootDisk, before.Spec.Guest.RootDisk) {
 		return fmt.Errorf(".rootDisk is immutable")
 	}
+	if !reflect.DeepEqual(r.Spec.Guest.Command, before.Spec.Guest.Command) {
+		return fmt.Errorf(".command is immutable")
+	}
+	if !reflect.DeepEqual(r.Spec.Guest.Args, before.Spec.Guest.Args) {
+		return fmt.Errorf(".args is immutable")
+	}
+	if !reflect.DeepEqual(r.Spec.Guest.Env, before.Spec.Guest.Env) {
+		return fmt.Errorf(".env is immutable")
+	}
 
 	// validate .spec.guest.cpu.use
 	if r.Spec.Guest.CPUs.Use != nil {

@@ -69,6 +69,16 @@ type Guest struct {
 	MemorySlots MemorySlots `json:"memorySlots"`
 	// +optional
 	RootDisk RootDisk `json:"rootDisk"`
+	// Docker image Entrypoint array replcacement.
+	// +optional
+	Command []string `json:"command,omitempty"`
+	// Arguments to the entrypoint.
+	// The docker image's cmd is used if this is not provided.
+	// +optional
+	Args []string `json:"args,omitempty"`
+	// List of environment variables to set in the vmstart process.
+	// +optional
+	Env []EnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
 	// List of ports to expose from the container.
 	// Cannot be updated.
 	// +optional
@@ -124,6 +134,14 @@ type RootDisk struct {
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy"`
 	// +optional
 	Execute []string `json:"execute,omitempty"`
+}
+
+type EnvVar struct {
+	// Name of the environment variable. Must be a C_IDENTIFIER.
+	Name string `json:"name"`
+	// +optional
+	// +kubebuilder:default:=""
+	Value string `json:"value,omitempty"`
 }
 
 type Port struct {
