@@ -55,20 +55,37 @@ var _ webhook.Validator = &VirtualMachine{}
 func (r *VirtualMachine) ValidateCreate() error {
 	virtualmachinelog.Info("validate create", "name", r.Name)
 
-	// validate .cpus.use and .cpus.max
+	// validate .spec.guest.cpus.use and .spec.guest.cpus.max
 	if r.Spec.Guest.CPUs.Use != nil {
 		if r.Spec.Guest.CPUs.Max == nil {
-			return fmt.Errorf(".cpus.max must be defined if .cpus.use specified")
+			return fmt.Errorf(".spec.guest.cpus.max must be defined if .spec.guest.cpus.use specified")
 		}
 		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
-			return fmt.Errorf(".cpus.use (%d) should be greater than or equal to the .cpus.min (%d)",
+			return fmt.Errorf(".spec.guest.cpus.use (%d) should be greater than or equal to the .spec.guest.cpus.min (%d)",
 				*r.Spec.Guest.CPUs.Use,
 				*r.Spec.Guest.CPUs.Min)
 		}
 		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
-			return fmt.Errorf(".cpus.use (%d) should be less than or equal to the .cpus.max (%d)",
+			return fmt.Errorf(".spec.guest.cpus.use (%d) should be less than or equal to the .spec.guest.cpus.max (%d)",
 				*r.Spec.Guest.CPUs.Use,
 				*r.Spec.Guest.CPUs.Max)
+		}
+	}
+
+	// validate .spec.disk names
+	for _, disk := range r.Spec.Disks {
+		virtualmachinelog.Info("validate disk", "name", disk.Name)
+		if disk.Name == "virtualmachineimages" {
+			return fmt.Errorf("'virtualmachineimages' is reserved name for .spec.disks[].name")
+		}
+		if disk.Name == "vmroot" {
+			return fmt.Errorf("'vmroot' is reserved name for .spec.disks[].name")
+		}
+		if disk.Name == "vmruntime" {
+			return fmt.Errorf("'vmruntime' is reserved name for .spec.disks[].name")
+		}
+		if len(disk.Name) > 32 {
+			return fmt.Errorf("disk name '%s' too long, should be less than or equal to 32", disk.Name)
 		}
 	}
 	return nil
@@ -81,31 +98,34 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	// process immutable fields
 	before, _ := old.(*VirtualMachine)
 	if *r.Spec.Guest.CPUs.Min != *before.Spec.Guest.CPUs.Min {
-		return fmt.Errorf(".cpus.min is immutable")
+		return fmt.Errorf(".spec.guest.cpus.min is immutable")
 	}
 	if *r.Spec.Guest.CPUs.Max != *before.Spec.Guest.CPUs.Max {
-		return fmt.Errorf(".cpus.max is immutable")
+		return fmt.Errorf(".spec.guest.cpus.max is immutable")
 	}
 	if *r.Spec.Guest.MemorySlots.Min != *before.Spec.Guest.MemorySlots.Min {
-		return fmt.Errorf(".memorySlots.min is immutable")
+		return fmt.Errorf(".spec.guest.memorySlots.min is immutable")
 	}
 	if *r.Spec.Guest.MemorySlots.Max != *before.Spec.Guest.MemorySlots.Max {
-		return fmt.Errorf(".memorySlots.max is immutable")
+		return fmt.Errorf(".spec.guest.memorySlots.max is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Ports, before.Spec.Guest.Ports) {
-		return fmt.Errorf(".ports is immutable")
+		return fmt.Errorf(".spec.guest.ports is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.RootDisk, before.Spec.Guest.RootDisk) {
-		return fmt.Errorf(".rootDisk is immutable")
+		return fmt.Errorf(".spec.guest.rootDisk is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Command, before.Spec.Guest.Command) {
-		return fmt.Errorf(".command is immutable")
+		return fmt.Errorf(".spec.guest.command is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Args, before.Spec.Guest.Args) {
-		return fmt.Errorf(".args is immutable")
+		return fmt.Errorf(".spec.guest.args is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Env, before.Spec.Guest.Env) {
-		return fmt.Errorf(".env is immutable")
+		return fmt.Errorf(".spec.guest.env is immutable")
+	}
+	if !reflect.DeepEqual(r.Spec.Disks, before.Spec.Disks) {
+		return fmt.Errorf(".spec.disks is immutable")
 	}
 
 	// validate .spec.guest.cpu.use

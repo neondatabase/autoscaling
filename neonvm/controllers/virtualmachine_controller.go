@@ -513,10 +513,10 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 				Image:           virtualmachine.Spec.Guest.RootDisk.Image,
 				Name:            "init-rootdisk",
 				ImagePullPolicy: virtualmachine.Spec.Guest.RootDisk.ImagePullPolicy,
-				Args:            []string{"cp", "/disk.qcow2", "/images/rootdisk.qcow2"},
+				Args:            []string{"cp", "/disk.qcow2", "/vm/images/rootdisk.qcow2"},
 				VolumeMounts: []corev1.VolumeMount{{
-					Name:      "images",
-					MountPath: "/images",
+					Name:      "virtualmachineimages",
+					MountPath: "/vm/images",
 				}},
 			}},
 			Containers: []corev1.Container{{
@@ -534,17 +534,64 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 				}},
 				Command: []string{"runner", "-vmdump", base64.StdEncoding.EncodeToString(vmSpecJson)},
 				VolumeMounts: []corev1.VolumeMount{{
-					Name:      "images",
-					MountPath: "/images",
+					Name:      "virtualmachineimages",
+					MountPath: "/vm/images",
 				}},
 			}},
 			Volumes: []corev1.Volume{{
-				Name: "images",
+				Name: "virtualmachineimages",
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{},
 				},
 			}},
 		},
+	}
+
+	for _, disk := range virtualmachine.Spec.Disks {
+		mnt := corev1.VolumeMount{
+			Name:      disk.Name,
+			MountPath: fmt.Sprintf("/vm/mounts%s", disk.MountPath),
+		}
+		if disk.ReadOnly != nil {
+			mnt.ReadOnly = *disk.ReadOnly
+		}
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
+
+		switch {
+		case disk.ConfigMap != nil:
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: disk.Name,
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: disk.ConfigMap.Name,
+						},
+						Items: disk.ConfigMap.Items,
+					},
+				},
+			})
+		case disk.Secret != nil:
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: disk.Name,
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: disk.Secret.SecretName,
+						Items:      disk.Secret.Items,
+					},
+				},
+			})
+		case disk.EmptyDisk != nil:
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: disk.Name,
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						SizeLimit: &disk.EmptyDisk.Size,
+					},
+				},
+			})
+		default:
+			// do nothing
+		}
 	}
 
 	// Set the ownerRef for the Pod

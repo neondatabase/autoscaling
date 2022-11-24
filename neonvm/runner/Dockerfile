@@ -37,10 +37,11 @@ RUN apk add --no-cache \
     socat \
     jq \
     busybox-extras \
+    e2fsprogs \
     qemu-system-x86_64 \
     qemu-img
 
 COPY --from=builder /runner /usr/bin/runner
-COPY hack/vmlinuz /kernel/vmlinuz
+COPY hack/vmlinuz /vm/kernel/vmlinuz
 
 ENTRYPOINT ["/sbin/tini", "--", "runner"]

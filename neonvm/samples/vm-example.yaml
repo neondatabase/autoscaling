@@ -1,3 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: example
+spec:
+  ports:
+  - name: psql
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+    nodePort: 30432
+  type: NodePort
+  selector:
+    vm.neon.tech/name: example
+
+---
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
@@ -12,13 +28,51 @@ spec:
     memorySlots:
       min: 1
       max: 4
-      use: 1
+      use: 4
     rootDisk:
       image: vm-postgres:14-alpine
-      size: 8Gi
+      #size: 8Gi
+    args:
+      - -c
+      - 'config_file=/etc/postgresql/postgresql.conf'
     env:
       # for testing only - allows login without password
       - name: POSTGRES_HOST_AUTH_METHOD
         value: trust
     ports:
       - port: 5432
+  disks:
+    - name: pgdata
+      mountPath: /var/lib/postgresql
+      emptyDisk:
+        size: 16Gi
+    - name: config
+      mountPath: /etc/postgresql
+      configMap:
+        name: postgresql-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-config
+data:
+  postgresql.conf: |
+    listen_addresses = '*'
+
+    max_connections = 64
+    shared_buffers = 2GB
+    effective_cache_size = 1GB
+    maintenance_work_mem = 256MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 16MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    work_mem = 8MB
+    min_wal_size = 1GB
+    max_wal_size = 4GB
+    max_worker_processes = 8
+    max_parallel_workers_per_gather = 4
+    max_parallel_workers = 8
+    max_parallel_maintenance_workers = 4

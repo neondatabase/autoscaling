@@ -48,6 +48,10 @@ type VirtualMachineSpec struct {
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
 	Guest Guest `json:"guest"`
+
+	// List of disk that can be mounted by virtual machine.
+	// +optional
+	Disks []Disk `json:"disks,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
@@ -124,8 +128,6 @@ type MemorySlots struct {
 }
 
 type RootDisk struct {
-	// +optional
-	// +kubebuilder:default:="kubevm/vm-alpine:3.16"
 	Image string `json:"image"`
 	// +optional
 	Size resource.Quantity `json:"size,omitempty"`
@@ -156,7 +158,7 @@ type Port struct {
 	Port int `json:"port"`
 	// Protocol for port. Must be UDP or TCP.
 	// Defaults to "TCP".
-	// +kubebuilder:default:="TCP"
+	// +kubebuilder:default:=TCP
 	Protocol Protocol `json:"protocol,omitempty"`
 }
 
@@ -168,6 +170,37 @@ const (
 	// ProtocolUDP is the UDP protocol.
 	ProtocolUDP Protocol = "UDP"
 )
+
+type Disk struct {
+	//Disk's name.
+	// Must be a DNS_LABEL and unique within the virtual machine.
+	Name string `json:"name"`
+	// Mounted read-only if true, read-write otherwise (false or unspecified).
+	// Defaults to false.
+	// +optional
+	// +kubebuilder:default:=false
+	ReadOnly *bool `json:"readOnly,omitempty"`
+	// Path within the virtual machine at which the disk should be mounted.  Must
+	// not contain ':'.
+	MountPath string `json:"mountPath"`
+	// DiskSource represents the location and type of the mounted disk.
+	DiskSource `json:",inline"`
+}
+
+type DiskSource struct {
+	// EmptyDisk represents a temporary empty qcow2 disk that shares a vm's lifetime.
+	EmptyDisk *EmptyDiskSource `json:"emptyDisk,omitempty"`
+	// configMap represents a configMap that should populate this disk
+	// +optional
+	ConfigMap *corev1.ConfigMapVolumeSource `json:"configMap,omitempty"`
+	// Secret represents a secret that should populate this disk.
+	// +optional
+	Secret *corev1.SecretVolumeSource `json:"secret,omitempty"`
+}
+
+type EmptyDiskSource struct {
+	Size resource.Quantity `json:"size"`
+}
 
 // VirtualMachineStatus defines the observed state of VirtualMachine
 type VirtualMachineStatus struct {

@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -30,11 +32,12 @@ import (
 const (
 	QEMU_BIN      = "qemu-system-x86_64"
 	QEMU_IMG_BIN  = "qemu-img"
-	kernelPath    = "/kernel/vmlinuz"
+	kernelPath    = "/vm/kernel/vmlinuz"
 	kernelCmdline = "memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
-	rootDiskPath    = "/images/rootdisk.qcow2"
-	runtimeDiskPath = "/images/runtime.iso"
+	rootDiskPath    = "/vm/images/rootdisk.qcow2"
+	runtimeDiskPath = "/vm/images/runtime.iso"
+	mountedDiskPath = "/vm/images"
 
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
@@ -147,18 +150,22 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
-func createISO9660(diskPath string, command []string, args []string, env []vmv1.EnvVar) error {
+func createISO9660runtime(diskPath string, command []string, args []string, env []vmv1.EnvVar, disks []vmv1.Disk) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
 	}
 	defer writer.Cleanup()
 
-	c := []string{}
-	c = append(c, command...)
-	c = append(c, args...)
-	if len(c) != 0 {
-		err = writer.AddFile(bytes.NewReader([]byte(shellescape.QuoteCommand(c))), "run.sh")
+	if len(command) != 0 {
+		err = writer.AddFile(bytes.NewReader([]byte(shellescape.QuoteCommand(command))), "command.sh")
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(args) != 0 {
+		err = writer.AddFile(bytes.NewReader([]byte(shellescape.QuoteCommand(args))), "args.sh")
 		if err != nil {
 			return err
 		}
@@ -176,12 +183,177 @@ func createISO9660(diskPath string, command []string, args []string, env []vmv1.
 		}
 	}
 
+	if len(disks) != 0 {
+		mounts := []string{}
+		for _, disk := range disks {
+			mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
+			switch {
+			case disk.EmptyDisk != nil:
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
+			case disk.ConfigMap != nil || disk.Secret != nil:
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
+			default:
+				// do nothing
+			}
+		}
+		mounts = append(mounts, "")
+		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(mounts, "\n"))), "mounts.sh")
+		if err != nil {
+			return err
+		}
+	}
+
 	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
 
-	err = writer.WriteTo(outputFile, "runtime")
+	err = writer.WriteTo(outputFile, "vmruntime")
+	if err != nil {
+		return err
+	}
+
+	err = outputFile.Close()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func calcDirUsage(dirPath string) (int64, error) {
+	stat, err := os.Lstat(dirPath)
+	if err != nil {
+		return 0, err
+	}
+
+	size := stat.Size()
+
+	if !stat.IsDir() {
+		return size, nil
+	}
+
+	dir, err := os.Open(dirPath)
+	if err != nil {
+		return size, err
+	}
+	defer dir.Close()
+
+	files, err := dir.Readdir(-1)
+	if err != nil {
+		return size, err
+	}
+
+	for _, file := range files {
+		if file.Name() == "." || file.Name() == ".." {
+			continue
+		}
+		s, err := calcDirUsage(dirPath + "/" + file.Name())
+		if err != nil {
+			return size, err
+		}
+		size += s
+	}
+	return size, nil
+}
+
+func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, contentPath *string) error {
+	ext4blocksMin := int64(64)
+	ext4blockSize := int64(4096)
+	ext4blockCount := int64(0)
+
+	if diskSize != nil {
+		ext4blockCount = diskSize.Value() / ext4blockSize
+	} else if contentPath != nil {
+		dirSize, err := calcDirUsage(*contentPath)
+		if err != nil {
+			return err
+		}
+		ext4blockCount = int64(math.Ceil(float64(ext4blocksMin) + float64((dirSize / ext4blockSize))))
+	} else {
+		return fmt.Errorf("diskSize or contentPath should be specified")
+	}
+
+	if contentPath == nil {
+		if err := execFg("mkfs.ext4", "-q", "-L", diskName, "-b", fmt.Sprintf("%d", ext4blockSize), "ext4.raw", fmt.Sprintf("%d", ext4blockCount)); err != nil {
+			return err
+		}
+	} else {
+		if err := execFg("mkfs.ext4", "-q", "-L", diskName, "-d", *contentPath, "-b", fmt.Sprintf("%d", ext4blockSize), "ext4.raw", fmt.Sprintf("%d", ext4blockCount)); err != nil {
+			return err
+		}
+	}
+
+	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
+		return err
+	}
+
+	if err := execFg("rm", "-f", "ext4.raw"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createISO9660FromPath(diskName string, diskPath string, contentPath string) error {
+	writer, err := iso9660.NewWriter()
+	if err != nil {
+		return err
+	}
+	defer writer.Cleanup()
+
+	dir, err := os.Open(contentPath)
+	if err != nil {
+		return err
+	}
+	dirEntrys, err := dir.ReadDir(0)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range dirEntrys {
+		fileName := fmt.Sprintf("%s/%s", contentPath, file.Name())
+		outputPath := file.Name()
+
+		if file.IsDir() {
+			continue
+		}
+		// try to resolve symlink and check resolved file IsDir
+		resolved, err := filepath.EvalSymlinks(fileName)
+		if err != nil {
+			return err
+		}
+		resolvedOpen, err := os.Open(resolved)
+		if err != nil {
+			return err
+		}
+		resolvedStat, err := resolvedOpen.Stat()
+		if err != nil {
+			return err
+		}
+		if resolvedStat.IsDir() {
+			continue
+		}
+
+		log.Printf("adding file: %s\n", outputPath)
+		fileToAdd, err := os.Open(fileName)
+		if err != nil {
+			return err
+		}
+		defer fileToAdd.Close()
+
+		err = writer.AddFile(fileToAdd, outputPath)
+		if err != nil {
+			return err
+		}
+	}
+
+	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+
+	err = writer.WriteTo(outputFile, diskName)
 	if err != nil {
 		return err
 	}
@@ -222,7 +394,8 @@ func main() {
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 
-	if err = createISO9660(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, vmSpec.Guest.Env); err != nil {
+	// create iso9660 disk with runtime options (command, args, envs, mounts)
+	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
 		log.Fatalln(err)
 	}
 
@@ -273,6 +446,27 @@ func main() {
 	// disk details
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
+	for _, disk := range vmSpec.Disks {
+		switch {
+		case disk.EmptyDisk != nil:
+			log.Printf("creating QCOW2 image '%s' with empty ext4 filesystem", disk.Name)
+			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
+			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
+				log.Fatalln(err)
+			}
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none", disk.Name, dPath))
+		case disk.ConfigMap != nil || disk.Secret != nil:
+			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
+			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
+			log.Printf("creating iso9660 image '%s' for '%s' from path '%s'", dPath, disk.Name, mnt)
+			if err := createISO9660FromPath(disk.Name, dPath, mnt); err != nil {
+				log.Fatalln(err)
+			}
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
+		default:
+			// do nothing
+		}
+	}
 
 	// cpu details
 	qemuCmd = append(qemuCmd, "-cpu", "host")

@@ -41,11 +41,13 @@ RUN set -e \
 		agetty \
 		su-exec \
 		e2fsprogs-extra \
+		blkid \
 	&& mv /sbin/acpid         /neonvm/bin/ \
 	&& mv /sbin/udevd         /neonvm/bin/ \
 	&& mv /sbin/agetty        /neonvm/bin/ \
 	&& mv /sbin/su-exec       /neonvm/bin/ \
 	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
+	&& mv /sbin/blkid         /neonvm/bin/blkid \
 	&& mkdir -p /neonvm/lib \
 	&& cp -f /lib/ld-musl-x86_64.so.1  /neonvm/lib/ \
 	&& cp -f /lib/libblkid.so.1.1.0    /neonvm/lib/libblkid.so.1 \
@@ -57,7 +59,8 @@ RUN set -e \
 	&& cp -f /usr/lib/libzstd.so.1.5.2 /neonvm/lib/libzstd.so.1 \
 	&& cp -f /lib/libe2p.so.2          /neonvm/lib/libe2p.so.2 \
 	&& cp -f /lib/libext2fs.so.2       /neonvm/lib/libext2fs.so.2 \
-	&& cp -f /lib/libcom_err.so.2      /neonvm/lib/libcom_err.so.2
+	&& cp -f /lib/libcom_err.so.2      /neonvm/lib/libcom_err.so.2 \
+	&& cp -f /lib/libblkid.so.1        /neonvm/lib/libblkid.so.1
 
 # tools for qemu disk creation
 RUN set -e \
@@ -79,7 +82,7 @@ COPY --from=vm-runtime /neonvm /rootdisk/neonvm
 RUN set -e \
     && mkdir -p /rootdisk/etc \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
-    && mkfs.ext4 -d /rootdisk /disk.raw ${DISK_SIZE} \
+    && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
 FROM alpine:3.16
@@ -87,17 +90,34 @@ RUN apk add --no-cache --no-progress --quiet qemu-img
 COPY --from=builder /disk.qcow2 /
 `
 	scriptVmStart = `#!/neonvm/bin/sh
+
+/neonvm/bin/cat <<'EOF' >/neonvm/bin/vmstarter.sh
 {{ range .Env }}
 export {{.}}
 {{- end }}
+EOF
 
-/neonvm/bin/test -f /neonvm/runtime/env.sh && source /neonvm/runtime/env.sh
-
-if [ -f /neonvm/runtime/run.sh ]; then
-    /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/runtime/run.sh
-else
-    /neonvm/bin/su-exec {{.User}} {{- range .Entrypoint}} {{.}} {{- end }} {{- range .Cmd }} {{.}} {{- end }}
+if /neonvm/bin/test -f /neonvm/runtime/env.sh; then
+    /neonvm/bin/cat /neonvm/runtime/env.sh >>/neonvm/bin/vmstarter.sh
 fi
+
+if /neonvm/bin/test -f /neonvm/runtime/command.sh; then
+    /neonvm/bin/cat /neonvm/runtime/command.sh >>/neonvm/bin/vmstarter.sh
+else
+    /neonvm/bin/echo -n '{{- range .Entrypoint}}{{.}} {{- end }}' >>/neonvm/bin/vmstarter.sh
+fi
+
+echo -n ' ' >>/neonvm/bin/vmstarter.sh
+
+if /neonvm/bin/test -f /neonvm/runtime/args.sh; then
+    /neonvm/bin/cat /neonvm/runtime/args.sh >>/neonvm/bin/vmstarter.sh
+else
+    /neonvm/bin/echo '{{- range .Cmd }}{{.}} {{- end }}' >>/neonvm/bin/vmstarter.sh
+fi
+
+/neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
+
+/neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh
 `
 
 	scriptInitTab = `
@@ -138,7 +158,10 @@ mount -t devpts -o noexec,nosuid       devpts    /dev/pts
 mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
 
 # neonvm runtime params mounted as iso9660 disk
-mount /dev/vdb /neonvm/runtime
+mount -o ro,mode=0644 /dev/vdb /neonvm/runtime
+
+# mount virtual machine .spec.disks
+test -f /neonvm/runtime/mounts.sh && /neonvm/bin/sh /neonvm/runtime/mounts.sh
 
 # try resize filesystem
 resize2fs /dev/vda
