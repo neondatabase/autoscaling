@@ -10,7 +10,7 @@ import (
 	"github.com/digitalocean/go-qemu/qmp"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	vmv1 "github.com/neondatabase/neonvm/api/v1"
+	vmv1 "github.com/neondatabase/neonvm/apis/neonvm/v1"
 )
 
 type QmpCpus struct {

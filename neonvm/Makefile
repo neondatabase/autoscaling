@@ -10,9 +10,12 @@ VM_KERNEL_VERSION ?= "5.15.76"
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.25.0
 
+# Get the currently used golang base path
+GOPATH=$(shell go env GOPATH)
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
-GOBIN=$(shell go env GOPATH)/bin
+GOBIN=$(GOPATH)/bin
 else
 GOBIN=$(shell go env GOBIN)
 endif
@@ -44,13 +47,16 @@ help: ## Display this help.
 
 ##@ Development
 
-.PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-
+# Generate a number of things:
+#  * Code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations
+#  * WebhookConfiguration, ClusterRole, and CustomResourceDefinition objects
+#  * Go client
 .PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
+	iidfile=$$(mktemp /tmp/iid-XXXXXX) && \
+	docker build -f hack/Dockerfile.generate --iidfile $$iidfile . && \
+	docker run --rm -v $$PWD:/go/src/github.com/neondatabase/neonvm -w /go/src/github.com/neondatabase/neonvm $$(cat $$iidfile) ./hack/generate.sh && \
+	rm -rf $$iidfile
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -62,19 +68,19 @@ vet: ## Run go vet against code.
 
 # TODO: fix/write tests
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
+test: fmt vet envtest ## Run tests.
 #	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
 ##@ Build
 
 .PHONY: build
-build: generate fmt vet ## Build controller binary.
+build: fmt vet ## Build controller binary.
 	go build -o bin/controller main.go
 	go build -o bin/runner runner/main.go
 	go build -o bin/vm-builder tools/vm-builder/main.go
 
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
+run: fmt vet ## Run a controller from your host.
 	go run ./main.go
 
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
@@ -116,16 +122,16 @@ ifndef ignore-not-found
 endif
 
 .PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+install: kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | kubectl apply -f -
 
 .PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+uninstall: kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 DEPLOYTS := $(shell date +%s)
 .PHONY: deploy
-deploy: kind-load  manifests kustomize install ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: kind-load kustomize install ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/controller && $(KUSTOMIZE) edit set image controller=$(IMG) && $(KUSTOMIZE) edit add annotation redeploy-at:$(DEPLOYTS) --force
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 	kubectl -n neonvm-system rollout status deployment neonvm-controller
@@ -143,23 +149,18 @@ $(LOCALBIN):
 
 ## Tool Binaries
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v3.8.7
 CONTROLLER_TOOLS_VERSION ?= v0.9.2
+GENERATE_GROUPS_VERSION ?= v0.25.0
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
 	test -s $(LOCALBIN)/kustomize || { curl -Ss $(KUSTOMIZE_INSTALL_SCRIPT) | bash -s -- $(subst v,,$(KUSTOMIZE_VERSION)) $(LOCALBIN); }
-
-.PHONY: controller-gen
-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
-$(CONTROLLER_GEN): $(LOCALBIN)
-	test -s $(LOCALBIN)/controller-gen || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
 
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.

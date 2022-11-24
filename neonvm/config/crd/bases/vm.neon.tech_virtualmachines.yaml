@@ -1,9 +1,10 @@
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.9.2
+    controller-gen.kubebuilder.io/version: v0.6.2
   creationTimestamp: null
   name: virtualmachines.vm.neon.tech
 spec:
@@ -161,7 +162,6 @@ spec:
                                     type: object
                                   type: array
                               type: object
-                              x-kubernetes-map-type: atomic
                             weight:
                               description: Weight associated with matching the corresponding
                                 nodeSelectorTerm, in the range 1-100.
@@ -262,12 +262,10 @@ spec:
                                     type: object
                                   type: array
                               type: object
-                              x-kubernetes-map-type: atomic
                             type: array
                         required:
                         - nodeSelectorTerms
                         type: object
-                        x-kubernetes-map-type: atomic
                     type: object
                   podAffinity:
                     description: Describes pod affinity scheduling rules (e.g. co-locate
@@ -344,7 +342,6 @@ spec:
                                         The requirements are ANDed.
                                       type: object
                                   type: object
-                                  x-kubernetes-map-type: atomic
                                 namespaceSelector:
                                   description: A label query over the set of namespaces
                                     that the term applies to. The term is applied
@@ -401,7 +398,6 @@ spec:
                                         The requirements are ANDed.
                                       type: object
                                   type: object
-                                  x-kubernetes-map-type: atomic
                                 namespaces:
                                   description: namespaces specifies a static list
                                     of namespace names that the term applies to. The
@@ -500,7 +496,6 @@ spec:
                                     requirements are ANDed.
                                   type: object
                               type: object
-                              x-kubernetes-map-type: atomic
                             namespaceSelector:
                               description: A label query over the set of namespaces
                                 that the term applies to. The term is applied to the
@@ -552,7 +547,6 @@ spec:
                                     requirements are ANDed.
                                   type: object
                               type: object
-                              x-kubernetes-map-type: atomic
                             namespaces:
                               description: namespaces specifies a static list of namespace
                                 names that the term applies to. The term is applied
@@ -653,7 +647,6 @@ spec:
                                         The requirements are ANDed.
                                       type: object
                                   type: object
-                                  x-kubernetes-map-type: atomic
                                 namespaceSelector:
                                   description: A label query over the set of namespaces
                                     that the term applies to. The term is applied
@@ -710,7 +703,6 @@ spec:
                                         The requirements are ANDed.
                                       type: object
                                   type: object
-                                  x-kubernetes-map-type: atomic
                                 namespaces:
                                   description: namespaces specifies a static list
                                     of namespace names that the term applies to. The
@@ -809,7 +801,6 @@ spec:
                                     requirements are ANDed.
                                   type: object
                               type: object
-                              x-kubernetes-map-type: atomic
                             namespaceSelector:
                               description: A label query over the set of namespaces
                                 that the term applies to. The term is applied to the
@@ -861,7 +852,6 @@ spec:
                                     requirements are ANDed.
                                   type: object
                               type: object
-                              x-kubernetes-map-type: atomic
                             namespaces:
                               description: namespaces specifies a static list of namespace
                                 names that the term applies to. The term is applied
@@ -955,7 +945,6 @@ spec:
                             keys must be defined
                           type: boolean
                       type: object
-                      x-kubernetes-map-type: atomic
                     emptyDisk:
                       description: EmptyDisk represents a temporary empty qcow2 disk
                         that shares a vm's lifetime.
@@ -1184,7 +1173,6 @@ spec:
                         TODO: Add other useful fields. apiVersion, kind, uid?'
                       type: string
                   type: object
-                  x-kubernetes-map-type: atomic
                 type: array
               nodeSelector:
                 additionalProperties:
@@ -1283,12 +1271,14 @@ spec:
                   description: "Condition contains details for one aspect of the current
                     state of this API Resource. --- This struct is intended for direct
                     use as an array at the field path .status.conditions.  For example,
-                    \n type FooStatus struct{ // Represents the observations of a
-                    foo's current state. // Known .status.conditions.type are: \"Available\",
-                    \"Progressing\", and \"Degraded\" // +patchMergeKey=type // +patchStrategy=merge
-                    // +listType=map // +listMapKey=type Conditions []metav1.Condition
+                    \n \ttype FooStatus struct{ \t    // Represents the observations
+                    of a foo's current state. \t    // Known .status.conditions.type
+                    are: \"Available\", \"Progressing\", and \"Degraded\" \t    //
+                    +patchMergeKey=type \t    // +patchStrategy=merge \t    // +listType=map
+                    \t    // +listMapKey=type \t    Conditions []metav1.Condition
                     `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\"
-                    protobuf:\"bytes,1,rep,name=conditions\"` \n // other fields }"
+                    protobuf:\"bytes,1,rep,name=conditions\"` \n \t    // other fields
+                    \t}"
                   properties:
                     lastTransitionTime:
                       description: lastTransitionTime is the last time the condition
@@ -1370,3 +1360,9 @@ spec:
     storage: true
     subresources:
       status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

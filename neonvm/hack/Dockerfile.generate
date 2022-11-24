@@ -1,0 +1,9 @@
+FROM golang:1.19
+
+WORKDIR /workspace
+
+COPY go.mod go.mod
+COPY go.sum go.sum
+
+RUN git clone --branch=v0.25.0 --depth=1 https://github.com/kubernetes/code-generator.git $GOPATH/src/k8s.io/code-generator
+RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen

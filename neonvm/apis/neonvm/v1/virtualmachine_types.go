@@ -22,6 +22,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// VirtualMachineNameLabel is the label assigned to each NeonVM Pod, providing the name of the
+// VirtualMachine object for the VM running in it
+//
+// This label can be used both to find which VM is running in a Pod (by getting the value of the
+// label) or to find which Pod a VM is running in (by searching for Pods with the label equal to the
+// VM's name).
+const VirtualMachineNameLabel string = "vm.neon.tech/name"
+
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // VirtualMachineSpec defines the desired state of VirtualMachine
@@ -247,6 +255,7 @@ const (
 	VmFailed VmPhase = "Failed"
 )
 
+//+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:singular=neonvm

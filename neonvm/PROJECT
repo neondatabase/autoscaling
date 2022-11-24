@@ -22,7 +22,7 @@ resources:
   domain: neon.tech
   group: vm
   kind: VirtualMachine
-  path: github.com/neondatabase/neonvm/api/v1
+  path: github.com/neondatabase/neonvm/apis/neonvm/v1
   version: v1
   webhooks:
     defaulting: true

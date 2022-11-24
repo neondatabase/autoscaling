@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	vmv1 "github.com/neondatabase/neonvm/api/v1"
+	vmv1 "github.com/neondatabase/neonvm/apis/neonvm/v1"
 )
 
 const virtualmachineFinalizer = "vm.neon.tech/finalizer"
@@ -605,8 +605,9 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
 func labelsForVirtualMachine(name string) map[string]string {
-	return map[string]string{"app.kubernetes.io/name": "VirtualMachine",
-		"vm.neon.tech/name": name,
+	return map[string]string{
+		"app.kubernetes.io/name":     "VirtualMachine",
+		vmv1.VirtualMachineNameLabel: name,
 	}
 }
 

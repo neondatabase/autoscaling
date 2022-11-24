@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	vmv1 "github.com/neondatabase/neonvm/api/v1"
+	vmv1 "github.com/neondatabase/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/neonvm/controllers"
 	//+kubebuilder:scaffold:imports
 )

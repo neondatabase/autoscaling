@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	vmv1 "github.com/neondatabase/neonvm/api/v1"
+	vmv1 "github.com/neondatabase/neonvm/apis/neonvm/v1"
 )
 
 var _ = Describe("VirtualMachine controller", func() {
