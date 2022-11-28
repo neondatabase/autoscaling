@@ -70,11 +70,8 @@ spec:
         - /manager
         args:
         - --leader-elect
-        image: controller:latest
+        image: controller:dev
         name: manager
-        env:
-        - name: VM_RUNNER_IMAGE
-          value: runner:dev
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
