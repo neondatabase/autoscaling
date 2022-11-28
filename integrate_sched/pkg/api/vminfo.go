@@ -13,7 +13,7 @@ const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
 // care about
 type VmInfo struct {
-	Cpu VmCpuInfo
+	Cpu           VmCpuInfo
 	AlwaysMigrate bool
 }
 

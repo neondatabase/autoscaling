@@ -3,9 +3,9 @@ package api
 // Definition of the Metrics type, plus reading it from node_exporter output
 
 import (
-	"strings"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Metrics gives the information pulled from node_exporter that the scheduler may use to prioritize
@@ -26,7 +26,7 @@ func ReadMetrics(nodeExporterOutput []byte) (m Metrics, err error) {
 		var line string
 		for _, l := range lines {
 			if strings.HasPrefix(l, linePrefix) {
-				line = l;
+				line = l
 				break
 			}
 		}

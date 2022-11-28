@@ -16,7 +16,7 @@ type Config struct {
 type ScalingConfig struct {
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	CPU struct {
+	CPU                   struct {
 		// DoubleRatio gives the ratio between the VM's load average and number of CPUs above which
 		// we'll request double the vCPU count
 		//

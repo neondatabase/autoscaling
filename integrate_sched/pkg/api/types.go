@@ -44,7 +44,7 @@ type AgentRequest struct {
 // a notification that the autoscaler-agent has independently decreased its resource usage, or a
 // notification that the autoscaler-agent is satisfied with its current resources.
 type Resources struct {
-	VCPU uint16  `json:"vCPUs"`
+	VCPU uint16 `json:"vCPUs"`
 }
 
 /////////////////////////////////
