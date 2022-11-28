@@ -78,7 +78,9 @@ type ResourcePermit struct {
 	VCPU uint16 `json:"vCPUs"`
 }
 
-// MigrateResponse, when provided, is an instruction to the autsocaler-agent that it must migrate
+// MigrateResponse, when provided, is a notification to the autsocaler-agent that it will migrate
+//
+// After receiving a MigrateResponse, the autoscaler-agent MUST NOT change its resource allocation.
 //
 // TODO: fill this with more information as required
 type MigrateResponse struct{}

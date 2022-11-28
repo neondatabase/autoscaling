@@ -266,7 +266,7 @@ func (s *pluginState) getOrFetchNodeState(
 				)
 				cpu = allocatableCPU
 			} else {
-				return nil, fmt.Errorf("Node has no Capacity CPU limit (it does have Allocatable, but config.fallbackToAllocated = false. set it to true for a temporary hotfix)")
+				return nil, fmt.Errorf("Node has no Capacity CPU limit (it does have Allocatable, but config.fallbackToAllocatable = false. set it to true for a temporary hotfix)")
 			}
 		} else {
 			return nil, fmt.Errorf("Node has no Capacity or Allocatable CPU limits")

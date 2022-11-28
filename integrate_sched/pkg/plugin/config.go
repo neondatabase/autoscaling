@@ -40,7 +40,7 @@ type config struct {
 	//
 	// This flag *should* be false, but exists to allow a hotfix to quickly get things working if
 	// the appropriate information isn't there for some reason.
-	FallbackToAllocatable bool `json:"fallbackToAllocated"`
+	FallbackToAllocatable bool `json:"fallbackToAllocatable"`
 
 	// JSONString is the JSON string that was used to generate this config struct
 	JSONString string `json:"-"`
