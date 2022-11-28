@@ -2,10 +2,8 @@ name: release
 
 on:
   push:
-    branches:
-      - main
     tags:
-      - v*
+      - "*.*.*"
 
 env:
   KUSTOMIZE_VERSION:        "4.5.7"

@@ -2,7 +2,7 @@ name: vm-example
 
 on:
   schedule:
-    - cron:  '40 * * * *'
+    - cron:  '42 4 * * 2'  # run once a week
   workflow_dispatch: # adds ability to run this manually
 
 env:
