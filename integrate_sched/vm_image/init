@@ -2,25 +2,6 @@
 
 set -x
 
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-# system mounts
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
-mkdir -p /dev/pts
-mount -t devpts devpts /dev/pts
-mount -t tmpfs -o size=32M none /tmp
-mount -t tmpfs -o size=256M none /run
-
-# networking
-ip link set up dev lo
-ip link set up dev eth0
-ip link set up dev eth1
-udhcpc -q -i eth0
-udhcpc -q -i eth1
-ip address show
-ip route show
-
 # node_exporter metrics (/metrics on :9100)
 run_metrics () {
     while true; do
@@ -34,23 +15,16 @@ mkdir -p /run/node_exporter
 run_metrics &
 
 # postgresql init and start (data in memory!)
-mount -t tmpfs -o size=1G none /mnt
-export PGDATA=/mnt/data
-mkdir -p $PGDATA /run/postgresql
-chown -R postgres:postgres $PGDATA /run/postgresql
-su-exec postgres pg_ctl init -o '--no-sync'
-echo 'host all all 10.0.0.0/8     trust' | tee -a /mnt/data/pg_hba.conf
-echo 'host all all 172.16.0.0/16  trust' | tee -a /mnt/data/pg_hba.conf
-echo 'host all all 192.168.0.0/16 trust' | tee -a /mnt/data/pg_hba.conf
-su-exec postgres pg_ctl start -o '-c config_file=/etc/postgresql.conf'
+export PGDATA=/var/lib/postgresql
+mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql
+su-exec postgres pg_ctl start -o '-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf'
 
 echo; cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2
-echo -e "\nBoot took $(cut -d' ' -f1 /proc/uptime) seconds\n"
+echo -e "\Start took $(cut -d' ' -f1 /proc/uptime) seconds\n"
 
 graceful () {
-  su-exec postgres pg_ctl stop
-  umount /mnt
-  poweroff -f
+    su-exec postgres pg_ctl stop
+    poweroff -f
 }
 
 trap graceful TERM INT KILL

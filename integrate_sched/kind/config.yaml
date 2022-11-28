@@ -13,7 +13,7 @@ nodes:
   - hostPath: kind/cni-bin
     containerPath: /opt/cni/bin
 
-  # virtink requires kube-apiserver to be run with `--allow-privileged=true`
+  # NeonVM(?) requires kube-apiserver to be run with `--allow-privileged=true`
   #
   # For more on the config here, see:
   #  * https://kind.sigs.k8s.io/docs/user/configuration/#kubeadm-config-patches

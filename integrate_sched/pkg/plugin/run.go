@@ -98,14 +98,14 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	var migrateDecision *api.MigrateResponse
 	if mustMigrate {
 		migrateDecision = &api.MigrateResponse{}
-		err = e.state.startMigration(context.Background(), pod, e.virtClient)
+		err = e.state.startMigration(context.Background(), pod, e.vmClient)
 		if err != nil {
 			return nil, 500, fmt.Errorf("Error starting migration for pod %v: %s", pod.name, err)
 		}
 	}
 
 	resp := api.PluginResponse{
-		Permit: permit,
+		Permit:  permit,
 		Migrate: migrateDecision,
 	}
 	return &resp, 200, nil

@@ -10,12 +10,18 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+
+	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 // Args encapsulates the arguments from both EnvArgs and PodArgs
 type Args struct {
 	EnvArgs
 	PodArgs
+	VmInfo *api.VmInfo
 }
 
 // EnvArgs stores the static configuration data assigned to the autoscaling agent by its
@@ -113,24 +119,8 @@ type PodArgs struct {
 	// our custom scheduler.
 	SchedulerName string
 
-	// InitVCPU is the initial number of vCPUs assigned to the VM. It is taken from the
-	// "autoscaler/init-vcpu" label
-	//
-	// We expect that InitVCPU will match the configured amount for Virtink's
-	// vm.spec.instance.cpu.sockets, and WILL NOT adjust the initially assigned amount to match.
-	//
-	// We require that MinVCPU <= InitVCPU <= MaxVCPU.
-	InitVCPU uint16
-	// MinVCPU is the minimum number of vCPUs that the VM may be assigned. It is taken from the
-	// "autoscaler/min-vcpu" label
-	//
-	// We require that MinVCPU <= InitVCPU <= MaxVCPU.
-	MinVCPU uint16
-	// MaxVCPU is the maximum number of vCPUs that the VM may be assigned. It is taken from the
-	// "autoscaler/max-vcpu" label
-	//
-	// We require that MinVCPU <= InitVCPU <= MaxVCPU.
-	MaxVCPU uint16
+	// VmName is the name of the VM object running in this pod
+	VmName string
 }
 
 func getPodLabel[T any](err *error, pod *corev1.Pod, labelName string, parse func(string) (T, error)) (v T) {
@@ -155,36 +145,38 @@ func ArgsFromPod(ctx context.Context, client *kubernetes.Clientset, envArgs EnvA
 		return PodArgs{}, err
 	}
 
-	// Helper decimal integer parsing function
-	parseDecimalUint16 := func(s string) (uint16, error) {
-		u, err := strconv.ParseUint(s, 10, 16)
-		return uint16(u), err
-	}
-	parseVCPU := func(s string) (uint16, error) {
-		n, err := parseDecimalUint16(s)
-		if err == nil && n == 0 {
-			err = fmt.Errorf("vCPU amount must be > 0")
-		}
-		return n, err
+	vmName, ok := pod.Labels[vmapi.VirtualMachineNameLabel]
+	if !ok {
+		return PodArgs{}, fmt.Errorf("Missing label %s in pod metadata", vmapi.VirtualMachineNameLabel)
 	}
 
-	args := PodArgs{
-		SchedulerName: pod.Spec.SchedulerName,
-		InitVCPU:      getPodLabel(&err, pod, "autoscaler/init-vcpu", parseVCPU),
-		MinVCPU:       getPodLabel(&err, pod, "autoscaler/min-vcpu", parseVCPU),
-		MaxVCPU:       getPodLabel(&err, pod, "autoscaler/max-vcpu", parseVCPU),
-	}
-
-	if err != nil {
-		return PodArgs{}, err
-	} else if !(args.MinVCPU <= args.InitVCPU && args.InitVCPU <= args.MaxVCPU) {
-		return PodArgs{}, fmt.Errorf("Invalid vCPU parameters: must have MinVCPU <= InitVCPU <= MaxVCPU")
-	} else if args.SchedulerName == "" || args.SchedulerName == "default-scheduler" {
+	if pod.Spec.SchedulerName == "" || pod.Spec.SchedulerName == "default-scheduler" {
 		// default-scheduler is the name of the scheduler used for pods not assigned to a particular
 		// scheduler.
-		err = fmt.Errorf("Pod is not using a custom scheduler (SchedulerName = %q)", args.SchedulerName)
+		err = fmt.Errorf("Pod is not using a custom scheduler (SchedulerName = %q)", pod.Spec.SchedulerName)
 		return PodArgs{}, err
-	} else {
-		return args, err
 	}
+
+	return PodArgs{
+		SchedulerName: pod.Spec.SchedulerName,
+		VmName:        vmName,
+	}, nil
+}
+
+func ArgsFromVM(ctx context.Context, client *vmclient.Clientset, envArgs EnvArgs, podArgs PodArgs) (*api.VmInfo, error) {
+	vm, err := client.NeonvmV1().
+		VirtualMachines(envArgs.K8sPodNamespace).
+		Get(ctx, podArgs.VmName, metav1.GetOptions{})
+	if err != nil {
+		err = fmt.Errorf("Error getting self VM %s:%s: %w", envArgs.K8sPodNamespace, podArgs.VmName, err)
+		return nil, err
+	}
+
+	vmInfo, err := api.ExtractVmInfo(vm)
+	if err != nil {
+		err = fmt.Errorf("Error extracting VmInfo from VM %s:%s: %w", envArgs.K8sPodNamespace, podArgs.VmName, err)
+		return nil, err
+	}
+
+	return vmInfo, nil
 }

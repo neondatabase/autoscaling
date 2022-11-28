@@ -5,7 +5,7 @@
 #
 # This script takes arguments from environment variables -- all optional. They are:
 #
-#   * VM_NAME - the virtink.io/vm.name of the VM. Optional if there is only one VM, otherwise must
+#   * VM_NAME - the vm.neon.tech/name of the VM. Optional if there is only one VM, otherwise must
 #     be provided.
 #   * SSHCLIENT_IP - the IP address of the ssh client on the vm-bridge network. Defaults to
 #     10.77.77.213, but must be provided if there is already a pod using that IP address.
@@ -36,45 +36,48 @@ if ! { kubectl get secret "$SECRET_NAME" 1>&3; } 2>&1 3>/dev/null | indent; then
     exit 1
 fi
 
-echo "get vmPodName (vm_name = $vm_name)"
-pod="$(kubectl get vm "$vm_name" -o jsonpath='{.status.vmPodName}')"
-echo "get VM static ip (pod = $pod)"
-vm_ip="$(get_vm_ip "$pod")"
-echo "vm_ip = $vm_ip"
+vm_ip="$(kubectl get neonvm "$vm_name" -o jsonpath='{.status.podIP}')"
 
-NAD_NAME="vm-bridge-ssh-$vm_name"
-NAD='
-apiVersion: k8s.cni.cncf.io/v1
-kind: NetworkAttachmentDefinition
-metadata:
-  name: '"$NAD_NAME"'
-spec:
-  config: '"'"'{
-    "cniVersion": "0.3.1",
-    "name": "overlay",
-    "type": "bridge",
-    "bridge": "vm-bridge",
-    "isGateway": false,
-    "isDefaultGateway": false,
-    "ipam": {
-      "type": "static",
-      "addresses": [{"address": "'"$SSHCLIENT_IP"'/24"}],
-      "routes": [{"dst": "10.77.77.0/24"}]
-    }
-  }'"'"'
-'
-
-nad_file="ssh-nad-$NAD_NAME.tmp"
-
-cleanup () {
-    rm "$nad_file"
-    kubectl delete network-attachment-definitions.k8s.cni.cncf.io "$NAD_NAME"
-}
-
-trap cleanup EXIT INT TERM
-
-echo "$NAD" > "$nad_file"
-kubectl apply -f "$nad_file"
+# TODO: switch back to multus networking once NeonVM implements it
+# echo "get vmPodName (vm_name = $vm_name)"
+# pod="$(kubectl get neonvm "$vm_name" -o jsonpath='{.status.podName}')"
+# echo "get VM static ip (pod = $pod)"
+# vm_ip="$(get_vm_ip "$pod")"
+# echo "vm_ip = $vm_ip"
+#
+# NAD_NAME="vm-bridge-ssh-$vm_name"
+# NAD='
+# apiVersion: k8s.cni.cncf.io/v1
+# kind: NetworkAttachmentDefinition
+# metadata:
+#   name: '"$NAD_NAME"'
+# spec:
+#   config: '"'"'{
+#     "cniVersion": "0.3.1",
+#     "name": "overlay",
+#     "type": "bridge",
+#     "bridge": "vm-bridge",
+#     "isGateway": false,
+#     "isDefaultGateway": false,
+#     "ipam": {
+#       "type": "static",
+#       "addresses": [{"address": "'"$SSHCLIENT_IP"'/24"}],
+#       "routes": [{"dst": "10.77.77.0/24"}]
+#     }
+#   }'"'"'
+# '
+#
+# nad_file="ssh-nad-$NAD_NAME.tmp"
+# 
+# cleanup () {
+#     rm "$nad_file"
+#     kubectl delete network-attachment-definitions.k8s.cni.cncf.io "$NAD_NAME"
+# }
+# 
+# trap cleanup EXIT INT TERM
+# 
+# echo "$NAD" > "$nad_file"
+# kubectl apply -f "$nad_file"
 
 if [ -n "$NODE_NAME" ]; then 
     NODE_SELECTOR='"nodeSelector": { "kubernetes.io/hostname": "'"$NODE_NAME"'" },'
@@ -125,5 +128,7 @@ CONTAINER_CFG='
     }
 }'
 
-ANNOTATIONS="--annotations=k8s.v1.cni.cncf.io/networks=$NAD_NAME"
-kubectl run "ssh-$vm_name" --rm --image=alpine --restart=Never -it "$ANNOTATIONS" --overrides="$CONTAINER_CFG"
+# TODO: switch back to multus networking once NeonVM implements it
+# ANNOTATIONS="--annotations=k8s.v1.cni.cncf.io/networks=$NAD_NAME"
+ANNOTATIONS=''
+kubectl run "ssh-$vm_name" --rm --image=alpine --restart=Never -it $ANNOTATIONS --overrides="$CONTAINER_CFG"

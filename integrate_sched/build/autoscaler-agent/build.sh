@@ -19,7 +19,7 @@ NAME="autoscaler-agent"
 TAG="latest"
 
 echo "Building Dockerfile"
-docker buildx build --no-cache --pull \
+docker buildx build --pull \
     -t "$REGISTRY/$NAME:$TAG" \
     -f build/autoscaler-agent/Dockerfile \
     . | indent

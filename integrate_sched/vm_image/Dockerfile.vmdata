@@ -1,22 +1,15 @@
-FROM alpine:3.16 as rootfs
+FROM alpine:3.16 AS rootfs
 
 # prometheus-node-exporter provides /metrics on :9001 (once we start it)
 RUN set -e \
 	&& apk add --no-cache \
-		jq \
-		curl \
 		ca-certificates \
 		util-linux-misc \
 		prometheus-node-exporter \
-	&& passwd -d root
+        coreutils
 
-RUN rm -f    /sbin/init
-ADD init     /sbin/init
-RUN chmod +x /sbin/init
-
-# virtink uses /sbin/hotplug
-ADD hotplug.sh /sbin/hotplug
-RUN chmod +x /sbin/hotplug
+ADD init     /bin/userstartup
+RUN chmod +x /bin/userstartup
 
 # postgresql stuff
 RUN set -e \
@@ -24,6 +17,14 @@ RUN set -e \
 		su-exec \
 		postgresql14
 ADD postgresql.conf /etc/postgresql.conf
+ADD pg_hba.conf     /etc/pg_hba.conf
+
+# Initialize postgres
+ENV PGDATA /var/lib/postgresql
+RUN set -e \
+    && mkdir -p ${PGDATA} /run/postgresql \
+    && chown -R postgres:postgres ${PGDATA} /run/postgresql\
+    && su-exec postgres pg_ctl init
 
 # ssh stuff
 RUN set -e \
@@ -38,16 +39,4 @@ RUN set -e \
 # set the greeting message on ssh logins
 RUN echo -e 'Welcome to Alpine!\n ~ This is the VM :) ~' >/etc/motd
 
-
-FROM alpine:3.16
-RUN set -e \
-    && apk add --no-cache \
-        e2fsprogs # required for mkfs.ext4 in rootfs-entrypoint.sh
-
-ADD rootfs-entrypoint.sh /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
-COPY --from=rootfs / /rootfs
-
-# dhcp client hack for read-only root fs
-RUN sed -i 's/^RESOLV_CONF=.*/RESOLV_CONF=\/run\/resolv\.conf/' /rootfs/usr/share/udhcpc/default.script
-RUN ln -sf ../run/resolv.conf /rootfs/etc/resolv.conf
+ENTRYPOINT ["/bin/userstartup"]

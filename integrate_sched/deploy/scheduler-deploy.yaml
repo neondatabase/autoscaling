@@ -3,8 +3,8 @@ kind: ClusterRole
 metadata:
   name: vm-patcher
 rules:
-- apiGroups: ["virt.virtink.smartx.com"]
-  resources: ["virtualmachines", "virtualmachinemigrations"]
+- apiGroups: ["vm.neon.tech"]
+  resources: ["virtualmachines"]
   verbs: ["create", "delete", "get", "list", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

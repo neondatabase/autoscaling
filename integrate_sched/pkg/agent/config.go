@@ -14,6 +14,8 @@ type Config struct {
 
 // ScalingConfig defines the scheduling we use for scaling up and down
 type ScalingConfig struct {
+	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
+	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	CPU struct {
 		// DoubleRatio gives the ratio between the VM's load average and number of CPUs above which
 		// we'll request double the vCPU count
@@ -82,7 +84,9 @@ func (c *Config) validate() error {
 		return fmt.Errorf("Field %s cannot be zero", fieldPath)
 	}
 
-	if c.Scaling.CPU.DoubleRatio == 0 {
+	if c.Scaling.RequestTimeoutSeconds == 0 {
+		return cannotBeZero(".scaling.requestTimeoutSeconds")
+	} else if c.Scaling.CPU.DoubleRatio == 0 {
 		return cannotBeZero(".scaling.cpu.doubleRatio")
 	} else if c.Scaling.CPU.HalveRatio == 0 {
 		return cannotBeZero(".scaling.cpu.halveRatio")

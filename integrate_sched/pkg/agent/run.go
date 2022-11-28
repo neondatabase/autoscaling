@@ -9,49 +9,55 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os/exec"
-	"strconv"
 	"sync/atomic"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	klog "k8s.io/klog/v2"
 
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type Runner struct {
-	podName                 api.PodName
-	schedulerIP             net.IP
-	cloudHypervisorSockPath string
-	metricsURL              *url.URL
-	minVCPU                 uint16
-	maxVCPU                 uint16
-	currentVCPU             uint16
-	servePort               uint16
-	readinessPort           uint16
-	politeExitPort          uint16
+	podName        api.PodName
+	schedulerIP    net.IP
+	vmClient       *vmclient.Clientset
+	vmName         string
+	metricsURL     *url.URL
+	minVCPU        uint16
+	maxVCPU        uint16
+	currentVCPU    uint16
+	servePort      uint16
+	readinessPort  uint16
+	politeExitPort uint16
 }
 
-func NewRunner(args Args, schedulerIP string, cloudHypervisorSockPath string) (*Runner, error) {
+func NewRunner(args Args, schedulerIP string, vmClient *vmclient.Clientset) (*Runner, error) {
 	parsedSchedulerIP := net.ParseIP(schedulerIP)
 	if parsedSchedulerIP == nil {
 		return nil, fmt.Errorf("Invalid scheduler IP %q", schedulerIP)
 	}
 
-	if args.InitVCPU == 0 {
-		panic("expected init vCPU >= 1")
+	if args.VmInfo.Cpu.Use == 0 {
+		// note: this is guaranteed by api.ExtractVmInfo; we're just double-checking here.
+		panic("expected init vCPU use >= 1")
 	}
 
 	return &Runner{
-		podName:                 api.PodName{Name: args.K8sPodName, Namespace: args.K8sPodNamespace},
-		schedulerIP:             parsedSchedulerIP,
-		cloudHypervisorSockPath: cloudHypervisorSockPath,
-		metricsURL:              args.MetricsURL,
-		minVCPU:                 args.MinVCPU,
-		maxVCPU:                 args.MaxVCPU,
-		currentVCPU:             args.InitVCPU,
-		readinessPort:           args.ReadinessPort,
-		politeExitPort:          args.PoliteExitPort,
+		podName:        api.PodName{Name: args.K8sPodName, Namespace: args.K8sPodNamespace},
+		schedulerIP:    parsedSchedulerIP,
+		vmClient:       vmClient,
+		vmName:         args.VmName,
+		metricsURL:     args.MetricsURL,
+		minVCPU:        args.VmInfo.Cpu.Min,
+		maxVCPU:        args.VmInfo.Cpu.Max,
+		currentVCPU:    args.VmInfo.Cpu.Use,
+		readinessPort:  args.ReadinessPort,
+		politeExitPort: args.PoliteExitPort,
 	}, nil
 }
 
@@ -100,7 +106,7 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 					"Goal vCPU %d < Current vCPU %d, decrease immediately",
 					newVCPUCount, r.currentVCPU,
 				)
-				if err := r.setCpus(ctx, newVCPUCount); err != nil {
+				if err := r.setCpus(ctx, config, newVCPUCount); err != nil {
 					return fmt.Errorf("Error while setting CPU count: %s", err)
 				}
 				r.currentVCPU = newVCPUCount
@@ -108,9 +114,9 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 
 			// Request a new amount of CPU
 			req := api.AgentRequest{
-				Pod: r.podName,
+				Pod:       r.podName,
 				Resources: api.Resources{VCPU: newVCPUCount},
-				Metrics: m,
+				Metrics:   m,
 			}
 			resp, err := r.sendRequestToPlugin(config, &req)
 			if err != nil {
@@ -127,7 +133,7 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 			}
 
 			if !changedVCPU {
-				continue;
+				continue
 			}
 
 			if resp.Permit.VCPU != r.currentVCPU {
@@ -144,7 +150,7 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 				}
 				klog.Infof("Setting vCPU = %d%s", resp.Permit.VCPU, maybeLessThanDesired)
 
-				if err := r.setCpus(ctx, resp.Permit.VCPU); err != nil {
+				if err := r.setCpus(ctx, config, resp.Permit.VCPU); err != nil {
 					return fmt.Errorf("Error while setting vCPU count: %s", err)
 				}
 
@@ -194,7 +200,7 @@ badScheduler:
 			// immediately. We know this value is ok because it's bounded by maxFutureVCPU.
 			if newCpuCount != r.currentVCPU {
 				klog.Infof("Setting vCPU = %d", newCpuCount)
-				if err := r.setCpus(ctx, newCpuCount); err != nil {
+				if err := r.setCpus(ctx, config, newCpuCount); err != nil {
 					return fmt.Errorf("Error while setting CPU count: %s", err)
 				}
 				r.currentVCPU = newCpuCount
@@ -311,7 +317,7 @@ func (r *Runner) getMetricsLoop(config *Config, metrics chan<- api.Metrics) {
 
 			m, err := api.ReadMetrics(body)
 			if err != nil {
-				klog.Errorf("Error reading metrics from node_exporter output: %s", err);
+				klog.Errorf("Error reading metrics from node_exporter output: %s", err)
 				return
 			}
 
@@ -365,30 +371,28 @@ func (r *Runner) sendRequestToPlugin(config *Config, req *api.AgentRequest) (*ap
 	return &respMsg, nil
 }
 
-func (r *Runner) setCpus(ctx context.Context, newCpuCount uint16) error {
-	// Allow a maximum of 1 second to perform the update; otherwise something unexpected happened
-	//
-	// Because this relies on the OS to kill the process, it's *maybe* possible for weird edge cases
-	// to stall it for longer. I'm not sure. Realistically, it should be fine.
-	cmdContext, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(
-		cmdContext,
-		// ch-remote --api-socket <PATH> resize --cpus <CPUs>
-		"ch-remote", "--api-socket", r.cloudHypervisorSockPath, "resize", "--cpus", strconv.Itoa(int(newCpuCount)),
-	)
-
-	out, err := cmd.CombinedOutput()
+func (r *Runner) setCpus(ctx context.Context, config *Config, newCpuCount uint16) error {
+	newCount := int32(newCpuCount)
+	patches := []util.JSONPatch{{
+		Op:    util.PatchReplace,
+		Path:  "/spec/guest/cpus/use",
+		Value: &newCount,
+	}}
+	patchPayload, err := json.Marshal(patches)
 	if err != nil {
-		if cmdContext.Err() == context.DeadlineExceeded {
-			err = fmt.Errorf("Running ch-remote timed out")
-		} else {
-			err = fmt.Errorf("Error while running ch-remote: %s", err)
-		}
-
-		klog.Error(err)
-		klog.Errorf("ch-remote output:\n%s", string(out))
+		return fmt.Errorf("Error marshalling JSON patch: %w", err)
 	}
 
-	return err
+	timeout := time.Second * time.Duration(config.Scaling.RequestTimeoutSeconds)
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	_, err = r.vmClient.NeonvmV1().VirtualMachines(r.podName.Namespace).
+		Patch(requestCtx, r.vmName, ktypes.JSONPatchType, patchPayload, metav1.PatchOptions{})
+
+	if err != nil {
+		return fmt.Errorf("Error making VM patch request: %w", err)
+	}
+
+	return nil
 }

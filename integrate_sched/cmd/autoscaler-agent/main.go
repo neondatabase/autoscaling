@@ -8,8 +8,12 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
+
+	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 )
 
 func main() {
@@ -25,9 +29,18 @@ func main() {
 	}
 	klog.Infof("Got environment args: %+v", envArgs)
 
-	kubeClient, err := makeKubeClientSet()
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		klog.Fatalf("Error getting in-cluster K8S config: %s", err)
+	}
+	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	if err != nil {
 		klog.Fatalf("Failed to make K8S client: %s", err)
+	}
+	vmapi.AddToScheme(scheme.Scheme)
+	vmClient, err := vmclient.NewForConfig(kubeConfig)
+	if err != nil {
+		klog.Fatalf("Failed to make VM client: %s", err)
 	}
 
 	podArgs, err := agent.ArgsFromPod(ctx, kubeClient, envArgs)
@@ -36,16 +49,20 @@ func main() {
 	}
 	klog.Infof("Got pod args: %+v", podArgs)
 
+	vmInfo, err := agent.ArgsFromVM(ctx, vmClient, envArgs, podArgs)
+	if err != nil {
+		klog.Fatalf("Error getting VM info: %s", err)
+	}
+
 	schedulerIP, err := getSchedulerIp(ctx, kubeClient, podArgs.SchedulerName)
 	if err != nil {
 		klog.Fatalf("Error getting self pod scheduler's IP: %s", err)
 	}
 	klog.Infof("Got scheduler IP address: %s", schedulerIP)
 
-	args := agent.Args{EnvArgs: envArgs, PodArgs: podArgs}
+	args := agent.Args{EnvArgs: envArgs, PodArgs: podArgs, VmInfo: vmInfo}
 
-	cloudHypervisorSockPath := "/var/run/virtink/ch.sock"
-	runner, err := agent.NewRunner(args, schedulerIP, cloudHypervisorSockPath)
+	runner, err := agent.NewRunner(args, schedulerIP, vmClient)
 	if err != nil {
 		klog.Fatalf("Error while creating main loop: %s", err)
 	}

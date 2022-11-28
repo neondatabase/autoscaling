@@ -3,36 +3,33 @@ package plugin
 import (
 	"context"
 	"fmt"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	klog "k8s.io/klog/v2"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/scheduler/framework"
 
-	virtclient "github.com/neondatabase/virtink/pkg/generated/clientset/versioned"
-	virtapi "github.com/neondatabase/virtink/pkg/apis/virt/v1alpha1"
+	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 const Name = "AutoscaleEnforcer"
-const LabelVM = "virtink.io/vm.name"
-const LabelInitVCPU = "autoscaler/init-vcpu"
-const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
+const LabelVM = vmapi.VirtualMachineNameLabel
 const ConfigMapNamespace = "kube-system"
 const ConfigMapName = "scheduler-plugin-config"
 const ConfigMapKey = "autoscaler-enforcer-config.json"
-const PluginConfigPath = "/etc/kubernetes/autoscale-scheduler-config/autoscale-enforcer-config.json"
 const InitConfigMapTimeoutSeconds = 5
 
 // AutoscaleEnforcer is the scheduler plugin to coordinate autoscaling
 type AutoscaleEnforcer struct {
-	handle framework.Handle
-	virtClient *virtclient.Clientset
-	state  pluginState
+	handle   framework.Handle
+	vmClient *vmclient.Clientset
+	state    pluginState
 }
 
 // NewAutoscaleEnforcerPlugin produces the initial AutoscaleEnforcer plugin to be used by the
@@ -42,20 +39,20 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	// quite need it yet.
 	klog.Info("[autoscale-enforcer] Initializing plugin")
 
-	// create the virtink client
-	virtapi.AddToScheme(scheme.Scheme)
+	// create the NeonVM client
+	vmapi.AddToScheme(scheme.Scheme)
 	vmConfig := rest.CopyConfig(h.KubeConfig())
 	// The handler's ContentType is not the default "application/json" (it's protobuf), so we need
-	// to set it back to JSON because Virtink doesn't support protobuf.
+	// to set it back to JSON because NeonVM doesn't support protobuf.
 	vmConfig.ContentType = "application/json"
-	virtClient, err := virtclient.NewForConfig(vmConfig)
+	vmClient, err := vmclient.NewForConfig(vmConfig)
 	if err != nil {
-		return nil, fmt.Errorf("Error creating virtink client: %s", err)
+		return nil, fmt.Errorf("Error creating NeonVM client: %s", err)
 	}
 
 	p := AutoscaleEnforcer{
-		handle: h,
-		virtClient: virtClient,
+		handle:   h,
+		vmClient: vmClient,
 		state: pluginState{
 			nodeMap: make(map[string]*nodeState),
 			podMap:  make(map[api.PodName]*podState),
@@ -79,23 +76,6 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		}
 	}()
 
-	// Run this once, to check that it works ...
-	if err := p.removeOldMigrations(context.Background()); err != nil {
-		return nil, fmt.Errorf("Error performing initial removal of old migrations")
-	}
-
-	// ... and then start it running in a loop:
-	go func() {
-		ctx := context.Background()
-		for {
-			time.Sleep(5 * time.Second)
-
-			if err := p.removeOldMigrations(ctx); err != nil {
-				klog.Errorf("[autoscale-enforcer] Error removing old migrations: %s", err)
-			}
-		}
-	}()
-
 	go p.runPermitHandler()
 
 	return &p, nil
@@ -106,6 +86,26 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 // Required for framework.Plugin
 func (e *AutoscaleEnforcer) Name() string {
 	return Name
+}
+
+// getVmInfo is a helper for the plugin-related functions
+func getVmInfo(ctx context.Context, vmClient *vmclient.Clientset, pod *corev1.Pod) (*api.VmInfo, string, error) {
+	vmName, ok := pod.Labels[LabelVM]
+	if !ok {
+		return nil, "", fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
+	}
+
+	vm, err := vmClient.NeonvmV1().VirtualMachines(pod.Namespace).Get(ctx, vmName, metav1.GetOptions{})
+	if err != nil {
+		return nil, "", fmt.Errorf("Error getting VM object %s:%s: %w", pod.Namespace, vmName, err)
+	}
+
+	vmInfo, err := api.ExtractVmInfo(vm)
+	if err != nil {
+		return nil, "", fmt.Errorf("Error extracting VM info: %w", err)
+	}
+
+	return vmInfo, vmName, nil
 }
 
 // Filter gives our plugin a chance to signal that a pod shouldn't be put onto a particular node
@@ -119,7 +119,7 @@ func (e *AutoscaleEnforcer) Filter(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
 
-	podInfo, err := getPodInfo(pod)
+	vmInfo, _, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Filter: Error getting pod %v init vCPU: %s", pName, err)
 		return framework.NewStatus(
@@ -165,11 +165,11 @@ func (e *AutoscaleEnforcer) Filter(
 	setMsg := func(compareOp string) {
 		msg = fmt.Sprintf(
 			"proposed node vCPU usage %d + pod init vCPU %d %s node max %d",
-			totalNodeVCPU, podInfo.initVCPU, compareOp, nodeTotalReservableCPU,
+			totalNodeVCPU, vmInfo.Cpu.Use, compareOp, nodeTotalReservableCPU,
 		)
 	}
 
-	if totalNodeVCPU + podInfo.initVCPU > nodeTotalReservableCPU {
+	if totalNodeVCPU+vmInfo.Cpu.Use > nodeTotalReservableCPU {
 		setMsg(">")
 		status = framework.NewStatus(
 			framework.Unschedulable,
@@ -208,7 +208,7 @@ func (e *AutoscaleEnforcer) Score(
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
 	podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
-	podInfo, err := getPodInfo(pod)
+	vmInfo, _, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Score: Error getting info for pod %v: %w", podName, err)
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
@@ -225,7 +225,7 @@ func (e *AutoscaleEnforcer) Score(
 	}
 
 	// Special case: return minimum score if we don't have room
-	if podInfo.initVCPU > node.remainingReservableCPU() {
+	if vmInfo.Cpu.Use > node.remainingReservableCPU() {
 		return framework.MinNodeScore, nil
 	}
 
@@ -234,7 +234,7 @@ func (e *AutoscaleEnforcer) Score(
 
 	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
 	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	score := framework.MinNodeScore + scoreLen * total / maxTotal
+	score := framework.MinNodeScore + scoreLen*total/maxTotal
 	return score, nil
 }
 
@@ -254,7 +254,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
-	podInfo, err := getPodInfo(pod)
+	vmInfo, vmName, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Error getting pod %v info: %s", pName, err)
 		return framework.NewStatus(
@@ -280,21 +280,21 @@ func (e *AutoscaleEnforcer) Reserve(
 	// checks will be handled in the calls to Filter, but it's possible for another VM to scale up
 	// in between the calls to Filter and Reserve, removing the resource availability that we
 	// thought we had.
-	if podInfo.initVCPU <= node.remainingReservableCPU() {
-		newNodeReservedCPU := node.vCPU.reserved + podInfo.initVCPU
+	if vmInfo.Cpu.Use <= node.remainingReservableCPU() {
+		newNodeReservedCPU := node.vCPU.reserved + vmInfo.Cpu.Use
 		klog.Infof(
 			"[autoscale-enforcer] Allowing pod %v (%d vCPU) in node %s: node.reservedCPU %d -> %d",
-			pName, podInfo.initVCPU, nodeName, node.vCPU.reserved, newNodeReservedCPU,
+			pName, vmInfo.Cpu.Use, nodeName, node.vCPU.reserved, newNodeReservedCPU,
 		)
 
 		node.vCPU.reserved = newNodeReservedCPU
 		ps := &podState{
-			name: pName,
-			vmName: podInfo.vmName,
-			node: node,
-			vCPU: podResourceState[uint16]{reserved: podInfo.initVCPU, capacityPressure: 0},
-			testingOnlyAlwaysMigrate: podInfo.alwaysMigrate,
-			mqIndex: -1,
+			name:                     pName,
+			vmName:                   vmName,
+			node:                     node,
+			vCPU:                     podResourceState[uint16]{reserved: vmInfo.Cpu.Use, capacityPressure: 0},
+			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
+			mqIndex:                  -1,
 		}
 		node.pods[pName] = ps
 		e.state.podMap[pName] = ps
@@ -302,7 +302,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	} else {
 		err := fmt.Errorf(
 			"Not enough available vCPU to reserve for pod init vCPU: need %d but have %d (of %d) remaining",
-			podInfo.initVCPU, node.remainingReservableCPU(), node.totalReservableCPU(),
+			vmInfo.Cpu.Use, node.remainingReservableCPU(), node.totalReservableCPU(),
 		)
 
 		klog.Errorf("[autoscale-enforcer] Can't schedule pod %v: %s", pName, err)

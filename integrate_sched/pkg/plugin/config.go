@@ -47,12 +47,12 @@ type config struct {
 }
 
 type overrideSet struct {
-	Nodes []string `json:"nodes"` // TODO: these should be changed to globs in the future.
+	Nodes  []string   `json:"nodes"` // TODO: these should be changed to globs in the future.
 	Config nodeConfig `json:"config"`
 }
 
 type nodeConfig struct {
-	Cpu resourceConfig `json:"cpu"`
+	Cpu    resourceConfig `json:"cpu"`
 	Memory resourceConfig `json:"memory"`
 }
 
@@ -96,7 +96,7 @@ func (mg *megabytesOrGigabytes) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("string must end with 'G' or 'M'")
 	}
 
-	intValue, err := strconv.Atoi(s[:len(s) - 1])
+	intValue, err := strconv.Atoi(s[:len(s)-1])
 	if err != nil {
 		return err
 	}
@@ -111,8 +111,8 @@ func (mg *megabytesOrGigabytes) UnmarshalJSON(b []byte) error {
 }
 
 func (mg *megabytesOrGigabytes) String() string {
-	if mg.mb % gigabyteMultiplier == 0 {
-		return fmt.Sprintf("%dG", mg.mb / gigabyteMultiplier)
+	if mg.mb%gigabyteMultiplier == 0 {
+		return fmt.Sprintf("%dG", mg.mb/gigabyteMultiplier)
 	} else {
 		return fmt.Sprintf("%dM", mg.mb)
 	}
@@ -170,7 +170,7 @@ func (c *resourceConfig) validate() (string, error) {
 	if c.System <= 0 {
 		return "system", fmt.Errorf("value must be > 0")
 	}
-	
+
 	return "", nil
 }
 
@@ -196,7 +196,7 @@ func (e *AutoscaleEnforcer) setConfigAndStartWatcher() error {
 		util.WatchHandlerFuncs[*corev1.ConfigMap]{
 			// Hooking into AddFunc as well as UpdateFunc allows for us to handle both "patch" and
 			// "delete + replace" workflows for the ConfigMap.
-			AddFunc: func(newConf *corev1.ConfigMap) { addEvents <- newConf },
+			AddFunc:    func(newConf *corev1.ConfigMap) { addEvents <- newConf },
 			UpdateFunc: func(oldConf, newConf *corev1.ConfigMap) { updateEvents <- newConf },
 		},
 		func(options *metav1.ListOptions) {
@@ -221,7 +221,7 @@ func (e *AutoscaleEnforcer) setConfigAndStartWatcher() error {
 			close(stop)
 			return fmt.Errorf("Bad initial ConfigMap: %w", err)
 		}
-	case <- time.After(time.Duration(InitConfigMapTimeoutSeconds) * time.Second):
+	case <-time.After(time.Duration(InitConfigMapTimeoutSeconds) * time.Second):
 		close(stop)
 		return fmt.Errorf(
 			"Timed out waiting for initial ConfigMap (expected name = %s, namespace = %s)",
@@ -310,11 +310,11 @@ func (c *nodeConfig) vCpuLimits(total uint16) (nodeResourceState[uint16], error)
 	}
 
 	return nodeResourceState[uint16]{
-		total: total,
-		system: system,
-		watermark: uint16(c.Cpu.Watermark * float32(total - system)),
-		reserved: 0,
-		capacityPressure: 0,
+		total:                total,
+		system:               system,
+		watermark:            uint16(c.Cpu.Watermark * float32(total-system)),
+		reserved:             0,
+		capacityPressure:     0,
 		pressureAccountedFor: 0,
 	}, nil
 }

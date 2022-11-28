@@ -12,7 +12,9 @@ source './scripts-common.sh'
 
 set -x
 
-kind create cluster -n autoscale-sched --config=kind/config.yaml
+CLUSTER="autoscale-sched"
+
+kind create cluster -n $CLUSTER --config=kind/config.yaml
 
 kubectl apply -f deploy/flannel.yaml -f deploy/multus-daemonset.yaml -f deploy/cert-manager.yaml \
     | indent
@@ -21,9 +23,9 @@ kubectl wait pod -n cert-manager --for=condition=Ready --timeout=2m \
     -l 'app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=webhook' \
     | indent
 
-kubectl apply -f deploy/virtink_localhost:5001.yaml | indent
+kubectl apply -f deploy/neonvm.yaml | indent
 
-kubectl wait pod -n virtink-system --for=condition=Ready -l 'name=virt-controller' | indent
+kubectl wait deployment -n neonvm-system neonvm-controller --for=condition=Available=True | indent
 
 kubectl apply -f deploy/scheduler-deploy.yaml -f deploy/autoscaler-agent-deploy.yaml | indent
 

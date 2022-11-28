@@ -7,10 +7,32 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: autoscaling-vm-view
+  name: autoscaler-view
 roleRef:
   kind: ClusterRole
   name: view
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: autoscaling-vm
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vm-view
+rules:
+- apiGroups: ["vm.neon.tech"]
+  resources: ["virtualmachines"]
+  verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: autoscaler-vm-view
+roleRef:
+  kind: ClusterRole
+  name: vm-view
   apiGroup: rbac.authorization.k8s.io
 subjects:
 - kind: ServiceAccount
@@ -25,6 +47,7 @@ metadata:
 data:
   config.json: '{
     "scaling": {
+      "requestTimeoutSeconds": 10,
       "cpu": {
         "doubleRatio": 0.9,
         "halveRatio": 0.4

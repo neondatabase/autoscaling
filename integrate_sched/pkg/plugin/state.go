@@ -5,18 +5,13 @@ package plugin
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
-	"encoding/json"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
-	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
-	virtclient "github.com/neondatabase/virtink/pkg/generated/clientset/versioned"
-	virtapi "github.com/neondatabase/virtink/pkg/apis/virt/v1alpha1"
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -45,7 +40,7 @@ type nodeState struct {
 	// name is the name of the node, guaranteed by kubernetes to be unique
 	name string
 
-	// vCPU tracks the state of vCPU resources -- what's available and how 
+	// vCPU tracks the state of vCPU resources -- what's available and how
 	vCPU nodeResourceState[uint16]
 
 	// pods tracks all the VM pods assigned to this node
@@ -100,7 +95,7 @@ type podState struct {
 	// name will not change after initialization, so it can be accessed without holding a lock.
 	name api.PodName
 
-	// vmName is the name of the VM, as given by the 'virtink.io/vm.name' label.
+	// vmName is the name of the VM, as given by the 'vm.neon.tech/name' label.
 	vmName string
 
 	// testingOnlyAlwaysMigrate is a test-only debugging flag that, if present in the pod's labels,
@@ -160,7 +155,7 @@ func (s *nodeState) tooMuchPressure() bool {
 	}
 
 	logicalPressure := s.vCPU.reserved - s.vCPU.watermark
-	result := logicalPressure + s.vCPU.capacityPressure > s.vCPU.pressureAccountedFor
+	result := logicalPressure+s.vCPU.capacityPressure > s.vCPU.pressureAccountedFor
 
 	klog.V(1).Infof(
 		"[autoscale-enforcer] tooMuchPressure(%s) = %v. logical = %d, capacity = %d, accountedFor = %d",
@@ -184,36 +179,36 @@ func (s *podState) currentlyMigrating() bool {
 	return s.migrationState != nil
 }
 
-func getPodInfo(
-	pod *corev1.Pod,
-) (
-	*struct{ initVCPU uint16; vmName string; alwaysMigrate bool},
-	error,
-) {
-	// If this isn't a VM, it shouldn't have been scheduled with us
-	name, ok := pod.Labels[LabelVM]
-	if !ok {
-		return nil, fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
-	}
-
-	initVCPUString, ok := pod.Labels[LabelInitVCPU]
-	if !ok {
-		return nil, fmt.Errorf("Missing init vCPU label %s", LabelInitVCPU)
-	}
-
-	initVCPU, err := strconv.ParseUint(initVCPUString, 10, 16)
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitVCPU, err)
-	}
-
-	_, alwaysMigrate := pod.Labels[LabelTestingOnlyAlwaysMigrate]
-
-	return &struct{initVCPU uint16; vmName string; alwaysMigrate bool}{
-		initVCPU: uint16(initVCPU),
-		vmName: name,
-		alwaysMigrate: alwaysMigrate,
-	}, nil
-}
+// func getPodInfo(
+// 	pod *corev1.Pod,
+// ) (
+// 	*struct{ initVCPU uint16; vmName string; alwaysMigrate bool},
+// 	error,
+// ) {
+// 	// If this isn't a VM, it shouldn't have been scheduled with us
+// 	name, ok := pod.Labels[LabelVM]
+// 	if !ok {
+// 		return nil, fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
+// 	}
+//
+// 	initVCPUString, ok := pod.Labels[LabelInitVCPU]
+// 	if !ok {
+// 		return nil, fmt.Errorf("Missing init vCPU label %s", LabelInitVCPU)
+// 	}
+//
+// 	initVCPU, err := strconv.ParseUint(initVCPUString, 10, 16)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitVCPU, err)
+// 	}
+//
+// 	_, alwaysMigrate := pod.Labels[LabelTestingOnlyAlwaysMigrate]
+//
+// 	return &struct{initVCPU uint16; vmName string; alwaysMigrate bool}{
+// 		initVCPU: uint16(initVCPU),
+// 		vmName: name,
+// 		alwaysMigrate: alwaysMigrate,
+// 	}, nil
+// }
 
 // this method can only be called while holding a lock. If we don't have the necessary information
 // locally, then the lock is released temporarily while we query the API server
@@ -344,38 +339,16 @@ func (e *AutoscaleEnforcer) handleVMDeletion(pName api.PodName) {
 	)
 }
 
-func (e *AutoscaleEnforcer) handleVMMFinished(ctx context.Context, vmmName api.PodName) {
-	// Currently, VM migration objects have unique names, so we don't need to worry about name
-	// reuse. However, the objects don't currently get cleaned up by Virtink, so we need to delete
-	// them ourselves.
-
-	klog.Infof("[autoscale-enforcer] Deleting VM Migration %v", vmmName)
-
-	err := e.virtClient.VirtV1alpha1().
-		VirtualMachineMigrations(vmmName.Namespace).
-		Delete(ctx, vmmName.Name, metav1.DeleteOptions{})
-
-	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Error deleting VM Migration %v: %s", vmmName, err)
-	}
-}
-
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
 	// TODO - this is just a first-pass approximation. Maybe it's ok for now? Maybe it's not. Idk.
 	return s.metrics.LoadAverage1Min < other.metrics.LoadAverage1Min
-}
-
-type patchValue[T any] struct{
-	Op string `json:"op"`
-	Path string `json:"path"`
-	Value T `json:"value"`
 }
 
 // this method can only be called while holding a lock. It will be released temporarily while we
 // send requests to the API server
 //
 // A lock will ALWAYS be held on return from this function.
-func (s *pluginState) startMigration(ctx context.Context, pod *podState, virtClient *virtclient.Clientset) error {
+func (s *pluginState) startMigration(ctx context.Context, pod *podState, vmClient *vmclient.Clientset) error {
 	if pod.currentlyMigrating() {
 		return fmt.Errorf("Pod is already migrating: state = %+v", pod.migrationState)
 	}
@@ -393,57 +366,9 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, virtCli
 		"[autoscaler-enforcer] Migrate pod %v; node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
 		pod.name, oldNodeVCPUPressure, pod.node.vCPU.capacityPressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.pressureAccountedFor,
 	)
-	s.lock.Unlock() // Unlock while we make the API server requests
 
-	var locked bool // In order to prevent double-unlock panics, we always lock on return.
-	defer func() {
-		if !locked {
-			s.lock.Lock()
-		}
-	}()
-	
-	// Patch init vCPU for the VM, so that the migration target pod has the correct vCPU count
-	patchPayload := []patchValue[string]{{
-		Op: "replace",
-		// if '/' is in the label, it's replaced by '~1'. Source:
-		//   https://stackoverflow.com/questions/36147137#comment98654379_36163917
-		Path: "/metadata/labels/autoscaler~1init-vcpu",
-		Value: fmt.Sprintf("%d", pod.vCPU.reserved), // labels are strings
-	}}
-
-	patchPayloadBytes, err := json.Marshal(patchPayload)
-	if err != nil {
-		return fmt.Errorf("Error marshalling JSON patch payload: %s", err)
-	}
-	klog.Infof("[autoscale-enforcer] Sending VM %s:%s patch request", pod.name.Namespace, pod.vmName)
-	_, err = virtClient.VirtV1alpha1().
-		VirtualMachines("default").
-		Patch(ctx, pod.vmName, ktypes.JSONPatchType, patchPayloadBytes, metav1.PatchOptions{})
-	if err != nil {
-		return fmt.Errorf("Error executing VM patch request: %s", err)
-	}
-
-	// ... And then actually start the migration:
-	vmMigration := virtapi.VirtualMachineMigration{
-		ObjectMeta: metav1.ObjectMeta{
-			// migrations need to be named, but we might end up starting a new migration before the
-			// old one has been removed, so we use GenerateName instead of directly setting Name
-			GenerateName: fmt.Sprintf("%s-migration-", pod.vmName),
-			Namespace: pod.name.Namespace,
-		},
-		Spec: virtapi.VirtualMachineMigrationSpec{
-			VMName: pod.vmName,
-		},
-	}
-	klog.Infof("[autoscale-enforcer] Sending VM Migration %s:%s create request", pod.name.Namespace, pod.vmName)
-	_, err = virtClient.VirtV1alpha1().
-		VirtualMachineMigrations(pod.name.Namespace).
-		Create(ctx, &vmMigration, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("Error executing VM Migration create request: %s", err)
-	}
-
-	return nil
+	// note: unimplemented for now, pending NeonVM implementation.
+	return fmt.Errorf("VM migration is currently unimplemented")
 }
 
 func (s *pluginState) handleUpdatedConf() {

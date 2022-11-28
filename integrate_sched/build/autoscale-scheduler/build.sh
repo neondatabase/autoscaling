@@ -16,7 +16,7 @@ NAME="kube-autoscale-scheduler"
 TAG="latest"
 
 echo "Building Dockerfile"
-docker buildx build --no-cache --pull \
+docker buildx build --pull \
     -t "$REGISTRY/$NAME:$TAG" \
     -f build/autoscale-scheduler/Dockerfile \
     . | indent

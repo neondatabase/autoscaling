@@ -9,7 +9,7 @@ import (
 type migrationQueue []*podState
 
 ///////////////////////
-// package-local API // 
+// package-local API //
 ///////////////////////
 
 func (mq *migrationQueue) addOrUpdate(pod *podState) {
@@ -61,7 +61,7 @@ func (mq *migrationQueue) Pop() any {
 	old := *mq
 	n := len(old)
 	pod := old[n-1]
-	old[n-1] = nil    // avoid memory leak
+	old[n-1] = nil   // avoid memory leak
 	pod.mqIndex = -1 // for safety
 	*mq = old[0 : n-1]
 	return pod

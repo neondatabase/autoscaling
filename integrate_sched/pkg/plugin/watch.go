@@ -5,13 +5,10 @@ package plugin
 
 import (
 	"context"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
-
-	virtapi "github.com/neondatabase/virtink/pkg/apis/virt/v1alpha1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -49,35 +46,6 @@ func (e *AutoscaleEnforcer) watchVMDeletions(ctx context.Context, deletions chan
 			options.LabelSelector = LabelVM
 		},
 	)
-
-	return nil
-}
-
-// removeOldMigrations is called periodically to clean up the VirtualMachineMigrations that Virtink
-// hasn't
-//
-// This was originally supposed to be implemented in a similar fashion to watchVMDeletions, but that
-// was erroring on startup, and the error messages were too annoying to fix.
-func (e *AutoscaleEnforcer) removeOldMigrations(ctx context.Context) error {
-	vmms, err := e.virtClient.VirtV1alpha1().VirtualMachineMigrations("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("Error listing migrations: %s", err)
-	}
-
-	for _, vmm := range vmms.Items {
-		name := api.PodName{Name: vmm.Name, Namespace: vmm.Namespace}
-
-		shouldDelete := vmm.Status.Phase == virtapi.VirtualMachineMigrationSucceeded
-
-		if vmm.Status.Phase == virtapi.VirtualMachineMigrationFailed {
-			klog.Infof("[autoscale-enforcer] Deleting failed migration %v", name)
-			shouldDelete = true
-		}
-
-		if shouldDelete {
-			e.handleVMMFinished(ctx, name)
-		}
-	}
 
 	return nil
 }
