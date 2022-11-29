@@ -72,6 +72,23 @@ func (r *VirtualMachine) ValidateCreate() error {
 		}
 	}
 
+	// validate .spec.guest.memorySlots.use and .spec.guest.memorySlots.max
+	if r.Spec.Guest.MemorySlots.Use != nil {
+		if r.Spec.Guest.MemorySlots.Max == nil {
+			return fmt.Errorf(".spec.guest.memorySlots.max must be defined if .spec.guest.memorySlots.use specified")
+		}
+		if *r.Spec.Guest.MemorySlots.Use < *r.Spec.Guest.MemorySlots.Min {
+			return fmt.Errorf(".spec.guest.memorySlots.use (%d) should be greater than or equal to the .spec.guest.memorySlots.min (%d)",
+				*r.Spec.Guest.MemorySlots.Use,
+				*r.Spec.Guest.MemorySlots.Min)
+		}
+		if *r.Spec.Guest.MemorySlots.Use > *r.Spec.Guest.MemorySlots.Max {
+			return fmt.Errorf(".spec.guest.memorySlots.use (%d) should be less than or equal to the .spec.guest.memorySlots.max (%d)",
+				*r.Spec.Guest.MemorySlots.Use,
+				*r.Spec.Guest.MemorySlots.Max)
+		}
+	}
+
 	// validate .spec.disk names
 	for _, disk := range r.Spec.Disks {
 		virtualmachinelog.Info("validate disk", "name", disk.Name)
@@ -97,16 +114,17 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 
 	// process immutable fields
 	before, _ := old.(*VirtualMachine)
-	if *r.Spec.Guest.CPUs.Min != *before.Spec.Guest.CPUs.Min {
+
+	if !reflect.DeepEqual(r.Spec.Guest.CPUs.Min, before.Spec.Guest.CPUs.Min) {
 		return fmt.Errorf(".spec.guest.cpus.min is immutable")
 	}
-	if *r.Spec.Guest.CPUs.Max != *before.Spec.Guest.CPUs.Max {
+	if !reflect.DeepEqual(r.Spec.Guest.CPUs.Max, before.Spec.Guest.CPUs.Max) {
 		return fmt.Errorf(".spec.guest.cpus.max is immutable")
 	}
-	if *r.Spec.Guest.MemorySlots.Min != *before.Spec.Guest.MemorySlots.Min {
+	if !reflect.DeepEqual(r.Spec.Guest.MemorySlots.Min, before.Spec.Guest.MemorySlots.Min) {
 		return fmt.Errorf(".spec.guest.memorySlots.min is immutable")
 	}
-	if *r.Spec.Guest.MemorySlots.Max != *before.Spec.Guest.MemorySlots.Max {
+	if !reflect.DeepEqual(r.Spec.Guest.MemorySlots.Max, before.Spec.Guest.MemorySlots.Max) {
 		return fmt.Errorf(".spec.guest.memorySlots.max is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Ports, before.Spec.Guest.Ports) {

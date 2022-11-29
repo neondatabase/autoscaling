@@ -60,7 +60,10 @@ RUN set -e \
 	&& cp -f /lib/libe2p.so.2          /neonvm/lib/libe2p.so.2 \
 	&& cp -f /lib/libext2fs.so.2       /neonvm/lib/libext2fs.so.2 \
 	&& cp -f /lib/libcom_err.so.2      /neonvm/lib/libcom_err.so.2 \
-	&& cp -f /lib/libblkid.so.1        /neonvm/lib/libblkid.so.1
+	&& cp -f /lib/libblkid.so.1        /neonvm/lib/libblkid.so.1 \
+	&& mv /usr/share/udhcpc/default.script /neonvm/bin/udhcpc.script \
+	&& sed -i 's/#!\/bin\/sh/#!\/neonvm\/bin\/sh/' /neonvm/bin/udhcpc.script \
+	&& sed -i 's/export PATH=.*/export PATH=\/neonvm\/bin/' /neonvm/bin/udhcpc.script
 
 # tools for qemu disk creation
 RUN set -e \
@@ -154,6 +157,7 @@ chmod 0755 /dev/pts
 chmod 1777 /dev/shm
 mount -t proc  proc  /proc
 mount -t sysfs sysfs /sys
+mount -t cgroup cgroup /sys/fs/cgroup
 mount -t devpts -o noexec,nosuid       devpts    /dev/pts
 mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
 
@@ -172,7 +176,7 @@ ETH_LIST=$(find /sys/class/net -mindepth 1 -maxdepth 1 -name "eth*")
 for i in ${ETH_LIST}; do
     iface=$(basename $i)
     ip link set up dev $iface
-    udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119
+    udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 done
 `
 )
@@ -371,12 +375,11 @@ func main() {
 	}
 
 	// do quiet build - discard output
-	io.Copy(io.Discard, buildResp.Body)
-	/*
-	   if err = printReader(buildResp.Body); err != nil {
-	   	log.Fatalln(err)
-	   }
-	*/
+	//io.Copy(io.Discard, buildResp.Body)
+
+	if err = printReader(buildResp.Body); err != nil {
+		log.Fatalln(err)
+	}
 
 	if len(*outFile) != 0 {
 		log.Printf("Save disk image as %s", *outFile)

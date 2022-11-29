@@ -21,7 +21,7 @@ jobs:
     steps:
 
       - id: get_version
-        run: echo "version=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
+        run: echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
       - name: git checkout
         uses: actions/checkout@v3
@@ -31,7 +31,7 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: generate go code
+      - name: generate code and k8s CRDs
         run: |
           git clone --branch=v${{ env.CODE_GENERATOR_VERSION }} --depth=1 https://github.com/kubernetes/code-generator.git ${RUNNER_TEMP}/code-generator
           go install sigs.k8s.io/controller-tools/cmd/controller-gen@v${{ env.CONTROLLER_TOOLS_VERSION }}
@@ -89,7 +89,6 @@ jobs:
 
       - name: github release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             neonvm.yaml

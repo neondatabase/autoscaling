@@ -6,7 +6,77 @@
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
 **Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `kubectl cluster-info` shows).
 
-### Running on the cluster
+### Install cert-manager
+
+```console
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+```
+
+### Install NeonVM
+
+```console
+kubectl apply -f https://github.com/neondatabase/neonvm/releases/latest/download/neonvm.yaml
+```
+
+### Run virtual machine
+
+```console
+cat <<EOF | kubectl apply -f -
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: vm-debian
+spec:
+  guest:
+    rootDisk:
+      image: neondatabase/vm-debian:11
+EOF
+```
+
+### Check virtual machine running
+
+```console
+kubectl get neonvm
+
+NAME        CPUS   MEMORY   POD               STATUS    AGE
+vm-debian   1      1Gi      vm-debian-8rxp7   Running   3m13s
+```
+
+### Go inside virtual machine
+
+```console
+kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- screen /dev/pts/0
+
+<press ENTER>
+
+root@neonvm:~#
+root@neonvm:~# apt-get update >/dev/null && apt-get install -y curl >/dev/null
+root@neonvm:~# curl -k https://kubernetes/version
+{
+  "major": "1",
+  "minor": "25",
+  "gitVersion": "v1.25.2",
+  "gitCommit": "5835544ca568b757a8ecae5c153f317e5736700e",
+  "gitTreeState": "clean",
+  "buildDate": "2022-09-22T05:25:21Z",
+  "goVersion": "go1.19.1",
+  "compiler": "gc",
+  "platform": "linux/amd64"
+}
+
+<press CTRL-a k to exit screen session>
+```
+
+### Delete virtual machine
+
+```console
+kubectl delete neonvm vm-debian
+```
+
+
+## Local development
+
+### Run NeonVM locally
 
 #### 1. Create local cluster
 
@@ -118,38 +188,11 @@ UnDeploy the controller to the cluster:
 make undeploy
 ```
 
-### How it works
+## How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
 
 It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/) 
 which provides a reconcile function responsible for synchronizing resources untile the desired state is reached on the cluster
-
-### Test It Out
-
-#### 1. Install the CRDs into the cluster:
-
-```sh
-make install
-```
-
-#### 2. Run your controller (this will run in the foreground, so switch to a new terminal if you want to leave it running):
-
-```sh
-make run
-```
-
-**NOTE:** You can also run this in one step by running: `make install run`
-
-### Modifying the API definitions
-If you are editing the API definitions, generate the manifests such as CRs or CRDs using:
-
-```sh
-make manifests
-```
-
-**NOTE:** Run `make --help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## Roadmap
 
@@ -157,7 +200,7 @@ More information can be found via the [Kubebuilder Documentation](https://book.k
 - [ ] Multus CNI support
 - [x] Hot[un]plug CPUs and Memory (via resource patch)
 - [ ] Live migration CRDs
-- [ ] Simplify VM disk image creation from any docker image
+- [x] Simplify VM disk image creation from any docker image
 - [ ] ARM64 support
 
 

@@ -5,10 +5,6 @@ on:
     - cron:  '42 4 * * 2'  # run once a week
   workflow_dispatch: # adds ability to run this manually
 
-env:
-  VM_EXAMPLE_SOURCE: postgres:14-alpine
-  VM_EXAMPLE_IMAGE:  neondatabase/vm-postgres:14-alpine
-
 jobs:
   vm-example:
     runs-on: ubuntu-latest
@@ -36,7 +32,22 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: build and push vm-example image
-        run: |
-          bin/vm-builder -src ${{ env.VM_EXAMPLE_SOURCE }} -dst ${{ env.VM_EXAMPLE_IMAGE }}
-          docker push -q ${{ env.VM_EXAMPLE_IMAGE }}
+      - name: build vm-alpine:3.16
+        run:  bin/vm-builder -src alpine:3.16 -dst neondatabase/vm-alpine:3.16
+      - name: push vm-alpine:3.16
+        run:  docker push -q neondatabase/vm-alpine:3.16
+
+      - name: build vm-ubuntu:22.04
+        run:  bin/vm-builder -src ubuntu:22.04 -dst neondatabase/vm-ubuntu:22.04
+      - name: push  vm-ubuntu:22.04
+        run:  docker push -q neondatabase/vm-ubuntu:22.04
+
+      - name: build vm-debian:11
+        run:  bin/vm-builder -src debian:11 -dst neondatabase/vm-debian:11
+      - name: push  vm-debian:11
+        run:  docker push -q neondatabase/vm-debian:11
+
+      - name: build vm-postgres:14-alpine
+        run:  bin/vm-builder -src postgres:14-alpine -dst neondatabase/vm-postgres:14-alpine
+      - name: push vm-postgres:14-alpine
+        run:  docker push -q neondatabase/vm-postgres:14-alpine
