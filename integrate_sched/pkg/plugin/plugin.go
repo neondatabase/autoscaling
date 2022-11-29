@@ -121,15 +121,25 @@ func (e *AutoscaleEnforcer) Filter(
 
 	vmInfo, _, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Filter: Error getting pod %v init vCPU: %s", pName, err)
+		klog.Errorf("[autoscale-enforcer] Filter: Error getting pod %v vmInfo: %s", pName, err)
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
-			fmt.Sprintf("Error getting pod init vCPU: %s", err),
+			fmt.Sprintf("Error getting pod vmInfo: %s", err),
 		)
 	}
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
+
+	// Check whether the pod's memory slot size matches the scheduler's. If it doesn't, reject it.
+	if !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
+		err := fmt.Errorf("expected %v, found %v", e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize)
+		klog.Warningf("[autoscale-enforcer] Filter: VM for pod %v has bad MemSlotSize: %w", pName, err)
+		return framework.NewStatus(
+			framework.UnschedulableAndUnresolvable,
+			fmt.Sprintf("VM for pod has bad MemSlotSize: %v", err),
+		)
+	}
 
 	node, err := e.state.getOrFetchNodeState(ctx, e.handle, nodeName)
 	if err != nil {
@@ -140,8 +150,8 @@ func (e *AutoscaleEnforcer) Filter(
 		)
 	}
 
-	// The pod will need podInitVCPU vCPUs reserved for it when it does get scheduled. Now we can
-	// check whether this node has capacity for the pod.
+	// The pod will resources according to vmInfo.{Cpu,Mem}.Use reserved for it when it does get
+	// scheduled. Now we can check whether this node has capacity for the pod.
 	//
 	// Technically speaking, the VM pods in nodeInfo might not match what we have recorded for the
 	// node -- simply because during preemption, the scheduler tries to see whether it could
@@ -149,11 +159,12 @@ func (e *AutoscaleEnforcer) Filter(
 	// preemption.
 	//
 	// So we have to actually count up the resource usage of all pods in nodeInfo:
-	totalNodeVCPU := uint16(0)
+	var totalNodeVCPU, totalNodeMem uint16
 	for _, podInfo := range nodeInfo.Pods {
 		pn := api.PodName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
 			totalNodeVCPU += podState.vCPU.reserved
+			totalNodeMem += podState.memSlots.reserved
 		}
 	}
 
@@ -225,17 +236,26 @@ func (e *AutoscaleEnforcer) Score(
 	}
 
 	// Special case: return minimum score if we don't have room
-	if vmInfo.Cpu.Use > node.remainingReservableCPU() {
+	if vmInfo.Cpu.Use > node.remainingReservableCPU() || vmInfo.Mem.Use > node.remainingReservableMemSlots() {
 		return framework.MinNodeScore, nil
 	}
 
-	total := int64(node.totalReservableCPU())
-	maxTotal := int64(e.state.maxTotalReservableCPU)
+	totalCpu := int64(node.totalReservableCPU())
+	totalMem := int64(node.totalReservableMemSlots())
+	maxTotalCpu := int64(e.state.maxTotalReservableCPU)
+	maxTotalMem := int64(e.state.maxTotalReservableMemSlots)
 
 	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
 	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	score := framework.MinNodeScore + scoreLen*total/maxTotal
-	return score, nil
+	scoreCpu := framework.MinNodeScore + scoreLen*totalCpu/maxTotalCpu
+	scoreMem := framework.MinNodeScore + scoreLen*totalMem/maxTotalMem
+
+	// return the minimum of the two resources scores
+	if scoreCpu < scoreMem {
+		return scoreCpu, nil
+	} else {
+		return scoreMem, nil
+	}
 }
 
 // ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used
@@ -266,6 +286,20 @@ func (e *AutoscaleEnforcer) Reserve(
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
+	// Double-check that the VM's memory slot size still matches ours. This should be ensured by
+	// our implementation of Filter, but this would be a *pain* to debug if it went wrong somehow.
+	if !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
+		err := fmt.Errorf(
+			"expected %v, found %v (this should have been caught during Filter)",
+			e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize,
+		)
+		klog.Errorf("[autoscale-enforcer] Reserve: VM for pod %v has bad MemSlotSize: %w", pName, err)
+		return framework.NewStatus(
+			framework.UnschedulableAndUnresolvable,
+			fmt.Sprintf("VM for pod has bad MemSlotSize: %v", err),
+		)
+	}
+
 	node, err := e.state.getOrFetchNodeState(ctx, e.handle, nodeName)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Error getting node %s state: %s", nodeName, err)
@@ -280,19 +314,28 @@ func (e *AutoscaleEnforcer) Reserve(
 	// checks will be handled in the calls to Filter, but it's possible for another VM to scale up
 	// in between the calls to Filter and Reserve, removing the resource availability that we
 	// thought we had.
-	if vmInfo.Cpu.Use <= node.remainingReservableCPU() {
+	if vmInfo.Cpu.Use <= node.remainingReservableCPU() && vmInfo.Mem.Use <= node.remainingReservableMemSlots() {
 		newNodeReservedCPU := node.vCPU.reserved + vmInfo.Cpu.Use
+		newNodeReservedMemSlots := node.memSlots.reserved + vmInfo.Mem.Use
+
+		fmtString := "[autoscale-enforcer] Allowing pod %v (%d vCPU, %d mem slots) in node %s: " +
+			"node.vCPU.reserved %d -> %d, node.memSlots.reserved %d -> %d"
 		klog.Infof(
-			"[autoscale-enforcer] Allowing pod %v (%d vCPU) in node %s: node.reservedCPU %d -> %d",
-			pName, vmInfo.Cpu.Use, nodeName, node.vCPU.reserved, newNodeReservedCPU,
+			fmtString,
+			// allowing pod %v (%d vCpu, %d mem slots) in node %s
+			pName, vmInfo.Cpu.Use, vmInfo.Mem.Use, nodeName,
+			// node vcpu reserved %d -> %d, node mem slots reserved %d -> %d
+			node.vCPU.reserved, newNodeReservedCPU, node.memSlots.reserved, newNodeReservedMemSlots,
 		)
 
 		node.vCPU.reserved = newNodeReservedCPU
+		node.memSlots.reserved = newNodeReservedMemSlots
 		ps := &podState{
 			name:                     pName,
 			vmName:                   vmName,
 			node:                     node,
 			vCPU:                     podResourceState[uint16]{reserved: vmInfo.Cpu.Use, capacityPressure: 0},
+			memSlots:                 podResourceState[uint16]{reserved: vmInfo.Mem.Use, capacityPressure: 0},
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 			mqIndex:                  -1,
 		}
@@ -300,9 +343,15 @@ func (e *AutoscaleEnforcer) Reserve(
 		e.state.podMap[pName] = ps
 		return nil // nil is success
 	} else {
+		fmtString := "Not enough resources to reserve for VM: " +
+			"need %d vCPU, %d mem slots but " +
+			"have %d vCPU, %d mem slots remaining"
 		err := fmt.Errorf(
-			"Not enough available vCPU to reserve for pod init vCPU: need %d but have %d (of %d) remaining",
-			vmInfo.Cpu.Use, node.remainingReservableCPU(), node.totalReservableCPU(),
+			fmtString,
+			// need %d vCPU, %d mem slots
+			vmInfo.Cpu.Use, vmInfo.Mem.Use,
+			// have %d vCPU, %d mem slots
+			node.remainingReservableCPU(), node.remainingReservableMemSlots(),
 		)
 
 		klog.Errorf("[autoscale-enforcer] Can't schedule pod %v: %s", pName, err)
@@ -332,17 +381,21 @@ func (e *AutoscaleEnforcer) Unreserve(
 		return
 	}
 
-	// Mark the vCPU as no longer reserved and delete the pod
+	// Mark the resources as no longer reserved
+
+	currentlyMigrating := false // Unreserve is never called on bound pods, so it can't be migrating.
+	vCPUVerdict := collectResourceTransition(&ps.node.vCPU, &ps.vCPU).
+		handleDeleted(currentlyMigrating)
+	memVerdict := collectResourceTransition(&ps.node.memSlots, &ps.memSlots).
+		handleDeleted(currentlyMigrating)
+
+	// Delete our record of the pod
 	delete(e.state.podMap, pName)
 	delete(ps.node.pods, pName)
 	ps.node.mq.removeIfPresent(ps)
-	oldReserved := ps.node.vCPU.reserved
-	oldPressure := ps.node.vCPU.capacityPressure
-	ps.node.vCPU.reserved -= ps.vCPU.reserved
-	ps.node.vCPU.capacityPressure -= ps.vCPU.capacityPressure
 
-	klog.Infof(
-		"[autoscale-enforcer] Unreserved pod %v (%d vCPU) from node %s: node.vCPU.reserved %d -> %d, node.vCPU.capacityPressure %d -> %d",
-		pName, ps.vCPU.reserved, ps.node.name, oldReserved, ps.node.vCPU.reserved, oldPressure, ps.node.vCPU.capacityPressure,
-	)
+	fmtString := "[autoscale-enforcer] Unreserved pod %v from node %s:\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+	klog.Infof(fmtString, ps.name, ps.node.name, vCPUVerdict, memVerdict)
 }

@@ -3,15 +3,16 @@ package plugin
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fields "k8s.io/apimachinery/pkg/fields"
 	klog "k8s.io/klog/v2"
 
+	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -27,13 +28,14 @@ type config struct {
 	//
 	// Duplicate names are allowed, and earlier overrides take precedence over later ones.
 	NodeOverrides []overrideSet `json:"nodeOverrides"`
-	// MemBlockSize is the smallest unit of memory that the scheduler plugin will reserve for a VM,
+	// MemSlotSize is the smallest unit of memory that the scheduler plugin will reserve for a VM,
 	// and is defined globally.
 	//
-	// If this value is increased at runtime, old assignments will continue to maintain their higher
-	// resolution. New VMs with a different block size will be rejected; migrations from old VMs
-	// will be maintained.
-	MemBlockSize megabytesOrGigabytes `json:"memBlockSize"`
+	// Any VM with a MemorySlotSize that does not match this value will be rejected.
+	//
+	// This value cannot be increased at runtime, and configurations that attempt to do so will be
+	// rejected.
+	MemSlotSize resource.Quantity `json:"memBlockSize"`
 
 	// FallbackToAllocatable is a flag that allows the scheduler to use a node's Status.Allocatable
 	// if a resource isn't present in its Status.Capacity.
@@ -52,8 +54,9 @@ type overrideSet struct {
 }
 
 type nodeConfig struct {
-	Cpu    resourceConfig `json:"cpu"`
-	Memory resourceConfig `json:"memory"`
+	Cpu         resourceConfig `json:"cpu"`
+	Memory      resourceConfig `json:"memory"`
+	ComputeUnit api.Resources  `json:"computeUnit"`
 }
 
 // resourceConfig configures the amount of a particular resource we're willing to allocate to VMs,
@@ -72,52 +75,6 @@ type resourceConfig struct {
 	System int64 `json:"system,omitempty"`
 }
 
-// megabytesOrGigabytes is an amount of memory, represented either by megabytes (suffix = "M") or
-// gigabytes (suffix = "G")
-//
-// This type has strict limitations, like not allowing "GB" or "GiB", to avoid the complexity of
-// those subtle differences, and allow us to change the precise meaning of "gigabyte" in the future
-// without worrying about small size differences.
-type megabytesOrGigabytes struct {
-	mb int64
-}
-
-const (
-	gigabyteMultiplier int64 = 1024
-)
-
-func (mg *megabytesOrGigabytes) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
-		return err
-	}
-
-	if !strings.HasSuffix(s, "G") && !strings.HasSuffix(s, "M") {
-		return fmt.Errorf("string must end with 'G' or 'M'")
-	}
-
-	intValue, err := strconv.Atoi(s[:len(s)-1])
-	if err != nil {
-		return err
-	}
-
-	multiplier := int64(1)
-	if strings.HasSuffix(s, "G") {
-		multiplier = gigabyteMultiplier
-	}
-
-	mg.mb = int64(intValue) * multiplier
-	return nil
-}
-
-func (mg *megabytesOrGigabytes) String() string {
-	if mg.mb%gigabyteMultiplier == 0 {
-		return fmt.Sprintf("%dG", mg.mb/gigabyteMultiplier)
-	} else {
-		return fmt.Sprintf("%dM", mg.mb)
-	}
-}
-
 ///////////////////////
 // CONFIG VALIDATION //
 ///////////////////////
@@ -125,13 +82,17 @@ func (mg *megabytesOrGigabytes) String() string {
 // if the returned error is not nil, the string is a JSON path to the invalid value
 func (c *config) validate() (string, error) {
 	if path, err := c.NodeDefaults.validate(); err != nil {
-		return fmt.Sprintf("nodeConfig.%s", path), err
+		return fmt.Sprintf("nodeDefaults.%s", path), err
 	}
 
 	for i, override := range c.NodeOverrides {
 		if path, err := override.validate(); err != nil {
 			return fmt.Sprintf("nodeOverrides[%d].%s", i, path), err
 		}
+	}
+
+	if c.MemSlotSize.Value() <= 0 {
+		return "memBlockSize", fmt.Errorf("value must be > 0")
 	}
 
 	return "", nil
@@ -156,6 +117,9 @@ func (c *nodeConfig) validate() (string, error) {
 	if path, err := c.Memory.validate(); err != nil {
 		return fmt.Sprintf("memory.%s", path), err
 	}
+	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
+		return "computeUnit", err
+	}
 
 	return "", nil
 }
@@ -169,6 +133,14 @@ func (c *resourceConfig) validate() (string, error) {
 
 	if c.System <= 0 {
 		return "system", fmt.Errorf("value must be > 0")
+	}
+
+	return "", nil
+}
+
+func (oldConf *config) validateChangeTo(newConf *config) (string, error) {
+	if newConf.MemSlotSize != oldConf.MemSlotSize {
+		return "memSlotSize", fmt.Errorf("value cannot be changed at runtime")
 	}
 
 	return "", nil
@@ -273,10 +245,15 @@ func (e *AutoscaleEnforcer) handleNewConfigMap(configMap *corev1.ConfigMap) erro
 
 	newConf.JSONString = jsonString
 
-	isNewConf := e.state.conf == nil
+	isFirstConf := e.state.conf == nil
+	if !isFirstConf {
+		if path, err := e.state.conf.validateChangeTo(&newConf); err != nil {
+			return fmt.Errorf("Invalid configuration update: at %s: %w", path, err)
+		}
+	}
 	e.state.conf = &newConf
 
-	if isNewConf {
+	if isFirstConf {
 		return nil
 	}
 
@@ -313,6 +290,26 @@ func (c *nodeConfig) vCpuLimits(total uint16) (nodeResourceState[uint16], error)
 		total:                total,
 		system:               system,
 		watermark:            uint16(c.Cpu.Watermark * float32(total-system)),
+		reserved:             0,
+		capacityPressure:     0,
+		pressureAccountedFor: 0,
+	}, nil
+}
+
+func (c *nodeConfig) memoryLimits(totalSlots uint16) (nodeResourceState[uint16], error) {
+	system := uint16(c.Memory.System)
+	if system > totalSlots {
+		err := fmt.Errorf(
+			"desired system memory (%d slots) greater than node total (%d slots)",
+			system, totalSlots,
+		)
+		return nodeResourceState[uint16]{}, err
+	}
+
+	return nodeResourceState[uint16]{
+		total:                totalSlots,
+		system:               system,
+		watermark:            uint16(c.Memory.Watermark * float32(totalSlots-system)),
 		reserved:             0,
 		capacityPressure:     0,
 		pressureAccountedFor: 0,

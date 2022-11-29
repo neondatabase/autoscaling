@@ -105,105 +105,54 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	}
 
 	resp := api.PluginResponse{
-		Permit:  permit,
-		Migrate: migrateDecision,
+		Permit:      permit,
+		Migrate:     migrateDecision,
+		ComputeUnit: *node.computeUnit,
 	}
+	pod.mostRecentComputeUnit = node.computeUnit // refer to common allocation
 	return &resp, 200, nil
 }
 
-// FIXME: this function has some duplicated sections. Ideally they wouldn't be (they don't have to!)
-// but it's a little tricky to sus out how to merge the logic in a way that makes sense..
 func (e *AutoscaleEnforcer) handleResources(
 	pod *podState, node *nodeState, req api.Resources, startingMigration bool,
-) (api.ResourcePermit, int, error) {
-	oldNodeVCPUReserved := node.vCPU.reserved
-	oldNodeVCPUPressure := node.vCPU.capacityPressure
-	oldNodeVCPUPressureAccountedFor := node.vCPU.pressureAccountedFor
-	oldPodVCPUReserved := pod.vCPU.reserved
-	oldPodVCPUPressure := pod.vCPU.capacityPressure
-
+) (api.Resources, int, error) {
 	// Check that we aren't being asked to do something during migration:
 	if pod.currentlyMigrating() {
 		// The agent shouldn't have asked for a change after already receiving notice that it's
 		// migrating.
-		if req.VCPU != pod.vCPU.reserved {
-			err := fmt.Errorf("cannot change vCPU: agent has already been informed that pod is migrating")
-			return api.ResourcePermit{}, 400, err
+		if req.VCPU != pod.vCPU.reserved || req.Mem != pod.memSlots.reserved {
+			err := fmt.Errorf("cannot change resources: agent has already been informed that pod is migrating")
+			return api.Resources{}, 400, err
 		}
-		return api.ResourcePermit{VCPU: pod.vCPU.reserved}, 200, nil
-	} else if startingMigration {
-		if req.VCPU > pod.vCPU.reserved {
-			pod.vCPU.capacityPressure = req.VCPU - pod.vCPU.reserved
-			node.vCPU.capacityPressure = node.vCPU.capacityPressure + pod.vCPU.capacityPressure - oldPodVCPUPressure
-			// don't handle pressureAccountedFor here, that's taken care of in
-			// (*pluginState).startMigration()
-			klog.Infof(
-				"[autoscale-enforcer] Denying pod %v vCPU increase %d -> %d because it is starting migration; node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
-				pod.name, pod.vCPU.reserved, req.VCPU, oldNodeVCPUPressure, node.vCPU.capacityPressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
+		return api.Resources{VCPU: pod.vCPU.reserved, Mem: pod.memSlots.reserved}, 200, nil
+	}
+
+	// Check that the resources correspond to an integer number of compute units, based on what the
+	// pod was most recently informed of.
+	if pod.mostRecentComputeUnit != nil {
+		cu := *pod.mostRecentComputeUnit
+		dividesCleanly := req.VCPU%cu.VCPU == 0 && req.Mem%cu.Mem == 0 && req.VCPU/cu.VCPU == req.Mem/cu.Mem
+		if !dividesCleanly {
+			err := fmt.Errorf(
+				"requested resources %+v do not divide cleanly by previous compute unit %+v",
+				req, cu,
 			)
-		} else /* `req.VCPU <= pod.vCPU.reserved` is implied */ {
-			// Handle decrease-or-equal in the same way as below.
-			node.vCPU.reserved -= pod.vCPU.reserved - req.VCPU
-			pod.vCPU.reserved = req.VCPU
-			pod.vCPU.capacityPressure = 0
-			node.vCPU.capacityPressure -= oldPodVCPUPressure
-
-			if oldPodVCPUPressure != 0 || req.VCPU != oldPodVCPUReserved {
-				klog.Infof(
-					"[autoscale-enforcer] Register pod %v vCPU %d -> %d (pressure %d -> %d); node.vCPU.reserved %d -> %d (of %d), node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
-					pod.name, oldPodVCPUReserved, pod.vCPU.reserved, oldPodVCPUPressure, pod.vCPU.capacityPressure,
-					oldNodeVCPUReserved, node.vCPU.reserved, node.totalReservableCPU(), oldNodeVCPUPressure, node.vCPU.capacityPressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
-				)
-			}
+			return api.Resources{}, 400, err
 		}
-
-		return api.ResourcePermit{VCPU: pod.vCPU.reserved}, 200, nil
 	}
 
-	if req.VCPU <= pod.vCPU.reserved {
-		// Decrease "requests" are actually just notifications it's already happened.
-		node.vCPU.reserved -= pod.vCPU.reserved - req.VCPU
-		pod.vCPU.reserved = req.VCPU
-		// pressure is now zero, because the pod no longer wants to increase resources.
-		pod.vCPU.capacityPressure = 0
-		node.vCPU.capacityPressure -= oldPodVCPUPressure
-	} else {
-		increase := req.VCPU - pod.vCPU.reserved
-		// Increases are bounded by what's left in the node:
-		maxIncrease := node.remainingReservableCPU()
-		if increase > maxIncrease /* increases are bounded by what's left in the node */ {
-			pod.vCPU.capacityPressure = increase - maxIncrease
-			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
-			// directly += or -= (implicitly relying on overflow).
-			node.vCPU.capacityPressure = node.vCPU.capacityPressure - oldPodVCPUPressure + pod.vCPU.capacityPressure
-			increase = maxIncrease // cap at maxIncrease.
-		} else {
-			// If we're not capped by maxIncrease, relieve pressure coming from this pod
-			node.vCPU.capacityPressure -= pod.vCPU.capacityPressure
-			pod.vCPU.capacityPressure = 0
-		}
-		pod.vCPU.reserved += increase
-		node.vCPU.reserved += increase
-	}
+	vCPUTransition := collectResourceTransition(&node.vCPU, &pod.vCPU)
+	memTransition := collectResourceTransition(&node.memSlots, &pod.memSlots)
 
-	if oldPodVCPUReserved == req.VCPU && oldPodVCPUPressure == 0 {
-		klog.Infof(
-			"[autoscale-enforcer] Received request for pod %v staying at current vCPU count %d",
-			pod.name, oldPodVCPUReserved,
-		)
-	} else {
-		var wanted string
-		if pod.vCPU.reserved != req.VCPU {
-			wanted = fmt.Sprintf(" (wanted %d)", req.VCPU)
-		}
-		klog.Infof(
-			"[autoscale-enforcer] Register pod %v vCPU %d -> %d%s (pressure %d -> %d); node.vCPU.reserved %d -> %d (of %d), node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
-			pod.name, oldPodVCPUReserved, pod.vCPU.reserved, wanted, oldPodVCPUPressure, pod.vCPU.capacityPressure,
-			oldNodeVCPUReserved, node.vCPU.reserved, node.totalReservableCPU(), oldNodeVCPUPressure, node.vCPU.capacityPressure, oldNodeVCPUPressureAccountedFor, node.vCPU.pressureAccountedFor,
-		)
-	}
+	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration)
+	memVerdict := memTransition.handleRequested(req.Mem, startingMigration)
 
-	return api.ResourcePermit{VCPU: pod.vCPU.reserved}, 200, nil
+	fmtString := "[autoscale-enforcer] Handled resources from pod %v AgentRequest.\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+	klog.Infof(fmtString, pod.name, vCPUVerdict, memVerdict)
+
+	return api.Resources{VCPU: pod.vCPU.reserved, Mem: pod.memSlots.reserved}, 200, nil
 }
 
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(

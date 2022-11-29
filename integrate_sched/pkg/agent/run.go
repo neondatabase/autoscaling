@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -28,9 +29,7 @@ type Runner struct {
 	vmClient       *vmclient.Clientset
 	vmName         string
 	metricsURL     *url.URL
-	minVCPU        uint16
-	maxVCPU        uint16
-	currentVCPU    uint16
+	vm             api.VmInfo
 	servePort      uint16
 	readinessPort  uint16
 	politeExitPort uint16
@@ -53,9 +52,7 @@ func NewRunner(args Args, schedulerIP string, vmClient *vmclient.Clientset) (*Ru
 		vmClient:       vmClient,
 		vmName:         args.VmName,
 		metricsURL:     args.MetricsURL,
-		minVCPU:        args.VmInfo.Cpu.Min,
-		maxVCPU:        args.VmInfo.Cpu.Max,
-		currentVCPU:    args.VmInfo.Cpu.Use,
+		vm:             *args.VmInfo,
 		readinessPort:  args.ReadinessPort,
 		politeExitPort: args.PoliteExitPort,
 	}, nil
@@ -80,10 +77,9 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 	metrics := make(chan api.Metrics)
 	go r.getMetricsLoop(config, metrics)
 
-	klog.Infof(
-		"Starting main loop. min vCPU = %d, init vCPU = %d, max vCPU = %d",
-		r.minVCPU, r.currentVCPU, r.maxVCPU,
-	)
+	klog.Infof("Starting main loop. vCPU = %+v, memSlots = %+v", r.vm.Cpu, r.vm.Mem)
+
+	var computeUnit *api.Resources
 
 	for {
 		select {
@@ -91,79 +87,210 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case m := <-metrics:
-			newVCPUCount := r.newGoalCPUCount(m)
-			changedVCPU := newVCPUCount != r.currentVCPU
+			// If we haven't yet sent the scheduler any metrics, we need to send an initial message
+			// to be informed of compute unit size
+			if computeUnit == nil {
+				req := api.AgentRequest{
+					Pod: r.podName,
+					Resources: api.Resources{
+						VCPU: r.vm.Cpu.Use,
+						Mem:  r.vm.Mem.Use,
+					},
+					Metrics: m,
+				}
+				resp, err := r.sendRequestToPlugin(config, &req)
+				if err != nil {
+					klog.Errorf("Error from initial plugin message %v", err)
+					goto badScheduler // assume something's permanently wrong with the scheduler
+				} else if err := resp.ComputeUnit.ValidateNonZero(); err != nil {
+					klog.Errorf(
+						"Initial plugin response gave bad compute unit %+v: %v",
+						resp.ComputeUnit, err,
+					)
+					goto badScheduler
+				}
 
-			if !changedVCPU {
-				klog.Infof("Goal vCPU = %d unchanged", newVCPUCount)
-			} else {
-				klog.Infof("New goal vCPU = %d", newVCPUCount)
+				computeUnit = &resp.ComputeUnit
+
+				if resp.Permit.VCPU != r.vm.Cpu.Use || resp.Permit.Mem != r.vm.Mem.Use {
+					klog.Errorf("Initial plugin response gave bad permit %+v", resp.Permit)
+					goto badScheduler
+				}
+
+				if resp.Migrate != nil {
+					klog.Infof("Scheduler responded to initial message with migration, exiting without further changes.")
+					return nil
+				}
 			}
 
-			// If the goal is less than the current amount, decrease right away.
-			if newVCPUCount < r.currentVCPU {
+			// Determine the minimum number of compute units to fit the current vCPU and memory,
+			// then use that for "inertia" when considering scaling. We don't want to naively
+			// decrease if one resource is only somewhat underutilized compared to the other.
+			minComputeUnits := r.minComputeUnits(*computeUnit)
+			inertiaCpu := minComputeUnits * computeUnit.VCPU
+
+			newRes := api.Resources{VCPU: r.newGoalCPUCount(m, inertiaCpu)}
+			newRes.Mem = memSlotsForCpu(*computeUnit, newRes.VCPU)
+
+			changedVCPU := newRes.VCPU != r.vm.Cpu.Use
+			changedMem := newRes.Mem != r.vm.Mem.Use
+
+			// Log the current goal
+			{
+				descriptor := func(changed bool) string {
+					if changed {
+						return "new"
+					} else {
+						return "unchanged"
+					}
+				}
+
+				klog.Infof(
+					"Goal vCPU = %d (%s), Goal mem slots = %d (%s)",
+					newRes.VCPU, descriptor(changedVCPU), newRes.Mem, descriptor(changedMem),
+				)
+			}
+
+			// If either new goal amount is less than the current, decrease immediately. However, we
+			// need to be careful not make changes for any resource that is *not* decreasing.
+			doChangesBeforeRequest := false
+			immediateChanges := api.Resources{
+				VCPU: r.vm.Cpu.Use,
+				Mem:  r.vm.Mem.Use,
+			}
+
+			if newRes.VCPU < r.vm.Cpu.Use {
 				klog.Infof(
 					"Goal vCPU %d < Current vCPU %d, decrease immediately",
-					newVCPUCount, r.currentVCPU,
+					newRes.VCPU, r.vm.Cpu.Use,
 				)
-				if err := r.setCpus(ctx, config, newVCPUCount); err != nil {
-					return fmt.Errorf("Error while setting CPU count: %s", err)
-				}
-				r.currentVCPU = newVCPUCount
+				immediateChanges.VCPU = newRes.VCPU
+				doChangesBeforeRequest = true
+			}
+			if newRes.Mem < r.vm.Mem.Use {
+				klog.Infof(
+					"Goal mem slots %d < Current mem slots %d, decrease immediately",
+					newRes.Mem, r.vm.Mem.Use,
+				)
+				immediateChanges.Mem = newRes.Mem
+				doChangesBeforeRequest = true
 			}
 
-			// Request a new amount of CPU
+			if doChangesBeforeRequest {
+				if err := r.setResources(ctx, config, newRes); err != nil {
+					return fmt.Errorf("Error while setting VM resources: %s", err)
+				}
+				r.vm.Cpu.Use = newRes.VCPU
+				r.vm.Mem.Use = newRes.Mem
+			}
+
+			// With pre-request changes out of the way, let's send our request.
 			req := api.AgentRequest{
 				Pod:       r.podName,
-				Resources: api.Resources{VCPU: newVCPUCount},
+				Resources: newRes,
 				Metrics:   m,
 			}
 			resp, err := r.sendRequestToPlugin(config, &req)
 			if err != nil {
 				klog.Errorf("Error from resource request: %s", err)
 				goto badScheduler // assume something's permanently wrong with the scheduler
-			} else if resp.Permit.VCPU > req.Resources.VCPU {
-				klog.Errorf("Plugin returned permit with vCPU greater than requested")
-				goto badScheduler // assume something's permanently wrong with the scheduler
+			} else if err = resp.ComputeUnit.ValidateNonZero(); err != nil {
+				klog.Errorf("Plugin gave bad compute unit %+v: %v", resp.ComputeUnit, err)
+				goto badScheduler
 			}
+
+			computeUnit = &resp.ComputeUnit
 
 			if resp.Migrate != nil {
 				klog.Infof("Scheduler responded with migration, exiting without further changes.")
 				return nil
 			}
 
-			if !changedVCPU {
+			if !changedVCPU && !changedMem {
 				continue
 			}
 
-			if resp.Permit.VCPU != r.currentVCPU {
-				if resp.Permit.VCPU < r.currentVCPU {
-					// We shoudln't reach this, because req.VCPUs < r.currentVCPU is already handled
-					// above, after which r.currentVCPU == req.VCPUs, so that would mean that the
+			// We made our request. Now we handle any remaining increases.
+			doChangesAfterRequest := false
+			schedulerGaveBadPermit := false
+
+			discontinueMsg := "Discontinuing further contact after updating resources"
+
+			if resp.Permit.VCPU != r.vm.Cpu.Use {
+				if resp.Permit.VCPU < r.vm.Cpu.Use {
+					// We shouldn't reach this, because req.VCPUs < r.vm.Cpu.Use is already handled
+					// above, after which r.vm.Cpu.Use == req.VCPUs, so that would mean that the
 					// permit caused a decrease beyond what we're expecting.
-					klog.Errorf("Scheduler gave bad permit less than current vCPU. Discontinuing further contact after updating vCPUs")
+					klog.Errorf("Scheduler gave bad permit less than current vCPU. %s", discontinueMsg)
+					schedulerGaveBadPermit = true
+				} else if resp.Permit.VCPU > req.Resources.VCPU {
+					// Permits given by the scheduler should never be greater than what's requested,
+					// and doing so indicates that something went very wrong.
+					klog.Errorf("Scheduler gave bad permit greater than requested vCPU. %s", discontinueMsg)
+					schedulerGaveBadPermit = true
 				}
 
 				maybeLessThanDesired := ""
-				if resp.Permit.VCPU < newVCPUCount {
+				if resp.Permit.VCPU < newRes.VCPU {
 					maybeLessThanDesired = " (less than desired)"
 				}
 				klog.Infof("Setting vCPU = %d%s", resp.Permit.VCPU, maybeLessThanDesired)
+				newRes.VCPU = resp.Permit.VCPU
+				doChangesAfterRequest = true
 
-				if err := r.setCpus(ctx, config, resp.Permit.VCPU); err != nil {
+			} else /* resp.Permit.VCPU == r.vm.Cpu.Use */ {
+				if r.vm.Cpu.Use == newRes.VCPU {
+					// We actually already set the CPU for this (see above), the returned permit
+					// just confirmed that
+					if changedVCPU {
+						klog.Infof("Scheduler confirmed decrease to %d vCPU", newRes.VCPU)
+					}
+				} else /* resp.Permit.VCPU == r.vm.Cpu.Use && resp.Permit.VCPU != newRes.VCPU */ {
+					// We wanted to increase vCPUs, but the scheduler didn't allow it.
+					klog.Infof("Scheduler denied increase to %d vCPU, staying at %d", newRes.VCPU, r.vm.Cpu.Use)
+				}
+			}
+
+			// Comments for memory are omitted; it's essentially the same as CPU handling
+			if resp.Permit.Mem != r.vm.Mem.Use {
+				if resp.Permit.Mem < r.vm.Mem.Use {
+					klog.Errorf("Scheduler gave bad permit less than current memory slots. %s", discontinueMsg)
+					schedulerGaveBadPermit = true
+				} else if resp.Permit.Mem > req.Resources.Mem {
+					klog.Errorf("Scheduler gave bad permit greater than requested memory slots. %s", discontinueMsg)
+					schedulerGaveBadPermit = true
+				}
+
+				maybeLessThanDesired := ""
+				if resp.Permit.Mem < newRes.Mem {
+					maybeLessThanDesired = " (less than desired)"
+				}
+				klog.Infof("Setting memory slots = %d%s", resp.Permit.Mem, maybeLessThanDesired)
+				newRes.Mem = resp.Permit.Mem
+				doChangesAfterRequest = true
+			} else /* resp.Permit.Mem == r.vm.Mem.Use */ {
+				if r.vm.Mem.Use == newRes.Mem {
+					if changedMem {
+						klog.Infof("Scheduler confirmed decrease to %d memory slots", newRes.Mem)
+					}
+				} else {
+					klog.Infof(
+						"Scheduler denied increase to %d memory slots, staying at %d",
+						newRes.Mem, r.vm.Mem.Use,
+					)
+				}
+			}
+
+			if doChangesAfterRequest {
+				if err := r.setResources(ctx, config, newRes); err != nil {
 					return fmt.Errorf("Error while setting vCPU count: %s", err)
 				}
 
-				r.currentVCPU = resp.Permit.VCPU
+				r.vm.Cpu.Use = newRes.VCPU
+				r.vm.Mem.Use = newRes.Mem
 
-			} else /* permit.VCPUs == r.currentVCPU */ {
-				if r.currentVCPU == newVCPUCount {
-					// We actually already set the CPU for this (see above), the returned permit
-					// just confirmed that
-					klog.Infof("Scheduler confirmed decrease to %d vCPU", newVCPUCount)
-				} else {
-					// We wanted to increase vCPUs, but the scheduler didn't allow it.
-					klog.Infof("Scheduler denied increase to %d vCPU, staying at %d", newVCPUCount, r.currentVCPU)
+				if schedulerGaveBadPermit {
+					goto badScheduler
 				}
 			}
 		}
@@ -173,11 +300,11 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 	// up to now means our current state is fine (even if it's not the minimum)
 badScheduler:
 	// We know the scheduler (if it is somehow behaving correctly) won't over-commit resources into
-	// our current vCPU count.
-	maxFutureVCPU := r.currentVCPU
+	// our current resource usage
+	maxFuture := api.Resources{VCPU: r.vm.Cpu.Use, Mem: r.vm.Mem.Use}
 
 	klog.Warning("Ignoring all future requests from scheduler because of bad request")
-	klog.Infof("Future vCPU limit set at current = %d", maxFutureVCPU)
+	klog.Infof("Future resource limits set at current = %+v", maxFuture)
 
 	for {
 		select {
@@ -186,26 +313,62 @@ badScheduler:
 		case m := <-metrics:
 			// We aren't allowed to communicate with the scheduling plugin, so we're upper-bounded
 			// by maxFutureVCPU, which was determined by our state at the time the scheduler failed.
-			newCpuCount := r.newGoalCPUCount(m)
+			newCpuCount := r.newGoalCPUCount(m, r.vm.Cpu.Use)
 
 			// Bound by our artificial maximum
-			if newCpuCount > maxFutureVCPU {
+			if newCpuCount > maxFuture.VCPU {
 				klog.Infof(
 					"Want to scale to %d vCPUs, but capped at %d vCPUs because scheduler failed",
-					newCpuCount, maxFutureVCPU,
+					newCpuCount, maxFuture.VCPU,
 				)
-				newCpuCount = maxFutureVCPU
+				newCpuCount = maxFuture.VCPU
 			}
 			// Because we're not communicating with the scheduler, we can change the CPU
 			// immediately. We know this value is ok because it's bounded by maxFutureVCPU.
-			if newCpuCount != r.currentVCPU {
-				klog.Infof("Setting vCPU = %d", newCpuCount)
-				if err := r.setCpus(ctx, config, newCpuCount); err != nil {
+			if newCpuCount != r.vm.Cpu.Use {
+				// But first, figure out our memory usage.
+				var newMemSlotsCount uint16
+				if computeUnit != nil {
+					newMemSlotsCount = memSlotsForCpu(*computeUnit, newCpuCount)
+
+					// It's possible for our desired memory slots to be greater than our future
+					// maximum, in cases where our resources weren't aligned to a compute unit when
+					// we abandoned the scheduler.
+					if newMemSlotsCount > maxFuture.Mem {
+						klog.Infof(
+							"Want to scale to %d mem slots (to match %d vCPU) but capped at %d mem slots because scheduler failed",
+							newMemSlotsCount, newCpuCount, maxFuture.Mem,
+						)
+						newMemSlotsCount = maxFuture.Mem
+					}
+				} else {
+					newMemSlotsCount = r.vm.Mem.Use
+					klog.Warningf("Cannot determine new memory slots count because we never received ")
+				}
+
+				klog.Infof("Setting vCPU = %d, memSlots = %d", newCpuCount, newMemSlotsCount)
+
+				resources := api.Resources{VCPU: newCpuCount, Mem: newMemSlotsCount}
+				if err := r.setResources(ctx, config, resources); err != nil {
 					return fmt.Errorf("Error while setting CPU count: %s", err)
 				}
-				r.currentVCPU = newCpuCount
+				r.vm.Cpu.Use = newCpuCount
 			}
 		}
+	}
+}
+
+// minComputeUnits returns the minimum number of compute units it would take to fit the current
+// resource allocations
+func (r *Runner) minComputeUnits(computeUnit api.Resources) uint16 {
+	// (x + M-1) / M is equivalent to x/M rounded up, as long as M != 0, which is guaranteed for
+	// compute units.
+	cpuUnits := (r.vm.Cpu.Use + computeUnit.VCPU - 1) / computeUnit.VCPU
+	memUnits := (r.vm.Mem.Use + computeUnit.Mem - 1) / computeUnit.Mem
+	if cpuUnits < memUnits {
+		return cpuUnits
+	} else {
+		return memUnits
 	}
 }
 
@@ -213,21 +376,49 @@ badScheduler:
 //
 // It is the caller's responsibility to make sure that they don't over-commit beyond what the
 // scheduler plugin has permitted.
-func (r *Runner) newGoalCPUCount(metrics api.Metrics) uint16 {
-	goal := r.currentVCPU
-	if metrics.LoadAverage1Min > 0.9*float32(r.currentVCPU) {
+func (r *Runner) newGoalCPUCount(metrics api.Metrics, currentCpu uint16) uint16 {
+	goal := currentCpu
+	if metrics.LoadAverage1Min > 0.9*float32(r.vm.Cpu.Use) {
 		goal *= 2
-	} else if metrics.LoadAverage1Min < 0.4*float32(r.currentVCPU) {
+	} else if metrics.LoadAverage1Min < 0.4*float32(r.vm.Cpu.Use) {
 		goal /= 2
 	}
 
-	if goal < r.minVCPU {
-		goal = r.minVCPU
-	} else if goal > r.maxVCPU {
-		goal = r.maxVCPU
+	// bound goal by min and max
+	if goal < r.vm.Cpu.Min {
+		goal = r.vm.Cpu.Min
+	} else if goal > r.vm.Cpu.Max {
+		goal = r.vm.Cpu.Max
 	}
 
 	return goal
+}
+
+func roundCpuToComputeUnit(computeUnit api.Resources, cpu uint16) uint16 {
+	// TODO: currently we always round up. We can do better, with a little context from which way
+	// we're changing the CPU.
+	if cpu%computeUnit.VCPU != 0 {
+		cpu += computeUnit.VCPU - cpu%computeUnit.VCPU
+	}
+
+	return cpu
+}
+
+func memSlotsForCpu(computeUnit api.Resources, cpu uint16) uint16 {
+	if cpu%computeUnit.VCPU != 0 {
+		klog.Warningf(
+			"vCPU %d is not a multiple of the compute unit's CPU (%d), using approximate ratio for memory",
+			cpu, computeUnit.VCPU,
+		)
+
+		ratio := float64(computeUnit.Mem) / float64(computeUnit.VCPU)
+		mem := uint16(math.Round(ratio * float64(cpu)))
+		return mem
+	}
+
+	units := cpu / computeUnit.VCPU
+	mem := units * computeUnit.Mem
+	return mem
 }
 
 // Helper function to abbreviate http server creation
@@ -371,12 +562,15 @@ func (r *Runner) sendRequestToPlugin(config *Config, req *api.AgentRequest) (*ap
 	return &respMsg, nil
 }
 
-func (r *Runner) setCpus(ctx context.Context, config *Config, newCpuCount uint16) error {
-	newCount := int32(newCpuCount)
+func (r *Runner) setResources(ctx context.Context, config *Config, resources api.Resources) error {
 	patches := []util.JSONPatch{{
 		Op:    util.PatchReplace,
 		Path:  "/spec/guest/cpus/use",
-		Value: &newCount,
+		Value: resources.VCPU,
+	}, {
+		Op:    util.PatchReplace,
+		Path:  "/spec/guest/memorySlots/use",
+		Value: resources.Mem,
 	}}
 	patchPayload, err := json.Marshal(patches)
 	if err != nil {

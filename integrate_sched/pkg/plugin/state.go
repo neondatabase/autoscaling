@@ -29,6 +29,9 @@ type pluginState struct {
 	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
 	// can appropriately scale our scoring
 	maxTotalReservableCPU uint16
+	// maxTotalReservableMemSlots is the same as maxTotalReservableCPU, but for memory slots instead
+	// of CPU
+	maxTotalReservableMemSlots uint16
 	// conf stores the current configuration, and is nil if the configuration has not yet been set
 	//
 	// Proper initialization of the plugin guarantees conf is not nil.
@@ -42,6 +45,10 @@ type nodeState struct {
 
 	// vCPU tracks the state of vCPU resources -- what's available and how
 	vCPU nodeResourceState[uint16]
+	// memSlots tracks the state of memory slots -- what's available and how
+	memSlots nodeResourceState[uint16]
+
+	computeUnit *api.Resources
 
 	// pods tracks all the VM pods assigned to this node
 	//
@@ -104,8 +111,14 @@ type podState struct {
 
 	// node provides information about the node that this pod is bound to or reserved onto.
 	node *nodeState
-	// vCPU is the current state of vCPU utilization and pressure
+	// vCPU is the current state of this pod's vCPU utilization and pressure
 	vCPU podResourceState[uint16]
+	// memSlots is the current state of this pod's memory slot(s) utilization and pressure
+	memSlots podResourceState[uint16]
+
+	// mostRecentComputeUnit stores the "compute unit" that this pod's autoscaler-agent most
+	// recently observed (and so, what future AgentRequests are expected to abide by)
+	mostRecentComputeUnit *api.Resources
 
 	// metrics is the most recent metrics update we received for this pod. A nil pointer means that
 	// we have not yet received metrics.
@@ -138,28 +151,54 @@ func (s *nodeState) totalReservableCPU() uint16 {
 	return s.vCPU.total - s.vCPU.system
 }
 
+// totalReservableMemSlots returns the number of memory slots that may be allocated to VM pods --
+// i.e., excluding the memory pre-reserved for system tasks.
+func (s *nodeState) totalReservableMemSlots() uint16 {
+	return s.memSlots.total - s.memSlots.system
+}
+
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
 func (s *nodeState) remainingReservableCPU() uint16 {
 	return s.totalReservableCPU() - s.vCPU.reserved
 }
 
+// remainingReservableMemSlots returns the remaining number of memory slots that can be allocated to
+// VM pods
+func (s *nodeState) remainingReservableMemSlots() uint16 {
+	return s.totalReservableMemSlots() - s.memSlots.reserved
+}
+
 // tooMuchPressure is used to signal whether the node should start migrating pods out in order to
 // relieve some of the pressure
 func (s *nodeState) tooMuchPressure() bool {
-	if s.vCPU.reserved <= s.vCPU.watermark {
+	if s.vCPU.reserved <= s.vCPU.watermark && s.memSlots.reserved < s.memSlots.watermark {
 		klog.V(1).Infof(
-			"[autoscale-enforcer] tooMuchPressure(%s) = false (reserved %d < watermark %d)",
-			s.name, s.vCPU.reserved, s.vCPU.watermark,
+			"[autoscale-enforcer] tooMuchPressure(%s) = false (vCPU: reserved %d < watermark %d, mem: reserved %d < watermark %d)",
+			s.name, s.vCPU.reserved, s.vCPU.watermark, s.memSlots.reserved, s.memSlots.watermark,
 		)
 		return false
 	}
 
-	logicalPressure := s.vCPU.reserved - s.vCPU.watermark
-	result := logicalPressure+s.vCPU.capacityPressure > s.vCPU.pressureAccountedFor
+	logicalCpuPressure := s.vCPU.reserved - s.vCPU.watermark
+	logicalMemPressure := s.memSlots.reserved - s.memSlots.watermark
+
+	tooMuchCpu := logicalCpuPressure+s.vCPU.capacityPressure > s.vCPU.pressureAccountedFor
+	tooMuchMem := logicalMemPressure+s.memSlots.capacityPressure > s.memSlots.pressureAccountedFor
+
+	result := tooMuchCpu || tooMuchMem
+
+	fmtString := "[autoscale-enforcer] tooMuchPressure(%s) = %v. " +
+		"vCPU: {logical: %d, capacity: %d, accountedFor: %d}, " +
+		"mem: {logical: %d, capacity: %d, accountedFor: %d}"
 
 	klog.V(1).Infof(
-		"[autoscale-enforcer] tooMuchPressure(%s) = %v. logical = %d, capacity = %d, accountedFor = %d",
-		s.name, result, logicalPressure, s.vCPU.capacityPressure, s.vCPU.pressureAccountedFor,
+		fmtString,
+		// tooMuchPressure(%s) = %v
+		s.name, result,
+		// vCPU: {logical: %d, capacity: %d, accountedFor: %d}
+		logicalCpuPressure, s.vCPU.capacityPressure, s.vCPU.pressureAccountedFor,
+		// mem: {logical: %d, capacity: %d, accountedFor: %d}
+		logicalMemPressure, s.memSlots.capacityPressure, s.memSlots.pressureAccountedFor,
 	)
 
 	return result
@@ -178,37 +217,6 @@ func (s *podState) checkOkToMigrate(oldMetrics api.Metrics) error {
 func (s *podState) currentlyMigrating() bool {
 	return s.migrationState != nil
 }
-
-// func getPodInfo(
-// 	pod *corev1.Pod,
-// ) (
-// 	*struct{ initVCPU uint16; vmName string; alwaysMigrate bool},
-// 	error,
-// ) {
-// 	// If this isn't a VM, it shouldn't have been scheduled with us
-// 	name, ok := pod.Labels[LabelVM]
-// 	if !ok {
-// 		return nil, fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
-// 	}
-//
-// 	initVCPUString, ok := pod.Labels[LabelInitVCPU]
-// 	if !ok {
-// 		return nil, fmt.Errorf("Missing init vCPU label %s", LabelInitVCPU)
-// 	}
-//
-// 	initVCPU, err := strconv.ParseUint(initVCPUString, 10, 16)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("Error parsing label %s as uint16: %s", LabelInitVCPU, err)
-// 	}
-//
-// 	_, alwaysMigrate := pod.Labels[LabelTestingOnlyAlwaysMigrate]
-//
-// 	return &struct{initVCPU uint16; vmName string; alwaysMigrate bool}{
-// 		initVCPU: uint16(initVCPU),
-// 		vmName: name,
-// 		alwaysMigrate: alwaysMigrate,
-// 	}, nil
-// }
 
 // this method can only be called while holding a lock. If we don't have the necessary information
 // locally, then the lock is released temporarily while we query the API server
@@ -256,44 +264,100 @@ func (s *pluginState) getOrFetchNodeState(
 		return n, nil
 	}
 
-	cpu := node.Status.Capacity.Cpu()
-	if cpu == nil {
+	// Fetch this upfront, because we'll need it a couple times later.
+	nodeConf := s.conf.forNode(nodeName)
+
+	// helper string for error messages
+	hasAllocatableMsg := "it does have Allocatable, but config.fallbackToAllocatable = false. set it to true for a temporary hotfix"
+
+	// cpuQ = "cpu, as a K8s resource.Quantity"
+	cpuQ := node.Status.Capacity.Cpu()
+	if cpuQ == nil {
 		allocatableCPU := node.Status.Allocatable.Cpu()
 		if allocatableCPU != nil {
 			if s.conf.FallbackToAllocatable {
 				klog.Warningf(
-					"[autoscale-enforcer] Node %s has no CPU capacity, using Allocatable limit", nodeName,
+					"[autoscale-enforcer] Node %s has no CPU capacity limit, using Allocatable limit",
+					nodeName,
 				)
-				cpu = allocatableCPU
+				cpuQ = allocatableCPU
 			} else {
-				return nil, fmt.Errorf("Node has no Capacity CPU limit (it does have Allocatable, but config.fallbackToAllocatable = false. set it to true for a temporary hotfix)")
+				return nil, fmt.Errorf("Node has no Capacity CPU limit (%s)", hasAllocatableMsg)
 			}
 		} else {
 			return nil, fmt.Errorf("Node has no Capacity or Allocatable CPU limits")
 		}
 	}
 
-	maxCPU := uint16(cpu.MilliValue() / 1000) // cpu.Value rounds up. We don't want to do that.
-	vCPU, err := s.conf.forNode(nodeName).vCpuLimits(maxCPU)
+	maxCPU := uint16(cpuQ.MilliValue() / 1000) // cpu.Value rounds up. We don't want to do that.
+	vCPU, err := nodeConf.vCpuLimits(maxCPU)
 	if err != nil {
 		return nil, fmt.Errorf("Error calculating vCPU limits for node %s: %w", nodeName, err)
 	}
 
-	n := &nodeState{
-		name: nodeName,
-		vCPU: vCPU,
-		pods: make(map[api.PodName]*podState),
+	// memQ = "mem, as a K8s resource.Quantity"
+	memQ := node.Status.Capacity.Memory()
+	if memQ == nil {
+		allocatableMem := node.Status.Allocatable.Memory()
+		if allocatableMem != nil {
+			if s.conf.FallbackToAllocatable {
+				klog.Warningf(
+					"[autoscale-enforcer] Node %s has no Memory capacity limit, using Allocatable limit",
+					nodeName,
+				)
+				memQ = allocatableMem
+			} else {
+				return nil, fmt.Errorf("Node has not Capacity Memory limit (%s)", hasAllocatableMsg)
+			}
+		} else {
+			return nil, fmt.Errorf("Node has not Capacity or Allocatable Memory limits")
+		}
+	}
+	// note: Value() rounds up. That's ok (probably), because the computation for totalSlots will
+	// round down.
+	totalSlots := memQ.Value() / s.conf.MemSlotSize.Value()
+	// Check that totalSlots fits within a uint16
+	if totalSlots > (1<<16 - 1) {
+		return nil, fmt.Errorf(
+			"Node memory too big for current slot size, calculated at %d memory slots",
+			totalSlots,
+		)
+	}
+	memSlots, err := nodeConf.memoryLimits(uint16(totalSlots))
+	if err != nil {
+		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", nodeName, err)
 	}
 
+	n := &nodeState{
+		name:        nodeName,
+		vCPU:        vCPU,
+		memSlots:    memSlots,
+		pods:        make(map[api.PodName]*podState),
+		computeUnit: &nodeConf.ComputeUnit,
+	}
+
+	fmtString := "[autoscale-enforcer] Fetched node %s:\n" +
+		"\tCPU:    total = %d (milli = %d), max reservable = %d, watermark = %d\n" +
+		"\tMemory: total = %d slots (value = %d), max reservable = %d, watermark = %d"
+
 	klog.Infof(
-		"[autoscale-enforcer] Fetched node %s CPU total = %d (milli = %d), max reservable = %d, watermark = %d",
-		nodeName, maxCPU, cpu.MilliValue(), n.totalReservableCPU(), n.vCPU.watermark,
+		fmtString,
+		// fetched node %s
+		nodeName,
+		// cpu: total = %d (milli = %d), max reservable = %d, watermark = %d
+		maxCPU, cpuQ.MilliValue(), n.totalReservableCPU(), n.vCPU.watermark,
+		// mem: total = %d (value = %d), max reservable = %d, watermark = %d
+		totalSlots, memQ.Value(), n.totalReservableMemSlots(), n.memSlots.watermark,
 	)
 
-	// update maxTotalReservableCPU if there's a new maximum
+	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
 	totalReservableCPU := n.totalReservableCPU()
 	if totalReservableCPU > s.maxTotalReservableCPU {
 		s.maxTotalReservableCPU = totalReservableCPU
+	}
+	totalReservableMemSlots := n.totalReservableMemSlots()
+	if totalReservableMemSlots > s.maxTotalReservableMemSlots {
+		s.maxTotalReservableMemSlots = totalReservableMemSlots
 	}
 
 	s.nodeMap[nodeName] = n
@@ -302,41 +366,40 @@ func (s *pluginState) getOrFetchNodeState(
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
 // logs, so IMO it's worthwhile to have this separate.
-func (e *AutoscaleEnforcer) handleVMDeletion(pName api.PodName) {
-	klog.Infof("[autoscale-enforcer] Handling deletion of pod %v", pName)
+func (e *AutoscaleEnforcer) handleVMDeletion(podName api.PodName) {
+	klog.Infof("[autoscale-enforcer] Handling deletion of pod %v", podName)
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	ps, ok := e.state.podMap[pName]
+	pod, ok := e.state.podMap[podName]
 	if !ok {
-		klog.Warningf("[autoscale-enforcer] delete: Cannot find pod %v in podMap", pName)
+		klog.Warningf("[autoscale-enforcer] delete: Cannot find pod %v in podMap", podName)
 		return
 	}
 
-	// Mark the resources as no longer reserved and delete the pod
-	delete(e.state.podMap, pName)
-	delete(ps.node.pods, pName)
-	ps.node.mq.removeIfPresent(ps)
-	oldReserved := ps.node.vCPU.reserved
-	oldPressure := ps.node.vCPU.capacityPressure
-	oldPressureAccountedFor := ps.node.vCPU.pressureAccountedFor
-	ps.node.vCPU.reserved -= ps.vCPU.reserved
-	ps.node.vCPU.capacityPressure -= ps.vCPU.capacityPressure
+	// Mark the resources as no longer reserved
+	currentlyMigrating := pod.currentlyMigrating()
 
-	// Something we have to handle here but not in Unreserve: the possibility of a VM being deleted
-	// mid-migration:
+	vCPUVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+		handleDeleted(currentlyMigrating)
+	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+		handleDeleted(currentlyMigrating)
+
+	// Delete our record of the pod
+	delete(e.state.podMap, podName)
+	delete(pod.node.pods, podName)
+	pod.node.mq.removeIfPresent(pod)
+
 	var migrating string
-	if ps.currentlyMigrating() {
-		ps.node.vCPU.pressureAccountedFor -= ps.vCPU.reserved + ps.vCPU.capacityPressure
+	if currentlyMigrating {
 		migrating = " migrating"
 	}
 
-	klog.Infof(
-		"[autoscale-enforcer] Deleted%s pod %v (%d vCPU) from node %s: node.vCPU.reserved %d -> %d, node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
-		migrating, pName, ps.vCPU.reserved, ps.node.name, oldReserved, ps.node.vCPU.reserved,
-		oldPressure, ps.node.vCPU.capacityPressure, oldPressureAccountedFor, ps.node.vCPU.pressureAccountedFor,
-	)
+	fmtString := "[autoscale-enforcer] Deleted%s pod %v from node %s:\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+	klog.Infof(fmtString, migrating, pod.name, pod.node.name, vCPUVerdict, memVerdict)
 }
 
 func (s *podState) isBetterMigrationTarget(other *podState) bool {

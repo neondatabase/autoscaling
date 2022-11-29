@@ -5,6 +5,8 @@ package api
 import (
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
 )
 
@@ -14,6 +16,7 @@ const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
 // care about
 type VmInfo struct {
 	Cpu           VmCpuInfo
+	Mem           VmMemInfo
 	AlwaysMigrate bool
 }
 
@@ -21,6 +24,14 @@ type VmCpuInfo struct {
 	Min uint16
 	Max uint16
 	Use uint16
+}
+
+type VmMemInfo struct {
+	Min uint16
+	Max uint16
+	Use uint16
+
+	SlotSize resource.Quantity
 }
 
 func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
@@ -44,6 +55,12 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 			Min: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min")),
 			Max: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max")),
 			Use: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use")),
+		},
+		Mem: VmMemInfo{
+			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
+			Max:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Max, ".spec.guest.memorySlots.max")),
+			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
+			SlotSize: vm.Spec.Guest.MemorySlotSize,
 		},
 		AlwaysMigrate: alwaysMigrate,
 	}

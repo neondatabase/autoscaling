@@ -125,13 +125,14 @@ metadata:
 data:
   autoscaler-enforcer-config.json: |
     {
-      "memBlockSize": "1G",
+      "memBlockSize": "1Gi",
       "nodeDefaults": {
         "cpu": { "watermark": 0.7, "system": 1 },
-        "memory": { "watermark": 0.7, "system": 1 }
+        "memory": { "watermark": 0.7, "system": 1 },
+        "computeUnit": { "vCPUs": 1, "mem": 1 }
       },
       "nodeOverrides": [],
-      "fallbackToAllocated": false
+      "fallbackToAllocatable": false
     }
 ---
 apiVersion: apps/v1
