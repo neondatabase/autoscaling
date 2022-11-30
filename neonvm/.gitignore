@@ -27,3 +27,4 @@ Dockerfile.cross
 
 *.qcow2
 vmlinuz
+neonvm.yaml

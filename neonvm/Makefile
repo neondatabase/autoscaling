@@ -1,8 +1,8 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:dev
 IMG_RUNNER ?= runner:dev
-VM_EXAMPLE_SOURCE ?= postgres:14-alpine
-VM_EXAMPLE_IMAGE ?= vm-postgres:14-alpine
+VM_EXAMPLE_SOURCE ?= postgres:15-alpine
+VM_EXAMPLE_IMAGE ?= vm-postgres:15-alpine
 
 # kernel for guests
 VM_KERNEL_VERSION ?= "5.15.80"

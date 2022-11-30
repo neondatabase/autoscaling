@@ -18,7 +18,7 @@ type QmpCpus struct {
 		Props struct {
 			CoreId   int32 `json:"core-id"`
 			ThreadId int32 `json:"thread-id"`
-			SockerId int32 `json:"socket-id"`
+			SocketId int32 `json:"socket-id"`
 		} `json:"props"`
 		VcpusCount int32   `json:"vcpus-count"`
 		QomPath    *string `json:"qom-path"`

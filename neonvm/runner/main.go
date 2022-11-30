@@ -366,6 +366,18 @@ func createISO9660FromPath(diskName string, diskPath string, contentPath string)
 	return nil
 }
 
+func checkKVM() bool {
+	info, err := os.Stat("/dev/kvm")
+	if err != nil {
+		return false
+	}
+	mode := info.Mode()
+	if mode&os.ModeCharDevice == os.ModeCharDevice {
+		return true
+	}
+	return false
+}
+
 func main() {
 	var vmSpecDump string
 	flag.StringVar(&vmSpecDump, "vmdump", vmSpecDump, "Base64 encoded VirtualMachine json specification")
@@ -426,7 +438,6 @@ func main() {
 
 	// prepare qemu command line
 	qemuCmd := []string{
-		"-enable-kvm",
 		"-machine", "q35",
 		"-nographic",
 		"-no-reboot",
@@ -469,7 +480,11 @@ func main() {
 	}
 
 	// cpu details
-	qemuCmd = append(qemuCmd, "-cpu", "host")
+	if checkKVM() {
+		log.Printf("using KVM acceleration\n")
+		qemuCmd = append(qemuCmd, "-enable-kvm")
+	}
+	qemuCmd = append(qemuCmd, "-cpu", "max")
 	qemuCmd = append(qemuCmd, "-smp", strings.Join(cpus, ","))
 
 	// memory details

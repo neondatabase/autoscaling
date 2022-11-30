@@ -30,7 +30,7 @@ spec:
       max: 4
       use: 4
     rootDisk:
-      image: vm-postgres:14-alpine
+      image: vm-postgres:15-alpine
       #size: 8Gi
     args:
       - -c
