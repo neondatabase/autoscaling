@@ -132,6 +132,7 @@ data:
         "computeUnit": { "vCPUs": 1, "mem": 1 }
       },
       "nodeOverrides": [],
+      "doMigration": false,
       "fallbackToAllocatable": false
     }
 ---

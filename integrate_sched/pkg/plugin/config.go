@@ -37,6 +37,12 @@ type config struct {
 	// rejected.
 	MemSlotSize resource.Quantity `json:"memBlockSize"`
 
+	// DoMigration, if provided, allows VM migration to be disabled
+	//
+	// This flag is intended to be temporary, just until NeonVM supports mgirations and we can
+	// re-enable it.
+	DoMigration *bool `json:"doMigration"`
+
 	// FallbackToAllocatable is a flag that allows the scheduler to use a node's Status.Allocatable
 	// if a resource isn't present in its Status.Capacity.
 	//
@@ -73,6 +79,10 @@ type resourceConfig struct {
 	// System is the absolute amount of the resource allocated to non-user node functions, like
 	// Kubernetes daemons
 	System int64 `json:"system,omitempty"`
+}
+
+func (c *config) migrationEnabled() bool {
+	return c.DoMigration == nil || *c.DoMigration
 }
 
 ///////////////////////

@@ -90,6 +90,9 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	// Check whether the pod *will* migrate, then update its resources, and THEN start its
 	// migration, using the possibly-changed resources.
 	mustMigrate := e.updateMetricsAndCheckMustMigrate(pod, node, req.Metrics)
+	// Don't migrate if it's disabled
+	mustMigrate = mustMigrate && e.state.conf.migrationEnabled()
+
 	permit, status, err := e.handleResources(pod, node, req.Resources, mustMigrate)
 	if err != nil {
 		return nil, status, err
