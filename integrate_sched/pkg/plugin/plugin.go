@@ -316,7 +316,7 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	}
 
-	// If there's capactiy to reserve the pod, do that. Otherwise, reject the pod. Most capacity
+	// If there's capacity to reserve the pod, do that. Otherwise, reject the pod. Most capacity
 	// checks will be handled in the calls to Filter, but it's possible for another VM to scale up
 	// in between the calls to Filter and Reserve, removing the resource availability that we
 	// thought we had.
