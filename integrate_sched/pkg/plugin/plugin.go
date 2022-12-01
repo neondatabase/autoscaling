@@ -32,6 +32,12 @@ type AutoscaleEnforcer struct {
 	state    pluginState
 }
 
+// Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
+var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
+var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
+var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
+var _ framework.ReservePlugin = (*AutoscaleEnforcer)(nil)
+
 // NewAutoscaleEnforcerPlugin produces the initial AutoscaleEnforcer plugin to be used by the
 // scheduler
 func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
