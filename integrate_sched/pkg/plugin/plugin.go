@@ -95,23 +95,23 @@ func (e *AutoscaleEnforcer) Name() string {
 }
 
 // getVmInfo is a helper for the plugin-related functions
-func getVmInfo(ctx context.Context, vmClient *vmclient.Clientset, pod *corev1.Pod) (*api.VmInfo, string, error) {
+func getVmInfo(ctx context.Context, vmClient *vmclient.Clientset, pod *corev1.Pod) (*api.VmInfo, error) {
 	vmName, ok := pod.Labels[LabelVM]
 	if !ok {
-		return nil, "", fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
+		return nil, fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
 	}
 
 	vm, err := vmClient.NeonvmV1().VirtualMachines(pod.Namespace).Get(ctx, vmName, metav1.GetOptions{})
 	if err != nil {
-		return nil, "", fmt.Errorf("Error getting VM object %s:%s: %w", pod.Namespace, vmName, err)
+		return nil, fmt.Errorf("Error getting VM object %s:%s: %w", pod.Namespace, vmName, err)
 	}
 
 	vmInfo, err := api.ExtractVmInfo(vm)
 	if err != nil {
-		return nil, "", fmt.Errorf("Error extracting VM info: %w", err)
+		return nil, fmt.Errorf("Error extracting VM info: %w", err)
 	}
 
-	return vmInfo, vmName, nil
+	return vmInfo, nil
 }
 
 // Filter gives our plugin a chance to signal that a pod shouldn't be put onto a particular node
@@ -125,7 +125,7 @@ func (e *AutoscaleEnforcer) Filter(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
 
-	vmInfo, _, err := getVmInfo(ctx, e.vmClient, pod)
+	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Filter: Error getting pod %v vmInfo: %s", pName, err)
 		return framework.NewStatus(
@@ -225,7 +225,7 @@ func (e *AutoscaleEnforcer) Score(
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
 	podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
-	vmInfo, _, err := getVmInfo(ctx, e.vmClient, pod)
+	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Score: Error getting info for pod %v: %w", podName, err)
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
@@ -280,7 +280,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
-	vmInfo, vmName, err := getVmInfo(ctx, e.vmClient, pod)
+	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Error getting pod %v info: %s", pName, err)
 		return framework.NewStatus(
@@ -338,7 +338,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		node.memSlots.reserved = newNodeReservedMemSlots
 		ps := &podState{
 			name:                     pName,
-			vmName:                   vmName,
+			vmName:                   vmInfo.Name,
 			node:                     node,
 			vCPU:                     podResourceState[uint16]{reserved: vmInfo.Cpu.Use, capacityPressure: 0},
 			memSlots:                 podResourceState[uint16]{reserved: vmInfo.Mem.Use, capacityPressure: 0},

@@ -15,6 +15,8 @@ const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
 // care about
 type VmInfo struct {
+	Name          string
+	Namespace     string
 	Cpu           VmCpuInfo
 	Mem           VmMemInfo
 	AlwaysMigrate bool
@@ -51,6 +53,8 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	_, alwaysMigrate := vm.Labels[LabelTestingOnlyAlwaysMigrate]
 
 	info := VmInfo{
+		Name:      vm.Name,
+		Namespace: vm.Namespace,
 		Cpu: VmCpuInfo{
 			Min: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min")),
 			Max: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max")),
