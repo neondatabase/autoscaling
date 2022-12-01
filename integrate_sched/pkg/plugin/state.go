@@ -338,7 +338,7 @@ func (s *pluginState) getOrFetchNodeState(
 
 	fmtString := "[autoscale-enforcer] Fetched node %s:\n" +
 		"\tCPU:    total = %d (milli = %d), max reservable = %d, watermark = %d\n" +
-		"\tMemory: total = %d slots (value = %d), max reservable = %d, watermark = %d"
+		"\tMemory: total = %d slots (raw = %v), max reservable = %d, watermark = %d"
 
 	klog.Infof(
 		fmtString,
@@ -346,8 +346,8 @@ func (s *pluginState) getOrFetchNodeState(
 		nodeName,
 		// cpu: total = %d (milli = %d), max reservable = %d, watermark = %d
 		maxCPU, cpuQ.MilliValue(), n.totalReservableCPU(), n.vCPU.watermark,
-		// mem: total = %d (value = %d), max reservable = %d, watermark = %d
-		totalSlots, memQ.Value(), n.totalReservableMemSlots(), n.memSlots.watermark,
+		// mem: total = %d (raw = %v), max reservable = %d, watermark = %d
+		totalSlots, memQ, n.totalReservableMemSlots(), n.memSlots.watermark,
 	)
 
 	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
