@@ -361,7 +361,7 @@ badScheduler:
 // minComputeUnits returns the minimum number of compute units it would take to fit the current
 // resource allocations
 func (r *Runner) minComputeUnits(computeUnit api.Resources) uint16 {
-	// (x + M-1) / M is equivalent to x/M rounded up, as long as M != 0, which is guaranteed for
+	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is guaranteed for
 	// compute units.
 	cpuUnits := (r.vm.Cpu.Use + computeUnit.VCPU - 1) / computeUnit.VCPU
 	memUnits := (r.vm.Mem.Use + computeUnit.Mem - 1) / computeUnit.Mem
