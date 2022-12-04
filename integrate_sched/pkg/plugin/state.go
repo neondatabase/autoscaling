@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
@@ -25,6 +27,9 @@ type pluginState struct {
 
 	podMap  map[api.PodName]*podState
 	nodeMap map[string]*nodeState
+
+	// otherPods stores information about non-VM pods
+	otherPods map[api.PodName]*otherPodState
 
 	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
 	// can appropriately scale our scoring
@@ -55,6 +60,11 @@ type nodeState struct {
 	// This includes both bound pods (i.e., pods fully committed to the node) and reserved pods
 	// (still may be unreserved)
 	pods map[api.PodName]*podState
+
+	// otherPods are the non-VM pods that we're also tracking in this node
+	otherPods map[api.PodName]*otherPodState
+	// otherResources is the sum resource usage associated with the non-VM pods
+	otherResources nodeOtherResourceState
 
 	// mq is the priority queue tracking which pods should be chosen first for migration
 	mq migrationQueue
@@ -93,6 +103,19 @@ type nodeResourceState[T any] struct {
 	//
 	// The value may be larger than capacityPressure.
 	pressureAccountedFor T
+}
+
+// nodeOtherResourceState are total resources associated with the non-VM pods in a node
+//
+// The resources are basically broken up into two groups: the "raw" amounts (which have a finer
+// resolution than what we track for VMs) and the "reserved" amounts. The reserved amounts are
+// rounded up to the next unit that
+type nodeOtherResourceState struct {
+	rawCpu    resource.Quantity
+	rawMemory resource.Quantity
+
+	reservedCpu      uint16
+	reservedMemSlots uint16
 }
 
 // podState is the information we track for an individual
@@ -143,6 +166,100 @@ type podResourceState[T any] struct {
 	// capacityPressure is this pod's contribution to this pod's node's capacityPressure for this
 	// resource
 	capacityPressure T
+}
+
+// otherPodState tracks a little bit of information for the non-VM pods we're handling
+type otherPodState struct {
+	name      api.PodName
+	node      *nodeState
+	resources podOtherResourceState
+}
+
+// podOtherResourceState is the resources tracked for a non-VM pod
+//
+// This is *like* nodeOtherResourceState, but we don't track reserved amounts because they only
+// exist at the high-level "total resource usage" scope
+type podOtherResourceState struct {
+	rawCpu    resource.Quantity
+	rawMemory resource.Quantity
+}
+
+// addPod is a convenience method that returns the new resource state if we were to add the given
+// pod resources
+//
+// This is used both to determine if there's enough room for the pod *and* to keep around the
+// before and after so that we can use it for logging.
+func (r nodeOtherResourceState) addPod(
+	memSlotSize *resource.Quantity, p podOtherResourceState,
+) nodeOtherResourceState {
+	newState := nodeOtherResourceState{
+		rawCpu:    r.rawCpu.DeepCopy(),
+		rawMemory: r.rawMemory.DeepCopy(),
+	}
+
+	newState.rawCpu.Add(p.rawCpu)
+	newState.rawMemory.Add(p.rawMemory)
+
+	newState.calculateReserved(memSlotSize)
+
+	return newState
+}
+
+// subPod is a convenience method that returns the new resource state if we were to remove the given
+// pod resources
+//
+// This *also* happens to be what we use for calculations when actually removing a pod, because it
+// allows us to use both the before and after for logging.
+func (r nodeOtherResourceState) subPod(
+	memSlotSize *resource.Quantity, p podOtherResourceState,
+) nodeOtherResourceState {
+	// Check we aren't underflowing.
+	//
+	// We're more worried about underflow than overflow because it should *generally* be pretty
+	// difficult to get overflow to occur (also because overflow would probably take a slow & steady
+	// leak to trigger, which is less useful than underflow.
+	if r.rawCpu.Cmp(p.rawCpu) == -1 {
+		panic(fmt.Sprintf(
+			"underflow: cannot subtract %v pod CPU from from %v node CPU",
+			&p.rawCpu, &r.rawCpu,
+		))
+	} else if r.rawMemory.Cmp(r.rawMemory) == -1 {
+		panic(fmt.Sprintf(
+			"underflow: cannot subtract %v pod memory from %v node memory",
+			&p.rawMemory, &r.rawMemory,
+		))
+	}
+
+	newState := nodeOtherResourceState{
+		rawCpu:    r.rawCpu.DeepCopy(),
+		rawMemory: r.rawMemory.DeepCopy(),
+	}
+
+	newState.rawCpu.Sub(p.rawCpu)
+	newState.rawMemory.Sub(p.rawMemory)
+
+	newState.calculateReserved(memSlotSize)
+
+	return newState
+}
+
+// calculateReserved sets the values of r.reservedCpu and r.reservedMemSlots based on the current
+// "raw" resource amounts and the memory slot size
+func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantity) {
+	// note: Value() rounds up, which is the behavior we want here.
+	r.reservedCpu = uint16(r.rawCpu.Value())
+
+	// note: memSlotSize /should/ always be an integer value. It's theoretically possible for a user
+	// to not do that, but that would be /execptionally/ weird.
+	memSlotSizeExact := memSlotSize.Value()
+	// note: For integer arithmetic, (x + n-1) / n is equivalent to ceil(x/n)
+	newReservedMemSlots := (r.rawMemory.Value() + memSlotSizeExact - 1) / memSlotSizeExact
+	if newReservedMemSlots > (1<<16 - 1) {
+		panic(fmt.Sprintf(
+			"new reserved mem slots overflows uint16 (%d > %d)", newReservedMemSlots, 1<<16-1,
+		))
+	}
+	r.reservedMemSlots = uint16(newReservedMemSlots)
 }
 
 // totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
@@ -333,6 +450,7 @@ func (s *pluginState) getOrFetchNodeState(
 		vCPU:        vCPU,
 		memSlots:    memSlots,
 		pods:        make(map[api.PodName]*podState),
+		otherPods:   make(map[api.PodName]*otherPodState),
 		computeUnit: &nodeConf.ComputeUnit,
 	}
 
@@ -364,17 +482,59 @@ func (s *pluginState) getOrFetchNodeState(
 	return n, nil
 }
 
+func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, error) {
+	var cpu resource.Quantity
+	var mem resource.Quantity
+
+	for i, container := range pod.Spec.Containers {
+		// For each resource, we must have (a) limit is provided and (b) if requests is provided,
+		// it must be equal to the limit.
+
+		cpuRequest := container.Resources.Requests.Cpu()
+		cpuLimit := container.Resources.Limits.Cpu()
+		// note: Cpu() always returns a non-nil pointer.
+		if cpuLimit.IsZero() {
+			err := fmt.Errorf("containers[%d] (%q) missing resources.limits.cpu", i, container.Name)
+			return podOtherResourceState{}, err
+		} else if !cpuRequest.IsZero() && !cpuLimit.Equal(*cpuRequest) {
+			err := fmt.Errorf(
+				"containers[%d] (%q) resources.requests.cpu != resources.limits.cpu",
+				i, container.Name,
+			)
+			return podOtherResourceState{}, err
+		}
+		cpu.Add(*cpuLimit)
+
+		memRequest := container.Resources.Requests.Memory()
+		memLimit := container.Resources.Limits.Memory()
+		// note: Memory() always returns a non-nil pointer.
+		if memLimit.IsZero() {
+			err := fmt.Errorf("containers[%d] (%q) missing resources.limits.memory", i, container.Name)
+			return podOtherResourceState{}, err
+		} else if !memRequest.IsZero() && !memLimit.Equal(*memRequest) {
+			err := fmt.Errorf(
+				"containers[%d] (%q) resources.requests.memory != resources.limits.memory",
+				i, container.Name,
+			)
+			return podOtherResourceState{}, err
+		}
+		mem.Add(*memLimit)
+	}
+
+	return podOtherResourceState{rawCpu: cpu, rawMemory: mem}, nil
+}
+
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
 // logs, so IMO it's worthwhile to have this separate.
 func (e *AutoscaleEnforcer) handleVMDeletion(podName api.PodName) {
-	klog.Infof("[autoscale-enforcer] Handling deletion of pod %v", podName)
+	klog.Infof("[autoscale-enforcer] Handling deletion of VM pod %v", podName)
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
 	pod, ok := e.state.podMap[podName]
 	if !ok {
-		klog.Warningf("[autoscale-enforcer] delete: Cannot find pod %v in podMap", podName)
+		klog.Warningf("[autoscale-enforcer] delete VM pod: Cannot find pod %v in podMap", podName)
 		return
 	}
 
@@ -396,10 +556,36 @@ func (e *AutoscaleEnforcer) handleVMDeletion(podName api.PodName) {
 		migrating = " migrating"
 	}
 
-	fmtString := "[autoscale-enforcer] Deleted%s pod %v from node %s:\n" +
+	fmtString := "[autoscale-enforcer] Deleted%s VM pod %v from node %s:\n" +
 		"\tvCPU verdict: %s\n" +
 		"\t mem verdict: %s"
 	klog.Infof(fmtString, migrating, pod.name, pod.node.name, vCPUVerdict, memVerdict)
+}
+
+func (e *AutoscaleEnforcer) handlePodDeletion(podName api.PodName) {
+	klog.Infof("[autoscale-enforcer] Handling deletion of non-VM pod %v", podName)
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	pod, ok := e.state.otherPods[podName]
+	if !ok {
+		klog.Warningf("[autoscale-enforcer] delete non-VM pod: Cannot find pod %v in otherPods", podName)
+		return
+	}
+
+	// Mark the resources as no longer reserved
+	cpuVerdict, memVerdict := handleDeletedPod(pod.node, pod.resources, &e.state.conf.MemSlotSize)
+
+	delete(e.state.otherPods, podName)
+	delete(pod.node.otherPods, podName)
+
+	fmtString := "[autoscale-enforcer] Deleted non-VM pod %v from node %s:\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
+
+	return
 }
 
 func (s *podState) isBetterMigrationTarget(other *podState) bool {

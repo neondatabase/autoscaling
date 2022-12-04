@@ -1,7 +1,8 @@
 package plugin
 
 // this file primarily contains the type resourceTransition[T], for handling a number of operations
-// on resources, and pretty-formatting summaries of the operations.
+// on resources, and pretty-formatting summaries of the operations. There are also other, unrelated
+// methods to perform similar functionality.
 //
 // resourceTransitions are created with the collectResourceTransition function.
 //
@@ -11,6 +12,8 @@ package plugin
 import (
 	"fmt"
 	"golang.org/x/exp/constraints"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type resourceTransition[T constraints.Unsigned] struct {
@@ -170,4 +173,34 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 		r.oldNode.capacityPressure, r.node.capacityPressure, r.oldNode.pressureAccountedFor, r.node.pressureAccountedFor,
 	)
 	return verdict
+}
+
+// handleDeletedPod is kind of like handleDeleted, except that it returns both verdicts side by
+// side instead of being generic over the resource
+func handleDeletedPod(
+	node *nodeState, pod podOtherResourceState, memSlotSize *resource.Quantity,
+) (cpuVerdict string, memVerdict string) {
+
+	oldRes := node.otherResources
+	newRes := node.otherResources.subPod(memSlotSize, pod)
+	node.otherResources = newRes
+
+	oldNodeCpuReserved := node.vCPU.reserved
+	oldNodeMemReserved := node.memSlots.reserved
+
+	node.vCPU.reserved = node.vCPU.reserved - oldRes.reservedCpu + newRes.reservedCpu
+	node.memSlots.reserved = node.memSlots.reserved - oldRes.reservedMemSlots + newRes.reservedMemSlots
+
+	cpuVerdict = fmt.Sprintf(
+		"pod had %v (raw), node otherPods (%v -> %v raw, %d -> %d rounded), node reserved %d -> %d",
+		&pod.rawCpu, &oldRes.rawCpu, &newRes.rawCpu, oldRes.reservedCpu, newRes.reservedCpu,
+		oldNodeCpuReserved, node.vCPU.reserved,
+	)
+	memVerdict = fmt.Sprintf(
+		"pod had %v (raw), node otherPods (%v -> %v raw, %d -> %d slots), node reserved %d -> %d slots",
+		&pod.rawMemory, &oldRes.rawMemory, &newRes.rawMemory, oldRes.reservedMemSlots, newRes.reservedMemSlots,
+		oldNodeMemReserved, node.memSlots.reserved,
+	)
+
+	return
 }

@@ -60,8 +60,9 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		handle:   h,
 		vmClient: vmClient,
 		state: pluginState{
-			nodeMap: make(map[string]*nodeState),
-			podMap:  make(map[api.PodName]*podState),
+			nodeMap:   make(map[string]*nodeState),
+			podMap:    make(map[api.PodName]*podState),
+			otherPods: make(map[api.PodName]*otherPodState),
 			// zero values are ok for the rest here
 		},
 	}
@@ -72,13 +73,22 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	}
 
 	vmDeletions := make(chan api.PodName)
-	if err := p.watchVMDeletions(context.Background(), vmDeletions); err != nil {
+	podDeletions := make(chan api.PodName)
+	if err := p.watchPodDeletions(context.Background(), vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %s", err)
 	}
 
+	// TODO: this is a little clumsy; both channels are sent on by the same goroutine and both
+	// consumed by this one. This should be changed, probably with handleVMDeletion and
+	// handlePodDeletion being merged into one function.
 	go func() {
-		for name := range vmDeletions {
-			p.handleVMDeletion(name)
+		for {
+			select {
+			case name := <-vmDeletions:
+				p.handleVMDeletion(name)
+			case name := <-podDeletions:
+				p.handlePodDeletion(name)
+			}
 		}
 	}()
 
@@ -95,10 +105,12 @@ func (e *AutoscaleEnforcer) Name() string {
 }
 
 // getVmInfo is a helper for the plugin-related functions
+//
+// This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
 func getVmInfo(ctx context.Context, vmClient *vmclient.Clientset, pod *corev1.Pod) (*api.VmInfo, error) {
 	vmName, ok := pod.Labels[LabelVM]
 	if !ok {
-		return nil, fmt.Errorf("Pod is not a VM (missing %s label)", LabelVM)
+		return nil, nil
 	}
 
 	vm, err := vmClient.NeonvmV1().VirtualMachines(pod.Namespace).Get(ctx, vmName, metav1.GetOptions{})
@@ -132,6 +144,10 @@ func (e *AutoscaleEnforcer) Filter(
 			framework.UnschedulableAndUnresolvable,
 			fmt.Sprintf("Error getting pod vmInfo: %s", err),
 		)
+	} else if vmInfo == nil {
+		// this pod isn't a VM. We don't care about it as much - it'll still be affected by scoring,
+		// which *kind of* overlaps with filtering.
+		return nil
 	}
 
 	e.state.lock.Lock()
@@ -231,6 +247,8 @@ func (e *AutoscaleEnforcer) Score(
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
 	}
 
+	// note: vmInfo may be nil here if the pod does not correspond to a NeonVM virtual machine
+
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
@@ -242,7 +260,10 @@ func (e *AutoscaleEnforcer) Score(
 	}
 
 	// Special case: return minimum score if we don't have room
-	if vmInfo.Cpu.Use > node.remainingReservableCPU() || vmInfo.Mem.Use > node.remainingReservableMemSlots() {
+	noRoom := vmInfo != nil &&
+		(vmInfo.Cpu.Use > node.remainingReservableCPU() ||
+			vmInfo.Mem.Use > node.remainingReservableMemSlots())
+	if noRoom {
 		return framework.MinNodeScore, nil
 	}
 
@@ -294,7 +315,7 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	// Double-check that the VM's memory slot size still matches ours. This should be ensured by
 	// our implementation of Filter, but this would be a *pain* to debug if it went wrong somehow.
-	if !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
+	if vmInfo != nil && !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
 		err := fmt.Errorf(
 			"expected %v, found %v (this should have been caught during Filter)",
 			e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize,
@@ -313,9 +334,73 @@ func (e *AutoscaleEnforcer) Reserve(
 			framework.Error,
 			fmt.Sprintf("Error getting node state: %s", err),
 		)
-
 	}
 
+	// if this is a non-VM pod, use a different set of information for it.
+	if vmInfo == nil {
+		podResources, err := extractPodOtherPodResourceState(pod)
+		if err != nil {
+			klog.Errorf("[autoscale-enforcer] Error getting non-VM pod %v state: %v", pName, err)
+			return framework.NewStatus(
+				framework.UnschedulableAndUnresolvable,
+				fmt.Sprintf("Error getting non-VM pod info: %v", err),
+			)
+		}
+
+		oldNodeRes := node.otherResources
+		newNodeRes := node.otherResources.addPod(&e.state.conf.MemSlotSize, podResources)
+
+		addCpu := newNodeRes.reservedCpu - oldNodeRes.reservedCpu
+		addMem := newNodeRes.reservedMemSlots - oldNodeRes.reservedMemSlots
+
+		if addCpu <= node.remainingReservableCPU() && addMem <= node.remainingReservableMemSlots() {
+			oldNodeCpuReserved := node.vCPU.reserved
+			oldNodeMemReserved := node.memSlots.reserved
+
+			node.otherResources = newNodeRes
+			node.vCPU.reserved += addCpu
+			node.memSlots.reserved += addMem
+
+			ps := &otherPodState{
+				name:      pName,
+				node:      node,
+				resources: podResources,
+			}
+			node.otherPods[pName] = ps
+			e.state.otherPods[pName] = ps
+
+			fmtString := "[autoscale-enforcer] Allowing non-VM pod %v (%v raw cpu, %v raw mem) in node %s:\n" +
+				"\tvCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw)\n" +
+				"\t mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw)"
+			klog.Infof(
+				fmtString,
+				// allowing non-VM pod %v (%v raw cpu, %v raw mem) in node %s
+				pName, &podResources.rawCpu, &podResources.rawMemory, nodeName,
+				// vCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw)
+				oldNodeCpuReserved, node.vCPU.reserved, oldNodeRes.reservedCpu, newNodeRes.reservedCpu, &oldNodeRes.rawCpu, &newNodeRes.rawCpu,
+				// mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw)
+				oldNodeMemReserved, node.memSlots.reserved, oldNodeRes.reservedMemSlots, newNodeRes.reservedMemSlots, &oldNodeRes.rawMemory, &newNodeRes.rawMemory,
+			)
+
+			return nil // nil is success
+		} else {
+			fmtString := "Not enough resources to reserve for non-VM pod: " +
+				"need %d vCPU (%v -> %v raw), %d mem slots (%v -> %v raw) but " +
+				"have %d vCPu, %d mem slots remaining"
+			err := fmt.Errorf(
+				fmtString,
+				// need %d vCPU (%v -> %v raw), %d mem slots (%v -> %v raw) but
+				addCpu, &oldNodeRes.rawCpu, &newNodeRes.rawCpu, addMem, &oldNodeRes.rawMemory, &newNodeRes.rawMemory,
+				// have %d vCPU, %d mem slots remaining
+				node.remainingReservableCPU(), node.remainingReservableMemSlots(),
+			)
+			klog.Errorf("[autoscale-enforcer] Can't schedule non-VM pod %v: %s", pName, err)
+			return framework.NewStatus(framework.Unschedulable, err.Error())
+		}
+	}
+
+	// Otherwise, it's a VM. Use the vmInfo
+	//
 	// If there's capacity to reserve the pod, do that. Otherwise, reject the pod. Most capacity
 	// checks will be handled in the calls to Filter, but it's possible for another VM to scale up
 	// in between the calls to Filter and Reserve, removing the resource availability that we
@@ -324,7 +409,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		newNodeReservedCPU := node.vCPU.reserved + vmInfo.Cpu.Use
 		newNodeReservedMemSlots := node.memSlots.reserved + vmInfo.Mem.Use
 
-		fmtString := "[autoscale-enforcer] Allowing pod %v (%d vCPU, %d mem slots) in node %s: " +
+		fmtString := "[autoscale-enforcer] Allowing VM pod %v (%d vCPU, %d mem slots) in node %s: " +
 			"node.vCPU.reserved %d -> %d, node.memSlots.reserved %d -> %d"
 		klog.Infof(
 			fmtString,
@@ -360,7 +445,7 @@ func (e *AutoscaleEnforcer) Reserve(
 			node.remainingReservableCPU(), node.remainingReservableMemSlots(),
 		)
 
-		klog.Errorf("[autoscale-enforcer] Can't schedule pod %v: %s", pName, err)
+		klog.Errorf("[autoscale-enforcer] Can't schedule VM pod %v: %s", pName, err)
 		return framework.NewStatus(framework.Unschedulable, err.Error())
 	}
 }
@@ -382,8 +467,20 @@ func (e *AutoscaleEnforcer) Unreserve(
 	defer e.state.lock.Unlock()
 
 	ps, ok := e.state.podMap[pName]
-	if !ok {
-		klog.Warningf("[autoscale-enforcer] Unreserve: Cannot find pod %v in podMap (this may be normal behavior)", pName)
+	otherPs, otherOk := e.state.otherPods[pName]
+	// FIXME: we should guarantee that we can never have an entry in both maps with the same name.
+	// This needs to be handled in Reserve, not here.
+	if !ok && otherOk {
+		vCPUVerdict, memVerdict := handleDeletedPod(otherPs.node, otherPs.resources, &e.state.conf.MemSlotSize)
+		delete(e.state.otherPods, pName)
+		delete(otherPs.node.otherPods, pName)
+
+		fmtString := "[autoscale-enforcer] Unreserved non-VM pod from node %s:\n" +
+			"\tvCPU verdict: %s\n" +
+			"\t mem verdict: %s"
+		klog.Infof(fmtString, otherPs.name, otherPs.node.name, vCPUVerdict, memVerdict)
+	} else {
+		klog.Warningf("[autoscale-enforcer] Unreserve: Cannot find pod %v in podMap or otherPods (this may be normal behavior)", pName)
 		return
 	}
 
@@ -400,7 +497,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 	delete(ps.node.pods, pName)
 	ps.node.mq.removeIfPresent(ps)
 
-	fmtString := "[autoscale-enforcer] Unreserved pod %v from node %s:\n" +
+	fmtString := "[autoscale-enforcer] Unreserved VM pod %v from node %s:\n" +
 		"\tvCPU verdict: %s\n" +
 		"\t mem verdict: %s"
 	klog.Infof(fmtString, ps.name, ps.node.name, vCPUVerdict, memVerdict)

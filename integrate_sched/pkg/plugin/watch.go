@@ -14,14 +14,17 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-// watchVMDeletions continuously tracks pod deletion events and sends each deleted VM podName on
-// deletions as they occur.
+// watchPodDeletions continuously tracks pod deletion events and sends each deleted podName on
+// either vmDeletions or podDeletions as they occur, depending on whether the pod has the LabelVM
+// label.
 //
 // This method starts its own goroutine, and guarantees that we have started listening for FUTURE
 // events once it returns (unless it returns error).
 //
 // Events occuring before this method is called will not be sent.
-func (e *AutoscaleEnforcer) watchVMDeletions(ctx context.Context, deletions chan<- api.PodName) error {
+func (e *AutoscaleEnforcer) watchPodDeletions(
+	ctx context.Context, vmDeletions chan<- api.PodName, podDeletions chan<- api.PodName,
+) error {
 	// We're using the client-go cache here (indirectly through util.Watch) so that we don't miss
 	// deletion events. Otherwise, we can run into race conditions where events are missed in the
 	// small gap between event stream restarts. In practice the chance of that occuring is
@@ -37,14 +40,14 @@ func (e *AutoscaleEnforcer) watchVMDeletions(ctx context.Context, deletions chan
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
-				deletions <- name
+				if _, ok := pod.Labels[LabelVM]; ok {
+					vmDeletions <- name
+				} else {
+					podDeletions <- name
+				}
 			},
 		},
-		// Setting LabelSelector = LabelVM means that we're selecting for pods that *have* that
-		// label, ignoring the contents of that label.
-		func(options *metav1.ListOptions) {
-			options.LabelSelector = LabelVM
-		},
+		func(options *metav1.ListOptions) {},
 	)
 
 	return nil
