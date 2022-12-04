@@ -21,7 +21,7 @@ We also require a local build of NeonVM (for now, as of 2022-11-27); which can b
 the repository:
 ```sh
 git clone -b sharnoff/dev git@github.com:neondatabase/neonvm
-cd virtink # ^^^^^^^^^^^^ NOTE: needs to be the right branch.
+cd neonvm  # ^^^^^^^^^^^^ NOTE: needs to be the right branch.
 
 # as root:
 CONTROLLER_IMG='localhost:5001/neonvm-controller:latest' \
