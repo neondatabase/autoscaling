@@ -45,7 +45,7 @@ func (e *AutoscaleEnforcer) runPermitHandler() {
 		resp, statusCode, err := e.handleAgentRequest(req)
 		if err != nil {
 			msg := fmt.Sprintf(
-				"[autscale-enforcer] Responding with status code %d to pod %v: %s",
+				"[autoscale-enforcer] Responding with status code %d to pod %v: %s",
 				statusCode, req.Pod, err,
 			)
 			if 500 <= statusCode && statusCode < 600 {
