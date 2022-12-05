@@ -1,12 +1,34 @@
-# Integrated scheduler
+# Autoscaling
 
-This builds on [`scaling_builtin`], which in turn builds on [`kind_setup`]. For more detail, refer
-to their respective READMEs (particularly [`kind_setup`]).
+Vertical autoscaling for a fleet of postgres instances running in a Kubernetes cluster.
 
-[`scaling_builtin`]: ../scaling_builtin
-[`kind_setup`]: ../kind_setup
+## Overview
 
-Steps:
+We want to dynamically change the amount of CPUs and memory of running postgres instances, _without
+breaking TCP connections to postgres_.
+
+This relatively easy when there's already spare resources on the physical (Kubernetes) node, but it
+takes careful coordination to move postgres instances from one node to another when the original
+node doesn't have the room.
+
+We've [tried a bunch](https://github.com/neondatabase/cloud/issues/1651) of existing tools and
+settled on the following:
+
+* Use [VM live migration](https://www.qemu.org/docs/master/devel/migration.html) to move running
+  postgres instances between physical nodes
+* QEMU is used as our hypervisor
+* [NeonVM](https://github.com/neondatabase/neonvm) orchestrates NeonVM VMs as custom resources in
+  K8s, and is responsible for scaling allocated resources (CPU and memory _slots_)
+* A modified K8s scheduler ensures that we don't overcommit resources and triggers migrations when
+  demand is above a pre-configured threshold
+* Each VM has a sidecar container in its pod (`autoscaler-agent`) that triggers scaling decisions
+  and makes resource requests to the K8s scheduler on its behalf to reserve additional resources.
+
+Networking is preserved across migrations by giving each VM an additional IP address on a bridge
+network spanning the cluster with a flat topology; the L2 network figures out "by itself" where to
+send the packets after migration.
+
+## Building and running
 
 Build everything:
 
@@ -18,7 +40,7 @@ build/autoscaler-agent/build.sh
 ```
 
 We also require a local build of NeonVM (for now, as of 2022-11-27); which can be done by cloning
-the repository:
+the repository, in a different directory:
 ```sh
 git clone -b sharnoff/dev git@github.com:neondatabase/neonvm
 cd neonvm  # ^^^^^^^^^^^^ NOTE: needs to be the right branch.
@@ -42,12 +64,10 @@ Set up the cluster:
 scripts/cluster-init.sh
 ```
 
-Run the VM(s):
+Run the VM:
 
 ```sh
 kubectl apply -f vm-deploy.yaml
-# or:
-kubectl apply -f vm-double-deploy.yaml
 ```
 
 Run pgbench and watch the vCPU allocation grow:
@@ -55,8 +75,7 @@ Run pgbench and watch the vCPU allocation grow:
 ```sh
 scripts/run-bench.sh
 # or:
-VM_NAME=postgres14-disk-1 scripts/run-bench.sh
-VM_NAME=postgres14-disk-2 scripts/run-bench.sh
+VM_NAME=postgres14-disk-test scripts/run-bench.sh
 ```
 
 ## Architecture
