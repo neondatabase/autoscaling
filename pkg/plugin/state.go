@@ -381,8 +381,33 @@ func (s *pluginState) getOrFetchNodeState(
 		return n, nil
 	}
 
+	n, err := buildInitialNodeState(node, s.conf)
+	if err != nil {
+		return nil, err
+	}
+
+	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
+	totalReservableCPU := n.totalReservableCPU()
+	if totalReservableCPU > s.maxTotalReservableCPU {
+		s.maxTotalReservableCPU = totalReservableCPU
+	}
+	totalReservableMemSlots := n.totalReservableMemSlots()
+	if totalReservableMemSlots > s.maxTotalReservableMemSlots {
+		s.maxTotalReservableMemSlots = totalReservableMemSlots
+	}
+
+	s.nodeMap[nodeName] = n
+	return n, nil
+}
+
+// this method must only be called while holding s.lock. It will not be released during this
+// function.
+//
+// Note: buildInitialNodeState does not take any of the pods or VMs on the node into account; it
+// only examines the total resources available to the node.
+func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) {
 	// Fetch this upfront, because we'll need it a couple times later.
-	nodeConf := s.conf.forNode(nodeName)
+	nodeConf := conf.forNode(node.Name)
 
 	// helper string for error messages
 	hasAllocatableMsg := "it does have Allocatable, but config.fallbackToAllocatable = false. set it to true for a temporary hotfix"
@@ -392,10 +417,10 @@ func (s *pluginState) getOrFetchNodeState(
 	if cpuQ == nil {
 		allocatableCPU := node.Status.Allocatable.Cpu()
 		if allocatableCPU != nil {
-			if s.conf.FallbackToAllocatable {
+			if conf.FallbackToAllocatable {
 				klog.Warningf(
 					"[autoscale-enforcer] Node %s has no CPU capacity limit, using Allocatable limit",
-					nodeName,
+					node.Name,
 				)
 				cpuQ = allocatableCPU
 			} else {
@@ -409,7 +434,7 @@ func (s *pluginState) getOrFetchNodeState(
 	maxCPU := uint16(cpuQ.MilliValue() / 1000) // cpu.Value rounds up. We don't want to do that.
 	vCPU, err := nodeConf.vCpuLimits(maxCPU)
 	if err != nil {
-		return nil, fmt.Errorf("Error calculating vCPU limits for node %s: %w", nodeName, err)
+		return nil, fmt.Errorf("Error calculating vCPU limits for node %s: %w", node.Name, err)
 	}
 
 	// memQ = "mem, as a K8s resource.Quantity"
@@ -417,10 +442,10 @@ func (s *pluginState) getOrFetchNodeState(
 	if memQ == nil {
 		allocatableMem := node.Status.Allocatable.Memory()
 		if allocatableMem != nil {
-			if s.conf.FallbackToAllocatable {
+			if conf.FallbackToAllocatable {
 				klog.Warningf(
 					"[autoscale-enforcer] Node %s has no Memory capacity limit, using Allocatable limit",
-					nodeName,
+					node.Name,
 				)
 				memQ = allocatableMem
 			} else {
@@ -432,7 +457,7 @@ func (s *pluginState) getOrFetchNodeState(
 	}
 	// note: Value() rounds up. That's ok (probably), because the computation for totalSlots will
 	// round down.
-	totalSlots := memQ.Value() / s.conf.MemSlotSize.Value()
+	totalSlots := memQ.Value() / conf.MemSlotSize.Value()
 	// Check that totalSlots fits within a uint16
 	if totalSlots > (1<<16 - 1) {
 		return nil, fmt.Errorf(
@@ -442,11 +467,11 @@ func (s *pluginState) getOrFetchNodeState(
 	}
 	memSlots, err := nodeConf.memoryLimits(uint16(totalSlots))
 	if err != nil {
-		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", nodeName, err)
+		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", node.Name, err)
 	}
 
 	n := &nodeState{
-		name:        nodeName,
+		name:        node.Name,
 		vCPU:        vCPU,
 		memSlots:    memSlots,
 		pods:        make(map[api.PodName]*podState),
@@ -454,31 +479,20 @@ func (s *pluginState) getOrFetchNodeState(
 		computeUnit: &nodeConf.ComputeUnit,
 	}
 
-	fmtString := "[autoscale-enforcer] Fetched node %s:\n" +
+	fmtString := "[autoscale-enforcer] Built initial node state for %s:\n" +
 		"\tCPU:    total = %d (milli = %d), max reservable = %d, watermark = %d\n" +
 		"\tMemory: total = %d slots (raw = %v), max reservable = %d, watermark = %d"
 
 	klog.Infof(
 		fmtString,
 		// fetched node %s
-		nodeName,
+		node.Name,
 		// cpu: total = %d (milli = %d), max reservable = %d, watermark = %d
 		maxCPU, cpuQ.MilliValue(), n.totalReservableCPU(), n.vCPU.watermark,
 		// mem: total = %d (raw = %v), max reservable = %d, watermark = %d
 		totalSlots, memQ, n.totalReservableMemSlots(), n.memSlots.watermark,
 	)
 
-	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
-	totalReservableCPU := n.totalReservableCPU()
-	if totalReservableCPU > s.maxTotalReservableCPU {
-		s.maxTotalReservableCPU = totalReservableCPU
-	}
-	totalReservableMemSlots := n.totalReservableMemSlots()
-	if totalReservableMemSlots > s.maxTotalReservableMemSlots {
-		s.maxTotalReservableMemSlots = totalReservableMemSlots
-	}
-
-	s.nodeMap[nodeName] = n
 	return n, nil
 }
 
