@@ -1229,6 +1229,10 @@ spec:
                 - OnFailure
                 - Never
                 type: string
+              schedulerName:
+                type: string
+              serviceAccountName:
+                type: string
               terminationGracePeriodSeconds:
                 default: 5
                 format: int64

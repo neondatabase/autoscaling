@@ -44,10 +44,12 @@ type VirtualMachineSpec struct {
 	// +optional
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds"`
 
-	NodeSelector map[string]string           `json:"nodeSelector,omitempty"`
-	Affinity     *corev1.Affinity            `json:"affinity,omitempty"`
-	Tolerations  []corev1.Toleration         `json:"tolerations,omitempty"`
-	PodResources corev1.ResourceRequirements `json:"podResources,omitempty"`
+	NodeSelector       map[string]string           `json:"nodeSelector,omitempty"`
+	Affinity           *corev1.Affinity            `json:"affinity,omitempty"`
+	Tolerations        []corev1.Toleration         `json:"tolerations,omitempty"`
+	SchedulerName      string                      `json:"schedulerName,omitempty"`
+	ServiceAccountName string                      `json:"serviceAccountName,omitempty"`
+	PodResources       corev1.ResourceRequirements `json:"podResources,omitempty"`
 
 	// +kubebuilder:default:=Never
 	// +optional

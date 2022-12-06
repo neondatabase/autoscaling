@@ -487,6 +487,8 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 			NodeSelector:                  virtualmachine.Spec.NodeSelector,
 			ImagePullSecrets:              virtualmachine.Spec.ImagePullSecrets,
 			Tolerations:                   virtualmachine.Spec.Tolerations,
+			ServiceAccountName:            virtualmachine.Spec.ServiceAccountName,
+			SchedulerName:                 virtualmachine.Spec.SchedulerName,
 			Affinity: &corev1.Affinity{
 				NodeAffinity: &corev1.NodeAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
