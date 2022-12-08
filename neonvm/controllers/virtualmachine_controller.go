@@ -462,7 +462,9 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
-	ls := labelsForVirtualMachine(virtualmachine.Name)
+
+	labels := labelsForVirtualMachine(virtualmachine)
+	affinity := affinityForVirtualMachine(virtualmachine)
 
 	// Get the Operand image
 	image, err := imageForVmRunner()
@@ -477,9 +479,10 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      virtualmachine.Status.PodName,
-			Namespace: virtualmachine.Namespace,
-			Labels:    ls,
+			Name:        virtualmachine.Status.PodName,
+			Namespace:   virtualmachine.Namespace,
+			Labels:      labels,
+			Annotations: virtualmachine.Annotations,
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy:                 corev1.RestartPolicy(virtualmachine.Spec.RestartPolicy),
@@ -489,28 +492,7 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 			Tolerations:                   virtualmachine.Spec.Tolerations,
 			ServiceAccountName:            virtualmachine.Spec.ServiceAccountName,
 			SchedulerName:                 virtualmachine.Spec.SchedulerName,
-			Affinity: &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{
-										Key:      "kubernetes.io/arch",
-										Operator: "In",
-										Values:   []string{"amd64"},
-									},
-									{
-										Key:      "kubernetes.io/os",
-										Operator: "In",
-										Values:   []string{"linux"},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
+			Affinity:                      affinity,
 			InitContainers: []corev1.Container{{
 				Image:           virtualmachine.Spec.Guest.RootDisk.Image,
 				Name:            "init-rootdisk",
@@ -606,11 +588,48 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
-func labelsForVirtualMachine(name string) map[string]string {
-	return map[string]string{
-		"app.kubernetes.io/name":     "VirtualMachine",
-		vmv1.VirtualMachineNameLabel: name,
+func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
+	l := virtualmachine.Labels
+	if l == nil {
+		l = map[string]string{}
 	}
+	l["app.kubernetes.io/name"] = "NeonVM"
+	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
+	return l
+}
+
+func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affinity {
+	a := virtualmachine.Spec.Affinity
+	if a == nil {
+		a = &corev1.Affinity{}
+	}
+	if a.NodeAffinity == nil {
+		a.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+
+	// if NodeSelectorTerms list is empty - add default values (arch==amd84 or os==linux)
+	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
+		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
+			a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+			corev1.NodeSelectorTerm{
+				MatchExpressions: []corev1.NodeSelectorRequirement{
+					{
+						Key:      "kubernetes.io/arch",
+						Operator: "In",
+						Values:   []string{"amd64"},
+					},
+					{
+						Key:      "kubernetes.io/os",
+						Operator: "In",
+						Values:   []string{"linux"},
+					},
+				},
+			})
+	}
+	return a
 }
 
 // imageForVirtualMachine gets the Operand image which is managed by this controller
