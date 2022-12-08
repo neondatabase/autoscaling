@@ -182,10 +182,11 @@ done
 )
 
 var (
-	srcImage = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
-	size     = flag.String("size", "1G", `Size for disk image: --size=1G`)
-	outFile  = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
+	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
+	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
 )
 
 func printReader(reader io.ReadCloser) error {
@@ -247,21 +248,38 @@ func main() {
 	}
 	defer cli.Close()
 
-	// pull source image
-	log.Printf("Pull source docker image: %s\n", *srcImage)
-	pull, err := cli.ImagePull(ctx, *srcImage, types.ImagePullOptions{})
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer pull.Close()
+	hostContainsSrcImage := false
+	if !*forcePull {
+		hostImages, err := cli.ImageList(ctx, types.ImageListOptions{})
+		if err != nil {
+			log.Fatalln(err)
+		}
 
-	// do quiet pull - discard output
-	io.Copy(io.Discard, pull)
-	/*
-	   if err = printReader(pull); err != nil {
-	   	log.Fatalln(err)
-	   }
-	*/
+		for _, img := range hostImages {
+			for _, name := range img.RepoTags {
+				if name == *srcImage {
+					hostContainsSrcImage = true
+					break
+				}
+			}
+			if hostContainsSrcImage {
+				break
+			}
+		}
+	}
+
+	if !hostContainsSrcImage {
+		// pull source image
+		log.Printf("Pull source docker image: %s", *srcImage)
+		pull, err := cli.ImagePull(ctx, *srcImage, types.ImagePullOptions{})
+		if err != nil {
+			log.Fatalln(err)
+		}
+		defer pull.Close()
+
+		// do quiet pull - discard output
+		io.Copy(io.Discard, pull)
+	}
 
 	log.Printf("Build docker image for virtual machine (disk size %s): %s\n", *size, dstIm)
 	imageSpec, _, err := cli.ImageInspectWithRaw(ctx, *srcImage)
