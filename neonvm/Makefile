@@ -59,10 +59,9 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	rm -rf $$iidfile
 	go fmt ./...
 
-# if buildvcs=false is not given, then we can run into issues with git worktrees.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	GOFLAGS="-buildvcs=false" $(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.

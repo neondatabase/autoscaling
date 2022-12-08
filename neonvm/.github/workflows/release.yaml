@@ -9,7 +9,6 @@ env:
   KUSTOMIZE_VERSION:        "4.5.7"
   CONTROLLER_TOOLS_VERSION: "0.10.0"
   CODE_GENERATOR_VERSION:   "0.25.4"
-  GOFLAGS:                  "-buildvcs=false"
   IMG:                      "neondatabase/neonvm-controller"
   IMG_RUNNER:               "neondatabase/neonvm-runner"
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
