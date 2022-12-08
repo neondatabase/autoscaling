@@ -126,6 +126,23 @@ func getVmInfo(ctx context.Context, vmClient *vmclient.Clientset, pod *corev1.Po
 	return vmInfo, nil
 }
 
+// checkSchedulerName asserts that the SchedulerName field of a Pod matches what we're expecting,
+// otherwise returns a non-nil framework.Status to return (and also logs the error)
+//
+// This method expects e.state.lock to be held when it is called. It will not release the lock.
+func (e *AutoscaleEnforcer) checkSchedulerName(pod *corev1.Pod) *framework.Status {
+	if e.state.conf.SchedulerName != pod.Spec.SchedulerName {
+		podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+		err := fmt.Sprintf(
+			"Mismatched SchedulerName for pod %v: our config has %q, but the pod has %q",
+			podName, e.state.conf.SchedulerName, pod.Spec.SchedulerName,
+		)
+		klog.Errorf("[autoscale-enforcer] %s", err)
+		return framework.NewStatus(framework.Error, err)
+	}
+	return nil
+}
+
 // Filter gives our plugin a chance to signal that a pod shouldn't be put onto a particular node
 //
 // Required for framework.FilterPlugin
@@ -152,6 +169,11 @@ func (e *AutoscaleEnforcer) Filter(
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
+
+	// Check that the SchedulerName matches what we're expecting
+	if status := e.checkSchedulerName(pod); status != nil {
+		return status
+	}
 
 	// Check whether the pod's memory slot size matches the scheduler's. If it doesn't, reject it.
 	if !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
@@ -252,6 +274,11 @@ func (e *AutoscaleEnforcer) Score(
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
+	// Double-check that the SchedulerName matches what we're expecting
+	if status := e.checkSchedulerName(pod); status != nil {
+		return framework.MinNodeScore, status
+	}
+
 	// Score by total resources available:
 	node, err := e.state.getOrFetchNodeState(ctx, e.handle, nodeName)
 	if err != nil {
@@ -312,6 +339,11 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
+
+	// Double-check that the SchedulerName matches what we're expecting
+	if status := e.checkSchedulerName(pod); status != nil {
+		return status
+	}
 
 	// Double-check that the VM's memory slot size still matches ours. This should be ensured by
 	// our implementation of Filter, but this would be a *pain* to debug if it went wrong somehow.

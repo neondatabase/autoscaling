@@ -37,6 +37,10 @@ type config struct {
 	// rejected.
 	MemSlotSize resource.Quantity `json:"memBlockSize"`
 
+	// SchedulerName informs the scheduler of its name, so that it can identify pods that a previous
+	// version handled.
+	SchedulerName string `json:"schedulerName"`
+
 	// DoMigration, if provided, allows VM migration to be disabled
 	//
 	// This flag is intended to be temporary, just until NeonVM supports mgirations and we can
@@ -105,6 +109,10 @@ func (c *config) validate() (string, error) {
 		return "memBlockSize", fmt.Errorf("value must be > 0")
 	}
 
+	if c.SchedulerName == "" {
+		return "schedulerName", fmt.Errorf("string cannot be empty")
+	}
+
 	return "", nil
 }
 
@@ -151,6 +159,9 @@ func (c *resourceConfig) validate() (string, error) {
 func (oldConf *config) validateChangeTo(newConf *config) (string, error) {
 	if newConf.MemSlotSize != oldConf.MemSlotSize {
 		return "memSlotSize", fmt.Errorf("value cannot be changed at runtime")
+	}
+	if newConf.SchedulerName != oldConf.SchedulerName {
+		return "schedulername", fmt.Errorf("value cannot be changed at runtime")
 	}
 
 	return "", nil
