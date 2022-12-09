@@ -33,7 +33,7 @@ replace (
 )
 
 require (
-	github.com/neondatabase/neonvm v0.0.0-20221117194802-a3617bfadc09
+	github.com/neondatabase/neonvm v0.0.0-20221216080543-d372d6413fd7
 	golang.org/x/exp v0.0.0-20221126150942-6ab00d035af9
 	k8s.io/api v0.25.4
 	k8s.io/apimachinery v0.25.4
