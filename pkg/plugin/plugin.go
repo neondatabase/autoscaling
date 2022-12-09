@@ -59,12 +59,8 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	p := AutoscaleEnforcer{
 		handle:   h,
 		vmClient: vmClient,
-		state: pluginState{
-			nodeMap:   make(map[string]*nodeState),
-			podMap:    make(map[api.PodName]*podState),
-			otherPods: make(map[api.PodName]*otherPodState),
-			// zero values are ok for the rest here
-		},
+		// fields are set by p.setConfigAndStartWatcher, p.readClusterState
+		state: pluginState{},
 	}
 
 	if err := p.setConfigAndStartWatcher(); err != nil {
@@ -72,10 +68,16 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		return nil, err
 	}
 
+	// Start watching deletion events...
 	vmDeletions := make(chan api.PodName)
 	podDeletions := make(chan api.PodName)
 	if err := p.watchPodDeletions(context.Background(), vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %s", err)
+	}
+
+	// ... but before handling the deletion events, read the current cluster state:
+	if err = p.readClusterState(context.TODO()); err != nil {
+		return nil, fmt.Errorf("Error reading cluster state: %w", err)
 	}
 
 	// TODO: this is a little clumsy; both channels are sent on by the same goroutine and both

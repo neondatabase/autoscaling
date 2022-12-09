@@ -171,9 +171,9 @@ func (oldConf *config) validateChangeTo(newConf *config) (string, error) {
 // CONFIG UPDATE TRACKING AND HANDLING //
 /////////////////////////////////////////
 
+// setConfigAndStartWatcher basically does what it says. It (indirectly) spawns goroutines that will
+// udpate the plugin's config (calling e.handleNewConfigMap).
 func (e *AutoscaleEnforcer) setConfigAndStartWatcher() error {
-	// We want the state to be locked until the initial get request is done we make so that we don't
-	// attempt to handle updates before lastConfigString has been set.
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
