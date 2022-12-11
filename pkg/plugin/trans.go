@@ -14,18 +14,22 @@ import (
 	"golang.org/x/exp/constraints"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type resourceTransition[T constraints.Unsigned] struct {
 	node    *nodeResourceState[T]
 	oldNode struct {
 		reserved             T
+		buffer               T
 		capacityPressure     T
 		pressureAccountedFor T
 	}
 	pod    *podResourceState[T]
 	oldPod struct {
 		reserved         T
+		buffer           T
 		capacityPressure T
 	}
 }
@@ -37,19 +41,23 @@ func collectResourceTransition[T constraints.Unsigned](
 		node: node,
 		oldNode: struct {
 			reserved             T
+			buffer               T
 			capacityPressure     T
 			pressureAccountedFor T
 		}{
 			reserved:             node.reserved,
+			buffer:               node.buffer,
 			capacityPressure:     node.capacityPressure,
 			pressureAccountedFor: node.pressureAccountedFor,
 		},
 		pod: pod,
 		oldPod: struct {
 			reserved         T
+			buffer           T
 			capacityPressure T
 		}{
 			reserved:         pod.reserved,
+			buffer:           pod.buffer,
 			capacityPressure: pod.capacityPressure,
 		},
 	}
@@ -61,7 +69,22 @@ func collectResourceTransition[T constraints.Unsigned](
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
 func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool) (verdict string) {
 	totalReservable := r.node.total - r.node.system
-	remainingReservable := totalReservable - r.oldNode.reserved
+	// note: it's possible to temorarily have reserved > totalReservable, after loading state or
+	// config change; we have to use SaturatingSub here to account for that.
+	remainingReservable := util.SaturatingSub(totalReservable, r.oldNode.reserved)
+
+	// Note: The correctness of this function depends on the autoscaler-agents and previous
+	// scheduler being well-behaved. This function will fail to prevent overcommitting when:
+	//
+	//  1. A previous scheduler allowed more than it should have, and the autoscaler-agents are
+	//     sticking to those resource levels; or
+	//  2. autoscaler-agents are making an initial communication that requests an increase from
+	//     their current resource allocation
+	//
+	// So long as neither of the above happen, we should be ok, because we'll inevitably lower the
+	// "buffered" amount until all pods for this node have contacted us, and the reserved amount
+	// should then be back under r.node.total. It _may_ still be above totalReservable, but that's
+	// expected to happen sometimes!
 
 	if requested <= r.pod.reserved {
 		// Decrease "requests" are actually just notifications it's already happened
@@ -80,6 +103,12 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		// will resolve it.
 		r.pod.capacityPressure = requested - r.pod.reserved
 		r.node.capacityPressure = r.node.capacityPressure + r.pod.capacityPressure - r.oldPod.capacityPressure
+
+		// note: we don't need to handle buffer here because migration is never started as the first
+		// communciation, so buffers will be zero already.
+		if r.pod.buffer != 0 {
+			panic("r.pod.buffer != 0")
+		}
 
 		fmtString := "Denying increase %d -> %d because the pod is starting migration; " +
 			"node capacityPressure %d -> %d (%d -> %d spoken for)"
@@ -131,9 +160,17 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		// use shared verdict below.
 	}
 
-	fmtString := "Register %d -> %d%s (pressure %d -> %d); " +
+	fmtString := "Register %d%s -> %d%s (pressure %d -> %d); " +
 		"node reserved %d -> %d (of %d), " +
 		"node capacityPressure %d -> %d (%d -> %d spoken for)"
+
+	var buffer string
+	if r.pod.buffer != 0 {
+		buffer = fmt.Sprintf(" (buffer %d)", r.pod.buffer)
+
+		r.node.buffer -= r.pod.buffer
+		r.pod.buffer = 0
+	}
 
 	var wanted string
 	if r.pod.reserved != requested {
@@ -142,8 +179,8 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 
 	verdict = fmt.Sprintf(
 		fmtString,
-		// Register %d -> %d%s (pressure %d -> %d)
-		r.oldPod.reserved, r.pod.reserved, wanted, r.oldPod.capacityPressure, r.pod.capacityPressure,
+		// Register %d%s -> %d%s (pressure %d -> %d)
+		r.oldPod.reserved, buffer, r.pod.reserved, wanted, r.oldPod.capacityPressure, r.pod.capacityPressure,
 		// node reserved %d -> %d (of %d)
 		r.oldNode.reserved, r.node.reserved, totalReservable,
 		// node capacityPressure %d -> %d (%d -> %d spoken for)

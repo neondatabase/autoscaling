@@ -16,6 +16,7 @@ import (
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 // pluginState stores the private state for the plugin, used both within and outside of the
@@ -81,15 +82,24 @@ type nodeResourceState[T any] struct {
 	// watermark is the amount of T reserved to pods above which we attempt to reduce usage via
 	// migration.
 	watermark T
-	// reserved is the current amount of T reserved to pods. It MUST be less than or equal to total,
-	// and SHOULD be less than or equal to (total - system), although the latter may be temporarily
-	// false after config updates.
+	// reserved is the current amount of T reserved to pods. It SHOULD be less than or equal to
+	// (total - system), and we take active measures reduce it once it is above watermark.
 	//
-	// We try to keep reserved less than or equal to watermark, but exceeding it is a deliberate
-	// part of normal operation.
+	// reserved MAY be greater than total on scheduler restart (because of buffering with VM scaling
+	// maximums), but (reserved - buffer) MUST be less than total. In general, (reserved - buffer)
+	// SHOULD be less than or equal to (total - system), but this can be temporarily violated after
+	// restart or config change.
+	//
+	// For more information, refer to the ARCHITECTURE.md file in this directory.
 	//
 	// reserved is always exactly equal to the sum of all of this node's pods' reserved T.
 	reserved T
+	// buffer *mostly* matters during startup. It tracks the total amount of T that we don't
+	// *expect* is currently in use, but is still reserved to the pods because we can't prevent the
+	// autoscaler-agents from making use of it.
+	//
+	// buffer is always exactly equal to the sum of all this node's pods' buffer for T.
+	buffer T
 	// capacityPressure is -- roughly speaking -- the amount of T that we're currently denying to
 	// pods in this node when they request it, due to not having space in remainingReservableCPU().
 	// This value is exactly equal to the sum of each pod's capacityPressure.
@@ -163,6 +173,15 @@ type podResourceState[T any] struct {
 	// reserved is the amount of T that this pod has reserved. It is guaranteed that the pod is
 	// using AT MOST reserved T.
 	reserved T
+	// buffer is the amount of reserved that we've included in reserved to account for the
+	// possibility of unilateral increases by the autoscaler-agent
+	//
+	// This value is only nonzero during startup (between initial state load and first communication
+	// from the autoscaler-agent), and MUST be less than or equal to reserved.
+	//
+	// After the first communication from the autoscaler-agent, we update reserved to match its
+	// value, and set buffer to zero.
+	buffer T
 	// capacityPressure is this pod's contribution to this pod's node's capacityPressure for this
 	// resource
 	capacityPressure T
@@ -296,26 +315,31 @@ func (s *nodeState) tooMuchPressure() bool {
 		return false
 	}
 
-	logicalCpuPressure := s.vCPU.reserved - s.vCPU.watermark
-	logicalMemPressure := s.memSlots.reserved - s.memSlots.watermark
+	logicalCpuPressure := util.SaturatingSub(s.vCPU.reserved, s.vCPU.watermark)
+	logicalMemPressure := util.SaturatingSub(s.memSlots.reserved, s.memSlots.watermark)
 
-	tooMuchCpu := logicalCpuPressure+s.vCPU.capacityPressure > s.vCPU.pressureAccountedFor
-	tooMuchMem := logicalMemPressure+s.memSlots.capacityPressure > s.memSlots.pressureAccountedFor
+	// Account for existing slack in the system, to counteract capacityPressure that hasn't been
+	// updated yet
+	logicalCpuSlack := s.vCPU.buffer + util.SaturatingSub(s.vCPU.watermark, s.vCPU.reserved)
+	logicalMemSlack := s.memSlots.buffer + util.SaturatingSub(s.memSlots.watermark, s.memSlots.reserved)
+
+	tooMuchCpu := logicalCpuPressure+s.vCPU.capacityPressure > s.vCPU.pressureAccountedFor+logicalCpuSlack
+	tooMuchMem := logicalMemPressure+s.memSlots.capacityPressure > s.memSlots.pressureAccountedFor+logicalMemSlack
 
 	result := tooMuchCpu || tooMuchMem
 
 	fmtString := "[autoscale-enforcer] tooMuchPressure(%s) = %v. " +
-		"vCPU: {logical: %d, capacity: %d, accountedFor: %d}, " +
-		"mem: {logical: %d, capacity: %d, accountedFor: %d}"
+		"vCPU: {logical: %d (slack: %d), capacity: %d, accountedFor: %d}, " +
+		"mem: {logical: %d (slack: %d), capacity: %d, accountedFor: %d}"
 
 	klog.V(1).Infof(
 		fmtString,
 		// tooMuchPressure(%s) = %v
 		s.name, result,
-		// vCPU: {logical: %d, capacity: %d, accountedFor: %d}
-		logicalCpuPressure, s.vCPU.capacityPressure, s.vCPU.pressureAccountedFor,
-		// mem: {logical: %d, capacity: %d, accountedFor: %d}
-		logicalMemPressure, s.memSlots.capacityPressure, s.memSlots.pressureAccountedFor,
+		// vCPU: {logical: %d (slack: %d), capacity: %d, accountedFor: %d}
+		logicalCpuPressure, logicalCpuSlack, s.vCPU.capacityPressure, s.vCPU.pressureAccountedFor,
+		// mem: {logical: %d, (slack: %d), capacity: %d, accountedFor: %d}
+		logicalMemPressure, logicalMemSlack, s.memSlots.capacityPressure, s.memSlots.pressureAccountedFor,
 	)
 
 	return result
@@ -792,11 +816,13 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			vmName: vm.Name,
 			node:   ns,
 			vCPU: podResourceState[uint16]{
-				reserved:         vmInfo.Cpu.Use,
+				reserved:         vmInfo.Cpu.Max,
+				buffer:           vmInfo.Cpu.Max - vmInfo.Cpu.Use,
 				capacityPressure: 0,
 			},
 			memSlots: podResourceState[uint16]{
-				reserved:         vmInfo.Mem.Use,
+				reserved:         vmInfo.Mem.Max,
+				buffer:           vmInfo.Mem.Max - vmInfo.Mem.Use,
 				capacityPressure: 0,
 			},
 
@@ -809,19 +835,22 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 		}
 		oldNodeVCPUReserved := ns.vCPU.reserved
 		oldNodeMemReserved := ns.memSlots.reserved
+		oldNodeVCPUBuffer := ns.vCPU.buffer
+		oldNodeMemBuffer := ns.memSlots.buffer
+
 		ns.vCPU.reserved += ps.vCPU.reserved
 		ns.memSlots.reserved += ps.memSlots.reserved
-		fmtString := "[autoscale-enforcer] load state: Adding VM pod %v to node %s; " +
-			"pod CPU = %d (node %d -> %d / %d), " +
-			"mem slots = %d (node %d -> %d / %d)"
+		fmtString := "[autoscale-enforcer] load state: Adding VM pod %v to node %s:\n" +
+			"\tpod CPU = %d/%d (node %d -> %d / %d, %d -> %d buffer)\n" +
+			"\tmem slots = %d/%d (node %d -> %d / %d, %d -> %d buffer)"
 		klog.Infof(
 			fmtString,
 			// Adding VM pod %v to node %s
 			podName, ns.name,
-			// pod CPU = %d (node %d -> %d / %d)
-			ps.vCPU.reserved, oldNodeVCPUReserved, ns.vCPU.reserved, ns.totalReservableCPU(),
-			// mem slots = %d (node %d -> %d / %d)
-			ps.memSlots.reserved, oldNodeMemReserved, ns.memSlots.reserved, ns.totalReservableMemSlots(),
+			// pod CPU = %d/%d (node %d -> %d / %d, %d -> %d buffer)
+			ps.vCPU.reserved, vmInfo.Cpu.Max, oldNodeVCPUReserved, ns.vCPU.reserved, ns.totalReservableCPU(), oldNodeVCPUBuffer, ns.vCPU.buffer,
+			// mem slots = %d/%d (node %d -> %d / %d, %d -> %d buffer)
+			ps.memSlots.reserved, vmInfo.Mem.Max, oldNodeMemReserved, ns.memSlots.reserved, ns.totalReservableMemSlots(), oldNodeMemBuffer, ns.memSlots.buffer,
 		)
 		ns.pods[podName] = ps
 		p.state.podMap[podName] = ps
@@ -924,19 +953,16 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 		ns := p.state.nodeMap[nodeName]
 		overBudget := []string{}
 
-		// TODO: When we allow online config changes, this should be changed to instead check
-		// ns.{vCPU,memSlots}.total, and do the proper handling for reserved > totalReservable
-
-		if ns.vCPU.reserved > ns.totalReservableCPU() {
+		if ns.vCPU.reserved-ns.vCPU.buffer > ns.vCPU.total {
 			overBudget = append(overBudget, fmt.Sprintf(
-				"reserved CPU %d > totalReservableCPU %d",
-				ns.vCPU.reserved, ns.totalReservableCPU(),
+				"expected CPU usage (reserved %d - buffer %d) > total %d",
+				ns.vCPU.reserved, ns.vCPU.buffer, ns.vCPU.total,
 			))
 		}
-		if ns.memSlots.reserved > ns.totalReservableMemSlots() {
+		if ns.memSlots.reserved > ns.memSlots.total {
 			overBudget = append(overBudget, fmt.Sprintf(
-				"reserved memSlots %d > totalReservableMemSlots %d",
-				ns.memSlots.reserved, ns.totalReservableMemSlots(),
+				"expected memSlots usage (reserved %d - buffer %d) > total %d",
+				ns.memSlots.reserved, ns.memSlots.buffer, ns.memSlots.total,
 			))
 		}
 
