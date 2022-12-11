@@ -6,8 +6,11 @@ setup fit together. Any protocol details are also written here as well.
 We also briefly touch on the implementation of [NeonVM](https://github.com/neondatabase/neonvm),
 because it's relevant to the inter-node communication that goes on.
 
+This document should be up-to-date. If it isn't, that's a mistake (open an issue!).
+
 **Table of contents:**
 
+* [See also](#see-also)
 * [High-level overview](#high-level-overview)
 * [Repository structure](#repository-structure)
 * [Agent-Scheduler protocol details](#agent-scheduler-protocol-details)
@@ -15,6 +18,13 @@ because it's relevant to the inter-node communication that goes on.
   * [Node pressure and watermarks](#node-pressure-and-watermarks)
 * [High-level consequences of the Agent-Scheduler protocol](#high-level-consequences-of-the-agent-scheduler-protocol)
 * [Footguns](#footguns)
+
+## See also
+
+This isn't the only architecture document. You may also want to look at:
+
+* [`pkg/plugin/ARCHITECTURE.md`](pkg/plugin/ARCHITECTURE.md) — detail on the implementation of the
+  scheduler plugin
 
 ## High-level overview
 
@@ -127,12 +137,14 @@ on each node, the scheduler can prevent
 
 ### Node pressure and watermarks
 
+<!-- Note: this topic is also discussed in pkg/plugin/ARCHITECTURE.md -->
+
 In order to trigger migrations before we _run out_ of resources on a node, the scheduler maintains a
 few _logical_ concepts. Here, we're talking about "watermarks" and "pressure".
 
 Each node has a "watermark" for each resource — the level above which the scheduler should
-_proactively_ start migrating VMs to make room. If everything is operating smoothly, we should never
-run out (which would cause us to deny requests for additional resources).
+_preemptively_ start migrating VMs to make room. If everything is operating smoothly, we should
+never run out (which would cause us to deny requests for additional resources).
 
 In order to make sure we don't over-correct and migrate away too many VMs, we also track the
 "pressure" that a particular resource on a node is under. This is, roughly speaking, the amount of
@@ -161,3 +173,6 @@ _An alternate name for this section:_ Things to watch out for
 * Creating a pod with `PodSpec.Node` set will bypass the scheduler (even if `SchedulerName` is set),
   so we cannot prevent it from overcommitting node resources. **Do not do this except for "system"
   functions.**
+* Non-VM pods must have `resources.limits` equal to `resources.requests` — otherwise, we wouldn't be
+  able to guarantee that resources aren't overcommitted. For more, see
+  [`pkg/plugin/ARCHITECTURE.md`](pkg/plugin/ARCHITECTURE.md).
