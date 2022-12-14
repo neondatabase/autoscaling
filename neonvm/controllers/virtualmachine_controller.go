@@ -531,6 +531,19 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 		},
 	}
 
+	for _, port := range virtualmachine.Spec.Guest.Ports {
+		cPort := corev1.ContainerPort{
+			ContainerPort: int32(port.Port),
+		}
+		if len(port.Name) != 0 {
+			cPort.Name = port.Name
+		}
+		if len(port.Protocol) != 0 {
+			cPort.Protocol = corev1.Protocol(port.Protocol)
+		}
+		pod.Spec.Containers[0].Ports = append(pod.Spec.Containers[0].Ports, cPort)
+	}
+
 	for _, disk := range virtualmachine.Spec.Disks {
 		mnt := corev1.VolumeMount{
 			Name:      disk.Name,

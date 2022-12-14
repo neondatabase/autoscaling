@@ -4,10 +4,10 @@ metadata:
   name: example
 spec:
   ports:
-  - name: psql
+  - name: postgres
     port: 5432
     protocol: TCP
-    targetPort: 5432
+    targetPort: postgres
     nodePort: 30432
   type: NodePort
   selector:
@@ -40,7 +40,8 @@ spec:
       - name: POSTGRES_HOST_AUTH_METHOD
         value: trust
     ports:
-      - port: 5432
+      - name: postgres
+        port: 5432
   disks:
     - name: pgdata
       mountPath: /var/lib/postgresql
