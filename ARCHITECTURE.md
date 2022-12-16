@@ -77,6 +77,8 @@ discussed more in the [high-level consequences] section below.
     * `scripts/cluster-init.sh` — sets up a kind cluster
     * `scripts/patch-*.json` — patches for testing live-updating of a VM or config
     * `scripts/replace-scheduler.sh` — replaces the currently running scheduler, for quick redeploy
+    * `scripts/repeat-delete-scheduler.sh` — repeatedly deletes the scheduler (which will be
+        recreated by the depoyment). For debugging.
     * `scripts/run-bench.sh` — starts a CPU-intensive pgbench connected to a VM. Useful to watch
       the TPS and get confirmation that autoscaled CPUs are being used.
     * `scripts/scheduler-logs.sh` — convenience script to tail the scheduler's logs
