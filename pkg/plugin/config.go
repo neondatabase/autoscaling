@@ -219,7 +219,7 @@ func (e *AutoscaleEnforcer) setConfigAndStartWatcher() error {
 			defer e.state.lock.Unlock()
 
 			if err := e.handleNewConfigMap(newConf); err != nil {
-				klog.Errorf("[autoscale-enforcer] Rejecting bad %s ConfigMap: %w", desc, err)
+				klog.Errorf("[autoscale-enforcer] Rejecting bad %s ConfigMap: %s", desc, err)
 			}
 		}
 	}
