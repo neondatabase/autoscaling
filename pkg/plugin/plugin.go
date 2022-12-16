@@ -63,7 +63,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		state: pluginState{},
 	}
 
-	if err := p.setConfigAndStartWatcher(); err != nil {
+	if err := p.setConfigAndStartWatcher(context.Background()); err != nil {
 		klog.Errorf("Error starting config watcher: %s", err)
 		return nil, err
 	}

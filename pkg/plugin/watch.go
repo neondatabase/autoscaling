@@ -5,6 +5,7 @@ package plugin
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,14 +31,15 @@ func (e *AutoscaleEnforcer) watchPodDeletions(
 	// small gap between event stream restarts. In practice the chance of that occuring is
 	// *incredibly* small, but it's still imperative that we avoid it.
 
-	stop := make(chan struct{})
-	_ = util.Watch(
-		e.handle.ClientSet().CoreV1().RESTClient(),
-		stop,
-		corev1.ResourcePods,
-		corev1.NamespaceAll,
+	_, err := util.Watch(
+		ctx,
+		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
+		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
+			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
+		},
+		metav1.ListOptions{},
 		util.WatchHandlerFuncs[*corev1.Pod]{
-			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
+			DeleteFunc: func(pod *corev1.Pod) {
 				name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
 				if _, ok := pod.Labels[LabelVM]; ok {
@@ -47,8 +49,10 @@ func (e *AutoscaleEnforcer) watchPodDeletions(
 				}
 			},
 		},
-		func(options *metav1.ListOptions) {},
 	)
+	if err != nil {
+		return fmt.Errorf("Error watching pod deletions: %w", err)
+	}
 
 	return nil
 }

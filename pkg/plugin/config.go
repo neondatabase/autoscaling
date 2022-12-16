@@ -1,10 +1,10 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -173,53 +173,55 @@ func (oldConf *config) validateChangeTo(newConf *config) (string, error) {
 
 // setConfigAndStartWatcher basically does what it says. It (indirectly) spawns goroutines that will
 // udpate the plugin's config (calling e.handleNewConfigMap).
-func (e *AutoscaleEnforcer) setConfigAndStartWatcher() error {
+func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error {
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	stop := make(chan struct{})
 	addEvents := make(chan *corev1.ConfigMap)
 	updateEvents := make(chan *corev1.ConfigMap)
 
-	util.Watch(
-		e.handle.ClientSet().CoreV1().RESTClient(),
-		stop,
-		corev1.ResourceConfigMaps,
-		ConfigMapNamespace,
+	watchStore, err := util.Watch(
+		ctx,
+		e.handle.ClientSet().CoreV1().ConfigMaps(ConfigMapNamespace),
+		util.WatchAccessors[*corev1.ConfigMapList, corev1.ConfigMap]{
+			Items: func(list *corev1.ConfigMapList) []corev1.ConfigMap { return list.Items },
+		},
+		metav1.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector(metav1.ObjectNameField, ConfigMapName).String(),
+		},
 		util.WatchHandlerFuncs[*corev1.ConfigMap]{
 			// Hooking into AddFunc as well as UpdateFunc allows for us to handle both "patch" and
 			// "delete + replace" workflows for the ConfigMap.
-			AddFunc:    func(newConf *corev1.ConfigMap) { addEvents <- newConf },
+			AddFunc: func(newConf *corev1.ConfigMap, preexisting bool) {
+				// preexisting ConfigMaps are handled by the call to watchStore.Items() below. If we
+				// tried to send them here, we'd deadlock.
+				if !preexisting {
+					addEvents <- newConf
+				}
+			},
 			UpdateFunc: func(oldConf, newConf *corev1.ConfigMap) { updateEvents <- newConf },
 		},
-		func(options *metav1.ListOptions) {
-			options.FieldSelector = fields.OneTermEqualSelector(metav1.ObjectNameField, ConfigMapName).String()
-		},
 	)
+	if err != nil {
+		return fmt.Errorf("Failed to watch ConfigMaps: %w", err)
+	}
 
-	// Listen until we get one configmap.
-	//
-	// We have to do it this way (instead of e.g., using a List method on the returned store)
-	// because using a List method is racy; it tends to use the existing stuff in the store BEFORE
-	// any calls to the API server has been made, and the store starts with nothing in it.
-	//
-	// Unfortunately, there isn't a clean, non-racy way for us to know when the store's been updated
-	// (even wrapping the REST client will still result in notification before the store is updated)
-	// So we're left with a "wait to see if there's anything" + "timeout if there isn't".
-	klog.Infof("Waiting for initial ConfigMap Add, timeout=%d seconds", InitConfigMapTimeoutSeconds)
-	select {
-	case initConfigMap := <-addEvents:
-		klog.Infof("Got initial ConfigMap, data = %v", initConfigMap.Data)
-		if err := e.handleNewConfigMap(initConfigMap); err != nil {
-			close(stop)
-			return fmt.Errorf("Bad initial ConfigMap: %w", err)
-		}
-	case <-time.After(time.Duration(InitConfigMapTimeoutSeconds) * time.Second):
-		close(stop)
+	initialConfigs := watchStore.Items()
+	if len(initialConfigs) == 0 {
+		watchStore.Stop()
 		return fmt.Errorf(
-			"Timed out waiting for initial ConfigMap (expected name = %s, namespace = %s)",
+			"No initial ConfigMap found (expected name = %s, namespace = %s)",
 			ConfigMapName, ConfigMapNamespace,
 		)
+	}
+
+	if len(initialConfigs) > 1 {
+		panic(fmt.Sprintf("more than one config found for name %s:%s", ConfigMapNamespace, ConfigMapName))
+	}
+
+	if err := e.handleNewConfigMap(initialConfigs[0]); err != nil {
+		watchStore.Stop()
+		return fmt.Errorf("Bad initial ConfigMap: %w", err)
 	}
 
 	// Start listening on the channels that we provided to the callbacks, now that we've gotten our
