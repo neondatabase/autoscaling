@@ -96,6 +96,7 @@ subjects:
 roleRef:
   kind: Role
   name: autoscale-scheduler-config-reader
+  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: v1
 kind: ConfigMap
