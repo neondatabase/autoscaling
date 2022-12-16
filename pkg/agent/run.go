@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"net/http"
 	"net/url"
 	"sync/atomic"
@@ -15,6 +14,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
@@ -25,8 +25,9 @@ import (
 
 type Runner struct {
 	podName        api.PodName
-	schedulerIP    net.IP
+	schedulerName  string
 	vmClient       *vmclient.Clientset
+	kubeClient     *kubernetes.Clientset
 	vmName         string
 	metricsURL     *url.URL
 	vm             api.VmInfo
@@ -35,21 +36,17 @@ type Runner struct {
 	politeExitPort uint16
 }
 
-func NewRunner(args Args, schedulerIP string, vmClient *vmclient.Clientset) (*Runner, error) {
-	parsedSchedulerIP := net.ParseIP(schedulerIP)
-	if parsedSchedulerIP == nil {
-		return nil, fmt.Errorf("Invalid scheduler IP %q", schedulerIP)
-	}
-
-	if args.VmInfo.Cpu.Use == 0 {
+func NewRunner(args Args, kubeClient *kubernetes.Clientset, vmClient *vmclient.Clientset) (*Runner, error) {
+	if args.VmInfo.Cpu.Use == 0 || args.VmInfo.Mem.Use == 0 {
 		// note: this is guaranteed by api.ExtractVmInfo; we're just double-checking here.
-		panic("expected init vCPU use >= 1")
+		panic("expected init vCPU use >= 1 and init memSlots use >= 1")
 	}
 
 	return &Runner{
 		podName:        api.PodName{Name: args.K8sPodName, Namespace: args.K8sPodNamespace},
-		schedulerIP:    parsedSchedulerIP,
+		schedulerName:  args.SchedulerName,
 		vmClient:       vmClient,
+		kubeClient:     kubeClient,
 		vmName:         args.VmName,
 		metricsURL:     args.MetricsURL,
 		vm:             *args.VmInfo,
@@ -77,15 +74,47 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 	metrics := make(chan api.Metrics)
 	go r.getMetricsLoop(config, metrics)
 
+	var computeUnit *api.Resources
+
+	klog.Info("Starting scheduler watcher and getting initial scheduler")
+	schedulerWatch, scheduler, err := watchSchedulerUpdates(context.Background(), r.kubeClient, r.schedulerName)
+	if err != nil {
+		return fmt.Errorf("Error starting scheduler watcher: %w", err)
+	} else if scheduler == nil {
+		klog.Info("No initial scheduler found, waiting for one to become ready")
+		goto noSchedulerLoop
+	}
+
+	klog.Infof(
+		"Got initial scheduler pod %v (UID = %v) with IP %v",
+		scheduler.podName, scheduler.uid, scheduler.ip,
+	)
+	schedulerWatch.Using(*scheduler)
+
 	klog.Infof("Starting main loop. vCPU = %+v, memSlots = %+v", r.vm.Cpu, r.vm.Mem)
 
-	var computeUnit *api.Resources
+restartConnection:
+
+	schedulerWatch.ExpectingDeleted()
 
 	for {
 		select {
 		// Simply exit if we're done
 		case <-ctx.Done():
 			return nil
+		case info := <-schedulerWatch.Deleted:
+			if info.uid != scheduler.uid {
+				klog.Infof(
+					"Received info that scheduler candidate pod %v was deleted, but we aren't using it (it's UID = %v, ours = %v)",
+					info.podName, info.uid, scheduler.uid,
+				)
+				continue
+			}
+			klog.Warningf(
+				"Received info that scheduler pod %v (UID = %v) was deleted, ending further communication",
+				scheduler.podName, scheduler.uid,
+			)
+			goto noSchedulerLoop
 		case m := <-metrics:
 			// If we haven't yet sent the scheduler any metrics, we need to send an initial message
 			// to be informed of compute unit size
@@ -98,7 +127,7 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 					},
 					Metrics: m,
 				}
-				resp, err := r.sendRequestToPlugin(config, &req)
+				resp, err := r.sendRequestToPlugin(scheduler, config, &req)
 				if err != nil {
 					klog.Errorf("Error from initial plugin message %v", err)
 					goto badScheduler // assume something's permanently wrong with the scheduler
@@ -190,7 +219,7 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 				Resources: newRes,
 				Metrics:   m,
 			}
-			resp, err := r.sendRequestToPlugin(config, &req)
+			resp, err := r.sendRequestToPlugin(scheduler, config, &req)
 			if err != nil {
 				klog.Errorf("Error from resource request: %s", err)
 				goto badScheduler // assume something's permanently wrong with the scheduler
@@ -296,20 +325,28 @@ func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
 		}
 	}
 
+badScheduler:
 	// Error-state handling: something went wrong, so we won't allow any more CPU changes. Our logic
 	// up to now means our current state is fine (even if it's not the minimum)
-badScheduler:
-	// We know the scheduler (if it is somehow behaving correctly) won't over-commit resources into
-	// our current resource usage
+	klog.Warningf("Stopping all future requests to scheduler %v because of bad request", scheduler.podName)
+noSchedulerLoop:
+	// We know the scheduler (if it is behaving correctly) won't over-commit resources into our
+	// current resource usage, so we're safe to use *up to* maxFuture
 	maxFuture := api.Resources{VCPU: r.vm.Cpu.Use, Mem: r.vm.Mem.Use}
 
-	klog.Warning("Ignoring all future requests from scheduler because of bad request")
 	klog.Infof("Future resource limits set at current = %+v", maxFuture)
+
+	schedulerWatch.ExpectingReady()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case info := <-schedulerWatch.ReadyQueue:
+			klog.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
+			scheduler = &info
+			computeUnit = nil
+			goto restartConnection
 		case m := <-metrics:
 			// We aren't allowed to communicate with the scheduling plugin, so we're upper-bounded
 			// by maxFutureVCPU, which was determined by our state at the time the scheduler failed.
@@ -318,7 +355,7 @@ badScheduler:
 			// Bound by our artificial maximum
 			if newCpuCount > maxFuture.VCPU {
 				klog.Infof(
-					"Want to scale to %d vCPUs, but capped at %d vCPUs because scheduler failed",
+					"Want to scale to %d vCPUs, but capped at %d vCPUs because we have no scheduler",
 					newCpuCount, maxFuture.VCPU,
 				)
 				newCpuCount = maxFuture.VCPU
@@ -336,21 +373,21 @@ badScheduler:
 					// we abandoned the scheduler.
 					if newMemSlotsCount > maxFuture.Mem {
 						klog.Infof(
-							"Want to scale to %d mem slots (to match %d vCPU) but capped at %d mem slots because scheduler failed",
+							"Want to scale to %d mem slots (to match %d vCPU) but capped at %d mem slots because we have no scheduler",
 							newMemSlotsCount, newCpuCount, maxFuture.Mem,
 						)
 						newMemSlotsCount = maxFuture.Mem
 					}
 				} else {
 					newMemSlotsCount = r.vm.Mem.Use
-					klog.Warningf("Cannot determine new memory slots count because we never received ")
+					klog.Warningf("Cannot determine new memory slots count because we never received a computeUnit from scheduler")
 				}
 
 				klog.Infof("Setting vCPU = %d, memSlots = %d", newCpuCount, newMemSlotsCount)
 
 				resources := api.Resources{VCPU: newCpuCount, Mem: newMemSlotsCount}
 				if err := r.setResources(ctx, config, resources); err != nil {
-					return fmt.Errorf("Error while setting CPU count: %s", err)
+					return fmt.Errorf("Error while setting resources: %s", err)
 				}
 				r.vm.Cpu.Use = newCpuCount
 			}
@@ -520,7 +557,9 @@ func (r *Runner) getMetricsLoop(config *Config, metrics chan<- api.Metrics) {
 	}
 }
 
-func (r *Runner) sendRequestToPlugin(config *Config, req *api.AgentRequest) (*api.PluginResponse, error) {
+func (r *Runner) sendRequestToPlugin(
+	sched *schedulerInfo, config *Config, req *api.AgentRequest,
+) (*api.PluginResponse, error) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			err := fmt.Errorf("Unexpected redirect while sending message to plugin")
@@ -537,7 +576,7 @@ func (r *Runner) sendRequestToPlugin(config *Config, req *api.AgentRequest) (*ap
 
 	klog.Infof("Sending AgentRequest: %+v", req)
 
-	url := fmt.Sprintf("http://%s:%d/", r.schedulerIP.String(), config.Scheduler.RequestPort)
+	url := fmt.Sprintf("http://%s:%d/", sched.ip, config.Scheduler.RequestPort)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("Error sending scheduler request: %s", err)

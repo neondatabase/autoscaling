@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/neondatabase/autoscaling/pkg/agent"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -54,15 +52,13 @@ func main() {
 		klog.Fatalf("Error getting VM info: %s", err)
 	}
 
-	schedulerIP, err := getSchedulerIp(ctx, kubeClient, podArgs.SchedulerName)
-	if err != nil {
-		klog.Fatalf("Error getting self pod scheduler's IP: %s", err)
+	if err = testGetPods(ctx, kubeClient); err != nil {
+		klog.Fatalf("Test failed: %s", err)
 	}
-	klog.Infof("Got scheduler IP address: %s", schedulerIP)
 
 	args := agent.Args{EnvArgs: envArgs, PodArgs: podArgs, VmInfo: vmInfo}
 
-	runner, err := agent.NewRunner(args, schedulerIP, vmClient)
+	runner, err := agent.NewRunner(args, kubeClient, vmClient)
 	if err != nil {
 		klog.Fatalf("Error while creating main loop: %s", err)
 	}
@@ -84,35 +80,44 @@ func makeKubeClientSet() (*kubernetes.Clientset, error) {
 	return clientset, err
 }
 
-func getSchedulerIp(ctx context.Context, kubeClient *kubernetes.Clientset, schedulerName string) (string, error) {
-	schedulerNamespace := "kube-system"
+func testGetPods(ctx context.Context, kubeClient *kubernetes.Clientset) error {
+	/*
+			pods, err := kubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return err
+			}
 
-	klog.Infof("Searching for scheduler pod with same name as pod scheduler: %s", schedulerName)
-	selector := fmt.Sprintf("name=%s", schedulerName)
-	pods, err := kubeClient.CoreV1().Pods(schedulerNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector,
-	})
-	if err != nil {
-		return "", fmt.Errorf(
-			"Error getting scheduler pod candidates (label %q in namespace %s): %s",
-			selector, schedulerNamespace, err,
-		)
-	} else if len(pods.Items) == 0 {
-		return "", fmt.Errorf(
-			"No pods matching scheduler selector (label %q in namespace %s)",
-			selector, schedulerNamespace,
-		)
-	} else if len(pods.Items) > 1 {
-		return "", fmt.Errorf(
-			"Too many (> 1) pods matching scheduler name (label %q in namespace %s)",
-			selector, schedulerNamespace,
-		)
-	}
+			klog.Info("Successful list pods")
 
-	schedulerPod := &pods.Items[0]
-	if schedulerPod.Status.PodIP == "" {
-		return "", fmt.Errorf("Scheduler pod IP is not available (not yet allocated?)")
-	}
+			for i := range pods.Items {
+				klog.Infof("god pod %s:%s", pods.Items[i].Namespace, pods.Items[i].Name)
+			}
 
-	return schedulerPod.Status.PodIP, nil
+			w, err := kubeClient.CoreV1().Pods("kube-system").Watch(ctx, metav1.ListOptions{})
+			if err != nil {
+				return err
+			}
+
+			klog.Info("Successful watch")
+
+			timeout := time.After(3 * time.Second)
+			for {
+				select {
+				case e := <-w.ResultChan():
+					klog.Infof("got event type %v", e.Type)
+					if e.Type == watch.Added {
+						pod := e.Object.(*corev1.Pod)
+						klog.Infof("added pod %s:%s", pod.Namespace, pod.Name)
+					}
+				case <-timeout:
+					klog.Infof("timeout reached")
+					goto doneLoop
+				}
+			}
+		doneLoop:
+
+			w.Stop()
+	*/
+
+	return nil
 }
