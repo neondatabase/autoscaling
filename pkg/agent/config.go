@@ -96,6 +96,8 @@ func (c *Config) validate() error {
 		return cannotBeZero(".metrics.secondsBetweenRequests")
 	} else if c.Metrics.InitialDelaySeconds == 0 {
 		return cannotBeZero(".metrics.initialDelaySeconds")
+	} else if c.Scheduler.RequestTimeoutSeconds == 0 {
+		return cannotBeZero(".scheduler.requestTimeoutSeconds")
 	} else if c.Scheduler.RequestPort == 0 {
 		return cannotBeZero(".scheduler.requestPort")
 	}

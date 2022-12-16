@@ -59,7 +59,7 @@ data:
       "initialDelaySeconds": 5
     },
     "scheduler": {
-      "requestTimeoutSeconds": 0,
+      "requestTimeoutSeconds": 2,
       "requestPort": 10299
     }
   }'
