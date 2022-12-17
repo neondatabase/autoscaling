@@ -191,7 +191,7 @@ kernel: ## Build linux kernel.
 
 .PHONY: cert-manager
 cert-manager: ## install cert-manager to cluster
-	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.8.2/cert-manager.yaml
+	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 
 .PHONY: kind-load
 kind-load: docker-build  ## Push docker images to the kind cluster.

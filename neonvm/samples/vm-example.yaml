@@ -9,6 +9,11 @@ spec:
     protocol: TCP
     targetPort: postgres
     nodePort: 30432
+  - name: pooler
+    port: 6432
+    protocol: TCP
+    targetPort: postgres
+    nodePort: 30632
   type: NodePort
   selector:
     vm.neon.tech/name: example
@@ -41,6 +46,8 @@ spec:
         value: trust
     ports:
       - name: postgres
+        port: 5432
+      - name: pooler
         port: 5432
   disks:
     - name: pgdata

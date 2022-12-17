@@ -3,3 +3,7 @@ kind: Kustomization
 
 resources:
 - manager.yaml
+images:
+- name: controller
+  newName: controller
+  newTag: dev

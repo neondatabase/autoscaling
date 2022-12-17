@@ -81,7 +81,7 @@ kubectl delete neonvm vm-debian
 #### 1. Create local cluster
 
 ```sh
-kind create cluster
+kind create cluster --image kindest/node:v1.23.13
 ```
 
 #### 2. Install cert-manager
