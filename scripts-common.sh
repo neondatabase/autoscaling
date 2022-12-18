@@ -17,6 +17,24 @@ require_root () {
     fi
 }
 
+# Usage: VAR_NAME="$(get_var VAR_NAME DEFAULT_VALUE)"
+#
+# Helper function that
+get_var () {
+    var_name="$1"
+    default_value="$2"
+
+    ( set -u; exec "echo \"\$$var_name\"" ) 2>/dev/null || {
+        printf -v default_escaped "%q" "$default_value"
+        read -p "Set $var_name [default $default_escaped]: " new_val
+        if [ -z "$new_val" ]; then
+            echo "$default_value"
+        else
+            echo "$new_val"
+        fi
+    }
+}
+
 # Usage: VM_NAME="$(get_vm_name)"
 #
 # Gets the VM name if it the VM_NAME variable isn't already set. Otherwise echo $VM_NAME
