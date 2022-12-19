@@ -52,10 +52,6 @@ func main() {
 		klog.Fatalf("Error getting VM info: %s", err)
 	}
 
-	if err = testGetPods(ctx, kubeClient); err != nil {
-		klog.Fatalf("Test failed: %s", err)
-	}
-
 	args := agent.Args{EnvArgs: envArgs, PodArgs: podArgs, VmInfo: vmInfo}
 
 	runner, err := agent.NewRunner(args, kubeClient, vmClient)
@@ -78,46 +74,4 @@ func makeKubeClientSet() (*kubernetes.Clientset, error) {
 
 	clientset, err := kubernetes.NewForConfig(config)
 	return clientset, err
-}
-
-func testGetPods(ctx context.Context, kubeClient *kubernetes.Clientset) error {
-	/*
-			pods, err := kubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{})
-			if err != nil {
-				return err
-			}
-
-			klog.Info("Successful list pods")
-
-			for i := range pods.Items {
-				klog.Infof("god pod %s:%s", pods.Items[i].Namespace, pods.Items[i].Name)
-			}
-
-			w, err := kubeClient.CoreV1().Pods("kube-system").Watch(ctx, metav1.ListOptions{})
-			if err != nil {
-				return err
-			}
-
-			klog.Info("Successful watch")
-
-			timeout := time.After(3 * time.Second)
-			for {
-				select {
-				case e := <-w.ResultChan():
-					klog.Infof("got event type %v", e.Type)
-					if e.Type == watch.Added {
-						pod := e.Object.(*corev1.Pod)
-						klog.Infof("added pod %s:%s", pod.Namespace, pod.Name)
-					}
-				case <-timeout:
-					klog.Infof("timeout reached")
-					goto doneLoop
-				}
-			}
-		doneLoop:
-
-			w.Stop()
-	*/
-
-	return nil
 }
