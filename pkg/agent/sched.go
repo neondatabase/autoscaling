@@ -133,6 +133,7 @@ func watchSchedulerUpdates(
 		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
+		util.InitWatchModeSync,
 		metav1.ListOptions{LabelSelector: schedulerLabelSelector(schedulerName)},
 		util.WatchHandlerFuncs[*corev1.Pod]{
 			AddFunc: func(pod *corev1.Pod, preexisting bool) {

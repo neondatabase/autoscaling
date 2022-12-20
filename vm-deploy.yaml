@@ -8,7 +8,6 @@ metadata:
     # autoscaler/testing-only-always-migrate: ""
 spec:
   schedulerName: autoscale-scheduler
-  serviceAccountName: autoscaling-vm
   guest:
     cpus: { min: 1, use: 1, max: 4 }
     memorySlotSize: 1Gi
@@ -21,28 +20,3 @@ spec:
       - port: 22   # ssh
       - port: 5432 # postgres
       - port: 9100 # metrics
-  sidecars:
-    - name: autoscaler-agent
-      image: localhost:5001/autoscaler-agent:latest
-      env:
-        - name: K8S_POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: K8S_POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        - name: CONFIG_PATH
-          value: /etc/autoscaler-agent-config/config.json
-        - name: METRICS_URL
-          # VM's IP address is always 10.255.255.254 on the pod's bridge network. ALso node_exporter
-          # is on port 9100 by default, with the /metrics endpoint.
-          value: "http://10.255.255.254:9100/metrics"
-      volumeMounts:
-        - name: autoscaler-agent-config
-          mountPath: /etc/autoscaler-agent-config
-  extraVolumes:
-    - name: autoscaler-agent-config
-      configMap:
-        name: autoscaler-agent-config

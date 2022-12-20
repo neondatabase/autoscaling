@@ -9,13 +9,12 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"sync/atomic"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	klog "k8s.io/klog/v2"
+	"k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
@@ -23,63 +22,111 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type Runner struct {
-	podName        api.PodName
-	schedulerName  string
-	vmClient       *vmclient.Clientset
-	kubeClient     *kubernetes.Clientset
-	vmName         string
-	metricsURL     *url.URL
-	vm             api.VmInfo
-	servePort      uint16
-	readinessPort  uint16
-	politeExitPort uint16
+type runner struct {
+	config     *Config
+	vmClient   *vmclient.Clientset
+	kubeClient *kubernetes.Clientset
+
+	// note: only vm.Name and vm.Namespace are expected to be set before calling Spawn or Run. The
+	// rest will be determined by an initial request to get information about the VM.
+	vm      *api.VmInfo
+	podName api.PodName
+	podIP   string
+
+	stop    util.SignalReceiver
+	deleted util.SignalReceiver
 }
 
-func NewRunner(args Args, kubeClient *kubernetes.Clientset, vmClient *vmclient.Clientset) (*Runner, error) {
-	if args.VmInfo.Cpu.Use == 0 || args.VmInfo.Mem.Use == 0 {
-		// note: this is guaranteed by api.ExtractVmInfo; we're just double-checking here.
-		panic("expected init vCPU use >= 1 and init memSlots use >= 1")
-	}
+func (r runner) Spawn(ctx context.Context, status *podStatus) {
+	go func() {
+		// Gracefully handle panics:
+		defer func() {
+			if err := recover(); err != nil {
+				status.lock.Lock()
+				defer status.lock.Unlock() // defer inside defer? sure!
 
-	return &Runner{
-		podName:        api.PodName{Name: args.K8sPodName, Namespace: args.K8sPodNamespace},
-		schedulerName:  args.SchedulerName,
-		vmClient:       vmClient,
-		kubeClient:     kubeClient,
-		vmName:         args.VmName,
-		metricsURL:     args.MetricsURL,
-		vm:             *args.VmInfo,
-		readinessPort:  args.ReadinessPort,
-		politeExitPort: args.PoliteExitPort,
-	}, nil
+				status.panicked = true
+				status.done = true
+				status.errored = fmt.Errorf("%s", fmt.Sprint("runner panicked:", err))
+			}
+		}()
+
+		migrating, err := r.Run(ctx)
+
+		status.lock.Lock()
+		defer status.lock.Unlock()
+
+		status.done = true
+		status.migrating = migrating
+		status.errored = err
+
+		if err != nil {
+			klog.Errorf("runner for pod %v ended with error: %s", r.podName, err)
+		} else {
+			klog.Infof("runner for pod %v ended without error", r.podName)
+		}
+	}()
 }
 
-func (r *Runner) MainLoop(config *Config, ctx context.Context) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	if r.politeExitPort != 0 {
-		go r.cancelOnPoliteExit(cancel)
-	} else {
-		klog.V(1).Info("Skipping polite exit server because port is set to zero")
-		defer cancel() // make sure cancel() still gets called
+// getInitialVMInfo fetches and returns the VmInfo for the VM as described by r.vm.{Name,Namespace}
+//
+// This method returns (nil, nil) if the VM does not exist, which may occur due to inherently racy
+// behavior -- by the time this method is called, the pod's creation event might have been
+// superseded by the VM's deletion.
+func (r runner) getInitialVMInfo(ctx context.Context) (*api.VmInfo, error) {
+	// In order to smoothly handle cases where the VM is missing, we perform a List request instead
+	// of a Get, with a FieldSelector that limits the result just to the target VM, if it exists.
+
+	opts := metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("metadata.name=%s", r.vm.Name),
+	}
+	list, err := r.vmClient.NeonvmV1().VirtualMachines(r.vm.Namespace).List(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("Error listing VM %s:%s: %w", r.vm.Namespace, r.vm.Name, err)
 	}
 
-	var gotMetricsYet atomic.Bool
-	if r.readinessPort != 0 {
-		go r.signalReadiness(&gotMetricsYet)
-	} else {
-		klog.V(1).Info("Skipping readiness server because port is set to zero")
+	if len(list.Items) > 1 {
+		return nil, fmt.Errorf("List for VM %s:%s returned > 1 item", r.vm.Namespace, r.vm.Name)
+	} else if len(list.Items) == 0 {
+		return nil, nil
 	}
+
+	vmInfo, err := api.ExtractVmInfo(&list.Items[0])
+	if err != nil {
+		return nil, fmt.Errorf("Error extracting VmInfo from %s:%s: %w", r.vm.Name, r.vm.Namespace, err)
+	}
+
+	return vmInfo, nil
+}
+
+func (r runner) Run(ctx context.Context) (migrating bool, _ error) {
+	ctx, cancelCtx := context.WithCancel(ctx)
+	defer cancelCtx() // Make sure that background tasks are cleaned up.
+
+	initVmInfo, err := r.getInitialVMInfo(ctx)
+	if err != nil {
+		return false, err
+	} else if initVmInfo == nil {
+		klog.Warningf(
+			"runner could not find VM %s:%s, maybe it was already deleted?",
+			r.vm.Namespace, r.vm.Name,
+		)
+		return false, nil
+	}
+
+	r.vm = initVmInfo
+	initVmInfo = nil // clear to allow GC.
 
 	metrics := make(chan api.Metrics)
-	go r.getMetricsLoop(config, metrics)
+	metricsPanicked := make(chan struct{})
+	go r.getMetricsLoop(ctx, r.config, metrics, metricsPanicked)
 
 	var computeUnit *api.Resources
 
 	klog.Info("Starting scheduler watcher and getting initial scheduler")
-	schedulerWatch, scheduler, err := watchSchedulerUpdates(context.Background(), r.kubeClient, r.schedulerName)
+	schedulerWatch, scheduler, err := watchSchedulerUpdates(ctx, r.kubeClient, r.config.Scheduler.SchedulerName)
 	if err != nil {
-		return fmt.Errorf("Error starting scheduler watcher: %w", err)
+		return false, fmt.Errorf("Error starting scheduler watcher: %w", err)
 	} else if scheduler == nil {
 		klog.Info("No initial scheduler found, waiting for one to become ready")
 		goto noSchedulerLoop
@@ -100,8 +147,15 @@ restartConnection:
 	for {
 		select {
 		// Simply exit if we're done
-		case <-ctx.Done():
-			return nil
+		case <-r.stop.Recv():
+			klog.Infof("Ending runner loop for VM %s:%s: received stop signal", r.vm.Namespace, r.vm.Name)
+			return false, nil
+		// and also exit if the pod was deleted
+		case <-r.deleted.Recv():
+			klog.Infof("Ending runner loop for VM %s:%s: pod was deleted", r.vm.Namespace, r.vm.Name)
+			return false, nil
+		case <-metricsPanicked:
+			return false, fmt.Errorf("Metrics loop panicked")
 		case info := <-schedulerWatch.Deleted:
 			if info.uid != scheduler.uid {
 				klog.Infof(
@@ -127,7 +181,7 @@ restartConnection:
 					},
 					Metrics: m,
 				}
-				resp, err := r.sendRequestToPlugin(scheduler, config, &req)
+				resp, err := r.sendRequestToPlugin(scheduler, r.config, &req)
 				if err != nil {
 					klog.Errorf("Error from initial plugin message %v", err)
 					goto badScheduler // assume something's permanently wrong with the scheduler
@@ -148,7 +202,7 @@ restartConnection:
 
 				if resp.Migrate != nil {
 					klog.Infof("Scheduler responded to initial message with migration, exiting without further changes.")
-					return nil
+					return true, nil
 				}
 			}
 
@@ -206,8 +260,9 @@ restartConnection:
 			}
 
 			if doChangesBeforeRequest {
-				if err := r.setResources(ctx, config, newRes); err != nil {
-					return fmt.Errorf("Error while setting VM resources: %s", err)
+				if err := r.setResources(ctx, r.config, newRes); err != nil {
+					// FIXME: maybe we should retry on failure?
+					return false, fmt.Errorf("Error while setting VM resources: %s", err)
 				}
 				r.vm.Cpu.Use = newRes.VCPU
 				r.vm.Mem.Use = newRes.Mem
@@ -219,7 +274,7 @@ restartConnection:
 				Resources: newRes,
 				Metrics:   m,
 			}
-			resp, err := r.sendRequestToPlugin(scheduler, config, &req)
+			resp, err := r.sendRequestToPlugin(scheduler, r.config, &req)
 			if err != nil {
 				klog.Errorf("Error from resource request: %s", err)
 				goto badScheduler // assume something's permanently wrong with the scheduler
@@ -232,7 +287,7 @@ restartConnection:
 
 			if resp.Migrate != nil {
 				klog.Infof("Scheduler responded with migration, exiting without further changes.")
-				return nil
+				return true, nil
 			}
 
 			if !changedVCPU && !changedMem {
@@ -311,8 +366,9 @@ restartConnection:
 			}
 
 			if doChangesAfterRequest {
-				if err := r.setResources(ctx, config, newRes); err != nil {
-					return fmt.Errorf("Error while setting vCPU count: %s", err)
+				if err := r.setResources(ctx, r.config, newRes); err != nil {
+					// FIXME: maybe we should retry on failure?
+					return false, fmt.Errorf("Error while setting vCPU count: %s", err)
 				}
 
 				r.vm.Cpu.Use = newRes.VCPU
@@ -340,8 +396,12 @@ noSchedulerLoop:
 
 	for {
 		select {
-		case <-ctx.Done():
-			return nil
+		case <-r.stop.Recv():
+			klog.Infof("Ending runner loop for VM %s:%s: received stop signal", r.vm.Namespace, r.vm.Name)
+			return false, nil
+		case <-r.deleted.Recv():
+			klog.Infof("Ending runner loop for VM %s:%s: pod was deleted", r.vm.Namespace, r.vm.Name)
+			return false, nil
 		case info := <-schedulerWatch.ReadyQueue:
 			klog.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
 			scheduler = &info
@@ -386,8 +446,9 @@ noSchedulerLoop:
 				klog.Infof("Setting vCPU = %d, memSlots = %d", newCpuCount, newMemSlotsCount)
 
 				resources := api.Resources{VCPU: newCpuCount, Mem: newMemSlotsCount}
-				if err := r.setResources(ctx, config, resources); err != nil {
-					return fmt.Errorf("Error while setting resources: %s", err)
+				if err := r.setResources(ctx, r.config, resources); err != nil {
+					// FIXME: maybe we should retry on failure?
+					return false, fmt.Errorf("Error while setting resources: %s", err)
 				}
 				r.vm.Cpu.Use = newCpuCount
 			}
@@ -397,7 +458,7 @@ noSchedulerLoop:
 
 // minComputeUnits returns the minimum number of compute units it would take to fit the current
 // resource allocations
-func (r *Runner) minComputeUnits(computeUnit api.Resources) uint16 {
+func (r *runner) minComputeUnits(computeUnit api.Resources) uint16 {
 	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is guaranteed for
 	// compute units.
 	cpuUnits := (r.vm.Cpu.Use + computeUnit.VCPU - 1) / computeUnit.VCPU
@@ -413,7 +474,7 @@ func (r *Runner) minComputeUnits(computeUnit api.Resources) uint16 {
 //
 // It is the caller's responsibility to make sure that they don't over-commit beyond what the
 // scheduler plugin has permitted.
-func (r *Runner) newGoalCPUCount(metrics api.Metrics, currentCpu uint16) uint16 {
+func (r *runner) newGoalCPUCount(metrics api.Metrics, currentCpu uint16) uint16 {
 	goal := currentCpu
 	if metrics.LoadAverage1Min > 0.9*float32(r.vm.Cpu.Use) {
 		goal *= 2
@@ -458,44 +519,10 @@ func memSlotsForCpu(computeUnit api.Resources, cpu uint16) uint16 {
 	return mem
 }
 
-// Helper function to abbreviate http server creation
-func listenAndServe(addr, routePattern string, handler func(http.ResponseWriter, *http.Request)) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc(routePattern, handler)
-	server := http.Server{Addr: addr, Handler: mux}
-	return server.ListenAndServe()
-}
-
-func (r *Runner) cancelOnPoliteExit(cancelFunc func()) {
-	klog.Fatalf("Polite exit server failed: %s", listenAndServe(
-		fmt.Sprintf("0.0.0.0:%d", r.politeExitPort), "/",
-		func(w http.ResponseWriter, r *http.Request) {
-			klog.Info("Received polite exit request")
-			w.WriteHeader(200)
-			w.Write([]byte("ok"))
-			cancelFunc() // TODO: will this cause an exit before the response is written?
-		},
-	))
-}
-
-func (r *Runner) signalReadiness(gotMetrics *atomic.Bool) {
-	klog.Infof("Starting readiness server (port %d)", r.readinessPort)
-
-	klog.Fatalf("Readiness server failed: %s", listenAndServe(
-		fmt.Sprintf("0.0.0.0:%d", r.readinessPort), "/healthz",
-		func(w http.ResponseWriter, r *http.Request) {
-			if gotMetrics.Load() {
-				w.WriteHeader(200)
-				w.Write([]byte("ok"))
-			} else {
-				w.WriteHeader(503)
-				w.Write([]byte(fmt.Sprintf("error: haven't received metrics yet")))
-			}
-		},
-	))
-}
-
-func (r *Runner) getMetricsLoop(config *Config, metrics chan<- api.Metrics) {
+// note: we actually use the context here; we have a deferred cancel on it in Run
+func (r *runner) getMetricsLoop(
+	ctx context.Context, config *Config, metrics chan<- api.Metrics, panicked chan<- struct{},
+) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			err := fmt.Errorf("Unexpected redirect while getting metrics")
@@ -505,9 +532,14 @@ func (r *Runner) getMetricsLoop(config *Config, metrics chan<- api.Metrics) {
 		Timeout: time.Second * time.Duration(config.Metrics.RequestTimeoutSeconds),
 	}
 
+	metricsURL, err := url.Parse(fmt.Sprintf("http://%s:9100/metrics", r.podIP))
+	if err != nil {
+		panic(fmt.Sprintf("Error creating metrics URL: %s", err))
+	}
+
 	req := http.Request{
 		Method: "GET",
-		URL:    r.metricsURL,
+		URL:    metricsURL,
 		// Allow reusing the TCP connection across multiple requests. Already false by default, but
 		// worth setting explicitly.
 		Close: false,
@@ -527,7 +559,7 @@ func (r *Runner) getMetricsLoop(config *Config, metrics chan<- api.Metrics) {
 			resp, err := client.Do(&req)
 			if err != nil {
 				err = fmt.Errorf("Error getting metrics: %s", err)
-				if !gotAtLeastOne {
+				if !gotAtLeastOne || ctx.Err() != nil {
 					klog.Warning(err)
 				} else {
 					klog.Error(err)
@@ -553,11 +585,18 @@ func (r *Runner) getMetricsLoop(config *Config, metrics chan<- api.Metrics) {
 			metrics <- m
 		}()
 
-		time.Sleep(time.Second * time.Duration(config.Metrics.SecondsBetweenRequests))
+		select {
+		case <-time.NewTimer(time.Second * time.Duration(config.Metrics.SecondsBetweenRequests)).C:
+			// Continue to the next request
+		case <-ctx.Done():
+			klog.Infof("Ending metrics loop for VM %s:%s", r.vm.Name, r.vm.Namespace)
+			// end the metrics loop
+			return
+		}
 	}
 }
 
-func (r *Runner) sendRequestToPlugin(
+func (r *runner) sendRequestToPlugin(
 	sched *schedulerInfo, config *Config, req *api.AgentRequest,
 ) (*api.PluginResponse, error) {
 	client := http.Client{
@@ -601,7 +640,7 @@ func (r *Runner) sendRequestToPlugin(
 	return &respMsg, nil
 }
 
-func (r *Runner) setResources(ctx context.Context, config *Config, resources api.Resources) error {
+func (r *runner) setResources(ctx context.Context, config *Config, resources api.Resources) error {
 	patches := []util.JSONPatch{{
 		Op:    util.PatchReplace,
 		Path:  "/spec/guest/cpus/use",
@@ -620,8 +659,8 @@ func (r *Runner) setResources(ctx context.Context, config *Config, resources api
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	_, err = r.vmClient.NeonvmV1().VirtualMachines(r.podName.Namespace).
-		Patch(requestCtx, r.vmName, ktypes.JSONPatchType, patchPayload, metav1.PatchOptions{})
+	_, err = r.vmClient.NeonvmV1().VirtualMachines(r.vm.Namespace).
+		Patch(requestCtx, r.vm.Name, ktypes.JSONPatchType, patchPayload, metav1.PatchOptions{})
 
 	if err != nil {
 		return fmt.Errorf("Error making VM patch request: %w", err)

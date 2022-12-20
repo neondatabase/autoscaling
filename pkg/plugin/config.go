@@ -193,6 +193,7 @@ func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error 
 		util.WatchAccessors[*corev1.ConfigMapList, corev1.ConfigMap]{
 			Items: func(list *corev1.ConfigMapList) []corev1.ConfigMap { return list.Items },
 		},
+		util.InitWatchModeSync,
 		metav1.ListOptions{
 			FieldSelector: fields.OneTermEqualSelector(metav1.ObjectNameField, ConfigMapName).String(),
 		},

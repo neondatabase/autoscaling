@@ -89,6 +89,22 @@ type WatchHandlerFuncs[P any] struct {
 	DeleteFunc func(obj P, mayBeStale bool)
 }
 
+// InitWatchMode dictates the behavior of Watch with respect to any initial calls to
+// handlers.AddFunc before returning
+//
+// If set to InitWatchModeSync, then AddFunc will be called while processing the initial listing,
+// meaning that the returned WatchStore is guaranteed contain the state of the cluster (although it
+// may update before any access).
+//
+// Otherwise, if set to InitWatchModeDefer, then AddFunc will not be called until after Watch
+// returns. Correspondingly, the WatchStore will not update until then either.
+type InitWatchMode string
+
+const (
+	InitWatchModeSync  InitWatchMode = "sync"
+	InitWatchModeDefer InitWatchMode = "defer"
+)
+
 // Watch starts a goroutine for watching events, using the provided WatchHandlerFuncs as the
 // callbacks for each type of event.
 //
@@ -99,6 +115,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	client C,
 	config WatchConfig,
 	accessors WatchAccessors[L, T],
+	mode InitWatchMode,
 	opts metav1.ListOptions,
 	handlers WatchHandlerFuncs[P],
 ) (*WatchStore[T], error) {
@@ -131,16 +148,25 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		stopCh:  make(chan struct{}),
 	}
 
-	// FIXME: Always calling AddFunc makes it easy to deadlock. Instead, we should provide a method
-	// on WatchStore that allows the caller to wait until the events from the initial listing have
-	// been processed. We can still create the watcher before processing them, by starting it at the
-	// already-updated ResourceVersion
 	items := accessors.Items(initialList)
-	for i := range items {
-		obj := &items[i]
-		uid := P(obj).GetObjectMeta().GetUID()
-		store.objects[uid] = obj
-		handlers.AddFunc(obj, true)
+
+	var deferredAdds []T
+
+	if mode == InitWatchModeDefer {
+		deferredAdds = items
+	} else {
+		for i := range items {
+			obj := &items[i]
+			uid := P(obj).GetObjectMeta().GetUID()
+			store.objects[uid] = obj
+			handlers.AddFunc(obj, true)
+
+			// Check if the context has been cancelled. This can happen in practice if AddFunc may
+			// take a long time to complete.
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 	}
 	items = []T{} // reset to allow GC
 
@@ -167,6 +193,20 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				_, _ = <-store.stopCh
 			}
 		}()
+
+		// Handle any deferred calls to AddFunc
+		for i := range deferredAdds {
+			obj := &deferredAdds[i]
+			uid := P(obj).GetObjectMeta().GetUID()
+			store.objects[uid] = obj
+			handlers.AddFunc(obj, true)
+
+			if err := ctx.Err(); err != nil {
+				return
+			}
+		}
+		// clear deferredAdds so the contents can be GC'd
+		deferredAdds = []T{}
 
 		for {
 			for {
