@@ -533,9 +533,15 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 		cpuRequest := container.Resources.Requests.Cpu()
 		cpuLimit := container.Resources.Limits.Cpu()
 		// note: Cpu() always returns a non-nil pointer.
-		if cpuLimit.IsZero() {
-			err := fmt.Errorf("containers[%d] (%q) missing resources.limits.cpu", i, container.Name)
+		if cpuLimit.IsZero() && cpuRequest.IsZero() {
+			err := fmt.Errorf("containers[%d] (%q) missing resources.requests.cpu AND resources.limits.cpu", i, container.Name)
 			return podOtherResourceState{}, err
+		} else if cpuLimit.IsZero() && !cpuRequest.IsZero() {
+			klog.Warningf(
+				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) missing resources.limits.cpu, using resources.requests.cpu as limit",
+				podName, i, container.Name,
+			)
+			cpuLimit = cpuRequest
 		} else if !cpuRequest.IsZero() && !cpuLimit.Equal(*cpuRequest) {
 			klog.Warningf(
 				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) resources.requests.cpu != resources.limits.cpu, using limits",
