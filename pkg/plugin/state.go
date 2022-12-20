@@ -524,6 +524,8 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 	var cpu resource.Quantity
 	var mem resource.Quantity
 
+	podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+
 	for i, container := range pod.Spec.Containers {
 		// For each resource, we must have (a) limit is provided and (b) if requests is provided,
 		// it must be equal to the limit.
@@ -535,11 +537,10 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 			err := fmt.Errorf("containers[%d] (%q) missing resources.limits.cpu", i, container.Name)
 			return podOtherResourceState{}, err
 		} else if !cpuRequest.IsZero() && !cpuLimit.Equal(*cpuRequest) {
-			err := fmt.Errorf(
-				"containers[%d] (%q) resources.requests.cpu != resources.limits.cpu",
-				i, container.Name,
+			klog.Warningf(
+				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) resources.requests.cpu != resources.limits.cpu, using limits",
+				podName, i, container.Name,
 			)
-			return podOtherResourceState{}, err
 		}
 		cpu.Add(*cpuLimit)
 
@@ -550,11 +551,10 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 			err := fmt.Errorf("containers[%d] (%q) missing resources.limits.memory", i, container.Name)
 			return podOtherResourceState{}, err
 		} else if !memRequest.IsZero() && !memLimit.Equal(*memRequest) {
-			err := fmt.Errorf(
-				"containers[%d] (%q) resources.requests.memory != resources.limits.memory",
-				i, container.Name,
+			klog.Warningf(
+				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) resources.requests.memory != resources.limits.memory, using limits",
+				podName, i, container.Name,
 			)
-			return podOtherResourceState{}, err
 		}
 		mem.Add(*memLimit)
 	}
