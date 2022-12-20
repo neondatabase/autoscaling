@@ -50,6 +50,10 @@ type MetricsConfig struct {
 
 // SchedulerConfig defines a few parameters for scheduler requests
 type SchedulerConfig struct {
+	// SchedulerName is the name of the scheduler we're expecting to communicate with.
+	//
+	// Any VMs that don't have a matching Spec.SchedulerName will not be autoscaled.
+	SchedulerName string `json:"schedulerName"`
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for requests to the scheduler
 	//
 	// If zero, requests will have no timeout.
@@ -83,6 +87,9 @@ func (c *Config) validate() error {
 	cannotBeZero := func(fieldPath string) error {
 		return fmt.Errorf("Field %s cannot be zero", fieldPath)
 	}
+	cannotBeEmpty := func(fieldPath string) error {
+		return fmt.Errorf("Field %s cannot be empty", fieldPath)
+	}
 
 	if c.Scaling.RequestTimeoutSeconds == 0 {
 		return cannotBeZero(".scaling.requestTimeoutSeconds")
@@ -96,6 +103,8 @@ func (c *Config) validate() error {
 		return cannotBeZero(".metrics.secondsBetweenRequests")
 	} else if c.Metrics.InitialDelaySeconds == 0 {
 		return cannotBeZero(".metrics.initialDelaySeconds")
+	} else if c.Scheduler.SchedulerName == "" {
+		return cannotBeEmpty(".scheduler.schedulerName")
 	} else if c.Scheduler.RequestTimeoutSeconds == 0 {
 		return cannotBeZero(".scheduler.requestTimeoutSeconds")
 	} else if c.Scheduler.RequestPort == 0 {

@@ -46,6 +46,7 @@ func (e *AutoscaleEnforcer) watchPodDeletions(
 		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
+		util.InitWatchModeSync, // note: doesn't matter, because AddFunc = nil.
 		metav1.ListOptions{},
 		util.WatchHandlerFuncs[*corev1.Pod]{
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
