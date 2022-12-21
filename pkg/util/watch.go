@@ -275,7 +275,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				if err != nil {
 					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
 					if config.RetryRelistAfter == nil {
-						klog.Infof("watch %s: ending, re-list failed and RetryWatchAfter is nil")
+						klog.Infof("watch %s: ending, re-list failed and RetryWatchAfter is nil", config.LogName)
 						return
 					}
 					retryAfter := config.RetryRelistAfter.Random()
@@ -331,7 +331,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 				// Update ResourceVersion, recreate watcher.
 				opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
-				klog.Infof("watch %s: re-list complete, restarting watcher")
+				klog.Infof("watch %s: re-list complete, restarting watcher", config.LogName)
 				goto newWatcher
 			}
 		newWatcher:
@@ -340,7 +340,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				if err != nil {
 					klog.Errorf("watch %s: re-watch failed: %s", config.LogName, err)
 					if config.RetryWatchAfter == nil {
-						klog.Infof("watch %s: ending, re-watch failed and RetryWatchAfter is nil")
+						klog.Infof("watch %s: ending, re-watch failed and RetryWatchAfter is nil", config.LogName)
 						return
 					}
 					retryAfter := config.RetryWatchAfter.Random()
