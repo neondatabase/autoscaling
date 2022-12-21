@@ -271,7 +271,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		relist:
 			klog.Infof("watch %s: re-listing", config.LogName)
 			for {
-				resyncList, err := client.List(ctx, opts)
+				relistList, err := client.List(ctx, opts)
 				if err != nil {
 					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
 					if config.RetryRelistAfter == nil {
@@ -292,8 +292,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 				}
 
-				// err == nil, process resyncList
-				resyncItems := accessors.Items(resyncList)
+				// err == nil, process relistList
+				relistItems := accessors.Items(relistList)
 
 				func() {
 					// First, copy the contents of objects into oldObjects. We do this so that we can
@@ -306,8 +306,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					store.mutex.Lock()
 					defer store.mutex.Unlock()
 
-					for i := range resyncItems {
-						obj := &resyncItems[i]
+					for i := range relistItems {
+						obj := &relistItems[i]
 						uid := P(obj).GetObjectMeta().GetUID()
 
 						store.objects[uid] = obj
@@ -321,7 +321,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						}
 					}
 
-					// For everything that's still in oldObjects (i.e. wasn't covered by resyncItems),
+					// For everything that's still in oldObjects (i.e. wasn't covered by relistItems),
 					// generate deletion events:
 					for uid, obj := range oldObjects {
 						delete(store.objects, uid)
@@ -331,7 +331,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 				// Update ResourceVersion, recreate watcher.
 				opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
-				klog.Infof("watch %s: resync complete, restarting watcher")
+				klog.Infof("watch %s: re-list complete, restarting watcher")
 				goto newWatcher
 			}
 		newWatcher:
