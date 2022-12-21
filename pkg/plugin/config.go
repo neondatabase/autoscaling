@@ -237,12 +237,15 @@ func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error 
 	// initial ConfigMap
 	listenWithName := func(ch <-chan *corev1.ConfigMap, desc string) {
 		for newConf := range ch {
-			e.state.lock.Lock()
-			defer e.state.lock.Unlock()
+			// Wrap this in a function so we can defer inside the loop
+			func() {
+				e.state.lock.Lock()
+				defer e.state.lock.Unlock()
 
-			if err := e.handleNewConfigMap(newConf); err != nil {
-				klog.Errorf("[autoscale-enforcer] Rejecting bad %s ConfigMap: %s", desc, err)
-			}
+				if err := e.handleNewConfigMap(newConf); err != nil {
+					klog.Errorf("[autoscale-enforcer] Rejecting bad %s ConfigMap: %s", desc, err)
+				}
+			}()
 		}
 	}
 
