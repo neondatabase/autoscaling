@@ -6,6 +6,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,12 +35,20 @@ func (e *AutoscaleEnforcer) watchPodDeletions(
 	_, err := util.Watch(
 		ctx,
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
+		util.WatchConfig{
+			LogName: "pods",
+			// We want to be up-to-date in tracking deletions, so that our reservations are correct.
+			//
+			// FIXME: make these configurable.
+			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
+			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
+		},
 		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
 		metav1.ListOptions{},
 		util.WatchHandlerFuncs[*corev1.Pod]{
-			DeleteFunc: func(pod *corev1.Pod) {
+			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
 				if _, ok := pod.Labels[LabelVM]; ok {

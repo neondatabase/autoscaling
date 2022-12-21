@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -183,6 +184,14 @@ func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error 
 	watchStore, err := util.Watch(
 		ctx,
 		e.handle.ClientSet().CoreV1().ConfigMaps(ConfigMapNamespace),
+		util.WatchConfig{
+			LogName: fmt.Sprintf("ConfigMap %s:%s", ConfigMapNamespace, ConfigMapName),
+			// We don't need to be super responsive to config updates, so we can wait 5-10 seconds.
+			//
+			// FIXME: make these configurable.
+			RetryRelistAfter: util.NewTimeRange(time.Second, 5, 10),
+			RetryWatchAfter:  util.NewTimeRange(time.Second, 5, 10),
+		},
 		util.WatchAccessors[*corev1.ConfigMapList, corev1.ConfigMap]{
 			Items: func(list *corev1.ConfigMapList) []corev1.ConfigMap { return list.Items },
 		},

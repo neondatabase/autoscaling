@@ -3,8 +3,10 @@ package util
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +23,47 @@ import (
 type WatchClient[L any] interface {
 	List(context.Context, metav1.ListOptions) (L, error)
 	Watch(context.Context, metav1.ListOptions) (watch.Interface, error)
+}
+
+// WatchConfig is the miscellaneous configuration used by Watch
+type WatchConfig struct {
+	// LogName is the name of the watcher for use in logs
+	LogName string
+
+	// RetryRelistAfter gives a retry interval when a re-list fails. If left nil, then Watch will
+	// not retry.
+	RetryRelistAfter *TimeRange
+	// RetryWatchAfter gives a retry interval when a non-initial watch fails. If left nil, then
+	// Watch will not retry.
+	RetryWatchAfter *TimeRange
+}
+
+type TimeRange struct {
+	min   int
+	max   int
+	units time.Duration
+}
+
+func NewTimeRange(units time.Duration, min, max int) *TimeRange {
+	if min < 0 {
+		panic("bad time range: min < 0")
+	} else if min == 0 && max == 0 {
+		panic("bad time range: min and max = 0")
+	} else if max < min {
+		panic("bad time range: max < min")
+	}
+
+	return &TimeRange{min: min, max: max, units: units}
+}
+
+// Random returns a random time.Duration within the range
+func (r TimeRange) Random() time.Duration {
+	if r.max == r.min {
+		return time.Duration(r.min) * r.units
+	}
+
+	count := rand.Intn(r.max-r.min) + r.min
+	return time.Duration(count) * r.units
 }
 
 // WatchAccessors provides the "glue" functions for Watch to go from a list L (returned by the
@@ -43,7 +86,7 @@ type WatchObject[T any] interface {
 type WatchHandlerFuncs[P any] struct {
 	AddFunc    func(obj P, preexisting bool)
 	UpdateFunc func(oldObj P, newObj P)
-	DeleteFunc func(obj P)
+	DeleteFunc func(obj P, mayBeStale bool)
 }
 
 // Watch starts a goroutine for watching events, using the provided WatchHandlerFuncs as the
@@ -54,6 +97,7 @@ type WatchHandlerFuncs[P any] struct {
 func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]](
 	ctx context.Context,
 	client C,
+	config WatchConfig,
 	accessors WatchAccessors[L, T],
 	opts metav1.ListOptions,
 	handlers WatchHandlerFuncs[P],
@@ -69,7 +113,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		handlers.UpdateFunc = func(oldObj, newObj P) {}
 	}
 	if handlers.DeleteFunc == nil {
-		handlers.DeleteFunc = func(obj P) {}
+		handlers.DeleteFunc = func(obj P, mayBeStale bool) {}
 	}
 
 	// Perform an initial listing
@@ -98,6 +142,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		store.objects[uid] = obj
 		handlers.AddFunc(obj, true)
 	}
+	items = []T{} // reset to allow GC
 
 	// Start watching
 	watcher, err := client.Watch(ctx, opts)
@@ -132,19 +177,26 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					return
 				case event, ok := <-watcher.ResultChan():
 					if !ok {
+						klog.Infof("watch %s: watcher ended gracefully, restarting", config.LogName)
 						goto newWatcher
 					} else if event.Type == watch.Error {
 						err := apierrors.FromObject(event.Object)
-						klog.Errorf("received watch error: %s", err)
-						return
+						// note: we can get 'too old resource version' errors when there's been a
+						// lot of resource updates that our ListOptions filtered out.
+						if apierrors.IsResourceExpired(err) {
+							klog.Warningf("watch %s: received error: %s", config.LogName, err)
+						} else {
+							klog.Errorf("watch %s: received error: %s", config.LogName, err)
+						}
+						goto relist
 					}
 
 					obj, ok := event.Object.(P)
 					if !ok {
 						var p P
 						klog.Errorf(
-							"watch: error casting event type %s object as type %T, got type %T",
-							event.Type, p, event.Object,
+							"watch %s: error casting event type %s object as type %T, got type %T",
+							config.LogName, event.Type, p, event.Object,
 						)
 						continue
 					}
@@ -168,8 +220,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 							if _, ok := store.objects[uid]; ok {
 								return fmt.Errorf(
-									"watch: received add event for object %s that we already have",
-									name(meta),
+									"watch %s: received add event for object %s that we already have",
+									config.LogName, name(meta),
 								)
 							}
 							store.objects[uid] = (*T)(obj)
@@ -185,19 +237,19 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 							old, ok := store.objects[uid]
 							if !ok {
 								return fmt.Errorf(
-									"watch: received delete event for object %s that's not present",
-									name(meta),
+									"watch %s: received delete event for object %s that's not present",
+									config.LogName, name(meta),
 								)
 							}
 							handlers.UpdateFunc(old, (*T)(obj))
 							delete(store.objects, uid)
-							handlers.DeleteFunc((*T)(obj))
+							handlers.DeleteFunc((*T)(obj), false)
 						case watch.Modified:
 							old, ok := store.objects[uid]
 							if !ok {
 								return fmt.Errorf(
-									"watch: received update event for object %s that's not present",
-									name(meta),
+									"watch %s: received update event for object %s that's not present",
+									config.LogName, name(meta),
 								)
 							}
 							store.objects[uid] = (*T)(obj)
@@ -212,21 +264,101 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 					if err != nil {
 						klog.Error(err.Error())
-						return
+						goto relist
 					}
 				}
 			}
+		relist:
+			klog.Infof("watch %s: re-listing", config.LogName)
+			for {
+				resyncList, err := client.List(ctx, opts)
+				if err != nil {
+					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
+					if config.RetryRelistAfter == nil {
+						klog.Infof("watch %s: ending, re-list failed and RetryWatchAfter is nil")
+						return
+					}
+					retryAfter := config.RetryRelistAfter.Random()
+					klog.Infof("watch %s: retrying re-list after %s", config.LogName, retryAfter)
+
+					select {
+					case <-time.After(retryAfter):
+						klog.Infof("watch %s: retrying re-list", config.LogName)
+						continue
+					case <-ctx.Done():
+						return
+					case <-store.stopCh:
+						return
+					}
+				}
+
+				// err == nil, process resyncList
+				resyncItems := accessors.Items(resyncList)
+
+				func() {
+					// First, copy the contents of objects into oldObjects. We do this so that we can
+					// uphold some guarantees about the contents of the store.
+					oldObjects := make(map[types.UID]*T)
+					for uid, obj := range store.objects {
+						oldObjects[uid] = obj
+					}
+
+					store.mutex.Lock()
+					defer store.mutex.Unlock()
+
+					for i := range resyncItems {
+						obj := &items[i]
+						uid := P(obj).GetObjectMeta().GetUID()
+
+						store.objects[uid] = obj
+						oldObj, hasObj := oldObjects[uid]
+
+						if hasObj {
+							handlers.UpdateFunc(oldObj, obj)
+							delete(oldObjects, uid)
+						} else {
+							handlers.AddFunc(obj, false)
+						}
+					}
+
+					// For everything that's still in oldObjects (i.e. wasn't covered by resyncItems),
+					// generate deletion events:
+					for uid, obj := range oldObjects {
+						delete(store.objects, uid)
+						handlers.DeleteFunc(obj, true)
+					}
+				}()
+
+				// Update ResourceVersion, recreate watcher.
+				opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
+				klog.Infof("watch %s: resync complete, restarting watcher")
+				goto newWatcher
+			}
 		newWatcher:
-			klog.Info("watcher ended gracefully, restarting")
+			for {
+				watcher, err = client.Watch(ctx, opts)
+				if err != nil {
+					klog.Errorf("watch %s: re-watch failed: %s", config.LogName, err)
+					if config.RetryWatchAfter == nil {
+						klog.Infof("watch %s: ending, re-watch failed and RetryWatchAfter is nil")
+						return
+					}
+					retryAfter := config.RetryWatchAfter.Random()
+					klog.Infof("watch %s: retrying re-watch after %s", config.LogName, retryAfter)
 
-			// FIXME: we need some kind of retry here, *and* a timeout accompanying it. We probably
-			// don't need a timeout if the watcher was long-running (i.e. > 1s) and exited without
-			// error.
+					select {
+					case <-time.After(retryAfter):
+						klog.Infof("watch %s: retrying re-watch after %s", config.LogName, retryAfter)
+						continue
+					case <-ctx.Done():
+						return
+					case <-store.stopCh:
+						return
+					}
+				}
 
-			watcher, err = client.Watch(ctx, opts)
-			if err != nil {
-				klog.Errorf("non-initial watch failed: %s", err)
-				return
+				// err == nil
+				break newWatcher
 			}
 		}
 	}()

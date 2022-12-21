@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"golang.org/x/exp/slices"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -121,6 +122,14 @@ func watchSchedulerUpdates(
 	store, err := util.Watch(
 		ctx,
 		kubeClient.CoreV1().Pods(schedulerNamespace),
+		util.WatchConfig{
+			LogName: "scheduler",
+			// We don't need to be super responsive to scheduler changes.
+			//
+			// FIXME: make these configurable.
+			RetryRelistAfter: util.NewTimeRange(time.Second, 4, 5),
+			RetryWatchAfter:  util.NewTimeRange(time.Second, 4, 5),
+		},
 		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
@@ -161,7 +170,7 @@ func watchSchedulerUpdates(
 					events <- watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)}
 				}
 			},
-			DeleteFunc: func(pod *corev1.Pod) {
+			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				wasReady := util.PodReady(pod)
 				if wasReady {
 					events <- watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)}
