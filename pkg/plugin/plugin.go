@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,6 +96,32 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	}()
 
 	go p.runPermitHandler()
+
+	// Periodically check that we're not deadlocked
+	go func() {
+		checkDelay := 5 * time.Second
+		timeout := 1 * time.Second
+
+		for {
+			success := make(chan struct{})
+
+			go func() {
+				p.state.lock.Lock()
+				defer p.state.lock.Unlock()
+				close(success)
+			}()
+
+			select {
+			case <-success:
+				// all good
+			case <-time.After(timeout):
+				// not all good
+				klog.Fatalf("deadlock detected, could not get lock after %s", timeout)
+			}
+
+			time.Sleep(checkDelay)
+		}
+	}()
 
 	return &p, nil
 }
