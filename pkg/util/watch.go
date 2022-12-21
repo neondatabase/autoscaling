@@ -330,7 +330,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				}()
 
 				// Update ResourceVersion, recreate watcher.
-				opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
+				opts.ResourceVersion = relistList.GetListMeta().GetResourceVersion()
 				klog.Infof("watch %s: re-list complete, restarting watcher", config.LogName)
 				goto newWatcher
 			}
