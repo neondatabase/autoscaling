@@ -538,15 +538,16 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 			return podOtherResourceState{}, err
 		} else if cpuLimit.IsZero() && !cpuRequest.IsZero() {
 			klog.Warningf(
-				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) missing resources.limits.cpu, using resources.requests.cpu as limit",
+				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) missing resources.limits.cpu, using request as limit",
 				podName, i, container.Name,
 			)
 			cpuLimit = cpuRequest
 		} else if !cpuRequest.IsZero() && !cpuLimit.Equal(*cpuRequest) {
 			klog.Warningf(
-				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) resources.requests.cpu != resources.limits.cpu, using limits",
+				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) resources.requests.cpu != resources.limits.cpu, using request as limit",
 				podName, i, container.Name,
 			)
+			cpuLimit = cpuRequest
 		}
 		cpu.Add(*cpuLimit)
 
