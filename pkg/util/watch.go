@@ -307,7 +307,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					defer store.mutex.Unlock()
 
 					for i := range resyncItems {
-						obj := &items[i]
+						obj := &resyncItems[i]
 						uid := P(obj).GetObjectMeta().GetUID()
 
 						store.objects[uid] = obj
