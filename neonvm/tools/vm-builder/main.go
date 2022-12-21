@@ -28,7 +28,7 @@ FROM alpine:3.16 AS vm-runtime
 # add busybox
 ENV BUSYBOX_VERSION 1.35.0
 RUN set -e \
-	&& mkdir -p /neonvm/bin /neonvm/runtime \
+	&& mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config \
 	&& wget -q https://busybox.net/downloads/binaries/${BUSYBOX_VERSION}-x86_64-linux-musl/busybox -O /neonvm/bin/busybox \
 	&& chmod +x /neonvm/bin/busybox \
 	&& /neonvm/bin/busybox --install -s /neonvm/bin
@@ -71,11 +71,17 @@ RUN set -e \
 		qemu-img \
 		e2fsprogs
 
+# Install vector.dev binary
+RUN set -e \
+    && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
+    | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-x86_64-unknown-linux-musl/bin/vector
+    
 # init scripts
 ADD inittab  /neonvm/bin/inittab
 ADD vminit   /neonvm/bin/vminit
 ADD vmstart  /neonvm/bin/vmstart
 ADD vmacpi   /neonvm/acpi/vmacpi
+ADD vector.yaml /neonvm/config/vector.yaml
 RUN chmod +x /neonvm/bin/vminit /neonvm/bin/vmstart
 
 FROM vm-runtime AS builder
@@ -127,6 +133,7 @@ fi
 ::sysinit:/neonvm/bin/vminit
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
+::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml
 ::respawn:/neonvm/bin/vmstart
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
@@ -178,6 +185,36 @@ for i in ${ETH_LIST}; do
     ip link set up dev $iface
     udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 done
+`
+	configVector = `---
+data_dir: /tmp
+api:
+  enabled: true
+  address: "[::]:8686"
+  playground: false
+sources:
+  host_metrics:
+    filesystem:
+      devices:
+        excludes: [binfmt_misc]
+      filesystems:
+        excludes: [binfmt_misc]
+      mountPoints:
+        excludes: ["*/proc/sys/fs/binfmt_misc"]
+    type: host_metrics
+  postgresql_metrics:
+    endpoints:
+      - "postgres://postgres@localhost:5432"
+    type: postgresql_metrics
+  internal_metrics:
+    type: internal_metrics
+sinks:
+  prom_exporter:
+    type: prometheus_exporter
+    inputs:
+      - host_metrics
+      - internal_metrics
+    address: "[::]:9090"
 `
 )
 
@@ -367,6 +404,16 @@ func main() {
 		log.Fatalln(err)
 	}
 	if err = AddToTar(tw, "vminit", b); err != nil {
+		log.Fatalln(err)
+	}
+
+	// add 'vector.yaml' file to docker build context
+	b.Reset()
+	_, err = b.WriteString(configVector)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if err = AddToTar(tw, "vector.yaml", b); err != nil {
 		log.Fatalln(err)
 	}
 
