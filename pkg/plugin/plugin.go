@@ -64,6 +64,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		state: pluginState{},
 	}
 
+	klog.Infof("[autoscale-enforcer] Starting config watcher")
 	if err := p.setConfigAndStartWatcher(context.Background()); err != nil {
 		klog.Errorf("Error starting config watcher: %s", err)
 		return nil, err
@@ -72,11 +73,13 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	// Start watching deletion events...
 	vmDeletions := make(chan api.PodName)
 	podDeletions := make(chan api.PodName)
+	klog.Infof("[autoscale-enforcer] Starting pod deletion watcher")
 	if err := p.watchPodDeletions(context.Background(), vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %s", err)
 	}
 
 	// ... but before handling the deletion events, read the current cluster state:
+	klog.Infof("[autoscale-enforcer] Reading initial cluster state")
 	if err = p.readClusterState(context.TODO()); err != nil {
 		return nil, fmt.Errorf("Error reading cluster state: %w", err)
 	}
@@ -123,6 +126,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		}
 	}()
 
+	klog.Info("[autoscale-enforcer] Plugin initialization complete")
 	return &p, nil
 }
 
