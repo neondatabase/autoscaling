@@ -158,15 +158,23 @@ func (e *AutoscaleEnforcer) Filter(
 
 	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Filter: Error getting pod %v vmInfo: %s", pName, err)
+		klog.Errorf("[autoscale-enforcer] Filter: Error getting VM pod %v info: %s", pName, err)
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
 			fmt.Sprintf("Error getting pod vmInfo: %s", err),
 		)
-	} else if vmInfo == nil {
-		// this pod isn't a VM. We don't care about it as much - it'll still be affected by scoring,
-		// which *kind of* overlaps with filtering.
-		return nil
+	}
+
+	var otherPodInfo podOtherResourceState
+	if vmInfo == nil {
+		otherPodInfo, err = extractPodOtherPodResourceState(pod)
+		if err != nil {
+			klog.Errorf("[autoscale-enforcer] Filter: Error getting non-VM pod %v info: %s", pName, err)
+			return framework.NewStatus(
+				framework.UnschedulableAndUnresolvable,
+				fmt.Sprintf("Error getting pod info: %s", err),
+			)
+		}
 	}
 
 	e.state.lock.Lock()
@@ -178,7 +186,7 @@ func (e *AutoscaleEnforcer) Filter(
 	}
 
 	// Check whether the pod's memory slot size matches the scheduler's. If it doesn't, reject it.
-	if !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
+	if vmInfo != nil && !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
 		err := fmt.Errorf("expected %v, found %v", e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize)
 		klog.Warningf("[autoscale-enforcer] Filter: VM for pod %v has bad MemSlotSize: %w", pName, err)
 		return framework.NewStatus(
@@ -206,45 +214,100 @@ func (e *AutoscaleEnforcer) Filter(
 	//
 	// So we have to actually count up the resource usage of all pods in nodeInfo:
 	var totalNodeVCPU, totalNodeMem uint16
+	var otherResources nodeOtherResourceState
 	for _, podInfo := range nodeInfo.Pods {
 		pn := api.PodName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
 			totalNodeVCPU += podState.vCPU.reserved
 			totalNodeMem += podState.memSlots.reserved
+		} else if otherPodState, ok := e.state.otherPods[pn]; ok {
+			oldRes := otherResources
+			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, otherPodState.resources)
+			totalNodeVCPU += otherResources.reservedCpu - oldRes.reservedCpu
+			totalNodeMem += otherResources.reservedMemSlots - oldRes.reservedMemSlots
 		}
 	}
 
 	nodeTotalReservableCPU := node.totalReservableCPU()
-	var status *framework.Status
-	var resultString string
+	nodeTotalReservableMemSots := node.totalReservableMemSlots()
 
-	var msg string
-	setMsg := func(compareOp string) {
-		msg = fmt.Sprintf(
-			"proposed node vCPU usage %d + pod init vCPU %d %s node max %d",
-			totalNodeVCPU, vmInfo.Cpu.Use, compareOp, nodeTotalReservableCPU,
+	var kind string
+	if vmInfo != nil {
+		kind = "VM"
+	} else {
+		kind = "non-VM"
+	}
+
+	makeMsg := func(resource, compareOp string, nodeUse, podUse, nodeMax any) string {
+		return fmt.Sprintf(
+			"node %s usage %v + %s pod %s %v %s node max %v",
+			resource, nodeUse, kind, resource, podUse, compareOp, nodeMax,
 		)
 	}
 
-	if totalNodeVCPU+vmInfo.Cpu.Use > nodeTotalReservableCPU {
-		setMsg(">")
-		status = framework.NewStatus(
-			framework.Unschedulable,
-			fmt.Sprintf("Not enough resources for pod: %s", msg),
-		)
-		resultString = "rejecting"
+	allowing := true
+	var cpuMsg string
+	var memMsg string
+
+	if vmInfo != nil {
+		var cpuCompare string
+		if totalNodeVCPU+vmInfo.Cpu.Use > nodeTotalReservableCPU {
+			cpuCompare = ">"
+			allowing = false
+		} else {
+			cpuCompare = "<="
+		}
+		cpuMsg = makeMsg("vCPU", cpuCompare, totalNodeVCPU, vmInfo.Cpu.Use, nodeTotalReservableCPU)
+
+		var memCompare string
+		if totalNodeMem+vmInfo.Mem.Use > nodeTotalReservableMemSots {
+			memCompare = ">"
+			allowing = false
+		} else {
+			memCompare = "<="
+		}
+		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, vmInfo.Mem.Use, nodeTotalReservableMemSots)
 	} else {
-		status = nil // explicitly setting this; nil is success.
+		newRes := otherResources.addPod(&e.state.conf.MemSlotSize, otherPodInfo)
+		cpuIncr := newRes.reservedCpu - otherResources.reservedCpu
+		memIncr := newRes.reservedMemSlots - otherResources.reservedMemSlots
+
+		var cpuCompare string
+		if totalNodeVCPU+cpuIncr > nodeTotalReservableCPU {
+			cpuCompare = ">"
+			allowing = false
+		} else {
+			cpuCompare = "<="
+		}
+		cpuMsg = makeMsg("vCPU", cpuCompare, totalNodeVCPU, cpuIncr, nodeTotalReservableCPU)
+
+		var memCompare string
+		if totalNodeMem+memIncr > nodeTotalReservableMemSots {
+			memCompare = ">"
+			allowing = false
+		} else {
+			memCompare = "<="
+		}
+		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, memIncr, nodeTotalReservableMemSots)
+	}
+
+	var resultString string
+	if allowing {
 		resultString = "allowing"
-		setMsg("<=")
+	} else {
+		resultString = "rejecting"
 	}
 
 	klog.Infof(
-		"[autoscale-enforcer] Filter: %s pod %v in node %s: %s",
-		resultString, pName, nodeName, msg,
+		"[autoscale-enforcer] Filter: %s %s pod %v in node %s: %s; %s",
+		resultString, kind, pName, nodeName, cpuMsg, memMsg,
 	)
 
-	return status
+	if !allowing {
+		return framework.NewStatus(framework.Unschedulable, "Not enough resources for pod")
+	} else {
+		return nil
+	}
 }
 
 // Score allows our plugin to express which nodes should be preferred for scheduling new pods onto
