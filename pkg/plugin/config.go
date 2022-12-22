@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -101,6 +102,8 @@ func (c *config) validate() (string, error) {
 
 	if c.MemSlotSize.Value() <= 0 {
 		return "memBlockSize", fmt.Errorf("value must be > 0")
+	} else if c.MemSlotSize.Value() <= math.MaxInt64/1000 && c.MemSlotSize.MilliValue()%1000 != 0 {
+		return "memBlockSize", fmt.Errorf("value cannot have milli-precision")
 	}
 
 	if c.SchedulerName == "" {
