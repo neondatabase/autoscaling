@@ -51,7 +51,9 @@ func (r runner) Spawn(ctx context.Context, status *podStatus) {
 			}
 		}()
 
-		migrating, err := r.Run(ctx)
+		logger := RunnerLogger{prefix: fmt.Sprintf("Runner %v: ", r.podName)}
+
+		migrating, err := r.Run(ctx, logger)
 
 		status.lock.Lock()
 		defer status.lock.Unlock()
@@ -61,9 +63,9 @@ func (r runner) Spawn(ctx context.Context, status *podStatus) {
 		status.errored = err
 
 		if err != nil {
-			klog.Errorf("runner for pod %v ended with error: %s", r.podName, err)
+			logger.Errorf("Ended with error: %s", err)
 		} else {
-			klog.Infof("runner for pod %v ended without error", r.podName)
+			logger.Infof("Ended without error")
 		}
 	}()
 }
@@ -99,7 +101,27 @@ func (r runner) getInitialVMInfo(ctx context.Context) (*api.VmInfo, error) {
 	return vmInfo, nil
 }
 
-func (r runner) Run(ctx context.Context) (migrating bool, _ error) {
+type RunnerLogger struct {
+	prefix string
+}
+
+func (l RunnerLogger) Infof(format string, args ...interface{}) {
+	klog.InfofDepth(1, l.prefix+format, args...)
+}
+
+func (l RunnerLogger) Warningf(format string, args ...interface{}) {
+	klog.WarningfDepth(1, l.prefix+format, args...)
+}
+
+func (l RunnerLogger) Errorf(format string, args ...interface{}) {
+	klog.ErrorfDepth(1, l.prefix+format, args...)
+}
+
+func (l RunnerLogger) Fatalf(format string, args ...interface{}) {
+	klog.FatalfDepth(1, l.prefix+format, args...)
+}
+
+func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _ error) {
 	ctx, cancelCtx := context.WithCancel(ctx)
 	defer cancelCtx() // Make sure that background tasks are cleaned up.
 
@@ -107,8 +129,8 @@ func (r runner) Run(ctx context.Context) (migrating bool, _ error) {
 	if err != nil {
 		return false, err
 	} else if initVmInfo == nil {
-		klog.Warningf(
-			"runner could not find VM %s:%s, maybe it was already deleted?",
+		logger.Warningf(
+			"Could not find VM %s:%s, maybe it was already deleted?",
 			r.vm.Namespace, r.vm.Name,
 		)
 		return false, nil
@@ -119,26 +141,26 @@ func (r runner) Run(ctx context.Context) (migrating bool, _ error) {
 
 	metrics := make(chan api.Metrics)
 	metricsPanicked := make(chan struct{})
-	go r.getMetricsLoop(ctx, r.config, metrics, metricsPanicked)
+	go r.getMetricsLoop(ctx, logger, r.config, metrics, metricsPanicked)
 
 	var computeUnit *api.Resources
 
-	klog.Info("Starting scheduler watcher and getting initial scheduler")
+	logger.Infof("Starting scheduler watcher and getting initial scheduler")
 	schedulerWatch, scheduler, err := watchSchedulerUpdates(ctx, r.kubeClient, r.config.Scheduler.SchedulerName)
 	if err != nil {
 		return false, fmt.Errorf("Error starting scheduler watcher: %w", err)
 	} else if scheduler == nil {
-		klog.Info("No initial scheduler found, waiting for one to become ready")
+		logger.Infof("No initial scheduler found, waiting for one to become ready")
 		goto noSchedulerLoop
 	}
 
-	klog.Infof(
+	logger.Infof(
 		"Got initial scheduler pod %v (UID = %v) with IP %v",
 		scheduler.podName, scheduler.uid, scheduler.ip,
 	)
 	schedulerWatch.Using(*scheduler)
 
-	klog.Infof("Starting main loop. vCPU = %+v, memSlots = %+v", r.vm.Cpu, r.vm.Mem)
+	logger.Infof("Starting main loop. vCPU = %+v, memSlots = %+v", r.vm.Cpu, r.vm.Mem)
 
 restartConnection:
 
@@ -148,23 +170,23 @@ restartConnection:
 		select {
 		// Simply exit if we're done
 		case <-r.stop.Recv():
-			klog.Infof("Ending runner loop for VM %s:%s: received stop signal", r.vm.Namespace, r.vm.Name)
+			logger.Infof("Ending runner loop, received stop signal")
 			return false, nil
 		// and also exit if the pod was deleted
 		case <-r.deleted.Recv():
-			klog.Infof("Ending runner loop for VM %s:%s: pod was deleted", r.vm.Namespace, r.vm.Name)
+			logger.Infof("Ending runner loop for VM, pod was deleted")
 			return false, nil
 		case <-metricsPanicked:
 			return false, fmt.Errorf("Metrics loop panicked")
 		case info := <-schedulerWatch.Deleted:
 			if info.uid != scheduler.uid {
-				klog.Infof(
+				logger.Infof(
 					"Received info that scheduler candidate pod %v was deleted, but we aren't using it (it's UID = %v, ours = %v)",
 					info.podName, info.uid, scheduler.uid,
 				)
 				continue
 			}
-			klog.Warningf(
+			logger.Warningf(
 				"Received info that scheduler pod %v (UID = %v) was deleted, ending further communication",
 				scheduler.podName, scheduler.uid,
 			)
@@ -181,12 +203,12 @@ restartConnection:
 					},
 					Metrics: m,
 				}
-				resp, err := r.sendRequestToPlugin(scheduler, r.config, &req)
+				resp, err := r.sendRequestToPlugin(logger, scheduler, r.config, &req)
 				if err != nil {
-					klog.Errorf("Error from initial plugin message %v", err)
+					logger.Errorf("Error from initial plugin message %s", err)
 					goto badScheduler // assume something's permanently wrong with the scheduler
 				} else if err := resp.ComputeUnit.ValidateNonZero(); err != nil {
-					klog.Errorf(
+					logger.Errorf(
 						"Initial plugin response gave bad compute unit %+v: %v",
 						resp.ComputeUnit, err,
 					)
@@ -196,12 +218,12 @@ restartConnection:
 				computeUnit = &resp.ComputeUnit
 
 				if resp.Permit.VCPU != r.vm.Cpu.Use || resp.Permit.Mem != r.vm.Mem.Use {
-					klog.Errorf("Initial plugin response gave bad permit %+v", resp.Permit)
+					logger.Errorf("Initial plugin response gave bad permit %+v", resp.Permit)
 					goto badScheduler
 				}
 
 				if resp.Migrate != nil {
-					klog.Infof("Scheduler responded to initial message with migration, exiting without further changes.")
+					logger.Infof("Scheduler responded to initial message with migration, exiting without further changes.")
 					return true, nil
 				}
 			}
@@ -213,7 +235,7 @@ restartConnection:
 			inertiaCpu := minComputeUnits * computeUnit.VCPU
 
 			newRes := api.Resources{VCPU: r.newGoalCPUCount(m, inertiaCpu)}
-			newRes.Mem = memSlotsForCpu(*computeUnit, newRes.VCPU)
+			newRes.Mem = memSlotsForCpu(logger, *computeUnit, newRes.VCPU)
 
 			changedVCPU := newRes.VCPU != r.vm.Cpu.Use
 			changedMem := newRes.Mem != r.vm.Mem.Use
@@ -228,7 +250,7 @@ restartConnection:
 					}
 				}
 
-				klog.Infof(
+				logger.Infof(
 					"Goal vCPU = %d (%s), Goal mem slots = %d (%s)",
 					newRes.VCPU, descriptor(changedVCPU), newRes.Mem, descriptor(changedMem),
 				)
@@ -243,7 +265,7 @@ restartConnection:
 			}
 
 			if newRes.VCPU < r.vm.Cpu.Use {
-				klog.Infof(
+				logger.Infof(
 					"Goal vCPU %d < Current vCPU %d, decrease immediately",
 					newRes.VCPU, r.vm.Cpu.Use,
 				)
@@ -251,7 +273,7 @@ restartConnection:
 				doChangesBeforeRequest = true
 			}
 			if newRes.Mem < r.vm.Mem.Use {
-				klog.Infof(
+				logger.Infof(
 					"Goal mem slots %d < Current mem slots %d, decrease immediately",
 					newRes.Mem, r.vm.Mem.Use,
 				)
@@ -274,19 +296,19 @@ restartConnection:
 				Resources: newRes,
 				Metrics:   m,
 			}
-			resp, err := r.sendRequestToPlugin(scheduler, r.config, &req)
+			resp, err := r.sendRequestToPlugin(logger, scheduler, r.config, &req)
 			if err != nil {
-				klog.Errorf("Error from resource request: %s", err)
+				logger.Errorf("Error from resource request: %s", err)
 				goto badScheduler // assume something's permanently wrong with the scheduler
 			} else if err = resp.ComputeUnit.ValidateNonZero(); err != nil {
-				klog.Errorf("Plugin gave bad compute unit %+v: %v", resp.ComputeUnit, err)
+				logger.Errorf("Plugin gave bad compute unit %+v: %v", resp.ComputeUnit, err)
 				goto badScheduler
 			}
 
 			computeUnit = &resp.ComputeUnit
 
 			if resp.Migrate != nil {
-				klog.Infof("Scheduler responded with migration, exiting without further changes.")
+				logger.Infof("Scheduler responded with migration, exiting without further changes.")
 				return true, nil
 			}
 
@@ -305,12 +327,12 @@ restartConnection:
 					// We shouldn't reach this, because req.VCPUs < r.vm.Cpu.Use is already handled
 					// above, after which r.vm.Cpu.Use == req.VCPUs, so that would mean that the
 					// permit caused a decrease beyond what we're expecting.
-					klog.Errorf("Scheduler gave bad permit less than current vCPU. %s", discontinueMsg)
+					logger.Errorf("Scheduler gave bad permit less than current vCPU. %s", discontinueMsg)
 					schedulerGaveBadPermit = true
 				} else if resp.Permit.VCPU > req.Resources.VCPU {
 					// Permits given by the scheduler should never be greater than what's requested,
 					// and doing so indicates that something went very wrong.
-					klog.Errorf("Scheduler gave bad permit greater than requested vCPU. %s", discontinueMsg)
+					logger.Errorf("Scheduler gave bad permit greater than requested vCPU. %s", discontinueMsg)
 					schedulerGaveBadPermit = true
 				}
 
@@ -318,7 +340,7 @@ restartConnection:
 				if resp.Permit.VCPU < newRes.VCPU {
 					maybeLessThanDesired = " (less than desired)"
 				}
-				klog.Infof("Setting vCPU = %d%s", resp.Permit.VCPU, maybeLessThanDesired)
+				logger.Infof("Setting vCPU = %d%s", resp.Permit.VCPU, maybeLessThanDesired)
 				newRes.VCPU = resp.Permit.VCPU
 				doChangesAfterRequest = true
 
@@ -327,21 +349,21 @@ restartConnection:
 					// We actually already set the CPU for this (see above), the returned permit
 					// just confirmed that
 					if changedVCPU {
-						klog.Infof("Scheduler confirmed decrease to %d vCPU", newRes.VCPU)
+						logger.Infof("Scheduler confirmed decrease to %d vCPU", newRes.VCPU)
 					}
 				} else /* resp.Permit.VCPU == r.vm.Cpu.Use && resp.Permit.VCPU != newRes.VCPU */ {
 					// We wanted to increase vCPUs, but the scheduler didn't allow it.
-					klog.Infof("Scheduler denied increase to %d vCPU, staying at %d", newRes.VCPU, r.vm.Cpu.Use)
+					logger.Infof("Scheduler denied increase to %d vCPU, staying at %d", newRes.VCPU, r.vm.Cpu.Use)
 				}
 			}
 
 			// Comments for memory are omitted; it's essentially the same as CPU handling
 			if resp.Permit.Mem != r.vm.Mem.Use {
 				if resp.Permit.Mem < r.vm.Mem.Use {
-					klog.Errorf("Scheduler gave bad permit less than current memory slots. %s", discontinueMsg)
+					logger.Errorf("Scheduler gave bad permit less than current memory slots. %s", discontinueMsg)
 					schedulerGaveBadPermit = true
 				} else if resp.Permit.Mem > req.Resources.Mem {
-					klog.Errorf("Scheduler gave bad permit greater than requested memory slots. %s", discontinueMsg)
+					logger.Errorf("Scheduler gave bad permit greater than requested memory slots. %s", discontinueMsg)
 					schedulerGaveBadPermit = true
 				}
 
@@ -349,16 +371,16 @@ restartConnection:
 				if resp.Permit.Mem < newRes.Mem {
 					maybeLessThanDesired = " (less than desired)"
 				}
-				klog.Infof("Setting memory slots = %d%s", resp.Permit.Mem, maybeLessThanDesired)
+				logger.Infof("Setting memory slots = %d%s", resp.Permit.Mem, maybeLessThanDesired)
 				newRes.Mem = resp.Permit.Mem
 				doChangesAfterRequest = true
 			} else /* resp.Permit.Mem == r.vm.Mem.Use */ {
 				if r.vm.Mem.Use == newRes.Mem {
 					if changedMem {
-						klog.Infof("Scheduler confirmed decrease to %d memory slots", newRes.Mem)
+						logger.Infof("Scheduler confirmed decrease to %d memory slots", newRes.Mem)
 					}
 				} else {
-					klog.Infof(
+					logger.Infof(
 						"Scheduler denied increase to %d memory slots, staying at %d",
 						newRes.Mem, r.vm.Mem.Use,
 					)
@@ -384,26 +406,26 @@ restartConnection:
 badScheduler:
 	// Error-state handling: something went wrong, so we won't allow any more CPU changes. Our logic
 	// up to now means our current state is fine (even if it's not the minimum)
-	klog.Warningf("Stopping all future requests to scheduler %v because of bad request", scheduler.podName)
+	logger.Warningf("Stopping all future requests to scheduler %v because of bad request", scheduler.podName)
 noSchedulerLoop:
 	// We know the scheduler (if it is behaving correctly) won't over-commit resources into our
 	// current resource usage, so we're safe to use *up to* maxFuture
 	maxFuture := api.Resources{VCPU: r.vm.Cpu.Use, Mem: r.vm.Mem.Use}
 
-	klog.Infof("Future resource limits set at current = %+v", maxFuture)
+	logger.Infof("Future resource limits set at current = %+v", maxFuture)
 
 	schedulerWatch.ExpectingReady()
 
 	for {
 		select {
 		case <-r.stop.Recv():
-			klog.Infof("Ending runner loop for VM %s:%s: received stop signal", r.vm.Namespace, r.vm.Name)
+			logger.Infof("Ending runner loop, received stop signal")
 			return false, nil
 		case <-r.deleted.Recv():
-			klog.Infof("Ending runner loop for VM %s:%s: pod was deleted", r.vm.Namespace, r.vm.Name)
+			logger.Infof("Ending runner loop, pod was deleted")
 			return false, nil
 		case info := <-schedulerWatch.ReadyQueue:
-			klog.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
+			logger.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
 			scheduler = &info
 			computeUnit = nil
 			goto restartConnection
@@ -414,7 +436,7 @@ noSchedulerLoop:
 
 			// Bound by our artificial maximum
 			if newCpuCount > maxFuture.VCPU {
-				klog.Infof(
+				logger.Infof(
 					"Want to scale to %d vCPUs, but capped at %d vCPUs because we have no scheduler",
 					newCpuCount, maxFuture.VCPU,
 				)
@@ -426,13 +448,13 @@ noSchedulerLoop:
 				// But first, figure out our memory usage.
 				var newMemSlotsCount uint16
 				if computeUnit != nil {
-					newMemSlotsCount = memSlotsForCpu(*computeUnit, newCpuCount)
+					newMemSlotsCount = memSlotsForCpu(logger, *computeUnit, newCpuCount)
 
 					// It's possible for our desired memory slots to be greater than our future
 					// maximum, in cases where our resources weren't aligned to a compute unit when
 					// we abandoned the scheduler.
 					if newMemSlotsCount > maxFuture.Mem {
-						klog.Infof(
+						logger.Infof(
 							"Want to scale to %d mem slots (to match %d vCPU) but capped at %d mem slots because we have no scheduler",
 							newMemSlotsCount, newCpuCount, maxFuture.Mem,
 						)
@@ -440,10 +462,10 @@ noSchedulerLoop:
 					}
 				} else {
 					newMemSlotsCount = r.vm.Mem.Use
-					klog.Warningf("Cannot determine new memory slots count because we never received a computeUnit from scheduler")
+					logger.Warningf("Cannot determine new memory slots count because we never received a computeUnit from scheduler")
 				}
 
-				klog.Infof("Setting vCPU = %d, memSlots = %d", newCpuCount, newMemSlotsCount)
+				logger.Infof("Setting vCPU = %d, memSlots = %d", newCpuCount, newMemSlotsCount)
 
 				resources := api.Resources{VCPU: newCpuCount, Mem: newMemSlotsCount}
 				if err := r.setResources(ctx, r.config, resources); err != nil {
@@ -502,9 +524,9 @@ func roundCpuToComputeUnit(computeUnit api.Resources, cpu uint16) uint16 {
 	return cpu
 }
 
-func memSlotsForCpu(computeUnit api.Resources, cpu uint16) uint16 {
+func memSlotsForCpu(logger RunnerLogger, computeUnit api.Resources, cpu uint16) uint16 {
 	if cpu%computeUnit.VCPU != 0 {
-		klog.Warningf(
+		logger.Warningf(
 			"vCPU %d is not a multiple of the compute unit's CPU (%d), using approximate ratio for memory",
 			cpu, computeUnit.VCPU,
 		)
@@ -521,12 +543,12 @@ func memSlotsForCpu(computeUnit api.Resources, cpu uint16) uint16 {
 
 // note: we actually use the context here; we have a deferred cancel on it in Run
 func (r *runner) getMetricsLoop(
-	ctx context.Context, config *Config, metrics chan<- api.Metrics, panicked chan<- struct{},
+	ctx context.Context, logger RunnerLogger, config *Config, metrics chan<- api.Metrics, panicked chan<- struct{},
 ) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			err := fmt.Errorf("Unexpected redirect while getting metrics")
-			klog.Warning(err)
+			logger.Warningf("%s", err)
 			return err
 		},
 		Timeout: time.Second * time.Duration(config.Metrics.RequestTimeoutSeconds),
@@ -545,7 +567,7 @@ func (r *runner) getMetricsLoop(
 		Close: false,
 	}
 
-	klog.Infof("Starting metrics loop. Timeout = %f seconds", client.Timeout.Seconds())
+	logger.Infof("Starting metrics loop. Timeout = %f seconds", client.Timeout.Seconds())
 
 	// Helper to track whether we've gotten any responses yet. If we have, failed requests are
 	// treated more seriously
@@ -560,9 +582,9 @@ func (r *runner) getMetricsLoop(
 			if err != nil {
 				err = fmt.Errorf("Error getting metrics: %s", err)
 				if !gotAtLeastOne || ctx.Err() != nil {
-					klog.Warning(err)
+					logger.Warningf("%s", err)
 				} else {
-					klog.Error(err)
+					logger.Errorf("%s", err)
 				}
 				return
 			}
@@ -571,17 +593,17 @@ func (r *runner) getMetricsLoop(
 			gotAtLeastOne = true
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
-				klog.Errorf("Error while reading metrics response: %s", err)
+				logger.Errorf("Error while reading metrics response: %s", err)
 				return
 			}
 
 			m, err := api.ReadMetrics(body)
 			if err != nil {
-				klog.Errorf("Error reading metrics from node_exporter output: %s", err)
+				logger.Errorf("Error reading metrics from node_exporter output: %s", err)
 				return
 			}
 
-			klog.Infof("Processed metrics from VM: %+v", m)
+			logger.Infof("Processed metrics from VM: %+v", m)
 			metrics <- m
 		}()
 
@@ -589,7 +611,7 @@ func (r *runner) getMetricsLoop(
 		case <-time.NewTimer(time.Second * time.Duration(config.Metrics.SecondsBetweenRequests)).C:
 			// Continue to the next request
 		case <-ctx.Done():
-			klog.Infof("Ending metrics loop for VM %s:%s", r.vm.Name, r.vm.Namespace)
+			logger.Infof("Ending metrics loop for VM %s:%s", r.vm.Name, r.vm.Namespace)
 			// end the metrics loop
 			return
 		}
@@ -597,12 +619,12 @@ func (r *runner) getMetricsLoop(
 }
 
 func (r *runner) sendRequestToPlugin(
-	sched *schedulerInfo, config *Config, req *api.AgentRequest,
+	logger RunnerLogger, sched *schedulerInfo, config *Config, req *api.AgentRequest,
 ) (*api.PluginResponse, error) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			err := fmt.Errorf("Unexpected redirect while sending message to plugin")
-			klog.Warning(err)
+			logger.Warningf("%s", err)
 			return err
 		},
 		Timeout: time.Second * time.Duration(config.Scheduler.RequestTimeoutSeconds),
@@ -610,10 +632,10 @@ func (r *runner) sendRequestToPlugin(
 
 	requestBody, err := json.Marshal(req)
 	if err != nil {
-		klog.Fatalf("Error encoding scheduer request into JSON: %s", err)
+		logger.Fatalf("Error encoding scheduer request into JSON: %s", err)
 	}
 
-	klog.Infof("Sending AgentRequest: %+v", req)
+	logger.Infof("Sending AgentRequest: %+v", req)
 
 	url := fmt.Sprintf("http://%s:%d/", sched.ip, config.Scheduler.RequestPort)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(requestBody))
@@ -636,7 +658,7 @@ func (r *runner) sendRequestToPlugin(
 		return nil, fmt.Errorf("Bad JSON response: %s", err)
 	}
 
-	klog.Infof("Received PluginResponse: %+v", respMsg)
+	logger.Infof("Received PluginResponse: %+v", respMsg)
 	return &respMsg, nil
 }
 
