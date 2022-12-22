@@ -433,26 +433,20 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 	// Fetch this upfront, because we'll need it a couple times later.
 	nodeConf := conf.forNode(node.Name)
 
-	// helper string for error messages
-	hasAllocatableMsg := "it does have Allocatable, but config.fallbackToAllocatable = false. set it to true for a temporary hotfix"
-
 	// cpuQ = "cpu, as a K8s resource.Quantity"
-	cpuQ := node.Status.Capacity.Cpu()
-	if cpuQ == nil {
-		allocatableCPU := node.Status.Allocatable.Cpu()
-		if allocatableCPU != nil {
-			if conf.FallbackToAllocatable {
-				klog.Warningf(
-					"[autoscale-enforcer] Node %s has no CPU capacity limit, using Allocatable limit",
-					node.Name,
-				)
-				cpuQ = allocatableCPU
-			} else {
-				return nil, fmt.Errorf("Node has no Capacity CPU limit (%s)", hasAllocatableMsg)
-			}
-		} else {
-			return nil, fmt.Errorf("Node has no Capacity or Allocatable CPU limits")
-		}
+	// -A for allocatable, -C for capacity
+	var cpuQ *resource.Quantity
+	cpuQA := node.Status.Allocatable.Cpu()
+	cpuQC := node.Status.Capacity.Cpu()
+
+	if cpuQA != nil {
+		// Use Allocatable by default ...
+		cpuQ = cpuQA
+	} else if cpuQC != nil {
+		// ... but use Capacity if Allocatable is not available
+		cpuQ = cpuQC
+	} else {
+		return nil, fmt.Errorf("Node has no Allocatable or Capacity CPU limits")
 	}
 
 	maxCPU := uint16(cpuQ.MilliValue() / 1000) // cpu.Value rounds up. We don't want to do that.
@@ -462,23 +456,19 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 	}
 
 	// memQ = "mem, as a K8s resource.Quantity"
-	memQ := node.Status.Capacity.Memory()
-	if memQ == nil {
-		allocatableMem := node.Status.Allocatable.Memory()
-		if allocatableMem != nil {
-			if conf.FallbackToAllocatable {
-				klog.Warningf(
-					"[autoscale-enforcer] Node %s has no Memory capacity limit, using Allocatable limit",
-					node.Name,
-				)
-				memQ = allocatableMem
-			} else {
-				return nil, fmt.Errorf("Node has not Capacity Memory limit (%s)", hasAllocatableMsg)
-			}
-		} else {
-			return nil, fmt.Errorf("Node has not Capacity or Allocatable Memory limits")
-		}
+	// -A for allocatable, -C for capacity
+	var memQ *resource.Quantity
+	memQA := node.Status.Allocatable.Memory()
+	memQC := node.Status.Capacity.Memory()
+
+	if memQA != nil {
+		memQ = memQA
+	} else if memQC != nil {
+		memQ = memQC
+	} else {
+		return nil, fmt.Errorf("Node has no Allocatable or Capacity Memory limits")
 	}
+
 	// note: Value() rounds up. That's ok (probably), because the computation for totalSlots will
 	// round down.
 	totalSlots := memQ.Value() / conf.MemSlotSize.Value()

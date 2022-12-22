@@ -134,8 +134,7 @@ data:
       },
       "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
-      "doMigration": false,
-      "fallbackToAllocatable": false
+      "doMigration": false
     }
 ---
 apiVersion: apps/v1

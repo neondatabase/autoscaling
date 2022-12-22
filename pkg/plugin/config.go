@@ -48,13 +48,6 @@ type config struct {
 	// re-enable it.
 	DoMigration *bool `json:"doMigration"`
 
-	// FallbackToAllocatable is a flag that allows the scheduler to use a node's Status.Allocatable
-	// if a resource isn't present in its Status.Capacity.
-	//
-	// This flag *should* be false, but exists to allow a hotfix to quickly get things working if
-	// the appropriate information isn't there for some reason.
-	FallbackToAllocatable bool `json:"fallbackToAllocatable"`
-
 	// JSONString is the JSON string that was used to generate this config struct
 	JSONString string `json:"-"`
 }
