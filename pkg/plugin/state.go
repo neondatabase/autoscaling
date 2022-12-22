@@ -269,7 +269,7 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 	r.reservedCpu = uint16(r.rawCpu.Value())
 
 	// note: memSlotSize /should/ always be an integer value. It's theoretically possible for a user
-	// to not do that, but that would be /execptionally/ weird.
+	// to not do that, but that would be /exceptionally/ weird.
 	memSlotSizeExact := memSlotSize.Value()
 	// note: For integer arithmetic, (x + n-1) / n is equivalent to ceil(x/n)
 	newReservedMemSlots := (r.rawMemory.Value() + memSlotSizeExact - 1) / memSlotSizeExact
