@@ -1000,5 +1000,5 @@ func (s *pluginState) handleUpdatedConf() {
 		return
 	}
 
-	panic("todo")
+	klog.Warningf("Ignoring updated configuration, runtime config updates are unimplemented")
 }
