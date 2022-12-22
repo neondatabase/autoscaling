@@ -5,6 +5,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -78,6 +79,9 @@ type nodeResourceState[T any] struct {
 	// system is the amount of T pre-reserved for system functions, and cannot be handed out to pods
 	// on the node. This amount CAN change on config updates, which may result in more of T than
 	// we'd like being already provided to the pods.
+	//
+	// This is equivalent to the value of this resource's resourceConfig.System, rounded up to the
+	// nearest size of the units of T.
 	system T
 	// watermark is the amount of T reserved to pods above which we attempt to reduce usage via
 	// migration.
@@ -126,6 +130,14 @@ type nodeOtherResourceState struct {
 
 	reservedCpu      uint16
 	reservedMemSlots uint16
+
+	// marginCpu and marginMemory track the amount of other resources we can get "for free" because
+	// they were left out when rounding the System usage to fit in integer untis of CPUs or memory
+	// slots
+	//
+	// These values are both only changed by configuration changes.
+	marginCpu    *resource.Quantity
+	marginMemory *resource.Quantity
 }
 
 // podState is the information we track for an individual
@@ -212,8 +224,10 @@ func (r nodeOtherResourceState) addPod(
 	memSlotSize *resource.Quantity, p podOtherResourceState,
 ) nodeOtherResourceState {
 	newState := nodeOtherResourceState{
-		rawCpu:    r.rawCpu.DeepCopy(),
-		rawMemory: r.rawMemory.DeepCopy(),
+		rawCpu:       r.rawCpu.DeepCopy(),
+		rawMemory:    r.rawMemory.DeepCopy(),
+		marginCpu:    r.marginCpu,
+		marginMemory: r.marginMemory,
 	}
 
 	newState.rawCpu.Add(p.rawCpu)
@@ -250,8 +264,10 @@ func (r nodeOtherResourceState) subPod(
 	}
 
 	newState := nodeOtherResourceState{
-		rawCpu:    r.rawCpu.DeepCopy(),
-		rawMemory: r.rawMemory.DeepCopy(),
+		rawCpu:       r.rawCpu.DeepCopy(),
+		rawMemory:    r.rawMemory.DeepCopy(),
+		marginCpu:    r.marginCpu,
+		marginMemory: r.marginMemory,
 	}
 
 	newState.rawCpu.Sub(p.rawCpu)
@@ -265,20 +281,35 @@ func (r nodeOtherResourceState) subPod(
 // calculateReserved sets the values of r.reservedCpu and r.reservedMemSlots based on the current
 // "raw" resource amounts and the memory slot size
 func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantity) {
-	// note: Value() rounds up, which is the behavior we want here.
-	r.reservedCpu = uint16(r.rawCpu.Value())
-
-	// note: memSlotSize /should/ always be an integer value. It's theoretically possible for a user
-	// to not do that, but that would be /exceptionally/ weird.
-	memSlotSizeExact := memSlotSize.Value()
-	// note: For integer arithmetic, (x + n-1) / n is equivalent to ceil(x/n)
-	newReservedMemSlots := (r.rawMemory.Value() + memSlotSizeExact - 1) / memSlotSizeExact
-	if newReservedMemSlots > (1<<16 - 1) {
-		panic(fmt.Sprintf(
-			"new reserved mem slots overflows uint16 (%d > %d)", newReservedMemSlots, 1<<16-1,
-		))
+	// If rawCpu doesn't exceed the margin we have from rounding up System, set reserved = 0
+	if r.rawCpu.Cmp(*r.marginCpu) <= 0 {
+		r.reservedCpu = 0
+	} else {
+		// set cupCopy := r.rawCpu - r.marginCpu
+		cpuCopy := r.rawCpu.DeepCopy()
+		cpuCopy.Sub(*r.marginCpu)
+		// note: Value() rounds up, which is the behavior we want here.
+		r.reservedCpu = uint16(cpuCopy.Value())
 	}
-	r.reservedMemSlots = uint16(newReservedMemSlots)
+
+	// If rawMemory doesn't exceed the margin ..., set reserved = 0
+	if r.rawMemory.Cmp(*r.marginMemory) <= 0 {
+		r.reservedMemSlots = 0
+	} else {
+		// set memoryCopy := r.rawMemory - r.marginMemory
+		memoryCopy := r.rawMemory.DeepCopy()
+		memoryCopy.Sub(*r.marginMemory)
+
+		memSlotSizeExact := memSlotSize.Value()
+		// note: For integer arithmetic, (x + n-1) / n is equivalent to ceil(x/n)
+		newReservedMemSlots := (memoryCopy.Value() + memSlotSizeExact - 1) / memSlotSizeExact
+		if newReservedMemSlots > math.MaxUint16 {
+			panic(fmt.Sprintf(
+				"new reserved mem slots overflows uint16 (%d > %d)", newReservedMemSlots, math.MaxUint16,
+			))
+		}
+		r.reservedMemSlots = uint16(newReservedMemSlots)
+	}
 }
 
 // totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
@@ -450,7 +481,7 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 	}
 
 	maxCPU := uint16(cpuQ.MilliValue() / 1000) // cpu.Value rounds up. We don't want to do that.
-	vCPU, err := nodeConf.vCpuLimits(maxCPU)
+	vCPU, marginCpu, err := nodeConf.vCpuLimits(maxCPU)
 	if err != nil {
 		return nil, fmt.Errorf("Error calculating vCPU limits for node %s: %w", node.Name, err)
 	}
@@ -469,42 +500,40 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 		return nil, fmt.Errorf("Node has no Allocatable or Capacity Memory limits")
 	}
 
-	// note: Value() rounds up. That's ok (probably), because the computation for totalSlots will
-	// round down.
-	totalSlots := memQ.Value() / conf.MemSlotSize.Value()
-	// Check that totalSlots fits within a uint16
-	if totalSlots > (1<<16 - 1) {
-		return nil, fmt.Errorf(
-			"Node memory too big for current slot size, calculated at %d memory slots",
-			totalSlots,
-		)
-	}
-	memSlots, err := nodeConf.memoryLimits(uint16(totalSlots))
+	memSlots, marginMemory, err := nodeConf.memoryLimits(memQ, &conf.MemSlotSize)
 	if err != nil {
 		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", node.Name, err)
 	}
 
 	n := &nodeState{
-		name:        node.Name,
-		vCPU:        vCPU,
-		memSlots:    memSlots,
-		pods:        make(map[api.PodName]*podState),
-		otherPods:   make(map[api.PodName]*otherPodState),
+		name:      node.Name,
+		vCPU:      vCPU,
+		memSlots:  memSlots,
+		pods:      make(map[api.PodName]*podState),
+		otherPods: make(map[api.PodName]*otherPodState),
+		otherResources: nodeOtherResourceState{
+			rawCpu:           resource.Quantity{},
+			rawMemory:        resource.Quantity{},
+			reservedCpu:      0,
+			reservedMemSlots: 0,
+			marginCpu:        marginCpu,
+			marginMemory:     marginMemory,
+		},
 		computeUnit: &nodeConf.ComputeUnit,
 	}
 
 	fmtString := "[autoscale-enforcer] Built initial node state for %s:\n" +
-		"\tCPU:    total = %d (milli = %d), max reservable = %d, watermark = %d\n" +
-		"\tMemory: total = %d slots (raw = %v), max reservable = %d, watermark = %d"
+		"\tCPU:    total = %d (milli = %d, margin = %v), max reservable = %d, watermark = %d\n" +
+		"\tMemory: total = %d slots (raw = %v, margin = %v), max reservable = %d, watermark = %d"
 
 	klog.Infof(
 		fmtString,
 		// fetched node %s
 		node.Name,
-		// cpu: total = %d (milli = %d), max reservable = %d, watermark = %d
-		maxCPU, cpuQ.MilliValue(), n.totalReservableCPU(), n.vCPU.watermark,
-		// mem: total = %d (raw = %v), max reservable = %d, watermark = %d
-		totalSlots, memQ, n.totalReservableMemSlots(), n.memSlots.watermark,
+		// cpu: total = %d (milli = %d, margin = %v), max reservable = %d, watermark = %d
+		maxCPU, cpuQ.MilliValue(), n.otherResources.marginCpu, n.totalReservableCPU(), n.vCPU.watermark,
+		// mem: total = %d (raw = %v, margin = %v), max reservable = %d, watermark = %d
+		n.memSlots.total, memQ, n.otherResources.marginMemory, n.totalReservableMemSlots(), n.memSlots.watermark,
 	)
 
 	return n, nil

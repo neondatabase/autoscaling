@@ -77,7 +77,7 @@ type resourceConfig struct {
 	Watermark float32 `json:"watermark,omitempty"`
 	// System is the absolute amount of the resource allocated to non-user node functions, like
 	// Kubernetes daemons
-	System int64 `json:"system,omitempty"`
+	System resource.Quantity `json:"system,omitempty"`
 }
 
 func (c *config) migrationEnabled() bool {
@@ -126,10 +126,10 @@ func (s *overrideSet) validate() (string, error) {
 }
 
 func (c *nodeConfig) validate() (string, error) {
-	if path, err := c.Cpu.validate(); err != nil {
+	if path, err := c.Cpu.validate(false); err != nil {
 		return fmt.Sprintf("cpu.%s", path), err
 	}
-	if path, err := c.Memory.validate(); err != nil {
+	if path, err := c.Memory.validate(true); err != nil {
 		return fmt.Sprintf("memory.%s", path), err
 	}
 	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
@@ -139,15 +139,17 @@ func (c *nodeConfig) validate() (string, error) {
 	return "", nil
 }
 
-func (c *resourceConfig) validate() (string, error) {
+func (c *resourceConfig) validate(isMemory bool) (string, error) {
 	if c.Watermark <= 0.0 {
 		return "watermark", fmt.Errorf("value must be > 0")
 	} else if c.Watermark > 1.0 {
 		return "watermark", fmt.Errorf("value must be <= 1")
 	}
 
-	if c.System <= 0 {
+	if c.System.Value() <= 0 {
 		return "system", fmt.Errorf("value must be > 0")
+	} else if isMemory && c.System.Value() < math.MaxInt64 && c.System.MilliValue()%1000 != 0 {
+		return "system", fmt.Errorf("value cannot have milli-precision")
 	}
 
 	return "", nil
@@ -310,39 +312,66 @@ func (c *config) forNode(nodeName string) *nodeConfig {
 	return &c.NodeDefaults
 }
 
-func (c *nodeConfig) vCpuLimits(total uint16) (nodeResourceState[uint16], error) {
-	system := uint16(c.Cpu.System)
-	if system > total {
+func (c *nodeConfig) vCpuLimits(total uint16) (_ nodeResourceState[uint16], margin *resource.Quantity, _ error) {
+	system := c.Cpu.System.Value()
+	if system > int64(total) {
 		err := fmt.Errorf("desired system vCPU %d greater than node total %d", system, total)
-		return nodeResourceState[uint16]{}, err
+		return nodeResourceState[uint16]{}, nil, err
 	}
+
+	// note: .Value() rounds up, so 1000*Value() >= MilliValue()
+	milliMargin := 1000*system - c.Cpu.System.MilliValue()
+	margin = resource.NewMilliQuantity(milliMargin, c.Cpu.System.Format)
 
 	return nodeResourceState[uint16]{
 		total:                total,
-		system:               system,
-		watermark:            uint16(c.Cpu.Watermark * float32(total-system)),
+		system:               uint16(system),
+		watermark:            uint16(c.Cpu.Watermark * float32(total-uint16(system))),
 		reserved:             0,
 		capacityPressure:     0,
 		pressureAccountedFor: 0,
-	}, nil
+	}, margin, nil
 }
 
-func (c *nodeConfig) memoryLimits(totalSlots uint16) (nodeResourceState[uint16], error) {
-	system := uint16(c.Memory.System)
-	if system > totalSlots {
+func (c *nodeConfig) memoryLimits(
+	total *resource.Quantity,
+	slotSize *resource.Quantity,
+) (_ nodeResourceState[uint16], margin *resource.Quantity, _ error) {
+	if c.Memory.System.Cmp(*total) == 1 /* if c.Memory.System > total */ {
 		err := fmt.Errorf(
-			"desired system memory (%d slots) greater than node total (%d slots)",
-			system, totalSlots,
+			"desired system memory %v greater than node total %v",
+			&c.Memory.System, total,
 		)
-		return nodeResourceState[uint16]{}, err
+		return nodeResourceState[uint16]{}, nil, err
+	} else if slotSize.Cmp(*total) == 1 /* if slotSize > total */ {
+		err := fmt.Errorf("slotSize %v greater than node total %v", slotSize, total)
+		return nodeResourceState[uint16]{}, nil, err
 	}
 
+	totalSlots := total.Value() / slotSize.Value()
+	if totalSlots > int64(math.MaxUint16) {
+		err := fmt.Errorf("too many memory slots (%d > maximum uint16)", totalSlots)
+		return nodeResourceState[uint16]{}, nil, err
+	}
+
+	// systemSlots isn't measured directly, but as the number of additional slots reserved for
+	// system functions *that we'd otherwise have available*.
+	//
+	// So if c.Memory.System is less than the leftover space between totalSlots*slotSize and total,
+	// then systemSlots will be zero.
+	systemSlots := totalSlots - (total.Value()-c.Memory.System.Value())/slotSize.Value()
+
+	reservableSlots := totalSlots - systemSlots
+	unreservable := total.Value() - slotSize.Value()*reservableSlots
+
+	margin = resource.NewQuantity(unreservable, total.Format)
+
 	return nodeResourceState[uint16]{
-		total:                totalSlots,
-		system:               system,
-		watermark:            uint16(c.Memory.Watermark * float32(totalSlots-system)),
+		total:                uint16(totalSlots),
+		system:               uint16(systemSlots),
+		watermark:            uint16(c.Memory.Watermark * float32(totalSlots-systemSlots)),
 		reserved:             0,
 		capacityPressure:     0,
 		pressureAccountedFor: 0,
-	}, nil
+	}, margin, nil
 }

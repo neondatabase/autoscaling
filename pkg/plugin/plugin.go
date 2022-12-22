@@ -246,6 +246,10 @@ func (e *AutoscaleEnforcer) Filter(
 	// So we have to actually count up the resource usage of all pods in nodeInfo:
 	var totalNodeVCPU, totalNodeMem uint16
 	var otherResources nodeOtherResourceState
+
+	otherResources.marginCpu = node.otherResources.marginCpu
+	otherResources.marginMemory = node.otherResources.marginMemory
+
 	for _, podInfo := range nodeInfo.Pods {
 		pn := api.PodName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
@@ -498,16 +502,16 @@ func (e *AutoscaleEnforcer) Reserve(
 			e.state.otherPods[pName] = ps
 
 			fmtString := "[autoscale-enforcer] Allowing non-VM pod %v (%v raw cpu, %v raw mem) in node %s:\n" +
-				"\tvCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw)\n" +
-				"\t mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw)"
+				"\tvCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw, %v margin)\n" +
+				"\t mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw, %v margin)"
 			klog.Infof(
 				fmtString,
 				// allowing non-VM pod %v (%v raw cpu, %v raw mem) in node %s
 				pName, &podResources.rawCpu, &podResources.rawMemory, nodeName,
-				// vCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw)
-				oldNodeCpuReserved, node.vCPU.reserved, oldNodeRes.reservedCpu, newNodeRes.reservedCpu, &oldNodeRes.rawCpu, &newNodeRes.rawCpu,
-				// mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw)
-				oldNodeMemReserved, node.memSlots.reserved, oldNodeRes.reservedMemSlots, newNodeRes.reservedMemSlots, &oldNodeRes.rawMemory, &newNodeRes.rawMemory,
+				// vCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw, %v margin)
+				oldNodeCpuReserved, node.vCPU.reserved, oldNodeRes.reservedCpu, newNodeRes.reservedCpu, &oldNodeRes.rawCpu, &newNodeRes.rawCpu, newNodeRes.marginCpu,
+				// mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw, %v margin)
+				oldNodeMemReserved, node.memSlots.reserved, oldNodeRes.reservedMemSlots, newNodeRes.reservedMemSlots, &oldNodeRes.rawMemory, &newNodeRes.rawMemory, newNodeRes.marginMemory,
 			)
 
 			return nil // nil is success

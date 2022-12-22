@@ -229,13 +229,13 @@ func handleDeletedPod(
 	node.memSlots.reserved = node.memSlots.reserved - oldRes.reservedMemSlots + newRes.reservedMemSlots
 
 	cpuVerdict = fmt.Sprintf(
-		"pod had %v (raw), node otherPods (%v -> %v raw, %d -> %d rounded), node reserved %d -> %d",
-		&pod.rawCpu, &oldRes.rawCpu, &newRes.rawCpu, oldRes.reservedCpu, newRes.reservedCpu,
+		"pod had %v (raw), node otherPods (%v -> %v raw, %v margin, %d -> %d rounded), node reserved %d -> %d",
+		&pod.rawCpu, &oldRes.rawCpu, &newRes.rawCpu, newRes.marginCpu, oldRes.reservedCpu, newRes.reservedCpu,
 		oldNodeCpuReserved, node.vCPU.reserved,
 	)
 	memVerdict = fmt.Sprintf(
-		"pod had %v (raw), node otherPods (%v -> %v raw, %d -> %d slots), node reserved %d -> %d slots",
-		&pod.rawMemory, &oldRes.rawMemory, &newRes.rawMemory, oldRes.reservedMemSlots, newRes.reservedMemSlots,
+		"pod had %v (raw), node otherPods (%v -> %v raw, %v margin, %d -> %d slots), node reserved %d -> %d slots",
+		&pod.rawMemory, &oldRes.rawMemory, &newRes.rawMemory, newRes.marginMemory, oldRes.reservedMemSlots, newRes.reservedMemSlots,
 		oldNodeMemReserved, node.memSlots.reserved,
 	)
 
