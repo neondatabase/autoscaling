@@ -190,7 +190,7 @@ done
 data_dir: /tmp
 api:
   enabled: true
-  address: "[::]:8686"
+  address: "0.0.0.0:8686"
   playground: false
 sources:
   host_metrics:
@@ -214,7 +214,7 @@ sinks:
     inputs:
       - host_metrics
       - internal_metrics
-    address: "[::]:9090"
+    address: "0.0.0.0:9100"
 `
 )
 
