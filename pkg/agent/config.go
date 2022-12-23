@@ -36,6 +36,9 @@ type ScalingConfig struct {
 
 // MetricsConfig defines a few parameters for metrics requests to the VM
 type MetricsConfig struct {
+	// LoadMetricPrefix is the prefix at at the beginning of the load metrics that we use. For
+	// node_exporter, this is "node_", and for vector it's "host_"
+	LoadMetricPrefix string `json:"loadMetricPrefix"`
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for metrics requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	// SecondsBetweenRequests sets the number of seconds to wait between metrics requests
@@ -103,6 +106,8 @@ func (c *Config) validate() error {
 		return cannotBeZero(".metrics.secondsBetweenRequests")
 	} else if c.Metrics.InitialDelaySeconds == 0 {
 		return cannotBeZero(".metrics.initialDelaySeconds")
+	} else if c.Metrics.LoadMetricPrefix == "" {
+		return cannotBeEmpty(".metrics.loadMetricPrefix")
 	} else if c.Scheduler.SchedulerName == "" {
 		return cannotBeEmpty(".scheduler.schedulerName")
 	} else if c.Scheduler.RequestTimeoutSeconds == 0 {

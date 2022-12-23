@@ -18,8 +18,8 @@ type Metrics struct {
 // ReadMetrics generates Metrics from node_exporter output, or returns error on failure
 //
 // This function could be more efficient, but realistically it doesn't matter. The size of the
-// output from node_exporter is so small anyways.
-func ReadMetrics(nodeExporterOutput []byte) (m Metrics, err error) {
+// output from node_exporter/vector is so small anyways.
+func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err error) {
 	lines := strings.Split(string(nodeExporterOutput), "\n")
 
 	getField := func(linePrefix string) (float32, error) {
@@ -52,11 +52,11 @@ func ReadMetrics(nodeExporterOutput []byte) (m Metrics, err error) {
 		return float32(v), nil
 	}
 
-	m.LoadAverage1Min, err = getField("node_load1 ") // include an extra space so we don't get node_load15
+	m.LoadAverage1Min, err = getField(loadPrefix + "load1 ") // include an extra space so we don't get node_load15
 	if err != nil {
 		return
 	}
-	m.LoadAverage5Min, err = getField("node_load5")
+	m.LoadAverage5Min, err = getField(loadPrefix + "load5")
 	if err != nil {
 		return
 	}

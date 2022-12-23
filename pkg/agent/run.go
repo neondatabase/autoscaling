@@ -597,7 +597,7 @@ func (r *runner) getMetricsLoop(
 				return
 			}
 
-			m, err := api.ReadMetrics(body)
+			m, err := api.ReadMetrics(body, r.config.Metrics.LoadMetricPrefix)
 			if err != nil {
 				logger.Errorf("Error reading metrics from node_exporter output: %s", err)
 				return

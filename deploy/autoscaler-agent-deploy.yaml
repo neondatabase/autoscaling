@@ -54,6 +54,7 @@ data:
       }
     },
     "metrics": {
+      "loadMetricPrefix": "node_",
       "requestTimeoutSeconds": 2,
       "secondsBetweenRequests": 5,
       "initialDelaySeconds": 5
