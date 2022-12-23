@@ -10,7 +10,13 @@ RUN go mod download
 COPY pkg/ pkg/
 COPY cmd/ cmd/
 
-RUN --mount=type=cache,target=/root/.cache/go-build go build -a cmd/autoscaler-agent/main.go
+ARG GIT_INFO
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    go build -a \
+    # -ldflags "-X ..." allows us to overwrite the value of a variable in a package \
+    -ldflags "-X 'github.com/neondatabase/autoscaling/pkg/util.BuildGitInfo=$GIT_INFO'" \
+    cmd/autoscaler-agent/main.go
 
 FROM alpine
 COPY --from=builder /workspace/main /usr/bin/autoscaler-agent

@@ -8,6 +8,8 @@ import (
 	"k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type MainRunner struct {
@@ -21,6 +23,11 @@ func (r MainRunner) Run() error {
 	ctx := context.Background()
 
 	podEvents := make(chan podEvent)
+
+	buildInfo := util.GetBuildInfo()
+	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
+	klog.Infof("buildInfo.NeonVM:    %s", buildInfo.NeonVM)
+	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	klog.Info("Starting pod watcher")
 	watchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)

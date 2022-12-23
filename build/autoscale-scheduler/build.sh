@@ -19,9 +19,13 @@ REGISTRY_OR_USER="$( get_var REGISTRY_OR_USER "$DEFAULT_REGISTRY" )"
 IMG_NAME="$( get_var IMG_NAME "$DEFAULT_IMG_NAME" )"
 TAG="$( get_var TAG "$DEFAULT_TAG" )"
 
+GIT_INFO="$(git_info)"
+echo "Git info: $GIT_INFO"
+
 echo "Building Dockerfile, tagged as $REGISTRY_OR_USER/$IMG_NAME:$TAG"
 docker buildx build --pull \
     -t "$REGISTRY_OR_USER/$IMG_NAME:$TAG" \
+    --build-arg "GIT_INFO=$GIT_INFO" \
     -f build/autoscale-scheduler/Dockerfile \
     . | indent
 echo "Push completed image"

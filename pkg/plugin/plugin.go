@@ -17,6 +17,7 @@ import (
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 const Name = "AutoscaleEnforcer"
@@ -45,6 +46,10 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	// ^ obj can be used for taking in configuration. it's a bit tricky to figure out, and we don't
 	// quite need it yet.
 	klog.Info("[autoscale-enforcer] Initializing plugin")
+	buildInfo := util.GetBuildInfo()
+	klog.Infof("[autoscale-enforcer] buildInfo.GitInfo:   %s", buildInfo.GitInfo)
+	klog.Infof("[autoscale-enforcer] buildInfo.NeonVM:    %s", buildInfo.NeonVM)
+	klog.Infof("[autoscale-enforcer] buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	// create the NeonVM client
 	vmapi.AddToScheme(scheme.Scheme)
