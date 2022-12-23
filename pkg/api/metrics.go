@@ -22,10 +22,10 @@ type Metrics struct {
 func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err error) {
 	lines := strings.Split(string(nodeExporterOutput), "\n")
 
-	getField := func(linePrefix string) (float32, error) {
+	getField := func(linePrefix, dontMatch string) (float32, error) {
 		var line string
 		for _, l := range lines {
-			if strings.HasPrefix(l, linePrefix) {
+			if strings.HasPrefix(l, linePrefix) && (len(dontMatch) == 0 || !strings.HasPrefix(l, dontMatch)) {
 				line = l
 				break
 			}
@@ -52,11 +52,11 @@ func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err e
 		return float32(v), nil
 	}
 
-	m.LoadAverage1Min, err = getField(loadPrefix + "load1 ") // include an extra space so we don't get node_load15
+	m.LoadAverage1Min, err = getField(loadPrefix+"load1", loadPrefix+"load15")
 	if err != nil {
 		return
 	}
-	m.LoadAverage5Min, err = getField(loadPrefix + "load5")
+	m.LoadAverage5Min, err = getField(loadPrefix+"load5", "")
 	if err != nil {
 		return
 	}
