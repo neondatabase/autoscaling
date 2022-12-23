@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 )
@@ -21,10 +22,12 @@ func (r MainRunner) Run() error {
 
 	podEvents := make(chan podEvent)
 
+	klog.Info("Starting pod watcher")
 	watchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
 	if err != nil {
 		return fmt.Errorf("Error starting pod watcher: %w", err)
 	}
+	klog.Info("Pod watcher started, entering main loop")
 
 	globalState := r.newAgentState()
 
