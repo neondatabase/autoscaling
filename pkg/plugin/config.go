@@ -312,21 +312,33 @@ func (c *config) forNode(nodeName string) *nodeConfig {
 	return &c.NodeDefaults
 }
 
-func (c *nodeConfig) vCpuLimits(total uint16) (_ nodeResourceState[uint16], margin *resource.Quantity, _ error) {
-	system := c.Cpu.System.Value()
-	if system > int64(total) {
-		err := fmt.Errorf("desired system vCPU %d greater than node total %d", system, total)
+func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[uint16], margin *resource.Quantity, _ error) {
+	// We check both Value and MilliValue here in case the value overflows an int64 when
+	// multiplied by 1000, which is possible if c.Cpu.System is not in units of milli-CPU
+	if c.Cpu.System.Value() > total.Value() || c.Cpu.System.MilliValue() > total.MilliValue() {
+		err := fmt.Errorf("desired system vCPU %v greater than node total %v", &c.Cpu.System, total)
 		return nodeResourceState[uint16]{}, nil, err
 	}
 
-	// note: .Value() rounds up, so 1000*Value() >= MilliValue()
-	milliMargin := 1000*system - c.Cpu.System.MilliValue()
-	margin = resource.NewMilliQuantity(milliMargin, c.Cpu.System.Format)
+	totalRounded := total.MilliValue() / 1000
+
+	// system CPU usage isn't measured directly, but as the number of additional *full* CPUs
+	// reserved for system functions *that we'd otherwise have available*.
+	//
+	// So if c.Cpu.System is less than the difference between total.MilliValue() and
+	// 1000*total.Value(), then systemCpus will be zero.
+	systemCpus := totalRounded - (total.MilliValue()-c.Cpu.System.MilliValue())/1000
+
+	reservableCpus := totalRounded - systemCpus
+	unreservableCpuMillis := total.MilliValue() - 1000*reservableCpus
+
+	margin = resource.NewMilliQuantity(unreservableCpuMillis, c.Cpu.System.Format)
+	margin.Sub(c.Cpu.System)
 
 	return nodeResourceState[uint16]{
-		total:                total,
-		system:               uint16(system),
-		watermark:            uint16(c.Cpu.Watermark * float32(total-uint16(system))),
+		total:                uint16(totalRounded),
+		system:               uint16(systemCpus),
+		watermark:            uint16(c.Cpu.Watermark * float32(reservableCpus)),
 		reserved:             0,
 		capacityPressure:     0,
 		pressureAccountedFor: 0,
@@ -365,11 +377,12 @@ func (c *nodeConfig) memoryLimits(
 	unreservable := total.Value() - slotSize.Value()*reservableSlots
 
 	margin = resource.NewQuantity(unreservable, total.Format)
+	margin.Sub(c.Memory.System)
 
 	return nodeResourceState[uint16]{
 		total:                uint16(totalSlots),
 		system:               uint16(systemSlots),
-		watermark:            uint16(c.Memory.Watermark * float32(totalSlots-systemSlots)),
+		watermark:            uint16(c.Memory.Watermark * float32(reservableSlots)),
 		reserved:             0,
 		capacityPressure:     0,
 		pressureAccountedFor: 0,

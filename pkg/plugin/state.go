@@ -480,8 +480,7 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 		return nil, fmt.Errorf("Node has no Allocatable or Capacity CPU limits")
 	}
 
-	maxCPU := uint16(cpuQ.MilliValue() / 1000) // cpu.Value rounds up. We don't want to do that.
-	vCPU, marginCpu, err := nodeConf.vCpuLimits(maxCPU)
+	vCPU, marginCpu, err := nodeConf.vCpuLimits(cpuQ)
 	if err != nil {
 		return nil, fmt.Errorf("Error calculating vCPU limits for node %s: %w", node.Name, err)
 	}
@@ -531,7 +530,7 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 		// fetched node %s
 		node.Name,
 		// cpu: total = %d (milli = %d, margin = %v), max reservable = %d, watermark = %d
-		maxCPU, cpuQ.MilliValue(), n.otherResources.marginCpu, n.totalReservableCPU(), n.vCPU.watermark,
+		n.vCPU.total, cpuQ.MilliValue(), n.otherResources.marginCpu, n.totalReservableCPU(), n.vCPU.watermark,
 		// mem: total = %d (raw = %v, margin = %v), max reservable = %d, watermark = %d
 		n.memSlots.total, memQ, n.otherResources.marginMemory, n.totalReservableMemSlots(), n.memSlots.watermark,
 	)
