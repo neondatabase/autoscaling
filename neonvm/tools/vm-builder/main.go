@@ -75,7 +75,7 @@ RUN set -e \
 RUN set -e \
     && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
     | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-x86_64-unknown-linux-musl/bin/vector
-    
+
 # init scripts
 ADD inittab  /neonvm/bin/inittab
 ADD vminit   /neonvm/bin/vminit
@@ -133,7 +133,7 @@ fi
 ::sysinit:/neonvm/bin/vminit
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
-::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml
+::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
@@ -202,18 +202,11 @@ sources:
       mountPoints:
         excludes: ["*/proc/sys/fs/binfmt_misc"]
     type: host_metrics
-  postgresql_metrics:
-    endpoints:
-      - "postgres://postgres@localhost:5432"
-    type: postgresql_metrics
-  internal_metrics:
-    type: internal_metrics
 sinks:
   prom_exporter:
     type: prometheus_exporter
     inputs:
       - host_metrics
-      - internal_metrics
     address: "0.0.0.0:9100"
 `
 )
