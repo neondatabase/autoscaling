@@ -63,13 +63,13 @@ func collectResourceTransition[T constraints.Unsigned](
 	}
 }
 
-// handleRequested udpates r.pod and r.node with changes to match the requested resources, within
+// handleRequested updates r.pod and r.node with changes to match the requested resources, within
 // what's possible given the remaining resources.
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
 func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool) (verdict string) {
 	totalReservable := r.node.total - r.node.system
-	// note: it's possible to temorarily have reserved > totalReservable, after loading state or
+	// note: it's possible to temporarily have reserved > totalReservable, after loading state or
 	// config change; we have to use SaturatingSub here to account for that.
 	remainingReservable := util.SaturatingSub(totalReservable, r.oldNode.reserved)
 
@@ -105,7 +105,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		r.node.capacityPressure = r.node.capacityPressure + r.pod.capacityPressure - r.oldPod.capacityPressure
 
 		// note: we don't need to handle buffer here because migration is never started as the first
-		// communciation, so buffers will be zero already.
+		// communication, so buffers will be zero already.
 		if r.pod.buffer != 0 {
 			panic("r.pod.buffer != 0")
 		}
@@ -134,7 +134,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		// This obviously isn't great. However, this *is* the most resilient solution, and it is
 		// significantly simpler to implement, so it is the one I went with. As it currently stands,
 		// the autoscaler-agent is still required to submit requests that are multiples of compute
-		// units, so the system will *eventually* stabilize. This allows us to gracefully hande many
+		// units, so the system will *eventually* stabilize. This allows us to gracefully handle many
 		// kinds of stressors. Handling the resources separately *from the scheduler's point of
 		// view* makes it much, much easier to deal with.
 		//

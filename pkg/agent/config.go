@@ -80,7 +80,7 @@ func ReadConfig(path string) (*Config, error) {
 	}
 
 	if err = config.validate(); err != nil {
-		return nil, fmt.Errorf("Invaid config: %s", err)
+		return nil, fmt.Errorf("Invalid config: %s", err)
 	}
 
 	return &config, nil

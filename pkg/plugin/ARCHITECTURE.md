@@ -75,7 +75,7 @@ The plugins we implement are:
 For more information on scheduler plugins, see:
 <https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/>.
 
-We support both VM pods and non-VM pods, in order to accomodate mixed deployments. We expect that
+We support both VM pods and non-VM pods, in order to accommodate mixed deployments. We expect that
 _all other resource usage_ is within the bounds of the configured per-node "system" usage, so it's
 best to deploy as much as possible through the scheduler.
 
@@ -298,4 +298,4 @@ the last `ComputeUnit` that we informed the `autoscaler-agent` of.
 
 Whenever we receive a resource request, we check that it's a multiple of the _last_ `ComputeUnit`
 that we sent it, not the current one — the `autoscaler-agent` can't have already known. The next
-request will then have to be a mutiple of the current `ComputeUnit`.
+request will then have to be a multiple of the current `ComputeUnit`.

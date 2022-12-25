@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Source: https://suraj.io/post/2021/05/k8s-import/
-# Retreived 05 Oct 2022
+# Retrieved 05 Oct 2022
 # Slightly modified.
 #
 # This script isn't *really* necessary now that go.mod is properly initialized, but it's crucial if

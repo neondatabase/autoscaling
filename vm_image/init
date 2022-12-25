@@ -53,5 +53,5 @@ while true; do
     sleep 1s
 done
 
-echo "Exiting and shuting down vm"
+echo "Exiting and shutting down vm"
 graceful

@@ -32,7 +32,7 @@ git_info () {
     fi
 
     # notes on formatting: the combination of TZ=UTC0 and --date=iso-local means that we'll output
-    # ISO 8601 (-ish) format, interpeting the timestamp as relative to UTC+0.
+    # ISO 8601 (-ish) format, interpreting the timestamp as relative to UTC+0.
     #
     # Looks like: 7b66271+dirty (2022-12-23 17:20:49 +0000) - agent: Handle metrics more gracefully
     TZ=UTC0 git show -s --format=format:"%h$dirty (%cd) - %s" --date=iso-local

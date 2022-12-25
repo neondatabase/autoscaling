@@ -171,7 +171,7 @@ func (oldConf *config) validateChangeTo(newConf *config) (string, error) {
 /////////////////////////////////////////
 
 // setConfigAndStartWatcher basically does what it says. It (indirectly) spawns goroutines that will
-// udpate the plugin's config (calling e.handleNewConfigMap).
+// update the plugin's config (calling e.handleNewConfigMap).
 func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error {
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
@@ -299,7 +299,7 @@ func (e *AutoscaleEnforcer) handleNewConfigMap(configMap *corev1.ConfigMap) erro
 // HELPER METHODS FOR USING CONFIGS //
 //////////////////////////////////////
 
-// forNode returns the individual nodeConfig for a node with a particualr name, taking override
+// forNode returns the individual nodeConfig for a node with a particular name, taking override
 // settings into account
 func (c *config) forNode(nodeName string) *nodeConfig {
 	for i, set := range c.NodeOverrides {
