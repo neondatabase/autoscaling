@@ -27,7 +27,7 @@ RUN set -e \
 # init postgres
 ENV PGDATA /var/lib/postgresql
 RUN set -e \
-    && mkdir -p ${PGDARA} /run/postgresql \
+    && mkdir -p ${PGDATA} /run/postgresql \
     && chown -R postgres:postgres ${PGDATA} /run/postgresql \
     && su-exec postgres pg_ctl init
 
