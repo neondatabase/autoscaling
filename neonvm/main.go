@@ -101,6 +101,18 @@ func main() {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
 		os.Exit(1)
 	}
+	if err = (&controllers.VirtualMachineMigrationReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
+		os.Exit(1)
+	}
+	if err = (&vmv1.VirtualMachineMigration{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachineMigration")
+		os.Exit(1)
+	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

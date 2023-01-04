@@ -35,6 +35,32 @@ rules:
 - apiGroups:
   - vm.neon.tech
   resources:
+  - virtualmachinemigrations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachinemigrations/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachinemigrations/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - vm.neon.tech
+  resources:
   - virtualmachines
   verbs:
   - create

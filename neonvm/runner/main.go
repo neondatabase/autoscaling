@@ -498,6 +498,11 @@ func main() {
 	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,script=no,downscript=no,vhost=on", defaultNetworkTapName))
 	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
 
+	// should runner receive migration ?
+	if os.Getenv("RECEIVE_MIGRATION") == "true" {
+		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
+	}
+
 	if err := execFg(QEMU_BIN, qemuCmd...); err != nil {
 		log.Fatal(err)
 	}

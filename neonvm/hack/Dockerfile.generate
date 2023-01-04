@@ -2,8 +2,8 @@ FROM golang:1.19
 
 WORKDIR /workspace
 
-ENV CONTROLLER_TOOLS_VERSION v0.10.0
-ENV CODE_GENERATOR_VERSION v0.25.4
+ENV CONTROLLER_TOOLS_VERSION v0.11.1
+ENV CODE_GENERATOR_VERSION v0.26.0
 
 RUN git clone --branch=${CODE_GENERATOR_VERSION} --depth=1 https://github.com/kubernetes/code-generator.git $GOPATH/src/k8s.io/code-generator
 RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@${CONTROLLER_TOOLS_VERSION}

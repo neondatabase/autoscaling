@@ -28,6 +28,7 @@ import (
 type NeonvmV1Interface interface {
 	RESTClient() rest.Interface
 	VirtualMachinesGetter
+	VirtualMachineMigrationsGetter
 }
 
 // NeonvmV1Client is used to interact with features provided by the neonvm group.
@@ -37,6 +38,10 @@ type NeonvmV1Client struct {
 
 func (c *NeonvmV1Client) VirtualMachines(namespace string) VirtualMachineInterface {
 	return newVirtualMachines(c, namespace)
+}
+
+func (c *NeonvmV1Client) VirtualMachineMigrations(namespace string) VirtualMachineMigrationInterface {
+	return newVirtualMachineMigrations(c, namespace)
 }
 
 // NewForConfig creates a new NeonvmV1Client for the given config.

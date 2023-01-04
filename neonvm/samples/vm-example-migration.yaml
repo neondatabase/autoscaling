@@ -1,0 +1,6 @@
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachineMigration
+metadata:
+  name: example
+spec:
+  vmName: example

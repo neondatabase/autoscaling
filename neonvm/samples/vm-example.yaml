@@ -37,13 +37,14 @@ spec:
   guest:
     cpus:
       min: 1
-      max: 4
-      use: 1
+#      max: 4
+#      use: 1
     memorySlotSize: 1Gi
     memorySlots:
-      min: 1
-      max: 4
-      use: 4
+      min: 2
+#      min: 1
+#      max: 2
+#      use: 2
     rootDisk:
       image: vm-postgres:15-alpine
       #size: 8Gi
@@ -94,21 +95,21 @@ data:
     shared_preload_libraries = 'pg_stat_statements'
 
     max_connections = 64
-    shared_buffers = 2GB
-    effective_cache_size = 1GB
-    maintenance_work_mem = 256MB
+    shared_buffers = 512MB
+    effective_cache_size = 1536MB
+    maintenance_work_mem = 128MB
     checkpoint_completion_target = 0.9
     wal_buffers = 16MB
     default_statistics_target = 100
     random_page_cost = 1.1
     effective_io_concurrency = 200
-    work_mem = 8MB
+    work_mem = 4MB
     min_wal_size = 1GB
     max_wal_size = 4GB
-    max_worker_processes = 8
-    max_parallel_workers_per_gather = 4
-    max_parallel_workers = 8
-    max_parallel_maintenance_workers = 4
+    max_worker_processes = 4
+    max_parallel_workers_per_gather = 2
+    max_parallel_workers = 4
+    max_parallel_maintenance_workers = 2
 
   vector.yaml: |
     sources:

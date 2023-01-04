@@ -463,6 +463,78 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 func (r *VirtualMachineReconciler) podForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 
+	pod, err := podSpec(virtualmachine)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Pod
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(virtualmachine, pod, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return pod, nil
+}
+
+// labelsForVirtualMachine returns the labels for selecting the resources
+// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
+func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
+	l := virtualmachine.Labels
+	if l == nil {
+		l = map[string]string{}
+	}
+	l["app.kubernetes.io/name"] = "NeonVM"
+	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
+	return l
+}
+
+func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affinity {
+	a := virtualmachine.Spec.Affinity
+	if a == nil {
+		a = &corev1.Affinity{}
+	}
+	if a.NodeAffinity == nil {
+		a.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+
+	// if NodeSelectorTerms list is empty - add default values (arch==amd84 or os==linux)
+	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
+		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
+			a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+			corev1.NodeSelectorTerm{
+				MatchExpressions: []corev1.NodeSelectorRequirement{
+					{
+						Key:      "kubernetes.io/arch",
+						Operator: "In",
+						Values:   []string{"amd64"},
+					},
+					{
+						Key:      "kubernetes.io/os",
+						Operator: "In",
+						Values:   []string{"linux"},
+					},
+				},
+			})
+	}
+	return a
+}
+
+// imageForVirtualMachine gets the Operand image which is managed by this controller
+// from the VM_RUNNER_IMAGE environment variable defined in the config/manager/manager.yaml
+func imageForVmRunner() (string, error) {
+	var imageEnvVar = "VM_RUNNER_IMAGE"
+	image, found := os.LookupEnv(imageEnvVar)
+	if !found {
+		return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
+	}
+	return image, nil
+}
+
+func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	labels := labelsForVirtualMachine(virtualmachine)
 	affinity := affinityForVirtualMachine(virtualmachine)
 
@@ -591,73 +663,11 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 		}
 	}
 
-	// Set the ownerRef for the Pod
-	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
-	if err := ctrl.SetControllerReference(virtualmachine, pod, r.Scheme); err != nil {
-		return nil, err
-	}
 	return pod, nil
 }
 
-// labelsForVirtualMachine returns the labels for selecting the resources
-// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
-func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
-	l := virtualmachine.Labels
-	if l == nil {
-		l = map[string]string{}
-	}
-	l["app.kubernetes.io/name"] = "NeonVM"
-	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
-	return l
-}
-
-func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affinity {
-	a := virtualmachine.Spec.Affinity
-	if a == nil {
-		a = &corev1.Affinity{}
-	}
-	if a.NodeAffinity == nil {
-		a.NodeAffinity = &corev1.NodeAffinity{}
-	}
-	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
-	}
-
-	// if NodeSelectorTerms list is empty - add default values (arch==amd84 or os==linux)
-	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
-		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
-			a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-			corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{
-					{
-						Key:      "kubernetes.io/arch",
-						Operator: "In",
-						Values:   []string{"amd64"},
-					},
-					{
-						Key:      "kubernetes.io/os",
-						Operator: "In",
-						Values:   []string{"linux"},
-					},
-				},
-			})
-	}
-	return a
-}
-
-// imageForVirtualMachine gets the Operand image which is managed by this controller
-// from the VM_RUNNER_IMAGE environment variable defined in the config/manager/manager.yaml
-func imageForVmRunner() (string, error) {
-	var imageEnvVar = "VM_RUNNER_IMAGE"
-	image, found := os.LookupEnv(imageEnvVar)
-	if !found {
-		return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
-	}
-	return image, nil
-}
-
 // SetupWithManager sets up the controller with the Manager.
-// Note that the Deployment will be also watched in order to ensure its
+// Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).

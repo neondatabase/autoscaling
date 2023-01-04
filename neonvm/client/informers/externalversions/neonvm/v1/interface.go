@@ -25,6 +25,8 @@ import (
 type Interface interface {
 	// VirtualMachines returns a VirtualMachineInformer.
 	VirtualMachines() VirtualMachineInformer
+	// VirtualMachineMigrations returns a VirtualMachineMigrationInformer.
+	VirtualMachineMigrations() VirtualMachineMigrationInformer
 }
 
 type version struct {
@@ -41,4 +43,9 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 // VirtualMachines returns a VirtualMachineInformer.
 func (v *version) VirtualMachines() VirtualMachineInformer {
 	return &virtualMachineInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// VirtualMachineMigrations returns a VirtualMachineMigrationInformer.
+func (v *version) VirtualMachineMigrations() VirtualMachineMigrationInformer {
+	return &virtualMachineMigrationInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

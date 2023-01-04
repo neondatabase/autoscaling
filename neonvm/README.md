@@ -78,10 +78,17 @@ kubectl delete neonvm vm-debian
 
 ### Run NeonVM locally
 
-#### 1. Create local cluster
+#### 1. Create local cluster (with 3 nodes)
 
 ```sh
-kind create cluster --image kindest/node:v1.23.13
+cat | kind create cluster --image kindest/node:v1.23.13 --config - <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+- role: worker
+- role: worker
+EOF
 ```
 
 #### 2. Install cert-manager
@@ -170,8 +177,53 @@ and then check status by `kubectl get neonvm example` and inspect memory inside 
 
 #### 7. Do live migration
 
+inspect VM details to see on what node it running
+
 ```sh
-...soon
+$ kubectl get neonvm -owide
+NAME      CPUS   MEMORY   POD             STATUS    AGE   NODE          IMAGE
+example   1      2Gi      example-xdw4s   Running   31s   kind-worker   vm-postgres:15-alpine
+```
+
+trigger live migration
+
+```sh
+kubectl apply -f samples/vm-example-migration.yaml
+```
+
+inspect migration details
+
+```sh
+$ kubectl get neonvmm -owide
+NAME      VM        SOURCE          SOURCEIP     TARGET          TARGETIP     STATUS      AGE
+example   example   example-xdw4s   10.244.1.7   example-7ztb2   10.244.2.6   Succeeded   33s
+```
+
+inspect VM details again (look at pod name and node)
+
+```sh
+$ kubectl get neonvm -owide
+NAME      CPUS   MEMORY   POD             STATUS    AGE     NODE           IMAGE
+example   1      2Gi      example-7ztb2   Running   4m12s   kind-worker2   vm-postgres:15-alpine
+```
+
+inspect migration details
+
+```sh
+$ kubectl get neonvmm example -ojsonpath='{.status.info}' | jq
+{
+  "compression": {
+    "compressedSize": 44687045
+  },
+  "downtimeMs": 39,
+  "ram": {
+    "total": 2148278272,
+    "transferred": 76324646
+  },
+  "setupTimeMs": 2,
+  "status": "completed",
+  "totalTimeMs": 3861
+}
 ```
 
 ### Uninstall CRDs

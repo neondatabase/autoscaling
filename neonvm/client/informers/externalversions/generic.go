@@ -54,6 +54,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 	// Group=neonvm, Version=v1
 	case v1.SchemeGroupVersion.WithResource("virtualmachines"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Neonvm().V1().VirtualMachines().Informer()}, nil
+	case v1.SchemeGroupVersion.WithResource("virtualmachinemigrations"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Neonvm().V1().VirtualMachineMigrations().Informer()}, nil
 
 	}
 

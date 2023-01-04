@@ -9,3 +9,5 @@ bash $GOPATH/src/k8s.io/code-generator/generate-groups.sh "deepcopy,client,infor
     github.com/neondatabase/neonvm/apis \
     neonvm:v1 \
     --go-header-file hack/boilerplate.go.txt
+
+controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./apis/..."

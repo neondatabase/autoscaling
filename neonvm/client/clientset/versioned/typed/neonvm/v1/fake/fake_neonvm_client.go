@@ -31,6 +31,10 @@ func (c *FakeNeonvmV1) VirtualMachines(namespace string) v1.VirtualMachineInterf
 	return &FakeVirtualMachines{c, namespace}
 }
 
+func (c *FakeNeonvmV1) VirtualMachineMigrations(namespace string) v1.VirtualMachineMigrationInterface {
+	return &FakeVirtualMachineMigrations{c, namespace}
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeNeonvmV1) RESTClient() rest.Interface {
