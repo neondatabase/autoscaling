@@ -82,6 +82,7 @@ ADD vminit   /neonvm/bin/vminit
 ADD vmstart  /neonvm/bin/vmstart
 ADD vmacpi   /neonvm/acpi/vmacpi
 ADD vector.yaml /neonvm/config/vector.yaml
+RUN mkdir /etc/vector
 RUN chmod +x /neonvm/bin/vminit /neonvm/bin/vmstart
 
 FROM vm-runtime AS builder
