@@ -313,8 +313,56 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			virtualmachinemigration.Status.SourcePodIP = vm.Status.PodIP
 			virtualmachinemigration.Status.TargetPodIP = targetRunner.Status.PodIP
 
-			// Migrate only running VMs
-			if vm.Status.Phase == vmv1.VmRunning {
+			readyToMigrateCPU := false
+			// do hotplugCPU in targetRunner before migration if .spec.guest.cpus.use defined
+			if vm.Spec.Guest.CPUs.Use != nil {
+				// firstly get current state from QEMU
+				cpusPlugged, _, err := QmpGetCpusFromRunner(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP)
+				if err != nil {
+					log.Error(err, "Failed to get CPU details from Target Runner", "Pod", virtualmachinemigration.Status.TargetPodName)
+					return err
+				}
+				// compare guest spec and count of plugged
+				if *vm.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
+					// going to plug one CPU
+					err := QmpPlugCpuToRunner(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP)
+					if err != nil {
+						return err
+					} else {
+						log.Info("Plugged CPU to Target Pod", "Pod.Name", virtualmachinemigration.Status.TargetPodName)
+					}
+				} else {
+					// seems all CPUs plugged to target runner
+					readyToMigrateCPU = true
+				}
+			}
+
+			readyToMigrateMemory := false
+			// do hotplug Memory in targetRunner if .spec.guest.memorySlots.use defined
+			if vm.Spec.Guest.MemorySlots.Use != nil {
+				// firstly get current state from QEMU
+				memoryDevices, err := QmpQueryMemoryDevicesFromRunner(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP)
+				if err != nil {
+					log.Error(err, "Failed to get Memory details from Target Runner", "Pod", virtualmachinemigration.Status.TargetPodName)
+					return err
+				}
+				// compare guest spec and count of plugged
+				if *vm.Spec.Guest.MemorySlots.Use > *vm.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
+					// going to plug one Memory Slot
+					err := QmpPlugMemoryToRunner(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP, vm.Spec.Guest.MemorySlotSize.Value())
+					if err != nil {
+						return err
+					} else {
+						log.Info("Plugged Memory to Target Pod", "Pod.Name", virtualmachinemigration.Status.TargetPodName)
+					}
+				} else {
+					// seems all Memory Slots plugged to target runner
+					readyToMigrateMemory = true
+				}
+			}
+
+			// Migrate only running VMs to target with plugged devices
+			if vm.Status.Phase == vmv1.VmRunning && readyToMigrateMemory && readyToMigrateCPU {
 				// update VM status
 				vm.Status.Phase = vmv1.VmMigrating
 				if err := r.Status().Update(ctx, vm); err != nil {

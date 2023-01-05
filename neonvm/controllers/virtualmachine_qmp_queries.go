@@ -96,8 +96,49 @@ func QmpConnect(virtualmachine *vmv1.VirtualMachine) (*qmp.SocketMonitor, error)
 	return mon, nil
 }
 
+func QmpConnectByIP(ip string, port int32) (*qmp.SocketMonitor, error) {
+	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", ip, port), 2*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	if err := mon.Connect(); err != nil {
+		return nil, err
+	}
+
+	return mon, nil
+}
+
 func QmpGetCpus(virtualmachine *vmv1.VirtualMachine) ([]QmpCpuSlot, []QmpCpuSlot, error) {
 	mon, err := QmpConnect(virtualmachine)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer mon.Disconnect()
+
+	qmpcmd := []byte(`{ "execute": "query-hotpluggable-cpus"}`)
+	raw, err := mon.Run(qmpcmd)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var result QmpCpus
+	json.Unmarshal(raw, &result)
+
+	plugged := []QmpCpuSlot{}
+	empty := []QmpCpuSlot{}
+	for _, entry := range result.Return {
+		if entry.QomPath != nil {
+			plugged = append(plugged, QmpCpuSlot{Core: entry.Props.CoreId, QOM: *entry.QomPath, Type: entry.Type})
+		} else {
+			empty = append(empty, QmpCpuSlot{Core: entry.Props.CoreId, QOM: "", Type: entry.Type})
+		}
+	}
+
+	return plugged, empty, nil
+}
+
+func QmpGetCpusFromRunner(ip string, port int32) ([]QmpCpuSlot, []QmpCpuSlot, error) {
+	mon, err := QmpConnectByIP(ip, port)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -135,6 +176,33 @@ func QmpPlugCpu(virtualmachine *vmv1.VirtualMachine) error {
 	}
 
 	mon, err := QmpConnect(virtualmachine)
+	if err != nil {
+		return err
+	}
+	defer mon.Disconnect()
+
+	// empty list reversed, first cpu slot in the end of list and last cpu slot in the begining
+	slot := empty[len(empty)-1]
+	qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
+
+	_, err = mon.Run(qmpcmd)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func QmpPlugCpuToRunner(ip string, port int32) error {
+	_, empty, err := QmpGetCpusFromRunner(ip, port)
+	if err != nil {
+		return err
+	}
+	if len(empty) == 0 {
+		return errors.New("No empy slots for CPU hotplug")
+	}
+
+	mon, err := QmpConnectByIP(ip, port)
 	if err != nil {
 		return err
 	}
@@ -205,6 +273,23 @@ func QmpQueryMemoryDevices(virtualmachine *vmv1.VirtualMachine) ([]QmpMemoryDevi
 	return result.Return, nil
 }
 
+func QmpQueryMemoryDevicesFromRunner(ip string, port int32) ([]QmpMemoryDevice, error) {
+	mon, err := QmpConnectByIP(ip, port)
+	if err != nil {
+		return nil, err
+	}
+	defer mon.Disconnect()
+
+	var result QmpMemoryDevices
+	cmd := []byte(`{ "execute": "query-memory-devices"}`)
+	raw, err := mon.Run(cmd)
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal(raw, &result)
+	return result.Return, nil
+}
+
 func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	// slots - number of pluggable memory slots (Max - Min)
 	slots := *virtualmachine.Spec.Guest.MemorySlots.Max - *virtualmachine.Spec.Guest.MemorySlots.Min
@@ -233,6 +318,44 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	if err != nil {
 		// that mean such object wasn't found, let's add it
 		cmd = []byte(fmt.Sprintf(`{"execute": "object-add", "arguments": {"id": "memslot%d", "size": %d, "qom-type": "memory-backend-ram"}}`, plugged+1, virtualmachine.Spec.Guest.MemorySlotSize.Value()))
+		_, err = mon.Run(cmd)
+		if err != nil {
+			return err
+		}
+	}
+	// now add pc-dimm device
+	cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "dimm%d", "driver": "pc-dimm", "memdev": "memslot%d"}}`, plugged+1, plugged+1))
+	_, err = mon.Run(cmd)
+	if err != nil {
+		// device_add comand failed... so try remove object that we just created
+		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, plugged+1))
+		mon.Run(cmd)
+		return err
+	}
+
+	return nil
+}
+
+func QmpPlugMemoryToRunner(ip string, port int32, size int64) error {
+	memoryDevices, err := QmpQueryMemoryDevicesFromRunner(ip, port)
+	if err != nil {
+		return err
+	}
+	plugged := int32(len(memoryDevices))
+
+	mon, err := QmpConnectByIP(ip, port)
+	if err != nil {
+		return err
+	}
+	defer mon.Disconnect()
+
+	// add memdev object for next slot
+	// firstly check if such obect already present to avoid repeats
+	cmd := []byte(fmt.Sprintf(`{"execute": "qom-list", "arguments": {"path": "/objects/memslot%d"}}`, plugged+1))
+	_, err = mon.Run(cmd)
+	if err != nil {
+		// that mean such object wasn't found, let's add it
+		cmd = []byte(fmt.Sprintf(`{"execute": "object-add", "arguments": {"id": "memslot%d", "size": %d, "qom-type": "memory-backend-ram"}}`, plugged+1, size))
 		_, err = mon.Run(cmd)
 		if err != nil {
 			return err
@@ -442,11 +565,8 @@ func QmpGetMigrationInfo(virtualmachine *vmv1.VirtualMachine) (MigrationInfo, er
 }
 
 func QmpQuit(ip string, port int32) error {
-	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", ip, port), 2*time.Second)
+	mon, err := QmpConnectByIP(ip, port)
 	if err != nil {
-		return err
-	}
-	if err := mon.Connect(); err != nil {
 		return err
 	}
 	defer mon.Disconnect()

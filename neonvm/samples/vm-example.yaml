@@ -37,17 +37,16 @@ spec:
   guest:
     cpus:
       min: 1
-#      max: 4
-#      use: 1
+      max: 4
+      use: 2
     memorySlotSize: 1Gi
     memorySlots:
-      min: 2
-#      min: 1
-#      max: 2
-#      use: 2
+      min: 1
+      max: 2
+      use: 2
     rootDisk:
       image: vm-postgres:15-alpine
-      #size: 8Gi
+      size: 8Gi
     args:
       - -c
       - 'config_file=/etc/postgresql/postgresql.conf'
