@@ -203,18 +203,11 @@ sources:
       mountPoints:
         excludes: ["*/proc/sys/fs/binfmt_misc"]
     type: host_metrics
-  postgresql_metrics:
-    type: postgresql_metrics
-    endpoints:
-      - "postgres://cloud_admin@localhost:5432/postgres"
-    exclude_databases:
-      - "^template.*"
 sinks:
   prom_exporter:
     type: prometheus_exporter
     inputs:
       - host_metrics
-      - postgresql_metrics
     address: "0.0.0.0:9100"
 `
 )
