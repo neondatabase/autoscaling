@@ -11,7 +11,7 @@ indent () {
 #
 # Helper function to require that the script is being run as root
 require_root () {
-    if [[ "$EUID" != 0 ]]; then
+    if [[ "$OSTYPE" != "darwin"* && "$EUID" != 0 ]]; then
         echo "Must be running as root (EUID != 0)"
         exit 1
     fi
