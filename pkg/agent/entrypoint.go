@@ -36,7 +36,7 @@ func (r MainRunner) Run() error {
 	}
 	klog.Info("Pod watcher started, entering main loop")
 
-	globalState := r.newAgentState()
+	globalState := r.newAgentState(r.EnvArgs.K8sPodIP)
 
 	for {
 		select {

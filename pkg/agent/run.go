@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/url"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +25,9 @@ type runner struct {
 	config     *Config
 	vmClient   *vmclient.Clientset
 	kubeClient *kubernetes.Clientset
+
+	// thisIP is the IP address of this autoscaler-agent's pod
+	thisIP string
 
 	// note: only vm.Name and vm.Namespace are expected to be set before calling Spawn or Run. The
 	// rest will be determined by an initial request to get information about the VM.
@@ -139,9 +141,23 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _
 	r.vm = initVmInfo
 	initVmInfo = nil // clear to allow GC.
 
+	// Signalling channel used by the informant server & metrics loop
+	switchSuspendResume := make(chan struct{})
+
+	informantServerPanicked := make(chan struct{}, 1)
+	newMetricsPort := make(chan uint16)
+	metricsPort, err := r.runInformantServerLoop(
+		ctx, logger, informantServerPanicked, newMetricsPort, switchSuspendResume,
+	)
+	if err != nil {
+		return false, fmt.Errorf("Error starting informant server loop: %w", err)
+	}
+
 	metrics := make(chan api.Metrics)
-	metricsPanicked := make(chan struct{})
-	go r.getMetricsLoop(ctx, logger, r.config, metrics, metricsPanicked)
+	metricsPanicked := make(chan struct{}, 1)
+	go r.getMetricsLoop(
+		ctx, logger, r.config, metrics, metricsPanicked, metricsPort, newMetricsPort, switchSuspendResume,
+	)
 
 	var computeUnit *api.Resources
 
@@ -176,6 +192,8 @@ restartConnection:
 		case <-r.deleted.Recv():
 			logger.Infof("Ending runner loop for VM, pod was deleted")
 			return false, nil
+		case <-informantServerPanicked:
+			return false, fmt.Errorf("Informant server panicked")
 		case <-metricsPanicked:
 			return false, fmt.Errorf("Metrics loop panicked")
 		case info := <-schedulerWatch.Deleted:
@@ -424,6 +442,10 @@ noSchedulerLoop:
 		case <-r.deleted.Recv():
 			logger.Infof("Ending runner loop, pod was deleted")
 			return false, nil
+		case <-informantServerPanicked:
+			return false, fmt.Errorf("Informant server panicked")
+		case <-metricsPanicked:
+			return false, fmt.Errorf("Metrics loop panicked")
 		case info := <-schedulerWatch.ReadyQueue:
 			logger.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
 			scheduler = &info
@@ -543,7 +565,14 @@ func memSlotsForCpu(logger RunnerLogger, computeUnit api.Resources, cpu uint16) 
 
 // note: we actually use the context here; we have a deferred cancel on it in Run
 func (r *runner) getMetricsLoop(
-	ctx context.Context, logger RunnerLogger, config *Config, metrics chan<- api.Metrics, panicked chan<- struct{},
+	ctx context.Context,
+	logger RunnerLogger,
+	config *Config,
+	metrics chan<- api.Metrics,
+	panicked chan<- struct{},
+	metricsPort uint16,
+	newPort <-chan uint16,
+	switchSuspendResume <-chan struct{},
 ) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -554,31 +583,32 @@ func (r *runner) getMetricsLoop(
 		Timeout: time.Second * time.Duration(config.Metrics.RequestTimeoutSeconds),
 	}
 
-	metricsURL, err := url.Parse(fmt.Sprintf("http://%s:9100/metrics", r.podIP))
+	metricsURL := fmt.Sprintf("http://%s:%d/metrics", r.podIP, metricsPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, bytes.NewReader([]byte{}))
 	if err != nil {
 		panic(fmt.Sprintf("Error creating metrics URL: %s", err))
 	}
 
-	req := http.Request{
-		Method: "GET",
-		URL:    metricsURL,
-		// Allow reusing the TCP connection across multiple requests. Already false by default, but
-		// worth setting explicitly.
-		Close: false,
-	}
+	logger.Infof("Metrics loop waiting for initial Resume from VM informant")
 
-	logger.Infof("Starting metrics loop. Timeout = %f seconds", client.Timeout.Seconds())
+	// Make sure that any exit from this loop will have some record of it
+	defer logger.Infof("Ending metrics loop for VM %s:%s", r.vm.Namespace, r.vm.Name)
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-switchSuspendResume:
+		logger.Infof("Starting metrics loop. Timeout = %s", client.Timeout)
+	}
 
 	// Helper to track whether we've gotten any responses yet. If we have, failed requests are
 	// treated more seriously
 	gotAtLeastOne := false
 
-	time.Sleep(time.Second * time.Duration(config.Metrics.InitialDelaySeconds))
-
 	for {
 		// Wrap the loop body in a function so that we can defer inside it
 		func() {
-			resp, err := client.Do(&req)
+			resp, err := client.Do(req)
 			if err != nil {
 				err = fmt.Errorf("Error getting metrics: %w", err)
 				if !gotAtLeastOne || ctx.Err() != nil {
@@ -611,9 +641,18 @@ func (r *runner) getMetricsLoop(
 		case <-time.NewTimer(time.Second * time.Duration(config.Metrics.SecondsBetweenRequests)).C:
 			// Continue to the next request
 		case <-ctx.Done():
-			logger.Infof("Ending metrics loop for VM %s:%s", r.vm.Name, r.vm.Namespace)
 			// end the metrics loop
 			return
+		case <-switchSuspendResume:
+			logger.Infof("Metrics loop suspended by informant server")
+
+			select {
+			case <-switchSuspendResume:
+				logger.Infof("Metrics loop resumed by informant server")
+				// continue on to the next loop
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

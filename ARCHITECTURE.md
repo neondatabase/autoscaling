@@ -17,6 +17,7 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
   * [Agent-Scheduler protocol steps](#agent-scheduler-protocol-steps)
   * [Node pressure and watermarks](#node-pressure-and-watermarks)
 * [High-level consequences of the Agent-Scheduler protocol](#high-level-consequences-of-the-agent-scheduler-protocol)
+* [Agent-Informant protocol details](#agent-informant-protocol-details)
 * [Footguns](#footguns)
 
 ## See also
@@ -70,6 +71,7 @@ discussed more in the [high-level consequences] section below.
     * `pkg/agent/` — implementation of `autoscaler-agent`
     * `pkg/api/` — types for scheduler plugin <-> `autoscaler-agent` communication, plus some
         protocol-relevant types independently used by both.
+    * `pkg/informant/` — implementation of the VM informant
     * `pkg/plugin/` — implementation of the scheduler plugin
     * `pkg/util/` — miscellaneous utilities that are too general to be included in `agent` or
       `plugin`.
@@ -167,6 +169,10 @@ than the amount of pressure already accounted for.
 2. Because resources are handled separately, any discrepancy in external resource availability can
    cause the scheduler to return `Permit`s that aren't a clean multiple of a compute unit.
    (e.g., nodes have mismatched memory vs CPU, or external pods / system reserved are mismatched)
+
+## Agent-Informant protocol details
+
+TODO
 
 ## Footguns
 

@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	Scaling   ScalingConfig   `json:"scaling"`
+	Informant InformantConfig `json:"informant"`
 	Metrics   MetricsConfig   `json:"metrics"`
 	Scheduler SchedulerConfig `json:"scheduler"`
 }
@@ -34,6 +35,24 @@ type ScalingConfig struct {
 	} `json:"cpu"`
 }
 
+type InformantConfig struct {
+	// ServerPort is the port that the VM informant serves from
+	ServerPort uint16 `json:"serverPort"`
+	// MaxStartupSeconds is the total maximum amount of time we're allowed to wait for the VM
+	// informant to come online
+	MaxStartupSeconds uint `json:"maxStartupSeconds"`
+	// RequestTimeoutSeconds gives the timeout for any individual request to the VM informant
+	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
+	// RetryRegisterAfterSeconds gives the amount of time we should wait before retrying a register
+	// request
+	RetryRegisterAfterSeconds uint `json:"retryRegisterAfterSeconds"`
+	// RetryServerDelaySeconds gives the initial delay for for recreating a server that's exited
+	RetryServerAfterSeconds uint `json:"retryServerAfterSeconds"`
+	// RetryFailedServerDelaySeconds gives the amount of time to wait between server creation
+	// retries, after it has already failed once
+	RetryFailedServerDelaySeconds uint `json:"retryFailedServerDelaySeconds"`
+}
+
 // MetricsConfig defines a few parameters for metrics requests to the VM
 type MetricsConfig struct {
 	// LoadMetricPrefix is the prefix at at the beginning of the load metrics that we use. For
@@ -43,12 +62,6 @@ type MetricsConfig struct {
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	// SecondsBetweenRequests sets the number of seconds to wait between metrics requests
 	SecondsBetweenRequests uint `json:"secondsBetweenRequests"`
-	// InitialDelaySeconds gives the amount to delay at the start before making any requests, to
-	// give the VM a chance to start up
-	//
-	// Setting this value too small doesn't have any permanent effects; we'll just retry after
-	// SecondsBetweenRequests has passed.
-	InitialDelaySeconds uint `json:"initialDelaySeconds"`
 }
 
 // SchedulerConfig defines a few parameters for scheduler requests
@@ -100,12 +113,18 @@ func (c *Config) validate() error {
 		return cannotBeZero(".scaling.cpu.doubleRatio")
 	} else if c.Scaling.CPU.HalveRatio == 0 {
 		return cannotBeZero(".scaling.cpu.halveRatio")
+	} else if c.Informant.ServerPort == 0 {
+		return cannotBeZero(".informant.serverPort")
+	} else if c.Informant.MaxStartupSeconds == 0 {
+		return cannotBeZero(".informant.maxStartupSeconds")
+	} else if c.Informant.RequestTimeoutSeconds == 0 {
+		return cannotBeZero(".informant.requestTimeoutSeconds")
+	} else if c.Informant.RetryRegisterAfterSeconds == 0 {
+		return cannotBeZero(".informant.retryRegisterAfterSeconds")
 	} else if c.Metrics.RequestTimeoutSeconds == 0 {
 		return cannotBeZero(".metrics.requestTimeoutSeconds")
 	} else if c.Metrics.SecondsBetweenRequests == 0 {
 		return cannotBeZero(".metrics.secondsBetweenRequests")
-	} else if c.Metrics.InitialDelaySeconds == 0 {
-		return cannotBeZero(".metrics.initialDelaySeconds")
 	} else if c.Metrics.LoadMetricPrefix == "" {
 		return cannotBeEmpty(".metrics.loadMetricPrefix")
 	} else if c.Scheduler.SchedulerName == "" {
