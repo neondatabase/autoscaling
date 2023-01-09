@@ -45,10 +45,15 @@ func (s *State) RegisterAgent(info *api.AgentDesc) (*api.InformantDesc, int, err
 // amount is ok
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) TryDownscale(target *api.RawResources) (*bool, int, error) {
-	// Currently, the implementation always returns that it's ok downscaling.
-	ok := true
-	return &ok, 200, nil
+func (s *State) TryDownscale(target *api.RawResources) (*api.DownscaleResult, int, error) {
+	return &api.DownscaleResult{Ok: true, Status: "No action taken"}, 200, nil
+}
+
+// NotifyUpscale signals that the VM's resource usage has been increased to the new amount
+//
+// Returns: body (if successful), status code and error (if unsuccessful)
+func (s *State) NotifyUpscale(newResources *api.RawResources) (*struct{}, int, error) {
+	return &struct{}{}, 200, nil
 }
 
 // UnregisterAgent unregisters the autoscaler-agent given by info, if it is currently registered

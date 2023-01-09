@@ -43,6 +43,10 @@ type InformantConfig struct {
 	MaxStartupSeconds uint `json:"maxStartupSeconds"`
 	// RequestTimeoutSeconds gives the timeout for any individual request to the VM informant
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
+	// DownscaleTimeoutSeconds is like RequestTimeoutSeconds, but for downscale requests. This is a
+	// separate value because it's possible that downscaling may require some non-trivial work that
+	// we want to allow to complete.
+	DownscaleTimeoutSeconds uint `json:"downscaleTimeoutSeconds"`
 	// RetryRegisterAfterSeconds gives the amount of time we should wait before retrying a register
 	// request
 	RetryRegisterAfterSeconds uint `json:"retryRegisterAfterSeconds"`
@@ -119,6 +123,8 @@ func (c *Config) validate() error {
 		return cannotBeZero(".informant.maxStartupSeconds")
 	} else if c.Informant.RequestTimeoutSeconds == 0 {
 		return cannotBeZero(".informant.requestTimeoutSeconds")
+	} else if c.Informant.DownscaleTimeoutSeconds == 0 {
+		return cannotBeZero(".informant.downscaleTimeoutSeconds")
 	} else if c.Informant.RetryRegisterAfterSeconds == 0 {
 		return cannotBeZero(".informant.retryRegisterAfterSeconds")
 	} else if c.Metrics.RequestTimeoutSeconds == 0 {

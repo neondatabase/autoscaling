@@ -227,8 +227,15 @@ type MoreResources struct {
 // RawResources signals raw resource amounts, and is primarily used in communications with the VM
 // informant because it doesn't know about things like memory slots
 type RawResources struct {
-	Cpu    resource.Quantity `json:"cpu"`
-	Memory resource.Quantity `json:"memory"`
+	Cpu    *resource.Quantity `json:"cpu"`
+	Memory *resource.Quantity `json:"memory"`
+}
+
+// DownscaleResult is used by the VM informant to return whether it downscaled successfully, and
+// some indication of its status when doing so
+type DownscaleResult struct {
+	Ok     bool
+	Status string
 }
 
 // SuspendAgent is sent from the VM informant to the autoscaler-agent when it has been contacted by

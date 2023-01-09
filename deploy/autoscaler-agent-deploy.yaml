@@ -57,6 +57,7 @@ data:
       "serverPort": 10301,
       "maxStartupSeconds": 10,
       "requestTimeoutSeconds": 1,
+      "downscaleTimeoutSeconds": 2,
       "retryRegisterAfterSeconds": 5,
       "retryServerAfterSeconds": 3,
       "retryFailedServerDelaySeconds": 5

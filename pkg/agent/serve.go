@@ -65,12 +65,15 @@ func (r *runner) runInformantServerLoop(
 	logger RunnerLogger,
 	panicked chan<- struct{},
 	newMetricsPort chan<- uint16,
+	notifyNewServer util.CondChannelSender,
 	switchSuspendResume chan<- struct{},
 ) (uint16, error) {
 	initialServer, err := startInformantServer(logger, r.thisIP, switchSuspendResume)
 	if err != nil {
 		return 0, fmt.Errorf("Error starting informant server: %w", err)
 	}
+
+	r.informantServer.Store(initialServer)
 
 	// Make sure we shut down the initial server, if we error out early
 	started := false
@@ -95,6 +98,8 @@ func (r *runner) runInformantServerLoop(
 
 		// recover from panics and politely unregister
 		defer func() {
+			r.informantServer.Store(nil)
+
 			if err := recover(); err != nil {
 				fmt.Println(err)
 				panicked <- struct{}{}
@@ -141,6 +146,7 @@ func (r *runner) runInformantServerLoop(
 			if ctx.Err() != nil {
 				return
 			}
+			r.informantServer.Store(nil)
 			server = nil // unset the server so our deferred cleanup won't send an unregister request
 			switchSuspendResume <- struct{}{}
 
@@ -165,11 +171,16 @@ func (r *runner) runInformantServerLoop(
 					logger.Infof("Successfully restarted informant server. AgentDesc = %+v", server.desc)
 
 					// Now reconnect with the informant
+					//
+					// FIXME: ctx has no timeout here, which allows us to loop forever, retrying. We
+					// should decide whether we want that behavior.
 					newPort, err := r.registerWithInformant(ctx, logger, &server.desc)
 					if err != nil {
 						logger.Errorf("Error reconnecting to informant: %s", err)
 						return // TODO: we should signal error here somehow instead of just returning
 					}
+					r.informantServer.Store(server)
+					notifyNewServer.Send()
 					if newPort != metricsPort {
 						logger.Infof("Informant metrics port updated %d -> %d", metricsPort, newPort)
 						newMetricsPort <- newPort
