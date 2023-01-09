@@ -1,7 +1,5 @@
 #!/bin/sh
 
-#!/bin/sh
-
 set -eu -o pipefail
 
 # Allow this script to be run from outside the directory
