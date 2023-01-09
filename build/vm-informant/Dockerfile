@@ -1,7 +1,7 @@
 FROM golang:1.19-alpine AS builder
 WORKDIR /workspace
 
-RUN apk add gcc musl-dev curl # gcc and musl-dev required for gcc-go
+RUN apk add gcc musl-dev # required for gcc-go
 
 COPY go.mod go.mod
 COPY go.sum go.sum
