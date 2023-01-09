@@ -141,7 +141,8 @@ type AgentMessage[T any] struct {
 type AgentDesc struct {
 	// AgentID is a unique UUID for the current instance of the autoscaler-agent
 	//
-	// This is helpful so that we can distinguish between (incorrect) duplicate calls to /
+	// This is helpful so that we can distinguish between (incorrect) duplicate calls to /register
+	// and (correct) re-registering of an agent.
 	AgentID uuid.UUID `json:"agentID"`
 
 	// ServeAddr gives the unique (per instance)
@@ -183,7 +184,8 @@ type InformantDesc struct {
 	//
 	// If an autoscaler-agent is successfully registered, a well-behaved VM informant MUST respond
 	// with a ProtoVersion within the bounds of the agent's declared minimum and maximum protocol
-	// versions. If the VM informant does not use a protocol version within those bounds, then
+	// versions. If the VM informant does not use a protocol version within those bounds, then it
+	// MUST respond with an error status code.
 	ProtoVersion uint32 `json:"protoVersion"`
 
 	// MetricsMethod tells the autoscaler-agent how to fetch metrics from the VM
