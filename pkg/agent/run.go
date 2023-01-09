@@ -632,7 +632,7 @@ func memSlotsForCpu(logger RunnerLogger, computeUnit api.Resources, cpu uint16) 
 func (r *runner) convertResourcesToRaw(res api.Resources) api.RawResources {
 	return api.RawResources{
 		Cpu:    resource.NewQuantity(int64(res.VCPU), resource.DecimalSI),
-		Memory: resource.NewQuantity(int64(res.Mem)*r.vm.Mem.SlotSize.Value(), r.vm.Mem.SlotSize.Format),
+		Memory: resource.NewQuantity(int64(res.Mem)*r.vm.Mem.SlotSize.Value(), resource.BinarySI),
 	}
 }
 
