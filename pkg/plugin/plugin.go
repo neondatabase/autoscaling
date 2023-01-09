@@ -59,7 +59,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	vmConfig.ContentType = "application/json"
 	vmClient, err := vmclient.NewForConfig(vmConfig)
 	if err != nil {
-		return nil, fmt.Errorf("Error creating NeonVM client: %s", err)
+		return nil, fmt.Errorf("Error creating NeonVM client: %w", err)
 	}
 
 	p := AutoscaleEnforcer{
@@ -80,7 +80,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	podDeletions := make(chan api.PodName)
 	klog.Infof("[autoscale-enforcer] Starting pod deletion watcher")
 	if err := p.watchPodDeletions(context.Background(), vmDeletions, podDeletions); err != nil {
-		return nil, fmt.Errorf("Error starting VM deletion watcher: %s", err)
+		return nil, fmt.Errorf("Error starting VM deletion watcher: %w", err)
 	}
 
 	// ... but before handling the deletion events, read the current cluster state:

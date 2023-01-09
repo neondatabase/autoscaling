@@ -47,7 +47,7 @@ func (r runner) Spawn(ctx context.Context, status *podStatus) {
 
 				status.panicked = true
 				status.done = true
-				status.errored = fmt.Errorf("%s", fmt.Sprint("runner panicked:", err))
+				status.errored = fmt.Errorf("runner panicked: %v", err)
 			}
 		}()
 
@@ -284,7 +284,7 @@ restartConnection:
 			if doChangesBeforeRequest {
 				if err := r.setResources(ctx, r.config, newRes); err != nil {
 					// FIXME: maybe we should retry on failure?
-					return false, fmt.Errorf("Error while setting VM resources: %s", err)
+					return false, fmt.Errorf("Error while setting VM resources: %w", err)
 				}
 				r.vm.Cpu.Use = newRes.VCPU
 				r.vm.Mem.Use = newRes.Mem
@@ -390,7 +390,7 @@ restartConnection:
 			if doChangesAfterRequest {
 				if err := r.setResources(ctx, r.config, newRes); err != nil {
 					// FIXME: maybe we should retry on failure?
-					return false, fmt.Errorf("Error while setting vCPU count: %s", err)
+					return false, fmt.Errorf("Error while setting vCPU count: %w", err)
 				}
 
 				r.vm.Cpu.Use = newRes.VCPU
@@ -470,7 +470,7 @@ noSchedulerLoop:
 				resources := api.Resources{VCPU: newCpuCount, Mem: newMemSlotsCount}
 				if err := r.setResources(ctx, r.config, resources); err != nil {
 					// FIXME: maybe we should retry on failure?
-					return false, fmt.Errorf("Error while setting resources: %s", err)
+					return false, fmt.Errorf("Error while setting resources: %w", err)
 				}
 				r.vm.Cpu.Use = newCpuCount
 			}
@@ -580,7 +580,7 @@ func (r *runner) getMetricsLoop(
 		func() {
 			resp, err := client.Do(&req)
 			if err != nil {
-				err = fmt.Errorf("Error getting metrics: %s", err)
+				err = fmt.Errorf("Error getting metrics: %w", err)
 				if !gotAtLeastOne || ctx.Err() != nil {
 					logger.Warningf("%s", err)
 				} else {
@@ -640,13 +640,13 @@ func (r *runner) sendRequestToPlugin(
 	url := fmt.Sprintf("http://%s:%d/", sched.ip, config.Scheduler.RequestPort)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(requestBody))
 	if err != nil {
-		return nil, fmt.Errorf("Error sending scheduler request: %s", err)
+		return nil, fmt.Errorf("Error sending scheduler request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("Error reading body for response: %s", err)
+		return nil, fmt.Errorf("Error reading body for response: %w", err)
 	}
 
 	if resp.StatusCode != 200 {
@@ -655,7 +655,7 @@ func (r *runner) sendRequestToPlugin(
 
 	var respMsg api.PluginResponse
 	if err := json.Unmarshal(body, &respMsg); err != nil {
-		return nil, fmt.Errorf("Bad JSON response: %s", err)
+		return nil, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
 	logger.Infof("Received PluginResponse: %+v", respMsg)

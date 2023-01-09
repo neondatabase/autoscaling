@@ -419,7 +419,7 @@ func (s *pluginState) getOrFetchNodeState(
 
 	node, err := handle.ClientSet().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("Error querying node information: %s", err)
+		return nil, fmt.Errorf("Error querying node information: %w", err)
 	}
 
 	// Re-lock and process API result

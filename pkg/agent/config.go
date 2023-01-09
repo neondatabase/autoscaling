@@ -68,7 +68,7 @@ type SchedulerConfig struct {
 func ReadConfig(path string) (*Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("Error opening config file %q: %s", path, err)
+		return nil, fmt.Errorf("Error opening config file %q: %w", path, err)
 	}
 
 	defer file.Close()
@@ -76,11 +76,11 @@ func ReadConfig(path string) (*Config, error) {
 	jsonDecoder := json.NewDecoder(file)
 	jsonDecoder.DisallowUnknownFields()
 	if err = jsonDecoder.Decode(&config); err != nil {
-		return nil, fmt.Errorf("Error decoding JSON config in %q: %s", path, err)
+		return nil, fmt.Errorf("Error decoding JSON config in %q: %w", path, err)
 	}
 
 	if err = config.validate(); err != nil {
-		return nil, fmt.Errorf("Invalid config: %s", err)
+		return nil, fmt.Errorf("Invalid config: %w", err)
 	}
 
 	return &config, nil

@@ -274,7 +274,7 @@ func (e *AutoscaleEnforcer) handleNewConfigMap(configMap *corev1.ConfigMap) erro
 	}
 
 	if path, err := newConf.validate(); err != nil {
-		return fmt.Errorf("Invalid configuration: at %s: %s", path, err)
+		return fmt.Errorf("Invalid configuration: at %s: %w", path, err)
 	}
 
 	newConf.JSONString = jsonString
