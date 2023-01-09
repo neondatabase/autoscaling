@@ -228,6 +228,8 @@ The protocol is as follows:
     4. The agent's `/resume` endpoint (via POST), with `ResumeAgent`. This allows the informant to
        pick up communication with an agent that was previously suspended. The informant **must not**
        double-resume an agent.
+    5. The agent's `/id` endpoint (via GET) is also available during normal operation, and is used
+       as a health check by the informant.
 5. If explicitly cut off, communication ends with the agent sending the original `AgentDesc` as a
    POST request on the `/unregister` endpoint.
 
