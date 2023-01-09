@@ -636,7 +636,6 @@ func (r *runner) convertResourcesToRaw(res api.Resources) api.RawResources {
 	}
 }
 
-// returns true iff informant is ok with downscale
 func (r *runner) requestInformantDownscale(
 	ctx context.Context, logger RunnerLogger, amount api.Resources,
 ) (*api.DownscaleResult, error) {
