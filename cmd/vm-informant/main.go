@@ -29,6 +29,6 @@ func main() {
 	if err == http.ErrServerClosed {
 		klog.Infof("Server ended.")
 	} else {
-		klog.Errorf("Server failed: %s", err)
+		klog.Fatalf("Server failed: %s", err)
 	}
 }
