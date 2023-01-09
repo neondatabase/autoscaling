@@ -80,7 +80,7 @@ func addHandler[T any, R any](
 			} else if 400 <= status && status < 500 {
 				logFunc = klog.Warningf
 			} else /* unexpected status */ {
-				err = fmt.Errorf("HTTP handler error: invalid status %d for error response: %s", status, err)
+				err = fmt.Errorf("HTTP handler error: invalid status %d for error response: %w", status, err)
 				logFunc = klog.Errorf
 			}
 			respBodyFormatted = err.Error()
