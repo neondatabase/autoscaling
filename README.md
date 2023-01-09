@@ -2,6 +2,18 @@
 
 Vertical autoscaling for a fleet of postgres instances running in a Kubernetes cluster.
 
+## Quick access
+
+Images are available as:
+
+| Component name | Image name |
+|----------------|------------|
+| scheduler (and plugin) | `neondatabase/autoscale-scheduler` |
+| autoscaler-agent | `neondatabase/autoscaler-agent` |
+| VM informant | `neondatabase/vm-informant` |
+
+The deployment files and a VM informant binary are attached to each release.
+
 ## Overview
 
 We want to dynamically change the amount of CPUs and memory of running postgres instances, _without

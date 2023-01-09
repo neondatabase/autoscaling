@@ -15,4 +15,4 @@ if [ -n "$pod" ]; then
     kubectl delete pod -n kube-system "$pod"
 fi
 
-kubectl apply -f deploy/scheduler-deploy.yaml
+kubectl apply -f deploy/autoscale-scheduler.yaml
