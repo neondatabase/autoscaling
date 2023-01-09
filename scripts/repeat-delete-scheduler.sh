@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # Helper script that repeatedly deletes the currently-running scheduler, which the deployment will
 # automatically replace. This is useful for things like testing scheduler reconnection.

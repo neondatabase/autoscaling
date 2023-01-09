@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Helper script to initialize the kind cluster, once everything is built.
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Source: https://suraj.io/post/2021/05/k8s-import/
 # Retrieved 05 Oct 2022

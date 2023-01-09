@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # Helper script to replace the currently-running autoscale-scheduler
 

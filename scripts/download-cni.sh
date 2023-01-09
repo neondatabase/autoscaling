@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Helper script to download the CNI plugins into a local directory. This script must be run *before
 # launching `kind`*.

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Helper script to set up some of the files before `docker build`, as well as packaging the 'vmdata'
 # container into what'll be used by NeonVM. This script is expected to be run as root.

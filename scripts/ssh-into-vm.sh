@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Convenience script to ssh into a particular VM using the local private key that was generated for
 # it.
