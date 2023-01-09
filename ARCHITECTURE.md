@@ -29,19 +29,29 @@ This isn't the only architecture document. You may also want to look at:
 
 ## High-level overview
 
-At a high level, this repository provides two pieces: a modified Kubernetes scheduler (using the
-[plugin interface]), a binary that runs alongside the VM to request resources on its behalf
-(`autoscaler-agent`).
+At a high level, this repository provides three components:
+
+1. A modified Kubernetes scheduler (using the [plugin interface]) — known as "the (scheduler)
+   plugin", `AutoscaleEnforcer`, `autscale-scheduler`
+2. A daemonset responsible for making VM scaling decisions & checking with interested parties
+   — known as `autoscaler-agent` or simply `agent`
+3. A binary running inside of the VM to (a) provide metrics to the `autoscaler-agent`, (b) validate
+   that downscaling is ok, and (c) request immediate upscaling due to sharp changes in demand —
+   known as "the (VM) informant"
 
 [plugin interface]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
 
 The scheduler plugin is responsible for handling resource requests from the `autoscaler-agent`,
 capping increases so that node resources aren't overcommitted.
 
-The `autoscaler-agent` periodically reads from a metrics source in the VM (currently:
-`node_exporter`) and makes scaling decisions about the _desired_ resource allocation. It then
+The `autoscaler-agent` periodically reads from a metrics source in the VM (defined by the
+_informant_) and makes scaling decisions about the _desired_ resource allocation. It then
 requests these resources from the scheduler plugin, and submits a patch request for its NeonVM to
 update the resources.
+
+The VM informant provides is responsible for handling all of the functionality inside the VM that
+the `autoscaler-agent` cannot. It provides metrics (or: informs the agent where it can find those)
+and approves attempts to downscale resource usage (or: rejects them, if they're still in use).
 
 NeonVM is able to live-scale the resources given to a VM (i.e. CPU and memory _slots_) by handling
 patches to the Kubernetes VM object, which requires connecting to QEMU running on the outer
@@ -56,8 +66,8 @@ discussed more in the [high-level consequences] section below.
 ## Repository structure
 
 * `build/` — scripts for building the scheduler (`autoscale-scheduler`) and `autoscaler-agent`
-* `cmd/` — entrypoints for the scheduler and `autoscaler-agent`. Very little functionality
-  implemented here. (See: `pkg/agent` and `pkg/plugin`)
+* `cmd/` — entrypoints for the `autoscaler-agent`, VM informant, and scheduler plugin. Very little
+    functionality implemented here. (See: `pkg/agent`, `pkg/informant`, and `pkg/plugin`)
 * `deploy/` — YAML files used during cluster init. Of these, only the following two are manually
   written:
     * `deploy/autoscaler-agent-deploy.yaml`
@@ -112,8 +122,8 @@ on each node, the scheduler can prevent
 
 ### Agent-Scheduler protocol steps
 
-1. On startup, the `autoscaler-agent` tries to fetch metrics from the VM. Currently, this is from
-   the VM's `node_exporter`, which is exposed at `http://10.255.255.254:9100/metrics`.
+1. On startup (for a particular VM), the `autoscaler-agent` [connects to the VM informant] and
+   fetches some initial metrics.
 2. After successfully receiving a response, the autoscaler-agent sends an `AgentRequest` with the
    metrics and current resource allocation (i.e. it does not request any scaling).
 3. The scheduler's `PluginResponse` informs the autoscaler-agent of the "compute unit" CPU and
@@ -138,6 +148,8 @@ on each node, the scheduler can prevent
     5. If the `PluginResponse`'s permit approved any amount of increase, submit a VM patch request
        that scales those resources up.
        * This has the same connection flow as the earlier patch request.
+
+[connects to the VM informant]: #agent-informant-protocol-details
 
 ### Node pressure and watermarks
 
@@ -172,7 +184,57 @@ than the amount of pressure already accounted for.
 
 ## Agent-Informant protocol details
 
-TODO
+A brief note before we get started: There are a lot of specific difficulties around making sure that
+the informant is always talking to _some_ agent — ideally the most recent one. While _in theory_
+there should only ever be one, we might have `n=0` or `n>1` during rollouts of new versions. Our
+process for handling this is not discussed here — this section only covers the communciations
+between a single agent and informant.
+
+The relevant types for the agent-informant protocol are all in [`pkg/api/types.go`]. If using this
+as a reference, it may be helpful to have that file open at the same time.
+
+[`pkg/api/types.go`]: ./pkg/api/types.go
+
+The protocol is as follows:
+
+1. On startup, the VM informant starts an HTTP server listening on `0.0.0.0:10301`.
+2. On startup for this VM, the `autoscaler-agent` starts an HTTP server listening _some_ port
+3. The agent sends an `AgentDesc` to the informant as a POST request on the `/register` endpoint.
+   Before responding:
+    1. If the informant has already registered an agent with the same `AgentDesc.AgentID`, it
+       immediately responds with HTTP code 409.
+    2. If the informant's protocol version doesn't match the `AgentDesc`'s min/max protocol
+       versions, it immediately responds with HTTP code 400.
+    3. Using the provided `ServerAddr` from the agent's `AgentDesc`, the informant makes a GET
+       request on the agent's `/id` endpoint
+    4. The agent responds immediately to the `/id` request with an `AgentMessage[AgentIdentification]`.
+    5. If the agent's `AgentIdentification.AgentID` doesn't match the original `AgentDesc.AgentID`,
+       the informant responds with HTTP code 400.
+    6. Otherwise, the informant responds with HTTP code 200, returning an `InformantDesc` describing
+       its capabilities and which protocol version to use.
+4. Begin "normal operation". During this, there are two "normal" requests made between the agent and
+   informant. Each party can make **only one request at a time**. The agent starts in the
+   "suspended" state.
+    1. The informant's `/downscale` endpoint (via PUT), with `RawResources`. This serves as the
+       agent _politely asking_ the informant to decrease resource usage to the specificed amount.
+       The informant returns a `DownscaleResult` indicating whether it was able to downscale (it may
+       not, if e.g. memory usage is too high).
+    2. The informant's `/upscale` endpoint (via PUT), with `RawResources`. This serves as the agent
+       _notifying_ the informant that its resources have increased to the provided amount.
+    3. The agent's `/suspend` endpoint (via POST), with `SuspendAgent`. This allows the informant to
+       inform the agent that it is no longer in use for the VM. While suspended, the agent **must
+       not** make any `downscale` or `upscale` requests. The informant **must not** double-suspend
+       an agent.
+    4. The agent's `/resume` endpoint (via POST), with `ResumeAgent`. This allows the informant to
+       pick up communication with an agent that was previously suspended. The informant **must not**
+       double-resume an agent.
+5. If explicitly cut off, communication ends with the agent sending the original `AgentDesc` as a
+   POST request on the `/unregister` endpoint.
+
+<!--
+FIXME: Per (4).3, the agent must not make {down,up}scale requests while suspended. This is not
+currently adhered to.
+-->
 
 ## Footguns
 
