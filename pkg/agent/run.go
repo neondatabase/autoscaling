@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
@@ -99,26 +98,6 @@ func (r runner) getInitialVMInfo(ctx context.Context) (*api.VmInfo, error) {
 	}
 
 	return vmInfo, nil
-}
-
-type RunnerLogger struct {
-	prefix string
-}
-
-func (l RunnerLogger) Infof(format string, args ...interface{}) {
-	klog.InfofDepth(1, l.prefix+format, args...)
-}
-
-func (l RunnerLogger) Warningf(format string, args ...interface{}) {
-	klog.WarningfDepth(1, l.prefix+format, args...)
-}
-
-func (l RunnerLogger) Errorf(format string, args ...interface{}) {
-	klog.ErrorfDepth(1, l.prefix+format, args...)
-}
-
-func (l RunnerLogger) Fatalf(format string, args ...interface{}) {
-	klog.FatalfDepth(1, l.prefix+format, args...)
 }
 
 func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _ error) {
