@@ -146,7 +146,7 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _
 	var computeUnit *api.Resources
 
 	logger.Infof("Starting scheduler watcher and getting initial scheduler")
-	schedulerWatch, scheduler, err := watchSchedulerUpdates(ctx, r.kubeClient, r.config.Scheduler.SchedulerName)
+	schedulerWatch, scheduler, err := watchSchedulerUpdates(ctx, logger, r.kubeClient, r.config.Scheduler.SchedulerName)
 	if err != nil {
 		return false, fmt.Errorf("Error starting scheduler watcher: %w", err)
 	} else if scheduler == nil {
