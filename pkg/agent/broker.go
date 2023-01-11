@@ -32,6 +32,7 @@ func (b *Broker[T]) Start(ctx context.Context) {
 
 	b.wg.Add(1)
 	go func() {
+		defer b.wg.Done()
 		subs := map[chan T]struct{}{}
 		for {
 			select {
