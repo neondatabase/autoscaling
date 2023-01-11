@@ -30,10 +30,6 @@ func newSchedulerInfo(pod *corev1.Pod) schedulerInfo {
 	}
 }
 
-type schedWatchSubscriptions struct {
-	watch *schedulerWatch
-}
-
 // schedulerWatch is the interface returned by watchSchedulerUpdates
 type schedulerWatch struct {
 	ReadyQueue <-chan schedulerInfo
