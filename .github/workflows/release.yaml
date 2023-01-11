@@ -79,6 +79,13 @@ jobs:
           docker cp $ID:/usr/bin/vm-informant bin/vm-informant
           docker rm -f $ID
 
+      # note: We *could* use something like kustomize for this. But there's extra steps (e.g.,
+      # adding kustomization.yaml) and sed is simple; so we can deal with this for now.
+      - name: modify deploy files to use current image(s)
+        run: |
+          sed -i -e s^localhost:5001/autoscaler-agent:latest^${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} deploy/autoscale-scheduler.yaml
+          sed -i -e s^localhost:5001/kube-autoscale-scheduler:latest^${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} deploy/autoscaler-agent.yaml
+
       - name: github release
         uses: softprops/action-gh-release@v1
         with:

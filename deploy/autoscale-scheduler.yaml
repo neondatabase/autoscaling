@@ -160,6 +160,8 @@ spec:
     spec:
       serviceAccountName: autoscale-scheduler
       containers:
+      # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
+      # update that as well if you change this line!
       - image: localhost:5001/kube-autoscale-scheduler:latest
         command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
         livenessProbe:
