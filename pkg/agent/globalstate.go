@@ -17,17 +17,19 @@ import (
 // agentState is the global state for the autoscaler agent
 type agentState struct {
 	pods       map[api.PodName]*podState
+	podIP      string
 	config     *Config
 	kubeClient *kubernetes.Clientset
 	vmClient   *vmclient.Clientset
 }
 
-func (r MainRunner) newAgentState() agentState {
+func (r MainRunner) newAgentState(podIP string) agentState {
 	return agentState{
 		pods:       make(map[api.PodName]*podState),
 		config:     r.Config,
 		kubeClient: r.KubeClient,
 		vmClient:   r.VMClient,
+		podIP:      podIP,
 	}
 }
 
@@ -71,6 +73,7 @@ func (s *agentState) handleEvent(event podEvent) {
 			config:     s.config,
 			vmClient:   s.vmClient,
 			kubeClient: s.kubeClient,
+			thisIP:     s.podIP,
 			podName:    event.podName,
 			podIP:      event.podIP,
 			vm: &api.VmInfo{

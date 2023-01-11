@@ -8,9 +8,10 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/url"
+	"sync/atomic"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -26,6 +27,13 @@ type runner struct {
 	config     *Config
 	vmClient   *vmclient.Clientset
 	kubeClient *kubernetes.Clientset
+
+	// These fields are set by Run
+	informantServer    *atomic.Pointer[informantServerState]
+	newInformantServer util.CondChannelReceiver
+
+	// thisIP is the IP address of this autoscaler-agent's pod
+	thisIP string
 
 	// note: only vm.Name and vm.Namespace are expected to be set before calling Spawn or Run. The
 	// rest will be determined by an initial request to get information about the VM.
@@ -139,9 +147,27 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _
 	r.vm = initVmInfo
 	initVmInfo = nil // clear to allow GC.
 
+	// Signalling channel used by the informant server & metrics loop
+	switchSuspendResume := make(chan struct{})
+	// Signalling sync.Cond-like channel used by informant server & some runner methods
+	notifyNewInformantServer, waitNewInformantServer := util.NewCondChannelPair()
+	r.newInformantServer = waitNewInformantServer
+	r.informantServer = &atomic.Pointer[informantServerState]{}
+
+	informantServerPanicked := make(chan struct{}, 1)
+	newMetricsPort := make(chan uint16)
+	metricsPort, err := r.runInformantServerLoop(
+		ctx, logger, informantServerPanicked, newMetricsPort, notifyNewInformantServer, switchSuspendResume,
+	)
+	if err != nil {
+		return false, fmt.Errorf("Error starting informant server loop: %w", err)
+	}
+
 	metrics := make(chan api.Metrics)
-	metricsPanicked := make(chan struct{})
-	go r.getMetricsLoop(ctx, logger, r.config, metrics, metricsPanicked)
+	metricsPanicked := make(chan struct{}, 1)
+	go r.getMetricsLoop(
+		ctx, logger, r.config, metrics, metricsPanicked, metricsPort, newMetricsPort, switchSuspendResume,
+	)
 
 	var computeUnit *api.Resources
 
@@ -176,6 +202,8 @@ restartConnection:
 		case <-r.deleted.Recv():
 			logger.Infof("Ending runner loop for VM, pod was deleted")
 			return false, nil
+		case <-informantServerPanicked:
+			return false, fmt.Errorf("Informant server panicked")
 		case <-metricsPanicked:
 			return false, fmt.Errorf("Metrics loop panicked")
 		case info := <-schedulerWatch.Deleted:
@@ -282,12 +310,27 @@ restartConnection:
 			}
 
 			if doChangesBeforeRequest {
-				if err := r.setResources(ctx, r.config, newRes); err != nil {
-					// FIXME: maybe we should retry on failure?
-					return false, fmt.Errorf("Error while setting VM resources: %w", err)
+				logger.Infof("Requesting downscale from informant")
+				result, err := r.requestInformantDownscale(ctx, logger, immediateChanges)
+				if err != nil {
+					return false, fmt.Errorf("Error requesting downscale from informant: %w", err)
 				}
-				r.vm.Cpu.Use = newRes.VCPU
-				r.vm.Mem.Use = newRes.Mem
+
+				if !result.Ok {
+					logger.Infof("Informant denied downscale with status %q", result.Status)
+					// Bump newRes fields back up to a minimum of r.vm.{Cpu,Mem}.Use so that we
+					// aren't downscaling.
+					newRes.VCPU = util.Max(newRes.VCPU, r.vm.Cpu.Use)
+					newRes.Mem = util.Max(newRes.Mem, r.vm.Mem.Use)
+				} else {
+					logger.Infof("Informant approved downscale with status %q", result.Status)
+					if err := r.setResources(ctx, r.config, immediateChanges); err != nil {
+						// FIXME: maybe we should retry on failure?
+						return false, fmt.Errorf("Error while setting VM resources: %w", err)
+					}
+					r.vm.Cpu.Use = newRes.VCPU
+					r.vm.Mem.Use = newRes.Mem
+				}
 			}
 
 			// With pre-request changes out of the way, let's send our request.
@@ -388,6 +431,12 @@ restartConnection:
 			}
 
 			if doChangesAfterRequest {
+				logger.Infof("Notifying informant of upscale")
+				if err := r.notifyInformantUpscale(ctx, logger, newRes); err != nil {
+					// FIXME: maybe we should retry on failure?
+					return false, fmt.Errorf("Error notifying informant of upscale: %w", err)
+				}
+
 				if err := r.setResources(ctx, r.config, newRes); err != nil {
 					// FIXME: maybe we should retry on failure?
 					return false, fmt.Errorf("Error while setting vCPU count: %w", err)
@@ -424,6 +473,10 @@ noSchedulerLoop:
 		case <-r.deleted.Recv():
 			logger.Infof("Ending runner loop, pod was deleted")
 			return false, nil
+		case <-informantServerPanicked:
+			return false, fmt.Errorf("Informant server panicked")
+		case <-metricsPanicked:
+			return false, fmt.Errorf("Metrics loop panicked")
 		case info := <-schedulerWatch.ReadyQueue:
 			logger.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
 			scheduler = &info
@@ -465,14 +518,49 @@ noSchedulerLoop:
 					logger.Warningf("Cannot determine new memory slots count because we never received a computeUnit from scheduler")
 				}
 
-				logger.Infof("Setting vCPU = %d, memSlots = %d", newCpuCount, newMemSlotsCount)
-
 				resources := api.Resources{VCPU: newCpuCount, Mem: newMemSlotsCount}
+
+				hasDecrease := resources.VCPU < r.vm.Cpu.Use || resources.Mem < r.vm.Mem.Use
+				hasIncrease := resources.VCPU > r.vm.Cpu.Use || resources.Mem > r.vm.Mem.Use
+
+				if hasDecrease {
+					decreaseHalf := api.Resources{
+						VCPU: util.Min(resources.VCPU, r.vm.Cpu.Use),
+						Mem:  util.Min(resources.Mem, r.vm.Mem.Use),
+					}
+					logger.Infof("Requesting downscale from informant")
+					result, err := r.requestInformantDownscale(ctx, logger, decreaseHalf)
+					if err != nil {
+						// FIXME: maybe we should retry on failure?
+						return false, fmt.Errorf("Error requesting downscale from informant: %w", err)
+					} else if !result.Ok {
+						logger.Infof("Informant denied downscale with status %q", result.Status)
+						if !hasIncrease {
+							// Nothing left to do
+							continue
+						}
+
+						resources.VCPU = util.Max(resources.VCPU, r.vm.Cpu.Use)
+						resources.Mem = util.Max(resources.Mem, r.vm.Mem.Use)
+					} else {
+						logger.Infof("Informant approved downscale with status %q", result.Status)
+					}
+				}
+
+				logger.Infof("Setting vCPU = %d, memSlots = %d", resources.VCPU, resources.Mem)
 				if err := r.setResources(ctx, r.config, resources); err != nil {
 					// FIXME: maybe we should retry on failure?
 					return false, fmt.Errorf("Error while setting resources: %w", err)
 				}
 				r.vm.Cpu.Use = newCpuCount
+
+				if hasIncrease {
+					logger.Infof("Notifying informant of upscale")
+					if err := r.notifyInformantUpscale(ctx, logger, resources); err != nil {
+						// FIXME: maybe we should retry on failure?
+						return false, fmt.Errorf("Error notifying informant of upscale: %w", err)
+					}
+				}
 			}
 		}
 	}
@@ -541,9 +629,112 @@ func memSlotsForCpu(logger RunnerLogger, computeUnit api.Resources, cpu uint16) 
 	return mem
 }
 
+func (r *runner) convertResourcesToRaw(res api.Resources) api.RawResources {
+	return api.RawResources{
+		Cpu:    resource.NewQuantity(int64(res.VCPU), resource.DecimalSI),
+		Memory: resource.NewQuantity(int64(res.Mem)*r.vm.Mem.SlotSize.Value(), resource.BinarySI),
+	}
+}
+
+func (r *runner) requestInformantDownscale(
+	ctx context.Context, logger RunnerLogger, amount api.Resources,
+) (*api.DownscaleResult, error) {
+	rawAmount := r.convertResourcesToRaw(amount)
+
+	requestBody, err := json.Marshal(&rawAmount)
+	if err != nil {
+		panic(fmt.Sprintf("Error marshalling RawResources: %s", err))
+	}
+
+	requestTimeout := time.Second * time.Duration(r.config.Informant.DownscaleTimeoutSeconds)
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:%d/downscale", r.podIP, r.config.Informant.ServerPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("Error creating HTTP request: %w", err)
+	}
+
+	client := http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Error sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Unsuccessful informant status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Response body type for this endpoint is a bool
+	var result api.DownscaleResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("Error unmarshalling repsonse body: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (r *runner) notifyInformantUpscale(
+	ctx context.Context, logger RunnerLogger, amount api.Resources,
+) error {
+	rawAmount := r.convertResourcesToRaw(amount)
+
+	requestBody, err := json.Marshal(&rawAmount)
+	if err != nil {
+		panic(fmt.Sprintf("Error marshalling RawResources: %s", err))
+	}
+
+	requestTimeout := time.Second * time.Duration(r.config.Informant.RequestTimeoutSeconds)
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:%d/upscale", r.podIP, r.config.Informant.ServerPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(requestBody))
+	if err != nil {
+		return fmt.Errorf("Error creating HTTP request: %w", err)
+	}
+
+	client := http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Error sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("Error reading response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Unsuccessful informant status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// note: response body type is expected to be struct{}
+	if err := json.Unmarshal(respBody, &struct{}{}); err != nil {
+		return fmt.Errorf("Error unmarshalling response body: %w", err)
+	}
+
+	return nil
+}
+
 // note: we actually use the context here; we have a deferred cancel on it in Run
 func (r *runner) getMetricsLoop(
-	ctx context.Context, logger RunnerLogger, config *Config, metrics chan<- api.Metrics, panicked chan<- struct{},
+	ctx context.Context,
+	logger RunnerLogger,
+	config *Config,
+	metrics chan<- api.Metrics,
+	panicked chan<- struct{},
+	metricsPort uint16,
+	newPort <-chan uint16,
+	switchSuspendResume <-chan struct{},
 ) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -554,31 +745,32 @@ func (r *runner) getMetricsLoop(
 		Timeout: time.Second * time.Duration(config.Metrics.RequestTimeoutSeconds),
 	}
 
-	metricsURL, err := url.Parse(fmt.Sprintf("http://%s:9100/metrics", r.podIP))
+	metricsURL := fmt.Sprintf("http://%s:%d/metrics", r.podIP, metricsPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, bytes.NewReader([]byte{}))
 	if err != nil {
 		panic(fmt.Sprintf("Error creating metrics URL: %s", err))
 	}
 
-	req := http.Request{
-		Method: "GET",
-		URL:    metricsURL,
-		// Allow reusing the TCP connection across multiple requests. Already false by default, but
-		// worth setting explicitly.
-		Close: false,
-	}
+	logger.Infof("Metrics loop waiting for initial Resume from VM informant")
 
-	logger.Infof("Starting metrics loop. Timeout = %f seconds", client.Timeout.Seconds())
+	// Make sure that any exit from this loop will have some record of it
+	defer logger.Infof("Ending metrics loop for VM %s:%s", r.vm.Namespace, r.vm.Name)
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-switchSuspendResume:
+		logger.Infof("Starting metrics loop. Timeout = %s", client.Timeout)
+	}
 
 	// Helper to track whether we've gotten any responses yet. If we have, failed requests are
 	// treated more seriously
 	gotAtLeastOne := false
 
-	time.Sleep(time.Second * time.Duration(config.Metrics.InitialDelaySeconds))
-
 	for {
 		// Wrap the loop body in a function so that we can defer inside it
 		func() {
-			resp, err := client.Do(&req)
+			resp, err := client.Do(req)
 			if err != nil {
 				err = fmt.Errorf("Error getting metrics: %w", err)
 				if !gotAtLeastOne || ctx.Err() != nil {
@@ -611,9 +803,18 @@ func (r *runner) getMetricsLoop(
 		case <-time.NewTimer(time.Second * time.Duration(config.Metrics.SecondsBetweenRequests)).C:
 			// Continue to the next request
 		case <-ctx.Done():
-			logger.Infof("Ending metrics loop for VM %s:%s", r.vm.Name, r.vm.Namespace)
 			// end the metrics loop
 			return
+		case <-switchSuspendResume:
+			logger.Infof("Metrics loop suspended by informant server")
+
+			select {
+			case <-switchSuspendResume:
+				logger.Infof("Metrics loop resumed by informant server")
+				// continue on to the next loop
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

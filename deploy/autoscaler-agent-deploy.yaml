@@ -53,11 +53,19 @@ data:
         "halveRatio": 0.4
       }
     },
+    "informant": {
+      "serverPort": 10301,
+      "maxStartupSeconds": 10,
+      "requestTimeoutSeconds": 1,
+      "downscaleTimeoutSeconds": 2,
+      "retryRegisterAfterSeconds": 5,
+      "retryServerAfterSeconds": 3,
+      "retryFailedServerDelaySeconds": 5
+    },
     "metrics": {
       "loadMetricPrefix": "node_",
       "requestTimeoutSeconds": 2,
-      "secondsBetweenRequests": 5,
-      "initialDelaySeconds": 5
+      "secondsBetweenRequests": 5
     },
     "scheduler": {
       "schedulerName": "autoscale-scheduler",
@@ -93,6 +101,10 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
+          - name: K8S_POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
           - name: CONFIG_PATH
             value: /etc/autoscaler-agent-config/config.json
           volumeMounts:

@@ -18,6 +18,9 @@ type EnvArgs struct {
 	// The Kubernetes documentation doesn't say this, but the NodeName is always populated with the
 	// final node the pod was placed on by the time the environment variables are set.
 	K8sNodeName string
+
+	// K8sPodIP is the IP address of the Kubernetes pod that this autoscaler-agent is running in
+	K8sPodIP string
 }
 
 func getEnvVar(err *error, require_nonempty bool, varName string) string {
@@ -39,6 +42,7 @@ func ArgsFromEnv() (EnvArgs, error) {
 	args := EnvArgs{
 		ConfigPath:  getEnvVar(&err, true, "CONFIG_PATH"),
 		K8sNodeName: getEnvVar(&err, true, "K8S_NODE_NAME"),
+		K8sPodIP:    getEnvVar(&err, true, "K8S_POD_IP"),
 	}
 
 	if err != nil {
