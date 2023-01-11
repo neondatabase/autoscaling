@@ -16,18 +16,20 @@ import (
 
 // agentState is the global state for the autoscaler agent
 type agentState struct {
-	pods       map[api.PodName]*podState
-	config     *Config
-	kubeClient *kubernetes.Clientset
-	vmClient   *vmclient.Clientset
+	pods           map[api.PodName]*podState
+	config         *Config
+	kubeClient     *kubernetes.Clientset
+	vmClient       *vmclient.Clientset
+	schedulerWatch schedulerWatch
 }
 
-func (r MainRunner) newAgentState() agentState {
+func (r MainRunner) newAgentState(schedulerWatch schedulerWatch) agentState {
 	return agentState{
-		pods:       make(map[api.PodName]*podState),
-		config:     r.Config,
-		kubeClient: r.KubeClient,
-		vmClient:   r.VMClient,
+		pods:           make(map[api.PodName]*podState),
+		config:         r.Config,
+		kubeClient:     r.KubeClient,
+		vmClient:       r.VMClient,
+		schedulerWatch: schedulerWatch,
 	}
 }
 
@@ -77,8 +79,9 @@ func (s *agentState) handleEvent(event podEvent) {
 				Name:      event.vmName,
 				Namespace: event.podName.Namespace,
 			},
-			stop:    recvStop,
-			deleted: recvDeleted,
+			stop:           recvStop,
+			deleted:        recvDeleted,
+			schedulerWatch: s.schedulerWatch,
 		}
 
 		state = &podState{

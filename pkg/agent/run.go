@@ -33,8 +33,9 @@ type runner struct {
 	podName api.PodName
 	podIP   string
 
-	stop    util.SignalReceiver
-	deleted util.SignalReceiver
+	stop           util.SignalReceiver
+	deleted        util.SignalReceiver
+	schedulerWatch schedulerWatch
 }
 
 func (r runner) Spawn(ctx context.Context, status *podStatus) {
@@ -53,7 +54,7 @@ func (r runner) Spawn(ctx context.Context, status *podStatus) {
 
 		logger := RunnerLogger{prefix: fmt.Sprintf("Runner %v: ", r.podName)}
 
-		migrating, err := r.Run(ctx, logger)
+		migrating, err := r.Run(ctx, logger, r.schedulerWatch)
 
 		status.lock.Lock()
 		defer status.lock.Unlock()
@@ -121,9 +122,14 @@ func (l RunnerLogger) Fatalf(format string, args ...interface{}) {
 	klog.FatalfDepth(1, l.prefix+format, args...)
 }
 
-func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _ error) {
+func (r runner) Run(ctx context.Context, logger RunnerLogger, schedulerWatch schedulerWatch) (migrating bool, _ error) {
 	ctx, cancelCtx := context.WithCancel(ctx)
 	defer cancelCtx() // Make sure that background tasks are cleaned up.
+
+	schedulerWatchDeleted := schedulerWatch.Deleted.Subscribe(ctx)
+	defer schedulerWatch.Deleted.Unsubscribe(ctx, schedulerWatchDeleted)
+	schedulerWatchReadyQueue := schedulerWatch.ReadyQueue.Subscribe(ctx)
+	defer schedulerWatch.ReadyQueue.Unsubscribe(ctx, schedulerWatchReadyQueue)
 
 	initVmInfo, err := r.getInitialVMInfo(ctx)
 	if err != nil {
@@ -144,26 +150,15 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _
 	go r.getMetricsLoop(ctx, logger, r.config, metrics, metricsPanicked)
 
 	var computeUnit *api.Resources
-
 	logger.Infof("Starting scheduler watcher and getting initial scheduler")
-	schedulerWatch, scheduler, err := watchSchedulerUpdates(ctx, r.kubeClient, r.config.Scheduler.SchedulerName)
-	if err != nil {
-		return false, fmt.Errorf("Error starting scheduler watcher: %w", err)
-	} else if scheduler == nil {
+	scheduler := schedulerWatch.current
+	if !schedulerWatch.hasScheduler {
 		logger.Infof("No initial scheduler found, waiting for one to become ready")
 		goto noSchedulerLoop
 	}
-
-	logger.Infof(
-		"Got initial scheduler pod %v (UID = %v) with IP %v",
-		scheduler.podName, scheduler.uid, scheduler.ip,
-	)
-	schedulerWatch.Using(*scheduler)
-
 	logger.Infof("Starting main loop. vCPU = %+v, memSlots = %+v", r.vm.Cpu, r.vm.Mem)
 
 restartConnection:
-
 	schedulerWatch.ExpectingDeleted()
 
 	for {
@@ -178,7 +173,7 @@ restartConnection:
 			return false, nil
 		case <-metricsPanicked:
 			return false, fmt.Errorf("Metrics loop panicked")
-		case info := <-schedulerWatch.Deleted:
+		case info := <-schedulerWatchDeleted:
 			if info.uid != scheduler.uid {
 				logger.Infof(
 					"Received info that scheduler candidate pod %v was deleted, but we aren't using it (it's UID = %v, ours = %v)",
@@ -188,7 +183,7 @@ restartConnection:
 			}
 			logger.Warningf(
 				"Received info that scheduler pod %v (UID = %v) was deleted, ending further communication",
-				scheduler.podName, scheduler.uid,
+				info.podName, info.uid,
 			)
 			goto noSchedulerLoop
 		case m := <-metrics:
@@ -424,10 +419,10 @@ noSchedulerLoop:
 		case <-r.deleted.Recv():
 			logger.Infof("Ending runner loop, pod was deleted")
 			return false, nil
-		case info := <-schedulerWatch.ReadyQueue:
+		case info := <-schedulerWatchReadyQueue:
 			logger.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
-			scheduler = &info
 			computeUnit = nil
+			scheduler = &info
 			goto restartConnection
 		case m := <-metrics:
 			// We aren't allowed to communicate with the scheduling plugin, so we're upper-bounded

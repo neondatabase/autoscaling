@@ -3,8 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"time"
+
+	"golang.org/x/exp/slices"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,13 +33,16 @@ func newSchedulerInfo(pod *corev1.Pod) schedulerInfo {
 
 // schedulerWatch is the interface returned by watchSchedulerUpdates
 type schedulerWatch struct {
-	ReadyQueue <-chan schedulerInfo
-	Deleted    <-chan schedulerInfo
+	ReadyQueue *Broker[schedulerInfo]
+	Deleted    *Broker[schedulerInfo]
 
 	cmd   chan<- watchCmd
 	using chan<- schedulerInfo
 
-	stop util.SignalSender
+	current *schedulerInfo
+
+	stop         util.SignalSender
+	hasScheduler bool
 }
 
 func (w schedulerWatch) ExpectingDeleted() {
@@ -83,11 +87,14 @@ const (
 )
 
 func watchSchedulerUpdates(
-	ctx context.Context, kubeClient *kubernetes.Clientset, schedulerName string,
-) (schedulerWatch, *schedulerInfo, error) {
+	ctx context.Context,
+	logger RunnerLogger,
+	kubeClient *kubernetes.Clientset,
+	schedulerName string,
+) (schedulerWatch, error) {
 	events := make(chan watchEvent, 0)
-	readyQueue := make(chan schedulerInfo)
-	deleted := make(chan schedulerInfo)
+	readyQueue := NewBroker[schedulerInfo]()
+	deleted := NewBroker[schedulerInfo]()
 	cmd := make(chan watchCmd)
 	using := make(chan schedulerInfo)
 	stopSender, stopListener := util.NewSingleSignalPair()
@@ -99,8 +106,8 @@ func watchSchedulerUpdates(
 		mode:       watchCmdReady,
 		events:     events,
 		store:      nil,
-		readyQueue: readyQueue,
-		deleted:    deleted,
+		readyQueue: readyQueue.Publish,
+		deleted:    deleted.Publish,
 		cmd:        cmd,
 		using:      using,
 		stop:       stopListener,
@@ -118,6 +125,10 @@ func watchSchedulerUpdates(
 		using:      using,
 		stop:       stopSender,
 	}
+
+	go state.run(ctx, setStore)
+	go readyQueue.Start(ctx)
+	go deleted.Start(ctx)
 
 	store, err := util.Watch(
 		ctx,
@@ -140,10 +151,10 @@ func watchSchedulerUpdates(
 				podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 				if util.PodReady(pod) {
 					if pod.Status.PodIP == "" {
-						klog.Errorf("Pod %v is ready but has no IP", podName)
+						logger.Errorf("Pod %v is ready but has no IP", podName)
 						return
 					}
-
+					watcher.hasScheduler = true
 					events <- watchEvent{info: newSchedulerInfo(pod), kind: eventKindReady}
 				}
 			},
@@ -152,7 +163,7 @@ func watchSchedulerUpdates(
 				newPodName := api.PodName{Name: newPod.Name, Namespace: newPod.Namespace}
 
 				if oldPod.Name != newPod.Name || oldPod.Namespace != newPod.Namespace {
-					klog.Errorf(
+					logger.Errorf(
 						"Unexpected scheduler pod update, old pod name %v != new pod name %v",
 						oldPodName, newPodName,
 					)
@@ -163,17 +174,20 @@ func watchSchedulerUpdates(
 
 				if !oldReady && newReady {
 					if newPod.Status.PodIP == "" {
-						klog.Errorf("Pod %v is ready but has no IP", newPodName)
+						logger.Errorf("Pod %v is ready but has no IP", newPodName)
 						return
 					}
+					watcher.hasScheduler = true
 					events <- watchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)}
 				} else if oldReady && !newReady {
+					watcher.hasScheduler = false
 					events <- watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)}
 				}
 			},
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				wasReady := util.PodReady(pod)
 				if wasReady {
+					watcher.hasScheduler = false
 					events <- watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)}
 				}
 			},
@@ -182,7 +196,7 @@ func watchSchedulerUpdates(
 
 	if err != nil {
 		watcher.Stop()
-		return schedulerWatch{}, nil, fmt.Errorf("Error starting scheduler pod watch: %w", err)
+		return schedulerWatch{}, fmt.Errorf("Error starting scheduler pod watch: %w", err)
 	}
 
 	setStore <- store
@@ -196,17 +210,24 @@ func watchSchedulerUpdates(
 
 	if len(candidates) > 1 {
 		watcher.Stop()
-		return schedulerWatch{}, nil, fmt.Errorf("Multiple initial candidate scheduler pods")
+		return schedulerWatch{}, fmt.Errorf("Multiple initial candidate scheduler pods")
 	} else if len(candidates) == 1 && candidates[0].Status.PodIP == "" {
 		watcher.Stop()
-		return schedulerWatch{}, nil, fmt.Errorf("Scheduler pod is ready but IP is not available")
+		return schedulerWatch{}, fmt.Errorf("Scheduler pod is ready but IP is not available")
 	}
 
 	if len(candidates) == 0 {
-		return watcher, nil, nil
+		return watcher, nil
 	} else {
 		info := newSchedulerInfo(candidates[0])
-		return watcher, &info, nil
+		watcher.Using(info)
+		watcher.current = &info
+		watcher.hasScheduler = true
+		logger.Infof("Got initial scheduler pod %v (UID = %v) with IP %v",
+			info.podName, info.uid, info.ip,
+		)
+		return watcher, nil
+
 	}
 }
 
@@ -219,8 +240,8 @@ type schedulerWatchState struct {
 	events <-chan watchEvent
 	store  *util.WatchStore[corev1.Pod]
 
-	readyQueue chan<- schedulerInfo
-	deleted    chan<- schedulerInfo
+	readyQueue func(ctx context.Context, info schedulerInfo)
+	deleted    func(ctx context.Context, info schedulerInfo)
 
 	cmd   <-chan watchCmd
 	using <-chan schedulerInfo
@@ -242,14 +263,14 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchS
 	}()
 
 	for {
-		var sendCh chan<- schedulerInfo
+		var sendOp func(context.Context, schedulerInfo)
 		var qIdx int
 		switch w.mode {
 		case watchCmdReady:
-			sendCh = w.readyQueue
+			sendOp = w.readyQueue
 			qIdx = w.nextReady
 		case watchCmdDeleted:
-			sendCh = w.deleted
+			sendOp = w.deleted
 			qIdx = w.nextDelete
 		}
 
@@ -274,25 +295,50 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchS
 			}
 		} else {
 			// Something to send
-			select {
-			case <-ctx.Done():
-				return
-			case <-w.stop.Recv():
-				return
-			case store, ok := <-setStore:
-				if ok {
-					w.store = store
+			func() {
+				opctx, opcancel := context.WithCancel(ctx)
+				defer opcancel()
+				pipe := make(chan schedulerInfo)
+				sig := make(chan struct{})
+
+				go func() {
+					defer close(sig)
+					select {
+					case <-opctx.Done():
+						return
+					case info := <-pipe:
+						sendOp(ctx, info)
+					}
+
+				}()
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-w.stop.Recv():
+					return
+				case store, ok := <-setStore:
+					if ok {
+						w.store = store
+					}
+					setStore = sndSetStore
+				case newMode := <-w.cmd:
+					w.handleNewMode(newMode)
+				case e := <-w.events:
+					w.handleEvent(e)
+				case info := <-w.using:
+					w.handleUsing(info)
+				case pipe <- w.queue[qIdx].info:
+					select {
+					case <-ctx.Done():
+						return
+					case <-w.stop.Recv():
+						return
+					case <-sig:
+						w.handleSent(qIdx)
+					}
 				}
-				setStore = sndSetStore
-			case newMode := <-w.cmd:
-				w.handleNewMode(newMode)
-			case e := <-w.events:
-				w.handleEvent(e)
-			case info := <-w.using:
-				w.handleUsing(info)
-			case sendCh <- w.queue[qIdx].info:
-				w.handleSent(qIdx)
-			}
+			}()
 		}
 	}
 }

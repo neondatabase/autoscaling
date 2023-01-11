@@ -30,14 +30,20 @@ func (r MainRunner) Run() error {
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	klog.Info("Starting pod watcher")
+
 	watchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
 	if err != nil {
 		return fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 	klog.Info("Pod watcher started, entering main loop")
 
-	globalState := r.newAgentState()
+	logger := RunnerLogger{prefix: "MainRunner: "}
+	schedulerWatch, err := watchSchedulerUpdates(ctx, logger, r.KubeClient, r.Config.Scheduler.SchedulerName)
+	if err != nil {
+		return fmt.Errorf("Error starting scheduler watcher: %w", err)
+	}
 
+	globalState := r.newAgentState(schedulerWatch)
 	for {
 		select {
 		case <-ctx.Done():
