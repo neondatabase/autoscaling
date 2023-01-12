@@ -22,7 +22,7 @@ func (e *AutoscaleEnforcer) runPermitHandler() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			w.WriteHeader(400)
-			w.Write([]byte("must be POST"))
+			_, _ = w.Write([]byte("must be POST"))
 			return
 		}
 
@@ -34,7 +34,7 @@ func (e *AutoscaleEnforcer) runPermitHandler() {
 			klog.Warningf("[autoscale-enforcer] Received bad JSON request: %s", err)
 			w.Header().Add("Content-Type", ContentTypeError)
 			w.WriteHeader(400)
-			w.Write([]byte("bad JSON"))
+			_, _ = w.Write([]byte("bad JSON"))
 			return
 		}
 
@@ -55,7 +55,7 @@ func (e *AutoscaleEnforcer) runPermitHandler() {
 			}
 			w.Header().Add("Content-Type", ContentTypeError)
 			w.WriteHeader(statusCode)
-			w.Write([]byte(err.Error()))
+			_, _ = w.Write([]byte(err.Error()))
 			return
 		}
 
@@ -66,8 +66,7 @@ func (e *AutoscaleEnforcer) runPermitHandler() {
 
 		w.Header().Add("Content-Type", ContentTypeJSON)
 		w.WriteHeader(statusCode)
-		w.Write(responseBody)
-		return
+		_, _ = w.Write(responseBody)
 	})
 	server := http.Server{Addr: "0.0.0.0:10299", Handler: mux}
 	klog.Info("[autoscale-enforcer] Starting resource request server")

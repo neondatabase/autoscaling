@@ -124,7 +124,6 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _
 	}
 
 	r.vm = initVmInfo
-	initVmInfo = nil // clear to allow GC.
 
 	// Signalling channel used by the informant server & metrics loop
 	switchSuspendResume := make(chan struct{})
@@ -579,16 +578,6 @@ func (r *runner) newGoalCPUCount(metrics api.Metrics, currentCpu uint16) uint16 
 	}
 
 	return goal
-}
-
-func roundCpuToComputeUnit(computeUnit api.Resources, cpu uint16) uint16 {
-	// TODO: currently we always round up. We can do better, with a little context from which way
-	// we're changing the CPU.
-	if cpu%computeUnit.VCPU != 0 {
-		cpu += computeUnit.VCPU - cpu%computeUnit.VCPU
-	}
-
-	return cpu
 }
 
 func memSlotsForCpu(logger RunnerLogger, computeUnit api.Resources, cpu uint16) uint16 {

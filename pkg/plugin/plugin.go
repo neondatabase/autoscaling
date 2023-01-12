@@ -52,7 +52,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	klog.Infof("[autoscale-enforcer] buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	// create the NeonVM client
-	vmapi.AddToScheme(scheme.Scheme)
+	_ = vmapi.AddToScheme(scheme.Scheme)
 	vmConfig := rest.CopyConfig(h.KubeConfig())
 	// The handler's ContentType is not the default "application/json" (it's protobuf), so we need
 	// to set it back to JSON because NeonVM doesn't support protobuf.

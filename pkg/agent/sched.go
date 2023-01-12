@@ -88,7 +88,7 @@ func watchSchedulerUpdates(
 	kubeClient *kubernetes.Clientset,
 	schedulerName string,
 ) (schedulerWatch, *schedulerInfo, error) {
-	events := make(chan watchEvent, 0)
+	events := make(chan watchEvent)
 	readyQueue := make(chan schedulerInfo)
 	deleted := make(chan schedulerInfo)
 	cmd := make(chan watchCmd)

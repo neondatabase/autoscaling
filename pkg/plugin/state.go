@@ -647,8 +647,6 @@ func (e *AutoscaleEnforcer) handlePodDeletion(podName api.PodName) {
 		"\tvCPU verdict: %s\n" +
 		"\t mem verdict: %s"
 	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
-
-	return
 }
 
 func (s *podState) isBetterMigrationTarget(other *podState) bool {

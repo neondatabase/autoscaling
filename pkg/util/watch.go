@@ -168,7 +168,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			}
 		}
 	}
-	items = []T{} // reset to allow GC
+	items = nil // reset to allow GC
 
 	// Start watching
 	watcher, err := client.Watch(ctx, opts)
@@ -190,7 +190,10 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			} else {
 				// Make sure we consume any "close" messages that might not have already been
 				// handled.
-				_, _ = <-store.stopCh
+				select {
+				case <-store.stopCh:
+				default:
+				}
 			}
 		}()
 

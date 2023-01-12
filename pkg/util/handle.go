@@ -28,7 +28,7 @@ func AddHandler[T any, R any](
 	mux.HandleFunc(endpoint, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != method {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			w.Write(errBadMethod)
+			_, _ = w.Write(errBadMethod)
 			return
 		}
 
@@ -37,7 +37,7 @@ func AddHandler[T any, R any](
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			klog.Errorf("%sError reading request body as JSON %s: %s", logPrefix, reqTypeName, err)
 			w.WriteHeader(400)
-			w.Write([]byte("bad JSON"))
+			_, _ = w.Write([]byte("bad JSON"))
 			return
 		}
 
@@ -77,7 +77,7 @@ func AddHandler[T any, R any](
 			if err != nil {
 				klog.Errorf("%sError encoding JSON response: %s", logPrefix, err)
 				w.WriteHeader(500)
-				w.Write([]byte("Error encoding JSON response"))
+				_, _ = w.Write([]byte("Error encoding JSON response"))
 				return
 			}
 			respBodyFormatted = string(respBody)
@@ -90,6 +90,6 @@ func AddHandler[T any, R any](
 		)
 
 		w.WriteHeader(status)
-		w.Write(respBody)
+		_, _ = w.Write(respBody)
 	})
 }

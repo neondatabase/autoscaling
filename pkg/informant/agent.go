@@ -7,11 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"io"
 	"net/http"
 	"sync"
 	"time"
+
+	"golang.org/x/exp/slices"
 
 	"github.com/google/uuid"
 
@@ -130,10 +131,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 	// block anything from sending on signal
 	go func() {
 	noSignal:
-		select {
-		case <-signal:
-			goto yesSignal
-		}
+		<-signal
 
 	yesSignal:
 		select {
