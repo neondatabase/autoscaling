@@ -9,6 +9,9 @@ env:
   SCHED_IMAGE: "neondatabase/autoscale-scheduler"
   INFORMANT_IMAGE: "neondatabase/vm-informant"
 
+  LOCAL_AGENT_IMAGE: "localhost:5001/autoscaler-agent:latest"
+  LOCAL_SCHED_IMAGE: "localhost:5001/kube-autoscale-scheduler:latest"
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -41,8 +44,11 @@ jobs:
       # adding kustomization.yaml) and sed is simple; so we can deal with this for now.
       - name: modify deploy files to use current image(s)
         run: |
-          sed -i -e s^localhost:5001/autoscaler-agent:latest^${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} deploy/autoscale-scheduler.yaml
-          sed -i -e s^localhost:5001/kube-autoscale-scheduler:latest^${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} deploy/autoscaler-agent.yaml
+          # check that the images are present:
+          grep -q ${{ env.LOCAL_AGENT_IMAGE }} deploy/autoscaler-agent.yaml
+          grep -q ${{ env.LOCAL_SCHED_IMAGE }} deploy/autoscale-scheduler.yaml
+          sed -i -e s^${{ env.LOCAL_AGENT_IMAGE }}^${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}^g deploy/autoscaler-agent.yaml
+          sed -i -e s^${{ env.LOCAL_SCHED_IMAGE }}^${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}^g deploy/autoscale-scheduler.yaml
 
       - name: check everything builds
         run: go build ./...
