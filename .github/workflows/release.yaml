@@ -1,0 +1,95 @@
+name: release
+on:
+  push:
+    tags:
+      - "{,v}*.*.*"
+
+env:
+  AGENT_IMAGE: "neondatabase/autoscaler-agent"
+  SCHED_IMAGE: "neondatabase/autoscale-scheduler"
+  INFORMANT_IMAGE: "neondatabase/vm-informant"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v3
+      - name: get version and git info
+        id: get_vcs_info
+        run: |
+          echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo -n "git_info=" >> $GITHUB_OUTPUT
+          bash -c "set -eu -o pipefail; source ./scripts-common.sh; git_info" >> $GITHUB_OUTPUT
+      - name: install golang
+        uses: actions/setup-go@v3
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: docker - install qemu
+        uses: docker/setup-qemu-action@v2
+      - name: docker - setup buildx
+        uses: docker/setup-buildx-action@v2
+      - name: login to docker hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: check everything builds
+        run: go build ./...
+
+      - name: build and push autoscale-scheduler image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          file: build/autoscale-scheduler/Dockerfile
+          tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          build-args:
+            - GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
+      - name: build and push autoscaler-agent image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          file: build/autoscaler-agent/Dockerfile
+          tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          build-args:
+            - GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
+      - name: build and push vm-informant image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          file: build/vm-informant/Dockerfile
+          tags: ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          build-args:
+            - GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
+      
+      # Because we want a docker image for the VM informant, the easiest way for us to also provide
+      # a binary is by just extracting it from the container image itself.
+      - name: extract vm-informant binary
+        run: |
+          mkdir bin
+          # todo: do we actually need to pull here if we're pushing above?
+          docker pull --quiet ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          ID=$(docker create ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          docker cp $ID:/usr/bin/vm-informant bin/vm-informant
+          docker rm -f $ID
+
+      # note: We *could* use something like kustomize for this. But there's extra steps (e.g.,
+      # adding kustomization.yaml) and sed is simple; so we can deal with this for now.
+      - name: modify deploy files to use current image(s)
+        run: |
+          sed -i -e s^localhost:5001/autoscaler-agent:latest^${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} deploy/autoscale-scheduler.yaml
+          sed -i -e s^localhost:5001/kube-autoscale-scheduler:latest^${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} deploy/autoscaler-agent.yaml
+
+      - name: github release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            bin/vm-informant
+            deploy/autoscaler-agent.yaml
+            deploy/autsocale-scheduler.yaml

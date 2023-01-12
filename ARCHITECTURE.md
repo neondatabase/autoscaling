@@ -70,8 +70,8 @@ discussed more in the [high-level consequences] section below.
     functionality implemented here. (See: `pkg/agent`, `pkg/informant`, and `pkg/plugin`)
 * `deploy/` — YAML files used during cluster init. Of these, only the following two are manually
   written:
-    * `deploy/autoscaler-agent-deploy.yaml`
-    * `deploy/scheduler-deploy.yaml`
+    * `deploy/autoscaler-agent.yaml`
+    * `deploy/autoscale-scheduler.yaml`
 * `kind/` — files specific to creating our [kind](https://kind.sigs.k8s.io/) cluster
     * `kind/cni-bin/` — [CNI plugins](https://www.cni.dev/docs/) downloaded via
       [`scripts/download-cni.sh`](scripts/download-cni.sh), required for our bridge network.

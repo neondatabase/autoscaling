@@ -27,7 +27,7 @@ kubectl apply -f deploy/neonvm.yaml | indent
 
 kubectl wait deployment -n neonvm-system neonvm-controller --for=condition=Available=True | indent
 
-kubectl apply -f deploy/scheduler-deploy.yaml -f deploy/autoscaler-agent-deploy.yaml | indent
+kubectl apply -f deploy/autoscale-scheduler.yaml -f deploy/autoscaler-agent.yaml | indent
 
 kubectl create secret generic vm-ssh --from-file=private-key=vm_image/ssh_id_rsa | indent
 
