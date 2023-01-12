@@ -47,8 +47,8 @@ jobs:
           push: true
           file: build/autoscale-scheduler/Dockerfile
           tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args:
-            - GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
+          build-args: |
+            GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
       - name: build and push autoscaler-agent image
         uses: docker/build-push-action@v3
         with:
@@ -56,8 +56,8 @@ jobs:
           push: true
           file: build/autoscaler-agent/Dockerfile
           tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args:
-            - GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
+          build-args: |
+            GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
       - name: build and push vm-informant image
         uses: docker/build-push-action@v3
         with:
@@ -65,8 +65,8 @@ jobs:
           push: true
           file: build/vm-informant/Dockerfile
           tags: ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args:
-            - GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
+          build-args: |
+            GIT_INFO=${{ setps.get_vcs_info.outputs.git_info }}
       
       # Because we want a docker image for the VM informant, the easiest way for us to also provide
       # a binary is by just extracting it from the container image itself.
