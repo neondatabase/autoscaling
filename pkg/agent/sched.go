@@ -44,14 +44,6 @@ type schedulerWatch struct {
 	hasScheduler bool
 }
 
-func (w schedulerWatch) ExpectingDeleted() {
-	w.cmd <- watchCmdDeleted
-}
-
-func (w schedulerWatch) ExpectingReady() {
-	w.cmd <- watchCmdReady
-}
-
 func (w schedulerWatch) Using(sched schedulerInfo) {
 	w.using <- sched
 }
@@ -69,8 +61,8 @@ func schedulerLabelSelector(schedulerName string) string {
 type watchCmd string
 
 const (
-	watchCmdDeleted watchCmd = "expecting deleted"
-	watchCmdReady   watchCmd = "expecting ready"
+	watchForCmdDeleted watchCmd = "expecting deleted"
+	watchForCmdReady   watchCmd = "expecting ready"
 )
 
 type watchEvent struct {
@@ -102,7 +94,7 @@ func watchSchedulerUpdates(
 		queue:      make([]watchEvent, 0, 1),
 		nextReady:  -1,
 		nextDelete: -1,
-		mode:       watchCmdReady,
+		mode:       watchForCmdReady,
 		events:     events,
 		store:      nil,
 		readyQueue: readyQueue.Publish,
@@ -155,6 +147,7 @@ func watchSchedulerUpdates(
 					}
 					watcher.hasScheduler = true
 					events <- watchEvent{info: newSchedulerInfo(pod), kind: eventKindReady}
+					watcher.cmd <- watchForCmdDeleted
 				}
 			},
 			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
@@ -178,9 +171,11 @@ func watchSchedulerUpdates(
 					}
 					watcher.hasScheduler = true
 					events <- watchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)}
+					watcher.cmd <- watchForCmdDeleted
 				} else if oldReady && !newReady {
 					watcher.hasScheduler = false
 					events <- watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)}
+					watcher.cmd <- watchForCmdReady
 				}
 			},
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
@@ -188,6 +183,7 @@ func watchSchedulerUpdates(
 				if wasReady {
 					watcher.hasScheduler = false
 					events <- watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)}
+					watcher.cmd <- watchForCmdReady
 				}
 			},
 		},
@@ -266,10 +262,10 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchS
 		var sendOp func(context.Context, schedulerInfo)
 		var qIdx int
 		switch w.mode {
-		case watchCmdReady:
+		case watchForCmdReady:
 			sendOp = w.readyQueue
 			qIdx = w.nextReady
-		case watchCmdDeleted:
+		case watchForCmdDeleted:
 			sendOp = w.deleted
 			qIdx = w.nextDelete
 		}
@@ -366,11 +362,11 @@ func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
 	w.mode = newMode
 
 	switch w.mode {
-	case watchCmdDeleted:
+	case watchForCmdDeleted:
 		// When switching from "ready" to "deleted", there's nothing extra we need to do. We just
 		// stop removing ready-delete pairs, which will be done on further calls to handleEvent.
 		return
-	case watchCmdReady:
+	case watchForCmdReady:
 		// When switching to "ready", remove all unprocessed deletion events *and* all creation
 		// events that have a linked deletion event
 		//
@@ -416,7 +412,7 @@ func (w *schedulerWatchState) handleEvent(event watchEvent) {
 		}
 	case eventKindDeleted:
 		switch w.mode {
-		case watchCmdReady:
+		case watchForCmdReady:
 			// If there was a prior "ready" event, remove both. Otherwise add the deletion
 			readyIdx := slices.IndexFunc(w.queue, eventFinder(eventKindReady, event.info.uid))
 			if readyIdx != -1 {
@@ -432,7 +428,7 @@ func (w *schedulerWatchState) handleEvent(event watchEvent) {
 					w.nextDelete = len(w.queue) - 1
 				}
 			}
-		case watchCmdDeleted:
+		case watchForCmdDeleted:
 			w.queue = append(w.queue, event)
 			if w.nextDelete == -1 {
 				w.nextDelete = len(w.queue) - 1

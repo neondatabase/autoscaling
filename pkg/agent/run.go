@@ -163,8 +163,6 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger, schedulerWatch sch
 	logger.Infof("Starting main loop. vCPU = %+v, memSlots = %+v", r.vm.Cpu, r.vm.Mem)
 
 restartConnection:
-	schedulerWatch.ExpectingDeleted()
-
 	for {
 		select {
 		// Simply exit if we're done
@@ -435,8 +433,6 @@ noSchedulerLoop:
 	maxFuture := api.Resources{VCPU: r.vm.Cpu.Use, Mem: r.vm.Mem.Use}
 
 	logger.Infof("Future resource limits set at current = %+v", maxFuture)
-
-	schedulerWatch.ExpectingReady()
 
 	for {
 		select {
