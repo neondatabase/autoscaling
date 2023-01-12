@@ -32,14 +32,24 @@ func newSchedulerInfo(pod *corev1.Pod) schedulerInfo {
 
 // schedulerWatch is the interface returned by watchSchedulerUpdates
 type schedulerWatch struct {
-	broker *Broker[schedulerInfo]
+	ReadyQueue *Broker[schedulerInfo]
+	Deleted    *Broker[schedulerInfo]
 
+	cmd   chan<- watchCmd
 	using chan<- schedulerInfo
 
 	current *schedulerInfo
 
 	stop         util.SignalSender
 	hasScheduler bool
+}
+
+func (w schedulerWatch) ExpectingDeleted() {
+	w.cmd <- watchCmdDeleted
+}
+
+func (w schedulerWatch) ExpectingReady() {
+	w.cmd <- watchCmdReady
 }
 
 func (w schedulerWatch) Using(sched schedulerInfo) {
@@ -55,6 +65,13 @@ const schedulerNamespace string = "kube-system"
 func schedulerLabelSelector(schedulerName string) string {
 	return fmt.Sprintf("name=%s", schedulerName)
 }
+
+type watchCmd string
+
+const (
+	watchCmdDeleted watchCmd = "expecting deleted"
+	watchCmdReady   watchCmd = "expecting ready"
+)
 
 type watchEvent struct {
 	info schedulerInfo
@@ -75,7 +92,9 @@ func watchSchedulerUpdates(
 	schedulerName string,
 ) (schedulerWatch, error) {
 	events := make(chan watchEvent, 0)
-	broker := NewBroker[schedulerInfo]()
+	readyQueue := NewBroker[schedulerInfo]()
+	deleted := NewBroker[schedulerInfo]()
+	cmd := make(chan watchCmd)
 	using := make(chan schedulerInfo)
 	stopSender, stopListener := util.NewSingleSignalPair()
 
@@ -83,9 +102,12 @@ func watchSchedulerUpdates(
 		queue:      make([]watchEvent, 0, 1),
 		nextReady:  -1,
 		nextDelete: -1,
+		mode:       watchCmdReady,
 		events:     events,
 		store:      nil,
-		publish:    broker.Publish,
+		readyQueue: readyQueue.Publish,
+		deleted:    deleted.Publish,
+		cmd:        cmd,
 		using:      using,
 		stop:       stopListener,
 		logger:     logger,
@@ -95,13 +117,17 @@ func watchSchedulerUpdates(
 	defer close(setStore)
 
 	watcher := schedulerWatch{
-		broker: broker,
-		using:  using,
-		stop:   stopSender,
+		ReadyQueue: readyQueue,
+		Deleted:    deleted,
+		cmd:        cmd,
+		using:      using,
+		stop:       stopSender,
 	}
+	go state.run(ctx, setStore)
 
 	go state.run(ctx, setStore)
-	go broker.Start(ctx)
+	go readyQueue.Start(ctx)
+	go deleted.Start(ctx)
 
 	store, err := util.Watch(
 		ctx,
@@ -209,11 +235,14 @@ type schedulerWatchState struct {
 	nextReady  int
 	nextDelete int
 
+	mode   watchCmd
 	events <-chan watchEvent
 	store  *util.WatchStore[corev1.Pod]
 
-	publish func(ctx context.Context, info schedulerInfo)
+	readyQueue func(ctx context.Context, info schedulerInfo)
+	deleted    func(ctx context.Context, info schedulerInfo)
 
+	cmd   <-chan watchCmd
 	using <-chan schedulerInfo
 
 	stop   util.SignalReceiver
@@ -234,38 +263,19 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchS
 	}()
 
 	for {
-		// NOTE(tycho): This might be right, but I don't have
-		// enough of a mental model. It sort of seems like we
-		// only really need to store the "last ready" event,
-		// and processing more things, though correct,
-		// wouldn't produce more desireable behavior.
+		var sendOp func(context.Context, schedulerInfo)
 		var qIdx int
-		if w.nextDelete < w.nextReady {
+		switch w.mode {
+		case watchCmdReady:
+			sendOp = w.readyQueue
 			qIdx = w.nextReady
-		} else {
+		case watchCmdDeleted:
+			sendOp = w.deleted
 			qIdx = w.nextDelete
 		}
 
-		// this is a function so that we can defer as we
-		// bridge the interface between channels and the
-		// broker interface
-		func() {
-			opctx, opcancel := context.WithCancel(ctx)
-			defer opcancel()
-			pipe := make(chan schedulerInfo)
-			sig := make(chan struct{})
-
-			go func() {
-				defer close(sig)
-				select {
-				case <-opctx.Done():
-					return
-				case info := <-pipe:
-					w.publish(ctx, info)
-				}
-
-			}()
-
+		if qIdx == -1 {
+			// Nothing to send
 			select {
 			case <-ctx.Done():
 				return
@@ -276,21 +286,60 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchS
 					w.store = store
 				}
 				setStore = sndSetStore
+			case newMode := <-w.cmd:
+				w.handleNewMode(newMode)
 			case e := <-w.events:
 				w.handleEvent(e)
 			case info := <-w.using:
 				w.handleUsing(info)
-			case pipe <- w.queue[qIdx].info:
+			}
+		} else {
+			// Something to send
+			func() {
+				opctx, opcancel := context.WithCancel(ctx)
+				defer opcancel()
+				pipe := make(chan schedulerInfo)
+				sig := make(chan struct{})
+
+				go func() {
+					defer close(sig)
+					select {
+					case <-opctx.Done():
+						return
+					case info := <-pipe:
+						sendOp(ctx, info)
+					}
+
+				}()
+
 				select {
 				case <-ctx.Done():
 					return
 				case <-w.stop.Recv():
 					return
-				case <-sig:
-					w.handleSent(qIdx)
+				case store, ok := <-setStore:
+					if ok {
+						w.store = store
+					}
+					setStore = sndSetStore
+				case newMode := <-w.cmd:
+					w.handleNewMode(newMode)
+				case e := <-w.events:
+					w.handleEvent(e)
+				case info := <-w.using:
+					w.handleUsing(info)
+				case pipe <- w.queue[qIdx].info:
+					select {
+					case <-ctx.Done():
+						return
+					case <-w.stop.Recv():
+						return
+					case <-sig:
+						w.handleSent(qIdx)
+					}
 				}
-			}
-		}()
+			}()
+		}
 	}
 }
 
@@ -310,6 +359,52 @@ func eventFinder(kind eventKind, uid types.UID) func(watchEvent) bool {
 	return func(e watchEvent) bool { return e.kind == kind && e.info.uid == uid }
 }
 
+func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
+	if newMode == w.mode {
+		return
+	}
+	w.mode = newMode
+
+	switch w.mode {
+	case watchCmdDeleted:
+		// When switching from "ready" to "deleted", there's nothing extra we need to do. We just
+		// stop removing ready-delete pairs, which will be done on further calls to handleEvent.
+		return
+	case watchCmdReady:
+		// When switching to "ready", remove all unprocessed deletion events *and* all creation
+		// events that have a linked deletion event
+		//
+		// Removing the deletion events isn't *strictly* necessary, but it means that we don't
+		// process or store extra deletions when we don't need to.
+
+		w.nextReady = -1
+		w.nextDelete = -1
+
+		// Gradually create the new queue, with all of the deletion events removed
+		var newQueue []watchEvent
+
+		for i := range w.queue {
+			switch w.queue[i].kind {
+			case eventKindReady:
+				finder := eventFinder(eventKindDeleted, w.queue[i].info.uid)
+				matchingDeletion := slices.IndexFunc(w.queue[i+1:], finder)
+				// Only if there's no matching deletion, add it to the new queue
+				if matchingDeletion == -1 {
+					newQueue = append(newQueue, w.queue[i])
+				}
+			case eventKindDeleted:
+				// Filter out all deletion events. (don't add this to the new queue)
+			}
+		}
+
+		if len(newQueue) != 0 {
+			w.nextReady = 0
+		}
+
+		w.queue = newQueue
+	}
+}
+
 func (w *schedulerWatchState) handleEvent(event watchEvent) {
 	w.logger.Infof("Received watch event %+v", event)
 
@@ -320,9 +415,28 @@ func (w *schedulerWatchState) handleEvent(event watchEvent) {
 			w.nextReady = len(w.queue) - 1
 		}
 	case eventKindDeleted:
-		w.queue = append(w.queue, event)
-		if w.nextDelete == -1 {
-			w.nextDelete = len(w.queue) - 1
+		switch w.mode {
+		case watchCmdReady:
+			// If there was a prior "ready" event, remove both. Otherwise add the deletion
+			readyIdx := slices.IndexFunc(w.queue, eventFinder(eventKindReady, event.info.uid))
+			if readyIdx != -1 {
+				w.queue = slices.Delete(w.queue, readyIdx, readyIdx+1)
+				// if nextReady < readyIdx, we don't need to do anything. And we can't have
+				// nextReady > readyIdx (because then it wouldn't be nextReady).
+				if w.nextReady == readyIdx {
+					w.resetNextReady()
+				}
+			} else {
+				w.queue = append(w.queue, event)
+				if w.nextDelete == -1 {
+					w.nextDelete = len(w.queue) - 1
+				}
+			}
+		case watchCmdDeleted:
+			w.queue = append(w.queue, event)
+			if w.nextDelete == -1 {
+				w.nextDelete = len(w.queue) - 1
+			}
 		}
 	}
 }
