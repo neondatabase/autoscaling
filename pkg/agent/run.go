@@ -112,10 +112,8 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger, schedulerWatch sch
 	ctx, cancelCtx := context.WithCancel(ctx)
 	defer cancelCtx() // Make sure that background tasks are cleaned up.
 
-	schedulerWatchDeleted := schedulerWatch.Deleted.Subscribe(ctx)
-	defer schedulerWatch.Deleted.Unsubscribe(ctx, schedulerWatchDeleted)
-	schedulerWatchReadyQueue := schedulerWatch.ReadyQueue.Subscribe(ctx)
-	defer schedulerWatch.ReadyQueue.Unsubscribe(ctx, schedulerWatchReadyQueue)
+	schedulerWatchEvents := schedulerWatch.broker.Subscribe(ctx)
+	defer schedulerWatch.broker.Unsubscribe(ctx, schedulerWatchEvents)
 
 	initVmInfo, err := r.getInitialVMInfo(ctx)
 	if err != nil {
@@ -163,8 +161,6 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger, schedulerWatch sch
 	logger.Infof("Starting main loop. vCPU = %+v, memSlots = %+v", r.vm.Cpu, r.vm.Mem)
 
 restartConnection:
-	schedulerWatch.ExpectingDeleted()
-
 	for {
 		select {
 		// Simply exit if we're done
@@ -179,7 +175,7 @@ restartConnection:
 			return false, fmt.Errorf("Informant server panicked")
 		case <-metricsPanicked:
 			return false, fmt.Errorf("Metrics loop panicked")
-		case info := <-schedulerWatchDeleted:
+		case info := <-schedulerWatchEvents:
 			if info.uid != scheduler.uid {
 				logger.Infof(
 					"Received info that scheduler candidate pod %v was deleted, but we aren't using it (it's UID = %v, ours = %v)",
@@ -436,8 +432,6 @@ noSchedulerLoop:
 
 	logger.Infof("Future resource limits set at current = %+v", maxFuture)
 
-	schedulerWatch.ExpectingReady()
-
 	for {
 		select {
 		case <-r.stop.Recv():
@@ -450,7 +444,7 @@ noSchedulerLoop:
 			return false, fmt.Errorf("Informant server panicked")
 		case <-metricsPanicked:
 			return false, fmt.Errorf("Metrics loop panicked")
-		case info := <-schedulerWatchReadyQueue:
+		case info := <-schedulerWatchEvents:
 			logger.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
 			computeUnit = nil
 			scheduler = &info
