@@ -35,7 +35,10 @@ git_info () {
     # ISO 8601 (-ish) format, interpreting the timestamp as relative to UTC+0.
     #
     # Looks like: 7b66271+dirty (2022-12-23 17:20:49 +0000) - agent: Handle metrics more gracefully
-    TZ=UTC0 git show -s --format=format:"%h$dirty (%cd) - %s" --date=iso-local
+    TZ=UTC0 git show -s --format=format:"%h$dirty (%cd) - %s" --date=iso-local | \
+        # Passing through layers of quotes means that git commits including a single-quote won't be
+        # handled correctly 🤦
+        sed -e "s:':\":g"
 }
 
 # Usage: VAR_NAME="$(get_var VAR_NAME DEFAULT_VALUE)"
