@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -111,12 +110,11 @@ func watchSchedulerUpdates(
 		cmd:        cmd,
 		using:      using,
 		stop:       stopListener,
+		logger:     logger,
 	}
 
 	setStore := make(chan *util.WatchStore[corev1.Pod])
 	defer close(setStore)
-
-	go state.run(ctx, setStore)
 
 	watcher := schedulerWatch{
 		ReadyQueue: readyQueue,
@@ -125,6 +123,7 @@ func watchSchedulerUpdates(
 		using:      using,
 		stop:       stopSender,
 	}
+	go state.run(ctx, setStore)
 
 	go state.run(ctx, setStore)
 	go readyQueue.Start(ctx)
@@ -246,7 +245,8 @@ type schedulerWatchState struct {
 	cmd   <-chan watchCmd
 	using <-chan schedulerInfo
 
-	stop util.SignalReceiver
+	stop   util.SignalReceiver
+	logger RunnerLogger
 }
 
 func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchStore[corev1.Pod]) {
@@ -406,7 +406,7 @@ func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
 }
 
 func (w *schedulerWatchState) handleEvent(event watchEvent) {
-	klog.Infof("Received watch event %+v", event)
+	w.logger.Infof("Received watch event %+v", event)
 
 	switch event.kind {
 	case eventKindReady:

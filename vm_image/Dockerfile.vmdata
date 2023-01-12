@@ -1,3 +1,6 @@
+FROM localhost:5001/vm-informant:latest as informant
+# ^ don't do anything with this; we just want it around for later use.
+
 FROM alpine:3.16 AS rootfs
 
 # prometheus-node-exporter provides /metrics on :9001 (once we start it)
@@ -7,6 +10,9 @@ RUN set -e \
 		util-linux-misc \
 		prometheus-node-exporter \
         coreutils
+
+# Add the vm-informant 
+COPY --from=informant /usr/bin/vm-informant /bin/vm-informant
 
 ADD init     /bin/userstartup
 RUN chmod +x /bin/userstartup

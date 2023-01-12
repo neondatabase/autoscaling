@@ -43,7 +43,7 @@ func (r MainRunner) Run() error {
 		return fmt.Errorf("Error starting scheduler watcher: %w", err)
 	}
 
-	globalState := r.newAgentState(schedulerWatch)
+	globalState := r.newAgentState(schedulerWatch, r.EnvArgs.K8sPodIP)
 	for {
 		select {
 		case <-ctx.Done():

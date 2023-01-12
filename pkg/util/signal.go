@@ -1,6 +1,7 @@
 package util
 
-// Lightweight single-signal sender/receiver pair
+// Signalling primitives: single-signal sender/receiver pair and sync.Cond-ish exposed over a
+// channel instead
 
 import (
 	"sync"
@@ -33,4 +34,35 @@ func (s SignalReceiver) Recv() chan struct{} {
 
 func (s SignalReceiver) Close() {
 	s.closeSigCh()
+}
+
+func NewCondChannelPair() (CondChannelSender, CondChannelReceiver) {
+	ch := make(chan struct{}, 1)
+	return CondChannelSender{ch: ch}, CondChannelReceiver{ch: ch}
+}
+
+type CondChannelSender struct {
+	ch chan struct{}
+}
+
+type CondChannelReceiver struct {
+	ch chan struct{}
+}
+
+func (c *CondChannelSender) Send() {
+	select {
+	case c.ch <- struct{}{}:
+	default:
+	}
+}
+
+func (c *CondChannelReceiver) Consume() {
+	select {
+	case <-c.ch:
+	default:
+	}
+}
+
+func (c *CondChannelReceiver) Recv() <-chan struct{} {
+	return c.ch
 }

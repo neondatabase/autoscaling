@@ -16,6 +16,7 @@ import (
 
 // agentState is the global state for the autoscaler agent
 type agentState struct {
+	podIP          string
 	pods           map[api.PodName]*podState
 	config         *Config
 	kubeClient     *kubernetes.Clientset
@@ -23,12 +24,13 @@ type agentState struct {
 	schedulerWatch schedulerWatch
 }
 
-func (r MainRunner) newAgentState(schedulerWatch schedulerWatch) agentState {
+func (r MainRunner) newAgentState(schedulerWatch schedulerWatch, podIP string) agentState {
 	return agentState{
 		pods:           make(map[api.PodName]*podState),
 		config:         r.Config,
 		kubeClient:     r.KubeClient,
 		vmClient:       r.VMClient,
+		podIP:          podIP,
 		schedulerWatch: schedulerWatch,
 	}
 }
@@ -73,6 +75,7 @@ func (s *agentState) handleEvent(event podEvent) {
 			config:     s.config,
 			vmClient:   s.vmClient,
 			kubeClient: s.kubeClient,
+			thisIP:     s.podIP,
 			podName:    event.podName,
 			podIP:      event.podIP,
 			vm: &api.VmInfo{

@@ -17,6 +17,16 @@ run_metrics () {
 mkdir -p /run/node_exporter
 run_metrics &
 
+run_informant () {
+    while true; do
+        vm-informant 2>&1 | tee -a /run/vm-informant/log
+        echo "$(date -R): vm-informant exited, retrying in 1s" | tee -a /run/vm-informant/log
+    done
+}
+
+mkdir -p /run/vm-informant
+run_informant &
+
 # postgresql init and start (data in memory!)
 export PGDATA=/var/lib/postgresql
 mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql

@@ -53,6 +53,11 @@ else
     chmod uga+rw 'ssh_id_rsa' 'ssh_id_rsa.pub'
 fi
 
+echo 'Building vm-informant'
+echo 'Note: this is only used locally so we can build it for linux & copy it into the dockerfile'
+
+../build/vm-informant/build.sh
+
 REGISTRY="localhost:5001"
 NAME="pg14-disk-test"
 TAG="latest"
