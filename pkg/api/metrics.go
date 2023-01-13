@@ -42,7 +42,8 @@ func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err e
 			)
 		}
 
-		v, err := strconv.ParseFloat(fields[1], 32)
+		var v float64
+		v, err = strconv.ParseFloat(fields[1], 32)
 		if err != nil {
 			return 0, fmt.Errorf(
 				"Error parsing %q as float for line starting with %q: %w",

@@ -50,7 +50,7 @@ type InformantConfig struct {
 	// RetryRegisterAfterSeconds gives the amount of time we should wait before retrying a register
 	// request
 	RetryRegisterAfterSeconds uint `json:"retryRegisterAfterSeconds"`
-	// RetryServerDelaySeconds gives the initial delay for for recreating a server that's exited
+	// RetryServerAfterSeconds gives the initial delay for recreating a server that's exited
 	RetryServerAfterSeconds uint `json:"retryServerAfterSeconds"`
 	// RetryFailedServerDelaySeconds gives the amount of time to wait between server creation
 	// retries, after it has already failed once
@@ -59,7 +59,7 @@ type InformantConfig struct {
 
 // MetricsConfig defines a few parameters for metrics requests to the VM
 type MetricsConfig struct {
-	// LoadMetricPrefix is the prefix at at the beginning of the load metrics that we use. For
+	// LoadMetricPrefix is the prefix at the beginning of the load metrics that we use. For
 	// node_exporter, this is "node_", and for vector it's "host_"
 	LoadMetricPrefix string `json:"loadMetricPrefix"`
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for metrics requests

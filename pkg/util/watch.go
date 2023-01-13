@@ -163,7 +163,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 			// Check if the context has been cancelled. This can happen in practice if AddFunc may
 			// take a long time to complete.
-			if err := ctx.Err(); err != nil {
+			if err = ctx.Err(); err != nil {
 				return nil, err
 			}
 		}
@@ -204,13 +204,14 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			store.objects[uid] = obj
 			handlers.AddFunc(obj, true)
 
-			if err := ctx.Err(); err != nil {
+			if err = ctx.Err(); err != nil {
 				return
 			}
 		}
 		// clear deferredAdds so the contents can be GC'd
 		deferredAdds = []T{}
 
+		var relistList L
 		for {
 			for {
 				select {
@@ -223,10 +224,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						klog.Infof("watch %s: watcher ended gracefully, restarting", config.LogName)
 						goto newWatcher
 					} else if event.Type == watch.Error {
-						err := apierrors.FromObject(event.Object)
 						// note: we can get 'too old resource version' errors when there's been a
 						// lot of resource updates that our ListOptions filtered out.
-						if apierrors.IsResourceExpired(err) {
+						if err = apierrors.FromObject(event.Object); apierrors.IsResourceExpired(err) {
 							klog.Warningf("watch %s: received error: %s", config.LogName, err)
 						} else {
 							klog.Errorf("watch %s: received error: %s", config.LogName, err)
@@ -255,7 +255,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
-					err := func() error {
+					err = func() error {
 						switch event.Type {
 						case watch.Added:
 							store.mutex.Lock()
@@ -311,10 +311,11 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 				}
 			}
+
 		relist:
 			klog.Infof("watch %s: re-listing", config.LogName)
 			for {
-				relistList, err := client.List(ctx, opts)
+				relistList, err = client.List(ctx, opts)
 				if err != nil {
 					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
 					if config.RetryRelistAfter == nil {

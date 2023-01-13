@@ -70,7 +70,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting config watcher")
-	if err := p.setConfigAndStartWatcher(context.Background()); err != nil {
+	if err = p.setConfigAndStartWatcher(context.Background()); err != nil {
 		klog.Errorf("Error starting config watcher: %s", err)
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	vmDeletions := make(chan api.PodName)
 	podDeletions := make(chan api.PodName)
 	klog.Infof("[autoscale-enforcer] Starting pod deletion watcher")
-	if err := p.watchPodDeletions(context.Background(), vmDeletions, podDeletions); err != nil {
+	if err = p.watchPodDeletions(context.Background(), vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %w", err)
 	}
 
@@ -223,7 +223,7 @@ func (e *AutoscaleEnforcer) Filter(
 
 	// Check whether the pod's memory slot size matches the scheduler's. If it doesn't, reject it.
 	if vmInfo != nil && !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
-		err := fmt.Errorf("expected %v, found %v", e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize)
+		err = fmt.Errorf("expected %v, found %v", e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize)
 		klog.Warningf("[autoscale-enforcer] Filter: VM for pod %v has bad MemSlotSize: %w", pName, err)
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
@@ -453,7 +453,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	// Double-check that the VM's memory slot size still matches ours. This should be ensured by
 	// our implementation of Filter, but this would be a *pain* to debug if it went wrong somehow.
 	if vmInfo != nil && !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
-		err := fmt.Errorf(
+		err = fmt.Errorf(
 			"expected %v, found %v (this should have been caught during Filter)",
 			e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize,
 		)

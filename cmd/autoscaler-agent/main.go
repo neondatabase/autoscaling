@@ -32,7 +32,7 @@ func main() {
 	if err != nil {
 		klog.Fatalf("Failed to make K8S client: %s", err)
 	}
-	if err := vmapi.AddToScheme(scheme.Scheme); err != nil {
+	if err = vmapi.AddToScheme(scheme.Scheme); err != nil {
 		klog.Fatalf("Failed to add NeonVM scheme: %s", err)
 	}
 

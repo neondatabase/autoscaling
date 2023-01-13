@@ -366,7 +366,7 @@ func (r *runner) registerWithInformant(
 			}
 
 			metricsPort, err := func() (uint16, error) {
-				if err := checkInformantProtocolVersion(informantDesc.ProtoVersion); err != nil {
+				if err = checkInformantProtocolVersion(informantDesc.ProtoVersion); err != nil {
 					return 0, err
 				}
 
