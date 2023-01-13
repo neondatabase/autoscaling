@@ -16,5 +16,5 @@ linters-settings:
 
 linters:
   enable:
-    - gofmt
+    - goimports
     - dupword
