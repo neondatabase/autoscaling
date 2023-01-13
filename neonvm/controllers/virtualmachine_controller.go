@@ -106,10 +106,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
 	if !controllerutil.ContainsFinalizer(virtualmachine, virtualmachineFinalizer) {
 		log.Info("Adding Finalizer for VirtualMachine")
-		if ok := controllerutil.AddFinalizer(virtualmachine, virtualmachineFinalizer); !ok {
-			log.Error(err, "Failed to add finalizer into the custom resource")
-			return ctrl.Result{Requeue: true}, nil
-		}
+		controllerutil.AddFinalizer(virtualmachine, virtualmachineFinalizer)
 
 		if err = r.Update(ctx, virtualmachine); err != nil {
 			log.Error(err, "Failed to update custom resource to add finalizer")
@@ -161,10 +158,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 
 			log.Info("Removing Finalizer for VirtualMachine after successfully perform the operations")
-			if ok := controllerutil.RemoveFinalizer(virtualmachine, virtualmachineFinalizer); !ok {
-				log.Error(err, "Failed to remove finalizer for VirtualMachine")
-				return ctrl.Result{Requeue: true}, nil
-			}
+			controllerutil.RemoveFinalizer(virtualmachine, virtualmachineFinalizer)
 
 			if err := r.Update(ctx, virtualmachine); err != nil {
 				log.Error(err, "Failed to remove finalizer for VirtualMachine")
