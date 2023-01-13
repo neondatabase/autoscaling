@@ -107,11 +107,14 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
 	if !controllerutil.ContainsFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer) {
 		log.Info("Adding Finalizer for VirtualMachineMigration")
+
+		/* for k8s 1.25
 		if ok := controllerutil.AddFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer); !ok {
 			log.Error(err, "Failed to add finalizer into the VM migration")
 			return ctrl.Result{Requeue: true}, nil
 		}
-
+		*/
+		controllerutil.AddFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer)
 		if err = r.Update(ctx, virtualmachinemigration); err != nil {
 			log.Error(err, "Failed to update VM migration to add finalizer")
 			return ctrl.Result{}, err
@@ -162,11 +165,13 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			}
 
 			log.Info("Removing Finalizer for VirtualMachineMigration after successfully perform the operations")
+			/* for k8s 1.25
 			if ok := controllerutil.RemoveFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer); !ok {
 				log.Error(err, "Failed to remove finalizer for VirtualMachineMigration")
 				return ctrl.Result{Requeue: true}, nil
 			}
-
+			*/
+			controllerutil.RemoveFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer)
 			if err := r.Update(ctx, virtualmachinemigration); err != nil {
 				log.Error(err, "Failed to remove finalizer for VirtualMachineMigration")
 				return ctrl.Result{}, err
