@@ -14,6 +14,7 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/tychoish/fun"
 )
 
 type schedulerInfo struct {
@@ -38,7 +39,8 @@ type schedulerWatch struct {
 	cmd   chan<- watchCmd
 	using chan<- schedulerInfo
 
-	stop util.SignalSender
+	stop            util.SignalSender
+	stopEventStream func()
 }
 
 func (w schedulerWatch) ExpectingDeleted() {
@@ -54,6 +56,7 @@ func (w schedulerWatch) Using(sched schedulerInfo) {
 }
 
 func (w schedulerWatch) Stop() {
+	w.stopEventStream()
 	w.stop.Send()
 }
 
@@ -82,13 +85,83 @@ const (
 	eventKindDeleted eventKind = "deleted"
 )
 
-func watchSchedulerUpdates(
+func startWatcherService(
 	ctx context.Context,
 	logger RunnerLogger,
 	kubeClient *kubernetes.Clientset,
+	eventBroker *fun.Broker[watchEvent],
 	schedulerName string,
+) (*util.WatchStore[corev1.Pod], error) {
+	return util.Watch(
+		ctx,
+		kubeClient.CoreV1().Pods(schedulerNamespace),
+		util.WatchConfig{
+			LogName: "scheduler",
+			// We don't need to be super responsive to scheduler changes.
+			//
+			// FIXME: make these configurable.
+			RetryRelistAfter: util.NewTimeRange(time.Second, 4, 5),
+			RetryWatchAfter:  util.NewTimeRange(time.Second, 4, 5),
+		},
+		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
+			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
+		},
+		util.InitWatchModeSync,
+		metav1.ListOptions{LabelSelector: schedulerLabelSelector(schedulerName)},
+		util.WatchHandlerFuncs[*corev1.Pod]{
+			AddFunc: func(pod *corev1.Pod, preexisting bool) {
+				podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+				if util.PodReady(pod) {
+					if pod.Status.PodIP == "" {
+						logger.Errorf("Pod %v is ready but has no IP", podName)
+						return
+					}
+
+					eventBroker.Publish(ctx, watchEvent{info: newSchedulerInfo(pod), kind: eventKindReady})
+				}
+			},
+			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
+				oldPodName := api.PodName{Name: oldPod.Name, Namespace: oldPod.Namespace}
+				newPodName := api.PodName{Name: newPod.Name, Namespace: newPod.Namespace}
+
+				if oldPod.Name != newPod.Name || oldPod.Namespace != newPod.Namespace {
+					logger.Errorf(
+						"Unexpected scheduler pod update, old pod name %v != new pod name %v",
+						oldPodName, newPodName,
+					)
+				}
+
+				oldReady := util.PodReady(oldPod)
+				newReady := util.PodReady(newPod)
+
+				if !oldReady && newReady {
+					if newPod.Status.PodIP == "" {
+						logger.Errorf("Pod %v is ready but has no IP", newPodName)
+						return
+					}
+					eventBroker.Publish(ctx, watchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)})
+				} else if oldReady && !newReady {
+					eventBroker.Publish(ctx, watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)})
+				}
+			},
+			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
+				wasReady := util.PodReady(pod)
+				if wasReady {
+					eventBroker.Publish(ctx, watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)})
+				}
+			},
+		},
+	)
+
+}
+
+func watchSchedulerUpdates(
+	ctx context.Context,
+	logger RunnerLogger,
+	eventBroker *fun.Broker[watchEvent],
+	store *util.WatchStore[corev1.Pod],
 ) (schedulerWatch, *schedulerInfo, error) {
-	events := make(chan watchEvent, 0)
+	events := eventBroker.Subscribe(ctx)
 	readyQueue := make(chan schedulerInfo)
 	deleted := make(chan schedulerInfo)
 	cmd := make(chan watchCmd)
@@ -114,79 +187,14 @@ func watchSchedulerUpdates(
 	defer close(setStore)
 
 	watcher := schedulerWatch{
-		ReadyQueue: readyQueue,
-		Deleted:    deleted,
-		cmd:        cmd,
-		using:      using,
-		stop:       stopSender,
+		ReadyQueue:      readyQueue,
+		Deleted:         deleted,
+		cmd:             cmd,
+		using:           using,
+		stop:            stopSender,
+		stopEventStream: func() { eventBroker.Unsubscribe(ctx, events) },
 	}
 	go state.run(ctx, setStore)
-
-	store, err := util.Watch(
-		ctx,
-		kubeClient.CoreV1().Pods(schedulerNamespace),
-		util.WatchConfig{
-			LogName: "scheduler",
-			// We don't need to be super responsive to scheduler changes.
-			//
-			// FIXME: make these configurable.
-			RetryRelistAfter: util.NewTimeRange(time.Second, 4, 5),
-			RetryWatchAfter:  util.NewTimeRange(time.Second, 4, 5),
-		},
-		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
-			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
-		},
-		util.InitWatchModeSync,
-		metav1.ListOptions{LabelSelector: schedulerLabelSelector(schedulerName)},
-		util.WatchHandlerFuncs[*corev1.Pod]{
-			AddFunc: func(pod *corev1.Pod, preexisting bool) {
-				podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
-				if util.PodReady(pod) {
-					if pod.Status.PodIP == "" {
-						logger.Errorf("Pod %v is ready but has no IP", podName)
-						return
-					}
-
-					events <- watchEvent{info: newSchedulerInfo(pod), kind: eventKindReady}
-				}
-			},
-			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
-				oldPodName := api.PodName{Name: oldPod.Name, Namespace: oldPod.Namespace}
-				newPodName := api.PodName{Name: newPod.Name, Namespace: newPod.Namespace}
-
-				if oldPod.Name != newPod.Name || oldPod.Namespace != newPod.Namespace {
-					logger.Errorf(
-						"Unexpected scheduler pod update, old pod name %v != new pod name %v",
-						oldPodName, newPodName,
-					)
-				}
-
-				oldReady := util.PodReady(oldPod)
-				newReady := util.PodReady(newPod)
-
-				if !oldReady && newReady {
-					if newPod.Status.PodIP == "" {
-						logger.Errorf("Pod %v is ready but has no IP", newPodName)
-						return
-					}
-					events <- watchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)}
-				} else if oldReady && !newReady {
-					events <- watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)}
-				}
-			},
-			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
-				wasReady := util.PodReady(pod)
-				if wasReady {
-					events <- watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)}
-				}
-			},
-		},
-	)
-
-	if err != nil {
-		watcher.Stop()
-		return schedulerWatch{}, nil, fmt.Errorf("Error starting scheduler pod watch: %w", err)
-	}
 
 	setStore <- store
 

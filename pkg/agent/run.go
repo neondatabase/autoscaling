@@ -11,12 +11,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+	"github.com/tychoish/fun"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -26,6 +28,9 @@ type runner struct {
 	config     *Config
 	vmClient   *vmclient.Clientset
 	kubeClient *kubernetes.Clientset
+
+	schedulerEventBroker *fun.Broker[watchEvent]
+	schedulerStore       *util.WatchStore[corev1.Pod]
 
 	// These fields are set by Run
 	informantServer    *atomic.Pointer[informantServerState]
@@ -151,7 +156,7 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _
 	var computeUnit *api.Resources
 
 	logger.Infof("Starting scheduler watcher and getting initial scheduler")
-	schedulerWatch, scheduler, err := watchSchedulerUpdates(ctx, logger, r.kubeClient, r.config.Scheduler.SchedulerName)
+	schedulerWatch, scheduler, err := watchSchedulerUpdates(ctx, logger, r.schedulerEventBroker, r.schedulerStore)
 	if err != nil {
 		return false, fmt.Errorf("Error starting scheduler watcher: %w", err)
 	} else if scheduler == nil {
