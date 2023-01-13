@@ -190,9 +190,10 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			} else {
 				// Make sure we consume any "close" messages that might not have already been
 				// handled.
+
 				select {
 				case <-store.stopCh:
-				default:
+				case <-ctx.Done():
 				}
 			}
 		}()

@@ -115,7 +115,7 @@ func (r *runner) runInformantServerLoop(
 					url := fmt.Sprintf("http://%s:%d/unregister", r.podIP, r.config.Informant.ServerPort)
 					body, err := json.Marshal(&server.desc)
 					if err != nil {
-						klog.Errorf("Error generating response: %s", err)
+						klog.Errorf("Error generating JSON response: %s", err)
 						return
 					}
 
