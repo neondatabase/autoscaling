@@ -40,7 +40,7 @@ func (r MainRunner) Run() error {
 
 	broker := fun.NewBroker[watchEvent](fun.BrokerOptions{})
 	broker.Start(ctx)
-	schedulerStore, err := startWatcherService(ctx, RunnerLogger{"Scheduler Watcher:"}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	schedulerStore, err := startWatcherService(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
