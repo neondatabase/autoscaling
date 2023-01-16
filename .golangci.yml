@@ -32,6 +32,7 @@ linters:
     - predeclared      # no identifiers in Go's list of predeclared identifiers, see <https://go.dev/ref/spec#Predeclared_identifiers>
     - gci              # deterministic import ordering
     - gocritic         # lots of small checks, see <https://go-critic.com/overview>
+    - noctx            # HTTP requests are passed a Context
     - nolintlint       # bad "nolint" directives
 
     # maybe in the future:
