@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 	"github.com/tychoish/fun"
+
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
+
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )

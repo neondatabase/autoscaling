@@ -14,10 +14,14 @@ linters-settings:
   govet:
     check-shadowing: true
   gci:
-    local-prefixes: github.com/neondatabase/autoscaling
+    custom-order: true
     skip-generated: true
     sections:
       - standard
+      - default
+      - Prefix(k8s.io)
+      - Prefix(github.com/neondatabase/neonvm)
+      - Prefix(github.com/neondatabase/autoscaling)
 
 linters:
   enable:

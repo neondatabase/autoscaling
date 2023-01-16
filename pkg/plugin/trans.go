@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"golang.org/x/exp/constraints"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/neondatabase/autoscaling/pkg/util"

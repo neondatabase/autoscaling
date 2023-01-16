@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/exp/slices"
+
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"

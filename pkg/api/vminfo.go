@@ -5,8 +5,9 @@ package api
 import (
 	"fmt"
 
-	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
 )
 
 const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
