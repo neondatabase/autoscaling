@@ -28,6 +28,16 @@ jobs:
           # Required: the version of golangci-lint is required and
           # should be specified with patch version.
           version: v1.50.1
-          args: --timeout 5m
+          args: --timeout 5m --fix
           github-token: ${{ secrets.github_token }}
         if: env.GIT_DIFF
+
+      - name: go mod tidy
+        run: |
+          go mod tidy
+          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+            git ls-files --exclude-standard --others .
+            git diff .
+            echo "ERROR: 'go mod tidy' modified the source tree."
+            exit 1
+          fi
