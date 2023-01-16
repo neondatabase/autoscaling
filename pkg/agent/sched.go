@@ -85,7 +85,7 @@ const (
 	eventKindDeleted eventKind = "deleted"
 )
 
-func startSchedulerWatcherService(
+func startSchedulerWatcher(
 	ctx context.Context,
 	logger RunnerLogger,
 	kubeClient *kubernetes.Clientset,
