@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -114,6 +115,10 @@ func (r *runner) runInformantServerLoop(
 
 					url := fmt.Sprintf("http://%s:%d/unregister", r.podIP, r.config.Informant.ServerPort)
 					body, err := json.Marshal(&server.desc)
+					if err != nil {
+						klog.Errorf("Error generating JSON response: %s", err)
+						return
+					}
 
 					req, err := http.NewRequestWithContext(
 						reqCtx, http.MethodDelete, url, bytes.NewReader(body),
@@ -238,7 +243,7 @@ func startInformantServer(
 	util.AddHandler(logger.prefix, mux, "/suspend", http.MethodPost, "SuspendAgent", state.handleSuspend)
 
 	server := http.Server{Handler: mux}
-	state.shutdown = func() { server.Shutdown(context.TODO()) }
+	state.shutdown = func() { _ = server.Shutdown(context.TODO()) }
 
 	go func() {
 		defer sendDone.Send()

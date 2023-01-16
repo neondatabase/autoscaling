@@ -1,0 +1,104 @@
+# More info on config here: https://golangci-lint.run/usage/configuration/
+run:
+  deadline: 5m
+  issues-exit-code: 1
+
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  sort-results: true
+
+linters:
+  enable:
+    # enabled by default:
+    - errcheck    # unchecked error values
+    - gosimple    # simplifications
+    - govet       # various items, see: https://pkg.go.dev/cmd/vet
+    - ineffassign # detects unused assignments
+    - staticcheck # some rules from staticcheck.io
+    - typecheck   # typechecks code, like the compiler
+    - unused      # checks for unused constants/variables/functions/types
+
+    # explicitly enabled:
+    - asciicheck       # all identifiers are ASCII
+    - bidichk          # no Unicode bidi sequences as per CVE-2021-42574
+    - bodyclose        # HTTP response bodies are closed
+    - dupword          # things like 'the the' in comments/strings
+    - durationcheck    # bad time.Duration arithmetic
+    - errorlint        # common errors with Go 1.13+ error wrapping
+    - exportloopref    # escaping pointers to loop variables
+    - predeclared      # no identifiers in Go's list of predeclared identifiers, see <https://go.dev/ref/spec#Predeclared_identifiers>
+    - gci              # deterministic import ordering
+    - gocritic         # lots of small checks, see <https://go-critic.com/overview>
+    - noctx            # HTTP requests are passed a Context
+    - nolintlint       # bad "nolint" directives
+
+    # maybe in the future:
+    # - exhaustruct     # all struct fields are initialized
+
+linters-settings:
+  # see: <https://golangci-lint.run/usage/linters/#dupword>, <https://github.com/Abirdcfly/dupword>
+  dupword:
+    # only enable a few common cases here. Typically, duplicated words will be short
+    keywords: ["a", "and", "at", "for", "from", "the"]
+
+  # see: <https://golangci-lint.run/usage/linters/#gci>
+  gci:
+    custom-order: true
+    skip-generated: true
+    sections:
+      - standard
+      - default
+      # k8s.io can be a large group; we want that visually distinguished
+      - Prefix(k8s.io)
+      # neonvm is *kind of* local, but not really. Don't lump it in with 'default'
+      - Prefix(github.com/neondatabase/neonvm)
+      - Prefix(github.com/neondatabase/autoscaling)
+
+  # see: <https://golangci-lint.run/usage/linters/#gocritic>, <https://go-critic.com/overview>
+  #
+  # We do not use any experimental checks.
+  gocritic:
+    enabled-tags:
+      - diagnostic
+    disabled-tags:
+      - style
+      - performance
+    # some hand-picked checks from #style
+    enabled-checks:
+      - captLocal
+      - commentFormatting
+      - commentedOutImport
+      - unlambda
+
+  # see: <https://golangci-lint.run/usage/linters/#govet>
+  govet:
+    # when check-shadowing is enabled, it prevents code like
+    #
+    #   foo, err := getFoo()
+    #    ...
+    #   for {
+    #     bar, err := getBar()
+    #     //   ^^^ err shadows from outside the loop
+    #     ...
+    #   }
+    check-shadowing: false
+    # add some additional functions to the printf format specifiers checking
+    printf:
+      # Kubernetes' klog — this is our primary logger
+      - (k8s.io/klog/v2).Infof
+      - (k8s.io/klog/v2).Warningf
+      - (k8s.io/klog/v2).Errorf
+      - (k8s.io/klog/v2).Fatalf
+      # autoscaler-agent's RunnerLogger
+      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Infof
+      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Warningf
+      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Errorf
+      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Fatalf
+  # see: <https://golangci-lint.run/usage/linters/#nolintlint>
+  nolintlint:
+    allow-unused: false
+    require-explanation: true
+    require-specific: true

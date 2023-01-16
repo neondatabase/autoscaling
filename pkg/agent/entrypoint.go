@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tychoish/fun"
+
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
-	"github.com/tychoish/fun"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -43,7 +44,7 @@ func (r MainRunner) Run() error {
 		return fmt.Errorf("starting scheduler watcher broker: %w", err)
 	}
 	broker.Start(ctx)
-	schedulerStore, err := startSchedulerWatcherService(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	schedulerStore, err := startSchedulerWatcher(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}

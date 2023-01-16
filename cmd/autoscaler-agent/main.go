@@ -1,8 +1,6 @@
 package main
 
 import (
-	"github.com/neondatabase/autoscaling/pkg/agent"
-
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -10,6 +8,8 @@ import (
 
 	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+
+	"github.com/neondatabase/autoscaling/pkg/agent"
 )
 
 func main() {
@@ -32,7 +32,10 @@ func main() {
 	if err != nil {
 		klog.Fatalf("Failed to make K8S client: %s", err)
 	}
-	vmapi.AddToScheme(scheme.Scheme)
+	if err = vmapi.AddToScheme(scheme.Scheme); err != nil {
+		klog.Fatalf("Failed to add NeonVM scheme: %s", err)
+	}
+
 	vmClient, err := vmclient.NewForConfig(kubeConfig)
 	if err != nil {
 		klog.Fatalf("Failed to make VM client: %s", err)

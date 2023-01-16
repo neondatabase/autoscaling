@@ -253,10 +253,10 @@ func (r nodeOtherResourceState) subPod(
 	// leak to trigger, which is less useful than underflow.
 	if r.rawCpu.Cmp(p.rawCpu) == -1 {
 		panic(fmt.Sprintf(
-			"underflow: cannot subtract %v pod CPU from from %v node CPU",
+			"underflow: cannot subtract %v pod CPU from %v node CPU",
 			&p.rawCpu, &r.rawCpu,
 		))
-	} else if r.rawMemory.Cmp(r.rawMemory) == -1 {
+	} else if r.rawMemory.Cmp(p.rawMemory) == -1 {
 		panic(fmt.Sprintf(
 			"underflow: cannot subtract %v pod memory from %v node memory",
 			&p.rawMemory, &r.rawMemory,
@@ -647,8 +647,6 @@ func (e *AutoscaleEnforcer) handlePodDeletion(podName api.PodName) {
 		"\tvCPU verdict: %s\n" +
 		"\t mem verdict: %s"
 	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
-
-	return
 }
 
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
@@ -797,7 +795,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			)
 			skippedVms += 1
 			continue
-		} else if podsVm, ok := pod.Labels[LabelVM]; !ok || podsVm != vm.Name {
+		} else if podsVm, exist := pod.Labels[LabelVM]; !exist || podsVm != vm.Name {
 			if ok {
 				return fmt.Errorf("Pod %v label %q doesn't match VM name %v", podName, LabelVM, vmName)
 			} else {

@@ -4,12 +4,13 @@ import (
 	"context"
 	"sync"
 
+	"github.com/tychoish/fun"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
-	"github.com/tychoish/fun"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"

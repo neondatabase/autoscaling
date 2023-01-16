@@ -6,14 +6,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"io"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/exp/slices"
 
 	klog "k8s.io/klog/v2"
 
@@ -130,10 +131,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 	// block anything from sending on signal
 	go func() {
 	noSignal:
-		select {
-		case <-signal:
-			goto yesSignal
-		}
+		<-signal
 
 	yesSignal:
 		select {
@@ -188,7 +186,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 					//
 					// > If the Agent becomes unregistered [ ... ] this method will return
 					// > context.Canceled
-					if err == context.Canceled {
+					if err == context.Canceled { //nolint:errorlint // explicit error value guarantee from Resume()
 						continue loopThroughAgents
 					}
 
@@ -222,7 +220,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 
 			if oldCurrent != nil {
 				handleError := func(err error) {
-					if err == context.Canceled {
+					if errors.Is(err, context.Canceled) {
 						return
 					}
 
@@ -289,7 +287,7 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (uint32, int, error) {
 
 	if err := agent.CheckID(AgentBackgroundCheckTimeout); err != nil {
 		return 0, 400, fmt.Errorf(
-			"Error checking ID for agent %s/%s: %s", agent.serverAddr, agent.id, err,
+			"Error checking ID for agent %s/%s: %w", agent.serverAddr, agent.id, err,
 		)
 	}
 
@@ -392,7 +390,7 @@ func (a *Agent) runBackgroundChecker() {
 				// If this request was cancelled (because the agent was unregistered), we're done.
 				// We can't check a.unregistered because CheckID will already unregister on failure
 				// anyways.
-				if err == context.Canceled {
+				if errors.Is(err, context.Canceled) {
 					return true
 				}
 

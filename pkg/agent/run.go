@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tychoish/fun"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,7 +20,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
-	"github.com/tychoish/fun"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -129,7 +130,6 @@ func (r runner) Run(ctx context.Context, logger RunnerLogger) (migrating bool, _
 	}
 
 	r.vm = initVmInfo
-	initVmInfo = nil // clear to allow GC.
 
 	// Signalling channel used by the informant server & metrics loop
 	switchSuspendResume := make(chan struct{})
@@ -215,7 +215,7 @@ restartConnection:
 					},
 					Metrics: m,
 				}
-				resp, err := r.sendRequestToPlugin(logger, scheduler, r.config, &req)
+				resp, err := r.sendRequestToPlugin(ctx, logger, scheduler, r.config, &req)
 				if err != nil {
 					logger.Errorf("Error from initial plugin message %s", err)
 					goto badScheduler // assume something's permanently wrong with the scheduler
@@ -323,7 +323,7 @@ restartConnection:
 				Resources: newRes,
 				Metrics:   m,
 			}
-			resp, err := r.sendRequestToPlugin(logger, scheduler, r.config, &req)
+			resp, err := r.sendRequestToPlugin(ctx, logger, scheduler, r.config, &req)
 			if err != nil {
 				logger.Errorf("Error from resource request: %s", err)
 				goto badScheduler // assume something's permanently wrong with the scheduler
@@ -586,16 +586,6 @@ func (r *runner) newGoalCPUCount(metrics api.Metrics, currentCpu uint16) uint16 
 	return goal
 }
 
-func roundCpuToComputeUnit(computeUnit api.Resources, cpu uint16) uint16 {
-	// TODO: currently we always round up. We can do better, with a little context from which way
-	// we're changing the CPU.
-	if cpu%computeUnit.VCPU != 0 {
-		cpu += computeUnit.VCPU - cpu%computeUnit.VCPU
-	}
-
-	return cpu
-}
-
 func memSlotsForCpu(logger RunnerLogger, computeUnit api.Resources, cpu uint16) uint16 {
 	if cpu%computeUnit.VCPU != 0 {
 		logger.Warningf(
@@ -804,7 +794,11 @@ func (r *runner) getMetricsLoop(
 }
 
 func (r *runner) sendRequestToPlugin(
-	logger RunnerLogger, sched *schedulerInfo, config *Config, req *api.AgentRequest,
+	ctx context.Context,
+	logger RunnerLogger,
+	sched *schedulerInfo,
+	config *Config,
+	req *api.AgentRequest,
 ) (*api.PluginResponse, error) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -823,7 +817,12 @@ func (r *runner) sendRequestToPlugin(
 	logger.Infof("Sending AgentRequest: %+v", req)
 
 	url := fmt.Sprintf("http://%s:%d/", sched.ip, config.Scheduler.RequestPort)
-	resp, err := client.Post(url, "application/json", bytes.NewReader(requestBody))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("building request %q: %w", url, err)
+	}
+	request.Header.Set("content-type", "application/json")
+	resp, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("Error sending scheduler request: %w", err)
 	}

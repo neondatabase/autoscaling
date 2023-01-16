@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tychoish/fun"
 	"golang.org/x/exp/slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
-	"github.com/tychoish/fun"
 )
 
 type schedulerInfo struct {
