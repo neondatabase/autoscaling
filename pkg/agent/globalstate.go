@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+	"github.com/tychoish/fun"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -15,20 +16,24 @@ import (
 
 // agentState is the global state for the autoscaler agent
 type agentState struct {
-	pods       map[api.PodName]*podState
-	podIP      string
-	config     *Config
-	kubeClient *kubernetes.Clientset
-	vmClient   *vmclient.Clientset
+	pods                 map[api.PodName]*podState
+	podIP                string
+	config               *Config
+	kubeClient           *kubernetes.Clientset
+	vmClient             *vmclient.Clientset
+	schedulerEventBroker *fun.Broker[watchEvent]
+	schedulerStore       *util.WatchStore[corev1.Pod]
 }
 
-func (r MainRunner) newAgentState(podIP string) agentState {
+func (r MainRunner) newAgentState(podIP string, broker *fun.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) agentState {
 	return agentState{
-		pods:       make(map[api.PodName]*podState),
-		config:     r.Config,
-		kubeClient: r.KubeClient,
-		vmClient:   r.VMClient,
-		podIP:      podIP,
+		pods:                 make(map[api.PodName]*podState),
+		config:               r.Config,
+		kubeClient:           r.KubeClient,
+		vmClient:             r.VMClient,
+		podIP:                podIP,
+		schedulerEventBroker: broker,
+		schedulerStore:       schedulerStore,
 	}
 }
 
@@ -79,8 +84,10 @@ func (s *agentState) handleEvent(event podEvent) {
 				Name:      event.vmName,
 				Namespace: event.podName.Namespace,
 			},
-			stop:    recvStop,
-			deleted: recvDeleted,
+			stop:                 recvStop,
+			deleted:              recvDeleted,
+			schedulerEventBroker: s.schedulerEventBroker,
+			schedulerStore:       s.schedulerStore,
 		}
 
 		state = &podState{
