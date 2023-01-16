@@ -186,7 +186,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 					//
 					// > If the Agent becomes unregistered [ ... ] this method will return
 					// > context.Canceled
-					if errors.Is(err, context.Canceled) {
+					if err == context.Canceled { //nolint:errorlint // explicit error value guarantee from Resume()
 						continue loopThroughAgents
 					}
 
