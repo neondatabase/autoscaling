@@ -163,7 +163,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 			// Check if the context has been cancelled. This can happen in practice if AddFunc may
 			// take a long time to complete.
-			if err = ctx.Err(); err != nil {
+			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 		}

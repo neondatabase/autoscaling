@@ -256,7 +256,7 @@ func (r nodeOtherResourceState) subPod(
 			"underflow: cannot subtract %v pod CPU from %v node CPU",
 			&p.rawCpu, &r.rawCpu,
 		))
-	} else if r.rawMemory.Cmp(r.rawMemory) == -1 {
+	} else if r.rawMemory.Cmp(p.rawMemory) == -1 {
 		panic(fmt.Sprintf(
 			"underflow: cannot subtract %v pod memory from %v node memory",
 			&p.rawMemory, &r.rawMemory,
