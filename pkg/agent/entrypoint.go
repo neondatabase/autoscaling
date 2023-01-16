@@ -38,9 +38,12 @@ func (r MainRunner) Run() error {
 	}
 	klog.Info("Pod watcher started, entering main loop")
 
-	broker := fun.NewBroker[watchEvent](fun.BrokerOptions{})
+	broker, err := fun.NewBroker[watchEvent](fun.BrokerOptions{})
+	if err != nil {
+		return fmt.Errorf("starting scheduler watcher broker: %w", err)
+	}
 	broker.Start(ctx)
-	schedulerStore, err := startWatcherService(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	schedulerStore, err := startSchedulerWatcherService(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}

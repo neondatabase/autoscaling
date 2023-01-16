@@ -35,6 +35,7 @@ replace (
 require (
 	github.com/google/uuid v1.3.0
 	github.com/neondatabase/neonvm v0.0.0-20221218221638-078f50be5f77
+	github.com/tychoish/fun v0.0.0-20230116050849-391971307822
 	golang.org/x/exp v0.0.0-20221126150942-6ab00d035af9
 	k8s.io/api v0.23.15
 	k8s.io/apimachinery v0.23.15
@@ -91,7 +92,6 @@ require (
 	github.com/prometheus/procfs v0.7.3 // indirect
 	github.com/spf13/cobra v1.4.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/tychoish/fun v0.0.0-20230113200045-220c03bd8e1b // indirect
 	go.etcd.io/etcd/api/v3 v3.5.0 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.0 // indirect
 	go.etcd.io/etcd/client/v3 v3.5.0 // indirect
