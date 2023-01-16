@@ -95,7 +95,8 @@ jobs:
       - name: github release
         uses: softprops/action-gh-release@v1
         with:
+          fail_on_unmatched_files: true
           files: |
             bin/vm-informant
             deploy/autoscaler-agent.yaml
-            deploy/autsocale-scheduler.yaml
+            deploy/autoscale-scheduler.yaml
