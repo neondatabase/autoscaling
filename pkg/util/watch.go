@@ -205,7 +205,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			store.objects[uid] = obj
 			handlers.AddFunc(obj, true)
 
-			if err = ctx.Err(); err != nil {
+			if err := ctx.Err(); err != nil {
 				return
 			}
 		}
@@ -224,13 +224,13 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						klog.Infof("watch %s: watcher ended gracefully, restarting", config.LogName)
 						goto newWatcher
 					} else if event.Type == watch.Error {
+						err := apierrors.FromObject(event.Object)
 						// note: we can get 'too old resource version' errors when there's been a
 						// lot of resource updates that our ListOptions filtered out.
-						aerr := apierrors.FromObject(event.Object)
-						if apierrors.IsResourceExpired(aerr) {
-							klog.Warningf("watch %s: received error: %s", config.LogName, aerr)
+						if apierrors.IsResourceExpired(err) {
+							klog.Warningf("watch %s: received error: %s", config.LogName, err)
 						} else {
-							klog.Errorf("watch %s: received error: %s", config.LogName, aerr)
+							klog.Errorf("watch %s: received error: %s", config.LogName, err)
 						}
 						goto relist
 					}
@@ -256,7 +256,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
-					err = func() error {
+					err := func() error {
 						switch event.Type {
 						case watch.Added:
 							store.mutex.Lock()
@@ -316,9 +316,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		relist:
 			klog.Infof("watch %s: re-listing", config.LogName)
 			for {
-				relistList, rlerr := client.List(ctx, opts)
-				if rlerr != nil {
-					klog.Errorf("watch %s: re-list failed: %s", config.LogName, rlerr)
+				relistList, err := client.List(ctx, opts)
+				if err != nil {
+					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
 					if config.RetryRelistAfter == nil {
 						klog.Infof("watch %s: ending, re-list failed and RetryWatchAfter is nil", config.LogName)
 						return
