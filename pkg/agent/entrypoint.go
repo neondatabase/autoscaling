@@ -3,11 +3,13 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+	"github.com/tychoish/fun"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -36,12 +38,30 @@ func (r MainRunner) Run() error {
 	}
 	klog.Info("Pod watcher started, entering main loop")
 
-	globalState := r.newAgentState(r.EnvArgs.K8sPodIP)
+	broker, err := fun.NewBroker[watchEvent](fun.BrokerOptions{})
+	if err != nil {
+		return fmt.Errorf("starting scheduler watcher broker: %w", err)
+	}
+	broker.Start(ctx)
+	schedulerStore, err := startSchedulerWatcherService(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	if err != nil {
+		return fmt.Errorf("starting scheduler watch server: %w", err)
+	}
+
+	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
 
 	for {
 		select {
 		case <-ctx.Done():
 			watchStore.Stop()
+			schedulerStore.Stop()
+			broker.Stop()
+			func() {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				broker.Wait(shutdownCtx)
+			}()
+
 			// Remove anything else from podEvents
 		loop:
 			for {
