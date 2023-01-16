@@ -33,8 +33,10 @@ settled on the following:
   K8s, and is responsible for scaling allocated resources (CPU and memory _slots_)
 * A modified K8s scheduler ensures that we don't overcommit resources and triggers migrations when
   demand is above a pre-configured threshold
-* Each VM has a sidecar container in its pod (`autoscaler-agent`) that triggers scaling decisions
-  and makes resource requests to the K8s scheduler on its behalf to reserve additional resources.
+* Each K8s node has an `autoscaler-agent` pod that triggers scaling decisions and makes resource
+  requests to the K8s scheduler on the VMs' behalf to reserve additional resources for them
+* Each VM runs the _VM informant_ binary, which communicates to the autoscaler-agent so that it can
+  immediately respond to memory pressure by allocating more (among other things).
 
 Networking is preserved across migrations by giving each VM an additional IP address on a bridge
 network spanning the cluster with a flat topology; the L2 network figures out "by itself" where to
