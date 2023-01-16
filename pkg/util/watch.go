@@ -212,7 +212,6 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		// clear deferredAdds so the contents can be GC'd
 		deferredAdds = []T{}
 
-		var relistList L
 		for {
 			for {
 				select {
@@ -316,9 +315,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		relist:
 			klog.Infof("watch %s: re-listing", config.LogName)
 			for {
-				relistList, err = client.List(ctx, opts)
-				if err != nil {
-					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
+				relistList, rlerr := client.List(ctx, opts)
+				if rlerr != nil {
+					klog.Errorf("watch %s: re-list failed: %s", config.LogName, rlerr)
 					if config.RetryRelistAfter == nil {
 						klog.Infof("watch %s: ending, re-list failed and RetryWatchAfter is nil", config.LogName)
 						return
