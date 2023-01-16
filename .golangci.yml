@@ -13,6 +13,11 @@ output:
 linters-settings:
   govet:
     check-shadowing: true
+  gci:
+    local-prefixes: github.com/neondatabase/autoscaling
+    skip-generated: true
+    sections:
+      - standard
 
 linters:
   enable:
@@ -26,5 +31,5 @@ linters:
     - exportloopref
     - errname
     - errorlint
-    # - gci # deterministic/consistent import order
+    - gci
     - noctx

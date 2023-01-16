@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -12,9 +14,6 @@ import (
 	rest "k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
-
-	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
-	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"

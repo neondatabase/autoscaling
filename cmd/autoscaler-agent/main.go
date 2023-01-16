@@ -1,15 +1,14 @@
 package main
 
 import (
-	"github.com/neondatabase/autoscaling/pkg/agent"
-
+	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
 
-	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
-	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+	"github.com/neondatabase/autoscaling/pkg/agent"
 )
 
 func main() {

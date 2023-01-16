@@ -12,9 +12,10 @@ package plugin
 import (
 	"fmt"
 
-	"github.com/neondatabase/autoscaling/pkg/util"
 	"golang.org/x/exp/constraints"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type resourceTransition[T constraints.Unsigned] struct {

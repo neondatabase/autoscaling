@@ -11,12 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-
-	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -209,7 +208,7 @@ restartConnection:
 					},
 					Metrics: m,
 				}
-				resp, err := r.sendRequestToPlugin(logger, scheduler, r.config, &req)
+				resp, err := r.sendRequestToPlugin(ctx, logger, scheduler, r.config, &req)
 				if err != nil {
 					logger.Errorf("Error from initial plugin message %s", err)
 					goto badScheduler // assume something's permanently wrong with the scheduler
@@ -317,7 +316,7 @@ restartConnection:
 				Resources: newRes,
 				Metrics:   m,
 			}
-			resp, err := r.sendRequestToPlugin(logger, scheduler, r.config, &req)
+			resp, err := r.sendRequestToPlugin(ctx, logger, scheduler, r.config, &req)
 			if err != nil {
 				logger.Errorf("Error from resource request: %s", err)
 				goto badScheduler // assume something's permanently wrong with the scheduler
@@ -788,7 +787,11 @@ func (r *runner) getMetricsLoop(
 }
 
 func (r *runner) sendRequestToPlugin(
-	logger RunnerLogger, sched *schedulerInfo, config *Config, req *api.AgentRequest,
+	ctx context.Context,
+	logger RunnerLogger,
+	sched *schedulerInfo,
+	config *Config,
+	req *api.AgentRequest,
 ) (*api.PluginResponse, error) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -807,7 +810,12 @@ func (r *runner) sendRequestToPlugin(
 	logger.Infof("Sending AgentRequest: %+v", req)
 
 	url := fmt.Sprintf("http://%s:%d/", sched.ip, config.Scheduler.RequestPort)
-	resp, err := client.Post(url, "application/json", bytes.NewReader(requestBody))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("building request %q: %w", url, err)
+	}
+	request.Header.Set("content-type", "application/json")
+	resp, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("Error sending scheduler request: %w", err)
 	}
