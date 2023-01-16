@@ -61,7 +61,7 @@ func AddHandler[T any, R any](
 				logFunc = klog.Warningf
 			} else /* unexpected status */ {
 				err = fmt.Errorf(
-					"%sHTTP handler error: invalid status %d for error response: %s",
+					"%sHTTP handler error: invalid status %d for error response: %w",
 					logPrefix, status, err,
 				)
 				logFunc = klog.Errorf

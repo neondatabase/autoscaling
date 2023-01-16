@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 
 	klog "k8s.io/klog/v2"
@@ -26,7 +27,7 @@ func main() {
 
 	server := http.Server{Addr: "0.0.0.0:10301", Handler: mux}
 	err := server.ListenAndServe()
-	if err == http.ErrServerClosed {
+	if errors.Is(err, http.ErrServerClosed) {
 		klog.Infof("Server ended.")
 	} else {
 		klog.Fatalf("Server failed: %s", err)

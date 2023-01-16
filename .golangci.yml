@@ -18,3 +18,13 @@ linters:
   enable:
     - goimports
     - dupword
+    - bodyclose
+    - nolintlint
+    - asciicheck
+    - errchkjson
+    - durationcheck
+    - exportloopref
+    - errname
+    - errorlint
+    # - gci # deterministic/consistent import order
+    - noctx
