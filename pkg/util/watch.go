@@ -226,10 +226,11 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					} else if event.Type == watch.Error {
 						// note: we can get 'too old resource version' errors when there's been a
 						// lot of resource updates that our ListOptions filtered out.
-						if err = apierrors.FromObject(event.Object); apierrors.IsResourceExpired(err) {
-							klog.Warningf("watch %s: received error: %s", config.LogName, err)
+						aerr := apierrors.FromObject(event.Object)
+						if apierrors.IsResourceExpired(aerr) {
+							klog.Warningf("watch %s: received error: %s", config.LogName, aerr)
 						} else {
-							klog.Errorf("watch %s: received error: %s", config.LogName, err)
+							klog.Errorf("watch %s: received error: %s", config.LogName, aerr)
 						}
 						goto relist
 					}
