@@ -68,7 +68,7 @@ jobs:
           context: .
           push: true
           file: build/autoscaler-agent/Dockerfile
-          tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          tags: ${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
             GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
       - name: build and push vm-informant image
