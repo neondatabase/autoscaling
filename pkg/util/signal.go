@@ -36,19 +36,29 @@ func (s SignalReceiver) Close() {
 	s.closeSigCh()
 }
 
+// NewCondChannelPair creates a sender/receiver pair for a sync.Cond-like interface
+//
+// The differences from sync.Cond are that receiving is exposed through a channel (so it can be
+// select-ed) and there is no equivalent to (*Cond).Broadcast()
 func NewCondChannelPair() (CondChannelSender, CondChannelReceiver) {
 	ch := make(chan struct{}, 1)
 	return CondChannelSender{ch: ch}, CondChannelReceiver{ch: ch}
 }
 
+// CondChannelSender is the sending half of a sync.Cond-like interface
 type CondChannelSender struct {
 	ch chan struct{}
 }
 
+// CondChannelReceiver is the receiving half of a sync.Cond-like interface
 type CondChannelReceiver struct {
 	ch chan struct{}
 }
 
+// Send performs a non-blocking notify of the associated CondChannelReceiver
+//
+// If there is currently a receiver waiting via Recv, then this will immediately wake them.
+// Otherwise, the next receive on the channel returned by Recv will complete immediately.
 func (c *CondChannelSender) Send() {
 	select {
 	case c.ch <- struct{}{}:
@@ -56,6 +66,10 @@ func (c *CondChannelSender) Send() {
 	}
 }
 
+// Consume removes any existing signal created by Send, requiring an additional Send to be made
+// before the receiving on Recv will unblock
+//
+// This method is non-blocking.
 func (c *CondChannelReceiver) Consume() {
 	select {
 	case <-c.ch:
@@ -63,6 +77,10 @@ func (c *CondChannelReceiver) Consume() {
 	}
 }
 
+// Recv returns a channel for which receiving will complete either (a) immediately, if Send has been
+// called without Consume or another receive since; or (b) as soon as Send is next called
+//
+// This method is non-blocking but receiving on the returned channel may block.
 func (c *CondChannelReceiver) Recv() <-chan struct{} {
 	return c.ch
 }
