@@ -216,7 +216,7 @@ The protocol is as follows:
    informant. Each party can make **only one request at a time**. The agent starts in the
    "suspended" state.
     1. The informant's `/downscale` endpoint (via PUT), with `RawResources`. This serves as the
-       agent _politely asking_ the informant to decrease resource usage to the specificed amount.
+       agent _politely asking_ the informant to decrease resource usage to the specified amount.
        The informant returns a `DownscaleResult` indicating whether it was able to downscale (it may
        not, if e.g. memory usage is too high).
     2. The informant's `/upscale` endpoint (via PUT), with `RawResources`. This serves as the agent
