@@ -14,6 +14,9 @@ Images are available as:
 
 The deployment files and a VM informant binary are attached to each release.
 
+For now, the currently deployed configuration on staging is manually replicated
+in the [`staging` branch](https://github.com/neondatabase/autoscaling/tree/staging).
+
 ## Overview
 
 We want to dynamically change the amount of CPUs and memory of running postgres instances, _without
