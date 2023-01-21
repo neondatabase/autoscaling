@@ -160,7 +160,7 @@ spec:
     spec:
       serviceAccountName: autoscale-scheduler
       containers:
-      - image: sharnoff/kube-autoscale-scheduler:121
+      - image: neondatabase/autoscale-scheduler:0.1.2
         command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
         livenessProbe:
           httpGet:

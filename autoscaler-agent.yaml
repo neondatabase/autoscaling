@@ -53,11 +53,19 @@ data:
         "halveRatio": 0.4
       }
     },
+    "informant": {
+      "serverPort": 10301,
+      "maxStartupSeconds": 10,
+      "requestTimeoutSeconds": 1,
+      "downscaleTimeoutSeconds": 2,
+      "retryRegisterAfterSeconds": 5,
+      "retryServerAfterSeconds": 3,
+      "retryFailedServerDelaySeconds": 5
+    },
     "metrics": {
       "loadMetricPrefix": "host_",
       "requestTimeoutSeconds": 2,
-      "secondsBetweenRequests": 5,
-      "initialDelaySeconds": 3
+      "secondsBetweenRequests": 5
     },
     "scheduler": {
       "schedulerName": "autoscale-scheduler",
@@ -83,7 +91,7 @@ spec:
       serviceAccountName: autoscaler-agent
       containers:
         - name: autoscaler-agent
-          image: sharnoff/autoscaler-agent:121
+          image: neondatabase/autoscaler-agent:0.1.2
           resources:
             limits:
               memory: 100Mi
@@ -93,6 +101,10 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
+          - name: K8S_POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
           - name: CONFIG_PATH
             value: /etc/autoscaler-agent-config/config.json
           volumeMounts:
