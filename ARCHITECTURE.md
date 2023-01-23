@@ -231,7 +231,12 @@ The protocol is as follows:
     5. The agent's `/id` endpoint (via GET) is also available during normal operation, and is used
        as a health check by the informant.
 5. If explicitly cut off, communication ends with the agent sending the original `AgentDesc` as a
-   POST request on the `/unregister` endpoint.
+   DELETE request on the `/unregister` endpoint. The informant returns an `UnregisterAgent`.
+
+Broadly, agent<->informant connections are not expected to survive restarts of the informant (due
+to failure, or otherwise). So, it is expected that *sometimes*, the informant will receive a request
+for an agent that it has no connection to. When that happens, the informant MUST respond with HTTP
+code 404, and the agent SHOULD try reconnecting.
 
 <!--
 FIXME: Per (4).3, the agent must not make {down,up}scale requests while suspended. This is not
