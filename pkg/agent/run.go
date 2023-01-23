@@ -618,7 +618,7 @@ func (r *runner) requestInformantDownscale(
 
 	requestBody, err := json.Marshal(&rawAmount)
 	if err != nil {
-		panic(fmt.Sprintf("Error marshalling RawResources: %s", err))
+		panic(fmt.Errorf("Error marshalling RawResources: %w", err))
 	}
 
 	requestTimeout := time.Second * time.Duration(r.config.Informant.DownscaleTimeoutSeconds)
@@ -663,7 +663,7 @@ func (r *runner) notifyInformantUpscale(
 
 	requestBody, err := json.Marshal(&rawAmount)
 	if err != nil {
-		panic(fmt.Sprintf("Error marshalling RawResources: %s", err))
+		panic(fmt.Errorf("Error marshalling RawResources: %w", err))
 	}
 
 	requestTimeout := time.Second * time.Duration(r.config.Informant.RequestTimeoutSeconds)
@@ -723,7 +723,7 @@ func (r *runner) getMetricsLoop(
 	metricsURL := fmt.Sprintf("http://%s:%d/metrics", r.podIP, metricsPort)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, bytes.NewReader([]byte{}))
 	if err != nil {
-		panic(fmt.Sprintf("Error creating metrics URL: %s", err))
+		panic(fmt.Errorf("Error creating metrics URL: %w", err))
 	}
 
 	logger.Infof("Metrics loop waiting for initial Resume from VM informant")

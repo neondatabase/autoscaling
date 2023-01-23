@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/tychoish/fun"
@@ -105,7 +106,7 @@ func (s *agentState) handleEvent(event podEvent) {
 		s.pods[event.podName] = state
 		runner.Spawn(context.Background(), &state.status)
 	default:
-		panic("bad event: unexpected event kind")
+		panic(errors.New("bad event: unexpected event kind"))
 	}
 }
 

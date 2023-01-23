@@ -10,6 +10,7 @@ package plugin
 // and changes from VM deletion are handled by handleDeleted.
 
 import (
+	"errors"
 	"fmt"
 
 	"golang.org/x/exp/constraints"
@@ -108,7 +109,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		// note: we don't need to handle buffer here because migration is never started as the first
 		// communication, so buffers will be zero already.
 		if r.pod.buffer != 0 {
-			panic("r.pod.buffer != 0")
+			panic(errors.New("r.pod.buffer != 0"))
 		}
 
 		fmtString := "Denying increase %d -> %d because the pod is starting migration; " +

@@ -2,6 +2,7 @@ package util
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -46,11 +47,11 @@ type TimeRange struct {
 
 func NewTimeRange(units time.Duration, min, max int) *TimeRange {
 	if min < 0 {
-		panic("bad time range: min < 0")
+		panic(errors.New("bad time range: min < 0"))
 	} else if min == 0 && max == 0 {
-		panic("bad time range: min and max = 0")
+		panic(errors.New("bad time range: min and max = 0"))
 	} else if max < min {
-		panic("bad time range: max < min")
+		panic(errors.New("bad time range: max < min"))
 	}
 
 	return &TimeRange{min: min, max: max, units: units}
@@ -120,7 +121,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	handlers WatchHandlerFuncs[P],
 ) (*WatchStore[T], error) {
 	if accessors.Items == nil {
-		panic("accessors.Items == nil")
+		panic(errors.New("accessors.Items == nil"))
 	}
 
 	if handlers.AddFunc == nil {
@@ -299,9 +300,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 							store.objects[uid] = (*T)(obj)
 							handlers.UpdateFunc(old, (*T)(obj))
 						case watch.Error:
-							panic("unreachable code reached") // handled above
+							panic(errors.New("unreachable code reached")) // handled above
 						default:
-							panic("unknown watch event")
+							panic(errors.New("unknown watch event"))
 						}
 						return nil
 					}()

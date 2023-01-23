@@ -253,12 +253,12 @@ func (r nodeOtherResourceState) subPod(
 	// difficult to get overflow to occur (also because overflow would probably take a slow & steady
 	// leak to trigger, which is less useful than underflow.
 	if r.rawCpu.Cmp(p.rawCpu) == -1 {
-		panic(fmt.Sprintf(
+		panic(fmt.Errorf(
 			"underflow: cannot subtract %v pod CPU from %v node CPU",
 			&p.rawCpu, &r.rawCpu,
 		))
 	} else if r.rawMemory.Cmp(p.rawMemory) == -1 {
-		panic(fmt.Sprintf(
+		panic(fmt.Errorf(
 			"underflow: cannot subtract %v pod memory from %v node memory",
 			&p.rawMemory, &r.rawMemory,
 		))
@@ -305,7 +305,7 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 		// note: For integer arithmetic, (x + n-1) / n is equivalent to ceil(x/n)
 		newReservedMemSlots := (memoryCopy.Value() + memSlotSizeExact - 1) / memSlotSizeExact
 		if newReservedMemSlots > math.MaxUint16 {
-			panic(fmt.Sprintf(
+			panic(fmt.Errorf(
 				"new reserved mem slots overflows uint16 (%d > %d)", newReservedMemSlots, math.MaxUint16,
 			))
 		}
@@ -696,10 +696,10 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 		p.state.maxTotalReservableCPU != 0 || p.state.maxTotalReservableMemSlots != 0
 
 	if hasNonNilField {
-		panic("readClusterState called with non-nil pluginState field")
+		panic(errors.New("readClusterState called with non-nil pluginState field"))
 	}
 	if p.state.conf == nil {
-		panic("readClusterState called with nil config")
+		panic(errors.New("readClusterState called with nil config"))
 	}
 
 	// There's a couple challenges we have to deal with here, particularly around discrepancies in

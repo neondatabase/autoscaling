@@ -225,7 +225,7 @@ func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error 
 	}
 
 	if len(initialConfigs) > 1 {
-		panic(fmt.Sprintf("more than one config found for name %s:%s", ConfigMapNamespace, ConfigMapName))
+		panic(fmt.Errorf("more than one config found for name %s:%s", ConfigMapNamespace, ConfigMapName))
 	}
 
 	if err := e.handleNewConfigMap(initialConfigs[0]); err != nil {

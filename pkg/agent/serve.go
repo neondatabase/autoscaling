@@ -235,7 +235,7 @@ func startInformantServer(
 	case *net.TCPAddr:
 		state.desc.ServerAddr = fmt.Sprintf("%s:%d", thisIP, addr.Port)
 	default:
-		panic("unexpected net.Addr type")
+		panic(errors.New("unexpected net.Addr type"))
 	}
 
 	mux := http.NewServeMux()
@@ -294,7 +294,7 @@ func (s *informantServerState) handleResume(body *api.ResumeAgent) (*api.AgentId
 			SequenceNumber: s.getSequenceNumberWhileLocked(),
 		}, 200, nil
 	default:
-		panic(fmt.Sprintf("unknown informantServerMode %q", s.mode))
+		panic(fmt.Errorf("unknown informantServerMode %q", s.mode))
 	}
 }
 
@@ -320,7 +320,7 @@ func (s *informantServerState) handleSuspend(body *api.SuspendAgent) (*api.Agent
 	case serverModeSuspended:
 		return nil, 400, errors.New("cannot suspend agent that is already running")
 	default:
-		panic(fmt.Sprintf("unknown informantServerMode %q", s.mode))
+		panic(fmt.Errorf("unknown informantServerMode %q", s.mode))
 	}
 }
 
@@ -331,7 +331,7 @@ func (r *runner) registerWithInformant(
 
 	reqBody, err := json.Marshal(serverDesc)
 	if err != nil {
-		panic(fmt.Sprintf("Error creating AgentDesc JSON: %s", err))
+		panic(fmt.Errorf("Error creating AgentDesc JSON: %w", err))
 	}
 
 	url := fmt.Sprintf("http://%s:%d/register", r.podIP, r.config.Informant.ServerPort)
