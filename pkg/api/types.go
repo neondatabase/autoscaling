@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 // PodName represents the namespaced name of a pod
@@ -76,6 +78,48 @@ func (r Resources) ValidateNonZero() error {
 	}
 
 	return nil
+}
+
+// HasFieldGreaterThan returns true if and only if there is a field F where r.F > cmp.F
+func (r Resources) HasFieldGreaterThan(cmp Resources) bool {
+	return r.VCPU > cmp.VCPU || r.Mem > cmp.Mem
+}
+
+// HasFieldGreaterThan returns true if and only if there is a field F where r.F < cmp.F
+func (r Resources) HasFieldLessThan(cmp Resources) bool {
+	return cmp.HasFieldGreaterThan(r)
+}
+
+// Min returns a new Resources value with each field F as the minimum of r.F and cmp.F
+func (r Resources) Min(cmp Resources) Resources {
+	return Resources{
+		VCPU: util.Min(r.VCPU, cmp.VCPU),
+		Mem:  util.Min(r.Mem, cmp.Mem),
+	}
+}
+
+// Max returns a new Resources value with each field F as the maximum of r.F and cmp.F
+func (r Resources) Max(cmp Resources) Resources {
+	return Resources{
+		VCPU: util.Max(r.VCPU, cmp.VCPU),
+		Mem:  util.Max(r.Mem, cmp.Mem),
+	}
+}
+
+// Mul returns the result of multiplying each resource by factor
+func (r Resources) Mul(factor uint16) Resources {
+	return Resources{
+		VCPU: factor * r.VCPU,
+		Mem:  factor * r.Mem,
+	}
+}
+
+// ConvertToRaw produces the RawResources equivalent to these Resources with the given slot size
+func (r Resources) ConvertToRaw(memSlotSize *resource.Quantity) RawResources {
+	return RawResources{
+		Cpu:    resource.NewQuantity(int64(r.VCPU), resource.DecimalSI),
+		Memory: resource.NewQuantity(int64(r.Mem)*memSlotSize.Value(), resource.BinarySI),
+	}
 }
 
 /////////////////////////////////

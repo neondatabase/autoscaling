@@ -15,25 +15,55 @@ const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
 // care about
 type VmInfo struct {
-	Name          string
-	Namespace     string
-	Cpu           VmCpuInfo
-	Mem           VmMemInfo
-	AlwaysMigrate bool
+	Name          string    `json:"name"`
+	Namespace     string    `json:"namespace"`
+	Cpu           VmCpuInfo `json:"cpu"`
+	Mem           VmMemInfo `json:"mem"`
+	AlwaysMigrate bool      `json:"alwaysMigrate"`
 }
 
 type VmCpuInfo struct {
-	Min uint16
-	Max uint16
-	Use uint16
+	Min uint16 `json:"min"`
+	Max uint16 `json:"max"`
+	Use uint16 `json:"use"`
 }
 
 type VmMemInfo struct {
-	Min uint16
-	Max uint16
-	Use uint16
+	Min uint16 `json:"min"`
+	Max uint16 `json:"max"`
+	Use uint16 `json:"use"`
 
-	SlotSize resource.Quantity
+	SlotSize resource.Quantity `json:"slotSize"`
+}
+
+// Using returns the Resources that this VmInfo says the VM is using
+func (vm VmInfo) Using() Resources {
+	return Resources{
+		VCPU: vm.Cpu.Use,
+		Mem:  vm.Mem.Use,
+	}
+}
+
+// SetUsing sets the values of vm.{Cpu,Mem}.Use to those provided by r
+func (vm *VmInfo) SetUsing(r Resources) {
+	vm.Cpu.Use = r.VCPU
+	vm.Mem.Use = r.Mem
+}
+
+// Min returns the Resources representing the minimum amount this VmInfo says the VM must reserve
+func (vm VmInfo) Min() Resources {
+	return Resources{
+		VCPU: vm.Cpu.Min,
+		Mem:  vm.Mem.Min,
+	}
+}
+
+// Max returns the Resources representing the maximum amount this VmInfo says the VM may reserve
+func (vm VmInfo) Max() Resources {
+	return Resources{
+		VCPU: vm.Cpu.Max,
+		Mem:  vm.Mem.Max,
+	}
 }
 
 func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
@@ -71,6 +101,16 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 
 	if err != nil {
 		return nil, err
+	}
+
+	min := info.Min()
+	using := info.Using()
+	max := info.Max()
+
+	if using.HasFieldLessThan(min) {
+		return nil, fmt.Errorf("current usage %+v has field less than minimum %+v", using, min)
+	} else if using.HasFieldGreaterThan(max) {
+		return nil, fmt.Errorf("current usage %+v has field greater than maximum %+v", using, max)
 	}
 
 	return &info, nil

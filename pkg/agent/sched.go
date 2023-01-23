@@ -19,16 +19,16 @@ import (
 )
 
 type schedulerInfo struct {
-	podName api.PodName
-	uid     types.UID
-	ip      string
+	PodName api.PodName
+	UID     types.UID
+	IP      string
 }
 
 func newSchedulerInfo(pod *corev1.Pod) schedulerInfo {
 	return schedulerInfo{
-		podName: api.PodName{Name: pod.Name, Namespace: pod.Namespace},
-		uid:     pod.UID,
-		ip:      pod.Status.PodIP,
+		PodName: api.PodName{Name: pod.Name, Namespace: pod.Namespace},
+		UID:     pod.UID,
+		IP:      pod.Status.PodIP,
 	}
 }
 
@@ -323,7 +323,7 @@ func (w *schedulerWatchState) resetNextDelete() {
 }
 
 func eventFinder(kind eventKind, uid types.UID) func(watchEvent) bool {
-	return func(e watchEvent) bool { return e.kind == kind && e.info.uid == uid }
+	return func(e watchEvent) bool { return e.kind == kind && e.info.UID == uid }
 }
 
 func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
@@ -353,7 +353,7 @@ func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
 		for i := range w.queue {
 			switch w.queue[i].kind {
 			case eventKindReady:
-				finder := eventFinder(eventKindDeleted, w.queue[i].info.uid)
+				finder := eventFinder(eventKindDeleted, w.queue[i].info.UID)
 				matchingDeletion := slices.IndexFunc(w.queue[i+1:], finder)
 				// Only if there's no matching deletion, add it to the new queue
 				if matchingDeletion == -1 {
@@ -385,7 +385,7 @@ func (w *schedulerWatchState) handleEvent(event watchEvent) {
 		switch w.mode {
 		case watchCmdReady:
 			// If there was a prior "ready" event, remove both. Otherwise add the deletion
-			readyIdx := slices.IndexFunc(w.queue, eventFinder(eventKindReady, event.info.uid))
+			readyIdx := slices.IndexFunc(w.queue, eventFinder(eventKindReady, event.info.UID))
 			if readyIdx != -1 {
 				w.queue = slices.Delete(w.queue, readyIdx, readyIdx+1)
 				// if nextReady < readyIdx, we don't need to do anything. And we can't have
@@ -410,7 +410,7 @@ func (w *schedulerWatchState) handleEvent(event watchEvent) {
 
 func (w *schedulerWatchState) handleUsing(info schedulerInfo) {
 	// If there's a "ready" event for the pod, remove it and recalculate nextReady
-	readyIdx := slices.IndexFunc(w.queue, eventFinder(eventKindReady, info.uid))
+	readyIdx := slices.IndexFunc(w.queue, eventFinder(eventKindReady, info.UID))
 	if readyIdx != -1 {
 		w.queue = slices.Delete(w.queue, readyIdx, readyIdx+1)
 		if readyIdx < w.nextDelete {
@@ -432,7 +432,7 @@ func (w *schedulerWatchState) handleSent(qIdx int) {
 		}
 	case eventKindDeleted:
 		// If there was a corresponding unhandled ready event before this, remove it as well
-		readyIdx := slices.IndexFunc(w.queue[:qIdx], eventFinder(eventKindReady, w.queue[qIdx].info.uid))
+		readyIdx := slices.IndexFunc(w.queue[:qIdx], eventFinder(eventKindReady, w.queue[qIdx].info.UID))
 		// Remove the "delete" event
 		w.queue = slices.Delete(w.queue, qIdx, qIdx+1)
 		if w.nextReady > qIdx {

@@ -17,44 +17,37 @@ type Config struct {
 type ScalingConfig struct {
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	CPU                   struct {
-		// DoubleRatio gives the ratio between the VM's load average and number of CPUs above which
-		// we'll request double the vCPU count
-		//
-		// Basically: if LoadAverage / NumCPUs > DoubleRatio, we set NumCPUs = NumCPUs * 2.
-		//
-		// TODO: Currently unused
-		DoubleRatio float32 `json:"doubleRatio"`
-		// HalveRatio gives the ratio between the VM's load average and the number of CPUs below
-		// which we'll halve the number of vCPUs we're using
-		//
-		// Basically: if LoadAverage / NumCPUs < HalveRatio, we set NumCPUs = NumCPUs / 2.
-		//
-		// TODO: Currently unused
-		HalveRatio float32 `json:"halveRatio"`
-	} `json:"cpu"`
 }
 
 type InformantConfig struct {
 	// ServerPort is the port that the VM informant serves from
 	ServerPort uint16 `json:"serverPort"`
-	// MaxStartupSeconds is the total maximum amount of time we're allowed to wait for the VM
-	// informant to come online
-	MaxStartupSeconds uint `json:"maxStartupSeconds"`
-	// RequestTimeoutSeconds gives the timeout for any individual request to the VM informant
+
+	// RetryServerMinWaitSeconds gives the minimum duration, in seconds, that we must wait between the
+	// start of one InformantServer and the next
+	//
+	// This "minimum wait" is only used when thethe
+	RetryServerMinWaitSeconds uint `json:"retryServerMinWaitSeconds"`
+	// RetryServerNormalWaitSeconds gives the typical duration, in seconds, that we wait between an
+	// InformantServer failing and our retry.
+	RetryServerNormalWaitSeconds uint `json:"retryServerNormalWaitSeconds"`
+	// RegisterRetrySeconds gives the duration, in seconds, to wait between retrying a failed
+	// register request.
+	RegisterRetrySeconds uint `json:"registerRetrySeconds"`
+
+	// RequestTimeoutSeconds gives the timeout for any individual request to the informant, except
+	// for those with separately-defined values below.
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	// DownscaleTimeoutSeconds is like RequestTimeoutSeconds, but for downscale requests. This is a
-	// separate value because it's possible that downscaling may require some non-trivial work that
-	// we want to allow to complete.
+	// RegisterTimeoutSeconds gives the timeout duration, in seconds, for a register request.
+	//
+	// This is a separate field from RequestTimeoutSeconds because registering may require that the
+	// informant suspend a previous agent, which could take longer.
+	RegisterTimeoutSeconds uint `json:"registerTimeoutSeconds"`
+	// DownscaleTimeoutSeconds gives the timeout duration, in seconds, for a downscale request.
+	//
+	// This is a separate field from RequestTimeoutSeconds it's possible that downscaling may
+	// require some non-trivial work that we want to allow to complete.
 	DownscaleTimeoutSeconds uint `json:"downscaleTimeoutSeconds"`
-	// RetryRegisterAfterSeconds gives the amount of time we should wait before retrying a register
-	// request
-	RetryRegisterAfterSeconds uint `json:"retryRegisterAfterSeconds"`
-	// RetryServerAfterSeconds gives the initial delay for recreating a server that's exited
-	RetryServerAfterSeconds uint `json:"retryServerAfterSeconds"`
-	// RetryFailedServerDelaySeconds gives the amount of time to wait between server creation
-	// retries, after it has already failed once
-	RetryFailedServerDelaySeconds uint `json:"retryFailedServerDelaySeconds"`
 }
 
 // MetricsConfig defines a few parameters for metrics requests to the VM
@@ -113,22 +106,20 @@ func (c *Config) validate() error {
 
 	if c.Scaling.RequestTimeoutSeconds == 0 {
 		return cannotBeZero(".scaling.requestTimeoutSeconds")
-	} else if c.Scaling.CPU.DoubleRatio == 0 {
-		return cannotBeZero(".scaling.cpu.doubleRatio")
-	} else if c.Scaling.CPU.HalveRatio == 0 {
-		return cannotBeZero(".scaling.cpu.halveRatio")
 	} else if c.Informant.ServerPort == 0 {
 		return cannotBeZero(".informant.serverPort")
-	} else if c.Informant.MaxStartupSeconds == 0 {
-		return cannotBeZero(".informant.maxStartupSeconds")
+	} else if c.Informant.RetryServerMinWaitSeconds == 0 {
+		return cannotBeZero(".informant.retryServerMinWaitSeconds")
+	} else if c.Informant.RetryServerNormalWaitSeconds == 0 {
+		return cannotBeZero(".informant.retryServerNormalWaitSeconds")
+	} else if c.Informant.RegisterRetrySeconds == 0 {
+		return cannotBeZero(".informant.registerRetrySeconds")
 	} else if c.Informant.RequestTimeoutSeconds == 0 {
 		return cannotBeZero(".informant.requestTimeoutSeconds")
+	} else if c.Informant.RegisterTimeoutSeconds == 0 {
+		return cannotBeZero(".informant.registerTimeoutSeconds")
 	} else if c.Informant.DownscaleTimeoutSeconds == 0 {
 		return cannotBeZero(".informant.downscaleTimeoutSeconds")
-	} else if c.Informant.RetryRegisterAfterSeconds == 0 {
-		return cannotBeZero(".informant.retryRegisterAfterSeconds")
-	} else if c.Metrics.RequestTimeoutSeconds == 0 {
-		return cannotBeZero(".metrics.requestTimeoutSeconds")
 	} else if c.Metrics.SecondsBetweenRequests == 0 {
 		return cannotBeZero(".metrics.secondsBetweenRequests")
 	} else if c.Metrics.LoadMetricPrefix == "" {

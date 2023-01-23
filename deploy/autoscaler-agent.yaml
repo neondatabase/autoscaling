@@ -47,20 +47,16 @@ metadata:
 data:
   config.json: '{
     "scaling": {
-      "requestTimeoutSeconds": 10,
-      "cpu": {
-        "doubleRatio": 0.9,
-        "halveRatio": 0.4
-      }
+      "requestTimeoutSeconds": 10
     },
     "informant": {
       "serverPort": 10301,
-      "maxStartupSeconds": 10,
+      "retryServerMinWaitSeconds": 5,
+      "retryServerNormalWaitSeconds": 5,
+      "registerRetrySeconds": 5,
       "requestTimeoutSeconds": 1,
-      "downscaleTimeoutSeconds": 2,
-      "retryRegisterAfterSeconds": 5,
-      "retryServerAfterSeconds": 3,
-      "retryFailedServerDelaySeconds": 5
+      "registerTimeoutSeconds": 2,
+      "downscaleTimeoutSeconds": 2
     },
     "metrics": {
       "loadMetricPrefix": "node_",

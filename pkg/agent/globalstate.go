@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tychoish/fun"
 
@@ -18,6 +20,8 @@ import (
 )
 
 // agentState is the global state for the autoscaler agent
+//
+// All fields are immutable, except pods.
 type agentState struct {
 	pods                 map[api.PodName]*podState
 	podIP                string
@@ -49,7 +53,7 @@ func podIsOurResponsibility(pod *corev1.Pod, config *Config, nodeName string) bo
 
 func (s *agentState) Stop() {
 	for _, pod := range s.pods {
-		pod.stop.Send()
+		pod.stop()
 	}
 }
 
@@ -65,7 +69,7 @@ func (s *agentState) handleEvent(event podEvent) {
 			return
 		}
 
-		state.deleted.Send()
+		state.stop()
 		delete(s.pods, event.podName)
 	case podEventAdded:
 		if hasPod {
@@ -73,38 +77,43 @@ func (s *agentState) handleEvent(event podEvent) {
 			return
 		}
 
-		sendStop, recvStop := util.NewSingleSignalPair()
-		sendDeleted, recvDeleted := util.NewSingleSignalPair()
+		runnerCtx, cancelRunnerContext := context.WithCancel(context.TODO())
 
-		runner := runner{
-			config:     s.config,
-			vmClient:   s.vmClient,
-			kubeClient: s.kubeClient,
-			thisIP:     s.podIP,
-			podName:    event.podName,
-			podIP:      event.podIP,
-			vm: &api.VmInfo{
-				Name:      event.vmName,
-				Namespace: event.podName.Namespace,
+		status := &podStatus{
+			lock:     sync.Mutex{},
+			done:     false,
+			errored:  nil,
+			panicked: false,
+		}
+
+		runner := &Runner{
+			global: s,
+			status: status,
+			logger: RunnerLogger{
+				prefix: fmt.Sprintf("Runner %v: ", event.podName),
 			},
-			stop:                 recvStop,
-			deleted:              recvDeleted,
-			schedulerEventBroker: s.schedulerEventBroker,
-			schedulerStore:       s.schedulerStore,
+			podName:               event.podName,
+			podIP:                 event.podIP,
+			lock:                  util.NewChanMutex(),
+			vmStateLock:           util.NewChanMutex(),
+			lastMetrics:           nil,
+			scheduler:             nil,
+			server:                nil,
+			informant:             nil,
+			computeUnit:           nil,
+			lastApproved:          nil,
+			lastSchedulerError:    nil,
+			backgroundWorkerCount: atomic.Int64{},
+			backgroundPanic:       make(chan error),
 		}
 
 		state = &podState{
 			podName: event.podName,
-			stop:    sendStop,
-			deleted: sendDeleted,
-			status: podStatus{
-				lock:      sync.Mutex{},
-				errored:   nil,
-				migrating: false,
-			},
+			stop:    cancelRunnerContext,
+			status:  status,
 		}
 		s.pods[event.podName] = state
-		runner.Spawn(context.Background(), &state.status)
+		runner.Spawn(runnerCtx, event.vmName)
 	default:
 		panic(errors.New("bad event: unexpected event kind"))
 	}
@@ -112,16 +121,15 @@ func (s *agentState) handleEvent(event podEvent) {
 
 type podState struct {
 	podName api.PodName
-	stop    util.SignalSender
-	deleted util.SignalSender
 
-	status podStatus
+	stop   context.CancelFunc
+	runner *Runner //nolint:unused // this will be used soon, with an HTTP endpoint to dump state
+	status *podStatus
 }
 
 type podStatus struct {
-	lock      sync.Mutex
-	done      bool // if true, the runner finished
-	errored   error
-	migrating bool
-	panicked  bool // if true, errored will be non-nil
+	lock     sync.Mutex
+	done     bool // if true, the runner finished
+	errored  error
+	panicked bool // if true, errored will be non-nil
 }

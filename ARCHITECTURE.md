@@ -238,11 +238,6 @@ to failure, or otherwise). So, it is expected that *sometimes*, the informant wi
 for an agent that it has no connection to. When that happens, the informant MUST respond with HTTP
 code 404, and the agent SHOULD try reconnecting.
 
-<!--
-FIXME: Per (4).3, the agent must not make {down,up}scale requests while suspended. This is not
-currently adhered to.
--->
-
 ## Footguns
 
 _An alternate name for this section:_ Things to watch out for
