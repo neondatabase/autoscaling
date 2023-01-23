@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -285,7 +286,7 @@ func (s *informantServerState) handleResume(body *api.ResumeAgent) (*api.AgentId
 
 	switch s.mode {
 	case serverModeNormal:
-		return nil, 400, fmt.Errorf("cannot resume agent that is already running")
+		return nil, 400, errors.New("cannot resume agent that is already running")
 	case serverModeSuspended:
 		s.switchSuspendResume <- struct{}{}
 		return &api.AgentIdentificationMessage{
@@ -317,7 +318,7 @@ func (s *informantServerState) handleSuspend(body *api.SuspendAgent) (*api.Agent
 			SequenceNumber: s.getSequenceNumberWhileLocked(),
 		}, 200, nil
 	case serverModeSuspended:
-		return nil, 400, fmt.Errorf("cannot suspend agent that is already running")
+		return nil, 400, errors.New("cannot suspend agent that is already running")
 	default:
 		panic(fmt.Sprintf("unknown informantServerMode %q", s.mode))
 	}
@@ -375,7 +376,7 @@ func (r *runner) registerWithInformant(
 				case informantDesc.MetricsMethod.Prometheus != nil:
 					return informantDesc.MetricsMethod.Prometheus.Port, nil
 				default:
-					return 0, fmt.Errorf("No metrics method given")
+					return 0, errors.New("No metrics method given")
 				}
 			}()
 

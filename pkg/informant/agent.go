@@ -480,7 +480,7 @@ func doRequestWithStartSignal[B any, R any](
 			}
 
 			if responseBody.SequenceNumber == 0 {
-				requestErr = fmt.Errorf("Got invalid sequence number 0")
+				requestErr = errors.New("Got invalid sequence number 0")
 				return
 			}
 

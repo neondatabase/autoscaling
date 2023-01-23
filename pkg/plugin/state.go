@@ -4,6 +4,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -477,7 +478,7 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 		// ... but use Capacity if Allocatable is not available
 		cpuQ = cpuQC
 	} else {
-		return nil, fmt.Errorf("Node has no Allocatable or Capacity CPU limits")
+		return nil, errors.New("Node has no Allocatable or Capacity CPU limits")
 	}
 
 	vCPU, marginCpu, err := nodeConf.vCpuLimits(cpuQ)
@@ -496,7 +497,7 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 	} else if memQC != nil {
 		memQ = memQC
 	} else {
-		return nil, fmt.Errorf("Node has no Allocatable or Capacity Memory limits")
+		return nil, errors.New("Node has no Allocatable or Capacity Memory limits")
 	}
 
 	memSlots, marginMemory, err := nodeConf.memoryLimits(memQ, &conf.MemSlotSize)
@@ -678,7 +679,7 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, vmClien
 	)
 
 	// note: unimplemented for now, pending NeonVM implementation.
-	return fmt.Errorf("VM migration is currently unimplemented")
+	return errors.New("VM migration is currently unimplemented")
 }
 
 // readClusterState sets the initial node and pod maps for the plugin's state, getting its
@@ -1002,7 +1003,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			errDesc += fmt.Sprintf("\n\t%s: %s", nodeName, badNodes[nodeName])
 		}
 		klog.Error(errDesc)
-		return fmt.Errorf("Some nodes were over-budget (see logs for a list and reasons)")
+		return errors.New("Some nodes were over-budget (see logs for a list and reasons)")
 	}
 
 	return nil

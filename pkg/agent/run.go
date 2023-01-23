@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -187,9 +188,9 @@ restartConnection:
 			logger.Infof("Ending runner loop for VM, pod was deleted")
 			return false, nil
 		case <-informantServerPanicked:
-			return false, fmt.Errorf("Informant server panicked")
+			return false, errors.New("Informant server panicked")
 		case <-metricsPanicked:
-			return false, fmt.Errorf("Metrics loop panicked")
+			return false, errors.New("Metrics loop panicked")
 		case info := <-schedulerWatch.Deleted:
 			if info.uid != scheduler.uid {
 				logger.Infof(
@@ -458,9 +459,9 @@ noSchedulerLoop:
 			logger.Infof("Ending runner loop, pod was deleted")
 			return false, nil
 		case <-informantServerPanicked:
-			return false, fmt.Errorf("Informant server panicked")
+			return false, errors.New("Informant server panicked")
 		case <-metricsPanicked:
-			return false, fmt.Errorf("Metrics loop panicked")
+			return false, errors.New("Metrics loop panicked")
 		case info := <-schedulerWatch.ReadyQueue:
 			logger.Infof("Retrying with new ready scheduler pod %v with IP %v...", info.podName, info.ip)
 			scheduler = &info
@@ -712,7 +713,7 @@ func (r *runner) getMetricsLoop(
 ) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			err := fmt.Errorf("Unexpected redirect while getting metrics")
+			err := errors.New("Unexpected redirect while getting metrics")
 			logger.Warningf("%s", err)
 			return err
 		},
@@ -802,7 +803,7 @@ func (r *runner) sendRequestToPlugin(
 ) (*api.PluginResponse, error) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			err := fmt.Errorf("Unexpected redirect while sending message to plugin")
+			err := errors.New("Unexpected redirect while sending message to plugin")
 			logger.Warningf("%s", err)
 			return err
 		},

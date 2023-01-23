@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -101,13 +102,13 @@ func (c *config) validate() (string, error) {
 	}
 
 	if c.MemSlotSize.Value() <= 0 {
-		return "memBlockSize", fmt.Errorf("value must be > 0")
+		return "memBlockSize", errors.New("value must be > 0")
 	} else if c.MemSlotSize.Value() <= math.MaxInt64/1000 && c.MemSlotSize.MilliValue()%1000 != 0 {
-		return "memBlockSize", fmt.Errorf("value cannot have milli-precision")
+		return "memBlockSize", errors.New("value cannot have milli-precision")
 	}
 
 	if c.SchedulerName == "" {
-		return "schedulerName", fmt.Errorf("string cannot be empty")
+		return "schedulerName", errors.New("string cannot be empty")
 	}
 
 	return "", nil
@@ -115,7 +116,7 @@ func (c *config) validate() (string, error) {
 
 func (s *overrideSet) validate() (string, error) {
 	if len(s.Nodes) == 0 {
-		return "nodes", fmt.Errorf("array must be non-empty")
+		return "nodes", errors.New("array must be non-empty")
 	}
 
 	if path, err := s.Config.validate(); err != nil {
@@ -141,15 +142,15 @@ func (c *nodeConfig) validate() (string, error) {
 
 func (c *resourceConfig) validate(isMemory bool) (string, error) {
 	if c.Watermark <= 0.0 {
-		return "watermark", fmt.Errorf("value must be > 0")
+		return "watermark", errors.New("value must be > 0")
 	} else if c.Watermark > 1.0 {
-		return "watermark", fmt.Errorf("value must be <= 1")
+		return "watermark", errors.New("value must be <= 1")
 	}
 
 	if c.System.Value() <= 0 {
-		return "system", fmt.Errorf("value must be > 0")
+		return "system", errors.New("value must be > 0")
 	} else if isMemory && c.System.Value() < math.MaxInt64 && c.System.MilliValue()%1000 != 0 {
-		return "system", fmt.Errorf("value cannot have milli-precision")
+		return "system", errors.New("value cannot have milli-precision")
 	}
 
 	return "", nil
@@ -157,10 +158,10 @@ func (c *resourceConfig) validate(isMemory bool) (string, error) {
 
 func (oldConf *config) validateChangeTo(newConf *config) (string, error) {
 	if newConf.MemSlotSize != oldConf.MemSlotSize {
-		return "memSlotSize", fmt.Errorf("value cannot be changed at runtime")
+		return "memSlotSize", errors.New("value cannot be changed at runtime")
 	}
 	if newConf.SchedulerName != oldConf.SchedulerName {
-		return "schedulername", fmt.Errorf("value cannot be changed at runtime")
+		return "schedulername", errors.New("value cannot be changed at runtime")
 	}
 
 	return "", nil

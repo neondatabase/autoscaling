@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -207,10 +208,10 @@ func watchSchedulerUpdates(
 
 	if len(candidates) > 1 {
 		watcher.Stop()
-		return schedulerWatch{}, nil, fmt.Errorf("Multiple initial candidate scheduler pods")
+		return schedulerWatch{}, nil, errors.New("Multiple initial candidate scheduler pods")
 	} else if len(candidates) == 1 && candidates[0].Status.PodIP == "" {
 		watcher.Stop()
-		return schedulerWatch{}, nil, fmt.Errorf("Scheduler pod is ready but IP is not available")
+		return schedulerWatch{}, nil, errors.New("Scheduler pod is ready but IP is not available")
 	}
 
 	if len(candidates) == 0 {

@@ -4,6 +4,7 @@ package util
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -46,7 +47,7 @@ func AddHandler[T any, R any](
 		resp, status, err := handle(&req)
 
 		if err == nil && status != http.StatusOK {
-			err = fmt.Errorf("HTTP handler error: status != 200 OK, but no error message")
+			err = errors.New("HTTP handler error: status != 200 OK, but no error message")
 			status = 500
 		}
 

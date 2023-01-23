@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -69,9 +70,9 @@ type Resources struct {
 // if either is.
 func (r Resources) ValidateNonZero() error {
 	if r.VCPU == 0 {
-		return fmt.Errorf("vCPUs must be non-zero")
+		return errors.New("vCPUs must be non-zero")
 	} else if r.Mem == 0 {
-		return fmt.Errorf("mem must be non-zero")
+		return errors.New("mem must be non-zero")
 	}
 
 	return nil

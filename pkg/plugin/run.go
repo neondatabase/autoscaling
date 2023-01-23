@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -81,7 +82,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	pod, ok := e.state.podMap[req.Pod]
 	if !ok {
 		klog.Warningf("[autoscale-enforcer] Received request for pod we don't know: %+v", req)
-		return nil, 404, fmt.Errorf("pod not found")
+		return nil, 404, errors.New("pod not found")
 	}
 
 	node := pod.node
@@ -123,7 +124,7 @@ func (e *AutoscaleEnforcer) handleResources(
 		// The agent shouldn't have asked for a change after already receiving notice that it's
 		// migrating.
 		if req.VCPU != pod.vCPU.reserved || req.Mem != pod.memSlots.reserved {
-			err := fmt.Errorf("cannot change resources: agent has already been informed that pod is migrating")
+			err := errors.New("cannot change resources: agent has already been informed that pod is migrating")
 			return api.Resources{}, 400, err
 		}
 		return api.Resources{VCPU: pod.vCPU.reserved, Mem: pod.memSlots.reserved}, 200, nil
