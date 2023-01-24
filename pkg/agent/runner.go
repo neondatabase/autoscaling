@@ -708,12 +708,12 @@ retryServer:
 		server, exited, err := NewInformantServer(ctx, r, updatedInformant)
 		if ctx.Err() != nil {
 			if err != nil {
-				r.logger.Warningf("Error starting informant server, context cancelled: %w", err)
+				r.logger.Warningf("Error starting informant server, context cancelled: %s", err)
 			}
 			return
 		} else if err != nil {
 			normalRetryWait = time.After(normalWait)
-			r.logger.Errorf("Error starting informant server: %w", err)
+			r.logger.Errorf("Error starting informant server: %s", err)
 			continue retryServer
 		}
 
@@ -1283,7 +1283,7 @@ retry:
 			// initial Register request failed.
 			if !sched.registered {
 				if err := sched.Register(ctx, func() {}); err != nil {
-					sched.logger.Errorf("Error re-attempting register: %w", err)
+					sched.logger.Errorf("Error re-attempting register: %s", err)
 					r.logger.Warningf("Unable to complete updating VM resources: scheduler Register failed")
 					return nil, nil
 				}
@@ -1296,7 +1296,7 @@ retry:
 			}
 			response, err := sched.DoRequest(ctx, &request)
 			if err != nil {
-				sched.logger.Errorf("Request failed: %w", err)
+				sched.logger.Errorf("Request failed: %s", err)
 				r.logger.Warningf("Unable to complete updating VM resources: scheduler request failed")
 				return nil, nil
 			}

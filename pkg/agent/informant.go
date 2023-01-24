@@ -180,7 +180,7 @@ func NewInformantServer(
 		// runner.lock
 		runner.spawnBackgroundWorker(context.TODO(), shutdownName, func(c context.Context) {
 			if err := httpServer.Shutdown(c); err != nil {
-				runner.logger.Warningf("Error shutting down InformantServer: %w", err)
+				runner.logger.Warningf("Error shutting down InformantServer: %s", err)
 			}
 		})
 		if server.madeContact {

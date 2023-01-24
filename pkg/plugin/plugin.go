@@ -226,7 +226,7 @@ func (e *AutoscaleEnforcer) Filter(
 	// Check whether the pod's memory slot size matches the scheduler's. If it doesn't, reject it.
 	if vmInfo != nil && !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
 		err := fmt.Errorf("expected %v, found %v", e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize)
-		klog.Warningf("[autoscale-enforcer] Filter: VM for pod %v has bad MemSlotSize: %w", pName, err)
+		klog.Warningf("[autoscale-enforcer] Filter: VM for pod %v has bad MemSlotSize: %s", pName, err)
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
 			fmt.Sprintf("VM for pod has bad MemSlotSize: %v", err),
@@ -372,7 +372,7 @@ func (e *AutoscaleEnforcer) Score(
 	podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Score: Error getting info for pod %v: %w", podName, err)
+		klog.Errorf("[autoscale-enforcer] Score: Error getting info for pod %v: %s", podName, err)
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
 	}
 
@@ -389,7 +389,7 @@ func (e *AutoscaleEnforcer) Score(
 	// Score by total resources available:
 	node, err := e.state.getOrFetchNodeState(ctx, e.handle, nodeName)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Score: Error fetching state for node %s: %w", nodeName, err)
+		klog.Errorf("[autoscale-enforcer] Score: Error fetching state for node %s: %s", nodeName, err)
 		return 0, framework.NewStatus(framework.Error, "Error fetching state for node")
 	}
 
@@ -459,7 +459,7 @@ func (e *AutoscaleEnforcer) Reserve(
 			"expected %v, found %v (this should have been caught during Filter)",
 			e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize,
 		)
-		klog.Errorf("[autoscale-enforcer] Reserve: VM for pod %v has bad MemSlotSize: %w", pName, err)
+		klog.Errorf("[autoscale-enforcer] Reserve: VM for pod %v has bad MemSlotSize: %s", pName, err)
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
 			fmt.Sprintf("VM for pod has bad MemSlotSize: %v", err),
