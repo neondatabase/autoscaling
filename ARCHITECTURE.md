@@ -20,6 +20,13 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
 * [Agent-Informant protocol details](#agent-informant-protocol-details)
 * [Footguns](#footguns)
 
+
+## Components and network connections between them
+
+![diagram](ARCHITECTURE-network-diagram.png)
+[Diagram source](ARCHITECTURE-network-diagram.org)
+
+
 ## See also
 
 This isn't the only architecture document. You may also want to look at:
