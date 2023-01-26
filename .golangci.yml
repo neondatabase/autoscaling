@@ -28,6 +28,7 @@ linters:
     - dupword          # things like 'the the' in comments/strings
     - durationcheck    # bad time.Duration arithmetic
     - errorlint        # common errors with Go 1.13+ error wrapping
+    - exhaustruct      # all struct fields are initialized
     - exportloopref    # escaping pointers to loop variables
     - predeclared      # no identifiers in Go's list of predeclared identifiers, see <https://go.dev/ref/spec#Predeclared_identifiers>
     - gci              # deterministic import ordering
@@ -35,14 +36,21 @@ linters:
     - noctx            # HTTP requests are passed a Context
     - nolintlint       # bad "nolint" directives
 
-    # maybe in the future:
-    # - exhaustruct     # all struct fields are initialized
-
 linters-settings:
   # see: <https://golangci-lint.run/usage/linters/#dupword>, <https://github.com/Abirdcfly/dupword>
   dupword:
     # only enable a few common cases here. Typically, duplicated words will be short
     keywords: ["a", "and", "at", "for", "from", "the"]
+
+  # see: <https://golangci-lint.run/usage/linters/#exhaustruct>
+  exhaustruct:
+    exclude:
+      - '^net/http\.(Client|Server)'
+      - '^net\.TCPAddr$'
+      # metav1.{GetOptions,ListOptions,WatchOptions,PatchOptions}
+      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Get|List|Watch|Patch)Options$'
+      - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
+      - '^github\.com/tychoish/fun\.BrokerOptions$'
 
   # see: <https://golangci-lint.run/usage/linters/#gci>
   gci:
