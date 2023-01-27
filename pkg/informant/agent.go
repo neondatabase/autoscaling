@@ -323,6 +323,9 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (uint32, int, error) {
 
 // Get returns the requested Agent, if it exists
 func (s *AgentSet) Get(id uuid.UUID) (_ *Agent, ok bool) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	agent, ok := s.byIDs[id]
 	return agent, ok
 }
