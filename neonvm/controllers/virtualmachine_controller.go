@@ -611,6 +611,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	}
 
 	for _, disk := range virtualmachine.Spec.Disks {
+
 		mnt := corev1.VolumeMount{
 			Name:      disk.Name,
 			MountPath: fmt.Sprintf("/vm/mounts%s", disk.MountPath),
@@ -618,10 +619,10 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		if disk.ReadOnly != nil {
 			mnt.ReadOnly = *disk.ReadOnly
 		}
-		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
 
 		switch {
 		case disk.ConfigMap != nil:
+			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
 			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: disk.Name,
 				VolumeSource: corev1.VolumeSource{
@@ -634,6 +635,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 				},
 			})
 		case disk.Secret != nil:
+			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
 			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: disk.Name,
 				VolumeSource: corev1.VolumeSource{
@@ -644,6 +646,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 				},
 			})
 		case disk.EmptyDisk != nil:
+			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
 			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: disk.Name,
 				VolumeSource: corev1.VolumeSource{

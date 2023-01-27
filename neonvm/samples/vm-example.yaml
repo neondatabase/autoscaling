@@ -82,6 +82,10 @@ spec:
         items:
           - key: vector.yaml
             path: vector.yaml
+    - name: cache
+      mountPath: /neonvm/cache
+      tmpfs:
+        size: 1Gi
 
 ---
 apiVersion: v1

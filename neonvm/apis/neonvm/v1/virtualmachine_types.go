@@ -206,9 +206,16 @@ type DiskSource struct {
 	// Secret represents a secret that should populate this disk.
 	// +optional
 	Secret *corev1.SecretVolumeSource `json:"secret,omitempty"`
+	// TmpfsDisk represents a tmpfs.
+	// +optional
+	Tmpfs *TmpfsDiskSource `json:"tmpfs,omitempty"`
 }
 
 type EmptyDiskSource struct {
+	Size resource.Quantity `json:"size"`
+}
+
+type TmpfsDiskSource struct {
 	Size resource.Quantity `json:"size"`
 }
 
