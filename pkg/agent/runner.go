@@ -1464,7 +1464,9 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 //
 // Under typical operation, this will just return two equal values, both of which are equal to the
 // VM's current number of Compute Units. However, if the VM's resource allocation doesn't cleanly
-// multiply to a single Compute Unit,
+// divide to a multiple of the Compute Unit, the upper and lower bounds will be different. This can
+// happen when the Compute Unit is changed, or when the VM's maximum or minimum resource allocations
+// has previously prevented it from being set to a multiple of the Compute Unit.
 func (s *atomicUpdateState) computeUnitsBounds() (uint16, uint16) {
 	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is already guaranteed by
 	// the
