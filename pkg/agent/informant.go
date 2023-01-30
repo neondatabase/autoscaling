@@ -136,13 +136,14 @@ func NewInformantServer(
 			MinProtoVersion: MinInformantProtocolVersion,
 			MaxProtoVersion: MaxInformantProtocolVersion,
 		},
-		seqNum:          0,
-		receivedIDCheck: false,
-		madeContact:     false,
-		mode:            InformantServerUnconfirmed,
-		requestLock:     util.NewChanMutex(),
-		exitStatus:      nil,
-		exit:            nil, // see below.
+		seqNum:           0,
+		receivedIDCheck:  false,
+		madeContact:      false,
+		mode:             InformantServerUnconfirmed,
+		updatedInformant: updatedInformant,
+		requestLock:      util.NewChanMutex(),
+		exitStatus:       nil,
+		exit:             nil, // see below.
 	}
 
 	runner.logger.Infof("Starting Informant server, desc = %+v", server.desc)

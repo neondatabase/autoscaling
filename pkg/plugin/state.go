@@ -229,6 +229,9 @@ func (r nodeOtherResourceState) addPod(
 		rawMemory:    r.rawMemory.DeepCopy(),
 		marginCpu:    r.marginCpu,
 		marginMemory: r.marginMemory,
+		// reserved amounts set by calculateReserved()
+		reservedCpu:      0,
+		reservedMemSlots: 0,
 	}
 
 	newState.rawCpu.Add(p.rawCpu)
@@ -269,6 +272,9 @@ func (r nodeOtherResourceState) subPod(
 		rawMemory:    r.rawMemory.DeepCopy(),
 		marginCpu:    r.marginCpu,
 		marginMemory: r.marginMemory,
+		// reserved amounts set by calculateReserved()
+		reservedCpu:      0,
+		reservedMemSlots: 0,
 	}
 
 	newState.rawCpu.Sub(p.rawCpu)
@@ -520,6 +526,7 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 			marginMemory:     marginMemory,
 		},
 		computeUnit: &nodeConf.ComputeUnit,
+		mq:          migrationQueue{},
 	}
 
 	fmtString := "[autoscale-enforcer] Built initial node state for %s:\n" +

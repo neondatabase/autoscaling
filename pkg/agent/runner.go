@@ -281,9 +281,12 @@ func (r *Runner) State() RunnerState {
 	var serverState *InformantServerState
 	if r.server != nil {
 		serverState = &InformantServerState{
-			Desc:   r.server.desc,
-			SeqNum: r.server.seqNum,
-			Mode:   r.server.mode,
+			Desc:            r.server.desc,
+			SeqNum:          r.server.seqNum,
+			ReceivedIDCheck: r.server.receivedIDCheck,
+			MadeContact:     r.server.madeContact,
+			Mode:            r.server.mode,
+			ExitStatus:      r.server.exitStatus,
 		}
 	}
 
@@ -295,6 +298,7 @@ func (r *Runner) State() RunnerState {
 		ComputeUnit:           r.computeUnit,
 		LastApproved:          r.lastApproved,
 		LastSchedulerError:    r.lastSchedulerError,
+		LastInformantError:    r.lastInformantError,
 		VM:                    *r.vm,
 		PodIP:                 r.podIP,
 		LogPrefix:             r.logger.prefix,
