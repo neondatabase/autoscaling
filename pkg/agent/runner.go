@@ -123,6 +123,11 @@ type Runner struct {
 	// from non-nil to nil. The data behind each pointer is immutable, but the value of the pointer
 	// itself is not.
 	lastMetrics *api.Metrics
+	// requestedUpscale provides information about any requested upscaling by a VM informant
+	//
+	// This value is reset whenever we start a new informant server
+	requestedUpscale api.MoreResources
+
 	// scheduler is the current scheduler that we're communicating with, or nil if there isn't one.
 	// Each scheduler's info field is immutable. When a scheduler is replaced, only the pointer
 	// value here is updated; the original Scheduler remains unchanged.
@@ -383,6 +388,8 @@ func (r *Runner) Run(ctx context.Context, vmName string) error {
 	sendSchedSignal, recvSchedSignal := util.NewCondChannelPair()
 	// signal when r.informant is updated
 	sendInformantUpd, recvInformantUpd := util.NewCondChannelPair()
+	// signal when the informant requests upscaling
+	sendUpscaleRequested, recvUpscaleRequested := util.NewCondChannelPair()
 
 	r.logger.Infof("Starting background workers")
 
@@ -399,10 +406,10 @@ func (r *Runner) Run(ctx context.Context, vmName string) error {
 		r.getMetricsLoop(c, sendMetricsSignal, recvInformantUpd)
 	})
 	r.spawnBackgroundWorker(ctx, "handle VM resources", func(c context.Context) {
-		r.handleVMResources(c, recvMetricsSignal, recvSchedSignal)
+		r.handleVMResources(c, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal)
 	})
 	r.spawnBackgroundWorker(ctx, "informant server loop", func(c context.Context) {
-		r.serveInformantLoop(c, sendInformantUpd)
+		r.serveInformantLoop(c, sendInformantUpd, sendUpscaleRequested)
 	})
 
 	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
@@ -586,6 +593,7 @@ func (r *Runner) getMetricsLoop(
 func (r *Runner) handleVMResources(
 	ctx context.Context,
 	updatedMetrics util.CondChannelReceiver,
+	upscaleRequested util.CondChannelReceiver,
 	registeredScheduler util.CondChannelReceiver,
 ) {
 	metricsUpdatedAtLeastOnce := false
@@ -598,6 +606,8 @@ func (r *Runner) handleVMResources(
 			return
 		case <-updatedMetrics.Recv():
 			reason = UpdatedMetrics
+		case <-upscaleRequested.Recv():
+			reason = UpscaleRequested
 		case <-registeredScheduler.Recv():
 			reason = RegisteredScheduler
 		}
@@ -608,7 +618,7 @@ func (r *Runner) handleVMResources(
 		//
 		// FIXME: This won't be necessary when the protocol is changed to allow nil metrics on an
 		// initial scheduler request.
-		if !metricsUpdatedAtLeastOnce && reason == UpdatedMetrics {
+		if !metricsUpdatedAtLeastOnce && reason != RegisteredScheduler {
 			sched, computeUnit := func() (*Scheduler, *api.Resources) {
 				r.lock.Lock()
 				defer r.lock.Unlock()
@@ -664,7 +674,11 @@ func (r *Runner) handleVMResources(
 // informant
 //
 // This function directly sets the value of r.server and indirectly sets r.informant.
-func (r *Runner) serveInformantLoop(ctx context.Context, updatedInformant util.CondChannelSender) {
+func (r *Runner) serveInformantLoop(
+	ctx context.Context,
+	updatedInformant util.CondChannelSender,
+	upscaleRequested util.CondChannelSender,
+) {
 	// variables set & accessed across loop iterations
 	var (
 		normalRetryWait <-chan time.Time
@@ -679,6 +693,10 @@ func (r *Runner) serveInformantLoop(ctx context.Context, updatedInformant util.C
 
 retryServer:
 	for {
+		// On each (re)try, unset the informant's requested upscale. We need to do this *before*
+		// starting the server, because otherwise it's possible for a racy /try-upscale request to
+		// sneak in before we reset it, which would cause us to incorrectly ignore the request.
+
 		if normalRetryWait != nil {
 			r.logger.Infof("Retrying informant server in %s", normalWait)
 			select {
@@ -709,7 +727,7 @@ retryServer:
 		minRetryWait = time.After(minWait)
 		lastStart = time.Now()
 
-		server, exited, err := NewInformantServer(ctx, r, updatedInformant)
+		server, exited, err := NewInformantServer(ctx, r, updatedInformant, upscaleRequested)
 		if ctx.Err() != nil {
 			if err != nil {
 				r.logger.Warningf("Error starting informant server, context cancelled: %s", err)
@@ -1072,6 +1090,7 @@ type VMUpdateReason string
 
 const (
 	UpdatedMetrics      VMUpdateReason = "metrics"
+	UpscaleRequested    VMUpdateReason = "upscale requested"
 	RegisteredScheduler VMUpdateReason = "scheduler"
 )
 
@@ -1081,10 +1100,11 @@ const (
 // Because atomicState is able to return nil when there isn't yet enough information to update the
 // VM's resources, some validation is already guaranteed by representing the data without pointers.
 type atomicUpdateState struct {
-	computeUnit  api.Resources
-	metrics      api.Metrics
-	vm           api.VmInfo
-	lastApproved api.Resources
+	computeUnit      api.Resources
+	metrics          api.Metrics
+	vm               api.VmInfo
+	lastApproved     api.Resources
+	requestedUpscale api.MoreResources
 }
 
 // updateVMResources is responsible for the high-level logic that orchestrates a single update to
@@ -1394,10 +1414,11 @@ func (r *Runner) getStateForVMUpdate(updateReason VMUpdateReason) *atomicUpdateS
 	}
 
 	return &atomicUpdateState{
-		computeUnit:  *r.computeUnit,
-		metrics:      *r.lastMetrics,
-		vm:           *r.vm,
-		lastApproved: *r.lastApproved,
+		computeUnit:      *r.computeUnit,
+		metrics:          *r.lastMetrics,
+		vm:               *r.vm,
+		lastApproved:     *r.lastApproved,
+		requestedUpscale: r.requestedUpscale,
 	}
 }
 
@@ -1440,6 +1461,9 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 		goalCU /= 2
 	}
 
+	// Update goalCU based on any requested upscaling
+	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling())
+
 	// resources for the desired "goal" compute units
 	goal := s.computeUnit.Mul(goalCU)
 
@@ -1478,6 +1502,28 @@ func (s *atomicUpdateState) computeUnitsBounds() (uint16, uint16) {
 	minMemUnits := (s.vm.Mem.Use + s.computeUnit.Mem - 1) / s.computeUnit.Mem
 
 	return util.Min(minCPUUnits, minMemUnits), util.Max(minCPUUnits, minMemUnits)
+}
+
+// requiredCUForRequestedUpscaling returns the minimum Compute Units required to abide by the
+// requested upscaling, if there is any.
+//
+// If there's no requested upscaling, then this method will return zero.
+//
+// This method does not respect any bounds on Compute Units placed by the VM's maximum or minimum
+// resource allocation.
+func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint16 {
+	var required uint16
+
+	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
+
+	if s.requestedUpscale.Cpu {
+		required = util.Max(required, s.vm.Cpu.Use/s.computeUnit.VCPU+1)
+	}
+	if s.requestedUpscale.Memory {
+		required = util.Max(required, s.vm.Mem.Use/s.computeUnit.Mem+1)
+	}
+
+	return required
 }
 
 // doVMUpdate handles updating the VM's resources from current to target WITHOUT CHECKING WITH THE
@@ -1592,6 +1638,18 @@ func (r *Runner) doVMUpdate(
 
 	upscaled := target // we already handled downscaling; only upscaling can be left
 	if upscaled.HasFieldGreaterThan(current) {
+		// Unset fields in r.requestedUpscale if we've handled it.
+		//
+		// Essentially, for each field F, set:
+		//
+		//     r.requestedUpscale.F = r.requestedUpscale && !(upscaled.F > current.F)
+		func() {
+			r.lock.Lock()
+			defer r.lock.Unlock()
+
+			r.requestedUpscale = r.requestedUpscale.And(upscaled.IncreaseFrom(current).Not())
+		}()
+
 		if ok, err := r.doInformantUpscale(ctx, upscaled); err != nil || !ok {
 			return nil, err
 		}

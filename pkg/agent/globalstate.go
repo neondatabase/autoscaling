@@ -98,6 +98,7 @@ func (s *agentState) handleEvent(event podEvent) {
 			podIP:                 event.podIP,
 			lock:                  util.NewChanMutex(),
 			vmStateLock:           util.NewChanMutex(),
+			requestedUpscale:      api.MoreResources{Cpu: false, Memory: false},
 			lastMetrics:           nil,
 			scheduler:             nil,
 			server:                nil,

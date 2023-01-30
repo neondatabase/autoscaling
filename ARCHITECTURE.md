@@ -212,8 +212,8 @@ The protocol is as follows:
        the informant responds with HTTP code 400.
     6. Otherwise, the informant responds with HTTP code 200, returning an `InformantDesc` describing
        its capabilities and which protocol version to use.
-4. Begin "normal operation". During this, there are two "normal" requests made between the agent and
-   informant. Each party can make **only one request at a time**. The agent starts in the
+4. Begin "normal operation". During this, there are a few types of requests made between the agent
+   and informant. Each party can make **only one request at a time**. The agent starts in the
    "suspended" state.
     1. The informant's `/downscale` endpoint (via PUT), with `RawResources`. This serves as the
        agent _politely asking_ the informant to decrease resource usage to the specified amount.
@@ -230,6 +230,10 @@ The protocol is as follows:
        double-resume an agent.
     5. The agent's `/id` endpoint (via GET) is also available during normal operation, and is used
        as a health check by the informant.
+    6. The agent's `/try-upscale` endpoint (via POST), with `MoreResources`. This allows the
+       informant to request more of a particular resource (e.g. memory). The agent MUST respond
+       immediately with an `AgentIdentification`. It MAY later send an `/upscale` request to the
+       informant once the requested increase in resources has been achieved.
 5. If explicitly cut off, communication ends with the agent sending the original `AgentDesc` as a
    DELETE request on the `/unregister` endpoint. The informant returns an `UnregisterAgent`.
 

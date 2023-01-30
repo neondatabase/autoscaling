@@ -5,6 +5,10 @@
 
 set -x
 
+# Setup the 'neon-test' cgroup:
+whoami
+mkdir /sys/fs/cgroup/neon-test
+
 run_informant () {
     while true; do
         vm-informant 2>&1 | tee -a /run/vm-informant/log

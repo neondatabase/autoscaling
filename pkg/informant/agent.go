@@ -38,6 +38,10 @@ type AgentSet struct {
 	// because we rely on tryNewAgents to handle setting the value here.
 	current *Agent
 
+	// wantsMemoryUpscale is true if the most recent (internal) request for immediate upscaling has
+	// not yet been answered (externally) by notification of an upscale by the autoscaler-agent.
+	wantsMemoryUpscale bool
+
 	// byIDs stores all of the agents, indexed by their unique IDs
 	byIDs map[uuid.UUID]*Agent
 	// byTime stores all of the *successfully registered* agents, sorted in increasing order of
@@ -87,11 +91,12 @@ func NewAgentSet() *AgentSet {
 	tryNewAgent := make(chan struct{})
 
 	agents := &AgentSet{
-		lock:        sync.Mutex{},
-		current:     nil,
-		byIDs:       make(map[uuid.UUID]*Agent),
-		byTime:      []*Agent{},
-		tryNewAgent: tryNewAgent,
+		lock:               sync.Mutex{},
+		current:            nil,
+		wantsMemoryUpscale: false,
+		byIDs:              make(map[uuid.UUID]*Agent),
+		byTime:             []*Agent{},
+		tryNewAgent:        tryNewAgent,
 	}
 
 	go agents.runDeadlockChecker()
@@ -215,6 +220,24 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 				}
 
 				s.current, old = candidate, s.current
+
+				// If upscale was requested, do that:
+				if s.wantsMemoryUpscale {
+					s.current.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+						if errors.Is(err, context.Canceled) {
+							return
+						}
+
+						// note: explicitly refer to candidate here instead of s.current, because
+						// the value of s.current could have changed by the time this function is
+						// called.
+						klog.Errorf(
+							"Error requesting upscale from Agent %s/%s: %s",
+							candidate.serverAddr, candidate.id, err,
+						)
+					})
+				}
+
 				return
 			}()
 
@@ -319,6 +342,45 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (uint32, int, error) {
 	}()
 
 	return ProtocolVersion, 200, nil
+}
+
+// RequestUpscale requests an immediate upscale for more memory, if there's an agent currently
+// enabled
+//
+// If there's no current agent, then RequestUpscale marks the upscale as desired, and will request
+// upscaling from the next agent we connect to.
+func (s *AgentSet) RequestUpscale() {
+	// FIXME: we should assign a timeout to these upscale requests, so that we don't continue trying
+	// to upscale after the demand has gone away.
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	s.wantsMemoryUpscale = true
+
+	// explicitly copy s.current so that our error handling points to the right Agent
+	if agent := s.current; agent != nil {
+		agent.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
+			klog.Errorf(
+				"Error requesting upscale from Agent %s/%s: %s",
+				agent.serverAddr, agent.id, err,
+			)
+		})
+	}
+}
+
+// ReceivedUpscale marks any desired upscaling from a prior s.RequestUpscale() as resolved
+//
+// Typically, (*CgroupState).ReceivedUpscale() is also called alongside this method.
+func (s *AgentSet) ReceivedUpscale() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	s.wantsMemoryUpscale = false
 }
 
 // Get returns the requested Agent, if it exists
@@ -701,4 +763,46 @@ func (a *Agent) Resume(timeout time.Duration) error {
 	}
 
 	return nil
+}
+
+// SpawnRequestUpscale requests that the Agent increase the resource allocation to this VM
+func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(error)) {
+	// Quick unregistered check
+	select {
+	case <-a.unregistered.Recv():
+		klog.Warningf(
+			"RequestUpscale called for Agent %s/%s that is already unregistered (probably *not* a race?)",
+			a.serverAddr, a.id,
+		)
+		handleError(context.Canceled)
+		return
+	default:
+	}
+
+	body := api.MoreResourcesRequest{
+		MoreResources: api.MoreResources{Cpu: false, Memory: true},
+		ExpectedID:    a.id,
+	}
+	id, _, err := doRequest[api.MoreResourcesRequest, api.AgentIdentification](
+		a, timeout, http.MethodPost, "/try-upscale", &body,
+	)
+
+	select {
+	case <-a.unregistered.Recv():
+		handleError(context.Canceled)
+		return
+	default:
+	}
+
+	if err != nil {
+		a.EnsureUnregistered()
+		handleError(err)
+		return
+	}
+
+	if id.AgentID != a.id {
+		a.EnsureUnregistered()
+		handleError(fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID))
+		return
+	}
 }

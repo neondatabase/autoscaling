@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"net/http"
 
 	klog "k8s.io/klog/v2"
@@ -15,8 +16,32 @@ func main() {
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
+	nullString := "\x00"
+	var cgroupName string
+	flag.StringVar(&cgroupName, "cgroup", nullString, "Sets the cgroup to monitor (optional)")
+
+	flag.Parse()
+
+	var stateOpts []informant.NewStateOpts
+
+	if cgroupName != nullString {
+		cgroupConfig := informant.DefaultCgroupConfig
+		klog.Infof("Selected cgroup %q, starting handler with config %+v", cgroupName, cgroupConfig)
+		cgroup, err := informant.NewCgroupManager(cgroupName)
+		if err != nil {
+			klog.Fatalf("Error starting cgroup handler for cgroup name %q: %s", err)
+		}
+
+		stateOpts = append(stateOpts, informant.WithCgroup(cgroup, cgroupConfig))
+	} else {
+		klog.Infof("No cgroup selected")
+	}
+
 	agents := informant.NewAgentSet()
-	state := informant.NewState(agents)
+	state, err := informant.NewState(agents, stateOpts...)
+	if err != nil {
+		klog.Fatalf("Error starting informant.NewState: %s", err)
+	}
 
 	mux := http.NewServeMux()
 	util.AddHandler("", mux, "/register", http.MethodPost, "AgentDesc", state.RegisterAgent)
@@ -26,7 +51,8 @@ func main() {
 	util.AddHandler("", mux, "/unregister", http.MethodDelete, "AgentDesc", state.UnregisterAgent)
 
 	server := http.Server{Addr: "0.0.0.0:10301", Handler: mux}
-	err := server.ListenAndServe()
+	klog.Infof("Starting server at %s", server.Addr)
+	err = server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		klog.Infof("Server ended.")
 	} else {

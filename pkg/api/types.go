@@ -114,6 +114,14 @@ func (r Resources) Mul(factor uint16) Resources {
 	}
 }
 
+// Increase returns a MoreResources with each field F true when r.F > old.F.
+func (r Resources) IncreaseFrom(old Resources) MoreResources {
+	return MoreResources{
+		Cpu:    r.VCPU > old.VCPU,
+		Memory: r.Mem > old.Mem,
+	}
+}
+
 // ConvertToRaw produces the RawResources equivalent to these Resources with the given slot size
 func (r Resources) ConvertToRaw(memSlotSize *resource.Quantity) RawResources {
 	return RawResources{
@@ -262,13 +270,50 @@ type UnregisterAgent struct {
 	WasActive bool `json:"wasActive"`
 }
 
-// MoreResources is sent by the VM informant to the autoscaler-agent when the VM is in need of more
-// resources of a certain type
+// MoreResourcesRequest is the request type wrapping MoreResources that's sent by the VM informant
+// to the autoscaler-agent when the VM is in need of more resources of a certain type
+type MoreResourcesRequest struct {
+	MoreResources
+
+	// ExpectedID is the expected AgentID of the autoscaler-agent
+	ExpectedID uuid.UUID `json:"expectedID"`
+}
+
+// MoreResources holds the data associated with a MoreResourcesRequest
 type MoreResources struct {
 	// Cpu is true if the VM informant is requesting more CPU
 	Cpu bool `json:"cpu"`
 	// Memory is true if the VM informant is requesting more memory
 	Memory bool `json:"memory"`
+}
+
+// Not returns the field-wise logical "not" of m
+func (m MoreResources) Not() MoreResources {
+	return MoreResources{
+		Cpu:    !m.Cpu,
+		Memory: !m.Memory,
+	}
+}
+
+// Or returns the field-wise logical "or" of m and cmp
+func (m MoreResources) Or(cmp MoreResources) MoreResources {
+	return MoreResources{
+		Cpu:    m.Cpu || cmp.Cpu,
+		Memory: m.Memory || cmp.Memory,
+	}
+}
+
+// And returns the field-wise logical "and" of m and cmp
+func (m MoreResources) And(cmp MoreResources) MoreResources {
+	// For fun, this method *could* be written as:
+	//
+	//     m.Not().Or(cmp.Not()).Not()
+	//
+	// ... but that's a bit ✨extra✨.
+	return MoreResources{
+		Cpu:    m.Cpu && cmp.Cpu,
+		Memory: m.Memory && cmp.Memory,
+	}
 }
 
 // RawResources signals raw resource amounts, and is primarily used in communications with the VM

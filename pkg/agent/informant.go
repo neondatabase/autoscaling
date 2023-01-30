@@ -62,6 +62,10 @@ type InformantServer struct {
 	// and the value of runner.informant is updated.
 	updatedInformant util.CondChannelSender
 
+	// upscaleRequested is signalled whenver a valid request on /try-upscale is received, with at
+	// least one field set to true (i.e., at least one resource is being requested).
+	upscaleRequested util.CondChannelSender
+
 	// requestLock guards requests to the VM informant to make sure that only one request is being
 	// made at a time.
 	//
@@ -110,7 +114,9 @@ type InformantServerExitStatus struct {
 // NewInformantServer starts an InformantServer, returning it and a signal receiver that will be
 // signalled when it exits.
 func NewInformantServer(
-	ctx context.Context, runner *Runner, updatedInformant util.CondChannelSender,
+	ctx context.Context, runner *Runner,
+	updatedInformant util.CondChannelSender,
+	upscaleRequested util.CondChannelSender,
 ) (*InformantServer, util.SignalReceiver, error) {
 	// Manually start the TCP listener so that we can see the port it's assigned
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: 0 /* 0 means it'll be assigned any(-ish) port */}
@@ -154,6 +160,7 @@ func NewInformantServer(
 	util.AddHandler(logPrefix, mux, "/id", http.MethodGet, "struct{}", server.handleID)
 	util.AddHandler(logPrefix, mux, "/resume", http.MethodPost, "ResumeAgent", server.handleResume)
 	util.AddHandler(logPrefix, mux, "/suspend", http.MethodPost, "SuspendAgent", server.handleSuspend)
+	util.AddHandler(logPrefix, mux, "/try-upscale", http.MethodPost, "MoreResourcesRequest", server.handleTryUpscale)
 	httpServer := &http.Server{Handler: mux}
 
 	sendFinished, recvFinished := util.NewSingleSignalPair()
@@ -717,6 +724,70 @@ func (s *InformantServer) handleSuspend(body *api.SuspendAgent) (*api.AgentIdent
 		Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
 		SequenceNumber: s.incrementSequenceNumber(),
 	}, 200, nil
+}
+
+// handleTryUpscale handles a request on the server's /try-upscale endpoint. This method should not
+// be called outside of that context.
+//
+// Returns: response body (if successful), status code, error (if unsuccessful)
+func (s *InformantServer) handleTryUpscale(
+	body *api.MoreResourcesRequest,
+) (*api.AgentIdentificationMessage, int, error) {
+	if body.ExpectedID != s.desc.AgentID {
+		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
+		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
+	}
+
+	s.runner.lock.Lock()
+	defer s.runner.lock.Unlock()
+
+	if s.exitStatus != nil {
+		return nil, 404, errors.New("Server has already exited")
+	}
+
+	switch s.mode {
+	case InformantServerRunning:
+		if body.MoreResources.Cpu || body.MoreResources.Memory {
+			s.upscaleRequested.Send()
+		} else {
+			s.runner.logger.Warningf("Received try-upscale request that does not increase")
+		}
+
+		s.runner.logger.Infof(
+			"Updating requested upscale from %+v to %+v",
+			s.runner.requestedUpscale, body.MoreResources,
+		)
+		s.runner.requestedUpscale = body.MoreResources
+
+		return &api.AgentIdentificationMessage{
+			Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
+			SequenceNumber: s.incrementSequenceNumber(),
+		}, 200, nil
+	case InformantServerSuspended:
+		internalErr := errors.New("Got /try-upscale request for server, but server is suspended")
+		s.runner.logger.Warningf("%s", internalErr)
+
+		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
+		s.exit(InformantServerExitStatus{
+			Err:            internalErr,
+			RetryShouldFix: true,
+		})
+
+		return nil, 400, errors.New("Cannot process upscale while suspended")
+	case InformantServerUnconfirmed:
+		internalErr := errors.New("Got /try-upscale request for server, but server is suspended")
+		s.runner.logger.Warningf("%s", internalErr)
+
+		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
+		s.exit(InformantServerExitStatus{
+			Err:            internalErr,
+			RetryShouldFix: true,
+		})
+
+		return nil, 400, errors.New("Cannot process upscale while unconfirmed")
+	default:
+		panic(fmt.Errorf("unexpected server mode: %q", s.mode))
+	}
 }
 
 // Downscale makes a request to the informant's /downscale endpoit with the api.Resources
