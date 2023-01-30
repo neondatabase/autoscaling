@@ -13,6 +13,7 @@ run_informant () {
     while true; do
         vm-informant 2>&1 | tee -a /run/vm-informant/log
         echo "$(date -R): vm-informant exited, retrying in 1s" | tee -a /run/vm-informant/log
+        sleep 1s
     done
 }
 
