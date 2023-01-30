@@ -16,31 +16,16 @@ cd -P -- "$(dirname -- "$0")"
 source '../scripts-common.sh'
 
 NEONVM_BUILDER_PATH='neonvm-builder'
-NEONVM_COMMITISH='sharnoff/dev' # Temporary; we require some special stuff for autoscaling (as of 2022-11-27)
-# note: explicitly use http here so that we don't require ssh credentials
 NEONVM_REPO='https://github.com/neondatabase/neonvm'
+NEONVM_VERSION='v0.3.5'
 
 if [ -e "$NEONVM_BUILDER_PATH" ]; then
-    echo "Skipping building vm-builder because '$NEONVM_BUILDER_PATH' already exists"
+    echo "Skipping downloading NeonVM vm-builder because '$NEONVM_BUILDER_PATH' already exists"
 else
-    tmpdir="$(mktemp -d vm-builder.build.XXXX)"
-    echo "Building new vm-builder in '$tmpdir'..."
-
-    cleanup() { if [ -e "$tmpdir" ]; then rm -rf "$tmpdir"; fi }
-    trap cleanup EXIT INT TERM
-
-    # execute in a sub-shell so we un-cd when done automatically
-    (
-        cd "$tmpdir"
-        set -x
-        git clone -b "$NEONVM_COMMITISH" "$NEONVM_REPO" . # clone into current dir
-        go build -o vm-builder tools/vm-builder/main.go
-    )
-
-    mv "$tmpdir/vm-builder" "$NEONVM_BUILDER_PATH"
-
-    echo "Done building vm-builder, removing tmpdir"
-    cleanup
+    echo "Downloading NeonVM vm-builder to '$NEONVM_BUILDER_PATH'..."
+    curl -sSLf -o "$NEONVM_BUILDER_PATH" "$NEONVM_REPO/releases/download/$NEONVM_VERSION/vm-builder"
+    echo "Done."
+    chmod +x "$NEONVM_BUILDER_PATH"
 fi
 
 if [ -a 'ssh_id_rsa' ]; then

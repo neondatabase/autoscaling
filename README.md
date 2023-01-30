@@ -58,18 +58,6 @@ build/autoscale-scheduler/build.sh
 build/autoscaler-agent/build.sh
 ```
 
-We also require a local build of NeonVM (for now, as of 2022-11-27); which can be done by cloning
-the repository, in a different directory:
-```sh
-git clone -b sharnoff/dev git@github.com:neondatabase/neonvm
-cd neonvm  # ^^^^^^^^^^^^ NOTE: needs to be the right branch.
-
-# as root:
-CONTROLLER_IMG='localhost:5001/neonvm-controller:latest' \
-RUNNER_IMG='localhost:5001/neonvm-runner:latest' \
-./build_docker.sh
-```
-
 Download various dependencies:
 
 ```sh

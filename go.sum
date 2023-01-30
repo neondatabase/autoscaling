@@ -475,8 +475,8 @@ github.com/mvdan/xurls v1.1.0/go.mod h1:tQlNn3BED8bE/15hnSL2HLkDeLWpNPAwtw7wkEq4
 github.com/mwitkow/go-conntrack v0.0.0-20161129095857-cc309e4a2223/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
 github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
 github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f/go.mod h1:ZdcZmHo+o7JKHSa8/e818NopupXU1YMK5fe1lsApnBw=
-github.com/neondatabase/neonvm v0.0.0-20221218221638-078f50be5f77 h1:MlUfQWSw2JP/f3zJAgX92oS+UFTsNytMUM+iYJRAAGo=
-github.com/neondatabase/neonvm v0.0.0-20221218221638-078f50be5f77/go.mod h1:c7QcUsH8SrQc/swPk6u5ONXY1VinXsPmNJxuxJ/QBas=
+github.com/neondatabase/neonvm v0.3.5 h1:VwtorWAJH9Q4m+NvF5rr94N1mQp2SCHEC0hP246ctY8=
+github.com/neondatabase/neonvm v0.3.5/go.mod h1:c7QcUsH8SrQc/swPk6u5ONXY1VinXsPmNJxuxJ/QBas=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e h1:fD57ERR4JtEqsWbfPhv4DMiApHyliiK5xCTNVSPiaAs=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
 github.com/nxadm/tail v1.4.4/go.mod h1:kenIhsEOeOJmVchQTgglprH7qJGnHDVpk1VPCcaMI8A=
