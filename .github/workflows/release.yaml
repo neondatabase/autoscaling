@@ -2,7 +2,7 @@ name: release
 on:
   push:
     tags:
-      - "*.*.*"
+      - "v*.*.*"
 
 env:
   AGENT_IMAGE: "neondatabase/autoscaler-agent"
