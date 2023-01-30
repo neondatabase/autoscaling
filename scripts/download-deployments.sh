@@ -17,3 +17,6 @@ curl -sSL https://github.com/cert-manager/cert-manager/releases/download/v1.8.2/
 echo "downloading 'multus-daemonset.yaml'..."
 curl -sS https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml \
     -o deploy/multus-daemonset.yaml
+echo "downloading 'neonvm.yaml'..."
+curl -sSL https://github.com/neondatabase/neonvm/releases/download/v0.3.5/neonvm.yaml \
+    -o deploy/neonvm.yaml
