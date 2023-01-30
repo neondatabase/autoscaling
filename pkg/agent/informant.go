@@ -62,7 +62,7 @@ type InformantServer struct {
 	// and the value of runner.informant is updated.
 	updatedInformant util.CondChannelSender
 
-	// upscaleRequested is signalled whenver a valid request on /try-upscale is received, with at
+	// upscaleRequested is signalled whenever a valid request on /try-upscale is received, with at
 	// least one field set to true (i.e., at least one resource is being requested).
 	upscaleRequested util.CondChannelSender
 

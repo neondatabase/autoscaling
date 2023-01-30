@@ -103,7 +103,7 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 	// determine what the correct behavior should be if a cgroup operation fails, though.
 	//
 	// FIXME: enforce a minimum wait period between requesting scale-ups (otherwise can be bad when
-	// memory usage is oscillating around memory.high but there aren't available resourecs)
+	// memory usage is oscillating around memory.high but there aren't available resources)
 
 	for {
 		// Wait for a new signal
@@ -178,7 +178,7 @@ func (s *CgroupState) handleMemoryHighEvent(config CgroupConfig) error {
 	case <-s.upscaleEventsRecvr.Recv():
 		totalWait := time.Since(startTime)
 		klog.Infof(
-			"Recieved notification of upscale after %s. Updating memory.high before thawing cgroup",
+			"Received notification of upscale after %s. Updating memory.high before thawing cgroup",
 			totalWait,
 		)
 
