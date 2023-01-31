@@ -40,9 +40,15 @@ var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ReservePlugin = (*AutoscaleEnforcer)(nil)
 
+func NewAutoscaleEnforcerPlugin(ctx context.Context) func(runtime.Object, framework.Handle) (framework.Plugin, error) {
+	return func(obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
+		return makeAutoscaleEnforcerPlugin(ctx, obj, h)
+	}
+}
+
 // NewAutoscaleEnforcerPlugin produces the initial AutoscaleEnforcer plugin to be used by the
 // scheduler
-func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
+func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
 	// ^ obj can be used for taking in configuration. it's a bit tricky to figure out, and we don't
 	// quite need it yet.
 	klog.Info("[autoscale-enforcer] Initializing plugin")
@@ -72,7 +78,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting config watcher")
-	if err := p.setConfigAndStartWatcher(context.Background()); err != nil {
+	if err := p.setConfigAndStartWatcher(ctx); err != nil {
 		klog.Errorf("Error starting config watcher: %s", err)
 		return nil, err
 	}
@@ -81,13 +87,13 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	vmDeletions := make(chan api.PodName)
 	podDeletions := make(chan api.PodName)
 	klog.Infof("[autoscale-enforcer] Starting pod deletion watcher")
-	if err := p.watchPodDeletions(context.Background(), vmDeletions, podDeletions); err != nil {
+	if err := p.watchPodDeletions(ctx, vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %w", err)
 	}
 
 	// ... but before handling the deletion events, read the current cluster state:
 	klog.Infof("[autoscale-enforcer] Reading initial cluster state")
-	if err = p.readClusterState(context.TODO()); err != nil {
+	if err = p.readClusterState(ctx); err != nil {
 		return nil, fmt.Errorf("Error reading cluster state: %w", err)
 	}
 
@@ -97,6 +103,8 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case name := <-vmDeletions:
 				p.handleVMDeletion(name)
 			case name := <-podDeletions:
@@ -105,13 +113,14 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		}
 	}()
 
-	go p.runPermitHandler()
+	go p.runPermitHandler(ctx)
 
 	// Periodically check that we're not deadlocked
 	go func() {
 		checkDelay := 5 * time.Second
 		timeout := 1 * time.Second
-
+		timer := time.NewTimer(checkDelay)
+		defer timer.Stop()
 		for {
 			success := make(chan struct{})
 
@@ -122,14 +131,15 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 			}()
 
 			select {
+			case <-ctx.Done():
+				return
 			case <-success:
 				// all good
-			case <-time.After(timeout):
+				timer.Reset(checkDelay)
+			case <-timer.C:
 				// not all good
 				klog.Fatalf("deadlock detected, could not get lock after %s", timeout)
 			}
-
-			time.Sleep(checkDelay)
 		}
 	}()
 
