@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tychoish/fun"
+	"github.com/tychoish/fun/pubsub"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -28,11 +28,11 @@ type agentState struct {
 	config               *Config
 	kubeClient           *kubernetes.Clientset
 	vmClient             *vmclient.Clientset
-	schedulerEventBroker *fun.Broker[watchEvent]
+	schedulerEventBroker *pubsub.Broker[watchEvent]
 	schedulerStore       *util.WatchStore[corev1.Pod]
 }
 
-func (r MainRunner) newAgentState(podIP string, broker *fun.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) agentState {
+func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) agentState {
 	return agentState{
 		pods:                 make(map[api.PodName]*podState),
 		config:               r.Config,

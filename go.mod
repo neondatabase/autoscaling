@@ -35,7 +35,7 @@ replace (
 require (
 	github.com/google/uuid v1.3.0
 	github.com/neondatabase/neonvm v0.3.5
-	github.com/tychoish/fun v0.0.0-20230116050849-391971307822
+	github.com/tychoish/fun v0.3.3
 	golang.org/x/exp v0.0.0-20221126150942-6ab00d035af9
 	k8s.io/api v0.23.15
 	k8s.io/apimachinery v0.23.15
