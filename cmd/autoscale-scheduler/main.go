@@ -15,6 +15,14 @@ import (
 // all of the juicy bits are defined in pkg/plugin/
 
 func main() {
+	if err := runProgram(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// runProgram is the "real" main, but returning an error means that
+// the shutdown handling code doesn't have to call os.Exit, even indirectly.
+func runProgram() error {
 	// this: listens for sigterm, when we catch that signal, the
 	// context gets canceled, a go routine waits for half a second, and
 	// then closes the signal channel, which we block on in a
@@ -30,6 +38,7 @@ func main() {
 
 	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, plugin.NewAutoscaleEnforcerPlugin(ctx)))
 	if err := command.ExecuteContext(ctx); err != nil {
-		log.Fatal(err)
+		return err
 	}
+	return nil
 }
