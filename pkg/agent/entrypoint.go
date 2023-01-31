@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tychoish/fun/pubsub"
+
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
-	"github.com/tychoish/fun/pubsub"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
