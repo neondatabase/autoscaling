@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tychoish/fun"
+	"github.com/tychoish/fun/pubsub"
 	"golang.org/x/exp/slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -90,7 +90,7 @@ func startSchedulerWatcher(
 	ctx context.Context,
 	logger RunnerLogger,
 	kubeClient *kubernetes.Clientset,
-	eventBroker *fun.Broker[watchEvent],
+	eventBroker *pubsub.Broker[watchEvent],
 	schedulerName string,
 ) (*util.WatchStore[corev1.Pod], error) {
 	return util.Watch(
@@ -159,7 +159,7 @@ func startSchedulerWatcher(
 func watchSchedulerUpdates(
 	ctx context.Context,
 	logger RunnerLogger,
-	eventBroker *fun.Broker[watchEvent],
+	eventBroker *pubsub.Broker[watchEvent],
 	store *util.WatchStore[corev1.Pod],
 ) (schedulerWatch, *schedulerInfo, error) {
 	events := eventBroker.Subscribe(ctx)
