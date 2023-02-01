@@ -106,7 +106,7 @@ func parseMemoryEvents(groupName string) (*cgroup2.Event, error) {
 		return nil, fmt.Errorf("Error reading file at %q: %w", path, err)
 	}
 
-	event := cgroup2.Event{}
+	event := cgroup2.Event{} //nolint:exhaustruct // fields set by the rest of this function
 	valueMap := map[string]struct {
 		v   *uint64
 		set bool

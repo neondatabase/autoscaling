@@ -147,6 +147,7 @@ func NewInformantServer(
 		madeContact:      false,
 		mode:             InformantServerUnconfirmed,
 		updatedInformant: updatedInformant,
+		upscaleRequested: upscaleRequested,
 		requestLock:      util.NewChanMutex(),
 		exitStatus:       nil,
 		exit:             nil, // see below.

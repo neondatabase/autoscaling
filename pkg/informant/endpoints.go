@@ -5,6 +5,7 @@ package informant
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	klog "k8s.io/klog/v2"
 
@@ -66,10 +67,12 @@ func WithCgroup(cgm *CgroupManager, config CgroupConfig) NewStateOpts {
 
 			upscaleEventsSendr, upscaleEventsRecvr := util.NewCondChannelPair()
 			s.cgroup = &CgroupState{
+				updateLock:         sync.Mutex{},
 				mgr:                cgm,
 				config:             config,
 				upscaleEventsSendr: upscaleEventsSendr,
 				upscaleEventsRecvr: upscaleEventsRecvr,
+				requestUpscale:     func() { s.agents.RequestUpscale() },
 			}
 		},
 		post: func(s *State) error {
