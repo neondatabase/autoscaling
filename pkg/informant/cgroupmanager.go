@@ -14,6 +14,8 @@ import (
 	cgroups "github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup2"
 
+	klog "k8s.io/klog/v2"
+
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -106,16 +108,32 @@ func parseMemoryEvents(groupName string) (*cgroup2.Event, error) {
 		return nil, fmt.Errorf("Error reading file at %q: %w", path, err)
 	}
 
-	event := cgroup2.Event{} //nolint:exhaustruct // fields set by the rest of this function
+	// note: When we read the memory.events file, it tends to look something like:
+	//
+	//   low 1
+	//   high 5
+	//   max 3
+	//   oom 1
+	//   oom_kill 0
+	//
+	// (numbers are made up)
+	//
+	// This map represents the field names we know about. Newer versions of the Linux kernel *might*
+	// add new fields, but that'll probably happen slowly, so we emit warnings only when the field
+	// name isn't recognized. For each entry in the map: v is the value of the field, set is true if
+	// we've already parsed the value, and required is true if we need the value in order to build a
+	// cgroup2.Event.
 	valueMap := map[string]struct {
-		v   *uint64
-		set bool
+		v        uint64
+		set      bool
+		required bool
 	}{
-		"low":      {&event.Low, false},
-		"high":     {&event.High, false},
-		"max":      {&event.Max, false},
-		"oom":      {&event.OOM, false},
-		"oom_kill": {&event.OOMKill, false},
+		"low":            {0, false, true},
+		"high":           {0, false, true},
+		"max":            {0, false, true},
+		"oom":            {0, false, true},
+		"oom_kill":       {0, false, true},
+		"oom_group_kill": {0, false, false}, // Added in 5.17
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
@@ -137,11 +155,11 @@ func parseMemoryEvents(groupName string) (*cgroup2.Event, error) {
 
 		pair, ok := valueMap[name]
 		if !ok {
-			return nil, fmt.Errorf("Unexpected field name %q", name)
+			klog.Warningf("Unrecognized memory.events field %q (is the kernel new?)", name)
 		} else if pair.set {
 			return nil, fmt.Errorf("Duplicate field %q", name)
 		}
-		*pair.v = value
+		pair.v = value
 		pair.set = true
 		valueMap[name] = pair
 	}
@@ -150,16 +168,22 @@ func parseMemoryEvents(groupName string) (*cgroup2.Event, error) {
 
 	// Check if there's any unset fields
 	for name, pair := range valueMap {
-		if !pair.set {
+		if !pair.set && pair.required {
 			unset = append(unset, name)
 		}
 	}
 
 	if len(unset) != 0 {
-		return nil, fmt.Errorf("Some fields not provided: %+v", unset)
+		return nil, fmt.Errorf("Some required fields not provided: %+v", unset)
 	}
 
-	return &event, nil
+	return &cgroup2.Event{
+		Low:     valueMap["low"].v,
+		High:    valueMap["high"].v,
+		Max:     valueMap["max"].v,
+		OOM:     valueMap["oom"].v,
+		OOMKill: valueMap["oom_kill"].v,
+	}, nil
 }
 
 // TODO: Open a PR in github.com/containerd/cgroups to expose this publicly. This function is
