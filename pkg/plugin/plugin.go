@@ -68,7 +68,7 @@ func NewAutoscaleEnforcerPlugin(obj runtime.Object, h framework.Handle) (framewo
 		handle:   h,
 		vmClient: vmClient,
 		// fields are set by p.setConfigAndStartWatcher, p.readClusterState
-		state: pluginState{},
+		state: pluginState{}, //nolint:exhaustruct // see above.
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting config watcher")
@@ -567,7 +567,10 @@ func (e *AutoscaleEnforcer) Reserve(
 			vCPU:                     podResourceState[uint16]{reserved: vmInfo.Cpu.Use, capacityPressure: 0},
 			memSlots:                 podResourceState[uint16]{reserved: vmInfo.Mem.Use, capacityPressure: 0},
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
+			mostRecentComputeUnit:    nil,
+			metrics:                  nil,
 			mqIndex:                  -1,
+			migrationState:           nil,
 		}
 		node.pods[pName] = ps
 		e.state.podMap[pName] = ps

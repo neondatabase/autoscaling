@@ -70,19 +70,26 @@ func startPodWatcher(
 					oldIsOurs := podIsOurResponsibility(oldPod, config, nodeName)
 					newIsOurs := podIsOurResponsibility(newPod, config, nodeName)
 
-					// doesn't matter which pod we take these from; they won't change.
-					podName := api.PodName{Name: newPod.Name, Namespace: newPod.Namespace}
-
-					event := podEvent{podName: podName, vmName: vmName}
+					var kind podEventKind
+					var podIP string
 
 					if !oldIsOurs && newIsOurs {
-						event.kind = podEventAdded
-						event.podIP = newPod.Status.PodIP
-						podEvents <- event
+						kind = podEventAdded
+						podIP = newPod.Status.PodIP
 					} else if oldIsOurs && !newIsOurs {
-						event.kind = podEventDeleted
-						event.podIP = oldPod.Status.PodIP
-						podEvents <- event
+						kind = podEventDeleted
+						podIP = oldPod.Status.PodIP
+					} else {
+						// If oldIsOurs == newIsOurs, nothing's changed, so do nothing.
+						return
+					}
+
+					podEvents <- podEvent{
+						// doesn't matter which pod we take these from; they won't change.
+						podName: api.PodName{Name: newPod.Name, Namespace: newPod.Namespace},
+						podIP:   podIP,
+						vmName:  vmName,
+						kind:    kind,
 					}
 				}
 			},

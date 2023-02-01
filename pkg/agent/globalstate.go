@@ -92,6 +92,8 @@ func (s *agentState) handleEvent(event podEvent) {
 			logger: RunnerLogger{
 				prefix: fmt.Sprintf("Runner %v: ", event.podName),
 			},
+			// note: vm is expected to be nil before (*Runner).Run
+			vm:                    nil,
 			podName:               event.podName,
 			podIP:                 event.podIP,
 			lock:                  util.NewChanMutex(),
@@ -103,6 +105,7 @@ func (s *agentState) handleEvent(event podEvent) {
 			computeUnit:           nil,
 			lastApproved:          nil,
 			lastSchedulerError:    nil,
+			lastInformantError:    nil,
 			backgroundWorkerCount: atomic.Int64{},
 			backgroundPanic:       make(chan error),
 		}
@@ -110,6 +113,7 @@ func (s *agentState) handleEvent(event podEvent) {
 		state = &podState{
 			podName: event.podName,
 			stop:    cancelRunnerContext,
+			runner:  runner,
 			status:  status,
 		}
 		s.pods[event.podName] = state
@@ -123,7 +127,7 @@ type podState struct {
 	podName api.PodName
 
 	stop   context.CancelFunc
-	runner *Runner //nolint:unused // this will be used soon, with an HTTP endpoint to dump state
+	runner *Runner
 	status *podStatus
 }
 
