@@ -5,18 +5,6 @@
 
 set -x
 
-# node_exporter metrics (/metrics on :9100)
-run_metrics () {
-    while true; do
-        node_exporter 2>>/run/node_exporter/log >>/run/node_exporter/log
-        echo "$(date -R): node_exporter exited, retrying in 1s" | tee -a /run/node_exporter/log
-        sleep 1s
-    done
-}
-
-mkdir -p /run/node_exporter
-run_metrics &
-
 run_informant () {
     while true; do
         vm-informant 2>&1 | tee -a /run/vm-informant/log

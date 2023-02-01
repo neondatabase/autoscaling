@@ -3,12 +3,10 @@ FROM localhost:5001/vm-informant:latest as informant
 
 FROM alpine:3.16 AS rootfs
 
-# prometheus-node-exporter provides /metrics on :9001 (once we start it)
 RUN set -e \
 	&& apk add --no-cache \
 		ca-certificates \
 		util-linux-misc \
-		prometheus-node-exporter \
         coreutils
 
 # Add the vm-informant 
