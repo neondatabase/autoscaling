@@ -295,21 +295,8 @@ func (m MoreResources) Not() MoreResources {
 	}
 }
 
-// Or returns the field-wise logical "or" of m and cmp
-func (m MoreResources) Or(cmp MoreResources) MoreResources {
-	return MoreResources{
-		Cpu:    m.Cpu || cmp.Cpu,
-		Memory: m.Memory || cmp.Memory,
-	}
-}
-
 // And returns the field-wise logical "and" of m and cmp
 func (m MoreResources) And(cmp MoreResources) MoreResources {
-	// For fun, this method *could* be written as:
-	//
-	//     m.Not().Or(cmp.Not()).Not()
-	//
-	// ... but that's a bit ✨extra✨.
 	return MoreResources{
 		Cpu:    m.Cpu && cmp.Cpu,
 		Memory: m.Memory && cmp.Memory,
