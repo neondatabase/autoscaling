@@ -27,7 +27,7 @@ type CgroupManager struct {
 
 func NewCgroupManager(groupName string) (*CgroupManager, error) {
 	mode := cgroups.Mode()
-	if mode != cgroups.Unified && mode != cgroups.Legacy {
+	if mode != cgroups.Unified && mode != cgroups.Hybrid {
 		var modeString string
 		switch mode {
 		case cgroups.Unavailable:
@@ -41,7 +41,11 @@ func NewCgroupManager(groupName string) (*CgroupManager, error) {
 		return nil, fmt.Errorf("cgroups v2 are not enabled, mode = %q", modeString)
 	}
 
-	manager, err := cgroup2.Load(groupName)
+	// note: cgroup2.Load expects the cgroup "path" to start with '/', rooted at "/sys/fs/cgroup"
+	//
+	// The final path of the cgroup will be "/sys/fs/cgroup" + <name>, where <name> is what we give
+	// cgroup2.Load().
+	manager, err := cgroup2.Load(fmt.Sprint("/", groupName))
 	if err != nil {
 		return nil, fmt.Errorf("Error loading cgroup: %w", err)
 	}
@@ -107,14 +111,14 @@ func parseMemoryEvents(groupName string) (*cgroup2.Event, error) {
 		v   *uint64
 		set bool
 	}{
-		"low":         {&event.Low, false},
-		"high":        {&event.High, false},
-		"max":         {&event.Max, false},
-		"oom":         {&event.OOM, false},
-		"oom   _kill": {&event.OOMKill, false},
+		"low":      {&event.Low, false},
+		"high":     {&event.High, false},
+		"max":      {&event.Max, false},
+		"oom":      {&event.OOM, false},
+		"oom_kill": {&event.OOMKill, false},
 	}
 
-	lines := strings.Split(string(content), "\n")
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
 	for i, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) != 2 {

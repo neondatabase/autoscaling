@@ -5,13 +5,19 @@
 
 set -x
 
-# Setup the 'neon-test' cgroup:
-whoami
-mkdir /sys/fs/cgroup/neon-test
+CGROUP_NAME="neon-test"
+
+# Setup the cgroup.
+#
+# First, we need to enable the necessary controller(s) - typically these should be enabled by
+# default, but for some reason they aren't here.
+echo "+cpu +memory" >> /sys/fs/cgroup/cgroup.subtree_control
+# .. And then, create the cgroup:
+mkdir "/sys/fs/cgroup/$CGROUP_NAME"
 
 run_informant () {
     while true; do
-        vm-informant 2>&1 | tee -a /run/vm-informant/log
+        vm-informant --cgroup="$CGROUP_NAME" 2>&1 | tee -a /run/vm-informant/log
         echo "$(date -R): vm-informant exited, retrying in 1s" | tee -a /run/vm-informant/log
         sleep 1s
     done

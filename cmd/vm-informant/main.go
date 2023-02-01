@@ -32,7 +32,7 @@ func main() {
 		klog.Infof("Selected cgroup %q, starting handler with config %+v", cgroupName, cgroupConfig)
 		cgroup, err := informant.NewCgroupManager(cgroupName)
 		if err != nil {
-			klog.Fatalf("Error starting cgroup handler for cgroup name %q: %s", err)
+			klog.Fatalf("Error starting cgroup handler for cgroup name %q: %s", cgroupName, err)
 		}
 
 		stateOpts = append(stateOpts, informant.WithCgroup(cgroup, cgroupConfig))

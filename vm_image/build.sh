@@ -57,6 +57,6 @@ echo " * IMAGE_SIZE = '$IMAGE_SIZE'"
 echo "Building 'Dockerfile.vmdata'..."
 docker buildx build -t "vmdata-temp:$TAG" -f Dockerfile.vmdata . | indent
 echo "Building NeonVM image..."
-"./$NEONVM_BUILDER_PATH" --src "vmdata-temp:$TAG" --dst "$REGISTRY/$NAME:$TAG" --size "$IMAGE_SIZE" | indent
+"./$NEONVM_BUILDER_PATH" --cgroup2 --src "vmdata-temp:$TAG" --dst "$REGISTRY/$NAME:$TAG" --size "$IMAGE_SIZE" | indent
 echo "Push completed image"
 docker push "$REGISTRY/$NAME:$TAG" | indent
