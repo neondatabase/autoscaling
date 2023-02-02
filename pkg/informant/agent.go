@@ -253,7 +253,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 					)
 				}
 
-				oldCurrent.SpawnSuspend(AgentSuspendTimeout, handleError)
+				oldCurrent.Suspend(AgentSuspendTimeout, handleError)
 			}
 		}
 	}
@@ -672,17 +672,14 @@ func (a *Agent) CheckID(timeout time.Duration) error {
 	return nil
 }
 
-// SpawnSuspend signals to the Agent that it is not *currently* in use, sending a request to its
-// /suspend endpoint
+// Suspend signals to the Agent that it is not *currently* in use, sending a request to its /suspend
+// endpoint
 //
-// Unlike other similar methods on Agent, SpawnSuspend will only wait for the request to be picked
-// up by the request executor. Handling the result of the request is done in a separate goroutine.
-//
-// If the Agent is unregistered before the call to Suspend() completes, the request will be cancelled
-// and this method will return context.Canceled.
+// If the Agent is unregistered before the call to Suspend() completes, the request will be
+// cancelled and this method will return context.Canceled.
 //
 // If the request fails, the Agent will be unregistered.
-func (a *Agent) SpawnSuspend(timeout time.Duration, handleError func(error)) {
+func (a *Agent) Suspend(timeout time.Duration, handleError func(error)) {
 	// Quick unregistered check:
 	select {
 	case <-a.unregistered.Recv():
