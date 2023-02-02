@@ -81,7 +81,7 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 	// in parallel) and wait for them to shut down.
 	go func() {
 		// this runs until something cancels it
-		if err := server.ListenAndServe(); err != nil && errors.Is(err, http.ErrServerClosed) {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			// this fatal will take down the entire process,
 			klog.Fatalf("[autoscale-enforcer] Resource request server failed: %s", err)
 		}
