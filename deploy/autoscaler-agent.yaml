@@ -59,7 +59,7 @@ data:
       "downscaleTimeoutSeconds": 2
     },
     "metrics": {
-      "loadMetricPrefix": "node_",
+      "loadMetricPrefix": "host_",
       "requestTimeoutSeconds": 2,
       "secondsBetweenRequests": 5
     },
