@@ -50,7 +50,7 @@ linters-settings:
       # metav1.{GetOptions,ListOptions,WatchOptions,PatchOptions}
       - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Get|List|Watch|Patch)Options$'
       - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
-      - '^github\.com/tychoish/fun\.BrokerOptions$'
+      - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
 
   # see: <https://golangci-lint.run/usage/linters/#gci>
   gci:
