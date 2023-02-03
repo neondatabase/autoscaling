@@ -29,7 +29,9 @@ func runProgram() error {
 	// defer. because defers execute in LIFO errors, this just
 	// pauses for a *very* short period of time before exiting.
 	//
-	// eventually, the constructed application
+	// eventually, the constructed application will track it's
+	// services and be able to more coherently wait for shutdown
+	// without needing a sleep.
 	sig := make(chan struct{})
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	go func() { defer close(sig); <-ctx.Done(); time.Sleep(500 * time.Millisecond) }()

@@ -80,14 +80,6 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 	// shutdown signal, you call the shutdown methods (preferably
 	// in parallel) and wait for them to shut down.
 	go func() {
-		// this runs until something cancels it
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			// this fatal will take down the entire process,
-			klog.Fatalf("[autoscale-enforcer] Resource request server failed: %s", err)
-		}
-	}()
-
-	go func() {
 		// wait till the program is going to exit
 		<-ctx.Done()
 		// create a new context with a timeout because the
@@ -104,6 +96,13 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 			klog.Errorf("[autoscale-enforcer] Service shutdown failed: %s", err)
 		}
 	}()
+
+	// this runs until something cancels or the context in
+	// the goroutine causes shutdown to run.
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		// this fatal will take down the entire process,
+		klog.Fatalf("[autoscale-enforcer] Resource request server failed: %s", err)
+	}
 
 }
 
