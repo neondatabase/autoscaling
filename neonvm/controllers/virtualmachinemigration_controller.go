@@ -20,11 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"reflect"
 	"time"
-
-	//	"os"
-	//	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -188,7 +184,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 
 	statusBefore := virtualmachinemigration.Status.DeepCopy()
 	rerr := r.doReconcile(ctx, virtualmachinemigration)
-	if !reflect.DeepEqual(virtualmachinemigration.Status, statusBefore) {
+	if !DeepEqual(virtualmachinemigration.Status, statusBefore) {
 		// update VirtualMachineMigration status
 		if err := r.Status().Update(ctx, virtualmachinemigration); err != nil {
 			if apierrors.IsConflict(err) {
@@ -272,6 +268,14 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 	switch virtualmachinemigration.Status.Phase {
 
 	case "":
+		// Set the ownerRef for the migration
+		if err := ctrl.SetControllerReference(vm, virtualmachinemigration, r.Scheme); err != nil {
+			return err
+		}
+		if err := r.Update(ctx, virtualmachinemigration); err != nil {
+			log.Error(err, "Failed to update VM migration to add Owner reference")
+			return err
+		}
 		// VirtualMachineMigration just created, change Phase to "Pending"
 		virtualmachinemigration.Status.Phase = vmv1.VmmPending
 	case vmv1.VmmPending:
@@ -446,7 +450,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 		}
 
 		// TODO: delete this log as it used for debug mostly
-		log.Info("Migration info", "Info", migrationInfo)
+		// log.Info("Migration info", "Info", migrationInfo)
 
 		// Store/update migration info in VirtualMachineMigration.Status
 		virtualmachinemigration.Status.Info.Status = migrationInfo.Status
@@ -477,7 +481,6 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 
 			// Redefine ownerRef for the target Pod
 			targetRunner.OwnerReferences = []metav1.OwnerReference{}
-			//if err := controllerutil.SetOwnerReference(vm, targetRunner, r.Scheme); err != nil {
 			if err := ctrl.SetControllerReference(vm, targetRunner, r.Scheme); err != nil {
 				return err
 			}

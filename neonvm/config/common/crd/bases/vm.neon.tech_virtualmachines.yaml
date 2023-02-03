@@ -25,6 +25,9 @@ spec:
     - jsonPath: .status.podName
       name: Pod
       type: string
+    - jsonPath: .status.extraNetIP
+      name: ExtraIP
+      type: string
     - jsonPath: .status.phase
       name: Status
       type: string
@@ -1071,6 +1074,23 @@ spec:
                   - name
                   type: object
                 type: array
+              extraNetwork:
+                description: Extra network interface attached to network provided
+                  by Mutlus CNI.
+                properties:
+                  enable:
+                    default: false
+                    description: Enable extra netowrk interface
+                    type: boolean
+                  interface:
+                    default: net1
+                    description: Interface name.
+                    type: string
+                  multusNetwork:
+                    default: neonvm-system/neonvm-overlay-net
+                    description: Multus Network name specified in network-attachments-definition.
+                    type: string
+                type: object
               guest:
                 properties:
                   args:
@@ -1297,6 +1317,7 @@ spec:
                   type: object
                 type: array
             required:
+            - extraNetwork
             - guest
             type: object
           status:
@@ -1372,6 +1393,10 @@ spec:
                 type: array
               cpus:
                 type: integer
+              extraNetIP:
+                type: string
+              extraNetMask:
+                type: string
               memorySize:
                 anyOf:
                 - type: integer

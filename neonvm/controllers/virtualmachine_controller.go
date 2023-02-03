@@ -21,9 +21,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"reflect"
+	"strings"
 	"time"
+
+	"github.com/bufbuild/connect-go"
+	goipamapiv1 "github.com/cicdteam/go-ipam/api/v1"
+	"github.com/cicdteam/go-ipam/api/v1/apiv1connect"
+	"google.golang.org/grpc"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -41,7 +49,10 @@ import (
 	vmv1 "github.com/neondatabase/neonvm/apis/neonvm/v1"
 )
 
-const virtualmachineFinalizer = "vm.neon.tech/finalizer"
+const (
+	virtualmachineFinalizer = "vm.neon.tech/finalizer"
+	ipamServerVariableName  = "IPAM_SERVER"
+)
 
 // Definitions to manage status conditions
 const (
@@ -87,13 +98,16 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Fetch the VirtualMachine instance
 	// The purpose is check if the Custom Resource for the Kind VirtualMachine
 	// is applied on the cluster if not we return nil to stop the reconciliation
-	virtualmachine := &vmv1.VirtualMachine{}
-	err := r.Get(ctx, req.NamespacedName, virtualmachine)
+
+	//virtualmachine := &vmv1.VirtualMachine{}
+	var virtualmachine vmv1.VirtualMachine
+	err := r.Get(ctx, req.NamespacedName, &virtualmachine)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// If the custom resource is not found then, it usually means that it was deleted or not created
 			// In this way, we will stop the reconciliation
-			log.V(2).Info("virtualmachine resource not found. Ignoring since object must be deleted")
+			//log.V(2).Info("virtualmachine resource not found. Ignoring since object must be deleted")
+			log.Info("virtualmachine resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
@@ -104,11 +118,11 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Let's add a finalizer. Then, we can define some operations which should
 	// occurs before the custom resource to be deleted.
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
-	if !controllerutil.ContainsFinalizer(virtualmachine, virtualmachineFinalizer) {
+	if !controllerutil.ContainsFinalizer(&virtualmachine, virtualmachineFinalizer) {
 		log.Info("Adding Finalizer for VirtualMachine")
-		controllerutil.AddFinalizer(virtualmachine, virtualmachineFinalizer)
+		controllerutil.AddFinalizer(&virtualmachine, virtualmachineFinalizer)
 
-		if err = r.Update(ctx, virtualmachine); err != nil {
+		if err = r.Update(ctx, &virtualmachine); err != nil {
 			log.Error(err, "Failed to update custom resource to add finalizer")
 			return ctrl.Result{}, err
 		}
@@ -118,7 +132,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// indicated by the deletion timestamp being set.
 	isVirtualMachineMarkedToBeDeleted := virtualmachine.GetDeletionTimestamp() != nil
 	if isVirtualMachineMarkedToBeDeleted {
-		if controllerutil.ContainsFinalizer(virtualmachine, virtualmachineFinalizer) {
+		if controllerutil.ContainsFinalizer(&virtualmachine, virtualmachineFinalizer) {
 			log.Info("Performing Finalizer Operations for VirtualMachine before delete CR")
 
 			// Let's add here an status "Downgrade" to define that this resource begin its process to be terminated.
@@ -126,14 +140,14 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				Status: metav1.ConditionUnknown, Reason: "Finalizing",
 				Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", virtualmachine.Name)})
 
-			if err := r.Status().Update(ctx, virtualmachine); err != nil {
+			if err := r.Status().Update(ctx, &virtualmachine); err != nil {
 				log.Error(err, "Failed to update VirtualMachine status")
 				return ctrl.Result{}, err
 			}
 
 			// Perform all operations required before remove the finalizer and allow
 			// the Kubernetes API to remove the custom custom resource.
-			r.doFinalizerOperationsForVirtualMachine(virtualmachine)
+			r.doFinalizerOperationsForVirtualMachine(ctx, &virtualmachine)
 
 			// TODO(user): If you add operations to the doFinalizerOperationsForVirtualMachine method
 			// then you need to ensure that all worked fine before deleting and updating the Downgrade status
@@ -143,7 +157,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			// so that we have the latest state of the resource on the cluster and we will avoid
 			// raise the issue "the object has been modified, please apply
 			// your changes to the latest version and try again" which would re-trigger the reconciliation
-			if err := r.Get(ctx, req.NamespacedName, virtualmachine); err != nil {
+			if err := r.Get(ctx, req.NamespacedName, &virtualmachine); err != nil {
 				log.Error(err, "Failed to re-fetch virtualmachine")
 				return ctrl.Result{}, err
 			}
@@ -152,51 +166,72 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				Status: metav1.ConditionTrue, Reason: "Finalizing",
 				Message: fmt.Sprintf("Finalizer operations for custom resource %s name were successfully accomplished", virtualmachine.Name)})
 
-			if err := r.Status().Update(ctx, virtualmachine); err != nil {
-				log.Error(err, "Failed to update VirtualMachine status")
-				return ctrl.Result{}, err
-			}
+			/*
+
+				if err := r.Status().Update(ctx, &virtualmachine); err != nil {
+					log.Error(err, "Failed to update VirtualMachine status")
+					return ctrl.Result{}, err
+				}
+
+			*/
 
 			log.Info("Removing Finalizer for VirtualMachine after successfully perform the operations")
-			controllerutil.RemoveFinalizer(virtualmachine, virtualmachineFinalizer)
+			controllerutil.RemoveFinalizer(&virtualmachine, virtualmachineFinalizer)
 
-			if err := r.Update(ctx, virtualmachine); err != nil {
+			if err := r.Update(ctx, &virtualmachine); err != nil {
 				log.Error(err, "Failed to remove finalizer for VirtualMachine")
 				return ctrl.Result{}, err
 			}
 		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
 	// Re-fetch the virtualmachine Custom Resource before managing VM lifecycle
-	if err := r.Get(ctx, req.NamespacedName, virtualmachine); err != nil {
+	if err := r.Get(ctx, req.NamespacedName, &virtualmachine); err != nil {
 		log.Error(err, "Failed to re-fetch virtualmachine")
 		return ctrl.Result{}, err
 	}
 
 	statusBefore := virtualmachine.Status.DeepCopy()
-	if err := r.doReconcile(ctx, virtualmachine); err != nil {
-		r.Recorder.Eventf(virtualmachine, corev1.EventTypeWarning, "Failed",
-			"Failed to reconcile (%s): %s", virtualmachine.Name, err)
+	if err := r.doReconcile(ctx, &virtualmachine); err != nil {
+		r.Recorder.Eventf(&virtualmachine, corev1.EventTypeWarning, "Failed",
+			"Failed to reconcile (%s): %s", &virtualmachine.Name, err)
 		return ctrl.Result{}, err
 	}
 
-	if !reflect.DeepEqual(virtualmachine.Status, statusBefore) {
-		// update VirtualMachine status
-		if err := r.Status().Update(ctx, virtualmachine); err != nil {
-			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+	// update status after reconcile loop (try 10 times)
+	statusNow := statusBefore.DeepCopy()
+	statusNew := virtualmachine.Status.DeepCopy()
+	try := 1
+	for try < 10 {
+		if !DeepEqual(statusNow, statusNew) {
+			// update VirtualMachine status
+			// log.Info("DEBUG", "StatusNow", statusNow, "StatusNew", statusNew, "attempt", try)
+			if err := r.Status().Update(ctx, &virtualmachine); err != nil {
+				if apierrors.IsConflict(err) {
+					try++
+					time.Sleep(time.Second)
+					// re-get statusNow from current state
+					statusNow = virtualmachine.Status.DeepCopy()
+					continue
+				}
+				log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
+					"virtualmachine", virtualmachine.Name)
+				return ctrl.Result{}, err
 			}
-			log.Error(err, "Failed to update VirtualMachine status after reconcile loop")
-			return ctrl.Result{}, err
 		}
+		// status updated (before and now are equal)
+		break
+	}
+	if try >= 10 {
+		return ctrl.Result{}, fmt.Errorf("unable update .specextraNetwork for virtualmachine %s in %d attemps", virtualmachine.Name, try)
 	}
 
 	return ctrl.Result{RequeueAfter: time.Second}, nil
 }
 
 // finalizeVirtualMachine will perform the required operations before delete the CR.
-func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(cr *vmv1.VirtualMachine) {
+func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, virtualmachine *vmv1.VirtualMachine) {
 	// TODO(user): Add the cleanup steps that the operator
 	// needs to do before the CR can be deleted. Examples
 	// of finalizers include performing backups and deleting
@@ -208,11 +243,31 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(cr *vm
 	// to set the ownerRef which means that the Deployment will be deleted by the Kubernetes API.
 	// More info: https://kubernetes.io/docs/tasks/administer-cluster/use-cascading-deletion/
 
+	log := log.FromContext(ctx)
+
+	// release IP for ExtraNetwork interface
+	if virtualmachine.Spec.ExtraNetwork != nil {
+		ipamService := os.Getenv(ipamServerVariableName)
+		if len(ipamService) == 0 {
+			log.Error(fmt.Errorf("IPAM service not found, environment variable %s is empty", ipamServerVariableName), "ipam service not defined")
+		} else if len(virtualmachine.Status.ExtraNetIP) != 0 {
+			log.Info("Going to release IP address used for ExtraNetwork",
+				"virtualmachine", virtualmachine.Name,
+				"extraNetIP", virtualmachine.Status.ExtraNetIP)
+			err := releaseIP(ctx, ipamService, virtualmachine.Status.ExtraNetIP)
+			if err != nil {
+				log.Error(err, "Failed to release IP address for ExtraNetwork",
+					"virtualmachine", virtualmachine.Name,
+					"extraNetIP", virtualmachine.Status.ExtraNetIP)
+			}
+		}
+	}
+
 	// The following implementation will raise an event
-	r.Recorder.Event(cr, "Warning", "Deleting",
+	r.Recorder.Event(virtualmachine, "Warning", "Deleting",
 		fmt.Sprintf("Custom Resource %s is being deleted from the namespace %s",
-			cr.Name,
-			cr.Namespace))
+			virtualmachine.Name,
+			virtualmachine.Namespace))
 }
 
 func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
@@ -235,6 +290,30 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// VirtualMachine just created, change Phase to "Pending"
 		virtualmachine.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
+		// acquire IP for ExtraNetwork interface
+		if virtualmachine.Spec.ExtraNetwork != nil {
+			ipamService := os.Getenv(ipamServerVariableName)
+			if len(ipamService) == 0 {
+				return fmt.Errorf("IPAM service not found, environment variable %s is empty", ipamServerVariableName)
+			}
+			if len(virtualmachine.Status.ExtraNetIP) == 0 {
+				log.Info("Trying acquire IP address and mask for ExtraNetwork")
+				ip, mask, err := acquireIP(ctx, ipamService)
+				if err != nil {
+					log.Error(err, "Failed to acquire IP address for ExtraNetwork")
+					return err
+				}
+				log.Info("Acquired IP address and mask", "ip", ip.String(), "mask", mask.String())
+				virtualmachine.Status.ExtraNetIP = ip.String()
+				virtualmachine.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", mask[0], mask[1], mask[2], mask[3])
+
+				r.Recorder.Event(virtualmachine, "Normal", "Aqcuired",
+					fmt.Sprintf("Acquired IP %s for VirtualMachine %s",
+						virtualmachine.Status.ExtraNetIP,
+						virtualmachine.Name))
+			}
+		}
+
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
@@ -540,7 +619,12 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 
 	vmSpecJson, err := json.Marshal(virtualmachine.Spec)
 	if err != nil {
-		return nil, fmt.Errorf("marshal VM: %s", err)
+		return nil, fmt.Errorf("marshal VM Spec: %s", err)
+	}
+
+	vmStatusJson, err := json.Marshal(virtualmachine.Status)
+	if err != nil {
+		return nil, fmt.Errorf("marshal VM Status: %s", err)
 	}
 
 	pod := &corev1.Pod{
@@ -582,7 +666,11 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 					ContainerPort: virtualmachine.Spec.QMP,
 					Name:          "qmp",
 				}},
-				Command: []string{"runner", "-vmdump", base64.StdEncoding.EncodeToString(vmSpecJson)},
+				Command: []string{
+					"runner",
+					"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
+					"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
+				},
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      "virtualmachineimages",
 					MountPath: "/vm/images",
@@ -660,6 +748,11 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		}
 	}
 
+	// use multus network tp add extra network interface
+	if virtualmachine.Spec.ExtraNetwork != nil {
+		pod.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
+	}
+
 	return pod, nil
 }
 
@@ -671,4 +764,121 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
 		Complete(r)
+}
+
+func waitForGrpc(ctx context.Context, addr string) {
+	log := log.FromContext(ctx)
+
+	dialAddr := strings.TrimLeft(addr, "http://")
+	dialTimeout := 5 * time.Second
+	dialOpts := []grpc.DialOption{
+		grpc.WithInsecure(),
+		grpc.WithBlock(),
+	}
+	log.Info("check grpc connection", "address", dialAddr)
+	for {
+		dialCtx, dialCancel := context.WithTimeout(ctx, dialTimeout)
+		defer dialCancel()
+		check, err := grpc.DialContext(dialCtx, dialAddr, dialOpts...)
+		if err != nil {
+			if err == context.DeadlineExceeded {
+				log.Info("timeout: failed to connect to grpc service", "address", dialAddr)
+			} else {
+				log.Info("failed to connect to grpc service", "address", dialAddr, "error", err)
+			}
+		} else {
+			log.Info("grpc connected", "grpc state", check.GetState())
+			break
+		}
+	}
+}
+
+func acquireIP(ctx context.Context, ipam string) (net.IP, net.IPMask, error) {
+	log := log.FromContext(ctx)
+
+	waitForGrpc(ctx, ipam)
+
+	c := apiv1connect.NewIpamServiceClient(
+		http.DefaultClient,
+		ipam,
+		connect.WithGRPC(),
+	)
+
+	// get prefixes from IPAM service
+	prefixes, err := c.ListPrefixes(ctx, connect.NewRequest(&goipamapiv1.ListPrefixesRequest{}))
+	if err != nil {
+		return net.IP{}, net.IPMask{}, err
+	}
+	p := prefixes.Msg.Prefixes
+	if len(p) == 0 {
+		return net.IP{}, net.IPMask{}, fmt.Errorf("IPAM prefix not found")
+	}
+	if len(p) > 1 {
+		return net.IP{}, net.IPMask{}, fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
+	}
+
+	result, err := c.AcquireIP(ctx, connect.NewRequest(&goipamapiv1.AcquireIPRequest{PrefixCidr: p[0].Cidr}))
+	if err != nil {
+		return net.IP{}, net.IPMask{}, err
+	}
+	log.Info("ip acquired", "ip", result.Msg.Ip.Ip)
+
+	// parse overlay cidr for IPMask
+	_, ipv4Net, err := net.ParseCIDR(p[0].Cidr)
+	if err != nil {
+		return net.IP{}, net.IPMask{}, err
+	}
+	ip := net.ParseIP(result.Msg.Ip.Ip)
+	mask := ipv4Net.Mask
+
+	return ip, mask, nil
+}
+
+func releaseIP(ctx context.Context, ipam string, ip string) error {
+	log := log.FromContext(ctx)
+
+	waitForGrpc(ctx, ipam)
+
+	c := apiv1connect.NewIpamServiceClient(
+		http.DefaultClient,
+		ipam,
+		connect.WithGRPC(),
+	)
+
+	// get prefixes from IPAM service
+	prefixes, err := c.ListPrefixes(ctx, connect.NewRequest(&goipamapiv1.ListPrefixesRequest{}))
+	if err != nil {
+		return err
+	}
+	p := prefixes.Msg.Prefixes
+	if len(p) == 0 {
+		return fmt.Errorf("IPAM prefix not found")
+	}
+	if len(p) > 1 {
+		return fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
+	}
+
+	result, err := c.ReleaseIP(ctx, connect.NewRequest(&goipamapiv1.ReleaseIPRequest{PrefixCidr: p[0].Cidr, Ip: ip}))
+	if err != nil {
+		return err
+	}
+	log.Info("ip released", "ip", result.Msg.Ip.Ip)
+
+	return nil
+}
+
+func DeepEqual(v1, v2 interface{}) bool {
+	if reflect.DeepEqual(v1, v2) {
+		return true
+	}
+	var x1 interface{}
+	bytesA, _ := json.Marshal(v1)
+	_ = json.Unmarshal(bytesA, &x1)
+	var x2 interface{}
+	bytesB, _ := json.Marshal(v2)
+	_ = json.Unmarshal(bytesB, &x2)
+	if reflect.DeepEqual(x1, x2) {
+		return true
+	}
+	return false
 }

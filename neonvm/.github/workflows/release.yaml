@@ -7,9 +7,10 @@ on:
 
 env:
   KUSTOMIZE_VERSION:        "4.5.7"
-  CONTROLLER_TOOLS_VERSION: "0.10.0"
-  CODE_GENERATOR_VERSION:   "0.25.4"
+  CONTROLLER_TOOLS_VERSION: "0.9.2"
+  CODE_GENERATOR_VERSION:   "0.26.0"
   IMG:                      "neondatabase/neonvm-controller"
+  IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:               "neondatabase/neonvm-runner"
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
   VM_KERNEL_VERSION:        "5.15.80"
@@ -35,7 +36,7 @@ jobs:
           git clone --branch=v${{ env.CODE_GENERATOR_VERSION }} --depth=1 https://github.com/kubernetes/code-generator.git ${RUNNER_TEMP}/code-generator
           go install sigs.k8s.io/controller-tools/cmd/controller-gen@v${{ env.CONTROLLER_TOOLS_VERSION }}
           ${RUNNER_TEMP}/code-generator/generate-groups.sh "deepcopy,client,informer,lister" github.com/neondatabase/neonvm/client github.com/neondatabase/neonvm/apis neonvm:v1 --go-header-file hack/boilerplate.go.txt
-          controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+          controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/common/crd/bases output:rbac:artifacts:config=config/common/rbac output:webhook:artifacts:config=config/common/webhook
 
       - name: build binaries
         run:  make build
@@ -77,18 +78,34 @@ jobs:
           #push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ env.IMG }}:${{ steps.get_version.outputs.version }}
 
+      - name: build and push vxlan controller image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          #push: ${{ github.event_name != 'pull_request' }}
+          file: tools/vxlan/Dockerfile
+          tags: ${{ env.IMG_VXLAN }}:${{ steps.get_version.outputs.version }}
+
       - name: render kubernetes resources
         uses: stefanprodan/kube-tools@v1
         with:
           kustomize: ${{ env.KUSTOMIZE_VERSION }}
           command: |
             kustomize version --short
-            cd config/controller   && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_version.outputs.version }}
-            cd ${GITHUB_WORKSPACE} && kustomize build config/default --output neonvm.yaml
+            cd config/common/controller              && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_version.outputs.version }}
+            cd config/default-vxlan/vxlan-controller && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_version.outputs.version }}
+            cd config/default-vxlan/vxlan-ipam       && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_version.outputs.version }}
+            cd ${GITHUB_WORKSPACE} && kustomize build config/default-vxlan/multus --output neonvm-multus.yaml
+            cd ${GITHUB_WORKSPACE} && kustomize build config/default-vxlan        --output neonvm-vxlan.yaml
+            cd ${GITHUB_WORKSPACE} && kustomize build config/default              --output neonvm.yaml
 
       - name: github release
         uses: softprops/action-gh-release@v1
         with:
           files: |
+            neonvm-multus.yaml
+            neonvm-vxlan.yaml
             neonvm.yaml
             bin/vm-builder

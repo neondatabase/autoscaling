@@ -63,6 +63,8 @@ spec:
         port: 9100
       - name: metrics
         port: 9187
+  extraNetwork:
+      enable: true
   disks:
     - name: pgdata
       mountPath: /var/lib/postgresql

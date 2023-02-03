@@ -62,6 +62,9 @@ type VirtualMachineSpec struct {
 	// List of disk that can be mounted by virtual machine.
 	// +optional
 	Disks []Disk `json:"disks,omitempty"`
+
+	// Extra network interface attached to network provided by Mutlus CNI.
+	ExtraNetwork *ExtraNetwork `json:"extraNetwork"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
@@ -219,6 +222,21 @@ type TmpfsDiskSource struct {
 	Size resource.Quantity `json:"size"`
 }
 
+type ExtraNetwork struct {
+	// Enable extra netowrk interface
+	// +kubebuilder:default:=false
+	// +optional
+	Enable bool `json:"enable"`
+	// Interface name.
+	// +kubebuilder:default:=net1
+	// +optional
+	Interface string `json:"interface"`
+	// Multus Network name specified in network-attachments-definition.
+	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net
+	// +optional
+	MultusNetwork string `json:"multusNetwork"`
+}
+
 // VirtualMachineStatus defines the observed state of VirtualMachine
 type VirtualMachineStatus struct {
 	// Represents the observations of a VirtualMachine's current state.
@@ -239,6 +257,10 @@ type VirtualMachineStatus struct {
 	PodName string `json:"podName,omitempty"`
 	// +optional
 	PodIP string `json:"podIP,omitempty"`
+	// +optional
+	ExtraNetIP string `json:"extraNetIP,omitempty"`
+	// +optional
+	ExtraNetMask string `json:"extraNetMask,omitempty"`
 	// +optional
 	Node string `json:"node,omitempty"`
 	// +optional
@@ -275,6 +297,7 @@ const (
 // +kubebuilder:printcolumn:name="Cpus",type=integer,JSONPath=`.status.cpus`
 // +kubebuilder:printcolumn:name="Memory",type=string,JSONPath=`.status.memorySize`
 // +kubebuilder:printcolumn:name="Pod",type=string,JSONPath=`.status.podName`
+// +kubebuilder:printcolumn:name="ExtraIP",type=string,JSONPath=`.status.extraNetIP`
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Node",type=string,priority=1,JSONPath=`.status.node`

@@ -12,10 +12,11 @@ You’ll need a Kubernetes cluster to run against. You can use [KIND](https://si
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 ```
 
-### Install NeonVM
+### Install NeonVM with VXLAN-based overlay network
 
 ```console
-kubectl apply -f https://github.com/neondatabase/neonvm/releases/latest/download/neonvm.yaml
+kubectl apply -f https://github.com/neondatabase/neonvm/releases/latest/download/neonvm-multus.yaml
+kubectl apply -f https://github.com/neondatabase/neonvm/releases/latest/download/neonvm-vxlan.yaml
 ```
 
 ### Run virtual machine
@@ -81,29 +82,16 @@ kubectl delete neonvm vm-debian
 #### 1. Create local cluster (with 3 nodes)
 
 ```sh
-cat | kind create cluster --image kindest/node:v1.23.13 --config - <<EOF
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-- role: worker
-- role: worker
-EOF
+make local-cluster
 ```
 
-#### 2. Install cert-manager
-
-```sh
-make cert-manager
-```
-
-#### 3. Build Linux kernel for Guests
+#### 2. Build Linux kernel for Guests
 
 ```sh
 make kernel
 ```
 
-#### 4. Build and deploy controller  to local cluster
+#### 3. Build and deploy controller and VXLAN overlay network to local cluster
 
 ```sh
 make deploy
@@ -249,9 +237,9 @@ which provides a reconcile function responsible for synchronizing resources unti
 ## Roadmap
 
 - [x] Implement Webhooks for mutation and validation
-- [ ] Multus CNI support
+- [x] Multus CNI support
 - [x] Hot[un]plug CPUs and Memory (via resource patch)
-- [ ] Live migration CRDs
+- [x] Live migration CRDs
 - [x] Simplify VM disk image creation from any docker image
 - [ ] ARM64 support
 
