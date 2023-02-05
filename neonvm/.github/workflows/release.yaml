@@ -94,12 +94,13 @@ jobs:
           kustomize: ${{ env.KUSTOMIZE_VERSION }}
           command: |
             kustomize version --short
-            cd config/common/controller              && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_version.outputs.version }}
-            cd config/default-vxlan/vxlan-controller && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_version.outputs.version }}
-            cd config/default-vxlan/vxlan-ipam       && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_version.outputs.version }}
-            cd ${GITHUB_WORKSPACE} && kustomize build config/default-vxlan/multus --output neonvm-multus.yaml
-            cd ${GITHUB_WORKSPACE} && kustomize build config/default-vxlan        --output neonvm-vxlan.yaml
-            cd ${GITHUB_WORKSPACE} && kustomize build config/default              --output neonvm.yaml
+            cd ${GITHUB_WORKSPACE}/config/common/controller              && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_version.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/config/default-vxlan/vxlan-controller && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_version.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/config/default-vxlan/vxlan-ipam       && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_version.outputs.version }}
+            cd ${GITHUB_WORKSPACE}
+            kustomize build config/default-vxlan/multus --output neonvm-multus.yaml
+            kustomize build config/default-vxlan        --output neonvm-vxlan.yaml
+            kustomize build config/default              --output neonvm.yaml
 
       - name: github release
         uses: softprops/action-gh-release@v1
