@@ -33,7 +33,7 @@ replace (
 )
 
 require (
-	github.com/containerd/cgroups/v3 v3.0.0-20230109201929-ed5fd67b28be
+	github.com/containerd/cgroups/v3 v3.0.1
 	github.com/elastic/go-sysinfo v1.9.0
 	github.com/google/uuid v1.3.0
 	github.com/neondatabase/neonvm v0.4.4
