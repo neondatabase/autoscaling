@@ -1317,7 +1317,6 @@ spec:
                   type: object
                 type: array
             required:
-            - extraNetwork
             - guest
             type: object
           status:

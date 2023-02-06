@@ -64,7 +64,8 @@ type VirtualMachineSpec struct {
 	Disks []Disk `json:"disks,omitempty"`
 
 	// Extra network interface attached to network provided by Mutlus CNI.
-	ExtraNetwork *ExtraNetwork `json:"extraNetwork"`
+	// +optional
+	ExtraNetwork *ExtraNetwork `json:"extraNetwork,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
