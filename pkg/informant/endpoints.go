@@ -67,7 +67,7 @@ func WithCgroup(cgm *CgroupManager, config CgroupConfig) NewStateOpts {
 
 			upscaleEventsSendr, upscaleEventsRecvr := util.NewCondChannelPair()
 			s.cgroup = &CgroupState{
-				updateLock:         sync.Mutex{},
+				updateMemHighLock:  sync.Mutex{},
 				mgr:                cgm,
 				config:             config,
 				upscaleEventsSendr: upscaleEventsSendr,
@@ -122,10 +122,11 @@ func (s *State) TryDownscale(target *api.RawResources) (*api.DownscaleResult, in
 	}
 
 	requestedMem := uint64(target.Memory.Value())
-	newMemHigh := s.cgroup.config.calculateMemoryHighValue(requestedMem)
+	estimatedUsableSystemMem := util.SaturatingSub(requestedMem, s.cgroup.config.SysBufferBytes)
+	newMemHigh := s.cgroup.config.calculateMemoryHighValue(estimatedUsableSystemMem)
 	ok, status, err := func() (bool, string, error) {
-		s.cgroup.updateLock.Lock()
-		defer s.cgroup.updateLock.Unlock()
+		s.cgroup.updateMemHighLock.Lock()
+		defer s.cgroup.updateMemHighLock.Unlock()
 
 		mib := float64(1 << 20) // 1 MiB = 2^20 bytes
 
@@ -173,7 +174,40 @@ func (s *State) TryDownscale(target *api.RawResources) (*api.DownscaleResult, in
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) NotifyUpscale(newResources *api.RawResources) (*struct{}, int, error) {
+	// FIXME: we shouldn't just trust what the agent says
+	//
+	// Because of race conditions like in <https://github.com/neondatabase/autoscaling/issues/23>,
+	// it's possible for us to receive a notification on /upscale *before* NeonVM actually adds the
+	// memory.
+	//
+	// So until the race condition described in #23 is fixed, we have to just trust that the agent
+	// is telling the truth, *especially because it might not be*.
+
+	if s.cgroup == nil {
+		klog.Infof("No action needed for upscale (no cgroup enabled)")
+		return &struct{}{}, 200, nil
+	}
+
+	newMem := uint64(newResources.Memory.Value())
+	estimatedUsableSystemMem := util.SaturatingSub(newMem, s.cgroup.config.SysBufferBytes)
+	newMemHigh := s.cgroup.config.calculateMemoryHighValue(estimatedUsableSystemMem)
+
+	s.cgroup.updateMemHighLock.Lock()
+	defer s.cgroup.updateMemHighLock.Unlock()
+
 	s.agents.ReceivedUpscale()
+
+	mib := float64(1 << 20) // 1 MiB = 2^20 bytes
+	klog.Infof(
+		"Updating memory.high to %v MiB, of new total %v MiB",
+		float64(newMemHigh)/mib, float64(newMem)/mib,
+	)
+
+	if err := s.cgroup.mgr.SetHighMem(newMemHigh); err != nil {
+		klog.Errorf("Error handling upscale request: Error setting cgroup memory.high: %s", err)
+		return nil, 500, errors.New("Internal error: Error setting cgroup memory.high")
+	}
+
 	return &struct{}{}, 200, nil
 }
 

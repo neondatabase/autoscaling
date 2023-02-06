@@ -353,24 +353,33 @@ func (s *AgentSet) RequestUpscale() {
 	// FIXME: we should assign a timeout to these upscale requests, so that we don't continue trying
 	// to upscale after the demand has gone away.
 
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	agent := func() *Agent {
+		s.lock.Lock()
+		defer s.lock.Unlock()
 
-	s.wantsMemoryUpscale = true
+		// If we already have an ongoing request, don't create a new one.
+		if s.wantsMemoryUpscale {
+			return nil
+		}
 
-	// explicitly copy s.current so that our error handling points to the right Agent
-	if agent := s.current; agent != nil {
-		agent.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
-			if errors.Is(err, context.Canceled) {
-				return
-			}
+		s.wantsMemoryUpscale = true
+		return s.current
+	}()
 
-			klog.Errorf(
-				"Error requesting upscale from Agent %s/%s: %s",
-				agent.serverAddr, agent.id, err,
-			)
-		})
+	if agent == nil {
+		return
 	}
+
+	agent.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+
+		klog.Errorf(
+			"Error requesting upscale from Agent %s/%s: %s",
+			agent.serverAddr, agent.id, err,
+		)
+	})
 }
 
 // ReceivedUpscale marks any desired upscaling from a prior s.RequestUpscale() as resolved
@@ -519,6 +528,8 @@ func doRequestWithStartSignal[B any, R any](
 				return
 			}
 
+			klog.Infof("Sending agent %s %q request: %s", agent.id, path, string(bodyBytes))
+
 			resp, err := client.Do(req)
 			if err != nil {
 				requestErr = err
@@ -543,6 +554,8 @@ func doRequestWithStartSignal[B any, R any](
 				requestErr = fmt.Errorf("Error reading response as JSON: %w", err)
 				return
 			}
+
+			klog.Infof("Got agent %s response: %s", agent.id, string(respBodyBytes))
 
 			if responseBody.SequenceNumber == 0 {
 				requestErr = errors.New("Got invalid sequence number 0")
@@ -763,6 +776,13 @@ func (a *Agent) Resume(timeout time.Duration) error {
 }
 
 // SpawnRequestUpscale requests that the Agent increase the resource allocation to this VM
+//
+// This method until the request is picked up by the message queue, and returns without waiting for
+// the request to complete (it'll do that on its own).
+//
+// The timeout applies only once the request is in-flight.
+//
+// This method MUST NOT be called while holding a.parent.lock; if that happens, it may deadlock.
 func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(error)) {
 	// Quick unregistered check
 	select {
@@ -776,30 +796,54 @@ func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(erro
 	default:
 	}
 
-	body := api.MoreResourcesRequest{
-		MoreResources: api.MoreResources{Cpu: false, Memory: true},
-		ExpectedID:    a.id,
-	}
-	id, _, err := doRequest[api.MoreResourcesRequest, api.AgentIdentification](
-		a, timeout, http.MethodPost, "/try-upscale", &body,
-	)
+	sendDone, recvDone := util.NewSingleSignalPair()
 
-	select {
-	case <-a.unregistered.Recv():
-		handleError(context.Canceled)
-		return
-	default:
-	}
+	go func() {
+		// If we exit early, signal that we're done.
+		defer sendDone.Send()
 
-	if err != nil {
-		a.EnsureUnregistered()
-		handleError(err)
-		return
-	}
+		unsetWantsUpscale := func() {
+			// Unset s.wantsMemoryUpscale if the agent is still current. We want to allow further
+			// requests to try again.
+			a.parent.lock.Lock()
+			defer a.parent.lock.Unlock()
 
-	if id.AgentID != a.id {
-		a.EnsureUnregistered()
-		handleError(fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID))
-		return
-	}
+			if a.parent.current == a {
+				a.parent.wantsMemoryUpscale = false
+			}
+		}
+
+		body := api.MoreResourcesRequest{
+			MoreResources: api.MoreResources{Cpu: false, Memory: true},
+			ExpectedID:    a.id,
+		}
+		// Pass the signal sender into doRequestWithStartSignal so that the signalling on
+		// start-of-handling is done for us.
+		id, _, err := doRequestWithStartSignal[api.MoreResourcesRequest, api.AgentIdentification](
+			a, timeout, &sendDone, http.MethodPost, "/try-upscale", &body,
+		)
+
+		select {
+		case <-a.unregistered.Recv():
+			handleError(context.Canceled)
+			return
+		default:
+		}
+
+		if err != nil {
+			unsetWantsUpscale()
+			a.EnsureUnregistered()
+			handleError(err)
+			return
+		}
+
+		if id.AgentID != a.id {
+			unsetWantsUpscale()
+			a.EnsureUnregistered()
+			handleError(fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID))
+			return
+		}
+	}()
+
+	<-recvDone.Recv()
 }

@@ -52,7 +52,6 @@ linters-settings:
       - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
       - '^github\.com/containerd/cgroups/v3/cgroup2\.(Resources|Memory)'
       - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
->>>>>>> 6be1b44 (Fixes (and bugfixes) from exhaustruct)
 
   # see: <https://golangci-lint.run/usage/linters/#gci>
   gci:

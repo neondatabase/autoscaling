@@ -572,6 +572,8 @@ func doInformantRequest[Q any, R any](
 		return nil, statusCode, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
+	s.runner.logger.Infof("Got informant %q response: %s", path, string(respBody))
+
 	return &respData, statusCode, nil
 }
 

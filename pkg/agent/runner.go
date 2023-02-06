@@ -713,7 +713,7 @@ retryServer:
 			default:
 				r.logger.Infof(
 					"Informant server ended quickly, only %s ago. Respecting minimum wait of %s",
-					time.Since(lastStart),
+					time.Since(lastStart), minWait,
 				)
 				select {
 				case <-ctx.Done():
@@ -1457,7 +1457,7 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	goalCU := currentCU
 	if s.metrics.LoadAverage1Min > 0.9*float32(s.vm.Cpu.Use) {
 		goalCU *= 2
-	} else if s.metrics.LoadAverage1Min < 0.4*float32(s.vm.Cpu.Use) {
+	} else if s.metrics.LoadAverage1Min < 0.4*float32(s.vm.Cpu.Use) && allowDecrease {
 		goalCU /= 2
 	}
 

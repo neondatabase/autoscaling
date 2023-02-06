@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	cgroups "github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup2"
@@ -51,23 +52,55 @@ func NewCgroupManager(groupName string) (*CgroupManager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Error loading cgroup: %w", err)
 	}
-
-	// FIXME: There's currently no way to stop the goroutine spawned by EventChan, so it doesn't yet
-	// make sense to provide a way to cancel the goroutine to handle its events. Eventually, we
-	// should either patch containerd/cgroups or write our own implementation here.
-	memEvents, eventErrCh := manager.EventChan()
 	sendEvent, recvEvent := util.NewCondChannelPair()
 
 	highEventCount := &atomic.Uint64{}
 	errCh := make(chan error, 1)
 
+	cgm := &CgroupManager{
+		MemoryHighEvent: recvEvent,
+		ErrCh:           errCh,
+		name:            groupName,
+		manager:         manager,
+	}
+
 	// Long-running handler task for memory events
 	go func() {
+		// FIXME: make this configurable
+		minWaitDuration := time.Second
+		var minWait <-chan time.Time
+
+		// Restart the event loop whenever it gets closed.
+		//
+		// This can happen, for instance, when the last task in the cgroup ends.
 		for {
+			if minWait != nil {
+				select {
+				case <-minWait:
+				default:
+					klog.Warningf(
+						"Respecting minimum wait of %s before restarting memory.events listener",
+						minWaitDuration,
+					)
+					<-minWait
+				}
+				klog.Infof("Restarting memory.events listener")
+			}
+
+			minWait = time.After(minWaitDuration)
+
+			// FIXME: There's currently no way to stop the goroutine spawned by EventChan, so it
+			// doesn't yet make sense to provide a way to cancel the goroutine to handle its events.
+			// Eventually, we should either patch containerd/cgroups or write our own implementation
+			// here.
+			memEvents, eventErrCh := manager.EventChan()
+
 			select {
 			case event := <-memEvents:
+				klog.Infof("New memory.events: %+v", event)
 				highCount := event.High
 				oldHighCount := util.AtomicMax(highEventCount, highCount)
+
 				if highCount > oldHighCount {
 					sendEvent.Send()
 				}
@@ -88,15 +121,12 @@ func NewCgroupManager(groupName string) (*CgroupManager, error) {
 		return nil, fmt.Errorf("Error getting current memory events: %w", err)
 	}
 
+	klog.Infof("Initial memory.events: %+v", *current)
+
 	util.AtomicMax(highEventCount, current.High)
 	recvEvent.Consume() // Clear events
 
-	return &CgroupManager{
-		MemoryHighEvent: recvEvent,
-		ErrCh:           errCh,
-		name:            groupName,
-		manager:         manager,
-	}, nil
+	return cgm, nil
 }
 
 // TODO: no way to do this with github.com/containerd/cgroups ? Seems like that should be

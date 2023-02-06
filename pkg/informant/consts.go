@@ -23,7 +23,8 @@ const (
 var (
 	// DefaultCgroupConfig is the default CgroupConfig used for cgroup interaction logic
 	DefaultCgroupConfig CgroupConfig = CgroupConfig{
-		OOMBufferBytes:        100 * (1 << 20), // 100 MiB
+		OOMBufferBytes:        200 * (1 << 20), // 200 MiB
+		SysBufferBytes:        100 * (1 << 20), // 100 MiB
 		MemoryHighBufferBytes: 100 * (1 << 20), // 100 MiB
 		MaxUpscaleWaitMillis:  20,              // 20ms
 	}
