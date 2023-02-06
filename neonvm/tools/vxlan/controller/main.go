@@ -16,9 +16,9 @@ import (
 	goipamapiv1 "github.com/cicdteam/go-ipam/api/v1"
 	"github.com/cicdteam/go-ipam/api/v1/apiv1connect"
 
-	"google.golang.org/grpc"
-
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
+	"google.golang.org/grpc"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +32,8 @@ const (
 	VXLAN_ID          = 100
 
 	ipamServerVariableName = "IPAM_SERVER"
+
+	iptablesChainName = "NEON-EXTRANET"
 )
 
 var (
@@ -68,6 +70,10 @@ func main() {
 		if err := deleteLinkAndAddr(VXLAN_BRIDGE_NAME, ipamService); err != nil {
 			log.Print(err)
 		}
+		log.Printf("deleting iptables nat rules")
+		if err := deleteIptablesRules(ipamService); err != nil {
+			log.Print(err)
+		}
 		os.Exit(0)
 	}
 
@@ -98,6 +104,12 @@ func main() {
 		log.Print("udpate FDB table")
 		if err := updateFDB(VXLAN_IF_NAME, nodeIPs, ownNodeIP); err != nil {
 			log.Fatal(err)
+		}
+
+		// upsert tptables nat rules
+		log.Printf("upsert iptables nat rules")
+		if err := upsertIptablesRules(ipamService); err != nil {
+			log.Print(err)
 		}
 
 		time.Sleep(30 * time.Second)
@@ -398,6 +410,94 @@ func releaseIP(ipam string, ip net.IP) error {
 		return err
 	}
 	log.Printf("ip %s released", result.Msg.Ip.Ip)
+
+	return nil
+}
+
+func getExtraNetCidr(ipam string) (string, error) {
+	// get extraNet prefix from ipam service
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	waitForGrpc(ctx, ipam)
+	c := apiv1connect.NewIpamServiceClient(
+		http.DefaultClient,
+		ipam,
+		connect.WithGRPC(),
+	)
+
+	prefixes, err := c.ListPrefixes(ctx, connect.NewRequest(&goipamapiv1.ListPrefixesRequest{}))
+	if err != nil {
+		return "", err
+	}
+	p := prefixes.Msg.Prefixes
+	if len(p) == 0 {
+		return "", fmt.Errorf("IPAM prefix not found")
+	}
+	return p[0].Cidr, nil
+}
+
+func upsertIptablesRules(ipam string) error {
+
+	cidr, err := getExtraNetCidr(ipam)
+	if err != nil {
+		return err
+	}
+
+	// manage iptables
+	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Timeout(5))
+	if err != nil {
+		return err
+	}
+	chainExists, err := ipt.ChainExists("nat", iptablesChainName)
+	if err != nil {
+		return err
+	}
+	if !chainExists {
+		err := ipt.NewChain("nat", iptablesChainName)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := insertRule(ipt, "nat", "POSTROUTING", 1, "-d", cidr, "-j", iptablesChainName); err != nil {
+		return err
+	}
+	if err := insertRule(ipt, "nat", iptablesChainName, 1, "-s", cidr, "-j", "ACCEPT"); err != nil {
+		return err
+	}
+	if err := insertRule(ipt, "nat", iptablesChainName, 2, "-d", cidr, "-j", "ACCEPT"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func deleteIptablesRules(ipam string) error {
+
+	// manage iptables
+	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Timeout(5))
+	if err != nil {
+		return err
+	}
+	err = ipt.ClearAndDeleteChain("nat", iptablesChainName)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// insertRule acts like Insert except that it won't insert a duplicate (no matter the position in the chain)
+func insertRule(ipt *iptables.IPTables, table, chain string, pos int, rulespec ...string) error {
+	exists, err := ipt.Exists(table, chain, rulespec...)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return ipt.Insert(table, chain, pos, rulespec...)
+	}
 
 	return nil
 }

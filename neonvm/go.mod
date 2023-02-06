@@ -9,6 +9,7 @@ require (
 	github.com/bufbuild/connect-grpcreflect-go v1.0.0
 	github.com/cicdteam/go-ipam v0.2.0
 	github.com/cilium/cilium v1.11.11
+	github.com/coreos/go-iptables v0.6.0
 	github.com/digitalocean/go-qemu v0.0.0-20220826173844-d5f5e3ceed89
 	github.com/docker/docker v20.10.22+incompatible
 	github.com/docker/libnetwork v0.8.0-dev.2.0.20210525090646-64b7a4574d14

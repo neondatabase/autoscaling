@@ -81,9 +81,11 @@ test: fmt vet envtest ## Run tests.
 
 .PHONY: build
 build: fmt vet ## Build controller binary.
-	go build -o bin/controller main.go
-	go build -o bin/runner runner/main.go
-	go build -o bin/vm-builder tools/vm-builder/main.go
+	go build -o bin/controller       main.go
+	go build -o bin/vxlan-controller tools/vxlan/controller/main.go
+	go build -o bin/vxlan-ipam       tools/vxlan/ipam/main.go
+	go build -o bin/runner           runner/main.go
+	go build -o bin/vm-builder       tools/vm-builder/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
