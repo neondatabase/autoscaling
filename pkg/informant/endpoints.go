@@ -142,7 +142,7 @@ func (s *State) TryDownscale(target *api.RawResources) (*api.DownscaleResult, in
 
 			verdict := "Calculated memory.high too low"
 			status := fmt.Sprintf(
-				"%s: %v MiB (new high) < %v MiB (current usage) + %v MiB (buffer)",
+				"%s: %g MiB (new high) < %g MiB (current usage) + %g MiB (buffer)",
 				verdict,
 				float64(newMemHigh)/mib, float64(current)/mib,
 				float64(s.cgroup.config.MemoryHighBufferBytes)/mib,
@@ -158,7 +158,7 @@ func (s *State) TryDownscale(target *api.RawResources) (*api.DownscaleResult, in
 			return false, "", fmt.Errorf("Error setting cgroup memory.high: %w", err)
 		}
 
-		status := fmt.Sprintf("Set cgroup memory.high down to %v MiB", float64(newMemHigh)/mib)
+		status := fmt.Sprintf("Set cgroup memory.high down to %g MiB", float64(newMemHigh)/mib)
 		return true, status, nil
 	}()
 
@@ -199,7 +199,7 @@ func (s *State) NotifyUpscale(newResources *api.RawResources) (*struct{}, int, e
 
 	mib := float64(1 << 20) // 1 MiB = 2^20 bytes
 	klog.Infof(
-		"Updating memory.high to %v MiB, of new total %v MiB",
+		"Updating memory.high to %g MiB, of new total %g MiB",
 		float64(newMemHigh)/mib, float64(newMem)/mib,
 	)
 

@@ -92,7 +92,7 @@ func (s *CgroupState) setMemoryHigh() error {
 	newMemHigh = s.config.calculateMemoryHighValue(systemMem.Total)
 
 	klog.Infof(
-		"Total system memory is %d bytes (%v MiB). Setting cgroup memory.high to %d bytes (%v MiB)",
+		"Total system memory is %d bytes (%g MiB). Setting cgroup memory.high to %d bytes (%g MiB)",
 		systemMem.Total, float64(systemMem.Total)/mib, newMemHigh, float64(newMemHigh)/mib,
 	)
 
