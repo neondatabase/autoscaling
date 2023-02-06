@@ -16,7 +16,7 @@ vm_name="$(get_vm_name)"
 set -u
 
 vm_ip="$(kubectl get neonvm "$vm_name" -o jsonpath='{.status.podIP}')"
-# TODO: switch back to multus networking once NeonVM implements it
+# FIXME: switch back to multus networking now that NeonVM implements it
 # echo "get vmPodName (vm_name = $vm_name)"
 # pod="$(kubectl get neonvm "$vm_name" -o jsonpath='{.status.vmPodName}')"
 # 
@@ -34,7 +34,7 @@ echo '"'   $QUERY'"'
 pgbench -h '"$vm_ip"' -U postgres -c 20 -T 1000 -P 1 -f factorial.sql postgres
 '
 
-# TODO: same multus stuff as above.
+# FIXME: same multus stuff as above.
 # NAD_NAME="vm-bridge-pgbench-$vm_name"
 # NAD='
 # apiVersion: k8s.cni.cncf.io/v1

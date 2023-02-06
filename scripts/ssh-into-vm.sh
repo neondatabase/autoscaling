@@ -38,7 +38,7 @@ fi
 
 vm_ip="$(kubectl get neonvm "$vm_name" -o jsonpath='{.status.podIP}')"
 
-# TODO: switch back to multus networking once NeonVM implements it
+# FIXME: switch back to multus networking now that NeonVM implements it
 # echo "get vmPodName (vm_name = $vm_name)"
 # pod="$(kubectl get neonvm "$vm_name" -o jsonpath='{.status.podName}')"
 # echo "get VM static ip (pod = $pod)"

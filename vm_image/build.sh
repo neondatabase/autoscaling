@@ -17,7 +17,7 @@ source '../scripts-common.sh'
 
 NEONVM_BUILDER_PATH='neonvm-builder'
 NEONVM_REPO='https://github.com/neondatabase/neonvm'
-NEONVM_VERSION='v0.3.5'
+NEONVM_VERSION='v0.4.4'
 
 if [ -e "$NEONVM_BUILDER_PATH" ]; then
     echo "Skipping downloading NeonVM vm-builder because '$NEONVM_BUILDER_PATH' already exists"
