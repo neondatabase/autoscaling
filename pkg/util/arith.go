@@ -47,9 +47,11 @@ type AtomicInt[I any] interface {
 
 // AtomicMax atomically sets a to the maximum of *a and i, returning the old value at a.
 //
-// Eventually, one would *hope* that go could add atomic maximum (and minimum), so we don't need
-// this function (there are some ISAs that support such instructions). In the meantime though, this
-// tends to be pretty useful - event though it's not wait-free.
+// On ISAs without atomic maximum/minimum instructions, a fallback is typically implemented as the
+// Load + CompareAndSwap loop that this function uses. At time of writing (Go 1.20), the Go standard
+// library does not include atomic maximum/minimum functions.
+//
+// This function is lock-free but not wait-free.
 func AtomicMax[A AtomicInt[I], I constraints.Integer](a A, i I) I {
 	for {
 		current := a.Load()
