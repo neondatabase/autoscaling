@@ -165,7 +165,7 @@ chmod 0755 /dev/pts
 chmod 1777 /dev/shm
 mount -t proc  proc  /proc
 mount -t sysfs sysfs /sys
-mount -t cgroup cgroup /sys/fs/cgroup
+mount -t cgroup2 cgroup2 /sys/fs/cgroup
 mount -t devpts -o noexec,nosuid       devpts    /dev/pts
 mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
 
