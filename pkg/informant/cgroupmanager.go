@@ -186,6 +186,7 @@ func parseMemoryEvents(groupName string) (*cgroup2.Event, error) {
 		pair, ok := valueMap[name]
 		if !ok {
 			klog.Warningf("Unrecognized memory.events field %q (is the kernel new?)", name)
+			continue
 		} else if pair.set {
 			return nil, fmt.Errorf("Duplicate field %q", name)
 		}
