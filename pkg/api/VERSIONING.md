@@ -13,7 +13,8 @@ commit in this repository, possibly unreleased.
 
 | Release | autoscaler-agent | VM informant |
 |---------|------------------|--------------|
-| _Current_ | **v1.0 - v1.1** | **v1.1** only |
+| _Current_ | v1.0 - v1.1 | v1.1 only |
+| v0.1.4 | **v1.0 - v1.1** | **v1.1** only |
 | v0.1.3 | v1.0 only | v1.0 only |
 | 0.1.2 | v1.0 only | v1.0 only |
 | 0.1.1 | v1.0 only | v1.0 only |
