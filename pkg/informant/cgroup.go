@@ -49,7 +49,7 @@ type CgroupConfig struct {
 	// size, rather than the self-reported memory size, according to the kernel.
 	//
 	// TODO: this field is only necessary while we still have to trust the autoscaler-agent's
-	// upscale resource amounts (becuase we might not *actually* have been upscaled yet). This field
+	// upscale resource amounts (because we might not *actually* have been upscaled yet). This field
 	// should be removed once we have a better solution there.
 	SysBufferBytes uint64
 

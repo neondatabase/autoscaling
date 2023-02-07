@@ -79,7 +79,7 @@ kubectl apply -f vm-deploy.yaml
 
 ### Running pgbench
 
-Broadly, the `run-bench.sh` script just exsits to be expensive on CPU, so that more vCPU will be
+Broadly, the `run-bench.sh` script just exists to be expensive on CPU, so that more vCPU will be
 allocated to the vm. You can run it with:
 
 ```sh
