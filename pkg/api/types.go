@@ -277,7 +277,7 @@ type AgentDesc struct {
 	MaxProtoVersion InformantProtoVersion `json:"maxProtoVersion"`
 }
 
-// ProtocolRange returns a VersionRange for d.MinProtoVersion and d.MaxProtoVersion.
+// ProtocolRange returns a VersionRange from d.MinProtoVersion to d.MaxProtoVersion.
 func (d AgentDesc) ProtocolRange() VersionRange[InformantProtoVersion] {
 	return VersionRange[InformantProtoVersion]{
 		Min: d.MinProtoVersion,
@@ -339,7 +339,8 @@ type UnregisterAgent struct {
 }
 
 // MoreResourcesRequest is the request type wrapping MoreResources that's sent by the VM informant
-// to the autoscaler-agent when the VM is in need of more resources of a certain type
+// to the autoscaler-agent's /try-upscale endpoint when the VM is urgently in need of more
+// resources.
 type MoreResourcesRequest struct {
 	MoreResources
 

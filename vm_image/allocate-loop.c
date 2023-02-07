@@ -86,7 +86,7 @@ int main(int argc, char* argv[]) {
 			// to allocate more, just write to the pages:
 			memset(&map[current_size], 0xAB, new_size-current_size);
 		} else if (new_size < current_size) {
-			// to deallocate, use madvise() the kernel that it can reclaim them
+			// to deallocate, use madvise() to tell the kernel it can reclaim some pages
 			if (madvise(&map[new_size], current_size-new_size, MADV_REMOVE) == -1) {
 				err(errno, "madvise");
 			}

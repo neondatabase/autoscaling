@@ -2,7 +2,7 @@ FROM localhost:5001/vm-informant:latest as informant
 # ^ don't do anything with this; we just want it around for later use.
 
 # Build the allocation tester:
-FROM alpine:3.16 AS builder
+FROM alpine:3.16 AS allocate-loop-builder
 
 RUN set -e \
 	&& apk add gcc musl-dev
@@ -25,7 +25,7 @@ RUN set -e \
 COPY --from=informant /usr/bin/vm-informant /bin/vm-informant
 
 # Add the allocate-loop tester
-COPY --from=builder /bin/allocate-loop /bin/allocate-loop
+COPY --from=allocate-loop-builder /bin/allocate-loop /bin/allocate-loop
 
 ADD init     /bin/userstartup
 RUN chmod +x /bin/userstartup

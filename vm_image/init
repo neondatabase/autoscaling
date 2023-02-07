@@ -9,8 +9,8 @@ CGROUP_NAME="neon-test"
 
 # Setup the cgroup.
 #
-# First, we need to enable the necessary controller(s) - typically these should be enabled by
-# default, but for some reason they aren't here.
+# First, we need to enable the necessary controller(s) - in most Linux installations, these are
+# enabled by default. For some reason, they aren't there by default for us.
 echo "+cpu +memory" >> /sys/fs/cgroup/cgroup.subtree_control
 # .. And then, create the cgroup:
 mkdir "/sys/fs/cgroup/$CGROUP_NAME"

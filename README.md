@@ -14,6 +14,9 @@ Images are available as:
 
 The deployment files and a VM informant binary are attached to each release.
 
+For information on inter-version compatibility, see
+[`pkg/api/VERSIONING.md`](./pkg/api/VERSIONING.md).
+
 For now, the currently deployed configuration on staging is manually replicated
 in the [`staging` branch](https://github.com/neondatabase/autoscaling/tree/staging).
 

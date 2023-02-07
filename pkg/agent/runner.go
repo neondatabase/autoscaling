@@ -697,6 +697,9 @@ retryServer:
 		// On each (re)try, unset the informant's requested upscale. We need to do this *before*
 		// starting the server, because otherwise it's possible for a racy /try-upscale request to
 		// sneak in before we reset it, which would cause us to incorrectly ignore the request.
+		if upscaleRequested.Unsend() {
+			r.logger.Infof("Cancelled existing 'upscale requested' signal due to informant server restart")
+		}
 
 		if normalRetryWait != nil {
 			r.logger.Infof("Retrying informant server in %s", normalWait)

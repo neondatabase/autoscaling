@@ -55,8 +55,9 @@ type InformantServer struct {
 	madeContact bool
 
 	// protoVersion gives the version of the agent<->informant protocol currently in use, if the
+	// server has been confirmed.
 	//
-	// This field is nil if and only if InformantServerUnconfirmed.
+	// In other words, this field is not nil if and only if mode is not InformantServerUnconfirmed.
 	protoVersion *api.InformantProtoVersion
 
 	// mode indicates whether the informant has marked the connection as resumed or not

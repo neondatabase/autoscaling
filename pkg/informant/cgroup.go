@@ -108,7 +108,7 @@ func (s *CgroupState) setMemoryHigh() error {
 
 // handleCgroupSignals is an internal function that handles "memory high" signals from the cgroup
 func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
-	// FIXME: the process might exit after freezing the cgroup but before thawing it. This isn't
+	// NOTE: the process might exit after freezing the cgroup but before thawing it. This isn't
 	// really feasible to fix here; the parent process should handle the "thaw if frozen" check on
 	// exit.
 	//

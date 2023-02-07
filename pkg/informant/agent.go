@@ -39,7 +39,7 @@ type AgentSet struct {
 	current *Agent
 
 	// wantsMemoryUpscale is true if the most recent (internal) request for immediate upscaling has
-	// not yet been answered (externally) by notification of an upscale by the autoscaler-agent.
+	// not yet been answered (externally) by notification of an upscale from the autoscaler-agent.
 	wantsMemoryUpscale bool
 
 	// byIDs stores all of the agents, indexed by their unique IDs
@@ -377,6 +377,9 @@ func (s *AgentSet) RequestUpscale() {
 		return
 	}
 
+	// FIXME: it's possible to block for an unbounded amount of time waiting for the request to get
+	// picked up by the message queue. We *do* want backpressure here, but we should ideally have a
+	// way to cancel an attempted request if it's taking too long.
 	agent.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
 		if errors.Is(err, context.Canceled) {
 			return
@@ -784,8 +787,8 @@ func (a *Agent) Resume(timeout time.Duration) error {
 
 // SpawnRequestUpscale requests that the Agent increase the resource allocation to this VM
 //
-// This method until the request is picked up by the message queue, and returns without waiting for
-// the request to complete (it'll do that on its own).
+// This method blocks until the request is picked up by the message queue, and returns without
+// waiting for the request to complete (it'll do that on its own).
 //
 // The timeout applies only once the request is in-flight.
 //

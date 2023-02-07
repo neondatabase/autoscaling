@@ -19,8 +19,8 @@ func main() {
 	// Realistically, we want to be able to distinguish between --cgroup="" and absence of the flag,
 	// if only to be able to provide better errors on invalid cgroup names.
 	//
-	// Because cgroup names *could* be any valid path fragment, we can include a null byte in the
-	// string to distinguish this, because null bytes aren't valid in paths.
+	// Because cgroup names *could* be any valid path fragment, we include a null byte in the string
+	// to distinguish between --cgroup=... and its absence, because null bytes aren't valid in paths.
 	noCgroup := "invalid\x00CgroupName"
 	var cgroupName string
 	flag.StringVar(&cgroupName, "cgroup", noCgroup, "Sets the cgroup to monitor (optional)")
