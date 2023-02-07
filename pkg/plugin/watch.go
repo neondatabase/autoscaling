@@ -27,11 +27,6 @@ import (
 func (e *AutoscaleEnforcer) watchPodDeletions(
 	ctx context.Context, vmDeletions chan<- api.PodName, podDeletions chan<- api.PodName,
 ) error {
-	// We're using the client-go cache here (indirectly through util.Watch) so that we don't miss
-	// deletion events. Otherwise, we can run into race conditions where events are missed in the
-	// small gap between event stream restarts. In practice the chance of that occurring is
-	// *incredibly* small, but it's still imperative that we avoid it.
-
 	_, err := util.Watch(
 		ctx,
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
