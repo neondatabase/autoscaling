@@ -25,7 +25,7 @@ import (
 // ProtocolVersion is the current version of the agent<->informant protocol in use by this informant
 //
 // Currently, each VM informant supports only one version at a time. In the future, this may change.
-const ProtocolVersion uint32 = 1
+const ProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
 
 // AgentSet is the global state handling various autoscaler-agents that we could connect to
 type AgentSet struct {
@@ -37,6 +37,10 @@ type AgentSet struct {
 	// This value may (temporarily) be nil even when there are other agents waiting in byIDs/byTime,
 	// because we rely on tryNewAgents to handle setting the value here.
 	current *Agent
+
+	// wantsMemoryUpscale is true if the most recent (internal) request for immediate upscaling has
+	// not yet been answered (externally) by notification of an upscale from the autoscaler-agent.
+	wantsMemoryUpscale bool
 
 	// byIDs stores all of the agents, indexed by their unique IDs
 	byIDs map[uuid.UUID]*Agent
@@ -87,11 +91,12 @@ func NewAgentSet() *AgentSet {
 	tryNewAgent := make(chan struct{})
 
 	agents := &AgentSet{
-		lock:        sync.Mutex{},
-		current:     nil,
-		byIDs:       make(map[uuid.UUID]*Agent),
-		byTime:      []*Agent{},
-		tryNewAgent: tryNewAgent,
+		lock:               sync.Mutex{},
+		current:            nil,
+		wantsMemoryUpscale: false,
+		byIDs:              make(map[uuid.UUID]*Agent),
+		byTime:             []*Agent{},
+		tryNewAgent:        tryNewAgent,
 	}
 
 	go agents.runDeadlockChecker()
@@ -215,6 +220,24 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 				}
 
 				s.current, old = candidate, s.current
+
+				// If upscale was requested, do that:
+				if s.wantsMemoryUpscale {
+					s.current.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+						if errors.Is(err, context.Canceled) {
+							return
+						}
+
+						// note: explicitly refer to candidate here instead of s.current, because
+						// the value of s.current could have changed by the time this function is
+						// called.
+						klog.Errorf(
+							"Error requesting upscale from Agent %s/%s: %s",
+							candidate.serverAddr, candidate.id, err,
+						)
+					})
+				}
+
 				return
 			}()
 
@@ -230,7 +253,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 					)
 				}
 
-				oldCurrent.SpawnSuspend(AgentSuspendTimeout, handleError)
+				oldCurrent.Suspend(AgentSuspendTimeout, handleError)
 			}
 		}
 	}
@@ -239,11 +262,18 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 // RegisterNewAgent instantiates our local information about the autsocaler-agent
 //
 // Returns: protocol version, status code, error (if unsuccessful)
-func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (uint32, int, error) {
-	if !(info.MinProtoVersion <= ProtocolVersion && ProtocolVersion <= info.MaxProtoVersion) {
+func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVersion, int, error) {
+	expectedRange := api.VersionRange[api.InformantProtoVersion]{
+		Min: ProtocolVersion,
+		Max: ProtocolVersion,
+	}
+
+	descProtoRange := info.ProtocolRange()
+
+	protoVersion, matches := expectedRange.LatestSharedVersion(descProtoRange)
+	if !matches {
 		return 0, 400, fmt.Errorf(
-			"Protocol version mismatch: Need %d but got min = %d, max = %d",
-			ProtocolVersion, info.MinProtoVersion, info.MaxProtoVersion,
+			"Protocol version mismatch: Need %v but got %v", expectedRange, descProtoRange,
 		)
 	}
 
@@ -318,7 +348,58 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (uint32, int, error) {
 		s.tryNewAgent <- struct{}{}
 	}()
 
-	return ProtocolVersion, 200, nil
+	return protoVersion, 200, nil
+}
+
+// RequestUpscale requests an immediate upscale for more memory, if there's an agent currently
+// enabled
+//
+// If there's no current agent, then RequestUpscale marks the upscale as desired, and will request
+// upscaling from the next agent we connect to.
+func (s *AgentSet) RequestUpscale() {
+	// FIXME: we should assign a timeout to these upscale requests, so that we don't continue trying
+	// to upscale after the demand has gone away.
+
+	agent := func() *Agent {
+		s.lock.Lock()
+		defer s.lock.Unlock()
+
+		// If we already have an ongoing request, don't create a new one.
+		if s.wantsMemoryUpscale {
+			return nil
+		}
+
+		s.wantsMemoryUpscale = true
+		return s.current
+	}()
+
+	if agent == nil {
+		return
+	}
+
+	// FIXME: it's possible to block for an unbounded amount of time waiting for the request to get
+	// picked up by the message queue. We *do* want backpressure here, but we should ideally have a
+	// way to cancel an attempted request if it's taking too long.
+	agent.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+
+		klog.Errorf(
+			"Error requesting upscale from Agent %s/%s: %s",
+			agent.serverAddr, agent.id, err,
+		)
+	})
+}
+
+// ReceivedUpscale marks any desired upscaling from a prior s.RequestUpscale() as resolved
+//
+// Typically, (*CgroupState).ReceivedUpscale() is also called alongside this method.
+func (s *AgentSet) ReceivedUpscale() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	s.wantsMemoryUpscale = false
 }
 
 // Get returns the requested Agent, if it exists
@@ -457,6 +538,8 @@ func doRequestWithStartSignal[B any, R any](
 				return
 			}
 
+			klog.Infof("Sending agent %s %q request: %s", agent.id, path, string(bodyBytes))
+
 			resp, err := client.Do(req)
 			if err != nil {
 				requestErr = err
@@ -481,6 +564,8 @@ func doRequestWithStartSignal[B any, R any](
 				requestErr = fmt.Errorf("Error reading response as JSON: %w", err)
 				return
 			}
+
+			klog.Infof("Got agent %s response: %s", agent.id, string(respBodyBytes))
 
 			if responseBody.SequenceNumber == 0 {
 				requestErr = errors.New("Got invalid sequence number 0")
@@ -610,17 +695,14 @@ func (a *Agent) CheckID(timeout time.Duration) error {
 	return nil
 }
 
-// SpawnSuspend signals to the Agent that it is not *currently* in use, sending a request to its
-// /suspend endpoint
+// Suspend signals to the Agent that it is not *currently* in use, sending a request to its /suspend
+// endpoint
 //
-// Unlike other similar methods on Agent, SpawnSuspend will only wait for the request to be picked
-// up by the request executor. Handling the result of the request is done in a separate goroutine.
-//
-// If the Agent is unregistered before the call to Suspend() completes, the request will be cancelled
-// and this method will return context.Canceled.
+// If the Agent is unregistered before the call to Suspend() completes, the request will be
+// cancelled and this method will return context.Canceled.
 //
 // If the request fails, the Agent will be unregistered.
-func (a *Agent) SpawnSuspend(timeout time.Duration, handleError func(error)) {
+func (a *Agent) Suspend(timeout time.Duration, handleError func(error)) {
 	// Quick unregistered check:
 	select {
 	case <-a.unregistered.Recv():
@@ -701,4 +783,77 @@ func (a *Agent) Resume(timeout time.Duration) error {
 	}
 
 	return nil
+}
+
+// SpawnRequestUpscale requests that the Agent increase the resource allocation to this VM
+//
+// This method blocks until the request is picked up by the message queue, and returns without
+// waiting for the request to complete (it'll do that on its own).
+//
+// The timeout applies only once the request is in-flight.
+//
+// This method MUST NOT be called while holding a.parent.lock; if that happens, it may deadlock.
+func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(error)) {
+	// Quick unregistered check
+	select {
+	case <-a.unregistered.Recv():
+		klog.Warningf(
+			"RequestUpscale called for Agent %s/%s that is already unregistered (probably *not* a race?)",
+			a.serverAddr, a.id,
+		)
+		handleError(context.Canceled)
+		return
+	default:
+	}
+
+	sendDone, recvDone := util.NewSingleSignalPair()
+
+	go func() {
+		// If we exit early, signal that we're done.
+		defer sendDone.Send()
+
+		unsetWantsUpscale := func() {
+			// Unset s.wantsMemoryUpscale if the agent is still current. We want to allow further
+			// requests to try again.
+			a.parent.lock.Lock()
+			defer a.parent.lock.Unlock()
+
+			if a.parent.current == a {
+				a.parent.wantsMemoryUpscale = false
+			}
+		}
+
+		body := api.MoreResourcesRequest{
+			MoreResources: api.MoreResources{Cpu: false, Memory: true},
+			ExpectedID:    a.id,
+		}
+		// Pass the signal sender into doRequestWithStartSignal so that the signalling on
+		// start-of-handling is done for us.
+		id, _, err := doRequestWithStartSignal[api.MoreResourcesRequest, api.AgentIdentification](
+			a, timeout, &sendDone, http.MethodPost, "/try-upscale", &body,
+		)
+
+		select {
+		case <-a.unregistered.Recv():
+			handleError(context.Canceled)
+			return
+		default:
+		}
+
+		if err != nil {
+			unsetWantsUpscale()
+			a.EnsureUnregistered()
+			handleError(err)
+			return
+		}
+
+		if id.AgentID != a.id {
+			unsetWantsUpscale()
+			a.EnsureUnregistered()
+			handleError(fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID))
+			return
+		}
+	}()
+
+	<-recvDone.Recv()
 }

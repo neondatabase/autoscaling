@@ -66,6 +66,18 @@ func (c *CondChannelSender) Send() {
 	}
 }
 
+// Unsend cancels an existing signal that has been sent but not yet received.
+//
+// It returns whether there was a signal to be cancelled.
+func (c *CondChannelSender) Unsend() bool {
+	select {
+	case <-c.ch:
+		return true
+	default:
+		return false
+	}
+}
+
 // Consume removes any existing signal created by Send, requiring an additional Send to be made
 // before the receiving on Recv will unblock
 //

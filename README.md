@@ -14,6 +14,9 @@ Images are available as:
 
 The deployment files and a VM informant binary are attached to each release.
 
+For information on inter-version compatibility, see
+[`pkg/api/VERSIONING.md`](./pkg/api/VERSIONING.md).
+
 For now, the currently deployed configuration on staging is manually replicated
 in the [`staging` branch](https://github.com/neondatabase/autoscaling/tree/staging).
 
@@ -71,16 +74,33 @@ Set up the cluster:
 scripts/cluster-init.sh
 ```
 
-Run the VM:
+Start the test VM:
 
 ```sh
 kubectl apply -f vm-deploy.yaml
 ```
 
-Run pgbench and watch the vCPU allocation grow:
+### Running pgbench
+
+Broadly, the `run-bench.sh` script just exists to be expensive on CPU, so that more vCPU will be
+allocated to the vm. You can run it with:
 
 ```sh
 scripts/run-bench.sh
 # or:
 VM_NAME=postgres14-disk-test scripts/run-bench.sh
 ```
+
+### Running `allocate-loop`
+
+To test on-demand memory reservation, the [`allocate-loop`] binary is built into the test VM, and
+can be used to slowly increasing memory allocations of arbitrary size. For example:
+
+```sh
+# After ssh-ing into the VM:
+cgexec -g memory:neon-test allocate-loop 256 2280
+#^^^^^^^^^^^^^^^^^^^^^^^^^               ^^^ ^^^^
+# run it in the neon-test cgroup  ;  use 256 <-> 2280 MiB
+```
+
+[`allocate-loop`]: vm_image/allocate-loop.c

@@ -18,9 +18,12 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+// The autoscaler-agent currently supports v1.0 to v1.1 of the agent<->informant protocol.
+//
+// If you update either of these values, make sure to also update VERSIONING.md.
 const (
-	MinInformantProtocolVersion uint32 = 1
-	MaxInformantProtocolVersion uint32 = 1
+	MinInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_0
+	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
 )
 
 type InformantServer struct {
@@ -51,6 +54,12 @@ type InformantServer struct {
 	// This field MAY be read while holding EITHER runner.lock OR requestLock.
 	madeContact bool
 
+	// protoVersion gives the version of the agent<->informant protocol currently in use, if the
+	// server has been confirmed.
+	//
+	// In other words, this field is not nil if and only if mode is not InformantServerUnconfirmed.
+	protoVersion *api.InformantProtoVersion
+
 	// mode indicates whether the informant has marked the connection as resumed or not
 	//
 	// This field MUST NOT be updated without holding BOTH runner.lock AND requestLock.
@@ -61,6 +70,10 @@ type InformantServer struct {
 	// updatedInformant is signalled once, when the InformantServer's register request completes,
 	// and the value of runner.informant is updated.
 	updatedInformant util.CondChannelSender
+
+	// upscaleRequested is signalled whenever a valid request on /try-upscale is received, with at
+	// least one field set to true (i.e., at least one resource is being requested).
+	upscaleRequested util.CondChannelSender
 
 	// requestLock guards requests to the VM informant to make sure that only one request is being
 	// made at a time.
@@ -94,6 +107,7 @@ type InformantServerState struct {
 	SeqNum          uint64                     `json:"seqNum"`
 	ReceivedIDCheck bool                       `json:"receivedIDCheck"`
 	MadeContact     bool                       `json:"madeContact"`
+	ProtoVersion    *api.InformantProtoVersion `json:"protoVersion"`
 	Mode            InformantServerMode        `json:"mode"`
 	ExitStatus      *InformantServerExitStatus `json:"exitStatus"`
 }
@@ -110,7 +124,9 @@ type InformantServerExitStatus struct {
 // NewInformantServer starts an InformantServer, returning it and a signal receiver that will be
 // signalled when it exits.
 func NewInformantServer(
-	ctx context.Context, runner *Runner, updatedInformant util.CondChannelSender,
+	ctx context.Context, runner *Runner,
+	updatedInformant util.CondChannelSender,
+	upscaleRequested util.CondChannelSender,
 ) (*InformantServer, util.SignalReceiver, error) {
 	// Manually start the TCP listener so that we can see the port it's assigned
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: 0 /* 0 means it'll be assigned any(-ish) port */}
@@ -139,8 +155,10 @@ func NewInformantServer(
 		seqNum:           0,
 		receivedIDCheck:  false,
 		madeContact:      false,
+		protoVersion:     nil,
 		mode:             InformantServerUnconfirmed,
 		updatedInformant: updatedInformant,
+		upscaleRequested: upscaleRequested,
 		requestLock:      util.NewChanMutex(),
 		exitStatus:       nil,
 		exit:             nil, // see below.
@@ -154,6 +172,7 @@ func NewInformantServer(
 	util.AddHandler(logPrefix, mux, "/id", http.MethodGet, "struct{}", server.handleID)
 	util.AddHandler(logPrefix, mux, "/resume", http.MethodPost, "ResumeAgent", server.handleResume)
 	util.AddHandler(logPrefix, mux, "/suspend", http.MethodPost, "SuspendAgent", server.handleSuspend)
+	util.AddHandler(logPrefix, mux, "/try-upscale", http.MethodPost, "MoreResourcesRequest", server.handleTryUpscale)
 	httpServer := &http.Server{Handler: mux}
 
 	sendFinished, recvFinished := util.NewSingleSignalPair()
@@ -392,6 +411,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 		)
 
 		s.mode = InformantServerSuspended
+		s.protoVersion = &resp.ProtoVersion
 
 		if s.runner.server == s {
 			oldInformant := s.runner.informant
@@ -564,6 +584,8 @@ func doInformantRequest[Q any, R any](
 		return nil, statusCode, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
+	s.runner.logger.Infof("Got informant %q response: %s", path, string(respBody))
+
 	return &respData, statusCode, nil
 }
 
@@ -717,6 +739,75 @@ func (s *InformantServer) handleSuspend(body *api.SuspendAgent) (*api.AgentIdent
 		Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
 		SequenceNumber: s.incrementSequenceNumber(),
 	}, 200, nil
+}
+
+// handleTryUpscale handles a request on the server's /try-upscale endpoint. This method should not
+// be called outside of that context.
+//
+// Returns: response body (if successful), status code, error (if unsuccessful)
+func (s *InformantServer) handleTryUpscale(
+	body *api.MoreResourcesRequest,
+) (*api.AgentIdentificationMessage, int, error) {
+	if body.ExpectedID != s.desc.AgentID {
+		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
+		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
+	}
+
+	s.runner.lock.Lock()
+	defer s.runner.lock.Unlock()
+
+	if s.exitStatus != nil {
+		return nil, 404, errors.New("Server has already exited")
+	}
+
+	switch s.mode {
+	case InformantServerRunning:
+		if !s.protoVersion.HasTryUpscale() {
+			err := fmt.Errorf("/try-upscale not supported for protocol version %v", *s.protoVersion)
+			return nil, 400, err
+		}
+
+		if body.MoreResources.Cpu || body.MoreResources.Memory {
+			s.upscaleRequested.Send()
+		} else {
+			s.runner.logger.Warningf("Received try-upscale request that does not increase")
+		}
+
+		s.runner.logger.Infof(
+			"Updating requested upscale from %+v to %+v",
+			s.runner.requestedUpscale, body.MoreResources,
+		)
+		s.runner.requestedUpscale = body.MoreResources
+
+		return &api.AgentIdentificationMessage{
+			Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
+			SequenceNumber: s.incrementSequenceNumber(),
+		}, 200, nil
+	case InformantServerSuspended:
+		internalErr := errors.New("Got /try-upscale request for server, but server is suspended")
+		s.runner.logger.Warningf("%s", internalErr)
+
+		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
+		s.exit(InformantServerExitStatus{
+			Err:            internalErr,
+			RetryShouldFix: true,
+		})
+
+		return nil, 400, errors.New("Cannot process upscale while suspended")
+	case InformantServerUnconfirmed:
+		internalErr := errors.New("Got /try-upscale request for server, but server is suspended")
+		s.runner.logger.Warningf("%s", internalErr)
+
+		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
+		s.exit(InformantServerExitStatus{
+			Err:            internalErr,
+			RetryShouldFix: true,
+		})
+
+		return nil, 400, errors.New("Cannot process upscale while unconfirmed")
+	default:
+		panic(fmt.Errorf("unexpected server mode: %q", s.mode))
+	}
 }
 
 // Downscale makes a request to the informant's /downscale endpoit with the api.Resources
