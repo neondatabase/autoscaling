@@ -25,7 +25,7 @@ import (
 // ProtocolVersion is the current version of the agent<->informant protocol in use by this informant
 //
 // Currently, each VM informant supports only one version at a time. In the future, this may change.
-const ProtocolVersion uint32 = 1
+const ProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
 
 // AgentSet is the global state handling various autoscaler-agents that we could connect to
 type AgentSet struct {
@@ -262,11 +262,18 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 // RegisterNewAgent instantiates our local information about the autsocaler-agent
 //
 // Returns: protocol version, status code, error (if unsuccessful)
-func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (uint32, int, error) {
-	if !(info.MinProtoVersion <= ProtocolVersion && ProtocolVersion <= info.MaxProtoVersion) {
+func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVersion, int, error) {
+	expectedRange := api.VersionRange[api.InformantProtoVersion]{
+		Min: ProtocolVersion,
+		Max: ProtocolVersion,
+	}
+
+	descProtoRange := info.ProtocolRange()
+
+	protoVersion, matches := expectedRange.LatestSharedVersion(descProtoRange)
+	if !matches {
 		return 0, 400, fmt.Errorf(
-			"Protocol version mismatch: Need %d but got min = %d, max = %d",
-			ProtocolVersion, info.MinProtoVersion, info.MaxProtoVersion,
+			"Protocol version mismatch: Need %v but got %v", expectedRange, descProtoRange,
 		)
 	}
 
@@ -341,7 +348,7 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (uint32, int, error) {
 		s.tryNewAgent <- struct{}{}
 	}()
 
-	return ProtocolVersion, 200, nil
+	return protoVersion, 200, nil
 }
 
 // RequestUpscale requests an immediate upscale for more memory, if there's an agent currently

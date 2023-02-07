@@ -167,6 +167,66 @@ type MigrateResponse struct{}
 // VM Informant Messages //
 ///////////////////////////
 
+// InformantProtoVersion represents a single version of the agent<->informant protocol
+//
+// Each version of the agent<->informant protocol is named independently from releases of the
+// repository containing this code. Names follow semver, although this does not necessarily
+// guarantee support - for example, the VM informant may only support versions above v1.1.
+//
+// Version compatibility is documented in the neighboring file VERSIONING.md.
+type InformantProtoVersion uint32
+
+const (
+	// InformantProtoV1_0 represents v1.0 of the agent<->informant protocol - the initial version.
+	//
+	// Last used in release version 0.1.2.
+	InformantProtoV1_0 InformantProtoVersion = iota + 1 // +1 so we start from 1
+
+	// InformantProtoV1_1 represents v1.1 of the agent<->informant protocol.
+	//
+	// Changes from v1.0:
+	//
+	// * Adds /try-upscale endpoint to the autoscaler-agent.
+	//
+	// Currently the latest version.
+	InformantProtoV1_1
+
+	// latestInformantProtoVersion represents the latest version of the agent<->informant protocol
+	//
+	// This value is kept private because it should not be used externally; any desired
+	// functionality that could be implemented with it should instead be a method on
+	// InformantProtoVersion.
+	latestInformantProtoVersion InformantProtoVersion = iota // excluding +1 makes it equal to previous
+)
+
+func (v InformantProtoVersion) String() string {
+	var zero InformantProtoVersion
+
+	switch v {
+	case zero:
+		return "<invalid: zero>"
+	case InformantProtoV1_0:
+		return "v1.0"
+	case InformantProtoV1_1:
+		return "v1.1"
+	default:
+		diff := v - latestInformantProtoVersion
+		return fmt.Sprintf("<unknown = %v + %d>", latestInformantProtoVersion, diff)
+	}
+}
+
+// IsValid returns whether the protocol version is valid. The zero value is not valid.
+func (v InformantProtoVersion) IsValid() bool {
+	return uint(v) != 0
+}
+
+// HasTryUpscale returns whether this version of the protocol has the /try-upscale endpoint
+//
+// This is true for version v1.1 and greater.
+func (v InformantProtoVersion) HasTryUpscale() bool {
+	return v >= InformantProtoV1_1
+}
+
 // AgentMessage is used for (almost) every message sent from the autoscaler-agent to the VM
 // informant, and serves to wrap the type T with a SequenceNumber
 //
@@ -207,14 +267,22 @@ type AgentDesc struct {
 	// Protocol versions are always non-zero.
 	//
 	// AgentDesc must always have MinProtoVersion <= MaxProtoVersion.
-	MinProtoVersion uint32 `json:"minProtoVersion"`
+	MinProtoVersion InformantProtoVersion `json:"minProtoVersion"`
 	// MaxProtoVersion is the maximum version of the agent<->informant protocol that the
 	// autoscaler-agent supports, inclusive.
 	//
 	// Protocol versions are always non-zero.
 	//
 	// AgentDesc must always have MinProtoVersion <= MaxProtoVersion.
-	MaxProtoVersion uint32 `json:"maxProtoVersion"`
+	MaxProtoVersion InformantProtoVersion `json:"maxProtoVersion"`
+}
+
+// ProtocolRange returns a VersionRange for d.MinProtoVersion and d.MaxProtoVersion.
+func (d AgentDesc) ProtocolRange() VersionRange[InformantProtoVersion] {
+	return VersionRange[InformantProtoVersion]{
+		Min: d.MinProtoVersion,
+		Max: d.MaxProtoVersion,
+	}
 }
 
 type AgentIdentificationMessage = AgentMessage[AgentIdentification]
@@ -239,7 +307,7 @@ type InformantDesc struct {
 	// with a ProtoVersion within the bounds of the agent's declared minimum and maximum protocol
 	// versions. If the VM informant does not use a protocol version within those bounds, then it
 	// MUST respond with an error status code.
-	ProtoVersion uint32 `json:"protoVersion"`
+	ProtoVersion InformantProtoVersion `json:"protoVersion"`
 
 	// MetricsMethod tells the autoscaler-agent how to fetch metrics from the VM
 	MetricsMethod InformantMetricsMethod `json:"metricsMethod"`

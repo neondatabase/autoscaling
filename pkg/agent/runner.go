@@ -290,6 +290,7 @@ func (r *Runner) State() RunnerState {
 			SeqNum:          r.server.seqNum,
 			ReceivedIDCheck: r.server.receivedIDCheck,
 			MadeContact:     r.server.madeContact,
+			ProtoVersion:    r.server.protoVersion,
 			Mode:            r.server.mode,
 			ExitStatus:      r.server.exitStatus,
 		}

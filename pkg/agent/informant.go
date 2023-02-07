@@ -18,9 +18,12 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+// The autoscaler-agent currently supports v1.0 to v1.1 of the agent<->informant protocol.
+//
+// If you update either of these values, make sure to also update VERSIONING.md.
 const (
-	MinInformantProtocolVersion uint32 = 1
-	MaxInformantProtocolVersion uint32 = 1
+	MinInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_0
+	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
 )
 
 type InformantServer struct {
@@ -50,6 +53,11 @@ type InformantServer struct {
 	//
 	// This field MAY be read while holding EITHER runner.lock OR requestLock.
 	madeContact bool
+
+	// protoVersion gives the version of the agent<->informant protocol currently in use, if the
+	//
+	// This field is nil if and only if InformantServerUnconfirmed.
+	protoVersion *api.InformantProtoVersion
 
 	// mode indicates whether the informant has marked the connection as resumed or not
 	//
@@ -98,6 +106,7 @@ type InformantServerState struct {
 	SeqNum          uint64                     `json:"seqNum"`
 	ReceivedIDCheck bool                       `json:"receivedIDCheck"`
 	MadeContact     bool                       `json:"madeContact"`
+	ProtoVersion    *api.InformantProtoVersion `json:"protoVersion"`
 	Mode            InformantServerMode        `json:"mode"`
 	ExitStatus      *InformantServerExitStatus `json:"exitStatus"`
 }
@@ -145,6 +154,7 @@ func NewInformantServer(
 		seqNum:           0,
 		receivedIDCheck:  false,
 		madeContact:      false,
+		protoVersion:     nil,
 		mode:             InformantServerUnconfirmed,
 		updatedInformant: updatedInformant,
 		upscaleRequested: upscaleRequested,
@@ -400,6 +410,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 		)
 
 		s.mode = InformantServerSuspended
+		s.protoVersion = &resp.ProtoVersion
 
 		if s.runner.server == s {
 			oldInformant := s.runner.informant
@@ -750,6 +761,11 @@ func (s *InformantServer) handleTryUpscale(
 
 	switch s.mode {
 	case InformantServerRunning:
+		if !s.protoVersion.HasTryUpscale() {
+			err := fmt.Errorf("/try-upscale not supported for protocol version %v", *s.protoVersion)
+			return nil, 400, err
+		}
+
 		if body.MoreResources.Cpu || body.MoreResources.Memory {
 			s.upscaleRequested.Send()
 		} else {

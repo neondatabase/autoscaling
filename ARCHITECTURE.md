@@ -195,6 +195,10 @@ as a reference, it may be helpful to have that file open at the same time.
 
 [`pkg/api/types.go`]: ./pkg/api/types.go
 
+It may also be worth noting that this protocol is versioned. For an overview of version
+compatibility and how it relates to releases of this repository, refer to
+[`pkg/api/VERSIONING.md`](./pkg/api/VERSIONING.md).
+
 The protocol is as follows:
 
 1. On startup, the VM informant starts an HTTP server listening on `0.0.0.0:10301`.
