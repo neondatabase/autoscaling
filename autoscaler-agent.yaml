@@ -47,20 +47,16 @@ metadata:
 data:
   config.json: '{
     "scaling": {
-      "requestTimeoutSeconds": 10,
-      "cpu": {
-        "doubleRatio": 0.9,
-        "halveRatio": 0.4
-      }
+      "requestTimeoutSeconds": 10
     },
     "informant": {
       "serverPort": 10301,
-      "maxStartupSeconds": 10,
+      "retryServerMinWaitSeconds": 5,
+      "retryServerNormalWaitSeconds": 5,
+      "registerRetrySeconds": 5,
       "requestTimeoutSeconds": 1,
-      "downscaleTimeoutSeconds": 2,
-      "retryRegisterAfterSeconds": 5,
-      "retryServerAfterSeconds": 3,
-      "retryFailedServerDelaySeconds": 5
+      "registerTimeoutSeconds": 2,
+      "downscaleTimeoutSeconds": 2
     },
     "metrics": {
       "loadMetricPrefix": "host_",
@@ -91,7 +87,9 @@ spec:
       serviceAccountName: autoscaler-agent
       containers:
         - name: autoscaler-agent
-          image: neondatabase/autoscaler-agent:0.1.2
+          # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
+          # update that as well if you change this line!
+          image: neondatabase/autoscaler-agent:v0.1.3
           resources:
             limits:
               memory: 100Mi

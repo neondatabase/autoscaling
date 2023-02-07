@@ -160,7 +160,9 @@ spec:
     spec:
       serviceAccountName: autoscale-scheduler
       containers:
-      - image: neondatabase/autoscale-scheduler:0.1.2
+      # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
+      # update that as well if you change this line!
+      - image: neondatabase/autoscale-scheduler:v0.1.3
         command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
         livenessProbe:
           httpGet:

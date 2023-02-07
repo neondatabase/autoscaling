@@ -10,7 +10,4 @@ Currently these are:
 ```js
 // Scheduler:
 config.nodeDefaults.computeUnit = { "vCPUs": 1, "mem": 4 }
-
-// autoscaler-agent:
-config.metrics.loadMetricPrefix = "host_"
 ```
