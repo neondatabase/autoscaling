@@ -20,6 +20,8 @@ apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
   name: example
+  labels:
+    autoscaling.neon.tech/enabled: ""
 spec:
   schedulerName: autoscale-scheduler
   guest:

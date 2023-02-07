@@ -53,6 +53,7 @@ func vmIsOurResponsibility(vm *vmapi.VirtualMachine, config *Config, nodeName st
 	return vm.Status.Node == nodeName &&
 		vm.Status.Phase == vmapi.VmRunning &&
 		vm.Status.PodIP != "" &&
+		api.HasAutoscalingEnabled(vm) &&
 		vm.Spec.SchedulerName == config.Scheduler.SchedulerName
 }
 

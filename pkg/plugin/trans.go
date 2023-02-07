@@ -215,6 +215,33 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 	return verdict
 }
 
+// handleAutoscalingDisabled updates r.node with changes to clear any buffer and capacityPressure
+// from r.pod
+//
+// A pretty-formatted summary of the changes is returned as the verdict, for logging.
+func (r resourceTransition[T]) handleAutoscalingDisabled() (verdict string) {
+	// buffer is included in reserved, so we reduce everything by buffer.
+	buffer := r.pod.Buffer
+	valuesToReduce := []*T{&r.node.Reserved, &r.node.Buffer, &r.pod.Reserved, &r.pod.Buffer}
+	for _, v := range valuesToReduce {
+		*v -= buffer
+	}
+
+	r.node.CapacityPressure -= r.pod.CapacityPressure
+	r.pod.CapacityPressure = 0
+
+	fmtString := "pod had buffer %d, capacityPressure %d; " +
+		"node reserved %d -> %d, capacityPressure %d -> %d"
+	verdict = fmt.Sprintf(
+		fmtString,
+		// pod had buffer %d, capacityPressure %d;
+		r.oldPod.buffer, r.oldPod.capacityPressure,
+		// node reserved %d -> %d, capacityPressure %d -> %d
+		r.oldNode.reserved, r.node.Reserved, r.oldNode.capacityPressure, r.node.CapacityPressure,
+	)
+	return verdict
+}
+
 // handleDeletedPod is kind of like handleDeleted, except that it returns both verdicts side by
 // side instead of being generic over the resource
 func handleDeletedPod(

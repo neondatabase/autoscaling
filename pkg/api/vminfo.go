@@ -6,20 +6,32 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
-const LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
+const (
+	LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
+	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
+)
+
+// HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
+func HasAutoscalingEnabled[T metav1.ObjectMetaAccessor](obj T) bool {
+	labels := obj.GetObjectMeta().GetLabels()
+	_, enabled := labels[LabelEnableAutoscaling]
+	return enabled
+}
 
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
 // care about
 type VmInfo struct {
-	Name          string    `json:"name"`
-	Namespace     string    `json:"namespace"`
-	Cpu           VmCpuInfo `json:"cpu"`
-	Mem           VmMemInfo `json:"mem"`
-	AlwaysMigrate bool      `json:"alwaysMigrate"`
+	Name           string    `json:"name"`
+	Namespace      string    `json:"namespace"`
+	Cpu            VmCpuInfo `json:"cpu"`
+	Mem            VmMemInfo `json:"mem"`
+	AlwaysMigrate  bool      `json:"alwaysMigrate"`
+	ScalingEnabled bool      `json:"scalingEnabled"`
 }
 
 type VmCpuInfo struct {
@@ -81,6 +93,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	}
 
 	_, alwaysMigrate := vm.Labels[LabelTestingOnlyAlwaysMigrate]
+	_, scalingEnabled := vm.Labels[LabelEnableAutoscaling]
 
 	info := VmInfo{
 		Name:      vm.Name,
@@ -96,7 +109,8 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
 			SlotSize: vm.Spec.Guest.MemorySlotSize,
 		},
-		AlwaysMigrate: alwaysMigrate,
+		AlwaysMigrate:  alwaysMigrate,
+		ScalingEnabled: scalingEnabled,
 	}
 
 	if err != nil {

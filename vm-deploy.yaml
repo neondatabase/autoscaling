@@ -4,6 +4,7 @@ kind: VirtualMachine
 metadata:
   name: postgres14-disk-test
   labels:
+    autoscaling.neon.tech/enabled: ""
     # Uncomment the line below to continuously migrate the VM (TESTING ONLY)
     # autoscaler/testing-only-always-migrate: ""
 spec:
