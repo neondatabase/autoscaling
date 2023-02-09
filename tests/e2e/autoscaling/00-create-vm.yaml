@@ -21,7 +21,7 @@ kind: VirtualMachine
 metadata:
   name: example
   labels:
-    autoscaling.neon.tech/enabled: ""
+    autoscaling.neon.tech/enabled: "true"
 spec:
   schedulerName: autoscale-scheduler
   guest:

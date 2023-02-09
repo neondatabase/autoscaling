@@ -19,8 +19,8 @@ const (
 // HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
 func HasAutoscalingEnabled[T metav1.ObjectMetaAccessor](obj T) bool {
 	labels := obj.GetObjectMeta().GetLabels()
-	_, enabled := labels[LabelEnableAutoscaling]
-	return enabled
+	value, ok := labels[LabelEnableAutoscaling]
+	return ok && value == "true"
 }
 
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
@@ -93,7 +93,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	}
 
 	_, alwaysMigrate := vm.Labels[LabelTestingOnlyAlwaysMigrate]
-	_, scalingEnabled := vm.Labels[LabelEnableAutoscaling]
+	scalingEnabled := HasAutoscalingEnabled(vm)
 
 	info := VmInfo{
 		Name:      vm.Name,
