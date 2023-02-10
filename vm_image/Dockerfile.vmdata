@@ -74,5 +74,3 @@ RUN echo '::respawn:setsid -w /usr/sbin/sshd -D -E /run/sshd/log -h /run/sshd/ss
 
 # set the greeting message on ssh logins
 RUN echo -e 'Welcome to Alpine!\n ~ This is the VM :) ~' >/etc/motd
-
-# ENTRYPOINT ["/bin/userstartup"]
