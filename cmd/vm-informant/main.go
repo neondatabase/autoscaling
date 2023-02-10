@@ -3,7 +3,13 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"time"
+
+	"github.com/containerd/cgroups/v3/cgroup2"
 
 	klog "k8s.io/klog/v2"
 
@@ -23,9 +29,34 @@ func main() {
 	// to distinguish between --cgroup=... and its absence, because null bytes aren't valid in paths.
 	noCgroup := "invalid\x00CgroupName"
 	var cgroupName string
+	var autoRestart bool
 	flag.StringVar(&cgroupName, "cgroup", noCgroup, "Sets the cgroup to monitor (optional)")
+	flag.BoolVar(&autoRestart, "auto-restart", false, "Automatically cleanup and restart on failure or exit")
 
 	flag.Parse()
+
+	// If we were asked to restart on failure, handle that separately:
+	if autoRestart {
+		var args []string
+		var cleanupHooks []func()
+		if cgroupName != noCgroup {
+			args = append(args, "-cgroup", cgroupName)
+			cleanupHooks = append(cleanupHooks, func() {
+				klog.Infof("vm-informant cleanup hook: making sure cgroup %q is thawed", cgroupName)
+				manager, err := cgroup2.Load(fmt.Sprint("/", cgroupName))
+				if err != nil {
+					klog.Warningf("Error making cgroup handler: %s", err)
+					return
+				}
+				if err := manager.Thaw(); err != nil {
+					klog.Warningf("Error thawing cgroup: %s", err)
+				}
+			})
+		}
+
+		runRestartOnFailure(args, cleanupHooks)
+		return
+	}
 
 	var stateOpts []informant.NewStateOpts
 
@@ -62,5 +93,57 @@ func main() {
 		klog.Infof("Server ended.")
 	} else {
 		klog.Fatalf("Server failed: %s", err)
+	}
+}
+
+// runRestartOnFailure repeatedly calls this binary with the same flags, but with 'auto-restart'
+// removed.
+//
+// We execute ourselves as a subprocess so that it's possible to appropriately cleanup after
+// termination by various signals (or an unhandled panic!). This is worthwhile because we *really*
+// don't want to leave the cgroup frozen while waiting to restart.
+func runRestartOnFailure(args []string, cleanupHooks []func()) {
+	selfPath := os.Args[0]
+
+	minWaitDuration := time.Second * 5
+
+	for {
+		minWait := time.After(minWaitDuration)
+
+		cmd := exec.Command(selfPath, args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+
+		var exitMode string
+
+		if err != nil {
+			// lint note: the linter's worried about wrapped errors being incorrect with switch, but
+			// this is cleaner than the alternative (via errors.As) and it's still correct because
+			// exec.Command.Run() explicitly mentions ExitError.
+			switch err.(type) { //nolint:errorlint // see above.
+			case *exec.ExitError:
+				exitMode = "failed"
+				klog.Errorf("vm-informant exited with: %v", err)
+			default:
+				exitMode = "failed to start"
+				klog.Errorf("error running vm-informant: %v", err)
+			}
+		} else {
+			exitMode = ""
+			klog.Warningf("vm-informant exited without error. This should not happen.")
+		}
+
+		for _, h := range cleanupHooks {
+			h()
+		}
+
+		select {
+		case <-minWait:
+			klog.Infof("vm-informant restarting immediately")
+		default:
+			klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minWaitDuration)
+			<-minWait
+		}
 	}
 }
