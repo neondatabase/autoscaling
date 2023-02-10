@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -110,7 +111,7 @@ func runRestartOnFailure(args []string, cleanupHooks []func()) {
 	for {
 		minWait := time.After(minWaitDuration)
 
-		cmd := exec.Command(selfPath, args...)
+		cmd := exec.CommandContext(context.TODO(), selfPath, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err := cmd.Run()
