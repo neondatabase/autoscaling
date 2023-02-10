@@ -15,7 +15,7 @@ type Client struct {
 
 func NewClient(url string, c *http.Client) Client { return Client{BaseURL: url, httpc: c} }
 
-func (c Client) NewBatch() *Batch { return &Batch{c: c} }
+func (c Client) NewBatch() *Batch { return &Batch{c: c, events: nil} }
 
 type Batch struct {
 	// Q: does this need a mutex?
@@ -52,6 +52,7 @@ func (b *Batch) Send(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
 	// theoretically if wanted/needed, we should use an http handler that
 	// does the retrying, to avoid writing that logic here.
