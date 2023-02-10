@@ -195,7 +195,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	statusBefore := virtualmachine.Status.DeepCopy()
 	if err := r.doReconcile(ctx, &virtualmachine); err != nil {
 		r.Recorder.Eventf(&virtualmachine, corev1.EventTypeWarning, "Failed",
-			"Failed to reconcile (%s): %s", &virtualmachine.Name, err)
+			"Failed to reconcile (%s): %s", virtualmachine.Name, err)
 		return ctrl.Result{}, err
 	}
 
@@ -750,7 +750,10 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 
 	// use multus network tp add extra network interface
 	if virtualmachine.Spec.ExtraNetwork != nil {
-		pod.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
+		if pod.ObjectMeta.Annotations == nil {
+			pod.ObjectMeta.Annotations = map[string]string{}
+		}
+		pod.ObjectMeta.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
 	}
 
 	return pod, nil
