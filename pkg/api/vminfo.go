@@ -17,7 +17,7 @@ const (
 )
 
 // HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
-func HasAutoscalingEnabled[T metav1.ObjectMetaAccessor](obj T) bool {
+func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
 	labels := obj.GetObjectMeta().GetLabels()
 	value, ok := labels[LabelEnableAutoscaling]
 	return ok && value == "true"
