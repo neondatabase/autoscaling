@@ -222,7 +222,8 @@ type podOtherResourceState struct {
 // This is used both to determine if there's enough room for the pod *and* to keep around the
 // before and after so that we can use it for logging.
 func (r nodeOtherResourceState) addPod(
-	memSlotSize *resource.Quantity, p podOtherResourceState,
+	memSlotSize *resource.Quantity,
+	p podOtherResourceState,
 ) nodeOtherResourceState {
 	newState := nodeOtherResourceState{
 		rawCpu:       r.rawCpu.DeepCopy(),
@@ -248,7 +249,8 @@ func (r nodeOtherResourceState) addPod(
 // This *also* happens to be what we use for calculations when actually removing a pod, because it
 // allows us to use both the before and after for logging.
 func (r nodeOtherResourceState) subPod(
-	memSlotSize *resource.Quantity, p podOtherResourceState,
+	memSlotSize *resource.Quantity,
+	p podOtherResourceState,
 ) nodeOtherResourceState {
 	// Check we aren't underflowing.
 	//

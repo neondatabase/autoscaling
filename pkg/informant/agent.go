@@ -499,7 +499,11 @@ func (a *Agent) runBackgroundChecker() {
 //
 // There are no guarantees made about the equality or content of errors returned from this function.
 func doRequest[B any, R any](
-	agent *Agent, timeout time.Duration, method string, path string, body *B,
+	agent *Agent,
+	timeout time.Duration,
+	method string,
+	path string,
+	body *B,
 ) (_ *R, old bool, _ error) {
 	return doRequestWithStartSignal[B, R](
 		agent, timeout, nil, method, path, body,
@@ -507,7 +511,12 @@ func doRequest[B any, R any](
 }
 
 func doRequestWithStartSignal[B any, R any](
-	agent *Agent, timeout time.Duration, start *util.SignalSender, method string, path string, body *B,
+	agent *Agent,
+	timeout time.Duration,
+	start *util.SignalSender,
+	method string,
+	path string,
+	body *B,
 ) (_ *R, old bool, _ error) {
 	outerContext, cancel := context.WithTimeout(context.TODO(), timeout)
 	defer cancel()

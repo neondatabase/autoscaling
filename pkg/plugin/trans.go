@@ -37,7 +37,8 @@ type resourceTransition[T constraints.Unsigned] struct {
 }
 
 func collectResourceTransition[T constraints.Unsigned](
-	node *nodeResourceState[T], pod *podResourceState[T],
+	node *nodeResourceState[T],
+	pod *podResourceState[T],
 ) resourceTransition[T] {
 	return resourceTransition[T]{
 		node: node,
@@ -217,7 +218,9 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 // handleDeletedPod is kind of like handleDeleted, except that it returns both verdicts side by
 // side instead of being generic over the resource
 func handleDeletedPod(
-	node *nodeState, pod podOtherResourceState, memSlotSize *resource.Quantity,
+	node *nodeState,
+	pod podOtherResourceState,
+	memSlotSize *resource.Quantity,
 ) (cpuVerdict string, memVerdict string) {
 
 	oldRes := node.otherResources

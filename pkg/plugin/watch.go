@@ -25,7 +25,9 @@ import (
 //
 // Events occurring before this method is called will not be sent.
 func (e *AutoscaleEnforcer) watchPodDeletions(
-	ctx context.Context, vmDeletions chan<- api.PodName, podDeletions chan<- api.PodName,
+	ctx context.Context,
+	vmDeletions chan<- api.PodName,
+	podDeletions chan<- api.PodName,
 ) error {
 	_, err := util.Watch(
 		ctx,
