@@ -109,7 +109,7 @@ func runRestartOnFailure(args []string, cleanupHooks []func()) {
 	minWaitDuration := time.Second * 5
 
 	for {
-		minWait := time.After(minWaitDuration)
+		startTime := time.Now()
 
 		cmd := exec.CommandContext(context.TODO(), selfPath, args...)
 		cmd.Stdout = os.Stdout
@@ -139,12 +139,12 @@ func runRestartOnFailure(args []string, cleanupHooks []func()) {
 			h()
 		}
 
-		select {
-		case <-minWait:
-			klog.Infof("vm-informant restarting immediately")
-		default:
+		dur := time.Since(startTime)
+		if dur < minWaitDuration {
 			klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minWaitDuration)
-			<-minWait
+			time.Sleep(dur - minWaitDuration)
+		} else {
+			klog.Infof("vm-informant restarting immediately")
 		}
 	}
 }
