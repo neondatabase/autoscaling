@@ -67,7 +67,7 @@ const (
 // Optional configuration may be provided by NewStateOpts - see WithCgroup and
 // WithPostgresFileCache.
 func NewState(agents *AgentSet, config StateConfig, opts ...NewStateOpts) (*State, error) {
-	if config.SysBufferBytes != 0 {
+	if config.SysBufferBytes == 0 {
 		panic("invalid StateConfig: SysBufferBytes cannot be zero")
 	}
 
