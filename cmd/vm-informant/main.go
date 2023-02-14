@@ -23,16 +23,18 @@ func main() {
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
-	// Realistically, we want to be able to distinguish between --cgroup="" and absence of the flag,
-	// if only to be able to provide better errors on invalid cgroup names.
-	//
-	// Because cgroup names *could* be any valid path fragment, we include a null byte in the string
-	// to distinguish between --cgroup=... and its absence, because null bytes aren't valid in paths.
-	noCgroup := "invalid\x00CgroupName"
+	// Below, we want to be able to distinguish between absence of flags and presence of empty
+	// flags. The only way we can reliably do this is by setting defaults to a sentinel value that
+	// isn't possible to create otherwise. In this case, it's a string containing a null byte, which
+	// cannot be provided (due to C's null-terminated strings).
+	invalidArgValue := "\x00"
+
 	var cgroupName string
 	var autoRestart bool
-	flag.StringVar(&cgroupName, "cgroup", noCgroup, "Sets the cgroup to monitor (optional)")
+	var pgConnStr string
+	flag.StringVar(&cgroupName, "cgroup", invalidArgValue, "Sets the cgroup to monitor (optional)")
 	flag.BoolVar(&autoRestart, "auto-restart", false, "Automatically cleanup and restart on failure or exit")
+	flag.StringVar(&pgConnStr, "pgconnstr", invalidArgValue, "Sets the postgres connection string to enable file cache (optional)")
 
 	flag.Parse()
 
@@ -40,7 +42,11 @@ func main() {
 	if autoRestart {
 		var args []string
 		var cleanupHooks []func()
-		if cgroupName != noCgroup {
+
+		if pgConnStr != invalidArgValue {
+			args = append(args, pgConnStr)
+		}
+		if cgroupName != invalidArgValue {
 			args = append(args, "-cgroup", cgroupName)
 			cleanupHooks = append(cleanupHooks, func() {
 				klog.Infof("vm-informant cleanup hook: making sure cgroup %q is thawed", cgroupName)
@@ -61,7 +67,7 @@ func main() {
 
 	var stateOpts []informant.NewStateOpts
 
-	if cgroupName != noCgroup {
+	if cgroupName != invalidArgValue {
 		cgroupConfig := informant.DefaultCgroupConfig
 		klog.Infof("Selected cgroup %q, starting handler with config %+v", cgroupName, cgroupConfig)
 		cgroup, err := informant.NewCgroupManager(cgroupName)
@@ -74,8 +80,14 @@ func main() {
 		klog.Infof("No cgroup selected")
 	}
 
+	if pgConnStr != invalidArgValue {
+		fileCacheConfig := informant.DefaultFileCacheConfig
+		klog.Infof("Selected postgres file cache, connstr = %q and config = %+v", pgConnStr, fileCacheConfig)
+		stateOpts = append(stateOpts, informant.WithPostgresFileCache(pgConnStr, fileCacheConfig))
+	}
+
 	agents := informant.NewAgentSet()
-	state, err := informant.NewState(agents, stateOpts...)
+	state, err := informant.NewState(agents, informant.DefaultStateConfig, stateOpts...)
 	if err != nil {
 		klog.Fatalf("Error starting informant.NewState: %s", err)
 	}
