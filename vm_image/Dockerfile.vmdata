@@ -14,6 +14,11 @@ RUN set -e \
 
 FROM alpine:3.16 AS rootfs
 
+# Setup inittab for later use with NeonVM.
+RUN set -e \
+    && rm -f /etc/inittab \
+    && touch /etc/inittab
+
 RUN set -e \
 	&& apk add --no-cache \
 		ca-certificates \
@@ -21,14 +26,19 @@ RUN set -e \
         coreutils \
 		cgroup-tools
 
-# Add the vm-informant 
-COPY --from=informant /usr/bin/vm-informant /bin/vm-informant
+# Configure cgroups on startup
+ADD cgconfig.conf /etc/cgconfig.conf
+RUN echo '::sysinit:/usr/sbin/cgconfigparser -l /etc/cgconfig.conf -s 1664' >> /etc/inittab
 
 # Add the allocate-loop tester
 COPY --from=allocate-loop-builder /bin/allocate-loop /bin/allocate-loop
 
-ADD init     /bin/userstartup
-RUN chmod +x /bin/userstartup
+# Add the vm-informant 
+COPY --from=informant /usr/bin/vm-informant /bin/vm-informant
+RUN adduser vm-informant --disabled-password --no-create-home
+# note: Use 'respawn' and '--auto-restart' so that the logs are noisy if the arguments are bad,
+# but we still have proper handling around cgroups, etc.
+RUN echo "::respawn:su vm-informant -c '/bin/vm-informant --auto-restart --cgroup=neon-test'" >> /etc/inittab
 
 # postgresql stuff
 RUN set -e \
@@ -37,6 +47,9 @@ RUN set -e \
 		postgresql14
 ADD postgresql.conf /etc/postgresql.conf
 ADD pg_hba.conf     /etc/pg_hba.conf
+
+RUN echo "::sysinit:sh -c 'mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql'" >> /etc/inittab
+RUN echo "::once:su postgres -c 'PGDATA=/var/lib/postgresql pg_ctl start -o \"-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf\"'" >> /etc/inittab
 
 # Initialize postgres
 ENV PGDATA /var/lib/postgresql
@@ -54,8 +67,10 @@ ADD ssh_id_rsa.pub /etc/ssh/authorized_keys
 # 'authorized_keys' needs to have the right mode bits, otherwise it'll get ignored by sshd
 RUN set -e \
     && chmod 600 /etc/ssh/authorized_keys
+ADD generate-sshd-keys.sh /bin/generate-sshd-keys.sh
+RUN echo '::sysinit:/bin/generate-sshd-keys.sh' >> /etc/inittab
+RUN echo '::respawn:setsid -w /usr/sbin/sshd -D -E /run/sshd/log -h /run/sshd/ssh_host_ecdsa_key -h /run/sshd/ssh_host_ed25519_key -h /run/sshd/ssh_host_rsa_key' >> /etc/inittab
+# Having trouble with ssh? Add -dd to the ssh args.
 
 # set the greeting message on ssh logins
 RUN echo -e 'Welcome to Alpine!\n ~ This is the VM :) ~' >/etc/motd
-
-ENTRYPOINT ["/bin/userstartup"]
