@@ -533,7 +533,9 @@ func makeDeadlockChecker(lock *util.ChanMutex, timeout, delay time.Duration) fun
 // is signalled. The update to r.lastMetrics and signal on newMetrics occur without releasing r.lock
 // in between.
 func (r *Runner) getMetricsLoop(
-	ctx context.Context, newMetrics util.CondChannelSender, updatedInformant util.CondChannelReceiver,
+	ctx context.Context,
+	newMetrics util.CondChannelSender,
+	updatedInformant util.CondChannelReceiver,
 ) {
 	timeout := time.Second * time.Duration(r.global.config.Metrics.RequestTimeoutSeconds)
 	waitBetweenDuration := time.Second * time.Duration(r.global.config.Metrics.SecondsBetweenRequests)
@@ -1001,7 +1003,9 @@ waitForNewScheduler:
 //
 // This method expects that the Runner is not locked.
 func (r *Runner) doMetricsRequestIfEnabled(
-	ctx context.Context, timeout time.Duration, clearNewInformantSignal func(),
+	ctx context.Context,
+	timeout time.Duration,
+	clearNewInformantSignal func(),
 ) (*api.Metrics, error) {
 	r.logger.Infof("Attempting metrics request")
 
@@ -1867,7 +1871,8 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 //
 // This method MUST be called while holding s.requestLock AND s.runner.lock.
 func (s *Scheduler) validatePluginResponse(
-	req *api.AgentRequest, resp *api.PluginResponse,
+	req *api.AgentRequest,
+	resp *api.PluginResponse,
 ) error {
 	isCurrent := s.runner.scheduler == s
 

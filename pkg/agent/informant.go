@@ -124,7 +124,8 @@ type InformantServerExitStatus struct {
 // NewInformantServer starts an InformantServer, returning it and a signal receiver that will be
 // signalled when it exits.
 func NewInformantServer(
-	ctx context.Context, runner *Runner,
+	ctx context.Context,
+	runner *Runner,
 	updatedInformant util.CondChannelSender,
 	upscaleRequested util.CondChannelSender,
 ) (*InformantServer, util.SignalReceiver, error) {

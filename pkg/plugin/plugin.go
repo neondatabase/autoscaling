@@ -197,7 +197,10 @@ func (e *AutoscaleEnforcer) checkSchedulerName(pod *corev1.Pod) *framework.Statu
 //
 // Required for framework.FilterPlugin
 func (e *AutoscaleEnforcer) Filter(
-	ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeInfo *framework.NodeInfo,
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+	nodeInfo *framework.NodeInfo,
 ) *framework.Status {
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
 
@@ -375,7 +378,10 @@ func (e *AutoscaleEnforcer) Filter(
 //
 // Required for framework.ScorePlugin
 func (e *AutoscaleEnforcer) Score(
-	ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeName string,
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+	nodeName string,
 ) (int64, *framework.Status) {
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
@@ -440,7 +446,10 @@ func (e *AutoscaleEnforcer) ScoreExtensions() framework.ScoreExtensions {
 //
 // Required for framework.ReservePlugin
 func (e *AutoscaleEnforcer) Reserve(
-	ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeName string,
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+	nodeName string,
 ) *framework.Status {
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
@@ -610,7 +619,10 @@ func (e *AutoscaleEnforcer) Reserve(
 // Note: the documentation for ReservePlugin indicates that Unreserve both (a) must be idempotent
 // and (b) may be called without a previous call to Reserve for the same pod.
 func (e *AutoscaleEnforcer) Unreserve(
-	ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeName string,
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+	nodeName string,
 ) {
 	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Unreserve: Handling request for pod %v, node %s", pName, nodeName)

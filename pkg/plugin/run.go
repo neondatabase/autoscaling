@@ -149,7 +149,10 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 }
 
 func (e *AutoscaleEnforcer) handleResources(
-	pod *podState, node *nodeState, req api.Resources, startingMigration bool,
+	pod *podState,
+	node *nodeState,
+	req api.Resources,
+	startingMigration bool,
 ) (api.Resources, int, error) {
 	// Check that we aren't being asked to do something during migration:
 	if pod.currentlyMigrating() {
@@ -191,7 +194,9 @@ func (e *AutoscaleEnforcer) handleResources(
 }
 
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
-	pod *podState, node *nodeState, metrics api.Metrics,
+	pod *podState,
+	node *nodeState,
+	metrics api.Metrics,
 ) bool {
 	// This pod should migrate if (a) we're looking for migrations and (b) it's next up in the
 	// priority queue. We will give it a chance later to veto if the metrics have changed too much
