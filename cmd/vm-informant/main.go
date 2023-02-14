@@ -142,7 +142,7 @@ func runRestartOnFailure(args []string, cleanupHooks []func()) {
 		dur := time.Since(startTime)
 		if dur < minWaitDuration {
 			klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minWaitDuration)
-			time.Sleep(dur - minWaitDuration)
+			time.Sleep(minWaitDuration - dur)
 		} else {
 			klog.Infof("vm-informant restarting immediately")
 		}
