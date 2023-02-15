@@ -17,7 +17,7 @@ source '../scripts-common.sh'
 
 NEONVM_BUILDER_PATH='neonvm-builder'
 NEONVM_REPO='https://github.com/neondatabase/neonvm'
-NEONVM_VERSION='v0.4.5'
+NEONVM_VERSION='v0.4.6'
 
 if [ -e "$NEONVM_BUILDER_PATH" ]; then
     echo "Skipping downloading NeonVM vm-builder because '$NEONVM_BUILDER_PATH' already exists"
@@ -57,6 +57,6 @@ echo " * IMAGE_SIZE = '$IMAGE_SIZE'"
 echo "Building 'Dockerfile.vmdata'..."
 docker buildx build -t "vmdata-temp:$TAG" -f Dockerfile.vmdata . | indent
 echo "Building NeonVM image..."
-"./$NEONVM_BUILDER_PATH" --src "vmdata-temp:$TAG" --dst "$REGISTRY/$NAME:$TAG" --size "$IMAGE_SIZE" | indent
+"./$NEONVM_BUILDER_PATH" --src "vmdata-temp:$TAG" --use-inittab --dst "$REGISTRY/$NAME:$TAG" --size "$IMAGE_SIZE" | indent
 echo "Push completed image"
 docker push "$REGISTRY/$NAME:$TAG" | indent
