@@ -84,6 +84,8 @@ func main() {
 		fileCacheConfig := informant.DefaultFileCacheConfig
 		klog.Infof("Selected postgres file cache, connstr = %q and config = %+v", pgConnStr, fileCacheConfig)
 		stateOpts = append(stateOpts, informant.WithPostgresFileCache(pgConnStr, fileCacheConfig))
+	} else {
+		klog.Infof("No postgres file cache selected")
 	}
 
 	agents := informant.NewAgentSet()
@@ -123,6 +125,7 @@ func runRestartOnFailure(args []string, cleanupHooks []func()) {
 	for {
 		startTime := time.Now()
 
+		klog.Infof("Running vm-informant with args %+v", args)
 		cmd := exec.CommandContext(context.TODO(), selfPath, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

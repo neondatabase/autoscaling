@@ -244,6 +244,7 @@ func cgroupPath(groupName string, file string) string {
 
 // SetMemLimit sets the memory.high limit of the cgroup, clearing
 func (c *CgroupManager) SetHighMem(bytes uint64) error {
+	klog.Infof("Updating cgroup memory.high to %v MiB (%d bytes)", float64(bytes)/float64(1<<20), bytes)
 	high := int64(bytes)
 	return c.manager.Update(&cgroup2.Resources{
 		Memory: &cgroup2.Memory{
