@@ -32,6 +32,7 @@ import (
 	goipamapiv1 "github.com/cicdteam/go-ipam/api/v1"
 	"github.com/cicdteam/go-ipam/api/v1/apiv1connect"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -602,7 +603,7 @@ func imageForVmRunner() (string, error) {
 	var imageEnvVar = "VM_RUNNER_IMAGE"
 	image, found := os.LookupEnv(imageEnvVar)
 	if !found {
-		return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
+		return "", fmt.Errorf("unable to find %s environment variable with the image", imageEnvVar)
 	}
 	return image, nil
 }
@@ -772,10 +773,10 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func waitForGrpc(ctx context.Context, addr string) {
 	log := log.FromContext(ctx)
 
-	dialAddr := strings.TrimLeft(addr, "http://")
+	dialAddr := strings.TrimPrefix(addr, "http://")
 	dialTimeout := 5 * time.Second
 	dialOpts := []grpc.DialOption{
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
 	}
 	log.Info("check grpc connection", "address", dialAddr)
@@ -880,8 +881,6 @@ func DeepEqual(v1, v2 interface{}) bool {
 	var x2 interface{}
 	bytesB, _ := json.Marshal(v2)
 	_ = json.Unmarshal(bytesB, &x2)
-	if reflect.DeepEqual(x1, x2) {
-		return true
-	}
-	return false
+
+	return reflect.DeepEqual(x1, x2)
 }

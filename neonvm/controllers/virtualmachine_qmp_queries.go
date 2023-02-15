@@ -115,7 +115,7 @@ func QmpGetCpus(virtualmachine *vmv1.VirtualMachine) ([]QmpCpuSlot, []QmpCpuSlot
 	}
 	defer mon.Disconnect()
 
-	qmpcmd := []byte(`{ "execute": "query-hotpluggable-cpus"}`)
+	qmpcmd := []byte(`{"execute": "query-hotpluggable-cpus"}`)
 	raw, err := mon.Run(qmpcmd)
 	if err != nil {
 		return nil, nil, err
@@ -144,7 +144,7 @@ func QmpGetCpusFromRunner(ip string, port int32) ([]QmpCpuSlot, []QmpCpuSlot, er
 	}
 	defer mon.Disconnect()
 
-	qmpcmd := []byte(`{ "execute": "query-hotpluggable-cpus"}`)
+	qmpcmd := []byte(`{"execute": "query-hotpluggable-cpus"}`)
 	raw, err := mon.Run(qmpcmd)
 	if err != nil {
 		return nil, nil, err
@@ -172,7 +172,7 @@ func QmpPlugCpu(virtualmachine *vmv1.VirtualMachine) error {
 		return err
 	}
 	if len(empty) == 0 {
-		return errors.New("No empy slots for CPU hotplug")
+		return errors.New("no empty slots for CPU hotplug")
 	}
 
 	mon, err := QmpConnect(virtualmachine)
@@ -199,7 +199,7 @@ func QmpPlugCpuToRunner(ip string, port int32) error {
 		return err
 	}
 	if len(empty) == 0 {
-		return errors.New("No empy slots for CPU hotplug")
+		return errors.New("no empty slots for CPU hotplug")
 	}
 
 	mon, err := QmpConnectByIP(ip, port)
@@ -236,7 +236,7 @@ func QmpUnplugCpu(virtualmachine *vmv1.VirtualMachine) error {
 		}
 	}
 	if !found {
-		return errors.New("There are no unpluggable CPUs")
+		return errors.New("there are no unpluggable CPUs")
 	}
 
 	mon, err := QmpConnect(virtualmachine)
@@ -264,7 +264,7 @@ func QmpQueryMemoryDevices(virtualmachine *vmv1.VirtualMachine) ([]QmpMemoryDevi
 	defer mon.Disconnect()
 
 	var result QmpMemoryDevices
-	cmd := []byte(`{ "execute": "query-memory-devices"}`)
+	cmd := []byte(`{"execute": "query-memory-devices"}`)
 	raw, err := mon.Run(cmd)
 	if err != nil {
 		return nil, err
@@ -281,7 +281,7 @@ func QmpQueryMemoryDevicesFromRunner(ip string, port int32) ([]QmpMemoryDevice, 
 	defer mon.Disconnect()
 
 	var result QmpMemoryDevices
-	cmd := []byte(`{ "execute": "query-memory-devices"}`)
+	cmd := []byte(`{"execute": "query-memory-devices"}`)
 	raw, err := mon.Run(cmd)
 	if err != nil {
 		return nil, err
@@ -302,7 +302,7 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	// check if available mmory slots present
 	plugged := int32(len(memoryDevices))
 	if plugged >= slots {
-		return errors.New("No empy slots for Memory hotplug")
+		return errors.New("no empy slots for Memory hotplug")
 	}
 
 	mon, err := QmpConnect(virtualmachine)
@@ -381,7 +381,7 @@ func QmpUnplugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	}
 	plugged := len(memoryDevices)
 	if plugged == 0 {
-		return errors.New("There are no unpluggable Memory slots")
+		return errors.New("there are no unpluggable Memory slots")
 	}
 
 	mon, err := QmpConnect(virtualmachine)
@@ -416,7 +416,7 @@ func QmpGetMemorySize(virtualmachine *vmv1.VirtualMachine) (*resource.Quantity, 
 	}
 	defer mon.Disconnect()
 
-	qmpcmd := []byte(`{ "execute": "query-memory-size-summary"}`)
+	qmpcmd := []byte(`{"execute": "query-memory-size-summary"}`)
 	raw, err := mon.Run(qmpcmd)
 	if err != nil {
 		return nil, err
@@ -455,8 +455,8 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 	}
 	defer tmon.Disconnect()
 
-	qmpcmd := []byte{}
 	cache := resource.MustParse("256Mi")
+	var qmpcmd []byte
 	// setup migration on source runner
 	qmpcmd = []byte(fmt.Sprintf(`{
 		"execute": "migrate-set-capabilities",
@@ -535,7 +535,7 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 	if err != nil {
 		return err
 	}
-	qmpcmd = []byte(fmt.Sprintf(`{"execute": "migrate-start-postcopy"}`))
+	qmpcmd = []byte(`{"execute": "migrate-start-postcopy"}`)
 	_, err = smon.Run(qmpcmd)
 	if err != nil {
 		return err
@@ -552,7 +552,7 @@ func QmpGetMigrationInfo(virtualmachine *vmv1.VirtualMachine) (MigrationInfo, er
 	}
 	defer mon.Disconnect()
 
-	qmpcmd := []byte(`{ "execute": "query-migrate"}`)
+	qmpcmd := []byte(`{"execute": "query-migrate"}`)
 	raw, err := mon.Run(qmpcmd)
 	if err != nil {
 		return empty, err
@@ -571,7 +571,7 @@ func QmpQuit(ip string, port int32) error {
 	}
 	defer mon.Disconnect()
 
-	qmpcmd := []byte(fmt.Sprintf(`{"execute": "quit"}`))
+	qmpcmd := []byte(`{"execute": "quit"}`)
 	_, err = mon.Run(qmpcmd)
 	if err != nil {
 		return err

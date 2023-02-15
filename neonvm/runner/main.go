@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"net"
@@ -79,7 +78,7 @@ func getResolvConf() (*resolveFile, error) {
 
 // GetSpecific returns the contents of the user specified resolv.conf file and its hash
 func getSpecific(path string) (*resolveFile, error) {
-	resolv, err := ioutil.ReadFile(path)
+	resolv, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +140,7 @@ func getLines(input []byte, commentMarker []byte) [][]byte {
 
 func resolvePath() string {
 	detectSystemdResolvConfOnce.Do(func() {
-		candidateResolvConf, err := ioutil.ReadFile(resolveDefaultPath)
+		candidateResolvConf, err := os.ReadFile(resolveDefaultPath)
 		if err != nil {
 			// silencing error as it will resurface at next calls trying to read defaultPath
 			return
@@ -379,10 +378,8 @@ func checkKVM() bool {
 		return false
 	}
 	mode := info.Mode()
-	if mode&os.ModeCharDevice == os.ModeCharDevice {
-		return true
-	}
-	return false
+
+	return mode&os.ModeCharDevice == os.ModeCharDevice
 }
 
 func main() {
@@ -552,6 +549,7 @@ func calcIPs(cidr string) (net.IP, net.IP, net.IPMask, error) {
 	return ip1, ip2, mask, nil
 }
 
+//lint:ignore U1000 the function is not in use right now, but it's good to have for the future
 func execBg(name string, arg ...string) error {
 	cmd := exec.Command(name, arg...)
 	cmd.Stdout = os.Stdout

@@ -19,6 +19,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -314,10 +315,10 @@ func deleteLinkAndAddr(name, ipam string) error {
 }
 
 func waitForGrpc(ctx context.Context, addr string) {
-	dialAddr := strings.TrimLeft(addr, "http://")
+	dialAddr := strings.TrimPrefix(addr, "http://")
 	dialTimeout := 5 * time.Second
 	dialOpts := []grpc.DialOption{
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
 	}
 	log.Printf("check grpc connection to service %s", dialAddr)
