@@ -4,9 +4,10 @@ package informant
 
 import (
 	"context"
-	// "database/sql" //nolint:gocritic
-	// _ "github.com/lib/pq"
+	"database/sql"
 	"fmt"
+
+	_ "github.com/lib/pq"
 
 	klog "k8s.io/klog/v2"
 
@@ -121,50 +122,37 @@ func (c *FileCacheConfig) CalculateCacheSize(total uint64) uint64 {
 	return byteSize / mib * mib
 }
 
-// DO NOT MERGE: this implementation is just for immediate testing, without the file cache
-// available on staging.
+// GetFileCacheSize returns the current size of the file cache, in bytes
 func (s *FileCacheState) GetFileCacheSize(ctx context.Context) (uint64, error) {
-	return 9999, nil
-}
+	db, err := sql.Open("postgres", s.connStr)
+	if err != nil {
+		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
+	}
 
-// DO NOT MERGE: Same as above.
-func (s *FileCacheState) SetFileCacheSize(ctx context.Context, sizeInBytes uint64) (uint64, error) {
-	sizeInMB := sizeInBytes / (1 << 20)
-	klog.Infof("Updating file cache size to %d MiB", sizeInMB)
+	var sizeInMB uint64
+	if err := db.QueryRowContext(ctx, "SHOW neon.file_cache_size_limit").Scan(&sizeInMB); err != nil {
+		return 0, fmt.Errorf("Error querying file cache size: %w", err)
+	}
+
+	// The file cache GUC variable is in MiB
 	return sizeInMB * (1 << 20), nil
 }
 
-// // GetFileCacheSize returns the current size of the file cache, in bytes
-// func (s *FileCacheState) GetFileCacheSize(ctx context.Context) (uint64, error) {
-// 	db, err := sql.Open("postgres", s.connStr)
-// 	if err != nil {
-// 		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
-// 	}
-//
-// 	var sizeInMB uint64
-// 	if err := db.QueryRowContext(ctx, "SHOW neon.file_cache_size_limit").Scan(&sizeInMB); err != nil {
-// 		return 0, fmt.Errorf("Error querying file cache size: %w", err)
-// 	}
-//
-// 	// The file cache GUC variable is in MiB
-// 	return sizeInMB * (1 << 20), nil
-// }
-//
-// // SetFileCacheSize sets the size of the file cache, returning the actual size it was set to
-// func (s *FileCacheState) SetFileCacheSize(ctx context.Context, sizeInBytes uint64) (uint64, error) {
-// 	db, err := sql.Open("postgres", s.connStr)
-// 	if err != nil {
-// 		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
-// 	}
-//
-// 	sizeInMB := sizeInBytes / (1 << 20)
-//  klog.Infof("Updating file cache size to %d MiB", sizeInMB)
-//
-// 	// TODO: query should cap the value with size neon.max_file_cache_size, then return the actual
-// 	// size we set it to.
-// 	if _, err := db.ExecContext(ctx, "SET neon.file_cache_size_limit = $1", sizeInMB); err != nil {
-// 		return 0, fmt.Errorf("Error setting file cache size: %w", err)
-// 	}
-//
-// 	return sizeInMB * (1 << 20), nil
-// }
+// SetFileCacheSize sets the size of the file cache, returning the actual size it was set to
+func (s *FileCacheState) SetFileCacheSize(ctx context.Context, sizeInBytes uint64) (uint64, error) {
+	db, err := sql.Open("postgres", s.connStr)
+	if err != nil {
+		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
+	}
+
+	sizeInMB := sizeInBytes / (1 << 20)
+	klog.Infof("Updating file cache size to %d MiB", sizeInMB)
+
+	// TODO: query should cap the value with size neon.max_file_cache_size, then return the actual
+	// size we set it to.
+	if _, err := db.ExecContext(ctx, "SET neon.file_cache_size_limit = $1", sizeInMB); err != nil {
+		return 0, fmt.Errorf("Error setting file cache size: %w", err)
+	}
+
+	return sizeInMB * (1 << 20), nil
+}
