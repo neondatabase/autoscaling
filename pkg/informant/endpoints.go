@@ -377,7 +377,7 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 		fileCacheMemUsage = actualUsage
 	}
 
-	if s.cgroup == nil {
+	if s.cgroup != nil {
 		newMemHigh := s.cgroup.config.calculateMemoryHighValue(usableSystemMemory - fileCacheMemUsage)
 		klog.Infof(
 			"Updating memory.high to %g MiB, of new total %g MiB",

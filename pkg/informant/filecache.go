@@ -105,7 +105,7 @@ func (c *FileCacheConfig) Validate() error {
 func (c *FileCacheConfig) CalculateCacheSize(total uint64) uint64 {
 	available := util.SaturatingSub(total, c.MinRemainingAfterCache)
 
-	if available <= c.MinRemainingAfterCache {
+	if available == 0 {
 		return 0
 	}
 

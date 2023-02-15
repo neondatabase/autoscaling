@@ -44,7 +44,7 @@ func main() {
 		var cleanupHooks []func()
 
 		if pgConnStr != invalidArgValue {
-			args = append(args, pgConnStr)
+			args = append(args, "-pgconnstr", pgConnStr)
 		}
 		if cgroupName != invalidArgValue {
 			args = append(args, "-cgroup", cgroupName)
