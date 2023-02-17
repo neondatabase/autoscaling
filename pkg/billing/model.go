@@ -17,7 +17,8 @@ type AbsoluteEvent struct {
 
 func (e *AbsoluteEvent) MarshalJSON() ([]byte, error) {
 	e.Type = "absolute"
-	return json.Marshal(e)
+	// note: if we don't dereference e, then we'll enter infinite recursion
+	return json.Marshal(*e)
 }
 
 type IncrementalEvent struct {
@@ -32,5 +33,6 @@ type IncrementalEvent struct {
 
 func (e *IncrementalEvent) MarshalJSON() ([]byte, error) {
 	e.Type = "incremental"
-	return json.Marshal(e)
+	// note: if we don't dereference e, then we'll enter infinite recursion
+	return json.Marshal(*e)
 }
