@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
+	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -105,5 +106,30 @@ func startPodWatcher(
 				}
 			},
 		},
+	)
+}
+
+func startVMWatcher(
+	ctx context.Context,
+	vmClient *vmclient.Clientset,
+	nodeName string,
+) (*util.WatchStore[vmapi.VirtualMachine], error) {
+	return util.Watch(
+		ctx,
+		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
+		util.WatchConfig{
+			LogName: "VMs",
+			// We want to be relatively snappy; don't wait for too long before retrying.
+			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 500, 1000),
+			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 500, 1000),
+		},
+		util.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
+			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
+		},
+		util.InitWatchModeDefer,
+		metav1.ListOptions{
+			FieldSelector: fmt.Sprintf("status.node=%s", nodeName),
+		},
+		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{},
 	)
 }
