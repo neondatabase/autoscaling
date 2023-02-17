@@ -64,6 +64,13 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+// PluginProtocolVersion is the current version of the agent<->scheduler plugin in use by this
+// autoscaler-agent.
+//
+// Currently, each autoscaler-agent supports only one version at a time. In the future, this may
+// change.
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+
 // Runner is per-VM Pod god object responsible for handling everything
 //
 // It primarily operates as a source of shared data for a number of long-running tasks. For
@@ -1322,9 +1329,10 @@ retry:
 			}
 
 			request := api.AgentRequest{
-				Pod:       r.podName,
-				Resources: target,
-				Metrics:   state.metrics, // FIXME: the metrics here *might* be a little out of date.
+				ProtoVersion: PluginProtocolVersion,
+				Pod:          r.podName,
+				Resources:    target,
+				Metrics:      state.metrics, // FIXME: the metrics here *might* be a little out of date.
 			}
 			response, err := sched.DoRequest(ctx, &request)
 			if err != nil {
@@ -1756,9 +1764,10 @@ func (s *Scheduler) Register(ctx context.Context, signalOk func()) error {
 	}
 
 	req := api.AgentRequest{
-		Pod:       s.runner.podName,
-		Resources: resources,
-		Metrics:   *metrics,
+		ProtoVersion: PluginProtocolVersion,
+		Pod:          s.runner.podName,
+		Resources:    resources,
+		Metrics:      *metrics,
 	}
 	if _, err := s.DoRequest(ctx, &req); err != nil {
 		return err
