@@ -68,6 +68,11 @@ func (v PluginProtoVersion) String() string {
 	}
 }
 
+// IsValid returns whether the protocol version is valid. The zero value is not valid.
+func (v PluginProtoVersion) IsValid() bool {
+	return uint(v) != 0
+}
+
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
 //
 // All AgentRequests expect a PluginResponse.

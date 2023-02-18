@@ -121,6 +121,9 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 		Max: MaxPluginProtocolVersion,
 	}
 
+	if !req.ProtoVersion.IsValid() {
+		return nil, 400, fmt.Errorf("Invalid protocol version %v", req.ProtoVersion)
+	}
 	reqProtoRange := req.ProtocolRange()
 	if _, ok := expectedProtoRange.LatestSharedVersion(reqProtoRange); !ok {
 		return nil, 400, fmt.Errorf(
