@@ -97,6 +97,7 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store *util.WatchStor
 	for _, vm := range store.Items() {
 		endpointID, ok := vm.Labels[EndpointLabel]
 		if !ok {
+			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
 			continue
 		}
 
