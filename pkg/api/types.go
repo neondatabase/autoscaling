@@ -42,8 +42,17 @@ const (
 	// PluginProtoV1_0 represents v1.0 of the agent<->scheduler plugin protocol - the initial
 	// version.
 	//
-	// Currently the latest version.
+	// Last used in release version <FIXME>
 	PluginProtoV1_0 PluginProtoVersion = iota + 1 // start from zero, for backwards compatibility with pre-versioned messages
+
+	// PluginProtoV1_1 represents v1.1 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v1.0:
+	//
+	// * Allows a nil value of the AgentRequest.Metrics field.
+	//
+	// Currently the latest version.
+	PluginProtoV1_1
 
 	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
 	// protocol
@@ -73,6 +82,14 @@ func (v PluginProtoVersion) IsValid() bool {
 	return uint(v) != 0
 }
 
+// AllowsNilMetrics returns whether this version of the protocol allows the autoscaler-agent to send
+// a nil metrics field.
+//
+// This is true for version v1.1 and greater.
+func (v PluginProtoVersion) AllowsNilMetrics() bool {
+	return v >= PluginProtoV1_1
+}
+
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
 //
 // All AgentRequests expect a PluginResponse.
@@ -93,7 +110,9 @@ type AgentRequest struct {
 	Resources Resources `json:"resources"`
 	// Metrics provides information about the VM's current load, so that the scheduler may
 	// prioritize which pods to migrate
-	Metrics Metrics `json:"metrics"`
+	//
+	// In some protocol versions, this field may be nil.
+	Metrics *Metrics `json:"metrics"`
 }
 
 // ProtocolRange returns a VersionRange exactly equal to r.ProtoVersion
