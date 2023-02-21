@@ -53,12 +53,8 @@ func (r MainRunner) Run() error {
 	}
 
 	if r.Config.Billing != nil {
-		go func() {
-			if err := RunBillingMetricsColllector(ctx, r.Config.Billing, vmWatchStore); err != nil {
-				// FIXME: we shoudln't panic here...
-				panic(fmt.Errorf("Billing metrics collector returned error: %w", err))
-			}
-		}()
+		// TODO: catch panics here, bubble those into a clean-ish shutdown.
+		go RunBillingMetricsColllector(ctx, r.Config.Billing, vmWatchStore)
 	}
 
 	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)

@@ -2,13 +2,13 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
 
@@ -24,9 +24,10 @@ type BillingConfig struct {
 }
 
 type billingMetricsState struct {
-	historical map[billingMetricsKey]vmMetricsHistory
-	present    map[billingMetricsKey]vmMetrics
-	lastTime   *time.Time
+	historical      map[billingMetricsKey]vmMetricsHistory
+	present         map[billingMetricsKey]vmMetricsInstant
+	lastCollectTime *time.Time
+	pushWindowStart time.Time
 }
 
 type billingMetricsKey struct {
@@ -35,17 +36,26 @@ type billingMetricsKey struct {
 }
 
 type vmMetricsHistory struct {
-	slices []metricsTimeSlice
+	lastSlice *metricsTimeSlice
+	total     vmMetricsSeconds
 }
 
 type metricsTimeSlice struct {
-	metrics   vmMetrics
+	metrics   vmMetricsInstant
 	startTime time.Time
 	endTime   time.Time
 }
 
-type vmMetrics struct {
+type vmMetricsInstant struct {
+	// cpu stores the cpu allocation at a particular instant.
 	cpu uint16
+}
+
+// vmMetricsSeconds is like vmMetrics, but the values cover the allocation over time
+type vmMetricsSeconds struct {
+	// cpu stores the cpu seconds allocated to the VM, roughly equivalent to the integral of CPU
+	// usage over time.
+	cpu uint32
 }
 
 const (
@@ -53,7 +63,7 @@ const (
 	EndpointLabel string = "neon/endpoint-id"
 )
 
-func RunBillingMetricsColllector(backgroundCtx context.Context, conf *BillingConfig, store *util.WatchStore[vmapi.VirtualMachine]) error {
+func RunBillingMetricsColllector(backgroundCtx context.Context, conf *BillingConfig, store *util.WatchStore[vmapi.VirtualMachine]) {
 	client := billing.NewClient(conf.URL, http.DefaultClient)
 
 	collectTicker := time.NewTicker(time.Second * time.Duration(conf.CollectEverySeconds))
@@ -62,9 +72,10 @@ func RunBillingMetricsColllector(backgroundCtx context.Context, conf *BillingCon
 	defer pushTicker.Stop()
 
 	state := billingMetricsState{
-		historical: make(map[billingMetricsKey]vmMetricsHistory),
-		present:    make(map[billingMetricsKey]vmMetrics),
-		lastTime:   nil,
+		historical:      make(map[billingMetricsKey]vmMetricsHistory),
+		present:         make(map[billingMetricsKey]vmMetricsInstant),
+		lastCollectTime: nil,
+		pushWindowStart: time.Now(),
 	}
 
 	state.collect(conf, store)
@@ -74,17 +85,20 @@ func RunBillingMetricsColllector(backgroundCtx context.Context, conf *BillingCon
 		case <-collectTicker.C:
 			state.collect(conf, store)
 		case <-pushTicker.C:
-			batch := state.drainIntoBatch(&client)
+			batch := state.makeBatch(&client)
 			if err := pushBillingEvents(conf, batch); err != nil {
-				return fmt.Errorf("Error pushing billing events: %w", err)
+				klog.Errorf("Error pushing billing events: %s", err)
+				continue
 			}
+			// Sending was successful; reset state
+			state.clear()
 		case <-backgroundCtx.Done():
 			// If we're being shut down, push the latests events we have before returning.
-			batch := state.drainIntoBatch(&client)
+			batch := state.makeBatch(&client)
 			if err := pushBillingEvents(conf, batch); err != nil {
-				return fmt.Errorf("Error pushing billing events: %w", err)
+				klog.Errorf("Error pushing billing events: %s", err)
 			}
-			return nil
+			return
 		}
 	}
 }
@@ -93,7 +107,7 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store *util.WatchStor
 	now := time.Now()
 
 	old := s.present
-	s.present = make(map[billingMetricsKey]vmMetrics)
+	s.present = make(map[billingMetricsKey]vmMetricsInstant)
 	for _, vm := range store.Items() {
 		endpointID, ok := vm.Labels[EndpointLabel]
 		if !ok {
@@ -105,73 +119,128 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store *util.WatchStor
 			uid:        vm.UID,
 			endpointID: endpointID,
 		}
-		presentMetrics := vmMetrics{
+		presentMetrics := vmMetricsInstant{
 			cpu: uint16(*vm.Spec.Guest.CPUs.Use),
 		}
 		if oldMetrics, ok := old[key]; ok {
 			// The VM was present from s.lastTime to now. Add a time slice to its metrics history.
 			timeSlice := metricsTimeSlice{
-				metrics: vmMetrics{
+				metrics: vmMetricsInstant{
 					// strategically under-bill by assigning the minimum to the entire time slice.
 					cpu: util.Min(oldMetrics.cpu, presentMetrics.cpu),
 				},
 				// note: we know s.lastTime != nil because otherwise old would be empty.
-				startTime: *s.lastTime,
+				startTime: *s.lastCollectTime,
 				endTime:   now,
 			}
 
 			vmHistory, ok := s.historical[key]
 			if !ok {
-				vmHistory = vmMetricsHistory{slices: nil}
+				vmHistory = vmMetricsHistory{
+					lastSlice: nil,
+					total:     vmMetricsSeconds{cpu: 0},
+				}
 			}
-			vmHistory.slices = append(vmHistory.slices, timeSlice)
+			// append the slice, merging with the previous if the resource usage was the same
+			vmHistory.appendSlice(timeSlice)
 			s.historical[key] = vmHistory
 		}
 
 		s.present[key] = presentMetrics
 	}
 
-	s.lastTime = &now
+	s.lastCollectTime = &now
 }
 
-func (s *billingMetricsState) drainIntoBatch(client *billing.Client) *billing.Batch {
-	batch := client.NewBatch()
-
-	for key, history := range s.historical {
-		history.forEachMergedSlice(func(slice metricsTimeSlice) {
-			batch.AddIncrementalEvent(billing.IncrementalEvent{
-				IdempotencyKey: uuid.NewString(),
-				MetricName:     MetricNameCPU,
-				Type:           "", // set on JSON marshal
-				EndpointID:     key.endpointID,
-				StartTime:      slice.startTime,
-				StopTime:       slice.endTime,
-				Value:          int(slice.metrics.cpu),
-			})
-		})
-	}
-
-	s.historical = make(map[billingMetricsKey]vmMetricsHistory)
-	return batch
-}
-
-func (h vmMetricsHistory) forEachMergedSlice(process func(metricsTimeSlice)) {
-	if len(h.slices) == 0 {
+func (h *vmMetricsHistory) appendSlice(timeSlice metricsTimeSlice) {
+	// Try to extend the existing period of continuous usage
+	if h.lastSlice != nil && h.lastSlice.tryMerge(timeSlice) {
 		return
 	}
 
-	last := h.slices[0]
-	for _, slice := range h.slices[1:] {
-		if last.endTime == slice.startTime && last.metrics == slice.metrics {
-			last.endTime = slice.endTime
-		} else {
-			process(last)
-			last = slice
-		}
+	// Something's new. Push previous time slice, start new one:
+	h.finalizeCurrentTimeSlice()
+	h.lastSlice = &timeSlice
+}
 
+// finalizeCurrentTimeSlice pushes the current time slice onto h.total
+//
+// This ends up rounding down the total time spent on a given time slice, so it's best to defer
+// calling this function until it's actually needed.
+func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
+	if h.lastSlice == nil {
+		return
 	}
 
-	process(last)
+	duration := h.lastSlice.endTime.Sub(h.lastSlice.startTime).Nanoseconds()
+	if duration < 0 {
+		panic("negative duration")
+	}
+
+	// note: we could've used Duration.Seconds() above, but that gives us a float. We absolutely do
+	// not want to be doing billing math with floats.
+	//
+	// TODO: This approach here explicitly rounds us down - otherwise rounding is actually quite
+	// tricky, and it's safer to round down than up. In the future, we might internally store things
+	// as milliseconds or something, and round down to the nearest "CPU second" when sending the
+	// batch, in order to be more accurate. There's a variety of options.
+	seconds := duration / time.Second.Nanoseconds()
+	metricsSeconds := vmMetricsSeconds{
+		cpu: uint32(h.lastSlice.metrics.cpu) * uint32(seconds),
+	}
+	h.total.cpu += metricsSeconds.cpu
+
+	h.lastSlice = nil
+}
+
+// tryMerge attempts to merge s and next (assuming that next is after s), returning true only if
+// that merging was successful.
+//
+// Merging may fail if s.endTime != next.startTime or s.metrics != next.metrics.
+func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
+	merged := s.endTime == next.startTime && s.metrics == next.metrics
+	if merged {
+		s.endTime = next.endTime
+	}
+	return merged
+}
+
+// clear updates the state to remove any previously un-pushed history
+func (s *billingMetricsState) clear() {
+	s.historical = make(map[billingMetricsKey]vmMetricsHistory)
+}
+
+// makeBatch creates a billing.Batch for the currently stored history, without modfiying any of it
+func (s *billingMetricsState) makeBatch(client *billing.Client) *billing.Batch {
+	batch := client.NewBatch()
+
+	now := time.Now()
+
+	for key, history := range s.historical {
+		batch.AddIncrementalEvent(billing.IncrementalEvent{
+			IdempotencyKey: uuid.NewString(),
+			MetricName:     MetricNameCPU,
+			Type:           "", // set on JSON marshal
+			EndpointID:     key.endpointID,
+			// TODO: maybe we should store start/stop time in the vmMetricsHistory object itself?
+			// That way we can be aligned to collection, rather than pushing.
+			StartTime: s.pushWindowStart,
+			StopTime:  now,
+			Value:     history.totalCPUSeconds(),
+		})
+	}
+
+	s.pushWindowStart = now
+	return batch
+}
+
+// totalCPUSeconds returns the integer CPU seconds corresponding to the allocation provided to the VM over
+// the timespan recorded in this vmMetricsHistory.
+func (h vmMetricsHistory) totalCPUSeconds() int {
+	// note: finalizeCurrentTimeSlice does not modify data behind any pointers in h, so we can
+	// safely call this without worrying about messing up our ongoing state.
+	h.finalizeCurrentTimeSlice()
+	return int(h.total.cpu)
 }
 
 func pushBillingEvents(conf *BillingConfig, batch *billing.Batch) error {
