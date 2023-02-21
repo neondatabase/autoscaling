@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/containerd/cgroups/v3/cgroup2"
+	"github.com/tychoish/fun/srv"
 
 	klog "k8s.io/klog/v2"
 
@@ -23,6 +23,24 @@ import (
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
+
+	orca := &srv.Orchestrator{}
+	ctx = srv.WithContext(ctx, orca)
+	svc := orca.Service()
+	if err := svc.Start(ctx); err != nil {
+		klog.Fatal("starting background service orchestrator", err)
+	}
+
+	var shutdown bool
+	defer func() {
+		if shutdown {
+			return
+		}
+
+		if err := svc.Wait(); err != nil {
+			klog.Error("shutting down service", err)
+		}
+	}()
 
 	buildInfo := util.GetBuildInfo()
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
@@ -60,7 +78,7 @@ func main() {
 			})
 		}
 
-		runRestartOnFailure(args, cleanupHooks)
+		runRestartOnFailure(ctx, args, cleanupHooks)
 		return
 	}
 
@@ -92,13 +110,13 @@ func main() {
 	util.AddHandler("", mux, "/upscale", http.MethodPut, "RawResources", state.NotifyUpscale)
 	util.AddHandler("", mux, "/unregister", http.MethodDelete, "AgentDesc", state.UnregisterAgent)
 
-	server := http.Server{Addr: "0.0.0.0:10301", Handler: mux}
-	klog.Infof("Starting server at %s", server.Addr)
-	err = server.ListenAndServe()
-	if errors.Is(err, http.ErrServerClosed) {
-		klog.Infof("Server ended.")
-	} else {
-		klog.Fatalf("Server failed: %s", err)
+	addr := "0.0.0.0:10301"
+	klog.Infof("Starting server at %s", addr)
+	orca.Add(srv.HTTP("informant-api", 5*time.Second, &http.Server{Addr: addr, Handler: mux}))
+
+	shutdown = true // skip the wait in the defer
+	if err := svc.Wait(); err != nil {
+		klog.Fatal("shutting down service:", err)
 	}
 }
 
