@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -48,8 +50,11 @@ func main() {
 		VMClient:   vmClient,
 	}
 
-	err = runner.Run()
-	if err != nil {
+	// TODO: add a signal handler here?
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err = runner.Run(ctx); err != nil {
 		klog.Fatalf("Main loop failed: %s", err)
 	}
 	klog.Info("Main loop returned without issue. Exiting.")

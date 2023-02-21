@@ -57,7 +57,7 @@ func (s *agentState) Stop() {
 	}
 }
 
-func (s *agentState) handleEvent(event podEvent) {
+func (s *agentState) handleEvent(ctx context.Context, event podEvent) {
 	klog.Infof("Handling pod event %+v", event)
 
 	state, hasPod := s.pods[event.podName]
@@ -77,7 +77,7 @@ func (s *agentState) handleEvent(event podEvent) {
 			return
 		}
 
-		runnerCtx, cancelRunnerContext := context.WithCancel(context.TODO())
+		runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
 
 		status := &podStatus{
 			lock:     sync.Mutex{},
