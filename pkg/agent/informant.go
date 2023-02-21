@@ -199,16 +199,26 @@ func NewInformantServer(
 
 		// we need to spawn these in separate threads so the caller doesn't block while holding
 		// runner.lock
-		runner.spawnBackgroundWorker(ctx, shutdownName, func(c context.Context) {
-			if err := httpServer.Shutdown(c); err != nil {
+		runner.spawnBackgroundWorker(ctx, shutdownName, func(context.Context) {
+			// we want shutdown to (potentially) live longer than the request which
+			// made it, but having a timeout is still good.
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+
+			if err := httpServer.Shutdown(ctx); err != nil {
 				runner.logger.Warningf("Error shutting down InformantServer: %s", err)
 			}
 		})
 		if server.madeContact {
 			// only unregister the server if we could have plausibly contacted the informant
 			unregisterName := fmt.Sprintf("InformantServer unregister (%s)", server.desc.AgentID)
-			runner.spawnBackgroundWorker(ctx, unregisterName, func(c context.Context) {
-				if err := server.unregisterFromInformant(c); err != nil {
+			runner.spawnBackgroundWorker(ctx, unregisterName, func(context.Context) {
+				// we want shutdown to (potentially) live longer than the request which
+				// made it, but having a timeout is still good.
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				if err := server.unregisterFromInformant(ctx); err != nil {
 					runner.logger.Warningf("Error unregistering %s: %s", server.desc.AgentID, err)
 				}
 			})
