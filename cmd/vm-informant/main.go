@@ -60,7 +60,7 @@ func main() {
 			})
 		}
 
-		runRestartOnFailure(args, cleanupHooks)
+		runRestartOnFailure(ctx, args, cleanupHooks)
 		return
 	}
 
