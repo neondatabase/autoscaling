@@ -23,22 +23,16 @@ import (
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
+	ctx = srv.SetShutdown(ctx)      // allows workers to cause a shutdown
+	ctx = srv.WithOrchestrator(ctx) // creates and starts an orchestrator
+	ctx = srv.SetBaseContext(ctx)   // sets a context for starting async work in request scopes
 
-	orca := &srv.Orchestrator{}
-	ctx = srv.WithContext(ctx, orca)
+	orca := srv.GetOrchestrator(ctx)
 	svc := orca.Service()
-	if err := svc.Start(ctx); err != nil {
-		klog.Fatal("starting background service orchestrator", err)
-	}
 
-	var shutdown bool
 	defer func() {
-		if shutdown {
-			return
-		}
-
-		if err := svc.Wait(); err != nil {
-			klog.Error("shutting down service", err)
+		if err := orca.Service().Wait(); err != nil {
+			klog.Fatal("shutting down service", err)
 		}
 	}()
 
@@ -56,11 +50,11 @@ func main() {
 	var autoRestart bool
 	flag.StringVar(&cgroupName, "cgroup", noCgroup, "Sets the cgroup to monitor (optional)")
 	flag.BoolVar(&autoRestart, "auto-restart", false, "Automatically cleanup and restart on failure or exit")
-
 	flag.Parse()
 
 	// If we were asked to restart on failure, handle that separately:
 	if autoRestart {
+		// TODO: implement this as a fun/srv.Service.
 		var args []string
 		var cleanupHooks []func()
 		if cgroupName != noCgroup {
@@ -79,6 +73,10 @@ func main() {
 		}
 
 		runRestartOnFailure(ctx, args, cleanupHooks)
+		// this cancels the context
+		srv.GetShutdown(ctx)()
+		// this drops to the defer that waits for all services to shutdown
+		// will run now.
 		return
 	}
 
@@ -112,12 +110,13 @@ func main() {
 
 	addr := "0.0.0.0:10301"
 	klog.Infof("Starting server at %s", addr)
+
+	// we create an http service and add it to the orchestrator,
+	// which will start it and manage it's lifecycle.
 	orca.Add(srv.HTTP("informant-api", 5*time.Second, &http.Server{Addr: addr, Handler: mux}))
 
-	shutdown = true // skip the wait in the defer
-	if err := svc.Wait(); err != nil {
-		klog.Fatal("shutting down service:", err)
-	}
+	// we drop to the defers now, which will block until the signal
+	// handler is called.
 }
 
 const minWaitDuration = 5 * time.Second
