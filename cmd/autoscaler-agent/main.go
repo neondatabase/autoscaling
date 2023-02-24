@@ -50,7 +50,7 @@ func main() {
 		VMClient:   vmClient,
 	}
 
-	// TODO: add a signal handler here?
+	// TODO: add a signal handler here
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
