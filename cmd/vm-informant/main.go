@@ -176,12 +176,12 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 
 		select {
 		case <-ctx.Done():
-			klog.Infof("vm0informant: received signal")
+			klog.Infof("vm-informant restart loop: received termination signal")
 			return
 		case <-sig:
 			dur := time.Since(startTime)
 			if dur < minWaitDuration {
-				// drain the timer before resetting it:
+				// drain the timer before resetting it, required by Timer.Reset:
 				if !timer.Stop() {
 					<-timer.C
 				}
@@ -190,7 +190,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 				klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minWaitDuration)
 				select {
 				case <-ctx.Done():
-					klog.Infof("vm0informant: received signal")
+					klog.Infof("vm-informant restart loop: received termination signal")
 					return
 				case <-timer.C:
 					continue
