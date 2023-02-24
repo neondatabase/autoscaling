@@ -117,44 +117,56 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 
 	for {
 		startTime := time.Now()
-		sig := make(chan struct{})
+		processedSignal := make(chan struct{})
 		var exitMode string
 
 		func() {
+			defer close(processedSignal)
 			pctx, pcancel := context.WithCancel(context.Background())
 			defer pcancel()
 
 			cmd := exec.Command(selfPath, args...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			go func() {
-				defer close(sig)
-				select {
-				case <-pctx.Done():
-					return
-				case <-ctx.Done():
-					if cmd.Process == nil || cmd.ProcessState == nil {
-						return
-					}
-					if cmd.ProcessState.ExitCode() >= 0 {
-						return
-					}
-					var pid int
-					if cmd.Process != nil {
-						pid = cmd.Process.Pid
-					}
-					if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-						klog.Infof("could not signal informant process %d: %v", pid, err)
-					}
-				}
-			}()
 
-			err := cmd.Run()
+			err := cmd.Start()
+
+			if err == nil {
+				go func() {
+					select {
+					case <-pctx.Done():
+						return
+					case <-ctx.Done():
+						if cmd.Process == nil || cmd.ProcessState == nil {
+							return
+						}
+						if cmd.ProcessState.ExitCode() >= 0 {
+							return
+						}
+						var pid int
+						if cmd.Process != nil {
+							pid = cmd.Process.Pid
+						}
+						if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+							klog.Infof("could not signal informant process %d: %v", pid, err)
+						}
+					}
+				}()
+
+				// this is blocking, but we should
+				// have killed the process in the
+				// wait goroutine, or the process would
+				// return normally.
+				err = cmd.Wait()
+				// stop the goroutine above, as the
+				// process has already returned.
+				pcancel()
+			}
 
 			if err != nil {
 				// lint note: the linter's worried about wrapped errors being incorrect with switch, but
 				// this is cleaner than the alternative (via errors.As) and it's still correct because
-				// exec.Command.Run() explicitly mentions ExitError.
+				// exec.Command.Wait() explicitly mentions ExitError.
 				switch err.(type) { //nolint:errorlint // see above.
 				case *exec.ExitError:
 					exitMode = "failed"
@@ -168,7 +180,6 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 				klog.Warningf("vm-informant exited without error. This should not happen.")
 			}
 
-			pcancel()
 			for _, h := range cleanupHooks {
 				h()
 			}
@@ -178,7 +189,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 		case <-ctx.Done():
 			klog.Infof("vm-informant restart loop: received termination signal")
 			return
-		case <-sig:
+		case <-processedSignal:
 			dur := time.Since(startTime)
 			if dur < minWaitDuration {
 				// drain the timer before resetting it, required by Timer.Reset:
