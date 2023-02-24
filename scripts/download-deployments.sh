@@ -8,6 +8,8 @@ set -eu -o pipefail
 cd -P -- "$(dirname -- "$0")"
 cd .. # but all of the references are to things in the upper directory
 
+source './scripts-common.sh'
+
 echo "downloading 'deploy/flannel.yaml'..."
 curl -sS https://raw.githubusercontent.com/flannel-io/flannel/v0.19.2/Documentation/kube-flannel.yml \
     -o deploy/flannel.yaml
@@ -18,5 +20,5 @@ echo "downloading 'multus-daemonset.yaml'..."
 curl -sS https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml \
     -o deploy/multus-daemonset.yaml
 echo "downloading 'neonvm.yaml'..."
-curl -sSL https://github.com/neondatabase/neonvm/releases/download/v0.4.6/neonvm.yaml \
+curl -sSL https://github.com/neondatabase/neonvm/releases/download/$(neonvm_version)/neonvm.yaml \
     -o deploy/neonvm.yaml
