@@ -32,7 +32,7 @@ func main() {
 
 	defer func() {
 		if err := orca.Service().Wait(); err != nil {
-			klog.Fatal("shutting down service", err)
+			klog.Fatal("failed to shut down service", err)
 		}
 	}()
 
@@ -112,7 +112,7 @@ func main() {
 	klog.Infof("Starting server at %s", addr)
 
 	// we create an http service and add it to the orchestrator,
-	// which will start it and manage it's lifecycle.
+	// which will start it and manage its lifecycle.
 	orca.Add(srv.HTTP("informant-api", 5*time.Second, &http.Server{Addr: addr, Handler: mux}))
 
 	// we drop to the defers now, which will block until the signal
