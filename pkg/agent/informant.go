@@ -89,7 +89,7 @@ type InformantServer struct {
 	// exit signals that the server should shut down, and sets exitStatus to status.
 	//
 	// This function MUST be called while holding runner.lock.
-	exit func(ctx context.Context, status InformantServerExitStatus)
+	exit func(status InformantServerExitStatus)
 }
 
 type InformantServerMode string
@@ -180,7 +180,7 @@ func NewInformantServer(
 	backgroundCtx, cancelBackground := context.WithCancel(ctx)
 
 	// note: docs for server.exit guarantee this function is called while holding runner.lock.
-	server.exit = func(ctx context.Context, status InformantServerExitStatus) {
+	server.exit = func(status InformantServerExitStatus) {
 		sendFinished.Send()
 		cancelBackground()
 
@@ -392,7 +392,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 			// We shouldn't *assume* that restarting will actually fix it though, so we'll still set
 			// RetryShouldFix = false.
 			if 400 <= statusCode && statusCode <= 599 {
-				s.exit(ctx, InformantServerExitStatus{
+				s.exit(InformantServerExitStatus{
 					Err:            err,
 					RetryShouldFix: false,
 				})
@@ -451,7 +451,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 			err := errors.New("Protocol violation: Informant responded to /register with 200 without requesting /id")
 			s.setLastInformantError(err, true)
 			s.runner.logger.Errorf("%s", err)
-			s.exit(ctx, InformantServerExitStatus{
+			s.exit(InformantServerExitStatus{
 				Err:            err,
 				RetryShouldFix: false,
 			})
@@ -672,7 +672,7 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 		s.runner.logger.Warningf("%s", internalErr)
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
-		s.exit(ctx, InformantServerExitStatus{
+		s.exit(InformantServerExitStatus{
 			Err:            internalErr,
 			RetryShouldFix: true,
 		})
@@ -683,7 +683,7 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 		s.runner.logger.Warningf("%s", internalErr)
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
-		s.exit(ctx, InformantServerExitStatus{
+		s.exit(InformantServerExitStatus{
 			Err:            internalErr,
 			RetryShouldFix: true,
 		})
@@ -727,7 +727,7 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 		s.runner.logger.Warningf("%s", internalErr)
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
-		s.exit(ctx, InformantServerExitStatus{
+		s.exit(InformantServerExitStatus{
 			Err:            internalErr,
 			RetryShouldFix: true,
 		})
@@ -738,7 +738,7 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 		s.runner.logger.Warningf("%s", internalErr)
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
-		s.exit(ctx, InformantServerExitStatus{
+		s.exit(InformantServerExitStatus{
 			Err:            internalErr,
 			RetryShouldFix: true,
 		})
@@ -800,7 +800,7 @@ func (s *InformantServer) handleTryUpscale(
 		s.runner.logger.Warningf("%s", internalErr)
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
-		s.exit(ctx, InformantServerExitStatus{
+		s.exit(InformantServerExitStatus{
 			Err:            internalErr,
 			RetryShouldFix: true,
 		})
@@ -811,7 +811,7 @@ func (s *InformantServer) handleTryUpscale(
 		s.runner.logger.Warningf("%s", internalErr)
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
-		s.exit(ctx, InformantServerExitStatus{
+		s.exit(InformantServerExitStatus{
 			Err:            internalErr,
 			RetryShouldFix: true,
 		})
@@ -854,7 +854,7 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 			s.setLastInformantError(fmt.Errorf("Downscale request failed: %w", err), true)
 
 			if 400 <= statusCode && statusCode <= 599 {
-				s.exit(ctx, InformantServerExitStatus{
+				s.exit(InformantServerExitStatus{
 					Err:            err,
 					RetryShouldFix: statusCode == 404,
 				})
@@ -896,7 +896,7 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 			s.setLastInformantError(fmt.Errorf("Downscale request failed: %w", err), true)
 
 			if 400 <= statusCode && statusCode <= 599 {
-				s.exit(ctx, InformantServerExitStatus{
+				s.exit(InformantServerExitStatus{
 					Err:            err,
 					RetryShouldFix: statusCode == 404,
 				})
