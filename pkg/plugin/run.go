@@ -31,7 +31,6 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 		defer r.Body.Close()
 		var req api.AgentRequest
 		jsonDecoder := json.NewDecoder(io.LimitReader(r.Body, MaxHTTPBodySize))
-		jsonDecoder.DisallowUnknownFields()
 		if err := jsonDecoder.Decode(&req); err != nil {
 			klog.Warningf("[autoscale-enforcer] Received bad JSON request: %s", err)
 			w.Header().Add("Content-Type", ContentTypeError)
