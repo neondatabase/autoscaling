@@ -113,7 +113,9 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		}
 	}()
 
-	go p.runPermitHandler(ctx)
+	if err := p.startPermitHandler(ctx); err != nil {
+		return nil, fmt.Errorf("permit handler: %w", err)
+	}
 
 	// Periodically check that we're not deadlocked
 	go func() {
