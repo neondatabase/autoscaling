@@ -9,10 +9,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tychoish/fun/srv"
+
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/tychoish/fun/srv"
 )
 
 var MaxHTTPBodySize int64 = 1 << 10 // 1 KiB

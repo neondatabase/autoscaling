@@ -6,10 +6,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/tychoish/fun/srv"
+
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
 
 	"github.com/neondatabase/autoscaling/pkg/plugin"
-	"github.com/tychoish/fun/srv"
 )
 
 // all of the juicy bits are defined in pkg/plugin/
