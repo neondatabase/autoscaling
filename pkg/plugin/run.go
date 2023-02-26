@@ -18,6 +18,14 @@ var MaxHTTPBodySize int64 = 1 << 10 // 1 KiB
 var ContentTypeJSON string = "application/json"
 var ContentTypeError string = "text/plain"
 
+// The scheduler plugin currently supports v1.0 of the agent<->scheduler plugin protoco.
+//
+// If you update either of these values, make sure to also update VERSIONING.md.
+const (
+	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+)
+
 // runPermitHandler runs the server for handling each resourceRequest from a pod
 func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 	mux := http.NewServeMux()
@@ -107,6 +115,22 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 
 // Returns body (if successful), status code, error (if unsuccessful)
 func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.PluginResponse, int, error) {
+	// Before doing anything, check that the version is within the range we're expecting.
+	expectedProtoRange := api.VersionRange[api.PluginProtoVersion]{
+		Min: MinPluginProtocolVersion,
+		Max: MaxPluginProtocolVersion,
+	}
+
+	if !req.ProtoVersion.IsValid() {
+		return nil, 400, fmt.Errorf("Invalid protocol version %v", req.ProtoVersion)
+	}
+	reqProtoRange := req.ProtocolRange()
+	if _, ok := expectedProtoRange.LatestSharedVersion(reqProtoRange); !ok {
+		return nil, 400, fmt.Errorf(
+			"Protocol version mismatch: Need %v but got %v", expectedProtoRange, reqProtoRange,
+		)
+	}
+
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
