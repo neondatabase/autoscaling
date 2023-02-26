@@ -14,6 +14,7 @@ commit in this repository, possibly unreleased.
 | Release | autoscaler-agent | VM informant |
 |---------|------------------|--------------|
 | _Current_ | v1.0 - v1.1 | v1.1 only |
+| v0.1.7 | v1.0 - v1.1 | v1.1 only |
 | v0.1.6 | v1.0 - v1.1 | v1.1 only |
 | v0.1.5 | v1.0 - v1.1 | v1.1 only |
 | v0.1.4 | **v1.0 - v1.1** | **v1.1** only |
