@@ -109,6 +109,7 @@ func startPodWatcher(
 	)
 }
 
+// note: unlike startPodWatcher, we aren't able to use a field selector on VM status.node (currently; NeonVM v0.4.6)
 func startVMWatcher(
 	ctx context.Context,
 	vmClient *vmclient.Clientset,
@@ -127,9 +128,7 @@ func startVMWatcher(
 			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
 		},
 		util.InitWatchModeDefer,
-		metav1.ListOptions{
-			FieldSelector: fmt.Sprintf("status.node=%s", nodeName),
-		},
+		metav1.ListOptions{},
 		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{},
 	)
 }

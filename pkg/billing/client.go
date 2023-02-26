@@ -23,6 +23,11 @@ type Batch struct {
 	events []json.Marshaler
 }
 
+// Count returns the number of events in the batch
+func (b *Batch) Count() int {
+	return len(b.events)
+}
+
 func (b *Batch) AddAbsoluteEvent(e AbsoluteEvent) {
 	b.events = append(b.events, &e)
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 
 type BillingConfig struct {
 	URL                 string `json:"url"`
+	CPUMetricName       string `json:"cpuMetricName"`
 	CollectEverySeconds uint   `json:"collectEverySeconds"`
 	PushEverySeconds    uint   `json:"pushEverySeconds"`
 	PushTimeoutSeconds  uint   `json:"pushTimeoutSeconds"`
@@ -53,21 +55,27 @@ type vmMetricsInstant struct {
 
 // vmMetricsSeconds is like vmMetrics, but the values cover the allocation over time
 type vmMetricsSeconds struct {
-	// cpu stores the cpu seconds allocated to the VM, roughly equivalent to the integral of CPU
+	// cpu stores the CPU seconds allocated to the VM, roughly equivalent to the integral of CPU
 	// usage over time.
 	cpu uint32
 }
 
 const (
-	MetricNameCPU string = "cpu"
 	EndpointLabel string = "neon/endpoint-id"
 )
 
-func RunBillingMetricsColllector(backgroundCtx context.Context, conf *BillingConfig, store *util.WatchStore[vmapi.VirtualMachine]) {
+func RunBillingMetricsColllector(
+	backgroundCtx context.Context,
+	conf *BillingConfig,
+	targetNode string,
+	store *util.WatchStore[vmapi.VirtualMachine],
+) {
 	client := billing.NewClient(conf.URL, http.DefaultClient)
 
 	collectTicker := time.NewTicker(time.Second * time.Duration(conf.CollectEverySeconds))
 	defer collectTicker.Stop()
+	// Offset by half a second, so it's a bit more deterministic.
+	time.Sleep(500 * time.Millisecond)
 	pushTicker := time.NewTicker(time.Second * time.Duration(conf.PushEverySeconds))
 	defer pushTicker.Stop()
 
@@ -78,23 +86,29 @@ func RunBillingMetricsColllector(backgroundCtx context.Context, conf *BillingCon
 		pushWindowStart: time.Now(),
 	}
 
-	state.collect(conf, store)
+	state.collect(conf, targetNode, store)
+	batch := client.NewBatch()
 
 	for {
 		select {
 		case <-collectTicker.C:
-			state.collect(conf, store)
+			klog.Infof("Collecting billing state")
+			state.collect(conf, targetNode, store)
 		case <-pushTicker.C:
-			batch := state.makeBatch(&client)
+			klog.Infof("Creating billing batch")
+			state.drainAppendToBatch(conf, batch)
+			klog.Infof("Pushing billing events (count = %d)", batch.Count())
 			if err := pushBillingEvents(conf, batch); err != nil {
 				klog.Errorf("Error pushing billing events: %s", err)
 				continue
 			}
-			// Sending was successful; reset state
-			state.clear()
+			// Sending was successful; clear the batch.
+			batch = client.NewBatch()
 		case <-backgroundCtx.Done():
 			// If we're being shut down, push the latests events we have before returning.
-			batch := state.makeBatch(&client)
+			klog.Infof("Creating final billing batch")
+			state.drainAppendToBatch(conf, batch)
+			klog.Infof("Pushing final billing events (count = %d)", batch.Count())
 			if err := pushBillingEvents(conf, batch); err != nil {
 				klog.Errorf("Error pushing billing events: %s", err)
 			}
@@ -103,7 +117,7 @@ func RunBillingMetricsColllector(backgroundCtx context.Context, conf *BillingCon
 	}
 }
 
-func (s *billingMetricsState) collect(conf *BillingConfig, store *util.WatchStore[vmapi.VirtualMachine]) {
+func (s *billingMetricsState) collect(conf *BillingConfig, targetNode string, store *util.WatchStore[vmapi.VirtualMachine]) {
 	now := time.Now()
 
 	old := s.present
@@ -172,21 +186,16 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 		return
 	}
 
-	duration := h.lastSlice.endTime.Sub(h.lastSlice.startTime).Nanoseconds()
+	duration := h.lastSlice.endTime.Sub(h.lastSlice.startTime)
 	if duration < 0 {
 		panic("negative duration")
 	}
 
-	// note: we could've used Duration.Seconds() above, but that gives us a float. We absolutely do
-	// not want to be doing billing math with floats.
-	//
-	// TODO: This approach here explicitly rounds us down - otherwise rounding is actually quite
-	// tricky, and it's safer to round down than up. In the future, we might internally store things
-	// as milliseconds or something, and round down to the nearest "CPU second" when sending the
-	// batch, in order to be more accurate. There's a variety of options.
-	seconds := duration / time.Second.Nanoseconds()
+	seconds := duration.Seconds()
+	// TODO: This approach is imperfect. Floating-point math is probably *fine*, but really not
+	// something we want to rely on. A "proper" solution is a lot of work, but long-term valuable.
 	metricsSeconds := vmMetricsSeconds{
-		cpu: uint32(h.lastSlice.metrics.cpu) * uint32(seconds),
+		cpu: uint32(math.Round(float64(h.lastSlice.metrics.cpu) * seconds)),
 	}
 	h.total.cpu += metricsSeconds.cpu
 
@@ -205,42 +214,28 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
-// clear updates the state to remove any previously un-pushed history
-func (s *billingMetricsState) clear() {
-	s.historical = make(map[billingMetricsKey]vmMetricsHistory)
-}
-
-// makeBatch creates a billing.Batch for the currently stored history, without modfiying any of it
-func (s *billingMetricsState) makeBatch(client *billing.Client) *billing.Batch {
-	batch := client.NewBatch()
-
+// drainAppendToBatch clears the current history, adding it as events to the batch
+func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *billing.Batch) {
 	now := time.Now()
 
 	for key, history := range s.historical {
+		history.finalizeCurrentTimeSlice()
+
 		batch.AddIncrementalEvent(billing.IncrementalEvent{
 			IdempotencyKey: uuid.NewString(),
-			MetricName:     MetricNameCPU,
+			MetricName:     conf.CPUMetricName,
 			Type:           "", // set on JSON marshal
 			EndpointID:     key.endpointID,
 			// TODO: maybe we should store start/stop time in the vmMetricsHistory object itself?
 			// That way we can be aligned to collection, rather than pushing.
 			StartTime: s.pushWindowStart,
 			StopTime:  now,
-			Value:     history.totalCPUSeconds(),
+			Value:     int(history.total.cpu),
 		})
 	}
 
 	s.pushWindowStart = now
-	return batch
-}
-
-// totalCPUSeconds returns the integer CPU seconds corresponding to the allocation provided to the VM over
-// the timespan recorded in this vmMetricsHistory.
-func (h vmMetricsHistory) totalCPUSeconds() int {
-	// note: finalizeCurrentTimeSlice does not modify data behind any pointers in h, so we can
-	// safely call this without worrying about messing up our ongoing state.
-	h.finalizeCurrentTimeSlice()
-	return int(h.total.cpu)
+	s.historical = make(map[billingMetricsKey]vmMetricsHistory)
 }
 
 func pushBillingEvents(conf *BillingConfig, batch *billing.Batch) error {

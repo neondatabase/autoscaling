@@ -133,6 +133,8 @@ func (c *Config) validate() error {
 		return cannotBeZero(".scheduler.requestPort")
 	} else if c.Billing != nil && c.Billing.URL == "" {
 		return cannotBeEmpty(".billing.url")
+	} else if c.Billing != nil && c.Billing.CPUMetricName == "" {
+		return cannotBeEmpty(".billing.cpuMetricName")
 	} else if c.Billing != nil && c.Billing.CollectEverySeconds == 0 {
 		return cannotBeZero(".billing.collectEverySeconds")
 	} else if c.Billing != nil && c.Billing.PushEverySeconds == 0 {
