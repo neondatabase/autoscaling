@@ -42,7 +42,7 @@ const (
 	// PluginProtoV1_0 represents v1.0 of the agent<->scheduler plugin protocol - the initial
 	// version.
 	//
-	// Last used in release version <FIXME>
+	// Last used in release version v0.1.8.
 	PluginProtoV1_0 PluginProtoVersion = iota + 1 // start from zero, for backwards compatibility with pre-versioned messages
 
 	// PluginProtoV1_1 represents v1.1 of the agent<->scheduler plugin protocol.
@@ -71,6 +71,8 @@ func (v PluginProtoVersion) String() string {
 		return "<invalid: zero>"
 	case PluginProtoV1_0:
 		return "v1.0"
+	case PluginProtoV1_1:
+		return "v1.1"
 	default:
 		diff := v - latestPluginProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)

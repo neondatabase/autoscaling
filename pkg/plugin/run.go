@@ -23,7 +23,7 @@ var ContentTypeError string = "text/plain"
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_1
 )
 
 // runPermitHandler runs the server for handling each resourceRequest from a pod

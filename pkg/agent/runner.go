@@ -69,7 +69,7 @@ import (
 //
 // Currently, each autoscaler-agent supports only one version at a time. In the future, this may
 // change.
-const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_1
 
 // Runner is per-VM Pod god object responsible for handling everything
 //
