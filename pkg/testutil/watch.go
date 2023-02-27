@@ -28,7 +28,10 @@ func Watch[T any, P util.WatchObject[T]](
 			select {
 			case <-ctx.Done():
 				return
-			case args := <-stream:
+			case args, ok := <-stream:
+				if !ok || ctx.Err() != nil {
+					return
+				}
 				ec.Add(util.ProcessEvent[T, P](store, handlers, args))
 			}
 		}
