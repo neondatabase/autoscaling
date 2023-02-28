@@ -391,7 +391,7 @@ func (s *nodeState) tooMuchPressure() bool {
 // A returned error indicates that the pod's resource usage has changed enough that we should try to
 // migrate something else first. The error provides justification for this.
 func (s *podState) checkOkToMigrate(oldMetrics api.Metrics) error {
-	// TODO
+	// TODO. Note: s.metrics may be nil.
 	return nil
 }
 

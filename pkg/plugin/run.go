@@ -18,12 +18,12 @@ var MaxHTTPBodySize int64 = 1 << 10 // 1 KiB
 var ContentTypeJSON string = "application/json"
 var ContentTypeError string = "text/plain"
 
-// The scheduler plugin currently supports v1.0 of the agent<->scheduler plugin protoco.
+// The scheduler plugin currently supports v1.0 to v1.1 of the agent<->scheduler plugin protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_1
 )
 
 // runPermitHandler runs the server for handling each resourceRequest from a pod
@@ -131,6 +131,11 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 		)
 	}
 
+	// if req.Metrics is nil, check that the protocol version allows that.
+	if req.Metrics == nil && !req.ProtoVersion.AllowsNilMetrics() {
+		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)
+	}
+
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
@@ -219,7 +224,7 @@ func (e *AutoscaleEnforcer) handleResources(
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	pod *podState,
 	node *nodeState,
-	metrics api.Metrics,
+	metrics *api.Metrics,
 ) bool {
 	// This pod should migrate if (a) we're looking for migrations and (b) it's next up in the
 	// priority queue. We will give it a chance later to veto if the metrics have changed too much
@@ -231,7 +236,7 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 
 	klog.Infof("[autoscale-enforcer] Updating pod %v metrics %+v -> %+v", pod.name, pod.metrics, metrics)
 	oldMetrics := pod.metrics
-	pod.metrics = &metrics
+	pod.metrics = metrics
 	if pod.currentlyMigrating() {
 		return false // don't do anything else; it's already migrating.
 	}
