@@ -642,6 +642,11 @@ func (e *AutoscaleEnforcer) handlePodDeletion(podName api.PodName) {
 }
 
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
+	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
+	if s.metrics == nil || other.metrics == nil {
+		return s.metrics != nil && other.metrics == nil
+	}
+
 	// TODO - this is just a first-pass approximation. Maybe it's ok for now? Maybe it's not. Idk.
 	return s.metrics.LoadAverage1Min < other.metrics.LoadAverage1Min
 }
