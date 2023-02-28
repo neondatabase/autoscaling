@@ -14,6 +14,7 @@ commit in this repository, possibly unreleased.
 | Release | autoscaler-agent | VM informant |
 |---------|------------------|--------------|
 | _Current_ | v1.0 - v1.1 | v1.1 only |
+| v0.1.10 | v1.0 - v1.1 | v1.1 only |
 | v0.1.9 | v1.0 - v1.1 | v1.1 only |
 | v0.1.8 | v1.0 - v1.1 | v1.1 only |
 | v0.1.7 | v1.0 - v1.1 | v1.1 only |
@@ -35,6 +36,7 @@ number.
 | Release | autoscaler-agent | Scheduler plugin |
 |---------|------------------|------------------|
 | _Current_ | v1.1 only | v1.0-v1.1 |
+| v0.1.10 | v1.1 only | v1.0-v1.1 |
 | v0.1.9 | **v1.1** only | **v1.0-v1.1** |
 | v0.1.8 | **v1.0** only | **v1.0** only |
 | v0.1.7 | v0.0 only | **v0.0-v1.0** |
