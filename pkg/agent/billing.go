@@ -64,7 +64,7 @@ const (
 	EndpointLabel string = "neon/endpoint-id"
 )
 
-func RunBillingMetricsColllector(
+func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
 	conf *BillingConfig,
 	targetNode string,
