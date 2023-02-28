@@ -33,11 +33,18 @@ func (r MainRunner) Run() error {
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	klog.Info("Starting pod watcher")
-	watchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
+	podWatchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
 	if err != nil {
 		return fmt.Errorf("Error starting pod watcher: %w", err)
 	}
-	klog.Info("Pod watcher started, entering main loop")
+	klog.Info("Pod watcher started")
+
+	klog.Info("Starting VM watcher")
+	vmWatchStore, err := startVMWatcher(ctx, r.VMClient, r.EnvArgs.K8sNodeName)
+	if err != nil {
+		return fmt.Errorf("Error starting VM watcher: %w", err)
+	}
+	klog.Info("VM watcher started")
 
 	broker := pubsub.NewBroker[watchEvent](ctx, pubsub.BrokerOptions{})
 	schedulerStore, err := startSchedulerWatcher(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
@@ -45,12 +52,20 @@ func (r MainRunner) Run() error {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
 
+	if r.Config.Billing != nil {
+		klog.Info("Starting billing metrics collector")
+		// TODO: catch panics here, bubble those into a clean-ish shutdown.
+		go RunBillingMetricsCollector(ctx, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)
+	}
+
 	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
 
+	klog.Info("Entering main loop")
 	for {
 		select {
 		case <-ctx.Done():
-			watchStore.Stop()
+			podWatchStore.Stop()
+			vmWatchStore.Stop()
 			schedulerStore.Stop()
 			broker.Stop()
 			func() {
