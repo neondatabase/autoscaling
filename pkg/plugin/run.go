@@ -18,7 +18,7 @@ var MaxHTTPBodySize int64 = 1 << 10 // 1 KiB
 var ContentTypeJSON string = "application/json"
 var ContentTypeError string = "text/plain"
 
-// The scheduler plugin currently supports v1.0 of the agent<->scheduler plugin protoco.
+// The scheduler plugin currently supports v1.0 to v1.1 of the agent<->scheduler plugin protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
