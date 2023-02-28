@@ -162,7 +162,7 @@ spec:
       containers:
       # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
       # update that as well if you change this line!
-      - image: neondatabase/autoscale-scheduler:v0.1.5
+      - image: neondatabase/autoscale-scheduler:v0.1.7
         command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
         livenessProbe:
           httpGet:
