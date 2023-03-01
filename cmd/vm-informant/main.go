@@ -121,7 +121,6 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 		var exitMode string
 
 		func() {
-			defer close(processedSignal)
 			pctx, pcancel := context.WithCancel(context.Background())
 			defer pcancel()
 
@@ -130,25 +129,19 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 			cmd.Stderr = os.Stderr
 
 			err := cmd.Start()
-
 			if err == nil {
 				go func() {
 					select {
 					case <-pctx.Done():
 						return
 					case <-ctx.Done():
-						if cmd.Process == nil || cmd.ProcessState == nil {
+						if pctx.Err() != nil {
+							// the process has already returned
+							// and we don't need to signal it
 							return
-						}
-						if cmd.ProcessState.ExitCode() >= 0 {
-							return
-						}
-						var pid int
-						if cmd.Process != nil {
-							pid = cmd.Process.Pid
 						}
 						if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-							klog.Infof("could not signal informant process %d: %v", pid, err)
+							klog.Infof("could not signal informant process: %v", err)
 						}
 					}
 				}()
@@ -176,7 +169,6 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 					klog.Errorf("error running vm-informant: %v", err)
 				}
 			} else {
-				exitMode = ""
 				klog.Warningf("vm-informant exited without error. This should not happen.")
 			}
 
@@ -189,7 +181,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 		case <-ctx.Done():
 			klog.Infof("vm-informant restart loop: received termination signal")
 			return
-		case <-processedSignal:
+		default:
 			dur := time.Since(startTime)
 			if dur < minSubProcessRestartInterval {
 				// drain the timer before resetting it, required by Timer.Reset:
