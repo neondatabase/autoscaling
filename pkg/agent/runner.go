@@ -64,6 +64,13 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+// PluginProtocolVersion is the current version of the agent<->scheduler plugin in use by this
+// autoscaler-agent.
+//
+// Currently, each autoscaler-agent supports only one version at a time. In the future, this may
+// change.
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_1
+
 // Runner is per-VM Pod god object responsible for handling everything
 //
 // It primarily operates as a source of shared data for a number of long-running tasks. For
@@ -599,8 +606,6 @@ func (r *Runner) handleVMResources(
 	upscaleRequested util.CondChannelReceiver,
 	registeredScheduler util.CondChannelReceiver,
 ) {
-	metricsUpdatedAtLeastOnce := false
-
 	for {
 		var reason VMUpdateReason
 
@@ -614,48 +619,6 @@ func (r *Runner) handleVMResources(
 		case <-registeredScheduler.Recv():
 			reason = RegisteredScheduler
 		}
-
-		// On the first time we receive metrics, retry registering the scheduler if r.computeUnit is
-		// nil, because a prior register request might've been unable to complete due to not having
-		// metrics.
-		//
-		// FIXME: This won't be necessary when the protocol is changed to allow nil metrics on an
-		// initial scheduler request.
-		if !metricsUpdatedAtLeastOnce && reason != RegisteredScheduler {
-			sched, computeUnit := func() (*Scheduler, *api.Resources) {
-				r.lock.Lock()
-				defer r.lock.Unlock()
-
-				return r.scheduler, r.computeUnit
-			}()
-
-			if computeUnit == nil && sched != nil {
-				func() {
-					sched.requestLock.Lock()
-					defer sched.requestLock.Unlock()
-
-					isCurrent := func() bool {
-						r.lock.Lock()
-						defer r.lock.Unlock()
-						return r.scheduler == sched
-					}()
-
-					if sched.registered || !isCurrent {
-						return
-					}
-
-					if err := sched.Register(ctx, func() {}); err != nil {
-						if ctx.Err() != nil {
-							r.logger.Warningf("Error retrying register with scheduler (but context is done): %s", err)
-						} else {
-							r.logger.Errorf("Error retrying register with scheduler: %s", err)
-						}
-					}
-				}()
-			}
-		}
-
-		metricsUpdatedAtLeastOnce = metricsUpdatedAtLeastOnce || reason == UpdatedMetrics
 
 		// FIXME: make maxRetries configurable
 		maxRetries := uint(1)
@@ -1322,9 +1285,10 @@ retry:
 			}
 
 			request := api.AgentRequest{
-				Pod:       r.podName,
-				Resources: target,
-				Metrics:   state.metrics, // FIXME: the metrics here *might* be a little out of date.
+				ProtoVersion: PluginProtocolVersion,
+				Pod:          r.podName,
+				Resources:    target,
+				Metrics:      &state.metrics, // FIXME: the metrics here *might* be a little out of date.
 			}
 			response, err := sched.DoRequest(ctx, &request)
 			if err != nil {
@@ -1749,16 +1713,11 @@ func (s *Scheduler) Register(ctx context.Context, signalOk func()) error {
 		return s.runner.lastMetrics, s.runner.vm.Using()
 	}()
 
-	if metrics == nil {
-		// FIXME: allow sending nil metrics so we can connect anyways.
-		s.logger.Warningf("Could not do initial register because we haven't received metrics yet")
-		return nil
-	}
-
 	req := api.AgentRequest{
-		Pod:       s.runner.podName,
-		Resources: resources,
-		Metrics:   *metrics,
+		ProtoVersion: PluginProtocolVersion,
+		Pod:          s.runner.podName,
+		Resources:    resources,
+		Metrics:      metrics,
 	}
 	if _, err := s.DoRequest(ctx, &req); err != nil {
 		return err
