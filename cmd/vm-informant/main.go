@@ -117,7 +117,6 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 
 	for {
 		startTime := time.Now()
-		processedSignal := make(chan struct{})
 		var exitMode string
 
 		func() {
