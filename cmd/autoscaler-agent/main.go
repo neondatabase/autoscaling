@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"os/signal"
+	"syscall"
+
+	"github.com/tychoish/fun/srv"
 
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
@@ -50,9 +54,10 @@ func main() {
 		VMClient:   vmClient,
 	}
 
-	// TODO: add a signal handler here
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
+	ctx = srv.SetShutdown(ctx)
+	ctx = srv.SetBaseContext(ctx)
 
 	if err = runner.Run(ctx); err != nil {
 		klog.Fatalf("Main loop failed: %s", err)

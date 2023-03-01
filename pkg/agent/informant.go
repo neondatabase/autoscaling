@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tychoish/fun/srv"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -199,10 +200,10 @@ func NewInformantServer(
 
 		// we need to spawn these in separate threads so the caller doesn't block while holding
 		// runner.lock
-		runner.spawnBackgroundWorker(ctx, shutdownName, func(context.Context) {
+		runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), shutdownName, func(context.Context) {
 			// we want shutdown to (potentially) live longer than the request which
 			// made it, but having a timeout is still good.
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
 			if err := httpServer.Shutdown(ctx); err != nil {
@@ -212,7 +213,7 @@ func NewInformantServer(
 		if server.madeContact {
 			// only unregister the server if we could have plausibly contacted the informant
 			unregisterName := fmt.Sprintf("InformantServer unregister (%s)", server.desc.AgentID)
-			runner.spawnBackgroundWorker(ctx, unregisterName, func(context.Context) {
+			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), unregisterName, func(context.Context) {
 				// we want shutdown to (potentially) live longer than the request which
 				// made it, but having a timeout is still good.
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
