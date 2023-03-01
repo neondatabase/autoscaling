@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tychoish/fun/srv"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -199,16 +200,26 @@ func NewInformantServer(
 
 		// we need to spawn these in separate threads so the caller doesn't block while holding
 		// runner.lock
-		runner.spawnBackgroundWorker(context.TODO(), shutdownName, func(c context.Context) {
-			if err := httpServer.Shutdown(c); err != nil {
+		runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), shutdownName, func(context.Context) {
+			// we want shutdown to (potentially) live longer than the request which
+			// made it, but having a timeout is still good.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			if err := httpServer.Shutdown(ctx); err != nil {
 				runner.logger.Warningf("Error shutting down InformantServer: %s", err)
 			}
 		})
 		if server.madeContact {
 			// only unregister the server if we could have plausibly contacted the informant
 			unregisterName := fmt.Sprintf("InformantServer unregister (%s)", server.desc.AgentID)
-			runner.spawnBackgroundWorker(context.TODO(), unregisterName, func(c context.Context) {
-				if err := server.unregisterFromInformant(c); err != nil {
+			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), unregisterName, func(context.Context) {
+				// we want shutdown to (potentially) live longer than the request which
+				// made it, but having a timeout is still good.
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				if err := server.unregisterFromInformant(ctx); err != nil {
 					runner.logger.Warningf("Error unregistering %s: %s", server.desc.AgentID, err)
 				}
 			})
@@ -614,7 +625,7 @@ func (s *InformantServer) informantURL(path string) string {
 // of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleID(body *struct{}) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.AgentIdentificationMessage, int, error) {
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
 
@@ -634,7 +645,7 @@ func (s *InformantServer) handleID(body *struct{}) (*api.AgentIdentificationMess
 // outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleResume(body *api.ResumeAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (*api.AgentIdentificationMessage, int, error) {
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -693,7 +704,7 @@ func (s *InformantServer) handleResume(body *api.ResumeAgent) (*api.AgentIdentif
 // called outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleSuspend(body *api.SuspendAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (*api.AgentIdentificationMessage, int, error) {
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -747,6 +758,7 @@ func (s *InformantServer) handleSuspend(body *api.SuspendAgent) (*api.AgentIdent
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
 func (s *InformantServer) handleTryUpscale(
+	ctx context.Context,
 	body *api.MoreResourcesRequest,
 ) (*api.AgentIdentificationMessage, int, error) {
 	if body.ExpectedID != s.desc.AgentID {

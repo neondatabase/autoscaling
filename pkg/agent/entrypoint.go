@@ -22,9 +22,7 @@ type MainRunner struct {
 	VMClient   *vmclient.Clientset
 }
 
-func (r MainRunner) Run() error {
-	ctx := context.Background()
-
+func (r MainRunner) Run(ctx context.Context) error {
 	podEvents := make(chan podEvent)
 
 	buildInfo := util.GetBuildInfo()
@@ -87,7 +85,7 @@ func (r MainRunner) Run() error {
 			globalState.Stop()
 			return nil
 		case event := <-podEvents:
-			globalState.handleEvent(event)
+			globalState.handleEvent(ctx, event)
 		}
 	}
 }
