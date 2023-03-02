@@ -150,7 +150,7 @@ func (s *FileCacheState) SetFileCacheSize(ctx context.Context, sizeInBytes uint6
 
 	// TODO: query should cap the value with size neon.max_file_cache_size, then return the actual
 	// size we set it to.
-	if _, err := db.ExecContext(ctx, "SET neon.file_cache_size_limit = $1", sizeInMB); err != nil {
+	if _, err := db.ExecContext(ctx, "ALTER SYSTEM SET neon.file_cache_size_limit = $1; SELECT pg_reload_conf();", sizeInMB); err != nil {
 		return 0, fmt.Errorf("Error setting file cache size: %w", err)
 	}
 
