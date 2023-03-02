@@ -58,9 +58,16 @@ func main() {
 	defer cancel()
 	ctx = srv.SetShutdown(ctx)
 	ctx = srv.SetBaseContext(ctx)
+	ctx = srv.WithOrchestrator(ctx)
+	defer func() {
+		if err := srv.GetOrchestrator(ctx).Wait(); err != nil {
+			klog.Fatalf("problem shutting down orchestrator: %s", err)
+		}
+
+		klog.Info("Main loop returned without issue. Exiting.")
+	}()
 
 	if err = runner.Run(ctx); err != nil {
 		klog.Fatalf("Main loop failed: %s", err)
 	}
-	klog.Info("Main loop returned without issue. Exiting.")
 }
