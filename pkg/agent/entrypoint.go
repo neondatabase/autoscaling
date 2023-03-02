@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/tychoish/fun/pubsub"
+	"github.com/tychoish/fun/srv"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -45,6 +45,8 @@ func (r MainRunner) Run(ctx context.Context) error {
 	klog.Info("VM watcher started")
 
 	broker := pubsub.NewBroker[watchEvent](ctx, pubsub.BrokerOptions{})
+	srv.GetOrchestrator(ctx).Add(srv.Broker(broker))
+
 	schedulerStore, err := startSchedulerWatcher(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
@@ -65,12 +67,6 @@ func (r MainRunner) Run(ctx context.Context) error {
 			podWatchStore.Stop()
 			vmWatchStore.Stop()
 			schedulerStore.Stop()
-			broker.Stop()
-			func() {
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				broker.Wait(shutdownCtx)
-			}()
 
 			// Remove anything else from podEvents
 		loop:
