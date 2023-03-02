@@ -117,8 +117,6 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 
 	for {
 		startTime := time.Now()
-		var exitMode string
-
 		func() {
 			pctx, pcancel := context.WithCancel(context.Background())
 			defer pcancel()
@@ -156,17 +154,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 			}
 
 			if err != nil {
-				// lint note: the linter's worried about wrapped errors being incorrect with switch, but
-				// this is cleaner than the alternative (via errors.As) and it's still correct because
-				// exec.Command.Wait() explicitly mentions ExitError.
-				switch err.(type) { //nolint:errorlint // see above.
-				case *exec.ExitError:
-					exitMode = "failed"
-					klog.Errorf("vm-informant exited with: %v", err)
-				default:
-					exitMode = "failed to start"
-					klog.Errorf("error running vm-informant: %v", err)
-				}
+				klog.Errorf("vm-informant exited with error: %v", err)
 			} else {
 				klog.Warningf("vm-informant exited without error. This should not happen.")
 			}
@@ -189,7 +177,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 				}
 				timer.Reset(minSubProcessRestartInterval - dur)
 
-				klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minSubProcessRestartInterval)
+				klog.Infof("vm-informant exited. respecting minimum wait of %s", minSubProcessRestartInterval)
 				select {
 				case <-ctx.Done():
 					klog.Infof("vm-informant restart loop: received termination signal")
