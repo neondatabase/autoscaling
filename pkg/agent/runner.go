@@ -276,8 +276,10 @@ type SchedulerState struct {
 	FatalError error         `json:"fatalError"`
 }
 
-func (r *Runner) State() RunnerState {
-	r.lock.Lock()
+func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
+	if err := r.lock.TryLock(ctx); err != nil {
+		return nil, err
+	}
 	defer r.lock.Unlock()
 
 	var scheduler *SchedulerState
@@ -303,7 +305,7 @@ func (r *Runner) State() RunnerState {
 		}
 	}
 
-	return RunnerState{
+	return &RunnerState{
 		LastMetrics:           r.lastMetrics,
 		Scheduler:             scheduler,
 		Server:                serverState,
@@ -316,7 +318,7 @@ func (r *Runner) State() RunnerState {
 		PodIP:                 r.podIP,
 		LogPrefix:             r.logger.prefix,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
-	}
+	}, nil
 }
 
 func (r *Runner) Spawn(ctx context.Context, vmName string) {

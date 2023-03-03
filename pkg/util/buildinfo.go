@@ -18,9 +18,9 @@ var BuildGitInfo string
 //
 // All strings are guaranteed to be non-empty.
 type BuildInfo struct {
-	GitInfo   string
-	NeonVM    string
-	GoVersion string
+	GitInfo   string `json:"gitInfo"`
+	NeonVM    string `json:"neonvmVersion"`
+	GoVersion string `json:"goVersion"`
 }
 
 // GetBuildInfo makes a best-effort attempt to return some information about how the currently
