@@ -45,7 +45,9 @@ func (r MainRunner) Run(ctx context.Context) error {
 	klog.Info("VM watcher started")
 
 	broker := pubsub.NewBroker[watchEvent](ctx, pubsub.BrokerOptions{})
-	srv.GetOrchestrator(ctx).Add(srv.Broker(broker))
+	if err := srv.GetOrchestrator(ctx).Add(srv.Broker(broker)); err != nil {
+		return err
+	}
 
 	schedulerStore, err := startSchedulerWatcher(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
