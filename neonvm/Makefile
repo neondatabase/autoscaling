@@ -70,7 +70,13 @@ fmt: ## Run go fmt against code.
 
 .PHONY: vet
 vet: ## Run go vet against code.
-	go vet ./...
+	# `go vet` requires gcc
+	# ref https://github.com/golang/go/issues/56755
+	CGO_ENABLED=0 go vet ./...
+
+.PHONE: e2e
+e2e: ## Run e2e kuttl tests
+	kubectl kuttl test --config tests/e2e/kuttl-test.yaml
 
 # TODO: fix/write tests
 .PHONY: test
@@ -151,7 +157,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 DEPLOYTS := $(shell date +%s)
 .PHONY: deploy
 deploy: kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/common/controller              && $(KUSTOMIZE) edit set image controller=$(IMG)               && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
+	cd config/common/controller              && $(KUSTOMIZE) edit set image controller=$(IMG)             && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	cd config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	cd config/default-vxlan/vxlan-ipam       && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	$(KUSTOMIZE) build config/default-vxlan/multus > neonvm-multus.yaml

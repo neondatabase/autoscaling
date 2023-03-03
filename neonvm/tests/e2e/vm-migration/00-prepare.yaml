@@ -1,0 +1,42 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+apply:
+- ../../../samples/vm-example.yaml
+unitTest: false
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: workload
+spec:
+  initContainers:
+  - name: wait-for-pg
+    image: postgres:15-alpine
+    command:
+    - sh
+    - "-c"
+    - |
+      set -e
+      until pg_isready --dbname=postgres --host=example --port=5432; do
+        sleep 1
+      done
+  - name: pgbench-initialize
+    image: postgres:15-alpine
+    command:
+    - pgbench
+    args:
+    - postgres://postgres@example:5432/postgres
+    - --initialize
+    - --scale=10
+  containers:
+  - name: pgbench
+    image: postgres:15-alpine
+    command:
+    - pgbench
+    args:
+    - postgres://postgres@example:5432/postgres
+    - --client=2
+    - --progress=1
+    - --progress-timestamp
+    - --time=600
+  restartPolicy: Never
