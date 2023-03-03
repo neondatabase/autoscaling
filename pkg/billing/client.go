@@ -46,7 +46,6 @@ func (b *Batch) idempotenize(key string) string {
 	}
 
 	return fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", b.c.hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
-
 }
 
 func (b *Batch) AddAbsoluteEvent(e AbsoluteEvent) {
