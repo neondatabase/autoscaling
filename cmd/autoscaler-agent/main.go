@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/tychoish/fun/srv"
 
@@ -16,6 +17,7 @@ import (
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/agent"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 func main() {
@@ -66,6 +68,10 @@ func main() {
 
 		klog.Info("Main loop returned without issue. Exiting.")
 	}()
+
+	if err := srv.GetOrchestrator(ctx).Add(srv.HTTP("agent-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
+		klog.Warningf("problem adding pprof service")
+	}
 
 	if err = runner.Run(ctx); err != nil {
 		klog.Fatalf("Main loop failed: %s", err)
