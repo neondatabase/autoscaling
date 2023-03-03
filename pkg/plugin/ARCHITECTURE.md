@@ -80,9 +80,13 @@ _all other resource usage_ is within the bounds of the configured per-node "syst
 best to deploy as much as possible through the scheduler.
 
 VM pods have an associated NeonVM `VirtualMachine` object, so we can fetch the resources from there.
-For non-VM pods, we use the value of `resources.limits` and expect it to be equal to
-`resources.requests`. It must be equal because otherwise to prevent resource overcommitting, we'd
-have to assume that it's always using `resources.limits`, which is unintuitive.
+For non-VM pods, we use the values from `resources.requests` for compatibility with other systems
+(e.g., [cluster-autoscaler]). This can lead to overcommitting, but it isn't _really_ worth being
+strict about this. If a resource is not present in `resources.requests`, we fallback on
+`resources.limits`. If any container in a pod has no value for one of its resources, the pod will be
+rejected; the scheduler doesn't have enough information to make accurate decisions.
+
+[cluster autoscaler]: https://github.com/kubernetes/autoscaler
 
 ## Deep dive into resource management
 

@@ -3,6 +3,7 @@ package util
 // Wrapper file for the AddHandler function
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,7 +23,7 @@ func AddHandler[T any, R any](
 	endpoint string,
 	method string,
 	reqTypeName string,
-	handle func(*T) (_ *R, statusCode int, _ error),
+	handle func(context.Context, *T) (_ *R, statusCode int, _ error),
 ) {
 	errBadMethod := []byte("request method must be " + method)
 
@@ -44,7 +45,7 @@ func AddHandler[T any, R any](
 
 		klog.Infof("%sReceived request on %s (client = %s) %+v", logPrefix, endpoint, r.RemoteAddr, req)
 
-		resp, status, err := handle(&req)
+		resp, status, err := handle(r.Context(), &req)
 
 		if err == nil && status != http.StatusOK {
 			err = errors.New("HTTP handler error: status != 200 OK, but no error message")
