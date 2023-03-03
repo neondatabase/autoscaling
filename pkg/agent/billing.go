@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
-
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
@@ -222,10 +220,9 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 		history.finalizeCurrentTimeSlice()
 
 		batch.AddIncrementalEvent(billing.IncrementalEvent{
-			IdempotencyKey: uuid.NewString(),
-			MetricName:     conf.CPUMetricName,
-			Type:           "", // set on JSON marshal
-			EndpointID:     key.endpointID,
+			MetricName: conf.CPUMetricName,
+			Type:       "", // set on JSON marshal
+			EndpointID: key.endpointID,
 			// TODO: maybe we should store start/stop time in the vmMetricsHistory object itself?
 			// That way we can be aligned to collection, rather than pushing.
 			StartTime: s.pushWindowStart,
