@@ -229,7 +229,7 @@ func NewInformantServer(
 	// Deadlock checker for server.requestLock
 	//
 	// FIXME: make these timeouts/delays separately defined constants, or configurable
-	deadlockChecker := makeDeadlockChecker(&server.requestLock, 5*time.Second, time.Second)
+	deadlockChecker := server.requestLock.DeadlockChecker(5*time.Second, time.Second)
 	deadlockWorkerName := fmt.Sprintf("InformantServer deadlock checker (%s)", server.desc.AgentID)
 	runner.spawnBackgroundWorker(backgroundCtx, deadlockWorkerName, deadlockChecker)
 

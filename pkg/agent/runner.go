@@ -402,8 +402,8 @@ func (r *Runner) Run(ctx context.Context, vmName string) error {
 	r.logger.Infof("Starting background workers")
 
 	// FIXME: make these timeouts/delays separately defined constants, or configurable
-	mainDeadlockChecker := makeDeadlockChecker(&r.lock, 250*time.Millisecond, time.Second)
-	vmDeadlockChecker := makeDeadlockChecker(&r.vmStateLock, 30*time.Second, time.Second)
+	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
+	vmDeadlockChecker := r.vmStateLock.DeadlockChecker(30*time.Second, time.Second)
 
 	r.spawnBackgroundWorker(ctx, "deadlock checker (main)", mainDeadlockChecker)
 	r.spawnBackgroundWorker(ctx, "deadlock checker (VM)", vmDeadlockChecker)
@@ -502,36 +502,6 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(
 
 		f(ctx)
 	}()
-}
-
-// makeDeadlockChecker creates a "deadlock checker" function that, when called, periodically
-// attempts to acquire the lock, panicking if it fails
-//
-// The returned function exits when its context is done.
-//
-// This function exists because there's a couple of different locks in Runner that we want to detect
-// deadlocks for.
-func makeDeadlockChecker(lock *util.ChanMutex, timeout, delay time.Duration) func(ctx context.Context) {
-	return func(ctx context.Context) {
-		for {
-			// Delay between checks
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(delay):
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-lock.WaitLock():
-				lock.Unlock()
-			case <-time.After(timeout):
-				// We can panic here, because it'll be caught by spawnBackgroundWorker
-				panic(fmt.Errorf("likely deadlock detected, could not get lock after %s", timeout))
-			}
-		}
-	}
 }
 
 // getMetricsLoop repeatedly attempts to fetch metrics from the VM
@@ -836,7 +806,7 @@ startScheduler:
 		})
 
 		// FIXME: make these timeouts/delays separately defined constants, or configurable
-		deadlockChecker := makeDeadlockChecker(&sched.requestLock, 5*time.Second, time.Second)
+		deadlockChecker := sched.requestLock.DeadlockChecker(5*time.Second, time.Second)
 
 		// precompute the worker names so we don't panic while holding the locks below
 		deadlockWorkerName := fmt.Sprintf("deadlock checker (sched %s)", currentInfo.UID)
