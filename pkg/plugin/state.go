@@ -132,7 +132,7 @@ type nodeOtherResourceState struct {
 	reservedMemSlots uint16
 
 	// marginCpu and marginMemory track the amount of other resources we can get "for free" because
-	// they were left out when rounding the System usage to fit in integer untis of CPUs or memory
+	// they were left out when rounding the System usage to fit in integer units of CPUs or memory
 	// slots
 	//
 	// These values are both only changed by configuration changes.
