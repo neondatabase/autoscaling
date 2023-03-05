@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -26,7 +25,7 @@ import (
 //
 // Accessing the individual fields MUST be done while holding a lock.
 type pluginState struct {
-	lock sync.Mutex
+	lock util.ChanMutex
 
 	podMap  map[api.PodName]*podState
 	nodeMap map[string]*nodeState
