@@ -169,11 +169,11 @@ func (e *AutoscaleEnforcer) handleResources(
 	if pod.currentlyMigrating() {
 		// The agent shouldn't have asked for a change after already receiving notice that it's
 		// migrating.
-		if req.VCPU != pod.vCPU.reserved || req.Mem != pod.memSlots.reserved {
+		if req.VCPU != pod.vCPU.Reserved || req.Mem != pod.memSlots.Reserved {
 			err := errors.New("cannot change resources: agent has already been informed that pod is migrating")
 			return api.Resources{}, 400, err
 		}
-		return api.Resources{VCPU: pod.vCPU.reserved, Mem: pod.memSlots.reserved}, 200, nil
+		return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
 	}
 
 	// Check that the resources correspond to an integer number of compute units, based on what the
@@ -201,7 +201,7 @@ func (e *AutoscaleEnforcer) handleResources(
 		"\t mem verdict: %s"
 	klog.Infof(fmtString, pod.name, vCPUVerdict, memVerdict)
 
-	return api.Resources{VCPU: pod.vCPU.reserved, Mem: pod.memSlots.reserved}, 200, nil
+	return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
 }
 
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(

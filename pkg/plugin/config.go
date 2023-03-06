@@ -218,12 +218,12 @@ func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[u
 	margin.Sub(c.Cpu.System)
 
 	return nodeResourceState[uint16]{
-		total:                uint16(totalRounded),
-		system:               uint16(systemCpus),
-		watermark:            uint16(c.Cpu.Watermark * float32(reservableCpus)),
-		reserved:             0,
-		capacityPressure:     0,
-		pressureAccountedFor: 0,
+		Total:                uint16(totalRounded),
+		System:               uint16(systemCpus),
+		Watermark:            uint16(c.Cpu.Watermark * float32(reservableCpus)),
+		Reserved:             0,
+		CapacityPressure:     0,
+		PressureAccountedFor: 0,
 	}, margin, nil
 }
 
@@ -262,11 +262,11 @@ func (c *nodeConfig) memoryLimits(
 	margin.Sub(c.Memory.System)
 
 	return nodeResourceState[uint16]{
-		total:                uint16(totalSlots),
-		system:               uint16(systemSlots),
-		watermark:            uint16(c.Memory.Watermark * float32(reservableSlots)),
-		reserved:             0,
-		capacityPressure:     0,
-		pressureAccountedFor: 0,
+		Total:                uint16(totalSlots),
+		System:               uint16(systemSlots),
+		Watermark:            uint16(c.Memory.Watermark * float32(reservableSlots)),
+		Reserved:             0,
+		CapacityPressure:     0,
+		PressureAccountedFor: 0,
 	}, margin, nil
 }

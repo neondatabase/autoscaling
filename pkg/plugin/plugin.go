@@ -249,19 +249,19 @@ func (e *AutoscaleEnforcer) Filter(
 	var totalNodeVCPU, totalNodeMem uint16
 	var otherResources nodeOtherResourceState
 
-	otherResources.marginCpu = node.otherResources.marginCpu
-	otherResources.marginMemory = node.otherResources.marginMemory
+	otherResources.MarginCPU = node.otherResources.MarginCPU
+	otherResources.MarginMemory = node.otherResources.MarginMemory
 
 	for _, podInfo := range nodeInfo.Pods {
 		pn := api.PodName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
-			totalNodeVCPU += podState.vCPU.reserved
-			totalNodeMem += podState.memSlots.reserved
+			totalNodeVCPU += podState.vCPU.Reserved
+			totalNodeMem += podState.memSlots.Reserved
 		} else if otherPodState, ok := e.state.otherPods[pn]; ok {
 			oldRes := otherResources
 			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, otherPodState.resources)
-			totalNodeVCPU += otherResources.reservedCpu - oldRes.reservedCpu
-			totalNodeMem += otherResources.reservedMemSlots - oldRes.reservedMemSlots
+			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
+			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
 		}
 	}
 
@@ -306,8 +306,8 @@ func (e *AutoscaleEnforcer) Filter(
 		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, vmInfo.Mem.Use, nodeTotalReservableMemSots)
 	} else {
 		newRes := otherResources.addPod(&e.state.conf.MemSlotSize, otherPodInfo)
-		cpuIncr := newRes.reservedCpu - otherResources.reservedCpu
-		memIncr := newRes.reservedMemSlots - otherResources.reservedMemSlots
+		cpuIncr := newRes.ReservedCPU - otherResources.ReservedCPU
+		memIncr := newRes.ReservedMemSlots - otherResources.ReservedMemSlots
 
 		var cpuCompare string
 		if totalNodeVCPU+cpuIncr > nodeTotalReservableCPU {
@@ -490,16 +490,16 @@ func (e *AutoscaleEnforcer) Reserve(
 		oldNodeRes := node.otherResources
 		newNodeRes := node.otherResources.addPod(&e.state.conf.MemSlotSize, podResources)
 
-		addCpu := newNodeRes.reservedCpu - oldNodeRes.reservedCpu
-		addMem := newNodeRes.reservedMemSlots - oldNodeRes.reservedMemSlots
+		addCpu := newNodeRes.ReservedCPU - oldNodeRes.ReservedCPU
+		addMem := newNodeRes.ReservedMemSlots - oldNodeRes.ReservedMemSlots
 
 		if addCpu <= node.remainingReservableCPU() && addMem <= node.remainingReservableMemSlots() {
-			oldNodeCpuReserved := node.vCPU.reserved
-			oldNodeMemReserved := node.memSlots.reserved
+			oldNodeCpuReserved := node.vCPU.Reserved
+			oldNodeMemReserved := node.memSlots.Reserved
 
 			node.otherResources = newNodeRes
-			node.vCPU.reserved += addCpu
-			node.memSlots.reserved += addMem
+			node.vCPU.Reserved += addCpu
+			node.memSlots.Reserved += addMem
 
 			ps := &otherPodState{
 				name:      pName,
@@ -515,11 +515,11 @@ func (e *AutoscaleEnforcer) Reserve(
 			klog.Infof(
 				fmtString,
 				// allowing non-VM pod %v (%v raw cpu, %v raw mem) in node %s
-				pName, &podResources.rawCpu, &podResources.rawMemory, nodeName,
+				pName, &podResources.RawCPU, &podResources.RawMemory, nodeName,
 				// vCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw, %v margin)
-				oldNodeCpuReserved, node.vCPU.reserved, oldNodeRes.reservedCpu, newNodeRes.reservedCpu, &oldNodeRes.rawCpu, &newNodeRes.rawCpu, newNodeRes.marginCpu,
+				oldNodeCpuReserved, node.vCPU.Reserved, oldNodeRes.ReservedCPU, newNodeRes.ReservedCPU, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, newNodeRes.MarginCPU,
 				// mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw, %v margin)
-				oldNodeMemReserved, node.memSlots.reserved, oldNodeRes.reservedMemSlots, newNodeRes.reservedMemSlots, &oldNodeRes.rawMemory, &newNodeRes.rawMemory, newNodeRes.marginMemory,
+				oldNodeMemReserved, node.memSlots.Reserved, oldNodeRes.ReservedMemSlots, newNodeRes.ReservedMemSlots, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, newNodeRes.MarginMemory,
 			)
 
 			return nil // nil is success
@@ -530,7 +530,7 @@ func (e *AutoscaleEnforcer) Reserve(
 			err := fmt.Errorf(
 				fmtString,
 				// need %d vCPU (%v -> %v raw), %d mem slots (%v -> %v raw) but
-				addCpu, &oldNodeRes.rawCpu, &newNodeRes.rawCpu, addMem, &oldNodeRes.rawMemory, &newNodeRes.rawMemory,
+				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory,
 				// have %d vCPU, %d mem slots remaining
 				node.remainingReservableCPU(), node.remainingReservableMemSlots(),
 			)
@@ -546,8 +546,8 @@ func (e *AutoscaleEnforcer) Reserve(
 	// in between the calls to Filter and Reserve, removing the resource availability that we
 	// thought we had.
 	if vmInfo.Cpu.Use <= node.remainingReservableCPU() && vmInfo.Mem.Use <= node.remainingReservableMemSlots() {
-		newNodeReservedCPU := node.vCPU.reserved + vmInfo.Cpu.Use
-		newNodeReservedMemSlots := node.memSlots.reserved + vmInfo.Mem.Use
+		newNodeReservedCPU := node.vCPU.Reserved + vmInfo.Cpu.Use
+		newNodeReservedMemSlots := node.memSlots.Reserved + vmInfo.Mem.Use
 
 		fmtString := "[autoscale-enforcer] Allowing VM pod %v (%d vCPU, %d mem slots) in node %s: " +
 			"node.vCPU.reserved %d -> %d, node.memSlots.reserved %d -> %d"
@@ -556,17 +556,17 @@ func (e *AutoscaleEnforcer) Reserve(
 			// allowing pod %v (%d vCpu, %d mem slots) in node %s
 			pName, vmInfo.Cpu.Use, vmInfo.Mem.Use, nodeName,
 			// node vcpu reserved %d -> %d, node mem slots reserved %d -> %d
-			node.vCPU.reserved, newNodeReservedCPU, node.memSlots.reserved, newNodeReservedMemSlots,
+			node.vCPU.Reserved, newNodeReservedCPU, node.memSlots.Reserved, newNodeReservedMemSlots,
 		)
 
-		node.vCPU.reserved = newNodeReservedCPU
-		node.memSlots.reserved = newNodeReservedMemSlots
+		node.vCPU.Reserved = newNodeReservedCPU
+		node.memSlots.Reserved = newNodeReservedMemSlots
 		ps := &podState{
 			name:                     pName,
 			vmName:                   vmInfo.Name,
 			node:                     node,
-			vCPU:                     podResourceState[uint16]{reserved: vmInfo.Cpu.Use, capacityPressure: 0},
-			memSlots:                 podResourceState[uint16]{reserved: vmInfo.Mem.Use, capacityPressure: 0},
+			vCPU:                     podResourceState[uint16]{Reserved: vmInfo.Cpu.Use, CapacityPressure: 0},
+			memSlots:                 podResourceState[uint16]{Reserved: vmInfo.Mem.Use, CapacityPressure: 0},
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 			mostRecentComputeUnit:    nil,
 			metrics:                  nil,

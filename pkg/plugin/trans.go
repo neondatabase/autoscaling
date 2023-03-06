@@ -48,10 +48,10 @@ func collectResourceTransition[T constraints.Unsigned](
 			capacityPressure     T
 			pressureAccountedFor T
 		}{
-			reserved:             node.reserved,
-			buffer:               node.buffer,
-			capacityPressure:     node.capacityPressure,
-			pressureAccountedFor: node.pressureAccountedFor,
+			reserved:             node.Reserved,
+			buffer:               node.Buffer,
+			capacityPressure:     node.CapacityPressure,
+			pressureAccountedFor: node.PressureAccountedFor,
 		},
 		pod: pod,
 		oldPod: struct {
@@ -59,9 +59,9 @@ func collectResourceTransition[T constraints.Unsigned](
 			buffer           T
 			capacityPressure T
 		}{
-			reserved:         pod.reserved,
-			buffer:           pod.buffer,
-			capacityPressure: pod.capacityPressure,
+			reserved:         pod.Reserved,
+			buffer:           pod.Buffer,
+			capacityPressure: pod.CapacityPressure,
 		},
 	}
 }
@@ -71,7 +71,7 @@ func collectResourceTransition[T constraints.Unsigned](
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
 func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool) (verdict string) {
-	totalReservable := r.node.total - r.node.system
+	totalReservable := r.node.Total - r.node.System
 	// note: it's possible to temporarily have reserved > totalReservable, after loading state or
 	// config change; we have to use SaturatingSub here to account for that.
 	remainingReservable := util.SaturatingSub(totalReservable, r.oldNode.reserved)
@@ -89,13 +89,13 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 	// should then be back under r.node.total. It _may_ still be above totalReservable, but that's
 	// expected to happen sometimes!
 
-	if requested <= r.pod.reserved {
+	if requested <= r.pod.Reserved {
 		// Decrease "requests" are actually just notifications it's already happened
-		r.node.reserved -= r.pod.reserved - requested
-		r.pod.reserved = requested
+		r.node.Reserved -= r.pod.Reserved - requested
+		r.pod.Reserved = requested
 		// pressure is now zero, because the pod no longer wants to increase resources.
-		r.pod.capacityPressure = 0
-		r.node.capacityPressure -= r.oldPod.capacityPressure
+		r.pod.CapacityPressure = 0
+		r.node.CapacityPressure -= r.oldPod.capacityPressure
 
 		// use shared verdict below.
 
@@ -104,12 +104,12 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		//
 		// But we _will_ add the pod's request to the node's pressure, noting that its migration
 		// will resolve it.
-		r.pod.capacityPressure = requested - r.pod.reserved
-		r.node.capacityPressure = r.node.capacityPressure + r.pod.capacityPressure - r.oldPod.capacityPressure
+		r.pod.CapacityPressure = requested - r.pod.Reserved
+		r.node.CapacityPressure = r.node.CapacityPressure + r.pod.CapacityPressure - r.oldPod.capacityPressure
 
 		// note: we don't need to handle buffer here because migration is never started as the first
 		// communication, so buffers will be zero already.
-		if r.pod.buffer != 0 {
+		if r.pod.Buffer != 0 {
 			panic(errors.New("r.pod.buffer != 0"))
 		}
 
@@ -120,7 +120,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 			// Denying increase %d -> %d because ...
 			r.oldPod.reserved, requested,
 			// node capacityPressure %d -> %d (%d -> %d spoken for)
-			r.oldNode.capacityPressure, r.node.capacityPressure, r.oldNode.pressureAccountedFor, r.node.pressureAccountedFor,
+			r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
 		)
 		return verdict
 	} else /* typical "request for increase" */ {
@@ -143,22 +143,22 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		//
 		// Please think carefully before changing this.
 
-		increase := requested - r.pod.reserved
+		increase := requested - r.pod.Reserved
 		// Increases are bounded by what's left in the node
 		maxIncrease := remainingReservable
 		if increase > maxIncrease /* increases are bound by what's left in the node */ {
-			r.pod.capacityPressure = increase - maxIncrease
+			r.pod.CapacityPressure = increase - maxIncrease
 			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
 			// directly += or -= (implicitly relying on overflow).
-			r.node.capacityPressure = r.node.capacityPressure - r.oldPod.capacityPressure + r.pod.capacityPressure
+			r.node.CapacityPressure = r.node.CapacityPressure - r.oldPod.capacityPressure + r.pod.CapacityPressure
 			increase = maxIncrease // cap at maxIncrease.
 		} else {
 			// If we're not capped by maxIncrease, relieve pressure coming from this pod
-			r.node.capacityPressure -= r.pod.capacityPressure
-			r.pod.capacityPressure = 0
+			r.node.CapacityPressure -= r.pod.CapacityPressure
+			r.pod.CapacityPressure = 0
 		}
-		r.pod.reserved += increase
-		r.node.reserved += increase
+		r.pod.Reserved += increase
+		r.node.Reserved += increase
 
 		// use shared verdict below.
 	}
@@ -168,26 +168,26 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		"node capacityPressure %d -> %d (%d -> %d spoken for)"
 
 	var buffer string
-	if r.pod.buffer != 0 {
-		buffer = fmt.Sprintf(" (buffer %d)", r.pod.buffer)
+	if r.pod.Buffer != 0 {
+		buffer = fmt.Sprintf(" (buffer %d)", r.pod.Buffer)
 
-		r.node.buffer -= r.pod.buffer
-		r.pod.buffer = 0
+		r.node.Buffer -= r.pod.Buffer
+		r.pod.Buffer = 0
 	}
 
 	var wanted string
-	if r.pod.reserved != requested {
+	if r.pod.Reserved != requested {
 		wanted = fmt.Sprintf(" (wanted %d)", requested)
 	}
 
 	verdict = fmt.Sprintf(
 		fmtString,
 		// Register %d%s -> %d%s (pressure %d -> %d)
-		r.oldPod.reserved, buffer, r.pod.reserved, wanted, r.oldPod.capacityPressure, r.pod.capacityPressure,
+		r.oldPod.reserved, buffer, r.pod.Reserved, wanted, r.oldPod.capacityPressure, r.pod.CapacityPressure,
 		// node reserved %d -> %d (of %d)
-		r.oldNode.reserved, r.node.reserved, totalReservable,
+		r.oldNode.reserved, r.node.Reserved, totalReservable,
 		// node capacityPressure %d -> %d (%d -> %d spoken for)
-		r.oldNode.capacityPressure, r.node.capacityPressure, r.oldNode.pressureAccountedFor, r.node.pressureAccountedFor,
+		r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
 	)
 	return verdict
 }
@@ -196,11 +196,11 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 //
 // A pretty-formatted summary of the changes is returned as the verdict, for logging.
 func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict string) {
-	r.node.reserved -= r.pod.reserved
-	r.node.capacityPressure -= r.pod.capacityPressure
+	r.node.Reserved -= r.pod.Reserved
+	r.node.CapacityPressure -= r.pod.CapacityPressure
 
 	if currentlyMigrating {
-		r.node.pressureAccountedFor -= r.pod.reserved + r.pod.capacityPressure
+		r.node.PressureAccountedFor -= r.pod.Reserved + r.pod.CapacityPressure
 	}
 
 	fmtString := "pod had %d; node reserved %d -> %d, " +
@@ -208,9 +208,9 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 	verdict = fmt.Sprintf(
 		fmtString,
 		// pod had %d; node reserved %d -> %d
-		r.pod.reserved, r.oldNode.reserved, r.node.reserved,
+		r.pod.Reserved, r.oldNode.reserved, r.node.Reserved,
 		// node capacityPressure %d -> %d (%d -> %d spoken for)
-		r.oldNode.capacityPressure, r.node.capacityPressure, r.oldNode.pressureAccountedFor, r.node.pressureAccountedFor,
+		r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
 	)
 	return verdict
 }
@@ -227,21 +227,21 @@ func handleDeletedPod(
 	newRes := node.otherResources.subPod(memSlotSize, pod)
 	node.otherResources = newRes
 
-	oldNodeCpuReserved := node.vCPU.reserved
-	oldNodeMemReserved := node.memSlots.reserved
+	oldNodeCpuReserved := node.vCPU.Reserved
+	oldNodeMemReserved := node.memSlots.Reserved
 
-	node.vCPU.reserved = node.vCPU.reserved - oldRes.reservedCpu + newRes.reservedCpu
-	node.memSlots.reserved = node.memSlots.reserved - oldRes.reservedMemSlots + newRes.reservedMemSlots
+	node.vCPU.Reserved = node.vCPU.Reserved - oldRes.ReservedCPU + newRes.ReservedCPU
+	node.memSlots.Reserved = node.memSlots.Reserved - oldRes.ReservedMemSlots + newRes.ReservedMemSlots
 
 	cpuVerdict = fmt.Sprintf(
 		"pod had %v (raw), node otherPods (%v -> %v raw, %v margin, %d -> %d rounded), node reserved %d -> %d",
-		&pod.rawCpu, &oldRes.rawCpu, &newRes.rawCpu, newRes.marginCpu, oldRes.reservedCpu, newRes.reservedCpu,
-		oldNodeCpuReserved, node.vCPU.reserved,
+		&pod.RawCPU, &oldRes.RawCPU, &newRes.RawCPU, newRes.MarginCPU, oldRes.ReservedCPU, newRes.ReservedCPU,
+		oldNodeCpuReserved, node.vCPU.Reserved,
 	)
 	memVerdict = fmt.Sprintf(
 		"pod had %v (raw), node otherPods (%v -> %v raw, %v margin, %d -> %d slots), node reserved %d -> %d slots",
-		&pod.rawMemory, &oldRes.rawMemory, &newRes.rawMemory, newRes.marginMemory, oldRes.reservedMemSlots, newRes.reservedMemSlots,
-		oldNodeMemReserved, node.memSlots.reserved,
+		&pod.RawMemory, &oldRes.RawMemory, &newRes.RawMemory, newRes.MarginMemory, oldRes.ReservedMemSlots, newRes.ReservedMemSlots,
+		oldNodeMemReserved, node.memSlots.Reserved,
 	)
 
 	return
