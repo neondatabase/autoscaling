@@ -85,6 +85,13 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		return nil, err
 	}
 
+	if p.state.conf.DumpState != nil {
+		klog.Infof("[autoscale-enforcer] Starting 'dump state' server")
+		if err := p.startDumpStateServer(ctx); err != nil {
+			return nil, fmt.Errorf("Error starting 'dump state' server: %w", err)
+		}
+	}
+
 	// Start watching deletion events...
 	vmDeletions := make(chan api.PodName)
 	podDeletions := make(chan api.PodName)
