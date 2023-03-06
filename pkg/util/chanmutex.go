@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/neondatabase/autoscaling/pkg/task"
 )
 
 // ChanMutex is a select-able mutex
@@ -82,19 +84,19 @@ func (m *ChanMutex) Unlock() {
 // DeadlockChecker creates a function that, when called, periodically attempts to acquire the lock,
 // panicking if it fails
 //
-// The returned function exits when the context is done.
-func (m *ChanMutex) DeadlockChecker(timeout, delay time.Duration) func(ctx context.Context) {
-	return func(ctx context.Context) {
+// The returned function exits when the task.Manager's context is done.
+func (m *ChanMutex) DeadlockChecker(timeout, delay time.Duration) func(tm task.Manager) {
+	return func(tm task.Manager) {
 		for {
 			// Delay between checks
 			select {
-			case <-ctx.Done():
+			case <-tm.Context().Done():
 				return
 			case <-time.After(delay):
 			}
 
 			select {
-			case <-ctx.Done():
+			case <-tm.Context().Done():
 				return
 			case <-m.WaitLock():
 				m.Unlock()

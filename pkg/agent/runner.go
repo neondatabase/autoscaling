@@ -53,14 +53,15 @@ import (
 	"io"
 	"net/http"
 	"runtime"
-	"runtime/debug"
-	"sync/atomic"
 	"time"
+
+	"github.com/sharnoff/chord"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -107,7 +108,6 @@ type Runner struct {
 	// - podName
 	// - podIP
 	// - logger
-	// - backgroundPanic
 	// lock MUST NOT be held while interacting with the network. The appropriate synchronization to
 	// ensure we don't send conflicting requests is provided by schedulerRequestLock and
 	// vmStateLock.
@@ -165,11 +165,6 @@ type Runner struct {
 	//
 	// This field MUST NOT be updated without holding BOTH lock AND server.requestLock.
 	lastInformantError error
-
-	// backgroundWorkerCount tracks the current number of background workers. It is exclusively
-	// updated by r.spawnBackgroundWorker
-	backgroundWorkerCount atomic.Int64
-	backgroundPanic       chan error
 }
 
 // Scheduler stores relevant state for a particular scheduler that a Runner is (or has) connected to
@@ -254,18 +249,18 @@ type schedulerInternal struct {
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
 type RunnerState struct {
-	LogPrefix             string                `json:"logPrefix"`
-	PodIP                 string                `json:"podIP"`
-	VM                    api.VmInfo            `json:"vm"`
-	LastMetrics           *api.Metrics          `json:"lastMetrics"`
-	Scheduler             *SchedulerState       `json:"scheduler"`
-	Server                *InformantServerState `json:"server"`
-	Informant             *api.InformantDesc    `json:"informant"`
-	ComputeUnit           *api.Resources        `json:"computeUnit"`
-	LastApproved          *api.Resources        `json:"lastApproved"`
-	LastSchedulerError    error                 `json:"lastSchedulerError"`
-	LastInformantError    error                 `json:"lastInformantError"`
-	BackgroundWorkerCount int64                 `json:"backgroundWorkerCount"`
+	LogPrefix          string                `json:"logPrefix"`
+	PodIP              string                `json:"podIP"`
+	VM                 api.VmInfo            `json:"vm"`
+	LastMetrics        *api.Metrics          `json:"lastMetrics"`
+	Scheduler          *SchedulerState       `json:"scheduler"`
+	Server             *InformantServerState `json:"server"`
+	Informant          *api.InformantDesc    `json:"informant"`
+	ComputeUnit        *api.Resources        `json:"computeUnit"`
+	LastApproved       *api.Resources        `json:"lastApproved"`
+	LastSchedulerError error                 `json:"lastSchedulerError"`
+	LastInformantError error                 `json:"lastInformantError"`
+	Tasks              task.TaskTree         `json:"tasks"`
 }
 
 // SchedulerState is the state of a Scheduler, constructed as part of a Runner's State Method
@@ -276,7 +271,7 @@ type SchedulerState struct {
 	FatalError error         `json:"fatalError"`
 }
 
-func (r *Runner) State() RunnerState {
+func (r *Runner) State(groupHandle task.SubgroupHandle) RunnerState {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -296,7 +291,7 @@ func (r *Runner) State() RunnerState {
 			Desc:            r.server.desc,
 			SeqNum:          r.server.seqNum,
 			ReceivedIDCheck: r.server.receivedIDCheck,
-			MadeContact:     r.server.madeContact,
+			MadeContact:     r.server.madeContact.Load(),
 			ProtoVersion:    r.server.protoVersion,
 			Mode:            r.server.mode,
 			ExitStatus:      r.server.exitStatus,
@@ -304,39 +299,50 @@ func (r *Runner) State() RunnerState {
 	}
 
 	return RunnerState{
-		LastMetrics:           r.lastMetrics,
-		Scheduler:             scheduler,
-		Server:                serverState,
-		Informant:             r.informant,
-		ComputeUnit:           r.computeUnit,
-		LastApproved:          r.lastApproved,
-		LastSchedulerError:    r.lastSchedulerError,
-		LastInformantError:    r.lastInformantError,
-		VM:                    *r.vm,
-		PodIP:                 r.podIP,
-		LogPrefix:             r.logger.prefix,
-		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
+		LastMetrics:        r.lastMetrics,
+		Scheduler:          scheduler,
+		Server:             serverState,
+		Informant:          r.informant,
+		ComputeUnit:        r.computeUnit,
+		LastApproved:       r.lastApproved,
+		LastSchedulerError: r.lastSchedulerError,
+		LastInformantError: r.lastInformantError,
+		VM:                 *r.vm,
+		PodIP:              r.podIP,
+		LogPrefix:          r.logger.prefix,
+		Tasks:              groupHandle.TaskTree(),
 	}
 }
 
-func (r *Runner) Spawn(ctx context.Context, vmName string) {
-	go func() {
-		// Gracefully handle panics:
-		defer func() {
-			if err := recover(); err != nil {
-				r.setStatus(func(stat *podStatus) {
-					stat.panicked = true
-					stat.done = true
-					stat.errored = fmt.Errorf("runner panicked: %v", err)
-				})
-			}
-		}()
+func makeShutdownContext() context.Context {
+	// note: it's ok to leak the cancel func here; we don't have a good way to clean it up, and
+	// eventually it'll get GC'd anyways.
+	//
+	// TODO: make this timeout configurable
+	ctx, _ := context.WithTimeout(context.TODO(), 10*time.Second) //nolint:govet // see above
+	return ctx
+}
 
-		err := r.Run(ctx, vmName)
+func (r *Runner) Spawn(tm task.Manager, vmName string) task.SubgroupHandle {
+	// Handle panics by marking ourselves as such and shutting down everything else
+	tm = tm.WithPanicHandler(func(taskName string, stackTrace chord.StackTrace) {
+		r.setStatus(func(stat *podStatus) {
+			stat.panicked = true
+			stat.done = true
+			stat.errored = fmt.Errorf("task %s panicked", taskName)
+		})
+		task.LogPanicAndShutdown(tm, makeShutdownContext)
+	})
+
+	return tm.SpawnAsSubgroup(fmt.Sprintf("runner-%v", r.podName), func(tm task.Manager) {
+		err := r.Run(tm, vmName)
 
 		r.setStatus(func(stat *podStatus) {
 			r.status.done = true
-			r.status.errored = err
+			// don't overwrite a prior panic
+			if r.status.errored == nil {
+				r.status.errored = err
+			}
 		})
 
 		if err != nil {
@@ -344,7 +350,7 @@ func (r *Runner) Spawn(ctx context.Context, vmName string) {
 		} else {
 			r.logger.Infof("Ended without error")
 		}
-	}()
+	})
 }
 
 func (r *Runner) setStatus(with func(*podStatus)) {
@@ -354,15 +360,17 @@ func (r *Runner) setStatus(with func(*podStatus)) {
 }
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
-func (r *Runner) Run(ctx context.Context, vmName string) error {
-	ctx, cancelCtx := context.WithCancel(ctx)
-	defer cancelCtx()
+func (r *Runner) Run(tm task.Manager, vmName string) (err error) {
+	defer func() {
+		shutdownErr := tm.Shutdown(makeShutdownContext())
+		if err == nil && shutdownErr != nil {
+			err = shutdownErr
+		}
+	}()
 
-	initVmInfo, err := r.getInitialVMInfo(ctx, vmName)
-	if ctx.Err() != nil {
-		return nil
-	} else if err != nil {
-		return err
+	initVmInfo, err := r.getInitialVMInfo(tm.Context(), vmName)
+	if err != nil {
+		return
 	}
 
 	// Updating r.vm has to be while r.lock is held, in case r.State() is concurrently called
@@ -374,7 +382,7 @@ func (r *Runner) Run(ctx context.Context, vmName string) error {
 	}()
 
 	schedulerWatch, scheduler, err := watchSchedulerUpdates(
-		ctx, r.logger, r.global.schedulerEventBroker, r.global.schedulerStore,
+		tm, r.logger, r.global.schedulerEventBroker, r.global.schedulerStore,
 	)
 	if err != nil {
 		return fmt.Errorf("Error starting scheduler watcher: %w", err)
@@ -405,29 +413,25 @@ func (r *Runner) Run(ctx context.Context, vmName string) error {
 	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
 	vmDeadlockChecker := r.vmStateLock.DeadlockChecker(30*time.Second, time.Second)
 
-	r.spawnBackgroundWorker(ctx, "deadlock checker (main)", mainDeadlockChecker)
-	r.spawnBackgroundWorker(ctx, "deadlock checker (VM)", vmDeadlockChecker)
-	r.spawnBackgroundWorker(ctx, "track scheduler", func(c context.Context) {
-		r.trackSchedulerLoop(c, scheduler, schedulerWatch, sendSchedSignal)
+	tm.Spawn("deadlock-checker-main", mainDeadlockChecker)
+	tm.Spawn("deadlock-checker-VM", vmDeadlockChecker)
+	tm.Spawn("track-scheduler", func(tm task.Manager) {
+		r.trackSchedulerLoop(tm, scheduler, schedulerWatch, sendSchedSignal)
 	})
-	r.spawnBackgroundWorker(ctx, "get metrics", func(c context.Context) {
-		r.getMetricsLoop(c, sendMetricsSignal, recvInformantUpd)
+	tm.Spawn("get-metrics", func(tm task.Manager) {
+		r.getMetricsLoop(tm.Context(), sendMetricsSignal, recvInformantUpd)
 	})
-	r.spawnBackgroundWorker(ctx, "handle VM resources", func(c context.Context) {
-		r.handleVMResources(c, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal)
+	tm.Spawn("handle-VM-resources", func(tm task.Manager) {
+		r.handleVMResources(tm.Context(), recvMetricsSignal, recvUpscaleRequested, recvSchedSignal)
 	})
-	r.spawnBackgroundWorker(ctx, "informant server loop", func(c context.Context) {
-		r.serveInformantLoop(c, sendInformantUpd, sendUpscaleRequested)
+	tm.Spawn("informant server loop", func(tm task.Manager) {
+		r.serveInformantLoop(tm, sendInformantUpd, sendUpscaleRequested)
 	})
 
 	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
 	// pod was deleted, or the autoscaler-agent is exiting.
-	select {
-	case <-ctx.Done():
-		return nil
-	case err := <-r.backgroundPanic:
-		panic(err)
-	}
+	<-tm.Context().Done()
+	return nil
 }
 
 func (r *Runner) getInitialVMInfo(ctx context.Context, vmName string) (*api.VmInfo, error) {
@@ -461,48 +465,6 @@ func (r *Runner) getInitialVMInfo(ctx context.Context, vmName string) (*api.VmIn
 //////////////////////
 // Background tasks //
 //////////////////////
-
-// spawnBackgroundWorker is a helper function to appropriately handle panics in the various goroutines
-// spawned by `(Runner) Run`, sending them back on r.backgroundPanic
-//
-// This method is essentially equivalent to 'go f(ctx)' but with appropriate panic handling,
-// start/stop logging, and updating of r.backgroundWorkerCount
-func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(context.Context)) {
-	// Increment the background worker count
-	r.backgroundWorkerCount.Add(1)
-
-	go func() {
-		defer func() {
-			// Decrement the background worker count
-			r.backgroundWorkerCount.Add(-1)
-
-			if v := recover(); v != nil {
-				err := fmt.Errorf("background worker %q panicked: %v", name, v)
-				r.logger.Errorf("%s", err)
-				// note: In Go, the stack doesn't "unwind" on panic. Instead, a panic will traverse up
-				// the callstack, and each deferred function, when called, will be *added* to the stack
-				// as if the original panic() is calling them. So the output of runtime/debug.Stack()
-				// has a couple frames do with debug.Stack() and this deferred function, and then the
-				// rest of the callstack starts from where the panic occurred.
-				//
-				// FIXME: we should handle the stack ourselves to remove the stack frames from
-				// debug.Stack() and co. -- it's ok to have nice things!
-				r.logger.Errorf("background worker %q panic stack: %s", name, string(debug.Stack()))
-				// send to r.backgroundPanic if we can; otherwise, don't worry about it.
-				select {
-				case r.backgroundPanic <- err:
-				default:
-				}
-			} else {
-				r.logger.Infof("background worker %q ended normally", name)
-			}
-		}()
-
-		r.logger.Infof("background worker %q started", name)
-
-		f(ctx)
-	}()
-}
 
 // getMetricsLoop repeatedly attempts to fetch metrics from the VM
 //
@@ -611,7 +573,7 @@ func (r *Runner) handleVMResources(
 //
 // This function directly sets the value of r.server and indirectly sets r.informant.
 func (r *Runner) serveInformantLoop(
-	ctx context.Context,
+	tm task.Manager,
 	updatedInformant util.CondChannelSender,
 	upscaleRequested util.CondChannelSender,
 ) {
@@ -639,7 +601,7 @@ retryServer:
 		if normalRetryWait != nil {
 			r.logger.Infof("Retrying informant server in %s", normalWait)
 			select {
-			case <-ctx.Done():
+			case <-tm.Context().Done():
 				return
 			case <-normalRetryWait:
 			}
@@ -655,7 +617,7 @@ retryServer:
 					time.Since(lastStart), minWait,
 				)
 				select {
-				case <-ctx.Done():
+				case <-tm.Context().Done():
 					return
 				case <-minRetryWait:
 				}
@@ -666,8 +628,8 @@ retryServer:
 		minRetryWait = time.After(minWait)
 		lastStart = time.Now()
 
-		server, exited, err := NewInformantServer(ctx, r, updatedInformant, upscaleRequested)
-		if ctx.Err() != nil {
+		server, exited, err := NewInformantServer(tm, r, updatedInformant, upscaleRequested)
+		if tm.Context().Err() != nil {
 			if err != nil {
 				r.logger.Warningf("Error starting informant server, context cancelled: %s", err)
 			}
@@ -699,10 +661,10 @@ retryServer:
 		// Try to register with the informant:
 	retryRegister:
 		for {
-			err := server.RegisterWithInformant(ctx)
+			err := server.RegisterWithInformant(tm.Context())
 			if err == nil {
 				break // all good; wait for the server to finish.
-			} else if ctx.Err() != nil {
+			} else if tm.Context().Err() != nil {
 				if err != nil {
 					r.logger.Warningf("Error registering with informant, context cancelled: %s", err)
 				}
@@ -720,14 +682,14 @@ retryServer:
 			select {
 			case <-time.After(retryRegister):
 				continue retryRegister
-			case <-ctx.Done():
+			case <-tm.Context().Done():
 				return
 			}
 		}
 
 		// Wait for the server to finish
 		select {
-		case <-ctx.Done():
+		case <-tm.Context().Done():
 			return
 		case <-exited.Recv():
 		}
@@ -749,7 +711,7 @@ retryServer:
 // trackSchedulerLoop listens on the schedulerWatch, keeping r.scheduler up-to-date and signalling
 // on registeredScheduler whenever a new Scheduler is successfully registered
 func (r *Runner) trackSchedulerLoop(
-	ctx context.Context,
+	tm task.Manager,
 	init *schedulerInfo,
 	schedulerWatch schedulerWatch,
 	registeredScheduler util.CondChannelSender,
@@ -761,6 +723,7 @@ func (r *Runner) trackSchedulerLoop(
 		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
 		currentInfo schedulerInfo
 		fatal       util.SignalReceiver
+		newFatal    chan util.SignalReceiver = make(chan util.SignalReceiver)
 		failed      bool
 	)
 
@@ -777,21 +740,27 @@ startScheduler:
 	okForNew = time.After(minWait)
 	failed = false
 
-	// Set the current scheduler
-	fatal = func() util.SignalReceiver {
-		r.logger.Infof(
-			"Updating scheduler to pod %v (UID = %s) with IP %s",
-			currentInfo.PodName, currentInfo.UID, currentInfo.IP,
-		)
+	r.logger.Infof(
+		"Updating scheduler to pod %v (UID = %s) with IP %s",
+		currentInfo.PodName, currentInfo.UID, currentInfo.IP,
+	)
 
+	// Set the current scheduler
+	//
+	// each scheduler's handling runs in its own task "subgroup", so their cleanup can be bundled
+	// together.
+	tm.SpawnAsSubgroup(fmt.Sprintf("schedloop-%s", currentInfo.UID), func(tm task.Manager) {
 		sendFatal, recvFatal := util.NewSingleSignalPair()
+
+		// the blocking receive on newFatal guarantees we can read currentInfo.UID without holding a lock
+		logger := RunnerLogger{
+			prefix: fmt.Sprintf("%sScheduler %s: ", r.logger.prefix, currentInfo.UID),
+		}
 
 		sched := &Scheduler{
 			&schedulerInternal{
-				runner: r,
-				logger: RunnerLogger{
-					prefix: fmt.Sprintf("%sScheduler %s: ", r.logger.prefix, currentInfo.UID),
-				},
+				runner:      r,
+				logger:      logger,
 				info:        currentInfo,
 				registered:  false,
 				fatalError:  nil,
@@ -800,17 +769,15 @@ startScheduler:
 			},
 		}
 
-		deadlockCheckerCtx, cancelDeadlockChecker := context.WithCancel(ctx)
-		runtime.SetFinalizer(sched, func(obj any) {
-			cancelDeadlockChecker()
-		})
-
 		// FIXME: make these timeouts/delays separately defined constants, or configurable
-		deadlockChecker := sched.requestLock.DeadlockChecker(5*time.Second, time.Second)
-
-		// precompute the worker names so we don't panic while holding the locks below
-		deadlockWorkerName := fmt.Sprintf("deadlock checker (sched %s)", currentInfo.UID)
-		registerWorkerName := fmt.Sprintf("Scheduler(%s).Register()", currentInfo.UID)
+		tm.Spawn("deadlock-checker", sched.requestLock.DeadlockChecker(5*time.Second, time.Second))
+		// shut down the deadlock checker once the object is no longer in use
+		runtime.SetFinalizer(sched, func(obj any) {
+			err := tm.Shutdown(makeShutdownContext())
+			if err != nil {
+				logger.Errorf("Error shutting down scheduler: %s", err)
+			}
+		})
 
 		// Acquire the requestLock for the initial sched.Register(). Responsibility for unlocking it
 		// is passed to the goroutine.
@@ -835,27 +802,33 @@ startScheduler:
 			r.lastSchedulerError = nil
 		}()
 
+		// only send after we've updated r.scheduler
+		newFatal <- recvFatal
+
 		responsibleForRequestLock = false
-		r.spawnBackgroundWorker(deadlockCheckerCtx, deadlockWorkerName, deadlockChecker)
-		r.spawnBackgroundWorker(ctx, registerWorkerName, func(c context.Context) {
+		tm.Spawn("Register()", func(tm task.Manager) {
 			defer sched.requestLock.Unlock()
 
-			if err := sched.Register(c, registeredScheduler.Send); err != nil {
-				if c.Err() != nil {
-					r.logger.Warningf("Error registering with scheduler (but context is done): %s", err)
+			if err := sched.Register(tm.Context(), registeredScheduler.Send); err != nil {
+				if tm.Context().Err() != nil {
+					logger.Warningf("Error registering (but context is done): %s", err)
 				} else {
-					r.logger.Errorf("Error registering with scheduler: %s", err)
+					logger.Errorf("Error registering: %s", err)
 				}
 			}
 		})
+	})
 
-		return recvFatal
-	}()
+	select {
+	case fatal = <-newFatal:
+	case <-tm.Context().Done():
+		return
+	}
 
 	// Start watching for the current scheduler to be deleted or have fatally errored
 	for {
 		select {
-		case <-ctx.Done():
+		case <-tm.Context().Done():
 			return
 		case <-fatal.Recv():
 			r.logger.Infof("Waiting for new scheduler because current fatally errored")
@@ -911,7 +884,7 @@ waitForNewScheduler:
 				endingMode, time.Since(lastStart), minWait,
 			)
 			select {
-			case <-ctx.Done():
+			case <-tm.Context().Done():
 				return
 			case <-okForNew:
 			}
@@ -920,7 +893,7 @@ waitForNewScheduler:
 
 	// Actually watch for a new scheduler
 	select {
-	case <-ctx.Done():
+	case <-tm.Context().Done():
 		return
 	case newInfo := <-schedulerWatch.ReadyQueue:
 		currentInfo = newInfo

@@ -14,6 +14,7 @@ import (
 	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/billing"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -65,7 +66,7 @@ const (
 )
 
 func RunBillingMetricsCollector(
-	backgroundCtx context.Context,
+	tm task.Manager,
 	conf *BillingConfig,
 	targetNode string,
 	store *util.WatchStore[vmapi.VirtualMachine],
@@ -104,7 +105,7 @@ func RunBillingMetricsCollector(
 			}
 			// Sending was successful; clear the batch.
 			batch = client.NewBatch()
-		case <-backgroundCtx.Done():
+		case <-tm.Context().Done():
 			// If we're being shut down, push the latests events we have before returning.
 			klog.Infof("Creating final billing batch")
 			state.drainAppendToBatch(conf, batch)

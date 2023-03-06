@@ -12,6 +12,7 @@ import (
 
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -22,7 +23,11 @@ type MainRunner struct {
 	VMClient   *vmclient.Clientset
 }
 
-func (r MainRunner) Run(ctx context.Context) error {
+func (r MainRunner) Run(tm task.Manager) error {
+	ctx := tm.Context()
+	immediateContext, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
 	podEvents := make(chan podEvent)
 
 	buildInfo := util.GetBuildInfo()
@@ -31,61 +36,56 @@ func (r MainRunner) Run(ctx context.Context) error {
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	klog.Info("Starting pod watcher")
-	podWatchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
+	podWatchStore, err := startPodWatcher(tm, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
 	if err != nil {
 		return fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 	klog.Info("Pod watcher started")
+	_ = tm.OnShutdown(immediateContext, task.Infallible(podWatchStore.Stop))
 
 	klog.Info("Starting VM watcher")
-	vmWatchStore, err := startVMWatcher(ctx, r.VMClient, r.EnvArgs.K8sNodeName)
+	vmWatchStore, err := startVMWatcher(tm, r.VMClient, r.EnvArgs.K8sNodeName)
 	if err != nil {
 		return fmt.Errorf("Error starting VM watcher: %w", err)
 	}
+	_ = tm.OnShutdown(immediateContext, task.Infallible(vmWatchStore.Stop))
 	klog.Info("VM watcher started")
 
-	broker := pubsub.NewBroker[watchEvent](ctx, pubsub.BrokerOptions{})
-	schedulerStore, err := startSchedulerWatcher(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	broker := pubsub.NewBroker[watchEvent](tm.Context(), pubsub.BrokerOptions{})
+	_ = tm.OnShutdown(immediateContext, func(ctx context.Context) error {
+		broker.Stop()
+		broker.Wait(ctx)
+		return ctx.Err()
+	})
+
+	schedulerStore, err := startSchedulerWatcher(tm, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
+	_ = tm.OnShutdown(immediateContext, task.Infallible(schedulerStore.Stop))
 
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")
-		// TODO: catch panics here, bubble those into a clean-ish shutdown.
-		go RunBillingMetricsCollector(ctx, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)
+		tm.WithPanicHandler(task.LogPanicAndShutdown(tm, makeShutdownContext)).
+			Spawn("billing-metrics-collector", func(subTm task.Manager) {
+				RunBillingMetricsCollector(subTm, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)
+			})
 	}
 
 	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	_ = tm.OnShutdown(immediateContext, task.Infallible(func() { globalState.Stop(tm) }))
 
 	klog.Info("Entering main loop")
 	for {
 		select {
 		case <-ctx.Done():
-			podWatchStore.Stop()
-			vmWatchStore.Stop()
-			schedulerStore.Stop()
-			broker.Stop()
-			func() {
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				broker.Wait(shutdownCtx)
-			}()
-
-			// Remove anything else from podEvents
-		loop:
-			for {
-				select {
-				case <-podEvents:
-				default:
-					break loop
-				}
+			klog.Infof("Shutting down")
+			if err := tm.Shutdown(makeShutdownContext()); err != nil {
+				klog.Errorf("Error during shutdown: %s", err)
 			}
-
-			globalState.Stop()
 			return nil
 		case event := <-podEvents:
-			globalState.handleEvent(ctx, event)
+			globalState.handleEvent(tm, event)
 		}
 	}
 }

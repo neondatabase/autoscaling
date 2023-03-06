@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -173,7 +173,7 @@ func (oldConf *config) validateChangeTo(newConf *config) (string, error) {
 
 // setConfigAndStartWatcher basically does what it says. It (indirectly) spawns goroutines that will
 // update the plugin's config (calling e.handleNewConfigMap).
-func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error {
+func (e *AutoscaleEnforcer) setConfigAndStartWatcher(tm task.Manager) error {
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
@@ -181,7 +181,7 @@ func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error 
 	updateEvents := make(chan *corev1.ConfigMap)
 
 	watchStore, err := util.Watch(
-		ctx,
+		tm,
 		e.handle.ClientSet().CoreV1().ConfigMaps(ConfigMapNamespace),
 		util.WatchConfig{
 			LogName: fmt.Sprintf("ConfigMap %s:%s", ConfigMapNamespace, ConfigMapName),

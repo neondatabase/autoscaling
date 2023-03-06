@@ -4,7 +4,6 @@ package plugin
 // associated resources
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -25,12 +25,12 @@ import (
 //
 // Events occurring before this method is called will not be sent.
 func (e *AutoscaleEnforcer) watchPodDeletions(
-	ctx context.Context,
+	tm task.Manager,
 	vmDeletions chan<- api.PodName,
 	podDeletions chan<- api.PodName,
 ) error {
 	_, err := util.Watch(
-		ctx,
+		tm,
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
 		util.WatchConfig{
 			LogName: "pods",

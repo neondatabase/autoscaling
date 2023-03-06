@@ -12,6 +12,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 )
 
 var MaxHTTPBodySize int64 = 1 << 10 // 1 KiB
@@ -27,7 +28,7 @@ const (
 )
 
 // runPermitHandler runs the server for handling each resourceRequest from a pod
-func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
+func (e *AutoscaleEnforcer) runPermitHandler(tm task.Manager) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
@@ -80,29 +81,13 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 	server := http.Server{Addr: "0.0.0.0:10299", Handler: mux}
 	klog.Info("[autoscale-enforcer] Starting resource request server")
 
-	// in general this isn't the right way to do this: we should
-	// have a group of functions which return service objects that
-	// have blocking close routines, and then start them at a
-	// higher level in the process, and then when we catch a
-	// shutdown signal, you call the shutdown methods (preferably
-	// in parallel) and wait for them to shut down.
-	go func() {
-		// wait till the program is going to exit
-		<-ctx.Done()
-		// create a new context with a timeout because the
-		// context we have is canceled. In practice, there's
-		// nothing at the top level to prevent us from exiting
-		// directly, so this is somewhat pro forma.
-		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer scancel()
+	immediateCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-		// this just stops accepting new requests, and lets
-		// the existing handlers return, and blocks until they
-		// do. That gives us a "clean shutdown."
-		if err := server.Shutdown(sctx); err != nil {
-			klog.Errorf("[autoscale-enforcer] Service shutdown failed: %s", err)
-		}
-	}()
+	err := tm.OnShutdown(immediateCtx, task.WrapOnError("Resource request server shutdown failed: %w", server.Shutdown))
+	if err != nil {
+		klog.Errorf("Error from immediate shutdown of resource request server: %s", err)
+	}
 
 	// this runs until something cancels or the context in
 	// the goroutine causes shutdown to run.
@@ -110,7 +95,6 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 		// this fatal will take down the entire process,
 		klog.Fatalf("[autoscale-enforcer] Resource request server failed: %s", err)
 	}
-
 }
 
 // Returns body (if successful), status code, error (if unsuccessful)

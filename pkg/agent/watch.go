@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -31,14 +31,14 @@ const (
 )
 
 func startPodWatcher(
-	ctx context.Context,
+	tm task.Manager,
 	config *Config,
 	kubeClient *kubernetes.Clientset,
 	nodeName string,
 	podEvents chan<- podEvent,
 ) (*util.WatchStore[corev1.Pod], error) {
 	return util.Watch(
-		ctx,
+		tm,
 		kubeClient.CoreV1().Pods(corev1.NamespaceAll),
 		util.WatchConfig{
 			LogName: "pods",
@@ -111,12 +111,12 @@ func startPodWatcher(
 
 // note: unlike startPodWatcher, we aren't able to use a field selector on VM status.node (currently; NeonVM v0.4.6)
 func startVMWatcher(
-	ctx context.Context,
+	tm task.Manager,
 	vmClient *vmclient.Clientset,
 	nodeName string,
 ) (*util.WatchStore[vmapi.VirtualMachine], error) {
 	return util.Watch(
-		ctx,
+		tm,
 		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		util.WatchConfig{
 			LogName: "VMs",

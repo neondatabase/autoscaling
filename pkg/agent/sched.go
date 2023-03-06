@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -87,14 +88,14 @@ const (
 )
 
 func startSchedulerWatcher(
-	ctx context.Context,
+	tm task.Manager,
 	logger RunnerLogger,
 	kubeClient *kubernetes.Clientset,
 	eventBroker *pubsub.Broker[watchEvent],
 	schedulerName string,
 ) (*util.WatchStore[corev1.Pod], error) {
 	return util.Watch(
-		ctx,
+		tm,
 		kubeClient.CoreV1().Pods(schedulerNamespace),
 		util.WatchConfig{
 			LogName: "scheduler",
@@ -118,7 +119,7 @@ func startSchedulerWatcher(
 						return
 					}
 
-					eventBroker.Publish(ctx, watchEvent{info: newSchedulerInfo(pod), kind: eventKindReady})
+					eventBroker.Publish(tm.Context(), watchEvent{info: newSchedulerInfo(pod), kind: eventKindReady})
 				}
 			},
 			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
@@ -140,15 +141,15 @@ func startSchedulerWatcher(
 						logger.Errorf("Pod %v is ready but has no IP", newPodName)
 						return
 					}
-					eventBroker.Publish(ctx, watchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)})
+					eventBroker.Publish(tm.Context(), watchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)})
 				} else if oldReady && !newReady {
-					eventBroker.Publish(ctx, watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)})
+					eventBroker.Publish(tm.Context(), watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)})
 				}
 			},
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				wasReady := util.PodReady(pod)
 				if wasReady {
-					eventBroker.Publish(ctx, watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)})
+					eventBroker.Publish(tm.Context(), watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)})
 				}
 			},
 		},
@@ -157,12 +158,12 @@ func startSchedulerWatcher(
 }
 
 func watchSchedulerUpdates(
-	ctx context.Context,
+	tm task.Manager,
 	logger RunnerLogger,
 	eventBroker *pubsub.Broker[watchEvent],
 	store *util.WatchStore[corev1.Pod],
 ) (schedulerWatch, *schedulerInfo, error) {
-	events := eventBroker.Subscribe(ctx)
+	events := eventBroker.Subscribe(tm.Context())
 	readyQueue := make(chan schedulerInfo)
 	deleted := make(chan schedulerInfo)
 	cmd := make(chan watchCmd)
@@ -193,9 +194,11 @@ func watchSchedulerUpdates(
 		cmd:             cmd,
 		using:           using,
 		stop:            stopSender,
-		stopEventStream: func() { eventBroker.Unsubscribe(ctx, events) },
+		stopEventStream: func() { eventBroker.Unsubscribe(tm.Context(), events) },
 	}
-	go state.run(ctx, setStore)
+	tm.Spawn("scheduler-watcher", func(tm task.Manager) {
+		state.run(tm.Context(), setStore)
+	})
 
 	setStore <- store
 

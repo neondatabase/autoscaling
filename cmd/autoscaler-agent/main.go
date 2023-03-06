@@ -1,12 +1,6 @@
 package main
 
 import (
-	"context"
-	"os/signal"
-	"syscall"
-
-	"github.com/tychoish/fun/srv"
-
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -16,6 +10,7 @@ import (
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/agent"
+	"github.com/neondatabase/autoscaling/pkg/task"
 )
 
 func main() {
@@ -54,12 +49,10 @@ func main() {
 		VMClient:   vmClient,
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
-	defer cancel()
-	ctx = srv.SetShutdown(ctx)
-	ctx = srv.SetBaseContext(ctx)
+	tm := task.NewRootTaskManager("autoscaler-agent")
+	tm.ShutdownOnSigterm()
 
-	if err = runner.Run(ctx); err != nil {
+	if err = runner.Run(tm); err != nil {
 		klog.Fatalf("Main loop failed: %s", err)
 	}
 	klog.Info("Main loop returned without issue. Exiting.")

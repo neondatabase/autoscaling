@@ -15,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/klog/v2"
+
+	"github.com/neondatabase/autoscaling/pkg/task"
 )
 
 // WatchClient is implemented by the specific interfaces of kubernetes clients, like
@@ -112,7 +114,7 @@ const (
 // The type C is the kubernetes client we use to get the objects, L representing a list of these,
 // T representing the object type, and P as a pointer to T.
 func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]](
-	ctx context.Context,
+	tm task.Manager,
 	client C,
 	config WatchConfig,
 	accessors WatchAccessors[L, T],
@@ -135,7 +137,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	}
 
 	// Perform an initial listing
-	initialList, err := client.List(ctx, opts)
+	initialList, err := client.List(tm.Context(), opts)
 	if err != nil {
 		return nil, fmt.Errorf("Initial list failed: %w", err)
 	}
@@ -164,7 +166,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 			// Check if the context has been cancelled. This can happen in practice if AddFunc may
 			// take a long time to complete.
-			if err := ctx.Err(); err != nil {
+			if err := tm.Context().Err(); err != nil {
 				return nil, err
 			}
 		}
@@ -172,13 +174,13 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	items = nil // reset to allow GC
 
 	// Start watching
-	watcher, err := client.Watch(ctx, opts)
+	watcher, err := client.Watch(tm.Context(), opts)
 	if err != nil {
 		return nil, fmt.Errorf("Initial watch failed: %w", err)
 	}
 
 	// With the successful Watch call underway, we hand off responsibility to a new goroutine.
-	go func() {
+	tm.Spawn("watch-%s", func(tm task.Manager) {
 		// note: instead of deferring watcher.Stop() directly, wrapping it in an outer function
 		// means that we'll always Stop the most recent watcher.
 		defer func() {
@@ -194,7 +196,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 				select {
 				case <-store.stopCh:
-				case <-ctx.Done():
+				case <-tm.Context().Done():
 				}
 			}
 		}()
@@ -206,7 +208,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			store.objects[uid] = obj
 			handlers.AddFunc(obj, true)
 
-			if err := ctx.Err(); err != nil {
+			if err := tm.Context().Err(); err != nil {
 				return
 			}
 		}
@@ -218,7 +220,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				select {
 				case <-store.stopCh:
 					return
-				case <-ctx.Done():
+				case <-tm.Context().Done():
 					return
 				case event, ok := <-watcher.ResultChan():
 					if !ok {
@@ -317,7 +319,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		relist:
 			klog.Infof("watch %s: re-listing", config.LogName)
 			for {
-				relistList, err := client.List(ctx, opts)
+				relistList, err := client.List(tm.Context(), opts)
 				if err != nil {
 					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
 					if config.RetryRelistAfter == nil {
@@ -331,7 +333,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					case <-time.After(retryAfter):
 						klog.Infof("watch %s: retrying re-list", config.LogName)
 						continue
-					case <-ctx.Done():
+					case <-tm.Context().Done():
 						return
 					case <-store.stopCh:
 						return
@@ -382,7 +384,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			}
 		newWatcher:
 			for {
-				watcher, err = client.Watch(ctx, opts)
+				watcher, err = client.Watch(tm.Context(), opts)
 				if err != nil {
 					klog.Errorf("watch %s: re-watch failed: %s", config.LogName, err)
 					if config.RetryWatchAfter == nil {
@@ -396,7 +398,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					case <-time.After(retryAfter):
 						klog.Infof("watch %s: retrying re-watch after %s", config.LogName, retryAfter)
 						continue
-					case <-ctx.Done():
+					case <-tm.Context().Done():
 						return
 					case <-store.stopCh:
 						return
@@ -407,7 +409,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				break newWatcher
 			}
 		}
-	}()
+	})
 
 	return &store, nil
 }

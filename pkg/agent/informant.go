@@ -10,12 +10,13 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tychoish/fun/srv"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -50,10 +51,10 @@ type InformantServer struct {
 	// madeContact only needs to be set on /register requests (because all others require a
 	// successful register first).
 	//
-	// This field MUST NOT be updated without holding BOTH runner.lock and requestLock.
+	// This field MUST NOT be updated without holding requestLock.
 	//
-	// This field MAY be read while holding EITHER runner.lock OR requestLock.
-	madeContact bool
+	// This field MAY be read at any time, without holding any locks.
+	madeContact atomic.Bool
 
 	// protoVersion gives the version of the agent<->informant protocol currently in use, if the
 	// server has been confirmed.
@@ -125,7 +126,7 @@ type InformantServerExitStatus struct {
 // NewInformantServer starts an InformantServer, returning it and a signal receiver that will be
 // signalled when it exits.
 func NewInformantServer(
-	ctx context.Context,
+	tm task.Manager,
 	runner *Runner,
 	updatedInformant util.CondChannelSender,
 	upscaleRequested util.CondChannelSender,
@@ -156,7 +157,7 @@ func NewInformantServer(
 		},
 		seqNum:           0,
 		receivedIDCheck:  false,
-		madeContact:      false,
+		madeContact:      atomic.Bool{},
 		protoVersion:     nil,
 		mode:             InformantServerUnconfirmed,
 		updatedInformant: updatedInformant,
@@ -178,81 +179,78 @@ func NewInformantServer(
 	httpServer := &http.Server{Handler: mux}
 
 	sendFinished, recvFinished := util.NewSingleSignalPair()
-	backgroundCtx, cancelBackground := context.WithCancel(ctx)
 
 	// note: docs for server.exit guarantee this function is called while holding runner.lock.
-	server.exit = func(status InformantServerExitStatus) {
-		sendFinished.Send()
-		cancelBackground()
 
-		// Set server.exitStatus if isn't already
-		if server.exitStatus == nil {
-			server.exitStatus = &status
-			logFunc := runner.logger.Warningf
-			if status.RetryShouldFix {
-				logFunc = runner.logger.Infof
+	sendStarted, recvStarted := util.NewSingleSignalPair()
+
+	tm.SpawnAsSubgroup(fmt.Sprintf("informant-server-%s", server.desc.AgentID), func(tm task.Manager) {
+		immediateCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		_ = tm.OnShutdown(immediateCtx,
+			task.Infallible(sendFinished.Send),
+			task.WrapOnError("Error shutting down InformantServer: %w", httpServer.Shutdown),
+			func(ctx context.Context) error {
+				if !server.madeContact.Load() {
+					return nil
+				}
+				return task.WrapOnError("Error unregistering: %w", server.unregisterFromInformant)(ctx)
+			},
+		)
+
+		server.exit = func(status InformantServerExitStatus) {
+			sendFinished.Send()
+
+			// Set server.exitStatus if isn't already
+			if server.exitStatus == nil {
+				server.exitStatus = &status
+				logFunc := runner.logger.Warningf
+				if status.RetryShouldFix {
+					logFunc = runner.logger.Infof
+				}
+
+				logFunc("Informant server exiting with retry: %v, err: %s", status.RetryShouldFix, status.Err)
 			}
 
-			logFunc("Informant server exiting with retry: %v, err: %s", status.RetryShouldFix, status.Err)
-		}
-
-		shutdownName := fmt.Sprintf("InformantServer shutdown (%s)", server.desc.AgentID)
-
-		// we need to spawn these in separate threads so the caller doesn't block while holding
-		// runner.lock
-		runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), shutdownName, func(context.Context) {
-			// we want shutdown to (potentially) live longer than the request which
-			// made it, but having a timeout is still good.
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			if err := httpServer.Shutdown(ctx); err != nil {
-				runner.logger.Warningf("Error shutting down InformantServer: %s", err)
-			}
-		})
-		if server.madeContact {
-			// only unregister the server if we could have plausibly contacted the informant
-			unregisterName := fmt.Sprintf("InformantServer unregister (%s)", server.desc.AgentID)
-			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), unregisterName, func(context.Context) {
-				// we want shutdown to (potentially) live longer than the request which
-				// made it, but having a timeout is still good.
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			// spawn this in a separate thread so the caller doesn't block while holding runner.lock
+			tm.Spawn("shutdown", func(tm task.Manager) {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 
-				if err := server.unregisterFromInformant(ctx); err != nil {
-					runner.logger.Warningf("Error unregistering %s: %s", server.desc.AgentID, err)
+				if err := tm.Shutdown(shutdownCtx); err != nil {
+					runner.logger.Errorf("Error shutting down InformantServer: %s", err)
 				}
 			})
 		}
-	}
 
-	// Deadlock checker for server.requestLock
-	//
-	// FIXME: make these timeouts/delays separately defined constants, or configurable
-	deadlockChecker := server.requestLock.DeadlockChecker(5*time.Second, time.Second)
-	deadlockWorkerName := fmt.Sprintf("InformantServer deadlock checker (%s)", server.desc.AgentID)
-	runner.spawnBackgroundWorker(backgroundCtx, deadlockWorkerName, deadlockChecker)
-
-	// Main thread running the server. After httpServer.Serve() completes, we do some error
-	// handling, but that's about it.
-	serverName := fmt.Sprintf("InformantServer (%s)", server.desc.AgentID)
-	runner.spawnBackgroundWorker(ctx, serverName, func(c context.Context) {
-		if err := httpServer.Serve(listener); errors.Is(err, http.ErrServerClosed) {
-			runner.logger.Errorf("InformantServer exited with unexpected error: %s", err)
-		}
-
-		// set server.exitStatus if it isn't already -- generally this should only occur if err
-		// isn't http.ErrServerClosed, because other server exits should be controlled by
-		runner.lock.Lock()
-		defer runner.lock.Unlock()
-
-		if server.exitStatus == nil {
-			server.exitStatus = &InformantServerExitStatus{
-				Err:            fmt.Errorf("Unexpected exit: %w", err),
-				RetryShouldFix: false,
+		// FIXME: make these timeouts/delays separately defined constants, or configurable
+		tm.Spawn("deadlock-checker", server.requestLock.DeadlockChecker(5*time.Second, time.Second))
+		// Main thread running the server. After httpServer.Serve() completes, we do some error
+		// handling, but that's about it.
+		tm.Spawn("serve", func(tm task.Manager) {
+			if err := httpServer.Serve(listener); errors.Is(err, http.ErrServerClosed) {
+				runner.logger.Errorf("InformantServer exited with unexpected error: %s", err)
 			}
-		}
+
+			// set server.exitStatus if it isn't already -- generally this should only occur if err
+			// isn't http.ErrServerClosed, because other server exits should be controlled by
+			runner.lock.Lock()
+			defer runner.lock.Unlock()
+
+			if server.exitStatus == nil {
+				server.exitStatus = &InformantServerExitStatus{
+					Err:            fmt.Errorf("Unexpected exit: %w", err),
+					RetryShouldFix: false,
+				}
+			}
+		})
+
+		sendStarted.Send()
 	})
+
+	// it's ok to block here, because the spawned goroutine doesn't block before sending this to us
+	<-recvStarted.Recv()
 
 	return server, recvFinished, nil
 }
@@ -381,7 +379,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 		defer s.runner.lock.Unlock()
 
 		// Record whether we might've contacted the informant:
-		s.madeContact = maybeMadeContact
+		s.madeContact.Store(maybeMadeContact)
 
 		if err != nil {
 			s.setLastInformantError(fmt.Errorf("Register request failed: %w", err), true)

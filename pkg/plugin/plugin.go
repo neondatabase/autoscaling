@@ -17,6 +17,7 @@ import (
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -49,6 +50,8 @@ func NewAutoscaleEnforcerPlugin(ctx context.Context) func(runtime.Object, framew
 // NewAutoscaleEnforcerPlugin produces the initial AutoscaleEnforcer plugin to be used by the
 // scheduler
 func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
+	tm := ctx.Value(task.ManagerKey).(task.Manager)
+
 	// ^ obj can be used for taking in configuration. it's a bit tricky to figure out, and we don't
 	// quite need it yet.
 	klog.Info("[autoscale-enforcer] Initializing plugin")
@@ -80,7 +83,7 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting config watcher")
-	if err := p.setConfigAndStartWatcher(ctx); err != nil {
+	if err := p.setConfigAndStartWatcher(tm); err != nil {
 		klog.Errorf("Error starting config watcher: %s", err)
 		return nil, err
 	}
@@ -89,7 +92,7 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	vmDeletions := make(chan api.PodName)
 	podDeletions := make(chan api.PodName)
 	klog.Infof("[autoscale-enforcer] Starting pod deletion watcher")
-	if err := p.watchPodDeletions(ctx, vmDeletions, podDeletions); err != nil {
+	if err := p.watchPodDeletions(tm, vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %w", err)
 	}
 
@@ -102,10 +105,10 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	// TODO: this is a little clumsy; both channels are sent on by the same goroutine and both
 	// consumed by this one. This should be changed, probably with handleVMDeletion and
 	// handlePodDeletion being merged into one function.
-	go func() {
+	tm.Spawn("deletion-listener", func(tm task.Manager) {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-tm.Context().Done():
 				return
 			case name := <-vmDeletions:
 				p.handleVMDeletion(name)
@@ -113,21 +116,12 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 				p.handlePodDeletion(name)
 			}
 		}
-	}()
+	})
 
-	go p.runPermitHandler(ctx)
+	tm.Spawn("resource-request-server", p.runPermitHandler)
 
 	// Periodically check that we're not deadlocked
-	go func() {
-		defer func() {
-			if err := recover(); err != nil {
-				klog.Errorf("deadlock checker for AutoscaleEnforcer.state.lock panicked")
-				panic(err)
-			}
-		}()
-
-		p.state.lock.DeadlockChecker(time.Second, 5*time.Second)(ctx)
-	}()
+	tm.Spawn("AutoscaleEnforcer.state.lock-deadlock-checker", p.state.lock.DeadlockChecker(time.Second, 5*time.Second))
 
 	klog.Info("[autoscale-enforcer] Plugin initialization complete")
 	return &p, nil

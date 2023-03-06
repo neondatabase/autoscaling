@@ -37,8 +37,9 @@ require (
 	github.com/elastic/go-sysinfo v1.9.0
 	github.com/google/uuid v1.3.0
 	github.com/neondatabase/neonvm v0.4.6
+	github.com/sharnoff/chord v0.0.0-20230306180645-0b0987b7b7d2
 	github.com/tychoish/fun v0.7.1
-	golang.org/x/exp v0.0.0-20221126150942-6ab00d035af9
+	golang.org/x/exp v0.0.0-20230304125523-9ff063c70017
 	k8s.io/api v0.23.15
 	k8s.io/apimachinery v0.23.15
 	k8s.io/client-go v0.23.15
