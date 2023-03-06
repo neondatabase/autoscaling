@@ -74,49 +74,49 @@ type nodeState struct {
 
 // nodeResourceState describes the state of a resource allocated to a node
 type nodeResourceState[T any] struct {
-	// total is the total amount of T available on the node. This value does not change.
-	total T
-	// system is the amount of T pre-reserved for system functions, and cannot be handed out to pods
+	// Total is the Total amount of T available on the node. This value does not change.
+	Total T `json:"total"`
+	// System is the amount of T pre-reserved for system functions, and cannot be handed out to pods
 	// on the node. This amount CAN change on config updates, which may result in more of T than
 	// we'd like being already provided to the pods.
 	//
 	// This is equivalent to the value of this resource's resourceConfig.System, rounded up to the
 	// nearest size of the units of T.
-	system T
-	// watermark is the amount of T reserved to pods above which we attempt to reduce usage via
+	System T `json:"system"`
+	// Watermark is the amount of T reserved to pods above which we attempt to reduce usage via
 	// migration.
-	watermark T
-	// reserved is the current amount of T reserved to pods. It SHOULD be less than or equal to
-	// (total - system), and we take active measures reduce it once it is above watermark.
+	Watermark T `json:"watermark"`
+	// Reserved is the current amount of T reserved to pods. It SHOULD be less than or equal to
+	// (Total - System), and we take active measures reduce it once it is above watermark.
 	//
-	// reserved MAY be greater than total on scheduler restart (because of buffering with VM scaling
-	// maximums), but (reserved - buffer) MUST be less than total. In general, (reserved - buffer)
-	// SHOULD be less than or equal to (total - system), but this can be temporarily violated after
+	// Reserved MAY be greater than Total on scheduler restart (because of buffering with VM scaling
+	// maximums), but (Reserved - Buffer) MUST be less than Total. In general, (Reserved - Buffer)
+	// SHOULD be less than or equal to (Total - System), but this can be temporarily violated after
 	// restart or config change.
 	//
 	// For more information, refer to the ARCHITECTURE.md file in this directory.
 	//
-	// reserved is always exactly equal to the sum of all of this node's pods' reserved T.
-	reserved T
-	// buffer *mostly* matters during startup. It tracks the total amount of T that we don't
+	// Reserved is always exactly equal to the sum of all of this node's pods' Reserved T.
+	Reserved T `json:"reserved"`
+	// Buffer *mostly* matters during startup. It tracks the total amount of T that we don't
 	// *expect* is currently in use, but is still reserved to the pods because we can't prevent the
 	// autoscaler-agents from making use of it.
 	//
-	// buffer is always exactly equal to the sum of all this node's pods' buffer for T.
-	buffer T
-	// capacityPressure is -- roughly speaking -- the amount of T that we're currently denying to
+	// Buffer is always exactly equal to the sum of all this node's pods' Buffer for T.
+	Buffer T `json:"buffer"`
+	// CapacityPressure is -- roughly speaking -- the amount of T that we're currently denying to
 	// pods in this node when they request it, due to not having space in remainingReservableCPU().
-	// This value is exactly equal to the sum of each pod's capacityPressure.
+	// This value is exactly equal to the sum of each pod's CapacityPressure.
 	//
-	// This value is used alongside the "logical pressure" (equal to reserved - watermark, if
+	// This value is used alongside the "logical pressure" (equal to Reserved - Watermark, if
 	// nonzero) in tooMuchPressure() to determine if more pods should be migrated off the node to
 	// free up pressure.
-	capacityPressure T
-	// pressureAccountedFor gives the total pressure expected to be relieved by ongoing migrations.
-	// This is equal to the sum of reserved + capacityPressure for all pods currently migrating.
+	CapacityPressure T `json:"capacityPressure"`
+	// PressureAccountedFor gives the total pressure expected to be relieved by ongoing migrations.
+	// This is equal to the sum of Reserved + CapacityPressure for all pods currently migrating.
 	//
-	// The value may be larger than capacityPressure.
-	pressureAccountedFor T
+	// The value may be larger than CapacityPressure.
+	PressureAccountedFor T `json:"pressureAccountedFor"`
 }
 
 // nodeOtherResourceState are total resources associated with the non-VM pods in a node
@@ -125,19 +125,19 @@ type nodeResourceState[T any] struct {
 // resolution than what we track for VMs) and the "reserved" amounts. The reserved amounts are
 // rounded up to the next unit that
 type nodeOtherResourceState struct {
-	rawCpu    resource.Quantity
-	rawMemory resource.Quantity
+	RawCPU    resource.Quantity `json:"rawCPU"`
+	RawMemory resource.Quantity `json:"rawMemory"`
 
-	reservedCpu      uint16
-	reservedMemSlots uint16
+	ReservedCPU      uint16 `json:"reservedCPU"`
+	ReservedMemSlots uint16 `json:"reservedMemSlots"`
 
-	// marginCpu and marginMemory track the amount of other resources we can get "for free" because
+	// MarginCPU and MarginMemory track the amount of other resources we can get "for free" because
 	// they were left out when rounding the System usage to fit in integer units of CPUs or memory
 	// slots
 	//
 	// These values are both only changed by configuration changes.
-	marginCpu    *resource.Quantity
-	marginMemory *resource.Quantity
+	MarginCPU    *resource.Quantity `json:"marginCPU"`
+	MarginMemory *resource.Quantity `json:"marginMemory"`
 }
 
 // podState is the information we track for an individual
@@ -182,21 +182,21 @@ type podState struct {
 type podMigrationState struct{}
 
 type podResourceState[T any] struct {
-	// reserved is the amount of T that this pod has reserved. It is guaranteed that the pod is
-	// using AT MOST reserved T.
-	reserved T
-	// buffer is the amount of reserved that we've included in reserved to account for the
+	// Reserved is the amount of T that this pod has reserved. It is guaranteed that the pod is
+	// using AT MOST Reserved T.
+	Reserved T `json:"reserved"`
+	// Buffer is the amount of Reserved that we've included in reserved to account for the
 	// possibility of unilateral increases by the autoscaler-agent
 	//
 	// This value is only nonzero during startup (between initial state load and first communication
 	// from the autoscaler-agent), and MUST be less than or equal to reserved.
 	//
-	// After the first communication from the autoscaler-agent, we update reserved to match its
-	// value, and set buffer to zero.
-	buffer T
-	// capacityPressure is this pod's contribution to this pod's node's capacityPressure for this
+	// After the first communication from the autoscaler-agent, we update Reserved to match its
+	// value, and set Buffer to zero.
+	Buffer T
+	// CapacityPressure is this pod's contribution to this pod's node's CapacityPressure for this
 	// resource
-	capacityPressure T
+	CapacityPressure T
 }
 
 // otherPodState tracks a little bit of information for the non-VM pods we're handling
@@ -211,8 +211,8 @@ type otherPodState struct {
 // This is *like* nodeOtherResourceState, but we don't track reserved amounts because they only
 // exist at the high-level "total resource usage" scope
 type podOtherResourceState struct {
-	rawCpu    resource.Quantity
-	rawMemory resource.Quantity
+	RawCPU    resource.Quantity `json:"rawCPU"`
+	RawMemory resource.Quantity `json:"rawMemory"`
 }
 
 // addPod is a convenience method that returns the new resource state if we were to add the given
@@ -225,17 +225,17 @@ func (r nodeOtherResourceState) addPod(
 	p podOtherResourceState,
 ) nodeOtherResourceState {
 	newState := nodeOtherResourceState{
-		rawCpu:       r.rawCpu.DeepCopy(),
-		rawMemory:    r.rawMemory.DeepCopy(),
-		marginCpu:    r.marginCpu,
-		marginMemory: r.marginMemory,
+		RawCPU:       r.RawCPU.DeepCopy(),
+		RawMemory:    r.RawMemory.DeepCopy(),
+		MarginCPU:    r.MarginCPU,
+		MarginMemory: r.MarginMemory,
 		// reserved amounts set by calculateReserved()
-		reservedCpu:      0,
-		reservedMemSlots: 0,
+		ReservedCPU:      0,
+		ReservedMemSlots: 0,
 	}
 
-	newState.rawCpu.Add(p.rawCpu)
-	newState.rawMemory.Add(p.rawMemory)
+	newState.RawCPU.Add(p.RawCPU)
+	newState.RawMemory.Add(p.RawMemory)
 
 	newState.calculateReserved(memSlotSize)
 
@@ -256,30 +256,30 @@ func (r nodeOtherResourceState) subPod(
 	// We're more worried about underflow than overflow because it should *generally* be pretty
 	// difficult to get overflow to occur (also because overflow would probably take a slow & steady
 	// leak to trigger, which is less useful than underflow.
-	if r.rawCpu.Cmp(p.rawCpu) == -1 {
+	if r.RawCPU.Cmp(p.RawCPU) == -1 {
 		panic(fmt.Errorf(
 			"underflow: cannot subtract %v pod CPU from %v node CPU",
-			&p.rawCpu, &r.rawCpu,
+			&p.RawCPU, &r.RawCPU,
 		))
-	} else if r.rawMemory.Cmp(p.rawMemory) == -1 {
+	} else if r.RawMemory.Cmp(p.RawMemory) == -1 {
 		panic(fmt.Errorf(
 			"underflow: cannot subtract %v pod memory from %v node memory",
-			&p.rawMemory, &r.rawMemory,
+			&p.RawMemory, &r.RawMemory,
 		))
 	}
 
 	newState := nodeOtherResourceState{
-		rawCpu:       r.rawCpu.DeepCopy(),
-		rawMemory:    r.rawMemory.DeepCopy(),
-		marginCpu:    r.marginCpu,
-		marginMemory: r.marginMemory,
+		RawCPU:       r.RawCPU.DeepCopy(),
+		RawMemory:    r.RawMemory.DeepCopy(),
+		MarginCPU:    r.MarginCPU,
+		MarginMemory: r.MarginMemory,
 		// reserved amounts set by calculateReserved()
-		reservedCpu:      0,
-		reservedMemSlots: 0,
+		ReservedCPU:      0,
+		ReservedMemSlots: 0,
 	}
 
-	newState.rawCpu.Sub(p.rawCpu)
-	newState.rawMemory.Sub(p.rawMemory)
+	newState.RawCPU.Sub(p.RawCPU)
+	newState.RawMemory.Sub(p.RawMemory)
 
 	newState.calculateReserved(memSlotSize)
 
@@ -290,23 +290,23 @@ func (r nodeOtherResourceState) subPod(
 // "raw" resource amounts and the memory slot size
 func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantity) {
 	// If rawCpu doesn't exceed the margin we have from rounding up System, set reserved = 0
-	if r.rawCpu.Cmp(*r.marginCpu) <= 0 {
-		r.reservedCpu = 0
+	if r.RawCPU.Cmp(*r.MarginCPU) <= 0 {
+		r.ReservedCPU = 0
 	} else {
 		// set cupCopy := r.rawCpu - r.marginCpu
-		cpuCopy := r.rawCpu.DeepCopy()
-		cpuCopy.Sub(*r.marginCpu)
+		cpuCopy := r.RawCPU.DeepCopy()
+		cpuCopy.Sub(*r.MarginCPU)
 		// note: Value() rounds up, which is the behavior we want here.
-		r.reservedCpu = uint16(cpuCopy.Value())
+		r.ReservedCPU = uint16(cpuCopy.Value())
 	}
 
 	// If rawMemory doesn't exceed the margin ..., set reserved = 0
-	if r.rawMemory.Cmp(*r.marginMemory) <= 0 {
-		r.reservedMemSlots = 0
+	if r.RawMemory.Cmp(*r.MarginMemory) <= 0 {
+		r.ReservedMemSlots = 0
 	} else {
 		// set memoryCopy := r.rawMemory - r.marginMemory
-		memoryCopy := r.rawMemory.DeepCopy()
-		memoryCopy.Sub(*r.marginMemory)
+		memoryCopy := r.RawMemory.DeepCopy()
+		memoryCopy.Sub(*r.MarginMemory)
 
 		memSlotSizeExact := memSlotSize.Value()
 		// note: For integer arithmetic, (x + n-1) / n is equivalent to ceil(x/n)
@@ -316,54 +316,54 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 				"new reserved mem slots overflows uint16 (%d > %d)", newReservedMemSlots, math.MaxUint16,
 			))
 		}
-		r.reservedMemSlots = uint16(newReservedMemSlots)
+		r.ReservedMemSlots = uint16(newReservedMemSlots)
 	}
 }
 
 // totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
 // excluding the CPU pre-reserved for system tasks.
 func (s *nodeState) totalReservableCPU() uint16 {
-	return s.vCPU.total - s.vCPU.system
+	return s.vCPU.Total - s.vCPU.System
 }
 
 // totalReservableMemSlots returns the number of memory slots that may be allocated to VM pods --
 // i.e., excluding the memory pre-reserved for system tasks.
 func (s *nodeState) totalReservableMemSlots() uint16 {
-	return s.memSlots.total - s.memSlots.system
+	return s.memSlots.Total - s.memSlots.System
 }
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
 func (s *nodeState) remainingReservableCPU() uint16 {
-	return s.totalReservableCPU() - s.vCPU.reserved
+	return s.totalReservableCPU() - s.vCPU.Reserved
 }
 
 // remainingReservableMemSlots returns the remaining number of memory slots that can be allocated to
 // VM pods
 func (s *nodeState) remainingReservableMemSlots() uint16 {
-	return s.totalReservableMemSlots() - s.memSlots.reserved
+	return s.totalReservableMemSlots() - s.memSlots.Reserved
 }
 
 // tooMuchPressure is used to signal whether the node should start migrating pods out in order to
 // relieve some of the pressure
 func (s *nodeState) tooMuchPressure() bool {
-	if s.vCPU.reserved <= s.vCPU.watermark && s.memSlots.reserved < s.memSlots.watermark {
+	if s.vCPU.Reserved <= s.vCPU.Watermark && s.memSlots.Reserved < s.memSlots.Watermark {
 		klog.V(1).Infof(
 			"[autoscale-enforcer] tooMuchPressure(%s) = false (vCPU: reserved %d < watermark %d, mem: reserved %d < watermark %d)",
-			s.name, s.vCPU.reserved, s.vCPU.watermark, s.memSlots.reserved, s.memSlots.watermark,
+			s.name, s.vCPU.Reserved, s.vCPU.Watermark, s.memSlots.Reserved, s.memSlots.Watermark,
 		)
 		return false
 	}
 
-	logicalCpuPressure := util.SaturatingSub(s.vCPU.reserved, s.vCPU.watermark)
-	logicalMemPressure := util.SaturatingSub(s.memSlots.reserved, s.memSlots.watermark)
+	logicalCpuPressure := util.SaturatingSub(s.vCPU.Reserved, s.vCPU.Watermark)
+	logicalMemPressure := util.SaturatingSub(s.memSlots.Reserved, s.memSlots.Watermark)
 
 	// Account for existing slack in the system, to counteract capacityPressure that hasn't been
 	// updated yet
-	logicalCpuSlack := s.vCPU.buffer + util.SaturatingSub(s.vCPU.watermark, s.vCPU.reserved)
-	logicalMemSlack := s.memSlots.buffer + util.SaturatingSub(s.memSlots.watermark, s.memSlots.reserved)
+	logicalCpuSlack := s.vCPU.Buffer + util.SaturatingSub(s.vCPU.Watermark, s.vCPU.Reserved)
+	logicalMemSlack := s.memSlots.Buffer + util.SaturatingSub(s.memSlots.Watermark, s.memSlots.Reserved)
 
-	tooMuchCpu := logicalCpuPressure+s.vCPU.capacityPressure > s.vCPU.pressureAccountedFor+logicalCpuSlack
-	tooMuchMem := logicalMemPressure+s.memSlots.capacityPressure > s.memSlots.pressureAccountedFor+logicalMemSlack
+	tooMuchCpu := logicalCpuPressure+s.vCPU.CapacityPressure > s.vCPU.PressureAccountedFor+logicalCpuSlack
+	tooMuchMem := logicalMemPressure+s.memSlots.CapacityPressure > s.memSlots.PressureAccountedFor+logicalMemSlack
 
 	result := tooMuchCpu || tooMuchMem
 
@@ -376,9 +376,9 @@ func (s *nodeState) tooMuchPressure() bool {
 		// tooMuchPressure(%s) = %v
 		s.name, result,
 		// vCPU: {logical: %d (slack: %d), capacity: %d, accountedFor: %d}
-		logicalCpuPressure, logicalCpuSlack, s.vCPU.capacityPressure, s.vCPU.pressureAccountedFor,
+		logicalCpuPressure, logicalCpuSlack, s.vCPU.CapacityPressure, s.vCPU.PressureAccountedFor,
 		// mem: {logical: %d, (slack: %d), capacity: %d, accountedFor: %d}
-		logicalMemPressure, logicalMemSlack, s.memSlots.capacityPressure, s.memSlots.pressureAccountedFor,
+		logicalMemPressure, logicalMemSlack, s.memSlots.CapacityPressure, s.memSlots.PressureAccountedFor,
 	)
 
 	return result
@@ -519,12 +519,12 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 		pods:      make(map[api.PodName]*podState),
 		otherPods: make(map[api.PodName]*otherPodState),
 		otherResources: nodeOtherResourceState{
-			rawCpu:           resource.Quantity{},
-			rawMemory:        resource.Quantity{},
-			reservedCpu:      0,
-			reservedMemSlots: 0,
-			marginCpu:        marginCpu,
-			marginMemory:     marginMemory,
+			RawCPU:           resource.Quantity{},
+			RawMemory:        resource.Quantity{},
+			ReservedCPU:      0,
+			ReservedMemSlots: 0,
+			MarginCPU:        marginCpu,
+			MarginMemory:     marginMemory,
 		},
 		computeUnit: &nodeConf.ComputeUnit,
 		mq:          migrationQueue{},
@@ -539,9 +539,9 @@ func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) 
 		// fetched node %s
 		node.Name,
 		// cpu: total = %d (milli = %d, margin = %v), max reservable = %d, watermark = %d
-		n.vCPU.total, cpuQ.MilliValue(), n.otherResources.marginCpu, n.totalReservableCPU(), n.vCPU.watermark,
+		n.vCPU.Total, cpuQ.MilliValue(), n.otherResources.MarginCPU, n.totalReservableCPU(), n.vCPU.Watermark,
 		// mem: total = %d (raw = %v, margin = %v), max reservable = %d, watermark = %d
-		n.memSlots.total, memQ, n.otherResources.marginMemory, n.totalReservableMemSlots(), n.memSlots.watermark,
+		n.memSlots.Total, memQ, n.otherResources.MarginMemory, n.totalReservableMemSlots(), n.memSlots.Watermark,
 	)
 
 	return n, nil
@@ -575,7 +575,7 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 		mem.Add(*memRequest)
 	}
 
-	return podOtherResourceState{rawCpu: cpu, rawMemory: mem}, nil
+	return podOtherResourceState{RawCPU: cpu, RawMemory: mem}, nil
 }
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
@@ -664,13 +664,13 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, vmClien
 	// Mark the pod as migrating
 	pod.migrationState = &podMigrationState{}
 	// Update resource trackers
-	oldNodeVCPUPressure := pod.node.vCPU.capacityPressure
-	oldNodeVCPUPressureAccountedFor := pod.node.vCPU.pressureAccountedFor
-	pod.node.vCPU.pressureAccountedFor += pod.vCPU.reserved + pod.vCPU.capacityPressure
+	oldNodeVCPUPressure := pod.node.vCPU.CapacityPressure
+	oldNodeVCPUPressureAccountedFor := pod.node.vCPU.PressureAccountedFor
+	pod.node.vCPU.PressureAccountedFor += pod.vCPU.Reserved + pod.vCPU.CapacityPressure
 
 	klog.Infof(
 		"[autoscale-enforcer] Migrate pod %v; node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
-		pod.name, oldNodeVCPUPressure, pod.node.vCPU.capacityPressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.pressureAccountedFor,
+		pod.name, oldNodeVCPUPressure, pod.node.vCPU.CapacityPressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.PressureAccountedFor,
 	)
 
 	// note: unimplemented for now, pending NeonVM implementation.
@@ -835,14 +835,14 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			vmName: vm.Name,
 			node:   ns,
 			vCPU: podResourceState[uint16]{
-				reserved:         vmInfo.Cpu.Max,
-				buffer:           vmInfo.Cpu.Max - vmInfo.Cpu.Use,
-				capacityPressure: 0,
+				Reserved:         vmInfo.Cpu.Max,
+				Buffer:           vmInfo.Cpu.Max - vmInfo.Cpu.Use,
+				CapacityPressure: 0,
 			},
 			memSlots: podResourceState[uint16]{
-				reserved:         vmInfo.Mem.Max,
-				buffer:           vmInfo.Mem.Max - vmInfo.Mem.Use,
-				capacityPressure: 0,
+				Reserved:         vmInfo.Mem.Max,
+				Buffer:           vmInfo.Mem.Max - vmInfo.Mem.Use,
+				CapacityPressure: 0,
 			},
 
 			mqIndex:               -1,
@@ -852,13 +852,13 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 		}
-		oldNodeVCPUReserved := ns.vCPU.reserved
-		oldNodeMemReserved := ns.memSlots.reserved
-		oldNodeVCPUBuffer := ns.vCPU.buffer
-		oldNodeMemBuffer := ns.memSlots.buffer
+		oldNodeVCPUReserved := ns.vCPU.Reserved
+		oldNodeMemReserved := ns.memSlots.Reserved
+		oldNodeVCPUBuffer := ns.vCPU.Buffer
+		oldNodeMemBuffer := ns.memSlots.Buffer
 
-		ns.vCPU.reserved += ps.vCPU.reserved
-		ns.memSlots.reserved += ps.memSlots.reserved
+		ns.vCPU.Reserved += ps.vCPU.Reserved
+		ns.memSlots.Reserved += ps.memSlots.Reserved
 		fmtString := "[autoscale-enforcer] load state: Adding VM pod %v to node %s:\n" +
 			"\tpod CPU = %d/%d (node %d -> %d / %d, %d -> %d buffer)\n" +
 			"\tmem slots = %d/%d (node %d -> %d / %d, %d -> %d buffer)"
@@ -867,9 +867,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			// Adding VM pod %v to node %s
 			podName, ns.name,
 			// pod CPU = %d/%d (node %d -> %d / %d, %d -> %d buffer)
-			ps.vCPU.reserved, vmInfo.Cpu.Max, oldNodeVCPUReserved, ns.vCPU.reserved, ns.totalReservableCPU(), oldNodeVCPUBuffer, ns.vCPU.buffer,
+			ps.vCPU.Reserved, vmInfo.Cpu.Max, oldNodeVCPUReserved, ns.vCPU.Reserved, ns.totalReservableCPU(), oldNodeVCPUBuffer, ns.vCPU.Buffer,
 			// mem slots = %d/%d (node %d -> %d / %d, %d -> %d buffer)
-			ps.memSlots.reserved, vmInfo.Mem.Max, oldNodeMemReserved, ns.memSlots.reserved, ns.totalReservableMemSlots(), oldNodeMemBuffer, ns.memSlots.buffer,
+			ps.memSlots.Reserved, vmInfo.Mem.Max, oldNodeMemReserved, ns.memSlots.Reserved, ns.totalReservableMemSlots(), oldNodeMemBuffer, ns.memSlots.Buffer,
 		)
 		ns.pods[podName] = ps
 		p.state.podMap[podName] = ps
@@ -928,15 +928,15 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 		oldNodeRes := ns.otherResources
 		newNodeRes := ns.otherResources.addPod(&p.state.conf.MemSlotSize, podRes)
 
-		addCpu := newNodeRes.reservedCpu - oldNodeRes.reservedCpu
-		addMem := newNodeRes.reservedMemSlots - oldNodeRes.reservedMemSlots
+		addCpu := newNodeRes.ReservedCPU - oldNodeRes.ReservedCPU
+		addMem := newNodeRes.ReservedMemSlots - oldNodeRes.ReservedMemSlots
 
-		oldNodeCpuReserved := ns.vCPU.reserved
-		oldNodeMemReserved := ns.memSlots.reserved
+		oldNodeCpuReserved := ns.vCPU.Reserved
+		oldNodeMemReserved := ns.memSlots.Reserved
 
 		ns.otherResources = newNodeRes
-		ns.vCPU.reserved += addCpu
-		ns.memSlots.reserved += addMem
+		ns.vCPU.Reserved += addCpu
+		ns.memSlots.Reserved += addMem
 
 		ps := &otherPodState{
 			name:      podName,
@@ -951,9 +951,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			// Adding non-VM pod %v to node %s
 			podName, pod.Spec.NodeName,
 			// pod CPU = %v (node %d [%v raw] -> %d [%v raw])
-			&podRes.rawCpu, oldNodeCpuReserved, &oldNodeRes.rawCpu, ns.vCPU.reserved, &newNodeRes.rawCpu,
+			&podRes.RawCPU, oldNodeCpuReserved, &oldNodeRes.RawCPU, ns.vCPU.Reserved, &newNodeRes.RawCPU,
 			// mem = %v (node %d slots [%v raw] -> %d [%v raw])
-			&podRes.rawMemory, oldNodeMemReserved, &oldNodeRes.rawMemory, ns.memSlots.reserved, &newNodeRes.rawMemory,
+			&podRes.RawMemory, oldNodeMemReserved, &oldNodeRes.RawMemory, ns.memSlots.Reserved, &newNodeRes.RawMemory,
 		)
 		ns.otherPods[podName] = ps
 		p.state.otherPods[podName] = ps
@@ -972,16 +972,16 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 		ns := p.state.nodeMap[nodeName]
 		overBudget := []string{}
 
-		if ns.vCPU.reserved-ns.vCPU.buffer > ns.vCPU.total {
+		if ns.vCPU.Reserved-ns.vCPU.Buffer > ns.vCPU.Total {
 			overBudget = append(overBudget, fmt.Sprintf(
 				"expected CPU usage (reserved %d - buffer %d) > total %d",
-				ns.vCPU.reserved, ns.vCPU.buffer, ns.vCPU.total,
+				ns.vCPU.Reserved, ns.vCPU.Buffer, ns.vCPU.Total,
 			))
 		}
-		if ns.memSlots.reserved > ns.memSlots.total {
+		if ns.memSlots.Reserved > ns.memSlots.Total {
 			overBudget = append(overBudget, fmt.Sprintf(
 				"expected memSlots usage (reserved %d - buffer %d) > total %d",
-				ns.memSlots.reserved, ns.memSlots.buffer, ns.memSlots.total,
+				ns.memSlots.Reserved, ns.memSlots.Buffer, ns.memSlots.Total,
 			))
 		}
 
