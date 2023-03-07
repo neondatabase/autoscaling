@@ -375,11 +375,11 @@ func ProcessEvent[T any, P WatchObject[T]](
 	handlers WatchHandlerFuncs[P],
 	args ProcessEventArgs[T, P],
 ) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
 	switch args.Event.Type {
 	case watch.Added:
-		store.mutex.Lock()
-		defer store.mutex.Unlock()
-
 		if _, ok := store.objects[args.UID]; ok {
 			return fmt.Errorf(
 				"watch %s: received add event for object %s that we already have",
@@ -389,13 +389,11 @@ func ProcessEvent[T any, P WatchObject[T]](
 		store.objects[args.UID] = (*T)(args.Object)
 		handlers.AddFunc((*T)(args.Object), false)
 	case watch.Bookmark:
-		// Nothing to do, just serves to give us a new ResourceVersion.
+		// no action necessary, but noop has to remain here to
+		// avoid panic.
 	case watch.Deleted:
 		// We're given the state of the object immediately before deletion, which
 		// *may* be different to what we currently have stored.
-		store.mutex.Lock()
-		defer store.mutex.Unlock()
-
 		old, ok := store.objects[args.UID]
 		if !ok {
 			return fmt.Errorf(
@@ -417,7 +415,7 @@ func ProcessEvent[T any, P WatchObject[T]](
 		store.objects[args.UID] = (*T)(args.Object)
 		handlers.UpdateFunc(old, (*T)(args.Object))
 	case watch.Error:
-		panic(errors.New("unreachable code reached")) // handled above
+		panic(errors.New("unreachable code reached"))
 	default:
 		panic(errors.New("unknown watch event"))
 	}
