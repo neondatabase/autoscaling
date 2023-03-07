@@ -35,4 +35,3 @@ if [ -z "$POD_NAME" ]; then
     echo "could not find a running vm pod"
     exit 1
 fi
-
