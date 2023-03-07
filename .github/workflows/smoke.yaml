@@ -22,6 +22,7 @@ jobs:
         with:
           PATTERNS: |
             **/**.go
+            **/**.sh
             "!test/"
             go.mod
             go.sum
