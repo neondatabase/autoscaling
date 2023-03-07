@@ -67,6 +67,13 @@ data:
       "schedulerName": "autoscale-scheduler",
       "requestTimeoutSeconds": 2,
       "requestPort": 10299
+    },
+    "billing": {
+      "url": "http://console-staging.local/billing/api/v1",
+      "cpuMetricName": "effective_compute_seconds",
+      "collectEverySeconds": 5,
+      "pushEverySeconds": 30,
+      "pushTimeoutSeconds": 20
     }
   }'
 ---
