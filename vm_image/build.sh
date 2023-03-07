@@ -43,13 +43,11 @@ echo 'Note: this is only used locally so we can build it for linux & copy it int
 
 ../build/vm-informant/build.sh
 
-REGISTRY="localhost:5001"
 NAME="pg14-disk-test"
-TAG="latest"
+TAG="dev"
 IMAGE_SIZE="1G"
 
 echo 'Build Configuration:'
-echo " * REGISTRY = '$REGISTRY'"
 echo " * NAME     = '$NAME'"
 echo " * TAG      = '$TAG'"
 echo " * IMAGE_SIZE = '$IMAGE_SIZE'"
@@ -57,6 +55,4 @@ echo " * IMAGE_SIZE = '$IMAGE_SIZE'"
 echo "Building 'Dockerfile.vmdata'..."
 docker buildx build -t "vmdata-temp:$TAG" -f Dockerfile.vmdata . | indent
 echo "Building NeonVM image..."
-"./$NEONVM_BUILDER_PATH" --src "vmdata-temp:$TAG" --use-inittab --dst "$REGISTRY/$NAME:$TAG" --size "$IMAGE_SIZE" | indent
-echo "Push completed image"
-docker push "$REGISTRY/$NAME:$TAG" | indent
+"./$NEONVM_BUILDER_PATH" --src "vmdata-temp:$TAG" --use-inittab --dst "$NAME:$TAG" --size "$IMAGE_SIZE" | indent

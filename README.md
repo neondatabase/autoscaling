@@ -55,7 +55,6 @@ For more information, refer to [ARCHITECTURE.md](./ARCHITECTURE.md).
 Build everything:
 
 ```sh
-vm_image/start-local-registry.sh # required for everything below. Does nothing on repeat
 vm_image/build.sh
 build/autoscale-scheduler/build.sh
 build/autoscaler-agent/build.sh
