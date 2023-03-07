@@ -73,7 +73,7 @@ data:
       "cpuMetricName": "effective_compute_seconds",
       "collectEverySeconds": 5,
       "pushEverySeconds": 30,
-      "pushTimeoutSeconds": 2,
+      "pushTimeoutSeconds": 2
     }
   }'
 ---
