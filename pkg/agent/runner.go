@@ -69,7 +69,7 @@ import (
 //
 // Currently, each autoscaler-agent supports only one version at a time. In the future, this may
 // change.
-const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_1
 
 // Runner is per-VM Pod god object responsible for handling everything
 //
@@ -402,8 +402,8 @@ func (r *Runner) Run(ctx context.Context, vmName string) error {
 	r.logger.Infof("Starting background workers")
 
 	// FIXME: make these timeouts/delays separately defined constants, or configurable
-	mainDeadlockChecker := makeDeadlockChecker(&r.lock, 250*time.Millisecond, time.Second)
-	vmDeadlockChecker := makeDeadlockChecker(&r.vmStateLock, 30*time.Second, time.Second)
+	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
+	vmDeadlockChecker := r.vmStateLock.DeadlockChecker(30*time.Second, time.Second)
 
 	r.spawnBackgroundWorker(ctx, "deadlock checker (main)", mainDeadlockChecker)
 	r.spawnBackgroundWorker(ctx, "deadlock checker (VM)", vmDeadlockChecker)
@@ -504,36 +504,6 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(
 	}()
 }
 
-// makeDeadlockChecker creates a "deadlock checker" function that, when called, periodically
-// attempts to acquire the lock, panicking if it fails
-//
-// The returned function exits when its context is done.
-//
-// This function exists because there's a couple of different locks in Runner that we want to detect
-// deadlocks for.
-func makeDeadlockChecker(lock *util.ChanMutex, timeout, delay time.Duration) func(ctx context.Context) {
-	return func(ctx context.Context) {
-		for {
-			// Delay between checks
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(delay):
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-lock.WaitLock():
-				lock.Unlock()
-			case <-time.After(timeout):
-				// We can panic here, because it'll be caught by spawnBackgroundWorker
-				panic(fmt.Errorf("likely deadlock detected, could not get lock after %s", timeout))
-			}
-		}
-	}
-}
-
 // getMetricsLoop repeatedly attempts to fetch metrics from the VM
 //
 // Every time metrics are successfully fetched, the value of r.lastMetrics is updated and newMetrics
@@ -606,8 +576,6 @@ func (r *Runner) handleVMResources(
 	upscaleRequested util.CondChannelReceiver,
 	registeredScheduler util.CondChannelReceiver,
 ) {
-	metricsUpdatedAtLeastOnce := false
-
 	for {
 		var reason VMUpdateReason
 
@@ -621,48 +589,6 @@ func (r *Runner) handleVMResources(
 		case <-registeredScheduler.Recv():
 			reason = RegisteredScheduler
 		}
-
-		// On the first time we receive metrics, retry registering the scheduler if r.computeUnit is
-		// nil, because a prior register request might've been unable to complete due to not having
-		// metrics.
-		//
-		// FIXME: This won't be necessary when the protocol is changed to allow nil metrics on an
-		// initial scheduler request.
-		if !metricsUpdatedAtLeastOnce && reason != RegisteredScheduler {
-			sched, computeUnit := func() (*Scheduler, *api.Resources) {
-				r.lock.Lock()
-				defer r.lock.Unlock()
-
-				return r.scheduler, r.computeUnit
-			}()
-
-			if computeUnit == nil && sched != nil {
-				func() {
-					sched.requestLock.Lock()
-					defer sched.requestLock.Unlock()
-
-					isCurrent := func() bool {
-						r.lock.Lock()
-						defer r.lock.Unlock()
-						return r.scheduler == sched
-					}()
-
-					if sched.registered || !isCurrent {
-						return
-					}
-
-					if err := sched.Register(ctx, func() {}); err != nil {
-						if ctx.Err() != nil {
-							r.logger.Warningf("Error retrying register with scheduler (but context is done): %s", err)
-						} else {
-							r.logger.Errorf("Error retrying register with scheduler: %s", err)
-						}
-					}
-				}()
-			}
-		}
-
-		metricsUpdatedAtLeastOnce = metricsUpdatedAtLeastOnce || reason == UpdatedMetrics
 
 		// FIXME: make maxRetries configurable
 		maxRetries := uint(1)
@@ -880,7 +806,7 @@ startScheduler:
 		})
 
 		// FIXME: make these timeouts/delays separately defined constants, or configurable
-		deadlockChecker := makeDeadlockChecker(&sched.requestLock, 5*time.Second, time.Second)
+		deadlockChecker := sched.requestLock.DeadlockChecker(5*time.Second, time.Second)
 
 		// precompute the worker names so we don't panic while holding the locks below
 		deadlockWorkerName := fmt.Sprintf("deadlock checker (sched %s)", currentInfo.UID)
@@ -1332,7 +1258,7 @@ retry:
 				ProtoVersion: PluginProtocolVersion,
 				Pod:          r.podName,
 				Resources:    target,
-				Metrics:      state.metrics, // FIXME: the metrics here *might* be a little out of date.
+				Metrics:      &state.metrics, // FIXME: the metrics here *might* be a little out of date.
 			}
 			response, err := sched.DoRequest(ctx, &request)
 			if err != nil {
@@ -1757,17 +1683,11 @@ func (s *Scheduler) Register(ctx context.Context, signalOk func()) error {
 		return s.runner.lastMetrics, s.runner.vm.Using()
 	}()
 
-	if metrics == nil {
-		// FIXME: allow sending nil metrics so we can connect anyways.
-		s.logger.Warningf("Could not do initial register because we haven't received metrics yet")
-		return nil
-	}
-
 	req := api.AgentRequest{
 		ProtoVersion: PluginProtocolVersion,
 		Pod:          s.runner.podName,
 		Resources:    resources,
-		Metrics:      *metrics,
+		Metrics:      metrics,
 	}
 	if _, err := s.DoRequest(ctx, &req); err != nil {
 		return err

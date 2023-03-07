@@ -253,6 +253,10 @@ _An alternate name for this section:_ Things to watch out for
 * Creating a pod with `PodSpec.Node` set will bypass the scheduler (even if `SchedulerName` is set),
   so we cannot prevent it from overcommitting node resources. **Do not do this except for "system"
   functions.**
-* Non-VM pods must have `resources.limits` equal to `resources.requests` — otherwise, we wouldn't be
-  able to guarantee that resources aren't overcommitted. For more, see
-  [`pkg/plugin/ARCHITECTURE.md`](pkg/plugin/ARCHITECTURE.md).
+* Non-VM pods will be accounted for _only_ by their `resources.requests` — this is for compatibility
+  with tools like [cluster autoscaler], but allows potentially overcommitting memory. To avoid
+  overcommitting in this way, set `resources.requests` equal to `resources.limits`. For more, see
+  [`pkg/plugin/ARCHITECTURE.md`]
+
+[cluster autoscaler]: https://github.com/kubernetes/autoscaler
+[`pkg/plugin/ARCHITECTURE.md`]: pkg/plugin/ARCHITECTURE.md

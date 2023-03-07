@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -26,7 +25,7 @@ import (
 //
 // Accessing the individual fields MUST be done while holding a lock.
 type pluginState struct {
-	lock sync.Mutex
+	lock util.ChanMutex
 
 	podMap  map[api.PodName]*podState
 	nodeMap map[string]*nodeState
@@ -133,7 +132,7 @@ type nodeOtherResourceState struct {
 	reservedMemSlots uint16
 
 	// marginCpu and marginMemory track the amount of other resources we can get "for free" because
-	// they were left out when rounding the System usage to fit in integer untis of CPUs or memory
+	// they were left out when rounding the System usage to fit in integer units of CPUs or memory
 	// slots
 	//
 	// These values are both only changed by configuration changes.
@@ -391,7 +390,7 @@ func (s *nodeState) tooMuchPressure() bool {
 // A returned error indicates that the pod's resource usage has changed enough that we should try to
 // migrate something else first. The error provides justification for this.
 func (s *podState) checkOkToMigrate(oldMetrics api.Metrics) error {
-	// TODO
+	// TODO. Note: s.metrics may be nil.
 	return nil
 }
 
@@ -552,46 +551,28 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 	var cpu resource.Quantity
 	var mem resource.Quantity
 
-	podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
-
 	for i, container := range pod.Spec.Containers {
-		// For each resource, we must have (a) limit is provided and (b) if requests is provided,
-		// it must be equal to the limit.
+		// For each resource, use requests if it's provided, or fallback on the limit.
 
 		cpuRequest := container.Resources.Requests.Cpu()
 		cpuLimit := container.Resources.Limits.Cpu()
-		// note: Cpu() always returns a non-nil pointer.
-		if cpuLimit.IsZero() && cpuRequest.IsZero() {
+		if cpuRequest.IsZero() && cpuLimit.IsZero() {
 			err := fmt.Errorf("containers[%d] (%q) missing resources.requests.cpu AND resources.limits.cpu", i, container.Name)
 			return podOtherResourceState{}, err
-		} else if cpuLimit.IsZero() && !cpuRequest.IsZero() {
-			klog.Warningf(
-				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) missing resources.limits.cpu, using request as limit",
-				podName, i, container.Name,
-			)
-			cpuLimit = cpuRequest
-		} else if !cpuRequest.IsZero() && !cpuLimit.Equal(*cpuRequest) {
-			klog.Warningf(
-				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) resources.requests.cpu != resources.limits.cpu, using request as limit",
-				podName, i, container.Name,
-			)
-			cpuLimit = cpuRequest
+		} else if cpuRequest.IsZero() /* && !cpuLimit.IsZero() */ {
+			cpuRequest = cpuLimit
 		}
-		cpu.Add(*cpuLimit)
+		cpu.Add(*cpuRequest)
 
 		memRequest := container.Resources.Requests.Memory()
 		memLimit := container.Resources.Limits.Memory()
-		// note: Memory() always returns a non-nil pointer.
-		if memLimit.IsZero() {
+		if memRequest.IsZero() && memLimit.IsZero() {
 			err := fmt.Errorf("containers[%d] (%q) missing resources.limits.memory", i, container.Name)
 			return podOtherResourceState{}, err
-		} else if !memRequest.IsZero() && !memLimit.Equal(*memRequest) {
-			klog.Warningf(
-				"[autoscale-enforcer] non-VM pod %v containers[%d] (%q) resources.requests.memory != resources.limits.memory, using limits",
-				podName, i, container.Name,
-			)
+		} else if memRequest.IsZero() /* && !memLimit.IsZero() */ {
+			memRequest = memLimit
 		}
-		mem.Add(*memLimit)
+		mem.Add(*memRequest)
 	}
 
 	return podOtherResourceState{rawCpu: cpu, rawMemory: mem}, nil
@@ -660,6 +641,11 @@ func (e *AutoscaleEnforcer) handlePodDeletion(podName api.PodName) {
 }
 
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
+	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
+	if s.metrics == nil || other.metrics == nil {
+		return s.metrics != nil && other.metrics == nil
+	}
+
 	// TODO - this is just a first-pass approximation. Maybe it's ok for now? Maybe it's not. Idk.
 	return s.metrics.LoadAverage1Min < other.metrics.LoadAverage1Min
 }
