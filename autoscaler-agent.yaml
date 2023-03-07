@@ -69,11 +69,11 @@ data:
       "requestPort": 10299
     },
     "billing": {
-      "url": "http://console-staging.local/billing/api/v1",
+      "url": "http://neon-internal-api.aws.neon.build",
       "cpuMetricName": "effective_compute_seconds",
       "collectEverySeconds": 5,
       "pushEverySeconds": 30,
-      "pushTimeoutSeconds": 20
+      "pushTimeoutSeconds": 2,
     }
   }'
 ---
