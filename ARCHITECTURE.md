@@ -98,6 +98,9 @@ discussed more in the [high-level consequences] section below.
     * `scripts/scheduler-logs.sh` — convenience script to tail the scheduler's logs
     * `scripts/ssh-into-vm.sh` — `ssh`es into a VM. Useful for debugging.
     * `scripts/start-vm-bridge.sh`
+* `tests/` — end-to-end tests
+    * `tests/e2e` — [`kuttl`](https://kuttl.dev/) test scenarios itself
+    * `tests/vm-example` — Minimal VM for testing
 * `scripts-common.sh` — file with a handful of useful functions, used both in `build` and `scripts`
 * `vm-deploy.yaml` — sample creation of a single VM, for testing autoscaling
 * `vm_image/` — collection of things for building the VM image, notably:
