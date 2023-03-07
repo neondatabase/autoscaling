@@ -263,7 +263,6 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 				}
 			}
-
 		relist:
 			klog.Infof("watch %s: re-listing", config.LogName)
 			for {
