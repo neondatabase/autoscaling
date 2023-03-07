@@ -5,22 +5,34 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
+	"os"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 type Client struct {
-	BaseURL string
-	httpc   *http.Client
+	BaseURL  string
+	httpc    *http.Client
+	hostname string
 }
 
-func NewClient(url string, c *http.Client) Client { return Client{BaseURL: url, httpc: c} }
+func NewClient(url string, c *http.Client) Client {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = fmt.Sprintf("unknown-%d", rand.Intn(1000))
+	}
+	return Client{BaseURL: url, httpc: c, hostname: hostname}
+}
 
 func (c Client) NewBatch() *Batch { return &Batch{c: c, events: nil} }
 
 type Batch struct {
 	// Q: does this need a mutex?
 	c      Client
-	events []json.Marshaler
+	events []any
 }
 
 // Count returns the number of events in the batch
@@ -28,11 +40,23 @@ func (b *Batch) Count() int {
 	return len(b.events)
 }
 
+func (b *Batch) idempotenize(key string) string {
+	if key != "" {
+		return key
+	}
+
+	return fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", b.c.hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
+}
+
 func (b *Batch) AddAbsoluteEvent(e AbsoluteEvent) {
+	e.Type = "absolute"
+	e.IdempotencyKey = b.idempotenize(e.IdempotencyKey)
 	b.events = append(b.events, &e)
 }
 
 func (b *Batch) AddIncrementalEvent(e IncrementalEvent) {
+	e.Type = "incremental"
+	e.IdempotencyKey = b.idempotenize(e.IdempotencyKey)
 	b.events = append(b.events, &e)
 }
 
@@ -42,7 +66,7 @@ func (b *Batch) Send(ctx context.Context) error {
 	}
 
 	payload, err := json.Marshal(struct {
-		Events []json.Marshaler `json:"events"`
+		Events []any `json:"events"`
 	}{Events: b.events})
 	if err != nil {
 		return err
