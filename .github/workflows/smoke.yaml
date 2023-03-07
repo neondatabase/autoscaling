@@ -29,6 +29,8 @@ jobs:
       - name: Run Smoke Tests
         if: env.GIT_DIFF
         run: |
+          set -o xtrace
+          
           # install kind
           curl -Lo ./kind-bin https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
           chmod +x ./kind-bin
