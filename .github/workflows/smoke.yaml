@@ -1,0 +1,36 @@
+name: smoke
+on:
+  pull_request:
+  push:
+    paths:
+      - "**.go"
+    branches:
+      - main
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: true
+    steps:
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.19"
+      - uses: actions/checkout@v3
+      - uses: technote-space/get-diff-action@v6
+        with:
+          PATTERNS: |
+            **/**.go
+            "!test/"
+            go.mod
+            go.sum
+      - name: Run Smoke Tests
+        if: env.GIT_DIFF
+        run: |
+          # install kind
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          # run the code
+          UNATTENDED_MODE=true ./smoke.sh
