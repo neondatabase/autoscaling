@@ -147,7 +147,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 							return
 						}
 						if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-							klog.Infof("could not signal informant process: %v", err)
+							klog.Warningf("could not signal vm-informant process: %v", err)
 						}
 					}
 				}()
