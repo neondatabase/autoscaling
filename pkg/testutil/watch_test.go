@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neondatabase/autoscaling/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/watch"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 func TestWatch(t *testing.T) {
@@ -24,6 +25,7 @@ func TestWatch(t *testing.T) {
 		UpdateFunc: func(*corev1.Pod, *corev1.Pod) { calledUpdate++ },
 	})
 	ch <- util.ProcessEventArgs[corev1.Pod, *corev1.Pod]{
+		//nolint:exhaustruct  // for testing
 		Event: watch.Event{
 			Type: watch.Added,
 		},
@@ -35,6 +37,7 @@ func TestWatch(t *testing.T) {
 	}
 
 	ch <- util.ProcessEventArgs[corev1.Pod, *corev1.Pod]{
+		//nolint:exhaustruct  // for testing
 		Event: watch.Event{
 			Type: watch.Deleted,
 		},

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tychoish/fun"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
@@ -19,6 +20,7 @@ func TestProcessEvent(t *testing.T) {
 				AddFunc: func(*corev1.Pod, bool) { calledHandler = true },
 			},
 			ProcessEventArgs[corev1.Pod, *corev1.Pod]{
+				//nolint:exhaustruct  // for testing
 				Event: watch.Event{
 					Type: watch.Added,
 				},
@@ -42,6 +44,7 @@ func TestProcessEvent(t *testing.T) {
 					AddFunc: func(*corev1.Pod, bool) { calledHandler = true },
 				},
 				ProcessEventArgs[corev1.Pod, *corev1.Pod]{
+					//nolint:exhaustruct  // for testing
 					Event: watch.Event{
 						Type: watch.Added,
 					},
@@ -67,6 +70,7 @@ func TestProcessEvent(t *testing.T) {
 			store,
 			handlers,
 			ProcessEventArgs[corev1.Pod, *corev1.Pod]{
+				//nolint:exhaustruct  // for testing
 				Event: watch.Event{
 					Type: watch.Added,
 				},
@@ -87,6 +91,7 @@ func TestProcessEvent(t *testing.T) {
 				store,
 				handlers,
 				ProcessEventArgs[corev1.Pod, *corev1.Pod]{
+					//nolint:exhaustruct  // for testing
 					Event: watch.Event{
 						Type: watch.Deleted,
 					},
@@ -110,6 +115,7 @@ func TestProcessEvent(t *testing.T) {
 				store,
 				handlers,
 				ProcessEventArgs[corev1.Pod, *corev1.Pod]{
+					//nolint:exhaustruct  // for testing
 					Event: watch.Event{
 						Type: watch.Deleted,
 					},
@@ -137,6 +143,7 @@ func TestProcessEvent(t *testing.T) {
 					AddFunc: func(*corev1.Pod, bool) { calledHandler = true },
 				},
 				ProcessEventArgs[corev1.Pod, *corev1.Pod]{
+					//nolint:exhaustruct  // for testing
 					Event: watch.Event{
 						Type: watch.Error,
 					},
