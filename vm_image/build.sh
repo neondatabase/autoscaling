@@ -5,15 +5,12 @@
 
 set -eu -o pipefail
 
-if [[ "$OSTYPE" != "darwin"* && "$EUID" != 0 ]]; then
-    echo "Must be running as root (EUID != 0)"
-    exit 1
-fi
-
 # Allow this script to be run from outside the vm_image directory
 cd -P -- "$(dirname -- "$0")"
 
 source '../scripts-common.sh'
+
+require_root
 
 NEONVM_BUILDER_PATH='neonvm-builder'
 NEONVM_REPO='https://github.com/neondatabase/neonvm'

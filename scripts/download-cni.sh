@@ -15,8 +15,8 @@ TARGET_DIR='kind/cni-bin'
 
 check_dep () {
     if ! which "$1" >/dev/null 2>/dev/null; then
-        echo "Missing required dependency $1"
-        exit 1
+	echo "Missing required dependency $1"
+	exit 1
     fi
 }
 
@@ -31,14 +31,14 @@ set -eu -o pipefail
 uname_arch="$(uname -m)"
 case "$uname_arch" in
     x86_64)
-        ARCH="amd64"
-        ;;
+	ARCH="amd64"
+	;;
     *)
-        echo "Unknown architecture $uname_arch"
-        echo "To add a new architecture to this script, check the architecture naming scheme of"
-        echo "the assets in <https://github.com/containernetworking/plugins/releases/latest>"
-        exit 1
-        ;;
+	echo "Unknown architecture $uname_arch"
+	echo "To add a new architecture to this script, check the architecture naming scheme of"
+	echo "the assets in <https://github.com/containernetworking/plugins/releases/latest>"
+	exit 1
+	;;
 esac
 
 REPO="containernetworking/plugins"
@@ -46,7 +46,9 @@ REPO="containernetworking/plugins"
 if [ -e "$TARGET_DIR" ]; then
     echo "directory $TARGET_DIR already exists"
     echo "aborting."
-    exit 2
+    if [ -z ${UNATTENDED_MODE=''} ]; then
+	exit 2
+    fi
 fi
 
 echo "Fetching latest release from https://github.com/$REPO..."
@@ -65,14 +67,18 @@ sha256_link="$(echo "$linux_group" | jq -r 'select(.name | endswith(".sha256")) 
 
 cleanup () {
     echo "cleaning up '$tgz_file'"
-    rm "$tgz_file"
+    if [ -e ${UNATTENDED_MODE=''} ]; then 
+	rm "$tgz_file"
+    fi
 }
 
 trap cleanup EXIT INT TERM
 
 echo "Downloading '$tgz_link'..."
 echo "  ... into '$tgz_file'"
-curl -sSL "$tgz_link" -o "$tgz_file"
+if [ ! -e $tgz_file ]; then 
+    curl -sSL "$tgz_link" -o "$tgz_file"
+fi
 
 actual_sum="$(sha256sum "$tgz_file")"
 echo "Downloading sha256 for '$tgz_file'..."
@@ -87,5 +93,5 @@ if [[ "$actual_sum" != "$expected_sum" ]]; then
 fi
 
 echo "Unpacking into $TARGET_DIR..."
-mkdir "$TARGET_DIR"
+mkdir -p "$TARGET_DIR"
 tar -xf "$tgz_file" -C "$TARGET_DIR"

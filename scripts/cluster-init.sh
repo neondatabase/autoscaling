@@ -10,11 +10,17 @@ cd .. # but all of the references are to things in the upper directory
 
 source './scripts-common.sh'
 
-set -x
-
 CLUSTER="autoscale-sched"
 
-kind create cluster -n $CLUSTER --config=kind/config.yaml
+if [ -n ${UNATTEDED_MODE=''} ]; then 
+    if (kind get clusters | grep $CLUSTER); then
+	kind delete cluster -n $CLUSTER
+    fi
+fi
+
+if !(kind get clusters | grep $CLUSTER); then 
+    kind create cluster -n $CLUSTER --config=kind/config.yaml
+fi
 
 kubectl apply -f deploy/flannel.yaml -f deploy/multus-daemonset.yaml -f deploy/cert-manager.yaml \
     | indent

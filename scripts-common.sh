@@ -12,8 +12,10 @@ indent () {
 # Helper function to require that the script is being run as root
 require_root () {
     if [[ "$OSTYPE" != "darwin"* && "$EUID" != 0 ]]; then
-        echo "Must be running as root (EUID != 0)"
-        exit 1
+        echo "SHOULD be running as root (EUID != 0)"
+        if [ -z ${UNATTENDED_MODE=""} ]; then
+	    exit 1
+        fi
     fi
 }
 
@@ -55,15 +57,19 @@ get_var () {
     var_name="$1"
     default_value="$2"
 
-    ( set -u; exec "echo \"\$$var_name\"" ) 2>/dev/null || {
-        printf -v default_escaped "%q" "$default_value"
-        read -p "Set $var_name [default $default_escaped]: " new_val
-        if [ -z "$new_val" ]; then
-            echo "$default_value"
-        else
-            echo "$new_val"
-        fi
-    }
+    if [ -z ${UNATTENDED_MODE=""} ]; then
+	( set -u; exec "echo \"\$$var_name\"" ) 2>/dev/null || {
+            printf -v default_escaped "%q" "$default_value"
+            read -p "Set $var_name [default $default_escaped]: " new_val
+            if [ -z "$new_val" ]; then
+		echo "$default_value"
+            else
+		echo "$new_val"
+            fi
+	}
+    fi
+
+    echo $default_value
 }
 
 # Usage: VM_NAME="$(get_vm_name)"
