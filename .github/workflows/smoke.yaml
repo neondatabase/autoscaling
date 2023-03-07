@@ -35,5 +35,9 @@ jobs:
           curl -Lo ./kind-bin https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
           chmod +x ./kind-bin
           sudo mv ./kind-bin /usr/local/bin/kind
+
+          # more setup
+          docker network create --driver bridge kind || true
+
           # run the code
           UNATTENDED_MODE=true ./smoke.sh
