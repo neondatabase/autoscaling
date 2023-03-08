@@ -5,12 +5,14 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/tychoish/fun/srv"
 
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
 
 	"github.com/neondatabase/autoscaling/pkg/plugin"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 // all of the juicy bits are defined in pkg/plugin/
@@ -40,6 +42,10 @@ func runProgram() (err error) {
 	ctx = srv.SetBaseContext(ctx)
 	orca := srv.GetOrchestrator(ctx)
 	defer func() { err = orca.Service().Wait() }()
+
+	if err := orca.Add(srv.HTTP("scheduler-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
+		return err
+	}
 
 	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, plugin.NewAutoscaleEnforcerPlugin(ctx)))
 	if err := command.ExecuteContext(ctx); err != nil {
