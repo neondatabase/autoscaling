@@ -10,4 +10,12 @@ Currently these are:
 ```js
 // Scheduler:
 config.nodeDefaults.computeUnit = { "vCPUs": 1, "mem": 4 }
+// Agent:
+config.billing = {
+      "url": "http://neon-internal-api.aws.neon.build/billing/api/v1",
+      "cpuMetricName": "effective_compute_seconds",
+      "collectEverySeconds": 5,
+      "pushEverySeconds": 30,
+      "pushTimeoutSeconds": 2
+}
 ```
