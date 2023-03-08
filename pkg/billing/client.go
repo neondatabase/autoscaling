@@ -76,6 +76,7 @@ func (b *Batch) Send(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	r.Header.Set("content-type", "application/json")
 
 	resp, err := b.c.httpc.Do(r)
 	if err != nil {
