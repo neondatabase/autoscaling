@@ -28,7 +28,6 @@ func main() {
 	ctx = srv.SetBaseContext(ctx)   // sets a context for starting async work in request scopes
 
 	orca := srv.GetOrchestrator(ctx)
-	svc := orca.Service()
 
 	defer func() {
 		if err := orca.Service().Wait(); err != nil {
@@ -113,7 +112,9 @@ func main() {
 
 	// we create an http service and add it to the orchestrator,
 	// which will start it and manage its lifecycle.
-	orca.Add(srv.HTTP("informant-api", 5*time.Second, &http.Server{Addr: addr, Handler: mux}))
+	if err := orca.Add(srv.HTTP("vm-informant-api", 5*time.Second, &http.Server{Addr: addr, Handler: mux})); err != nil {
+		klog.Fatalf("failed to add informant api server: %s", err)
+	}
 
 	// we drop to the defers now, which will block until the signal
 	// handler is called.
