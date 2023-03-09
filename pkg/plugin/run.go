@@ -16,9 +16,11 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-var MaxHTTPBodySize int64 = 1 << 10 // 1 KiB
-var ContentTypeJSON string = "application/json"
-var ContentTypeError string = "text/plain"
+const (
+	MaxHTTPBodySize  int64  = 1 << 10 // 1 KiB
+	ContentTypeJSON  string = "application/json"
+	ContentTypeError string = "text/plain"
+)
 
 // The scheduler plugin currently supports v1.0 to v1.1 of the agent<->scheduler plugin protocol.
 //
