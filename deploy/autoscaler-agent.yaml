@@ -70,6 +70,7 @@ data:
     },
     "billing": {
       "cpuMetricName": "effective_compute_seconds",
+      "activeTimeMetricName": "active_time_seconds",
       "collectEverySeconds": 5,
       "pushEverySeconds": 30,
       "pushTimeoutSeconds": 2

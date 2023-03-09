@@ -135,6 +135,8 @@ func (c *Config) validate() error {
 		return cannotBeEmpty(".billing.url")
 	} else if c.Billing != nil && c.Billing.CPUMetricName == "" {
 		return cannotBeEmpty(".billing.cpuMetricName")
+	} else if c.Billing != nil && c.Billing.ActiveTimeMetricName == "" {
+		return cannotBeEmpty(".billing.activeTimeMetricName")
 	} else if c.Billing != nil && c.Billing.CollectEverySeconds == 0 {
 		return cannotBeZero(".billing.collectEverySeconds")
 	} else if c.Billing != nil && c.Billing.PushEverySeconds == 0 {
