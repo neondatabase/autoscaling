@@ -342,8 +342,10 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 
 	mib := float64(1 << 20) // 1 MiB = 2^20 bytes. We'll use this for pretty-printing.
 
-	s.cgroup.updateMemHighLock.Lock()
-	defer s.cgroup.updateMemHighLock.Unlock()
+	if s.cgroup != nil {
+		s.cgroup.updateMemHighLock.Lock()
+		defer s.cgroup.updateMemHighLock.Unlock()
+	}
 
 	s.agents.ReceivedUpscale()
 
