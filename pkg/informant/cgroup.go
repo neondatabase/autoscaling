@@ -38,21 +38,6 @@ type CgroupConfig struct {
 	// In other words, memory.high + OOMBufferBytes will equal total system memory.
 	OOMBufferBytes uint64
 
-	// SysBufferBytes gives the estimated amount of memory, in bytes, that the kernel uses before
-	// handing out the rest to userspace. This value is the estimated difference between the
-	// *actual* physical memory and the amount reported by `grep MemTotal /proc/meminfo`.
-	//
-	// For more information, refer to `man 5 proc`, which defines MemTotal as "Total usable RAM
-	// (i.e., physical RAM minus a few reserved bits and the kernel binary code)".
-	//
-	// We only use SysBufferBytes when calculating the system memory from the *external* memory
-	// size, rather than the self-reported memory size, according to the kernel.
-	//
-	// TODO: this field is only necessary while we still have to trust the autoscaler-agent's
-	// upscale resource amounts (because we might not *actually* have been upscaled yet). This field
-	// should be removed once we have a better solution there.
-	SysBufferBytes uint64
-
 	// MemoryHighBufferBytes gives the amount of memory, in bytes, below a proposed new value for
 	// memory.high that the cgroup's memory usage must be for us to downscale
 	//
@@ -80,20 +65,15 @@ func (s *CgroupState) ReceivedUpscale() {
 // system memory.
 //
 // This method MUST be called while holding s.updateMemHighLock.
-func (s *CgroupState) setMemoryHigh() error {
+func (s *CgroupState) setMemoryHigh(availableMemory uint64) error {
 	var newMemHigh uint64
 	mib := float64(1 << 20) // Size of 1 MiB = 2^20 = 1 << 20
 
-	systemMem, err := getTotalSystemMemory()
-	if err != nil {
-		return fmt.Errorf("Error getting system memory: %w", err)
-	}
-
-	newMemHigh = s.config.calculateMemoryHighValue(systemMem.Total)
+	newMemHigh = s.config.calculateMemoryHighValue(availableMemory)
 
 	klog.Infof(
-		"Total system memory is %d bytes (%g MiB). Setting cgroup memory.high to %d bytes (%g MiB)",
-		systemMem.Total, float64(systemMem.Total)/mib, newMemHigh, float64(newMemHigh)/mib,
+		"Total memory available for cgroup is %d bytes (%g MiB). Setting cgroup memory.high to %d bytes (%g MiB)",
+		availableMemory, float64(availableMemory)/mib, newMemHigh, float64(newMemHigh)/mib,
 	)
 
 	s.mgr.MemoryHighEvent.Consume()
