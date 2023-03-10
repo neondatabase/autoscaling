@@ -129,13 +129,13 @@ func (s *FileCacheState) GetFileCacheSize(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
 	}
 
-	var sizeInMB uint64
-	if err := db.QueryRowContext(ctx, "SHOW neon.file_cache_size_limit").Scan(&sizeInMB); err != nil {
+	var sizeInBytes uint64
+	if err := db.QueryRowContext(ctx, `SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));`).Scan(&sizeInBytes); err != nil {
 		return 0, fmt.Errorf("Error querying file cache size: %w", err)
 	}
 
 	// The file cache GUC variable is in MiB
-	return sizeInMB * (1 << 20), nil
+	return sizeInBytes, nil
 }
 
 // SetFileCacheSize sets the size of the file cache, returning the actual size it was set to
@@ -150,8 +150,19 @@ func (s *FileCacheState) SetFileCacheSize(ctx context.Context, sizeInBytes uint6
 
 	// TODO: query should cap the value with size neon.max_file_cache_size, then return the actual
 	// size we set it to.
-	if _, err := db.ExecContext(ctx, "ALTER SYSTEM SET neon.file_cache_size_limit = $1; SELECT pg_reload_conf();", sizeInMB); err != nil {
-		return 0, fmt.Errorf("Error setting file cache size: %w", err)
+	//
+	// note: even though the normal ways to get the cache size produce values with trailing "MB"
+	// (hence why we call pg_size_bytes in GetFileCacheSize's query), the format it expects to set
+	// the value is "integer number of MB" without trailing units. For some reason, this *really*
+	// wasn't working with normal arguments, so that's wny we're constructing the query here.
+	setQuery := fmt.Sprintf(`ALTER SYSTEM SET neon.file_cache_size_limit = %d;`, sizeInMB)
+	if _, err := db.ExecContext(ctx, setQuery); err != nil {
+		return 0, fmt.Errorf("Error changing cache setting: %w", err)
+	}
+
+	// must use pg_reload_conf to have the settings change take effect
+	if _, err := db.ExecContext(ctx, `SELECT pg_reload_conf();`); err != nil {
+		return 0, fmt.Errorf("Error reloading config: %w", err)
 	}
 
 	return sizeInMB * (1 << 20), nil
