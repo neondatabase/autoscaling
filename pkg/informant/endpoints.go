@@ -284,8 +284,8 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 
 	// The downscaling has been approved. Downscale the file cache, then the cgroup.
 	if s.fileCache != nil && s.fileCache.config.InMemory {
-		// FIXME: make the timeout configurable, plumb some context into here.
-		dbCtx, cancel := context.WithTimeout(context.TODO(), time.Second) // for talking to the DB
+		// FIXME: make the timeout configurablek
+		dbCtx, cancel := context.WithTimeout(ctx, time.Second) // for talking to the DB
 		defer cancel()
 
 		actualUsage, err := s.fileCache.SetFileCacheSize(dbCtx, expectedFileCacheMemUsage)
@@ -354,8 +354,8 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 	// Get the file cache's expected contribution to the memory usage
 	var fileCacheMemUsage uint64
 	if s.fileCache != nil && s.fileCache.config.InMemory {
-		// FIXME: make the timeout configurable, plumb some context into here.
-		dbCtx, cancel := context.WithTimeout(context.TODO(), time.Second) // for talking to the DB
+		// FIXME: make the timeout configurable
+		dbCtx, cancel := context.WithTimeout(ctx, time.Second) // for talking to the DB
 		defer cancel()
 
 		// Update the size of the file cache
