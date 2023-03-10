@@ -170,6 +170,10 @@ func WithPostgresFileCache(connStr string, config FileCacheConfig) NewStateOpts 
 			}
 		},
 		post: func(s *State, memTotal uint64) error {
+			if !config.InMemory {
+				panic("file cache not in-memory unimplemented")
+			}
+
 			// FIXME: make the timeout configurable
 			ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
 			defer cancel()
@@ -230,10 +234,10 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 		return nil, 500, errors.New("Internal error")
 	}
 
-	// If we aren't interacting with something should be adjusted, then we don't need to do anything.
-	if s.cgroup == nil && (s.fileCache == nil || !s.fileCache.config.InMemory) {
-		klog.Infof("No action needed for downscale (no cgroup or in-memory file cache enabled)")
-		return resultFromStatus(true, "No action taken (no cgroup or in-memory file cache enabled)")
+	// If we aren't interacting with something that should be adjusted, then we don't need to do anything.
+	if s.cgroup == nil && s.fileCache == nil {
+		klog.Infof("No action needed for downscale (no cgroup or file cache enabled)")
+		return resultFromStatus(true, "No action taken (no cgroup or file cache enabled)")
 	}
 
 	requestedMem := uint64(target.Memory.Value())
@@ -284,6 +288,10 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 
 	// The downscaling has been approved. Downscale the file cache, then the cgroup.
 	if s.fileCache != nil && s.fileCache.config.InMemory {
+		if !s.fileCache.config.InMemory {
+			panic("file cache not in-memory unimplemented")
+		}
+
 		// FIXME: make the timeout configurablek
 		dbCtx, cancel := context.WithTimeout(ctx, time.Second) // for talking to the DB
 		defer cancel()
@@ -334,8 +342,8 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 		return nil, 500, errors.New("Internal error")
 	}
 
-	if s.cgroup == nil && (s.fileCache == nil || !s.fileCache.config.InMemory) {
-		klog.Infof("No action needed for upscale (no cgroup or in-memory file cache enabled)")
+	if s.cgroup == nil && s.fileCache == nil {
+		klog.Infof("No action needed for upscale (no cgroup or file cache enabled)")
 		return &struct{}{}, 200, nil
 	}
 
@@ -353,7 +361,11 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 
 	// Get the file cache's expected contribution to the memory usage
 	var fileCacheMemUsage uint64
-	if s.fileCache != nil && s.fileCache.config.InMemory {
+	if s.fileCache != nil {
+		if !s.fileCache.config.InMemory {
+			panic("file cache not in-memory unimplemented")
+		}
+
 		// FIXME: make the timeout configurable
 		dbCtx, cancel := context.WithTimeout(ctx, time.Second) // for talking to the DB
 		defer cancel()
