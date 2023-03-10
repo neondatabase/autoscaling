@@ -90,6 +90,8 @@ func NewState(agents *AgentSet, config StateConfig, opts ...NewStateOpts) (*Stat
 	// We need to process file cache initialization before cgroup initialization, so that the memory
 	// allocated to the file cache is appropriately taken into account when we decide the cgroup's
 	// memory limits.
+	//
+	// TODO: this should be made cleaner, but it's mostly ok when there's only two options.
 	for _, kind := range []newStateOptKind{optFileCache, optCgroup} {
 		for _, opt := range opts {
 			if opt.kind == kind {
