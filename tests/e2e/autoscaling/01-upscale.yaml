@@ -23,7 +23,7 @@ spec:
     image: postgres:15-alpine
     volumeMounts:
     - name: my-volume
-      mountPath: /etc/config
+      mountPath: /etc/misc
     command:
     - pgbench
     args:
@@ -32,17 +32,17 @@ spec:
     - --progress=1
     - --progress-timestamp
     - --time=600
-    - --file=/etc/config/my-file.txt
+    - --file=/etc/misc/query.sql
   volumes:
   - name: my-volume
     configMap:
-      name: my-config
+      name: query
   restartPolicy: Never
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: my-config
+  name: query
 data:
-  my-file.txt: |
+  query.sql: |
     select length(factorial(length(factorial(1223)::text)/2)::text);

@@ -1,8 +1,5 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
-apply:
-- ../../../deploy/autoscale-scheduler.yaml
-- ../../../deploy/autoscaler-agent.yaml
 unitTest: false
 ---
 apiVersion: v1
@@ -16,26 +13,6 @@ spec:
     protocol: TCP
     targetPort: postgres
     nodePort: 30432
-  - name: pooler
-    port: 6432
-    protocol: TCP
-    targetPort: postgres
-    nodePort: 30632
-  - name: host-metrics
-    port: 9100
-    protocol: TCP
-    targetPort: host-metrics
-    nodePort: 30100
-  - name: metrics
-    port: 9187
-    protocol: TCP
-    targetPort: metrics
-    nodePort: 30187
-  - name: informant
-    port: 10301
-    protocol: TCP
-    targetPort: informant
-    nodePort: 30301
   type: NodePort
   selector:
     vm.neon.tech/name: example
@@ -69,12 +46,8 @@ spec:
     ports:
       - name: postgres
         port: 5432
-      - name: pooler
-        port: 6432
       - name: host-metrics
         port: 9100
-      - name: metrics
-        port: 9187
       - name: informant
         port: 10301
   extraNetwork:
@@ -91,13 +64,6 @@ spec:
         items:
           - key: postgresql.conf
             path: postgresql.conf
-    - name: vector-config
-      mountPath: /etc/vector
-      configMap:
-        name: example-config
-        items:
-          - key: vector.yaml
-            path: vector.yaml
     - name: cache
       mountPath: /neonvm/cache
       tmpfs:
@@ -114,7 +80,7 @@ data:
     shared_preload_libraries = 'pg_stat_statements'
 
     max_connections = 64
-    shared_buffers = 512MB
+    shared_buffers = 256MB
     effective_cache_size = 1536MB
     maintenance_work_mem = 128MB
     checkpoint_completion_target = 0.9
@@ -129,18 +95,3 @@ data:
     max_parallel_workers_per_gather = 2
     max_parallel_workers = 4
     max_parallel_maintenance_workers = 2
-
-  vector.yaml: |
-    sources:
-      postgresql_metrics:
-        type: postgresql_metrics
-        endpoints:
-          - "postgres://postgres@localhost:5432"
-        exclude_databases:
-          - "^template.*"
-    sinks:
-      postgres_exporter:
-        type: prometheus_exporter
-        inputs:
-          - postgresql_metrics
-        address: "0.0.0.0:9187"
