@@ -321,13 +321,13 @@ func MakeShutdownContext() (context.Context, context.CancelFunc) {
 
 func (r *Runner) Spawn(tm task.Manager, vmName string) task.SubgroupHandle {
 	// Handle panics by marking ourselves as such and shutting down everything else
-	tm = tm.WithPanicHandler(func(taskName string, stackTrace chord.StackTrace) {
+	tm = tm.WithPanicHandler(func(taskName string, err any, stackTrace chord.StackTrace) {
 		r.setStatus(func(stat *podStatus) {
 			stat.panicked = true
 			stat.done = true
 			stat.errored = fmt.Errorf("task %s panicked", taskName)
 		})
-		task.LogPanicAndShutdown(tm, MakeShutdownContext)
+		task.LogPanicAndShutdown(tm, MakeShutdownContext)(taskName, err, stackTrace)
 	})
 	// Don't use the top-level error handler
 	tm = tm.WithShutdownErrorHandler(nil)

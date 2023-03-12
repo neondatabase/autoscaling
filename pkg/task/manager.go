@@ -61,7 +61,7 @@ type TaskTree = chord.TaskTree
 type sigShutdown struct{}
 
 type ErrorHandler func(error) error
-type PanicHandler func(fullTaskName string, stackTrace chord.StackTrace)
+type PanicHandler func(fullTaskName string, err any, stackTrace chord.StackTrace)
 
 func LogFatalError(format string) func(error) error {
 	return func(err error) error {
@@ -70,18 +70,18 @@ func LogFatalError(format string) func(error) error {
 	}
 }
 
-func LogPanic(taskName string, stackTrace chord.StackTrace) {
-	klog.Errorf("task %s panicked:\n%s", taskName, stackTrace.String())
+func LogPanic(taskName string, err any, stackTrace chord.StackTrace) {
+	klog.Errorf("task %s panicked with %v:\n%s", taskName, err, stackTrace.String())
 }
 
-func LogPanicAndExit(taskName string, stackTrace chord.StackTrace) {
-	LogPanic(taskName, stackTrace)
+func LogPanicAndExit(taskName string, err any, stackTrace chord.StackTrace) {
+	LogPanic(taskName, err, stackTrace)
 	os.Exit(2)
 }
 
 func LogPanicAndShutdown(m Manager, makeCtx func() (context.Context, context.CancelFunc)) PanicHandler {
-	return func(taskName string, stackTrace chord.StackTrace) {
-		LogPanic(taskName, stackTrace)
+	return func(taskName string, err any, stackTrace chord.StackTrace) {
+		LogPanic(taskName, err, stackTrace)
 		klog.Warningf("Shutting down %v due to previous panic", m.FullName())
 		ctx, cancel := makeCtx()
 		defer cancel()
@@ -202,7 +202,7 @@ func (m Manager) MaybeRecover() {
 			// panicking should skip 2 -- one for this function, and one for the call to
 			// runtime.panic itself
 			trace := chord.GetStackTrace(m.caller, 2)
-			m.onPanic(m.FullName(), trace)
+			m.onPanic(m.FullName(), err, trace)
 		} else {
 			// If there's no panic handler, propagate the error
 			panic(err)
