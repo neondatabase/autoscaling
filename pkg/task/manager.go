@@ -141,7 +141,10 @@ func (m Manager) FullName() string {
 func (m Manager) ShutdownOnSigterm(makeContext func() (context.Context, context.CancelFunc)) {
 	onErr := m.onError
 	handler := func(_ context.Context, err error) error {
-		return onErr(err)
+		if onErr != nil {
+			err = onErr(err)
+		}
+		return err
 	}
 	err := m.signals.sm.WithErrorHandler(handler).On(syscall.SIGTERM, context.Background(), func(context.Context) error {
 		ctx, cancel := makeContext()
@@ -215,13 +218,17 @@ func (m Manager) NewForTask(name string) (_ Manager, done func()) {
 	m.group.Add(name)
 	m.signals.incr()
 
-	m.pathInGroup = fmt.Sprintf("%s/%s", m.pathInGroup, name)
-	klog.Infof("Starting task %s", m.FullName())
+	if m.pathInGroup == "main" {
+		m.pathInGroup = name
+	} else {
+		m.pathInGroup = fmt.Sprintf("%s/%s", m.pathInGroup, name)
+	}
+	klog.Infof("Starting task %q", m.FullName())
 
 	return m, func() {
 		m.group.Done(name)
 		m.signals.decr()
-		klog.Infof("Task %s ended", m.FullName())
+		klog.Infof("Task %q ended", m.FullName())
 	}
 }
 
@@ -271,13 +278,13 @@ func (m Manager) SpawnAsSubgroup(name string, f func(Manager)) SubgroupHandle {
 	}
 
 	sub.group.Add("main")
-	klog.Infof("Starting task %s", sub.FullName())
+	klog.Infof("Starting task %q", sub.FullName())
 
 	go func() {
 		defer sub.group.Done("main")
 		defer sub.signals.decr()
 		defer sub.MaybeRecover()
-		klog.Infof("Task %s ended", sub.FullName())
+		klog.Infof("Task %q ended", sub.FullName())
 
 		f(sub)
 	}()
@@ -292,7 +299,10 @@ func (m Manager) Shutdown(ctx context.Context) error {
 func (m Manager) OnShutdown(ctx context.Context, callbacks ...func(context.Context) error) error {
 	onErr := m.onError
 	handler := func(_ context.Context, err error) error {
-		return onErr(err)
+		if onErr != nil {
+			err = onErr(err)
+		}
+		return err
 	}
 	return m.signals.sm.WithErrorHandler(handler).On(sigShutdown{}, ctx, callbacks...)
 }

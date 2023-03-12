@@ -180,7 +180,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	}
 
 	// With the successful Watch call underway, we hand off responsibility to a new goroutine.
-	tm.Spawn("watch-%s", func(tm task.Manager) {
+	tm.Spawn(fmt.Sprintf("watch-%s", config.LogName), func(tm task.Manager) {
 		// note: instead of deferring watcher.Stop() directly, wrapping it in an outer function
 		// means that we'll always Stop the most recent watcher.
 		defer func() {

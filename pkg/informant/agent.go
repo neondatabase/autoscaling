@@ -67,12 +67,6 @@ type Agent struct {
 	// suspended is true if this Agent was last sent a request on /suspend. This is only ever set by
 	suspended bool
 
-	// unregistered signalled when the agent is unregistered (due to an error or an /unregister
-	// request)
-	unregistered util.SignalReceiver
-	// Sending half of unregistered — only used by EnsureUnregistered()
-	signalUnregistered util.SignalSender
-
 	id         uuid.UUID
 	serverAddr string
 
@@ -271,18 +265,14 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 		)
 	}
 
-	unregisterSend, unregisterRecv := util.NewSingleSignalPair()
-
 	agent := &Agent{
 		tm: task.Manager{}, // set below
 
-		lock: util.ChanMutex{},
+		lock: util.NewChanMutex(),
 
 		parent: s,
 
-		suspended:          false,
-		unregistered:       unregisterRecv,
-		signalUnregistered: unregisterSend,
+		suspended: false,
 
 		id:         info.AgentID,
 		serverAddr: info.ServerAddr,
@@ -308,13 +298,19 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 		return 0, 409, fmt.Errorf("Agent with ID %s is already registered", info.AgentID)
 	}
 
-	s.tm.SpawnAsSubgroup(fmt.Sprintf("agent-%s", agent.id), func(tm task.Manager) {
+	sendInitialized, recvInitialized := util.NewSingleSignalPair()
+
+	s.tm.SpawnAsSubgroup(agent.id.String(), func(tm task.Manager) {
 		tm = tm.WithPanicHandler(task.LogPanicAndShutdown(tm, MakeShutdownContext))
 		agent.tm = tm
+		sendInitialized.Send()
 
 		tm.Spawn("handler-loop", agent.runHandler)
 		tm.Spawn("background-checker", agent.runBackgroundChecker)
 	})
+
+	// wait for agent.tm to be set before doing anything else
+	<-recvInitialized.Recv()
 
 	if err := agent.CheckID(AgentBackgroundCheckTimeout); err != nil {
 		return 0, 400, fmt.Errorf(
@@ -582,7 +578,7 @@ func doRequestWithStartSignal[B any, R any](
 	case <-outerContext.Done():
 		// Timeout reached
 		return nil, false, outerContext.Err()
-	case <-agent.unregistered.Recv():
+	case <-agent.tm.Context().Done():
 		return nil, false, context.Canceled
 	case agent.requestQueue <- req:
 		// Continue as normal
@@ -618,7 +614,13 @@ func (a *Agent) EnsureUnregistered() (wasCurrent bool) {
 
 	klog.Infof("Unregistering agent %s/%s", a.serverAddr, a.id)
 
-	a.signalUnregistered.Send()
+	a.tm.Spawn("shutdown", func(task.Manager) {
+		ctx, cancel := MakeShutdownContext()
+		defer cancel()
+		if err := a.tm.Shutdown(ctx); err != nil {
+			klog.Errorf("Error shutting down agent %s: %s", a.id, err)
+		}
+	})
 
 	a.parent.lock.Lock()
 	defer a.parent.lock.Unlock()
@@ -657,7 +659,7 @@ func (a *Agent) EnsureUnregistered() (wasCurrent bool) {
 func (a *Agent) CheckID(timeout time.Duration) error {
 	// Quick unregistered check:
 	select {
-	case <-a.unregistered.Recv():
+	case <-a.tm.Context().Done():
 		klog.Warningf(
 			"CheckID called for Agent %s/%s that is already unregistered (probably *not* a race?)",
 			a.serverAddr, a.id,
@@ -670,7 +672,7 @@ func (a *Agent) CheckID(timeout time.Duration) error {
 	id, _, err := doRequest[struct{}, api.AgentIdentification](a, timeout, http.MethodGet, "/id", &body)
 
 	select {
-	case <-a.unregistered.Recv():
+	case <-a.tm.Context().Done():
 		return context.Canceled
 	default:
 	}
@@ -698,7 +700,7 @@ func (a *Agent) CheckID(timeout time.Duration) error {
 func (a *Agent) Suspend(timeout time.Duration, handleError func(error)) {
 	// Quick unregistered check:
 	select {
-	case <-a.unregistered.Recv():
+	case <-a.tm.Context().Done():
 		klog.Warningf(
 			"Suspend called for Agent %s/%s that is already unregistered (probably *not* a race?)",
 			a.serverAddr, a.id,
@@ -714,7 +716,7 @@ func (a *Agent) Suspend(timeout time.Duration, handleError func(error)) {
 	)
 
 	select {
-	case <-a.unregistered.Recv():
+	case <-a.tm.Context().Done():
 		handleError(context.Canceled)
 		return
 	default:
@@ -745,7 +747,7 @@ func (a *Agent) Suspend(timeout time.Duration, handleError func(error)) {
 func (a *Agent) Resume(timeout time.Duration) error {
 	// Quick unregistered check:
 	select {
-	case <-a.unregistered.Recv():
+	case <-a.tm.Context().Done():
 		klog.Warningf(
 			"Resume called for Agent %s/%s that is already unregistered (probably *not* a race?)",
 			a.serverAddr, a.id,
@@ -760,7 +762,7 @@ func (a *Agent) Resume(timeout time.Duration) error {
 	)
 
 	select {
-	case <-a.unregistered.Recv():
+	case <-a.tm.Context().Done():
 		return context.Canceled
 	default:
 	}
@@ -789,7 +791,7 @@ func (a *Agent) Resume(timeout time.Duration) error {
 func (a *Agent) SpawnRequestUpscale(tm task.Manager, timeout time.Duration, handleError func(error)) {
 	// Quick unregistered check
 	select {
-	case <-a.unregistered.Recv():
+	case <-a.tm.Context().Done():
 		klog.Warningf(
 			"RequestUpscale called for Agent %s/%s that is already unregistered (probably *not* a race?)",
 			a.serverAddr, a.id,
@@ -829,7 +831,7 @@ func (a *Agent) SpawnRequestUpscale(tm task.Manager, timeout time.Duration, hand
 		)
 
 		select {
-		case <-a.unregistered.Recv():
+		case <-a.tm.Context().Done():
 			handleError(context.Canceled)
 			return
 		default:
