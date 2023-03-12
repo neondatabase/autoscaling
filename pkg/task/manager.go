@@ -214,19 +214,24 @@ func (m Manager) NewForTask(name string) (_ Manager, done func()) {
 	m.group.Add(name)
 	m.signals.incr()
 
-	return Manager{
-			ctx:          m.ctx,
-			signals:      m.signals,
-			group:        m.group,
-			caller:       m.caller,
-			onPanic:      m.onPanic,
-			pathInGroup:  fmt.Sprintf("%s/%s", m.pathInGroup, name),
-			groupPath:    m.groupPath,
-			cleanupToken: m.cleanupToken,
-		}, func() {
-			m.group.Done(name)
-			m.signals.decr()
-		}
+	tm := Manager{
+		ctx:          m.ctx,
+		signals:      m.signals,
+		group:        m.group,
+		caller:       m.caller,
+		onPanic:      m.onPanic,
+		pathInGroup:  fmt.Sprintf("%s/%s", m.pathInGroup, name),
+		groupPath:    m.groupPath,
+		cleanupToken: m.cleanupToken,
+	}
+
+	klog.Infof("Starting task %s", tm.FullName())
+
+	return tm, func() {
+		m.group.Done(name)
+		m.signals.decr()
+		klog.Infof("Task %s ended", tm.FullName())
+	}
 }
 
 func (m Manager) Spawn(name string, f func(Manager)) {
@@ -274,11 +279,13 @@ func (m Manager) SpawnAsSubgroup(name string, f func(Manager)) SubgroupHandle {
 	}
 
 	sub.group.Add("main")
+	klog.Infof("Starting task %s", sub.FullName())
 
 	go func() {
 		defer sub.group.Done("main")
 		defer sub.signals.decr()
 		defer sub.MaybeRecover()
+		klog.Infof("Task %s ended", sub.FullName())
 
 		f(sub)
 	}()
