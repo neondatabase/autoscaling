@@ -81,6 +81,8 @@ discussed more in the [high-level consequences] section below.
     * `pkg/agent/` — implementation of `autoscaler-agent`
     * `pkg/api/` — types for scheduler plugin <-> `autoscaler-agent` communication, plus some
         protocol-relevant types independently used by both.
+    * `pkg/billing/` — consumption metrics API, primarily used in
+        [`pkg/agent/billing.go`](pkg/agent/billing.go)
     * `pkg/informant/` — implementation of the VM informant
     * `pkg/plugin/` — implementation of the scheduler plugin
     * `pkg/util/` — miscellaneous utilities that are too general to be included in `agent` or
