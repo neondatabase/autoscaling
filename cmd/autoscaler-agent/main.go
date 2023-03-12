@@ -59,7 +59,7 @@ func main() {
 		ctx, cancel := agent.MakeShutdownContext()
 		defer cancel()
 		if err := tm.Shutdown(ctx); err != nil {
-			errHandler(err)
+			_ = errHandler(err)
 		}
 	}()
 

@@ -126,6 +126,7 @@ func NewRootTaskManager(name string) Manager {
 		signals:      signals,
 		group:        chord.NewTaskGroup(name),
 		caller:       nil,
+		onError:      nil,
 		onPanic:      nil,
 		pathInGroup:  "main",
 		groupPath:    name,
@@ -214,23 +215,13 @@ func (m Manager) NewForTask(name string) (_ Manager, done func()) {
 	m.group.Add(name)
 	m.signals.incr()
 
-	tm := Manager{
-		ctx:          m.ctx,
-		signals:      m.signals,
-		group:        m.group,
-		caller:       m.caller,
-		onPanic:      m.onPanic,
-		pathInGroup:  fmt.Sprintf("%s/%s", m.pathInGroup, name),
-		groupPath:    m.groupPath,
-		cleanupToken: m.cleanupToken,
-	}
+	m.pathInGroup = fmt.Sprintf("%s/%s", m.pathInGroup, name)
+	klog.Infof("Starting task %s", m.FullName())
 
-	klog.Infof("Starting task %s", tm.FullName())
-
-	return tm, func() {
+	return m, func() {
 		m.group.Done(name)
 		m.signals.decr()
-		klog.Infof("Task %s ended", tm.FullName())
+		klog.Infof("Task %s ended", m.FullName())
 	}
 }
 
@@ -261,6 +252,7 @@ func (m Manager) SpawnAsSubgroup(name string, f func(Manager)) SubgroupHandle {
 		group:        m.group.NewSubgroup(name),
 		signals:      signals,
 		caller:       &caller,
+		onError:      m.onError,
 		onPanic:      m.onPanic,
 		pathInGroup:  "main",
 		groupPath:    fmt.Sprintf("%s/%s", m.groupPath, name),

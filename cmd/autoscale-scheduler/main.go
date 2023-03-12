@@ -25,7 +25,7 @@ func main() {
 		ctx, cancel := makeShutdownContext()
 		defer cancel()
 		if err := tm.Shutdown(ctx); err != nil {
-			shutdownErrorHandler(err)
+			_ = shutdownErrorHandler(err)
 		}
 	}()
 
