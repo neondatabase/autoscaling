@@ -231,7 +231,7 @@ func (m Manager) SpawnAsSubgroup(name string, f func(Manager)) SubgroupHandle {
 }
 
 func (m Manager) Shutdown(ctx context.Context) error {
-	return m.signals.sm.Trigger(sigShutdown{}, ctx)
+	return m.signals.sm.TriggerAndWait(sigShutdown{}, ctx)
 }
 
 func (m Manager) OnShutdown(ctx context.Context, callbacks ...func(context.Context) error) error {
