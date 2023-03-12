@@ -50,8 +50,6 @@ func NewAutoscaleEnforcerPlugin(ctx context.Context) func(runtime.Object, framew
 // NewAutoscaleEnforcerPlugin produces the initial AutoscaleEnforcer plugin to be used by the
 // scheduler
 func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
-	tm := ctx.Value(task.ManagerKey).(task.Manager)
-
 	// ^ obj can be used for taking in configuration. it's a bit tricky to figure out, and we don't
 	// quite need it yet.
 	klog.Info("[autoscale-enforcer] Initializing plugin")
@@ -59,6 +57,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	klog.Infof("[autoscale-enforcer] buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("[autoscale-enforcer] buildInfo.NeonVM:    %s", buildInfo.NeonVM)
 	klog.Infof("[autoscale-enforcer] buildInfo.GoVersion: %s", buildInfo.GoVersion)
+
+	tm := ctx.Value(task.ManagerKey).(task.Manager)
 
 	// create the NeonVM client
 	if err := vmapi.AddToScheme(scheme.Scheme); err != nil {

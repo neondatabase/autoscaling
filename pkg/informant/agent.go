@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +18,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -29,7 +29,9 @@ const ProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
 
 // AgentSet is the global state handling various autoscaler-agents that we could connect to
 type AgentSet struct {
-	lock sync.Mutex
+	tm task.Manager
+
+	lock util.ChanMutex
 
 	// current is the agent we're currently communciating with. If there is none, then this value is
 	// nil
@@ -53,8 +55,10 @@ type AgentSet struct {
 }
 
 type Agent struct {
+	tm task.Manager
+
 	// lock is required for accessing the mutable fields of this struct: parent and lastSeqNumber.
-	lock sync.Mutex
+	lock util.ChanMutex
 
 	// parent is the AgentSet containing this Agent. It is always non-nil, up until this Agent is
 	// unregistered with EnsureUnregistered()
@@ -87,11 +91,12 @@ type agentRequest struct {
 // NewAgentSet creates a new AgentSet and starts the necessary background tasks
 //
 // On completion, the background tasks should be ended with the Stop method.
-func NewAgentSet() *AgentSet {
+func NewAgentSet(tm task.Manager) *AgentSet {
 	tryNewAgent := make(chan struct{})
 
 	agents := &AgentSet{
-		lock:               sync.Mutex{},
+		tm:                 task.Manager{}, // set below
+		lock:               util.NewChanMutex(),
 		current:            nil,
 		wantsMemoryUpscale: false,
 		byIDs:              make(map[uuid.UUID]*Agent),
@@ -99,42 +104,31 @@ func NewAgentSet() *AgentSet {
 		tryNewAgent:        tryNewAgent,
 	}
 
-	go agents.runDeadlockChecker()
-	go agents.tryNewAgents(tryNewAgent)
+	agents.lock.Lock()
+	defer agents.lock.Unlock()
+
+	handle := tm.SpawnAsSubgroup("agents", func(tm task.Manager) {
+		agents.tm = tm
+		tm.Spawn("deadlock-checker", agents.lock.DeadlockChecker(CheckDeadlockTimeout, CheckDeadlockDelay))
+		tm.SpawnAsSubgroup("new-agents", func(tm task.Manager) {
+			agents.tryNewAgents(tm, tryNewAgent)
+		})
+	})
+
+	immediateContext := context.TODO()
+	_ = tm.OnShutdown(immediateContext, task.WrapOnError("timed out waiting for agents to finish: %w", handle.TryWait))
+
 	return agents
 }
 
-// runDeadlockChecker periodically tries to acquire the AgentSet's lock, killing the process if it
-// was unable to do so
-func (s *AgentSet) runDeadlockChecker() {
-	for {
-		success := make(chan struct{})
-
-		go func() {
-			s.lock.Lock()
-			defer s.lock.Unlock()
-			close(success)
-		}()
-
-		select {
-		case <-success:
-			// all good
-		case <-time.After(CheckDeadlockTimeout):
-			klog.Fatalf("deadlock detected, could not get lock after %s", CheckDeadlockTimeout)
-		}
-
-		time.Sleep(CheckDeadlockDelay)
-	}
-}
-
-func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
+func (s *AgentSet) tryNewAgents(tm task.Manager, signal <-chan struct{}) {
 	// note: we don't close this. Sending stops when the context is done, and every read from this
 	// channel also handles the context being cancelled.
 	aggregate := make(chan struct{})
 
 	// Helper function to coalesce repeated incoming signals into a single output, so that we don't
 	// block anything from sending on signal
-	go func() {
+	tm.Spawn("signal-aggregator", func(tm task.Manager) {
 	noSignal:
 		<-signal
 
@@ -145,7 +139,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 		case aggregate <- struct{}{}:
 			goto noSignal
 		}
-	}()
+	})
 
 	for {
 		<-aggregate
@@ -223,7 +217,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 
 				// If upscale was requested, do that:
 				if s.wantsMemoryUpscale {
-					s.current.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+					s.current.SpawnRequestUpscale(tm, AgentUpscaleTimeout, func(err error) {
 						if errors.Is(err, context.Canceled) {
 							return
 						}
@@ -280,7 +274,9 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 	unregisterSend, unregisterRecv := util.NewSingleSignalPair()
 
 	agent := &Agent{
-		lock: sync.Mutex{},
+		tm: task.Manager{}, // set below
+
+		lock: util.ChanMutex{},
 
 		parent: s,
 
@@ -312,8 +308,13 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 		return 0, 409, fmt.Errorf("Agent with ID %s is already registered", info.AgentID)
 	}
 
-	go agent.runHandler()
-	go agent.runBackgroundChecker()
+	s.tm.SpawnAsSubgroup(fmt.Sprintf("agent-%s", agent.id), func(tm task.Manager) {
+		tm = tm.WithPanicHandler(task.LogPanicAndShutdown(tm, MakeShutdownContext))
+		agent.tm = tm
+
+		tm.Spawn("handler-loop", agent.runHandler)
+		tm.Spawn("background-checker", agent.runBackgroundChecker)
+	})
 
 	if err := agent.CheckID(AgentBackgroundCheckTimeout); err != nil {
 		return 0, 400, fmt.Errorf(
@@ -380,7 +381,7 @@ func (s *AgentSet) RequestUpscale() {
 	// FIXME: it's possible to block for an unbounded amount of time waiting for the request to get
 	// picked up by the message queue. We *do* want backpressure here, but we should ideally have a
 	// way to cancel an attempted request if it's taking too long.
-	agent.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+	agent.SpawnRequestUpscale(s.tm, AgentUpscaleTimeout, func(err error) {
 		if errors.Is(err, context.Canceled) {
 			return
 		}
@@ -412,7 +413,7 @@ func (s *AgentSet) Get(id uuid.UUID) (_ *Agent, ok bool) {
 }
 
 // runHandler receives inputs from the requestSet and dispatches them
-func (a *Agent) runHandler() {
+func (a *Agent) runHandler(tm task.Manager) {
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			err := fmt.Errorf("Unexpected redirect getting %s", req.URL)
@@ -426,44 +427,27 @@ func (a *Agent) runHandler() {
 	for {
 		// Ignore items in the requestQueue if the Agent's been unregistered.
 		select {
-		case <-a.unregistered.Recv():
+		case <-tm.Context().Done():
 			return
 		default:
 		}
 
 		select {
-		case <-a.unregistered.Recv():
+		case <-tm.Context().Done():
 			return
 		case req := <-a.requestQueue:
-			func() {
-				reqCtx, cancel := context.WithCancel(req.ctx)
-				defer cancel()
-
-				done := make(chan struct{})
-				go func() {
-					defer req.done.Send()
-					defer close(done)
-					req.doRequest(reqCtx, &client)
-				}()
-
-				select {
-				case <-a.unregistered.Recv():
-					cancel()
-					// Even if we've just cancelled it, we have to wait on done so that we know the
-					// http.Client won't be used by other goroutines
-					<-done
-				case <-done:
-				}
-			}()
+			// merge req.ctx and tm.Context():
+			reqCtx := tm.WithContext(req.ctx).Context()
+			req.doRequest(reqCtx, &client)
 		}
 	}
 }
 
 // runBackgroundChecker performs periodic checks that the Agent is still available
-func (a *Agent) runBackgroundChecker() {
+func (a *Agent) runBackgroundChecker(tm task.Manager) {
 	for {
 		select {
-		case <-a.unregistered.Recv():
+		case <-tm.Context().Done():
 			return
 		case <-time.After(AgentBackgroundCheckDelay):
 			// all good
@@ -802,7 +786,7 @@ func (a *Agent) Resume(timeout time.Duration) error {
 // The timeout applies only once the request is in-flight.
 //
 // This method MUST NOT be called while holding a.parent.lock; if that happens, it may deadlock.
-func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(error)) {
+func (a *Agent) SpawnRequestUpscale(tm task.Manager, timeout time.Duration, handleError func(error)) {
 	// Quick unregistered check
 	select {
 	case <-a.unregistered.Recv():
@@ -817,7 +801,9 @@ func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(erro
 
 	sendDone, recvDone := util.NewSingleSignalPair()
 
-	go func() {
+	tm = a.tm.WithContext(tm.Context()).WithCaller(tm.Caller())
+
+	tm.Spawn("request-upscale", func(tm task.Manager) {
 		// If we exit early, signal that we're done.
 		defer sendDone.Send()
 
@@ -862,7 +848,7 @@ func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(erro
 			handleError(fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID))
 			return
 		}
-	}()
+	})
 
 	<-recvDone.Recv()
 }

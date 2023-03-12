@@ -172,10 +172,10 @@ func NewInformantServer(
 	logPrefix := runner.logger.prefix
 
 	mux := http.NewServeMux()
-	util.AddHandler(logPrefix, mux, "/id", http.MethodGet, "struct{}", server.handleID)
-	util.AddHandler(logPrefix, mux, "/resume", http.MethodPost, "ResumeAgent", server.handleResume)
-	util.AddHandler(logPrefix, mux, "/suspend", http.MethodPost, "SuspendAgent", server.handleSuspend)
-	util.AddHandler(logPrefix, mux, "/try-upscale", http.MethodPost, "MoreResourcesRequest", server.handleTryUpscale)
+	util.AddHandler(tm, logPrefix, mux, "/id", http.MethodGet, "struct{}", server.handleID)
+	util.AddHandler(tm, logPrefix, mux, "/resume", http.MethodPost, "ResumeAgent", server.handleResume)
+	util.AddHandler(tm, logPrefix, mux, "/suspend", http.MethodPost, "SuspendAgent", server.handleSuspend)
+	util.AddHandler(tm, logPrefix, mux, "/try-upscale", http.MethodPost, "MoreResourcesRequest", server.handleTryUpscale)
 	httpServer := &http.Server{Handler: mux}
 
 	sendFinished, recvFinished := util.NewSingleSignalPair()
@@ -623,7 +623,7 @@ func (s *InformantServer) informantURL(path string) string {
 // of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleID(tm task.Manager, body *struct{}) (*api.AgentIdentificationMessage, int, error) {
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
 
@@ -643,7 +643,7 @@ func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.Ag
 // outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleResume(tm task.Manager, body *api.ResumeAgent) (*api.AgentIdentificationMessage, int, error) {
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -702,7 +702,7 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 // called outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleSuspend(tm task.Manager, body *api.SuspendAgent) (*api.AgentIdentificationMessage, int, error) {
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -756,7 +756,7 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
 func (s *InformantServer) handleTryUpscale(
-	ctx context.Context,
+	tm task.Manager,
 	body *api.MoreResourcesRequest,
 ) (*api.AgentIdentificationMessage, int, error) {
 	if body.ExpectedID != s.desc.AgentID {

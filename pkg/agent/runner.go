@@ -314,13 +314,9 @@ func (r *Runner) State(groupHandle task.SubgroupHandle) RunnerState {
 	}
 }
 
-func makeShutdownContext() context.Context {
-	// note: it's ok to leak the cancel func here; we don't have a good way to clean it up, and
-	// eventually it'll get GC'd anyways.
-	//
+func MakeShutdownContext() (context.Context, context.CancelFunc) {
 	// TODO: make this timeout configurable
-	ctx, _ := context.WithTimeout(context.TODO(), 10*time.Second) //nolint:govet // see above
-	return ctx
+	return context.WithTimeout(context.TODO(), 10*time.Second)
 }
 
 func (r *Runner) Spawn(tm task.Manager, vmName string) task.SubgroupHandle {
@@ -331,8 +327,10 @@ func (r *Runner) Spawn(tm task.Manager, vmName string) task.SubgroupHandle {
 			stat.done = true
 			stat.errored = fmt.Errorf("task %s panicked", taskName)
 		})
-		task.LogPanicAndShutdown(tm, makeShutdownContext)
+		task.LogPanicAndShutdown(tm, MakeShutdownContext)
 	})
+	// Don't use the top-level error handler
+	tm = tm.WithShutdownErrorHandler(nil)
 
 	return tm.SpawnAsSubgroup(fmt.Sprintf("runner-%v", r.podName), func(tm task.Manager) {
 		err := r.Run(tm, vmName)
@@ -362,7 +360,9 @@ func (r *Runner) setStatus(with func(*podStatus)) {
 // Run is the main entrypoint to the long-running per-VM pod tasks
 func (r *Runner) Run(tm task.Manager, vmName string) (err error) {
 	defer func() {
-		shutdownErr := tm.Shutdown(makeShutdownContext())
+		ctx, cancel := MakeShutdownContext()
+		defer cancel()
+		shutdownErr := tm.Shutdown(ctx)
 		if err == nil && shutdownErr != nil {
 			err = shutdownErr
 		}
@@ -773,8 +773,9 @@ startScheduler:
 		tm.Spawn("deadlock-checker", sched.requestLock.DeadlockChecker(5*time.Second, time.Second))
 		// shut down the deadlock checker once the object is no longer in use
 		runtime.SetFinalizer(sched, func(obj any) {
-			err := tm.Shutdown(makeShutdownContext())
-			if err != nil {
+			ctx, cancel := MakeShutdownContext()
+			defer cancel()
+			if err := tm.Shutdown(ctx); err != nil {
 				logger.Errorf("Error shutting down scheduler: %s", err)
 			}
 		})

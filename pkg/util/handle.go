@@ -3,13 +3,17 @@ package util
 // Wrapper file for the AddHandler function
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+
+	"github.com/sharnoff/chord"
 
 	klog "k8s.io/klog/v2"
+
+	"github.com/neondatabase/autoscaling/pkg/task"
 )
 
 // AddHandler is a helper function to wrap the handle function with JSON [de]serialization and check
@@ -18,16 +22,24 @@ import (
 // The provided logPrefix is prepended to every log line emitted by the wrapped handler function, to
 // offer distinction where that's useful.
 func AddHandler[T any, R any](
+	tm task.Manager,
 	logPrefix string,
 	mux *http.ServeMux,
 	endpoint string,
 	method string,
 	reqTypeName string,
-	handle func(context.Context, *T) (_ *R, statusCode int, _ error),
+	handle func(task.Manager, *T) (_ *R, statusCode int, _ error),
 ) {
 	errBadMethod := []byte("request method must be " + method)
+	caller := chord.GetStackTrace(nil, 1) // skip 1 to get location of AddHandler's caller
+	tm = tm.WithCaller(&caller)
+	taskName := fmt.Sprintf("handle-%s", strings.TrimPrefix(endpoint, "/"))
 
 	mux.HandleFunc(endpoint, func(w http.ResponseWriter, r *http.Request) {
+		tm, done := tm.WithContext(r.Context()).NewForTask(taskName)
+		defer done()
+		defer tm.MaybeRecover()
+
 		if r.Method != method {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			_, _ = w.Write(errBadMethod)
@@ -45,7 +57,7 @@ func AddHandler[T any, R any](
 
 		klog.Infof("%sReceived request on %s (client = %s) %+v", logPrefix, endpoint, r.RemoteAddr, req)
 
-		resp, status, err := handle(r.Context(), &req)
+		resp, status, err := handle(tm, &req)
 
 		if err == nil && status != http.StatusOK {
 			err = errors.New("HTTP handler error: status != 200 OK, but no error message")

@@ -15,6 +15,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/informant"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -74,20 +75,32 @@ func main() {
 		klog.Infof("No cgroup selected")
 	}
 
-	agents := informant.NewAgentSet()
+	tm := task.NewRootTaskManager("vm-informant").WithPanicHandler(task.LogPanicAndExit)
+	tm.ShutdownOnSigterm(informant.MakeShutdownContext)
+	defer func() {
+		ctx, cancel := informant.MakeShutdownContext()
+		defer cancel()
+		if err := tm.Shutdown(ctx); err != nil {
+			klog.Fatalf("Error shutting down: %s", err)
+		}
+	}()
+
+	agents := informant.NewAgentSet(tm)
 	state, err := informant.NewState(agents, stateOpts...)
 	if err != nil {
 		klog.Fatalf("Error starting informant.NewState: %s", err)
 	}
 
 	mux := http.NewServeMux()
-	util.AddHandler("", mux, "/register", http.MethodPost, "AgentDesc", state.RegisterAgent)
+	util.AddHandler(tm, "", mux, "/register", http.MethodPost, "AgentDesc", state.RegisterAgent)
 	// FIXME: /downscale and /upscale should have the AgentID in the request body
-	util.AddHandler("", mux, "/downscale", http.MethodPut, "RawResources", state.TryDownscale)
-	util.AddHandler("", mux, "/upscale", http.MethodPut, "RawResources", state.NotifyUpscale)
-	util.AddHandler("", mux, "/unregister", http.MethodDelete, "AgentDesc", state.UnregisterAgent)
+	util.AddHandler(tm, "", mux, "/downscale", http.MethodPut, "RawResources", state.TryDownscale)
+	util.AddHandler(tm, "", mux, "/upscale", http.MethodPut, "RawResources", state.NotifyUpscale)
+	util.AddHandler(tm, "", mux, "/unregister", http.MethodDelete, "AgentDesc", state.UnregisterAgent)
 
 	server := http.Server{Addr: "0.0.0.0:10301", Handler: mux}
+	_ = tm.OnShutdown(context.TODO(), task.WrapOnError("Error shutting down HTTP server: %w", server.Shutdown))
+
 	klog.Infof("Starting server at %s", server.Addr)
 	err = server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {

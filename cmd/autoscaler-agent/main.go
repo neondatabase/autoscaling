@@ -50,7 +50,18 @@ func main() {
 	}
 
 	tm := task.NewRootTaskManager("autoscaler-agent")
-	tm.ShutdownOnSigterm()
+	errHandler := task.LogFatalError("Error during shutdown: %w")
+
+	tm = tm.WithShutdownErrorHandler(errHandler)
+	tm = tm.WithPanicHandler(task.LogPanicAndShutdown(tm, agent.MakeShutdownContext))
+	tm.ShutdownOnSigterm(agent.MakeShutdownContext)
+	defer func() {
+		ctx, cancel := agent.MakeShutdownContext()
+		defer cancel()
+		if err := tm.Shutdown(ctx); err != nil {
+			errHandler(err)
+		}
+	}()
 
 	if err = runner.Run(tm); err != nil {
 		klog.Fatalf("Main loop failed: %s", err)

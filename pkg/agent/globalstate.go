@@ -80,7 +80,9 @@ func (s *agentState) handleEvent(tm task.Manager, event podEvent) {
 		}
 
 		tm.Spawn(fmt.Sprintf("stop-%v", event.podName), func(tm task.Manager) {
-			if err := state.group.Shutdown(makeShutdownContext()); err != nil {
+			ctx, cancel := MakeShutdownContext()
+			defer cancel()
+			if err := state.group.Shutdown(ctx); err != nil {
 				klog.Errorf("Error while stopping Runner %v: %w", event.podName, err)
 			}
 		})

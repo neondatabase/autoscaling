@@ -83,6 +83,7 @@ discussed more in the [high-level consequences] section below.
         protocol-relevant types independently used by both.
     * `pkg/informant/` — implementation of the VM informant
     * `pkg/plugin/` — implementation of the scheduler plugin
+    * `pkg/task/` — tools for managing goroutine lifecycle and service shutdown
     * `pkg/util/` — miscellaneous utilities that are too general to be included in `agent` or
       `plugin`.
 * `scripts/` — a collection of scripts for common tasks. Items of note:

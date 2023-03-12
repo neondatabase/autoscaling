@@ -26,6 +26,7 @@ type Manager struct {
 	group   *chord.TaskGroup
 	caller  *chord.StackTrace
 
+	onError ErrorHandler
 	onPanic PanicHandler
 
 	pathInGroup string
@@ -42,11 +43,11 @@ type signalManager struct {
 	refcount atomic.Int64
 }
 
-func (s signalManager) incr() {
+func (s *signalManager) incr() {
 	s.refcount.Add(1)
 }
 
-func (s signalManager) decr() {
+func (s *signalManager) decr() {
 	if s.refcount.Add(-1) == 0 {
 		s.sm.Stop()
 		if s.parent != nil {
@@ -59,7 +60,15 @@ type TaskTree = chord.TaskTree
 
 type sigShutdown struct{}
 
+type ErrorHandler func(error) error
 type PanicHandler func(fullTaskName string, stackTrace chord.StackTrace)
+
+func LogFatalError(format string) func(error) error {
+	return func(err error) error {
+		klog.Fatalf(format, err)
+		return nil
+	}
+}
 
 func LogPanic(taskName string, stackTrace chord.StackTrace) {
 	klog.Errorf("task %s panicked:\n%s", taskName, stackTrace.String())
@@ -70,11 +79,13 @@ func LogPanicAndExit(taskName string, stackTrace chord.StackTrace) {
 	os.Exit(2)
 }
 
-func LogPanicAndShutdown(m Manager, makeCtx func() context.Context) PanicHandler {
+func LogPanicAndShutdown(m Manager, makeCtx func() (context.Context, context.CancelFunc)) PanicHandler {
 	return func(taskName string, stackTrace chord.StackTrace) {
 		LogPanic(taskName, stackTrace)
 		klog.Warningf("Shutting down %v due to previous panic", m.FullName())
-		if err := m.Shutdown(makeCtx()); err != nil {
+		ctx, cancel := makeCtx()
+		defer cancel()
+		if err := m.Shutdown(ctx); err != nil {
 			klog.Errorf("Shutdown returned error: %w", err)
 		}
 	}
@@ -126,8 +137,16 @@ func (m Manager) FullName() string {
 	return fmt.Sprintf("group{%s}-task{%s}", m.groupPath, m.pathInGroup)
 }
 
-func (m Manager) ShutdownOnSigterm() {
-	err := m.signals.sm.On(syscall.SIGTERM, context.Background(), m.Shutdown)
+func (m Manager) ShutdownOnSigterm(makeContext func() (context.Context, context.CancelFunc)) {
+	onErr := m.onError
+	handler := func(_ context.Context, err error) error {
+		return onErr(err)
+	}
+	err := m.signals.sm.WithErrorHandler(handler).On(syscall.SIGTERM, context.Background(), func(context.Context) error {
+		ctx, cancel := makeContext()
+		defer cancel()
+		return m.Shutdown(ctx)
+	})
 	if err != nil {
 		panic(fmt.Errorf("unexpected error while setting SIGTERM hook: %w", err))
 	}
@@ -141,8 +160,34 @@ func (m Manager) Context() context.Context {
 	}
 }
 
+func (m Manager) Caller() *chord.StackTrace {
+	return m.caller
+}
+
+func (m Manager) WithCaller(trace *chord.StackTrace) Manager {
+	m.caller = trace
+	return m
+}
+
 func (m Manager) WithContext(ctx context.Context) Manager {
 	m.ctx = ctx
+	return m
+}
+
+func (m Manager) WithShutdownErrorHandler(onError ErrorHandler) Manager {
+	if m.onError != nil && onError != nil {
+		parent := m.onError
+		m.onError = func(err error) error {
+			err = onError(err)
+			if err != nil {
+				err = parent(err)
+			}
+			return err
+		}
+	} else {
+		m.onError = onError
+	}
+
 	return m
 }
 
@@ -151,24 +196,47 @@ func (m Manager) WithPanicHandler(onPanic PanicHandler) Manager {
 	return m
 }
 
-func (m Manager) Spawn(name string, f func(Manager)) {
-	caller := chord.GetStackTrace(m.caller, 1) // ignore this function in stack trace
+func (m Manager) MaybeRecover() {
+	if err := recover(); err != nil {
+		if m.onPanic != nil {
+			// panicking should skip 2 -- one for this function, and one for the call to
+			// runtime.panic itself
+			trace := chord.GetStackTrace(m.caller, 2)
+			m.onPanic(m.FullName(), trace)
+		} else {
+			// If there's no panic handler, propagate the error
+			panic(err)
+		}
+	}
+}
 
+func (m Manager) NewForTask(name string) (_ Manager, done func()) {
 	m.group.Add(name)
 	m.signals.incr()
-	go func() {
-		defer m.group.Done(name)
-		defer m.signals.decr()
-		f(Manager{
+
+	return Manager{
 			ctx:          m.ctx,
 			signals:      m.signals,
 			group:        m.group,
-			caller:       &caller,
+			caller:       m.caller,
 			onPanic:      m.onPanic,
 			pathInGroup:  fmt.Sprintf("%s/%s", m.pathInGroup, name),
 			groupPath:    m.groupPath,
 			cleanupToken: m.cleanupToken,
-		})
+		}, func() {
+			m.group.Done(name)
+			m.signals.decr()
+		}
+}
+
+func (m Manager) Spawn(name string, f func(Manager)) {
+	caller := chord.GetStackTrace(m.caller, 1) // ignore this function in stack trace
+
+	child, done := m.WithCaller(&caller).NewForTask(name)
+	go func() {
+		defer done()
+		defer child.MaybeRecover()
+		f(child)
 	}()
 }
 
@@ -210,19 +278,7 @@ func (m Manager) SpawnAsSubgroup(name string, f func(Manager)) SubgroupHandle {
 	go func() {
 		defer sub.group.Done("main")
 		defer sub.signals.decr()
-		defer func() {
-			if err := recover(); err != nil {
-				if m.onPanic != nil {
-					// panicking should skip 2 -- one for the deferred function, and one for the call to
-					// runtime.panic itself
-					trace := chord.GetStackTrace(sub.caller, 2)
-					m.onPanic(m.FullName(), trace)
-				} else {
-					// If there's no panic handler, propagate the error
-					panic(err)
-				}
-			}
-		}()
+		defer sub.MaybeRecover()
 
 		f(sub)
 	}()
@@ -235,7 +291,11 @@ func (m Manager) Shutdown(ctx context.Context) error {
 }
 
 func (m Manager) OnShutdown(ctx context.Context, callbacks ...func(context.Context) error) error {
-	return m.signals.sm.On(sigShutdown{}, ctx, callbacks...)
+	onErr := m.onError
+	handler := func(_ context.Context, err error) error {
+		return onErr(err)
+	}
+	return m.signals.sm.WithErrorHandler(handler).On(sigShutdown{}, ctx, callbacks...)
 }
 
 func (m Manager) IgnoreParentShutdown() {

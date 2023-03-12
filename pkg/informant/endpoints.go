@@ -3,7 +3,6 @@ package informant
 // This file contains the high-level handlers for various HTTP endpoints
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/task"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -96,7 +96,7 @@ func WithCgroup(cgm *CgroupManager, config CgroupConfig) NewStateOpts {
 // RegisterAgent registers a new or updated autoscaler-agent
 //
 // Returns: body (if successful), status code, error (if unsuccessful)
-func (s *State) RegisterAgent(ctx context.Context, info *api.AgentDesc) (*api.InformantDesc, int, error) {
+func (s *State) RegisterAgent(tm task.Manager, info *api.AgentDesc) (*api.InformantDesc, int, error) {
 	protoVersion, status, err := s.agents.RegisterNewAgent(info)
 	if err != nil {
 		return nil, status, err
@@ -116,7 +116,7 @@ func (s *State) RegisterAgent(ctx context.Context, info *api.AgentDesc) (*api.In
 // amount is ok
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*api.DownscaleResult, int, error) {
+func (s *State) TryDownscale(tm task.Manager, target *api.RawResources) (*api.DownscaleResult, int, error) {
 	// If we aren't interacting with a cgroup, then we don't need to do anything.
 	if s.cgroup == nil {
 		return &api.DownscaleResult{Ok: true, Status: "No action taken (no cgroup enabled)"}, 200, nil
@@ -174,7 +174,7 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResources) (*struct{}, int, error) {
+func (s *State) NotifyUpscale(tm task.Manager, newResources *api.RawResources) (*struct{}, int, error) {
 	// FIXME: we shouldn't just trust what the agent says
 	//
 	// Because of race conditions like in <https://github.com/neondatabase/autoscaling/issues/23>,
@@ -217,7 +217,7 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 // If a different autoscaler-agent is currently registered, this method will do nothing.
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) UnregisterAgent(ctx context.Context, info *api.AgentDesc) (*api.UnregisterAgent, int, error) {
+func (s *State) UnregisterAgent(tm task.Manager, info *api.AgentDesc) (*api.UnregisterAgent, int, error) {
 	agent, ok := s.agents.Get(info.AgentID)
 	if !ok {
 		return nil, 404, fmt.Errorf("No agent with ID %q", info.AgentID)

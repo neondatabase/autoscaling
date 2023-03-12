@@ -66,10 +66,9 @@ func (r MainRunner) Run(tm task.Manager) error {
 
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")
-		tm.WithPanicHandler(task.LogPanicAndShutdown(tm, makeShutdownContext)).
-			Spawn("billing-metrics-collector", func(subTm task.Manager) {
-				RunBillingMetricsCollector(subTm, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)
-			})
+		tm.Spawn("billing-metrics-collector", func(subTm task.Manager) {
+			RunBillingMetricsCollector(subTm, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)
+		})
 	}
 
 	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
@@ -79,10 +78,7 @@ func (r MainRunner) Run(tm task.Manager) error {
 	for {
 		select {
 		case <-ctx.Done():
-			klog.Infof("Shutting down")
-			if err := tm.Shutdown(makeShutdownContext()); err != nil {
-				klog.Errorf("Error during shutdown: %s", err)
-			}
+			klog.Infof("Shutting down") // let the caller wait for shutdown to complete
 			return nil
 		case event := <-podEvents:
 			globalState.handleEvent(tm, event)

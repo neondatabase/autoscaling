@@ -3,6 +3,7 @@ package informant
 // Assorted constants that aren't worth having a configuration file for
 
 import (
+	"context"
 	"time"
 )
 
@@ -18,6 +19,8 @@ const (
 	AgentResumeTimeout  time.Duration = 100 * time.Millisecond
 	AgentSuspendTimeout time.Duration = 200 * time.Millisecond
 	AgentUpscaleTimeout time.Duration = 400 * time.Millisecond // does not include waiting for /upscale response
+
+	ShutdownTimeout time.Duration = 2 * time.Second
 )
 
 var (
@@ -29,3 +32,7 @@ var (
 		MaxUpscaleWaitMillis:  20,              // 20ms
 	}
 )
+
+func MakeShutdownContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), ShutdownTimeout)
+}
