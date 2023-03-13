@@ -435,6 +435,7 @@ func (a *Agent) runHandler(tm task.Manager) {
 			// merge req.ctx and tm.Context():
 			reqCtx := tm.WithContext(req.ctx).Context()
 			req.doRequest(reqCtx, &client)
+			req.done.Send()
 		}
 	}
 }
