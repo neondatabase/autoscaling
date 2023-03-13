@@ -136,8 +136,6 @@ func main() {
 	// handler is called.
 }
 
-const minWaitDuration = 5 * time.Second
-
 // runRestartOnFailure repeatedly calls this binary with the same flags, but with 'auto-restart'
 // removed.
 //
@@ -210,14 +208,14 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 			return
 		case <-sig:
 			dur := time.Since(startTime)
-			if dur < minWaitDuration {
+			if dur < minSubProcessRestartInterval {
 				// drain the timer before resetting it, required by Timer.Reset::
 				if !timer.Stop() {
 					<-timer.C
 				}
-				timer.Reset(minWaitDuration - dur)
+				timer.Reset(minSubProcessRestartInterval - dur)
 
-				klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minWaitDuration)
+				klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minSubProcessRestartInterval)
 				select {
 				case <-ctx.Done():
 					klog.Infof("vm-informant restart loop: received termination signal")
