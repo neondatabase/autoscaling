@@ -28,4 +28,4 @@ jobs:
       - name: Run Go Tests
         if: env.GIT_DIFF
         run: |
-          go list -f "{{ if (or .TestGoFiles .XTestGoFiles) }}{{ .ImportPath }}{{ end }}" ./... | xargs -t go test -v 
+          go list -f "{{ if (or .TestGoFiles .XTestGoFiles) }}{{ .ImportPath }}{{ end }}" ./... | xargs -t go test -v

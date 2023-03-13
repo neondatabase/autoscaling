@@ -98,13 +98,14 @@ discussed more in the [high-level consequences] section below.
     * `scripts/scheduler-logs.sh` — convenience script to tail the scheduler's logs
     * `scripts/ssh-into-vm.sh` — `ssh`es into a VM. Useful for debugging.
     * `scripts/start-vm-bridge.sh`
+* `tests/` — end-to-end tests
+    * `tests/e2e` — [`kuttl`](https://kuttl.dev/) test scenarios itself
+    * `tests/vm-example` — Minimal VM for testing
 * `scripts-common.sh` — file with a handful of useful functions, used both in `build` and `scripts`
 * `vm-deploy.yaml` — sample creation of a single VM, for testing autoscaling
 * `vm_image/` — collection of things for building the VM image, notably:
     * `vm_image/build.sh` — script to build the VM image
     * `vm_image/clean.sh` — script to clean up files cached for `build.sh` runs
-    * `vm_image/start-local-registry.sh` — launches a docker registry at `localhost:5001`, which
-      is used by everything else we build ourselves here.
     * Refer to [`vm_image/README.md`](./vm_image) for more information.
 
 ## Agent-Scheduler protocol details
@@ -120,7 +121,7 @@ scheduler plugin, which serves these requests on port `10299`. Each request sent
 
 In general, a `PluginResponse` primarily provides a `Permit`, which grants permission for the
 `autoscaler-agent` to assign the VM some amount of resources. By tracking total resource allocation
-on each node, the scheduler can prevent 
+on each node, the scheduler can prevent
 
 ### Agent-Scheduler protocol steps
 
