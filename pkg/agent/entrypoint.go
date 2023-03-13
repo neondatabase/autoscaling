@@ -54,7 +54,7 @@ func (r MainRunner) Run(ctx context.Context) error {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
 
-	if r.Config.Billing != nil {
+	if r.Config.Billing.Enabled {
 		klog.Info("Starting billing metrics collector")
 		// TODO: catch panics here, bubble those into a clean-ish shutdown.
 		go RunBillingMetricsCollector(ctx, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)

@@ -11,7 +11,7 @@ type Config struct {
 	Informant InformantConfig `json:"informant"`
 	Metrics   MetricsConfig   `json:"metrics"`
 	Scheduler SchedulerConfig `json:"scheduler"`
-	Billing   *BillingConfig  `json:"billing,omitempty"`
+	Billing   BillingConfig   `json:"billing,omitempty"`
 }
 
 // ScalingConfig defines the scheduling we use for scaling up and down
@@ -131,15 +131,15 @@ func (c *Config) validate() error {
 		return cannotBeZero(".scheduler.requestTimeoutSeconds")
 	} else if c.Scheduler.RequestPort == 0 {
 		return cannotBeZero(".scheduler.requestPort")
-	} else if c.Billing != nil && c.Billing.URL == "" {
+	} else if c.Billing.Enabled && c.Billing.URL == "" {
 		return cannotBeEmpty(".billing.url")
-	} else if c.Billing != nil && c.Billing.CPUMetricName == "" {
+	} else if c.Billing.Enabled && c.Billing.CPUMetricName == "" {
 		return cannotBeEmpty(".billing.cpuMetricName")
-	} else if c.Billing != nil && c.Billing.CollectEverySeconds == 0 {
+	} else if c.Billing.Enabled && c.Billing.CollectEverySeconds == 0 {
 		return cannotBeZero(".billing.collectEverySeconds")
-	} else if c.Billing != nil && c.Billing.PushEverySeconds == 0 {
+	} else if c.Billing.Enabled && c.Billing.PushEverySeconds == 0 {
 		return cannotBeZero(".billing.pushEverySeconds")
-	} else if c.Billing != nil && c.Billing.PushTimeoutSeconds == 0 {
+	} else if c.Billing.Enabled && c.Billing.PushTimeoutSeconds == 0 {
 		return cannotBeZero(".billing.pushTimeoutSeconds")
 	}
 

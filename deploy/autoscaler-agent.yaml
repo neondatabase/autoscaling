@@ -69,6 +69,7 @@ data:
       "requestPort": 10299
     },
     "billing": {
+      "enabled": false,
       "cpuMetricName": "effective_compute_seconds",
       "collectEverySeconds": 5,
       "pushEverySeconds": 30,

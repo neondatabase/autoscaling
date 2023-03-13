@@ -16,6 +16,7 @@ import (
 )
 
 type BillingConfig struct {
+	Enabled             bool   `json:"enabled"`
 	URL                 string `json:"url"`
 	CPUMetricName       string `json:"cpuMetricName"`
 	CollectEverySeconds uint   `json:"collectEverySeconds"`
@@ -64,7 +65,7 @@ const (
 
 func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
-	conf *BillingConfig,
+	conf BillingConfig,
 	targetNode string,
 	store *util.WatchStore[vmapi.VirtualMachine],
 ) {
@@ -115,7 +116,7 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *billingMetricsState) collect(conf *BillingConfig, targetNode string, store *util.WatchStore[vmapi.VirtualMachine]) {
+func (s *billingMetricsState) collect(conf BillingConfig, targetNode string, store *util.WatchStore[vmapi.VirtualMachine]) {
 	now := time.Now()
 
 	old := s.present
@@ -213,7 +214,7 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 }
 
 // drainAppendToBatch clears the current history, adding it as events to the batch
-func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *billing.Batch) {
+func (s *billingMetricsState) drainAppendToBatch(conf BillingConfig, batch *billing.Batch) {
 	now := time.Now()
 
 	for key, history := range s.historical {
@@ -236,7 +237,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 	s.historical = make(map[billingMetricsKey]vmMetricsHistory)
 }
 
-func pushBillingEvents(conf *BillingConfig, batch *billing.Batch) error {
+func pushBillingEvents(conf BillingConfig, batch *billing.Batch) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*time.Duration(conf.PushTimeoutSeconds))
 	defer cancel()
 
