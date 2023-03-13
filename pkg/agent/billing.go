@@ -16,11 +16,12 @@ import (
 )
 
 type BillingConfig struct {
-	URL                 string `json:"url"`
-	CPUMetricName       string `json:"cpuMetricName"`
-	CollectEverySeconds uint   `json:"collectEverySeconds"`
-	PushEverySeconds    uint   `json:"pushEverySeconds"`
-	PushTimeoutSeconds  uint   `json:"pushTimeoutSeconds"`
+	URL                  string `json:"url"`
+	CPUMetricName        string `json:"cpuMetricName"`
+	ActiveTimeMetricName string `json:"activeTimeMetricName"`
+	CollectEverySeconds  uint   `json:"collectEverySeconds"`
+	PushEverySeconds     uint   `json:"pushEverySeconds"`
+	PushTimeoutSeconds   uint   `json:"pushTimeoutSeconds"`
 }
 
 type billingMetricsState struct {
@@ -45,6 +46,8 @@ type metricsTimeSlice struct {
 	startTime time.Time
 	endTime   time.Time
 }
+
+func (m *metricsTimeSlice) Duration() time.Duration { return m.endTime.Sub(m.startTime) }
 
 type vmMetricsInstant struct {
 	// cpu stores the cpu allocation at a particular instant.
@@ -184,7 +187,7 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 		return
 	}
 
-	duration := h.lastSlice.endTime.Sub(h.lastSlice.startTime)
+	duration := h.lastSlice.Duration()
 	if duration < 0 {
 		panic("negative duration")
 	}
@@ -229,6 +232,15 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			StartTime: s.pushWindowStart,
 			StopTime:  now,
 			Value:     int(history.total.cpu),
+		})
+		batch.AddIncrementalEvent(billing.IncrementalEvent{
+			MetricName:     conf.ActiveTimeMetricName,
+			Type:           "", // set in batch method
+			IdempotencyKey: "", // set in batch method
+			EndpointID:     key.endpointID,
+			StartTime:      s.pushWindowStart,
+			StopTime:       now,
+			Value:          int(history.lastSlice.Duration().Seconds()),
 		})
 	}
 
