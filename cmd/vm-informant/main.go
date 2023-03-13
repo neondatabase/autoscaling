@@ -20,6 +20,8 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+const minSubProcessRestartInterval = 5 * time.Second
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
@@ -39,24 +41,30 @@ func main() {
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
-	// Realistically, we want to be able to distinguish between --cgroup="" and absence of the flag,
-	// if only to be able to provide better errors on invalid cgroup names.
-	//
-	// Because cgroup names *could* be any valid path fragment, we include a null byte in the string
-	// to distinguish between --cgroup=... and its absence, because null bytes aren't valid in paths.
-	noCgroup := "invalid\x00CgroupName"
+	// Below, we want to be able to distinguish between absence of flags and presence of empty
+	// flags. The only way we can reliably do this is by setting defaults to a sentinel value that
+	// isn't possible to create otherwise. In this case, it's a string containing a null byte, which
+	// cannot be provided (due to C's null-terminated strings).
+	invalidArgValue := "\x00"
+
 	var cgroupName string
 	var autoRestart bool
-	flag.StringVar(&cgroupName, "cgroup", noCgroup, "Sets the cgroup to monitor (optional)")
+	var pgConnStr string
+	flag.StringVar(&cgroupName, "cgroup", invalidArgValue, "Sets the cgroup to monitor (optional)")
 	flag.BoolVar(&autoRestart, "auto-restart", false, "Automatically cleanup and restart on failure or exit")
+	flag.StringVar(&pgConnStr, "pgconnstr", invalidArgValue, "Sets the postgres connection string to enable file cache (optional)")
+
 	flag.Parse()
 
 	// If we were asked to restart on failure, handle that separately:
 	if autoRestart {
-		// TODO: implement this as a fun/srv.Service.
 		var args []string
 		var cleanupHooks []func()
-		if cgroupName != noCgroup {
+
+		if pgConnStr != invalidArgValue {
+			args = append(args, "-pgconnstr", pgConnStr)
+		}
+		if cgroupName != invalidArgValue {
 			args = append(args, "-cgroup", cgroupName)
 			cleanupHooks = append(cleanupHooks, func() {
 				klog.Infof("vm-informant cleanup hook: making sure cgroup %q is thawed", cgroupName)
@@ -81,7 +89,7 @@ func main() {
 
 	var stateOpts []informant.NewStateOpts
 
-	if cgroupName != noCgroup {
+	if cgroupName != invalidArgValue {
 		cgroupConfig := informant.DefaultCgroupConfig
 		klog.Infof("Selected cgroup %q, starting handler with config %+v", cgroupName, cgroupConfig)
 		cgroup, err := informant.NewCgroupManager(cgroupName)
@@ -94,8 +102,16 @@ func main() {
 		klog.Infof("No cgroup selected")
 	}
 
+	if pgConnStr != invalidArgValue {
+		fileCacheConfig := informant.DefaultFileCacheConfig
+		klog.Infof("Selected postgres file cache, connstr = %q and config = %+v", pgConnStr, fileCacheConfig)
+		stateOpts = append(stateOpts, informant.WithPostgresFileCache(pgConnStr, fileCacheConfig))
+	} else {
+		klog.Infof("No postgres file cache selected")
+	}
+
 	agents := informant.NewAgentSet()
-	state, err := informant.NewState(agents, stateOpts...)
+	state, err := informant.NewState(agents, informant.DefaultStateConfig, stateOpts...)
 	if err != nil {
 		klog.Fatalf("Error starting informant.NewState: %s", err)
 	}
@@ -145,48 +161,44 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 			cmd := exec.Command(selfPath, args...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			go func() {
-				defer close(sig)
-				select {
-				case <-pctx.Done():
-					return
-				case <-ctx.Done():
-					if cmd.Process == nil || cmd.ProcessState == nil {
-						return
-					}
-					if cmd.ProcessState.ExitCode() >= 0 {
-						return
-					}
-					var pid int
-					if cmd.Process != nil {
-						pid = cmd.Process.Pid
-					}
-					if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-						klog.Infof("could not signal informant process %d: %v", pid, err)
-					}
-				}
-			}()
 
-			err := cmd.Run()
+			klog.Infof("Running vm-informant with args %+v", args)
+			err := cmd.Start()
+			if err == nil {
+				go func() {
+					defer close(sig)
+
+					select {
+					case <-pctx.Done():
+						return
+					case <-ctx.Done():
+						if pctx.Err() != nil {
+							// the process has already returned
+							// and we don't need to signal it
+							return
+						}
+						if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+							klog.Warningf("could not signal vm-informant process: %v", err)
+						}
+					}
+				}()
+
+				// this is blocking, but we should
+				// have killed the process in the
+				// wait goroutine, or the process would
+				// return normally.
+				err = cmd.Wait()
+				// stop the goroutine above, as the
+				// process has already returned.
+				pcancel()
+			}
 
 			if err != nil {
-				// lint note: the linter's worried about wrapped errors being incorrect with switch, but
-				// this is cleaner than the alternative (via errors.As) and it's still correct because
-				// exec.Command.Run() explicitly mentions ExitError.
-				switch err.(type) { //nolint:errorlint // see above.
-				case *exec.ExitError:
-					exitMode = "failed"
-					klog.Errorf("vm-informant exited with: %v", err)
-				default:
-					exitMode = "failed to start"
-					klog.Errorf("error running vm-informant: %v", err)
-				}
+				klog.Errorf("vm-informant exited with error: %v", err)
 			} else {
-				exitMode = ""
 				klog.Warningf("vm-informant exited without error. This should not happen.")
 			}
 
-			pcancel()
 			for _, h := range cleanupHooks {
 				h()
 			}
@@ -194,12 +206,12 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 
 		select {
 		case <-ctx.Done():
-			klog.Infof("vm0informant: received signal")
+			klog.Infof("vm-informant: received signal")
 			return
 		case <-sig:
 			dur := time.Since(startTime)
 			if dur < minWaitDuration {
-				// drain the timer before resetting it:
+				// drain the timer before resetting it, required by Timer.Reset::
 				if !timer.Stop() {
 					<-timer.C
 				}
@@ -208,7 +220,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 				klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minWaitDuration)
 				select {
 				case <-ctx.Done():
-					klog.Infof("vm0informant: received signal")
+					klog.Infof("vm-informant restart loop: received termination signal")
 					return
 				case <-timer.C:
 					continue

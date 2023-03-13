@@ -5,6 +5,8 @@ package util
 
 import (
 	"context"
+	"fmt"
+	"time"
 )
 
 // ChanMutex is a select-able mutex
@@ -74,5 +76,31 @@ func (m *ChanMutex) Unlock() {
 	case m.ch <- struct{}{}:
 	default:
 		panic("ChanMutex.Unlock called while already unlocked")
+	}
+}
+
+// DeadlockChecker creates a function that, when called, periodically attempts to acquire the lock,
+// panicking if it fails
+//
+// The returned function exits when the context is done.
+func (m *ChanMutex) DeadlockChecker(timeout, delay time.Duration) func(ctx context.Context) {
+	return func(ctx context.Context) {
+		for {
+			// Delay between checks
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-m.WaitLock():
+				m.Unlock()
+			case <-time.After(timeout):
+				panic(fmt.Errorf("likely deadlock detected, could not get lock after %s", timeout))
+			}
+		}
 	}
 }

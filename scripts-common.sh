@@ -41,6 +41,13 @@ git_info () {
         sed -e "s:':\":g"
 }
 
+# Usage: NEONVM_VERSION="$(neonvm_version)"
+#
+# Fetches the version of NeonVM we're using as a dependency, directly from go.mod.
+neonvm_version () {
+    go list -m -f '{{ .Version }}' github.com/neondatabase/neonvm
+}
+
 # Usage: VAR_NAME="$(get_var VAR_NAME DEFAULT_VALUE)"
 #
 # Helper function that

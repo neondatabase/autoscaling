@@ -74,7 +74,9 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		handle:   h,
 		vmClient: vmClient,
 		// fields are set by p.setConfigAndStartWatcher, p.readClusterState
-		state: pluginState{}, //nolint:exhaustruct // see above.
+		state: pluginState{ //nolint:exhaustruct // see above.
+			lock: util.NewChanMutex(),
+		},
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting config watcher")
@@ -113,34 +115,20 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		}
 	}()
 
-	go p.runPermitHandler(ctx)
+	if err := p.startPermitHandler(ctx); err != nil {
+		return nil, fmt.Errorf("permit handler: %w", err)
+	}
 
 	// Periodically check that we're not deadlocked
 	go func() {
-		checkDelay := 5 * time.Second
-		timeout := 1 * time.Second
-		timer := time.NewTimer(checkDelay)
-		defer timer.Stop()
-		for {
-			success := make(chan struct{})
-
-			go func() {
-				p.state.lock.Lock()
-				defer p.state.lock.Unlock()
-				close(success)
-			}()
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-success:
-				// all good
-				timer.Reset(checkDelay)
-			case <-timer.C:
-				// not all good
-				klog.Fatalf("deadlock detected, could not get lock after %s", timeout)
+		defer func() {
+			if err := recover(); err != nil {
+				klog.Errorf("deadlock checker for AutoscaleEnforcer.state.lock panicked")
+				panic(err)
 			}
-		}
+		}()
+
+		p.state.lock.DeadlockChecker(time.Second, 5*time.Second)(ctx)
 	}()
 
 	klog.Info("[autoscale-enforcer] Plugin initialization complete")

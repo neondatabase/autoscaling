@@ -1,7 +1,6 @@
 package billing
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -15,12 +14,6 @@ type AbsoluteEvent struct {
 	Value          int       `json:"value"`
 }
 
-func (e *AbsoluteEvent) MarshalJSON() ([]byte, error) {
-	e.Type = "absolute"
-	// note: if we don't dereference e, then we'll enter infinite recursion
-	return json.Marshal(*e)
-}
-
 type IncrementalEvent struct {
 	IdempotencyKey string    `json:"idempotency_key"`
 	MetricName     string    `json:"metric"`
@@ -29,10 +22,4 @@ type IncrementalEvent struct {
 	StartTime      time.Time `json:"start_time"`
 	StopTime       time.Time `json:"stop_time"`
 	Value          int       `json:"value"`
-}
-
-func (e *IncrementalEvent) MarshalJSON() ([]byte, error) {
-	e.Type = "incremental"
-	// note: if we don't dereference e, then we'll enter infinite recursion
-	return json.Marshal(*e)
 }
