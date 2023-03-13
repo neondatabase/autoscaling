@@ -28,10 +28,78 @@ func (n PodName) String() string {
 // (Autoscaler) Agent Messages //
 /////////////////////////////////
 
+// PluginProtoVersion represents a single version of the agent<->scheduler plugin protocol
+//
+// Each version of the agent<->scheduler plugin protocol is named independently from releases of the
+// repository containing this code. Names follow semver, although this does not necessarily
+// guarantee support - for example, the plugin may only support a single version, even though others
+// may appear to be semver-compatible.
+//
+// Version compatibility is documented in the neighboring file VERSIONING.md.
+type PluginProtoVersion uint32
+
+const (
+	// PluginProtoV1_0 represents v1.0 of the agent<->scheduler plugin protocol - the initial
+	// version.
+	//
+	// Last used in release version v0.1.8.
+	PluginProtoV1_0 PluginProtoVersion = iota + 1 // start from zero, for backwards compatibility with pre-versioned messages
+
+	// PluginProtoV1_1 represents v1.1 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v1.0:
+	//
+	// * Allows a nil value of the AgentRequest.Metrics field.
+	//
+	// Currently the latest version.
+	PluginProtoV1_1
+
+	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
+	// protocol
+	//
+	// This value is kept private because it should not be used externally; any desired
+	// functionality that could be implemented with it should instead be a method on
+	// PluginProtoVersion.
+	latestPluginProtoVersion PluginProtoVersion = iota // excluding +1 makes it equal to previous
+)
+
+func (v PluginProtoVersion) String() string {
+	var zero PluginProtoVersion
+
+	switch v {
+	case zero:
+		return "<invalid: zero>"
+	case PluginProtoV1_0:
+		return "v1.0"
+	case PluginProtoV1_1:
+		return "v1.1"
+	default:
+		diff := v - latestPluginProtoVersion
+		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)
+	}
+}
+
+// IsValid returns whether the protocol version is valid. The zero value is not valid.
+func (v PluginProtoVersion) IsValid() bool {
+	return uint(v) != 0
+}
+
+// AllowsNilMetrics returns whether this version of the protocol allows the autoscaler-agent to send
+// a nil metrics field.
+//
+// This is true for version v1.1 and greater.
+func (v PluginProtoVersion) AllowsNilMetrics() bool {
+	return v >= PluginProtoV1_1
+}
+
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
 //
 // All AgentRequests expect a PluginResponse.
 type AgentRequest struct {
+	// ProtoVersion is the version of the protocol that the autoscaler-agent is expecting to use
+	//
+	// If the scheduler does not support this version, then it will respond with a 400 status.
+	ProtoVersion PluginProtoVersion `json:"protoVersion"`
 	// Pod is the namespaced name of the pod making the request
 	Pod PodName `json:"pod"`
 	// Resources gives a requested or notified change in resources allocated to the VM.
@@ -44,7 +112,17 @@ type AgentRequest struct {
 	Resources Resources `json:"resources"`
 	// Metrics provides information about the VM's current load, so that the scheduler may
 	// prioritize which pods to migrate
-	Metrics Metrics `json:"metrics"`
+	//
+	// In some protocol versions, this field may be nil.
+	Metrics *Metrics `json:"metrics"`
+}
+
+// ProtocolRange returns a VersionRange exactly equal to r.ProtoVersion
+func (r AgentRequest) ProtocolRange() VersionRange[PluginProtoVersion] {
+	return VersionRange[PluginProtoVersion]{
+		Min: r.ProtoVersion,
+		Max: r.ProtoVersion,
+	}
 }
 
 // Resources represents an amount of CPU and memory (via memory slots)

@@ -36,8 +36,9 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.1
 	github.com/elastic/go-sysinfo v1.9.0
 	github.com/google/uuid v1.3.0
-	github.com/neondatabase/neonvm v0.4.5
-	github.com/tychoish/fun v0.3.3
+	github.com/lib/pq v1.10.7
+	github.com/neondatabase/neonvm v0.4.6
+	github.com/tychoish/fun v0.7.1
 	golang.org/x/exp v0.0.0-20221126150942-6ab00d035af9
 	k8s.io/api v0.23.15
 	k8s.io/apimachinery v0.23.15

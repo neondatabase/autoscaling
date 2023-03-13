@@ -6,7 +6,7 @@ networking:
 nodes:
 - role: control-plane
   # Directly expose the CNI plugins stored locally into the cluster.
-  # 
+  #
   # Taken from https://medium.com/swlh/customise-your-kind-clusters-networking-layer-1249e7916100
   # It's a medium "member-only" article; if you're out of articles, clear your cookies for the site ;)
   extraMounts:
@@ -32,8 +32,3 @@ nodes:
   extraMounts:
   - hostPath: kind/cni-bin
     containerPath: /opt/cni/bin
-# Ensure that our local registry is visible within the cluster as `kind-registry`
-containerdConfigPatches:
-- |-
-  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
-  endpoint = ["http://kind-registry:5000"]

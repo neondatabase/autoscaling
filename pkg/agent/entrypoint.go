@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/tychoish/fun/pubsub"
+	"github.com/tychoish/fun/srv"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -22,9 +22,7 @@ type MainRunner struct {
 	VMClient   *vmclient.Clientset
 }
 
-func (r MainRunner) Run() error {
-	ctx := context.Background()
-
+func (r MainRunner) Run(ctx context.Context) error {
 	podEvents := make(chan podEvent)
 
 	buildInfo := util.GetBuildInfo()
@@ -33,31 +31,44 @@ func (r MainRunner) Run() error {
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	klog.Info("Starting pod watcher")
-	watchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
+	podWatchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
 	if err != nil {
 		return fmt.Errorf("Error starting pod watcher: %w", err)
 	}
-	klog.Info("Pod watcher started, entering main loop")
+	klog.Info("Pod watcher started")
+
+	klog.Info("Starting VM watcher")
+	vmWatchStore, err := startVMWatcher(ctx, r.VMClient, r.EnvArgs.K8sNodeName)
+	if err != nil {
+		return fmt.Errorf("Error starting VM watcher: %w", err)
+	}
+	klog.Info("VM watcher started")
 
 	broker := pubsub.NewBroker[watchEvent](ctx, pubsub.BrokerOptions{})
+	if err := srv.GetOrchestrator(ctx).Add(srv.Broker(broker)); err != nil {
+		return err
+	}
+
 	schedulerStore, err := startSchedulerWatcher(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
 
+	if r.Config.Billing != nil {
+		klog.Info("Starting billing metrics collector")
+		// TODO: catch panics here, bubble those into a clean-ish shutdown.
+		go RunBillingMetricsCollector(ctx, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)
+	}
+
 	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
 
+	klog.Info("Entering main loop")
 	for {
 		select {
 		case <-ctx.Done():
-			watchStore.Stop()
+			podWatchStore.Stop()
+			vmWatchStore.Stop()
 			schedulerStore.Stop()
-			broker.Stop()
-			func() {
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				broker.Wait(shutdownCtx)
-			}()
 
 			// Remove anything else from podEvents
 		loop:
@@ -72,7 +83,7 @@ func (r MainRunner) Run() error {
 			globalState.Stop()
 			return nil
 		case event := <-podEvents:
-			globalState.handleEvent(event)
+			globalState.handleEvent(ctx, event)
 		}
 	}
 }

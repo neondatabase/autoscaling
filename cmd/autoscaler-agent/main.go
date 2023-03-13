@@ -1,6 +1,13 @@
 package main
 
 import (
+	"context"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/tychoish/fun/srv"
+
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -10,6 +17,7 @@ import (
 	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/agent"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 func main() {
@@ -48,9 +56,24 @@ func main() {
 		VMClient:   vmClient,
 	}
 
-	err = runner.Run()
-	if err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer cancel()
+	ctx = srv.SetShutdown(ctx)
+	ctx = srv.SetBaseContext(ctx)
+	ctx = srv.WithOrchestrator(ctx)
+	defer func() {
+		if err := srv.GetOrchestrator(ctx).Wait(); err != nil {
+			klog.Fatalf("problem shutting down orchestrator: %s", err)
+		}
+
+		klog.Info("Main loop returned without issue. Exiting.")
+	}()
+
+	if err := srv.GetOrchestrator(ctx).Add(srv.HTTP("agent-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
+		klog.Fatalf("problem adding pprof service")
+	}
+
+	if err = runner.Run(ctx); err != nil {
 		klog.Fatalf("Main loop failed: %s", err)
 	}
-	klog.Info("Main loop returned without issue. Exiting.")
 }

@@ -9,8 +9,8 @@ env:
   SCHED_IMAGE: "neondatabase/autoscale-scheduler"
   INFORMANT_IMAGE: "neondatabase/vm-informant"
 
-  LOCAL_AGENT_IMAGE: "localhost:5001/autoscaler-agent:latest"
-  LOCAL_SCHED_IMAGE: "localhost:5001/kube-autoscale-scheduler:latest"
+  LOCAL_AGENT_IMAGE: "autoscaler-agent:dev"
+  LOCAL_SCHED_IMAGE: "kube-autoscale-scheduler:dev"
 
 jobs:
   release:
@@ -80,7 +80,7 @@ jobs:
           tags: ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
             GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
-      
+
       # Because we want a docker image for the VM informant, the easiest way for us to also provide
       # a binary is by just extracting it from the container image itself.
       - name: extract vm-informant binary

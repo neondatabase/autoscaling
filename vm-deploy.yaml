@@ -13,8 +13,7 @@ spec:
     memorySlotSize: 1Gi
     memorySlots: { min: 1, use: 1, max: 4 }
     rootDisk:
-      image: localhost:5001/pg14-disk-test:latest
-      imagePullPolicy: Always # always re-pull, for testing.
+      image: pg14-disk-test:dev
       size: 8Gi
     ports:
       - port: 22   # ssh

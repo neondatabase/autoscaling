@@ -9,17 +9,29 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tychoish/fun/srv"
+
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-var MaxHTTPBodySize int64 = 1 << 10 // 1 KiB
-var ContentTypeJSON string = "application/json"
-var ContentTypeError string = "text/plain"
+const (
+	MaxHTTPBodySize  int64  = 1 << 10 // 1 KiB
+	ContentTypeJSON  string = "application/json"
+	ContentTypeError string = "text/plain"
+)
 
-// runPermitHandler runs the server for handling each resourceRequest from a pod
-func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
+// The scheduler plugin currently supports v1.0 to v1.1 of the agent<->scheduler plugin protocol.
+//
+// If you update either of these values, make sure to also update VERSIONING.md.
+const (
+	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_1
+)
+
+// startPermitHandler runs the server for handling each resourceRequest from a pod
+func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
@@ -31,7 +43,6 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 		defer r.Body.Close()
 		var req api.AgentRequest
 		jsonDecoder := json.NewDecoder(io.LimitReader(r.Body, MaxHTTPBodySize))
-		jsonDecoder.DisallowUnknownFields()
 		if err := jsonDecoder.Decode(&req); err != nil {
 			klog.Warningf("[autoscale-enforcer] Received bad JSON request: %s", err)
 			w.Header().Add("Content-Type", ContentTypeError)
@@ -70,44 +81,44 @@ func (e *AutoscaleEnforcer) runPermitHandler(ctx context.Context) {
 		w.WriteHeader(statusCode)
 		_, _ = w.Write(responseBody)
 	})
-	server := http.Server{Addr: "0.0.0.0:10299", Handler: mux}
+
+	orca := srv.GetOrchestrator(ctx)
+
 	klog.Info("[autoscale-enforcer] Starting resource request server")
-
-	// in general this isn't the right way to do this: we should
-	// have a group of functions which return service objects that
-	// have blocking close routines, and then start them at a
-	// higher level in the process, and then when we catch a
-	// shutdown signal, you call the shutdown methods (preferably
-	// in parallel) and wait for them to shut down.
-	go func() {
-		// wait till the program is going to exit
-		<-ctx.Done()
-		// create a new context with a timeout because the
-		// context we have is canceled. In practice, there's
-		// nothing at the top level to prevent us from exiting
-		// directly, so this is somewhat pro forma.
-		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer scancel()
-
-		// this just stops accepting new requests, and lets
-		// the existing handlers return, and blocks until they
-		// do. That gives us a "clean shutdown."
-		if err := server.Shutdown(sctx); err != nil {
-			klog.Errorf("[autoscale-enforcer] Service shutdown failed: %s", err)
-		}
-	}()
-
-	// this runs until something cancels or the context in
-	// the goroutine causes shutdown to run.
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		// this fatal will take down the entire process,
-		klog.Fatalf("[autoscale-enforcer] Resource request server failed: %s", err)
+	hs := srv.HTTP("resource-request", 5*time.Second, &http.Server{Addr: "0.0.0.0:10299", Handler: mux})
+	if err := hs.Start(ctx); err != nil {
+		return fmt.Errorf("Error starting resource request server: %w", err)
 	}
 
+	if err := orca.Add(hs); err != nil {
+		return fmt.Errorf("Error adding resource request server to orchestrator: %w", err)
+	}
+	return nil
 }
 
 // Returns body (if successful), status code, error (if unsuccessful)
 func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.PluginResponse, int, error) {
+	// Before doing anything, check that the version is within the range we're expecting.
+	expectedProtoRange := api.VersionRange[api.PluginProtoVersion]{
+		Min: MinPluginProtocolVersion,
+		Max: MaxPluginProtocolVersion,
+	}
+
+	if !req.ProtoVersion.IsValid() {
+		return nil, 400, fmt.Errorf("Invalid protocol version %v", req.ProtoVersion)
+	}
+	reqProtoRange := req.ProtocolRange()
+	if _, ok := expectedProtoRange.LatestSharedVersion(reqProtoRange); !ok {
+		return nil, 400, fmt.Errorf(
+			"Protocol version mismatch: Need %v but got %v", expectedProtoRange, reqProtoRange,
+		)
+	}
+
+	// if req.Metrics is nil, check that the protocol version allows that.
+	if req.Metrics == nil && !req.ProtoVersion.AllowsNilMetrics() {
+		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)
+	}
+
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
@@ -196,7 +207,7 @@ func (e *AutoscaleEnforcer) handleResources(
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	pod *podState,
 	node *nodeState,
-	metrics api.Metrics,
+	metrics *api.Metrics,
 ) bool {
 	// This pod should migrate if (a) we're looking for migrations and (b) it's next up in the
 	// priority queue. We will give it a chance later to veto if the metrics have changed too much
@@ -208,7 +219,7 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 
 	klog.Infof("[autoscale-enforcer] Updating pod %v metrics %+v -> %+v", pod.name, pod.metrics, metrics)
 	oldMetrics := pod.metrics
-	pod.metrics = &metrics
+	pod.metrics = metrics
 	if pod.currentlyMigrating() {
 		return false // don't do anything else; it's already migrating.
 	}
