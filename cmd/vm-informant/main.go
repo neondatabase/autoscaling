@@ -115,20 +115,11 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
-	// CancelFunc for each process's context, for internal signaling.
-	// The defer is out here so we don't leak deferred funcs on restart.
-	var pcancel context.CancelFunc
-	defer func() {
-		if pcancel != nil {
-			pcancel()
-		}
-	}()
-
 	for {
 		startTime := time.Now()
 		func() {
-			var pctx context.Context
-			pctx, pcancel = context.WithCancel(context.Background())
+			pctx, pcancel := context.WithCancel(context.Background())
+			defer pcancel()
 
 			cmd := exec.Command(selfPath, args...)
 			cmd.Stdout = os.Stdout
