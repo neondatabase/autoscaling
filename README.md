@@ -55,7 +55,6 @@ For more information, refer to [ARCHITECTURE.md](./ARCHITECTURE.md).
 Build everything:
 
 ```sh
-vm_image/start-local-registry.sh # required for everything below. Does nothing on repeat
 vm_image/build.sh
 build/autoscale-scheduler/build.sh
 build/autoscaler-agent/build.sh
@@ -104,3 +103,25 @@ cgexec -g memory:neon-test allocate-loop 256 2280
 ```
 
 [`allocate-loop`]: vm_image/allocate-loop.c
+
+### Testing
+
+To run e2e tests you need to install dependencies:
+- [`kubectl`]
+- [`kind`]
+- [`kuttl`]
+
+You can either download them from their websites or install using Homebrew: `brew install kubectl kind kuttl`
+
+```sh
+make -C neonvm local-cluster
+make -C neonvm kernel
+make -C neonvm deploy
+make deploy
+make vm-example
+make e2e
+```
+
+[`kubectl`]: https://kubernetes.io/docs/tasks/tools/#kubectl
+[`kind`]: https://kubernetes.io/docs/tasks/tools/#kind
+[`kuttl`]: https://kuttl.dev/

@@ -27,6 +27,10 @@ kubectl apply -f deploy/neonvm.yaml | indent
 
 kubectl wait deployment -n neonvm-system neonvm-controller --for=condition=Available=True | indent
 
+for img in pg14-disk-test:dev kube-autoscale-scheduler:dev autoscaler-agent:dev; do
+    kind load docker-image -n $CLUSTER $img | indent
+done
+
 kubectl apply -f deploy/autoscale-scheduler.yaml -f deploy/autoscaler-agent.yaml | indent
 
 kubectl create secret generic vm-ssh --from-file=private-key=vm_image/ssh_id_rsa | indent
