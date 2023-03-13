@@ -40,15 +40,15 @@ var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ReservePlugin = (*AutoscaleEnforcer)(nil)
 
-func NewAutoscaleEnforcerPlugin(ctx context.Context) func(runtime.Object, framework.Handle) (framework.Plugin, error) {
+func NewAutoscaleEnforcerPlugin(ctx context.Context, config *Config) func(runtime.Object, framework.Handle) (framework.Plugin, error) {
 	return func(obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
-		return makeAutoscaleEnforcerPlugin(ctx, obj, h)
+		return makeAutoscaleEnforcerPlugin(ctx, obj, h, config)
 	}
 }
 
 // NewAutoscaleEnforcerPlugin produces the initial AutoscaleEnforcer plugin to be used by the
 // scheduler
-func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
+func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h framework.Handle, config *Config) (framework.Plugin, error) {
 	// ^ obj can be used for taking in configuration. it's a bit tricky to figure out, and we don't
 	// quite need it yet.
 	klog.Info("[autoscale-enforcer] Initializing plugin")
@@ -73,16 +73,11 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	p := AutoscaleEnforcer{
 		handle:   h,
 		vmClient: vmClient,
-		// fields are set by p.setConfigAndStartWatcher, p.readClusterState
+		// remaining fields are set by p.readClusterState
 		state: pluginState{ //nolint:exhaustruct // see above.
 			lock: util.NewChanMutex(),
+			conf: config,
 		},
-	}
-
-	klog.Infof("[autoscale-enforcer] Starting config watcher")
-	if err := p.setConfigAndStartWatcher(ctx); err != nil {
-		klog.Errorf("Error starting config watcher: %s", err)
-		return nil, err
 	}
 
 	// Start watching deletion events...

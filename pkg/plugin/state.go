@@ -42,7 +42,7 @@ type pluginState struct {
 	// conf stores the current configuration, and is nil if the configuration has not yet been set
 	//
 	// Proper initialization of the plugin guarantees conf is not nil.
-	conf *config
+	conf *Config
 }
 
 // nodeState is the information that we track for a particular
@@ -468,7 +468,7 @@ func (s *pluginState) getOrFetchNodeState(
 //
 // Note: buildInitialNodeState does not take any of the pods or VMs on the node into account; it
 // only examines the total resources available to the node.
-func buildInitialNodeState(node *corev1.Node, conf *config) (*nodeState, error) {
+func buildInitialNodeState(node *corev1.Node, conf *Config) (*nodeState, error) {
 	// Fetch this upfront, because we'll need it a couple times later.
 	nodeConf := conf.forNode(node.Name)
 
@@ -1002,15 +1002,4 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (s *pluginState) handleUpdatedConf() {
-	// It's possible for this method to be called before readClusterState, in which case there's
-	// nothing for us to do. We don't want to access nil data if that happens though, so we
-	// special-case it:
-	if s.podMap == nil {
-		return
-	}
-
-	klog.Warningf("Ignoring updated configuration, runtime config updates are unimplemented")
 }

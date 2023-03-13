@@ -1,29 +1,22 @@
 package plugin
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"strings"
-	"time"
+	"os"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	fields "k8s.io/apimachinery/pkg/fields"
-	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 //////////////////
 // CONFIG TYPES //
 //////////////////
 
-type config struct {
+type Config struct {
 	// NodeDefaults is the default node configuration used when not overridden
 	NodeDefaults nodeConfig `json:"nodeDefaults"`
 	// NodeOverrides is a list of node configurations that override the default for a small set of
@@ -81,7 +74,7 @@ type resourceConfig struct {
 	System resource.Quantity `json:"system,omitempty"`
 }
 
-func (c *config) migrationEnabled() bool {
+func (c *Config) migrationEnabled() bool {
 	return c.DoMigration == nil || *c.DoMigration
 }
 
@@ -90,7 +83,7 @@ func (c *config) migrationEnabled() bool {
 ///////////////////////
 
 // if the returned error is not nil, the string is a JSON path to the invalid value
-func (c *config) validate() (string, error) {
+func (c *Config) validate() (string, error) {
 	if path, err := c.NodeDefaults.validate(); err != nil {
 		return fmt.Sprintf("nodeDefaults.%s", path), err
 	}
@@ -156,144 +149,31 @@ func (c *resourceConfig) validate(isMemory bool) (string, error) {
 	return "", nil
 }
 
-func (oldConf *config) validateChangeTo(newConf *config) (string, error) {
-	if newConf.MemSlotSize != oldConf.MemSlotSize {
-		return "memSlotSize", errors.New("value cannot be changed at runtime")
-	}
-	if newConf.SchedulerName != oldConf.SchedulerName {
-		return "schedulername", errors.New("value cannot be changed at runtime")
-	}
+////////////////////
+// CONFIG READING //
+////////////////////
 
-	return "", nil
-}
+const DefaultConfigPath = "/etc/scheduler-plugin-config/autoscale-enforcer-config.json"
 
-/////////////////////////////////////////
-// CONFIG UPDATE TRACKING AND HANDLING //
-/////////////////////////////////////////
-
-// setConfigAndStartWatcher basically does what it says. It (indirectly) spawns goroutines that will
-// update the plugin's config (calling e.handleNewConfigMap).
-func (e *AutoscaleEnforcer) setConfigAndStartWatcher(ctx context.Context) error {
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
-
-	addEvents := make(chan *corev1.ConfigMap)
-	updateEvents := make(chan *corev1.ConfigMap)
-
-	watchStore, err := util.Watch(
-		ctx,
-		e.handle.ClientSet().CoreV1().ConfigMaps(ConfigMapNamespace),
-		util.WatchConfig{
-			LogName: fmt.Sprintf("ConfigMap %s:%s", ConfigMapNamespace, ConfigMapName),
-			// We don't need to be super responsive to config updates, so we can wait 5-10 seconds.
-			//
-			// FIXME: make these configurable.
-			RetryRelistAfter: util.NewTimeRange(time.Second, 5, 10),
-			RetryWatchAfter:  util.NewTimeRange(time.Second, 5, 10),
-		},
-		util.WatchAccessors[*corev1.ConfigMapList, corev1.ConfigMap]{
-			Items: func(list *corev1.ConfigMapList) []corev1.ConfigMap { return list.Items },
-		},
-		util.InitWatchModeSync,
-		metav1.ListOptions{
-			FieldSelector: fields.OneTermEqualSelector(metav1.ObjectNameField, ConfigMapName).String(),
-		},
-		util.WatchHandlerFuncs[*corev1.ConfigMap]{
-			// Hooking into AddFunc as well as UpdateFunc allows for us to handle both "patch" and
-			// "delete + replace" workflows for the ConfigMap.
-			AddFunc: func(newConf *corev1.ConfigMap, preexisting bool) {
-				// preexisting ConfigMaps are handled by the call to watchStore.Items() below. If we
-				// tried to send them here, we'd deadlock.
-				if !preexisting {
-					addEvents <- newConf
-				}
-			},
-			UpdateFunc: func(oldConf, newConf *corev1.ConfigMap) { updateEvents <- newConf },
-		},
-	)
+func ReadConfig(path string) (*Config, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("Failed to watch ConfigMaps: %w", err)
+		return nil, fmt.Errorf("Error opening config file %q: %w", path, err)
 	}
 
-	initialConfigs := watchStore.Items()
-	if len(initialConfigs) == 0 {
-		watchStore.Stop()
-		return fmt.Errorf(
-			"No initial ConfigMap found (expected name = %s, namespace = %s)",
-			ConfigMapName, ConfigMapNamespace,
-		)
+	defer file.Close()
+	var config Config
+	jsonDecoder := json.NewDecoder(file)
+	jsonDecoder.DisallowUnknownFields()
+	if err = jsonDecoder.Decode(&config); err != nil {
+		return nil, fmt.Errorf("Error decoding JSON config in %q: %w", path, err)
 	}
 
-	if len(initialConfigs) > 1 {
-		panic(fmt.Errorf("more than one config found for name %s:%s", ConfigMapNamespace, ConfigMapName))
+	if path, err = config.validate(); err != nil {
+		return nil, fmt.Errorf("Invalid config at %s: %w", path, err)
 	}
 
-	if err := e.handleNewConfigMap(initialConfigs[0]); err != nil {
-		watchStore.Stop()
-		return fmt.Errorf("Bad initial ConfigMap: %w", err)
-	}
-
-	// Start listening on the channels that we provided to the callbacks, now that we've gotten our
-	// initial ConfigMap
-	listenWithName := func(ch <-chan *corev1.ConfigMap, desc string) {
-		for newConf := range ch {
-			// Wrap this in a function so we can defer inside the loop
-			func() {
-				e.state.lock.Lock()
-				defer e.state.lock.Unlock()
-
-				if err := e.handleNewConfigMap(newConf); err != nil {
-					klog.Errorf("[autoscale-enforcer] Rejecting bad %s ConfigMap: %s", desc, err)
-				}
-			}()
-		}
-	}
-
-	go listenWithName(addEvents, "new")
-	go listenWithName(updateEvents, "updated")
-
-	return nil
-}
-
-func (e *AutoscaleEnforcer) handleNewConfigMap(configMap *corev1.ConfigMap) error {
-	jsonString, ok := configMap.Data[ConfigMapKey]
-	if !ok {
-		return fmt.Errorf("ConfigMap missing map key %q", ConfigMapKey)
-	}
-
-	// If there's an existing configuration and the JSON string is the same, then do nothing.
-	if e.state.conf != nil && e.state.conf.JSONString == jsonString {
-		klog.Infof("[autoscale-enforcer] Doing nothing for config update; config string unchanged")
-		return nil
-	}
-
-	var newConf config
-	decoder := json.NewDecoder(strings.NewReader(jsonString))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&newConf); err != nil {
-		return err
-	}
-
-	if path, err := newConf.validate(); err != nil {
-		return fmt.Errorf("Invalid configuration: at %s: %w", path, err)
-	}
-
-	newConf.JSONString = jsonString
-
-	isFirstConf := e.state.conf == nil
-	if !isFirstConf {
-		if path, err := e.state.conf.validateChangeTo(&newConf); err != nil {
-			return fmt.Errorf("Invalid configuration update: at %s: %w", path, err)
-		}
-	}
-	e.state.conf = &newConf
-
-	if isFirstConf {
-		return nil
-	}
-
-	e.state.handleUpdatedConf()
-	return nil
+	return &config, nil
 }
 
 //////////////////////////////////////
@@ -302,7 +182,7 @@ func (e *AutoscaleEnforcer) handleNewConfigMap(configMap *corev1.ConfigMap) erro
 
 // forNode returns the individual nodeConfig for a node with a particular name, taking override
 // settings into account
-func (c *config) forNode(nodeName string) *nodeConfig {
+func (c *Config) forNode(nodeName string) *nodeConfig {
 	for i, set := range c.NodeOverrides {
 		for _, name := range set.Nodes {
 			if name == nodeName {
