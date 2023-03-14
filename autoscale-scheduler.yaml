@@ -130,7 +130,7 @@ data:
       "nodeDefaults": {
         "cpu": { "watermark": 0.7, "system": "500m" },
         "memory": { "watermark": 0.7, "system": "0.5Gi" },
-        "computeUnit": { "vCPUs": 1, "mem": 4 }
+        "computeUnit": { "vCPUs": 1, "mem": 1 }
       },
       "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
@@ -162,7 +162,7 @@ spec:
       containers:
       # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
       # update that as well if you change this line!
-      - image: neondatabase/autoscale-scheduler:v0.1.14
+      - image: neondatabase/autoscale-scheduler:v0.1.15
         command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
         livenessProbe:
           httpGet:

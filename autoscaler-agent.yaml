@@ -71,6 +71,7 @@ data:
     "billing": {
       "url": "http://neon-internal-api.aws.neon.build/billing/api/v1",
       "cpuMetricName": "effective_compute_seconds",
+      "activeTimeMetricName": "active_time_seconds",
       "collectEverySeconds": 5,
       "pushEverySeconds": 30,
       "pushTimeoutSeconds": 2
@@ -96,7 +97,7 @@ spec:
         - name: autoscaler-agent
           # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
           # update that as well if you change this line!
-          image: neondatabase/autoscaler-agent:v0.1.14
+          image: neondatabase/autoscaler-agent:v0.1.13
           resources:
             limits:
               memory: 100Mi

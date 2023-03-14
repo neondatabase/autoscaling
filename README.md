@@ -14,6 +14,7 @@ config.nodeDefaults.computeUnit = { "vCPUs": 1, "mem": 4 }
 config.billing = {
       "url": "http://neon-internal-api.aws.neon.build/billing/api/v1",
       "cpuMetricName": "effective_compute_seconds",
+      "activeTimeMetricName": "active_time_seconds",
       "collectEverySeconds": 5,
       "pushEverySeconds": 30,
       "pushTimeoutSeconds": 2
