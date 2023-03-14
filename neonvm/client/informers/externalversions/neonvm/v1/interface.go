@@ -18,7 +18,7 @@ limitations under the License.
 package v1
 
 import (
-	internalinterfaces "github.com/neondatabase/neonvm/client/informers/externalversions/internalinterfaces"
+	internalinterfaces "github.com/neondatabase/autoscaling/neonvm/client/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to all the informers in this group version.

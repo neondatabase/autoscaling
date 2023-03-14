@@ -9,8 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
-	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"

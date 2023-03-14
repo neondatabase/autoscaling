@@ -19,7 +19,6 @@ var BuildGitInfo string
 // All strings are guaranteed to be non-empty.
 type BuildInfo struct {
 	GitInfo   string
-	NeonVM    string
 	GoVersion string
 }
 
@@ -27,18 +26,9 @@ type BuildInfo struct {
 // running binary was built
 func GetBuildInfo() BuildInfo {
 	goVersion := "<unknown>"
-	neonvmVersion := "<unknown>"
 	if buildInfo, ok := debug.ReadBuildInfo(); ok {
 		if buildInfo.GoVersion != "" {
 			goVersion = buildInfo.GoVersion
-		}
-
-		// Find neonvm:
-		for _, m := range buildInfo.Deps {
-			if m.Path == "github.com/neondatabase/neonvm" {
-				neonvmVersion = m.Version
-				break
-			}
 		}
 	}
 
@@ -49,7 +39,6 @@ func GetBuildInfo() BuildInfo {
 
 	return BuildInfo{
 		GitInfo:   gitInfo,
-		NeonVM:    neonvmVersion,
 		GoVersion: goVersion,
 	}
 }

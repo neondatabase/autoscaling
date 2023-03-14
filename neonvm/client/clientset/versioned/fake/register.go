@@ -18,7 +18,7 @@ limitations under the License.
 package fake
 
 import (
-	neonvmv1 "github.com/neondatabase/neonvm/apis/neonvm/v1"
+	neonvmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
