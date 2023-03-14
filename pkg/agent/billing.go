@@ -59,6 +59,8 @@ type vmMetricsSeconds struct {
 	// cpu stores the CPU seconds allocated to the VM, roughly equivalent to the integral of CPU
 	// usage over time.
 	cpu uint32
+	// activeTime stores the total time that the VM was active
+	activeTime time.Duration
 }
 
 const (
@@ -153,7 +155,7 @@ func (s *billingMetricsState) collect(conf *BillingConfig, targetNode string, st
 			if !ok {
 				vmHistory = vmMetricsHistory{
 					lastSlice: nil,
-					total:     vmMetricsSeconds{cpu: 0},
+					total:     vmMetricsSeconds{cpu: 0, activeTime: time.Duration(0)},
 				}
 			}
 			// append the slice, merging with the previous if the resource usage was the same
@@ -196,9 +198,11 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 	// TODO: This approach is imperfect. Floating-point math is probably *fine*, but really not
 	// something we want to rely on. A "proper" solution is a lot of work, but long-term valuable.
 	metricsSeconds := vmMetricsSeconds{
-		cpu: uint32(math.Round(float64(h.lastSlice.metrics.cpu) * seconds)),
+		cpu:        uint32(math.Round(float64(h.lastSlice.metrics.cpu) * seconds)),
+		activeTime: duration,
 	}
 	h.total.cpu += metricsSeconds.cpu
+	h.total.activeTime += metricsSeconds.activeTime
 
 	h.lastSlice = nil
 }
@@ -240,7 +244,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
-			Value:          int(history.lastSlice.Duration().Seconds()),
+			Value:          int(math.Round(history.total.activeTime.Seconds())),
 		})
 	}
 
