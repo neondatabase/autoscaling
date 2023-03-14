@@ -244,7 +244,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
-			Value:          int(history.total.activeTime.Seconds()),
+			Value:          int(math.Round(history.total.activeTime.Seconds())),
 		})
 	}
 
