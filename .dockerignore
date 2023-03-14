@@ -2,6 +2,6 @@
 # Ignore build and test binaries.
 bin/
 testbin/
-neonvm-multus.yaml
-neonvm-vxlan.yaml
-neonvm.yaml
+neonvm/neonvm-multus.yaml
+neonvm/neonvm-vxlan.yaml
+neonvm/neonvm.yaml
