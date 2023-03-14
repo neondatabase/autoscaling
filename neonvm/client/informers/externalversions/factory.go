@@ -22,9 +22,9 @@ import (
 	sync "sync"
 	time "time"
 
-	versioned "github.com/neondatabase/neonvm/client/clientset/versioned"
-	internalinterfaces "github.com/neondatabase/neonvm/client/informers/externalversions/internalinterfaces"
-	neonvm "github.com/neondatabase/neonvm/client/informers/externalversions/neonvm"
+	versioned "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
+	internalinterfaces "github.com/neondatabase/autoscaling/neonvm/client/informers/externalversions/internalinterfaces"
+	neonvm "github.com/neondatabase/autoscaling/neonvm/client/informers/externalversions/neonvm"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"

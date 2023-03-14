@@ -13,7 +13,7 @@ plugins:
         image: alpine:3.16
       version: v1
 projectName: neonvm
-repo: github.com/neondatabase/neonvm
+repo: github.com/neondatabase/autoscaling/neonvm
 resources:
 - api:
     crdVersion: v1
@@ -22,7 +22,7 @@ resources:
   domain: neon.tech
   group: vm
   kind: VirtualMachine
-  path: github.com/neondatabase/neonvm/apis/neonvm/v1
+  path: github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1
   version: v1
   webhooks:
     defaulting: true

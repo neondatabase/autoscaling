@@ -10,7 +10,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
-	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -27,7 +27,6 @@ func (r MainRunner) Run(ctx context.Context) error {
 
 	buildInfo := util.GetBuildInfo()
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
-	klog.Infof("buildInfo.NeonVM:    %s", buildInfo.NeonVM)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	klog.Info("Starting pod watcher")

@@ -18,8 +18,8 @@ limitations under the License.
 package neonvm
 
 import (
-	internalinterfaces "github.com/neondatabase/neonvm/client/informers/externalversions/internalinterfaces"
-	v1 "github.com/neondatabase/neonvm/client/informers/externalversions/neonvm/v1"
+	internalinterfaces "github.com/neondatabase/autoscaling/neonvm/client/informers/externalversions/internalinterfaces"
+	v1 "github.com/neondatabase/autoscaling/neonvm/client/informers/externalversions/neonvm/v1"
 )
 
 // Interface provides access to each of this group's versions.

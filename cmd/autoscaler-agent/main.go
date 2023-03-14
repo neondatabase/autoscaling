@@ -13,8 +13,8 @@ import (
 	"k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
 
-	vmapi "github.com/neondatabase/neonvm/apis/neonvm/v1"
-	vmclient "github.com/neondatabase/neonvm/client/clientset/versioned"
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/agent"
 	"github.com/neondatabase/autoscaling/pkg/util"

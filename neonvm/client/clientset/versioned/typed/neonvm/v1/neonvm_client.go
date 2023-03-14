@@ -20,8 +20,8 @@ package v1
 import (
 	"net/http"
 
-	v1 "github.com/neondatabase/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/neonvm/client/clientset/versioned/scheme"
+	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
 )
 

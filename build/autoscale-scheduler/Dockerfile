@@ -9,6 +9,8 @@ RUN go mod download
 
 COPY pkg/ pkg/
 COPY cmd/ cmd/
+COPY neonvm/apis neonvm/apis
+COPY neonvm/client neonvm/client
 
 ARG GIT_INFO
 

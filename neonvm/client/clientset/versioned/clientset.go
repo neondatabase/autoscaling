@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"net/http"
 
-	neonvmv1 "github.com/neondatabase/neonvm/client/clientset/versioned/typed/neonvm/v1"
+	neonvmv1 "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/typed/neonvm/v1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
