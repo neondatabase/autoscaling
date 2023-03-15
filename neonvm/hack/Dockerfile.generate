@@ -1,5 +1,14 @@
 FROM golang:1.19
 
+# Use uid and gid of current user to avoid mismatched permissions
+ARG USER_ID
+ARG GROUP_ID
+RUN if [ $USER_ID -ne $(id -u) ]; then \
+        addgroup --gid $GROUP_ID user; \
+        adduser --disabled-password --gecos '' --uid $USER_ID --gid $GROUP_ID user; \
+    fi
+USER $USER_ID:$GROUP_ID
+
 WORKDIR /workspace
 
 # temporary use old version of contoleer tools to fit k8s 1.23 branch
