@@ -5,9 +5,9 @@
 set -eu -o pipefail
 
 bash $GOPATH/src/k8s.io/code-generator/generate-groups.sh "deepcopy,client,informer,lister" \
-    github.com/neondatabase/neonvm/client \
-    github.com/neondatabase/neonvm/apis \
+    github.com/neondatabase/autoscaling/neonvm/client \
+    github.com/neondatabase/autoscaling/neonvm/apis \
     neonvm:v1 \
-    --go-header-file hack/boilerplate.go.txt
+    --go-header-file neonvm/hack/boilerplate.go.txt
 
-controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./apis/..."
+controller-gen object:headerFile="neonvm/hack/boilerplate.go.txt" paths="./neonvm/apis/..."
