@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 
@@ -90,14 +91,19 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 
 	wg := sync.WaitGroup{}
 	wg.Add(len(podList))
+	concurrencyLimit := runtime.NumCPU()
+	sema := make(chan struct{}, concurrencyLimit) // semaphore
 
-	// TODO: We should have some concurrency limit on the number of active goroutines while fetching
-	// state.
 	for i, pod := range podList {
+		sema <- struct{}{} // enforce only 'concurrencyLimit' threads running at a time
 		i, pod := i, pod
 		go func() {
+			defer func() {
+				<-sema
+				wg.Done()
+			}()
+
 			state.Pods[i] = pod.Dump(ctx)
-			wg.Done()
 		}()
 	}
 
