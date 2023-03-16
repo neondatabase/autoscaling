@@ -31,10 +31,10 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           build-args: KERNEL_VERSION=${{ env.VM_KERNEL_VERSION }}
-          context: .
+          context: neonvm/hack
           platforms: linux/amd64
           push: true
           pull: true
           no-cache: true
-          file: hack/Dockerfile.kernel-builder
+          file: neonvm/hack/Dockerfile.kernel-builder
           tags: ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}

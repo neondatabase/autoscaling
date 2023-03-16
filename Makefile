@@ -15,7 +15,7 @@ EXAMPLE_VM_IMG ?= vm-example:dev
 VM_KERNEL_VERSION ?= "5.15.80"
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.23.0
+ENVTEST_K8S_VERSION = 1.23.1
 
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
@@ -103,17 +103,22 @@ e2e: ## Run e2e kuttl tests
 # TODO: fix/write tests
 .PHONY: test
 test: fmt vet envtest ## Run tests.
-#	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
+	CGO_ENABLED=0 \
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+		go test ./... -coverprofile cover.out
 
 ##@ Build
 
 .PHONY: build
-build: fmt vet ## Build controller binary.
+build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
 	go build -o bin/vxlan-ipam       neonvm/tools/vxlan/ipam/main.go
 	go build -o bin/runner           neonvm/runner/main.go
-	go build -o bin/vm-builder       neonvm/tools/vm-builder/main.go
+
+.PHONY: bin/vm-builder
+bin/vm-builder: ## Build vm-builder binary.
+	go build -o bin/vm-builder neonvm/tools/vm-builder/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
@@ -132,7 +137,7 @@ vm-example: ## Build a VM image for testing
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: build test ## Build docker image with the controller.
+docker-build: build ## Build docker image with the controller.
 	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG) -f neonvm/Dockerfile .
 	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
 	bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)

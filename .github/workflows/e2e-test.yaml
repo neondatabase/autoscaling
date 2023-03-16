@@ -15,12 +15,12 @@ jobs:
     runs-on: [ self-hosted, gen3, small ]
     steps:
       - uses: actions/checkout@v3
-        with:
-          submodules: true
 
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4
         with:
-          go-version: "1.19"
+          go-version-file: 'go.mod'
+
+      - uses: docker/setup-buildx-action@v2
 
       - name: Install dependencies
         run: |
@@ -50,6 +50,8 @@ jobs:
           kubectl version --client --output=yaml
           kind version
           kubectl kuttl version
+          docker version
+          docker buildx version
 
       # To save some time use prebuilt vm kernel instead of running `make kernel` (see .github/workflows/release.yaml)
       - name: Load VM kernel
@@ -62,9 +64,7 @@ jobs:
           VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
           VM_KERNEL_VERSION: "5.15.80"
 
-      - run: make -C neonvm local-cluster
-
-      - run: make -C neonvm deploy
+      - run: make local-cluster
 
       - run: make deploy
 

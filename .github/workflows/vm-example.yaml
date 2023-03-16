@@ -14,13 +14,12 @@ jobs:
         uses: actions/checkout@v3
 
       - name: install golang
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
-          cache: true
 
       - name: build vm-builder
-        run:  go build -o bin/vm-builder tools/vm-builder/main.go
+        run:  make bin/vm-builder
 
       - name: docker - install qemu
         uses: docker/setup-qemu-action@v2
