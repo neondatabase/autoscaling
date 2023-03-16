@@ -156,17 +156,17 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 	}
 	defer s.lock.Unlock()
 
-	var vmPods []podNameAndPointer
+	vmPods := make([]podNameAndPointer, 0, len(s.podMap))
 	for _, p := range s.podMap {
 		vmPods = append(vmPods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
 	}
 
-	var otherPods []podNameAndPointer
+	otherPods := make([]podNameAndPointer, 0, len(s.otherPods))
 	for _, p := range s.otherPods {
 		otherPods = append(otherPods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
 	}
 
-	var nodes []keyed[string, nodeStateDump]
+	nodes := make([]keyed[string, nodeStateDump], 0, len(s.nodeMap))
 	for k, n := range s.nodeMap {
 		nodes = append(nodes, keyed[string, nodeStateDump]{Key: k, Value: n.dump()})
 	}
@@ -182,18 +182,17 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 }
 
 func (s *nodeState) dump() nodeStateDump {
-
-	var pods []keyed[api.PodName, podStateDump]
+	pods := make([]keyed[api.PodName, podStateDump], 0, len(s.pods))
 	for k, p := range s.pods {
 		pods = append(pods, keyed[api.PodName, podStateDump]{Key: k, Value: p.dump()})
 	}
 
-	var otherPods []keyed[api.PodName, otherPodStateDump]
+	otherPods := make([]keyed[api.PodName, otherPodStateDump], 0, len(s.otherPods))
 	for k, p := range s.otherPods {
 		otherPods = append(otherPods, keyed[api.PodName, otherPodStateDump]{Key: k, Value: p.dump()})
 	}
 
-	var mq []*podNameAndPointer
+	mq := make([]*podNameAndPointer, 0, len(s.mq))
 	for _, p := range s.mq {
 		if p == nil {
 			mq = append(mq, nil)

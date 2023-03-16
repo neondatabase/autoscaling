@@ -73,7 +73,7 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 		}
 		defer s.lock.Unlock()
 
-		var list []*podState
+		list := make([]*podState, 0, len(s.pods))
 		for name := range s.pods {
 			list = append(list, s.pods[name])
 		}
