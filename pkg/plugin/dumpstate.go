@@ -49,13 +49,13 @@ func (p *AutoscaleEnforcer) startDumpStateServer(shutdownCtx context.Context) er
 			timeout := time.Duration(p.state.conf.DumpState.TimeoutSeconds) * time.Second
 
 			startTime := time.Now()
-			ctx, cancel := context.WithDeadline(ctx, startTime.Add(timeout))
+			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
 			state, err := p.dumpState(ctx, shutdownCtx.Err() != nil)
 			if err != nil {
-				totalDuration := time.Since(startTime)
-				if totalDuration >= timeout {
+				if ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					totalDuration := time.Since(startTime)
 					return nil, 500, fmt.Errorf("timed out after %s while getting state", totalDuration)
 				} else {
 					// some other type of cancel; 400 is a little weird, but there isn't a great
