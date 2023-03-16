@@ -12,6 +12,7 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
 
 * [See also](#see-also)
 * [High-level overview](#high-level-overview)
+* [Network connections between components](#network-connections-between-components)
 * [Repository structure](#repository-structure)
 * [Agent-Scheduler protocol details](#agent-scheduler-protocol-details)
   * [Agent-Scheduler protocol steps](#agent-scheduler-protocol-steps)
@@ -62,6 +63,11 @@ memory is roughly linear. In practice, it's possible for this to become slightly
 discussed more in the [high-level consequences] section below.
 
 [high-level consequences]: #high-level-consequences-of-the-agent-scheduler-protocol
+
+## Network connections between components
+
+![Diagram of network connections between the components listed above, in addition to the kubernetes API and Neon compute node. Directed arrows indicate which component initiates each TCP connection](ARCHITECTURE-network-diagram.png)
+[Diagram source](ARCHITECTURE-network-diagram.org)
 
 ## Repository structure
 
