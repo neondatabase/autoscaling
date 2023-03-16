@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os/signal"
 	"syscall"
@@ -26,6 +27,11 @@ func main() {
 // runProgram is the "real" main, but returning an error means that
 // the shutdown handling code doesn't have to call os.Exit, even indirectly.
 func runProgram() (err error) {
+	conf, err := plugin.ReadConfig(plugin.DefaultConfigPath)
+	if err != nil {
+		return fmt.Errorf("Error reading config at %q: %w", plugin.DefaultConfigPath, err)
+	}
+
 	// this: listens for sigterm, when we catch that signal, the
 	// context gets canceled, a go routine waits for half a second, and
 	// then closes the signal channel, which we block on in a
@@ -47,7 +53,7 @@ func runProgram() (err error) {
 		return err
 	}
 
-	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, plugin.NewAutoscaleEnforcerPlugin(ctx)))
+	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, plugin.NewAutoscaleEnforcerPlugin(ctx, conf)))
 	if err := command.ExecuteContext(ctx); err != nil {
 		return err
 	}

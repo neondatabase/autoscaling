@@ -124,7 +124,7 @@ metadata:
   name: scheduler-plugin-config
   namespace: kube-system
 data:
-  autoscaler-enforcer-config.json: |
+  autoscale-enforcer-config.json: |
     {
       "memBlockSize": "1Gi",
       "nodeDefaults": {
@@ -184,9 +184,14 @@ spec:
         volumeMounts:
           - name: scheduler-config-volume
             mountPath: /etc/kubernetes/autoscale-scheduler-config
+          - name: plugin-config-volume
+            mountPath: /etc/scheduler-plugin-config
       hostNetwork: false
       hostPID: false
       volumes:
         - name: scheduler-config-volume
           configMap:
             name: autoscale-scheduler-config
+        - name: plugin-config-volume
+          configMap:
+            name: scheduler-plugin-config
