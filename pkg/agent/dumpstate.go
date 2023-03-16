@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -81,36 +82,30 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 		return nil, err
 	}
 
-	results := make(chan podStateDump)
-
-	// TODO: We should have some concurrency limit on the number of active goroutines while fetching
-	// state.
-	for _, pod := range podList {
-		// pass pod through explicitly, so we avoid variable reuse issues
-		go func(p *podState) {
-			results <- p.Dump(ctx)
-		}(pod)
-	}
-
 	state := StateDump{
 		Stopped:   stopped,
 		BuildInfo: util.GetBuildInfo(),
-		Pods:      nil,
+		Pods:      make([]podStateDump, 0, len(podList)),
 	}
 
-	cleanupCourtesy := time.NewTimer(0)
-	cleanupCourtesy.Stop()
+	wg := sync.WaitGroup{}
+	wg.Add(len(podList))
 
-	for i := 0; i < len(podList); i += 1 {
-		select {
-		case <-ctx.Done():
-			cleanupCourtesy.Reset(100 * time.Millisecond)
-		case <-cleanupCourtesy.C:
-			break
-		case pod := <-results:
-			state.Pods = append(state.Pods, pod)
-		}
+	// TODO: We should have some concurrency limit on the number of active goroutines while fetching
+	// state.
+	for i, pod := range podList {
+		i, pod := i, pod
+		go func() {
+			state.Pods[i] = pod.Dump(ctx)
+			wg.Done()
+		}()
 	}
+
+	// note: pod.Dump() respects the context, even with locking. When the context expires before we
+	// acquire a lock, there's still valuable information to return - it's worthwhile to wait for
+	// that to make it back to state.Pods when the context expires, instead of proactively aborting
+	// in *this* thread.
+	wg.Wait()
 
 	return &state, nil
 }
