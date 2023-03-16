@@ -12,7 +12,6 @@ spec:
     port: 5432
     protocol: TCP
     targetPort: postgres
-    nodePort: 30432
   type: NodePort
   selector:
     vm.neon.tech/name: example
