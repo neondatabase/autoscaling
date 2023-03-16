@@ -72,6 +72,12 @@ jobs:
 
       - name: Run make e2e
         run: |
+          # Increase inotify limits for dnsmasq to fix
+          #   "dnsmasq: failed to create inotify: No file descriptors available"
+          sudo sysctl fs.inotify.max_user_instances=8192
+          sudo sysctl fs.inotify.max_user_watches=524288
+          sudo sysctl -p
+
           kubectl kuttl test --config tests/e2e/kuttl-test.yaml --skip-delete
 
       - name: Get k8s logs and events
