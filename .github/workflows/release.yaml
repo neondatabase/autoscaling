@@ -12,6 +12,15 @@ env:
   LOCAL_AGENT_IMAGE: "autoscaler-agent:dev"
   LOCAL_SCHED_IMAGE: "kube-autoscale-scheduler:dev"
 
+  KUSTOMIZE_VERSION:        "4.5.7"
+  CONTROLLER_TOOLS_VERSION: "0.9.2"
+  CODE_GENERATOR_VERSION:   "0.26.0"
+  IMG:                      "neondatabase/neonvm-controller"
+  IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
+  IMG_RUNNER:               "neondatabase/neonvm-runner"
+  VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
+  VM_KERNEL_VERSION:        "5.15.80"
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -25,10 +34,12 @@ jobs:
           echo -n "git_info=" >> $GITHUB_OUTPUT
           bash -c "set -eu -o pipefail; source ./scripts-common.sh; git_info" >> $GITHUB_OUTPUT
       - name: install golang
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
-          cache: true
+
+      - name: build binaries
+        run:  make build
 
       - name: docker - install qemu
         uses: docker/setup-qemu-action@v2
@@ -39,6 +50,58 @@ jobs:
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: load vm kernel
+        run: |
+          docker pull --quiet ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}
+          ID=$(docker create ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }} true)
+          docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
+          docker rm -f ${ID}
+
+      - name: build and push runner image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          load: true
+          file: neonvm/runner/Dockerfile
+          tags: ${{ env.IMG_RUNNER }}:${{ steps.get_vcs_info.outputs.version }}
+
+      - name: build and push controller image
+        uses: docker/build-push-action@v3
+        with:
+          build-args: VM_RUNNER_IMAGE=${{ env.IMG_RUNNER }}:${{ steps.get_vcs_info.outputs.version }}
+          context: .
+          platforms: linux/amd64
+          push: true
+          load: true
+          file: neonvm/Dockerfile
+          tags: ${{ env.IMG }}:${{ steps.get_vcs_info.outputs.version }}
+
+      - name: build and push vxlan controller image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          load: true
+          file: neonvm/tools/vxlan/Dockerfile
+          tags: ${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
+
+      - name: render kubernetes resources
+        uses: stefanprodan/kube-tools@v1
+        with:
+          kustomize: ${{ env.KUSTOMIZE_VERSION }}
+          command: |
+            kustomize version --short
+            cd ${GITHUB_WORKSPACE}/neonvm/config/common/controller              && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_vcs_info.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/neonvm/config/default-vxlan/vxlan-controller && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/neonvm/config/default-vxlan/vxlan-ipam       && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/neonvm/
+            kustomize build config/default-vxlan/multus --output neonvm-multus.yaml
+            kustomize build config/default-vxlan        --output neonvm-vxlan.yaml
+            kustomize build config/default              --output neonvm.yaml
 
       # note: We *could* use something like kustomize for this. But there's extra steps (e.g.,
       # adding kustomization.yaml) and sed is simple; so we can deal with this for now.
@@ -58,6 +121,7 @@ jobs:
         with:
           context: .
           push: true
+          load: true
           file: build/autoscale-scheduler/Dockerfile
           tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
@@ -67,6 +131,7 @@ jobs:
         with:
           context: .
           push: true
+          load: true
           file: build/autoscaler-agent/Dockerfile
           tags: ${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
@@ -76,6 +141,7 @@ jobs:
         with:
           context: .
           push: true
+          load: true
           file: build/vm-informant/Dockerfile
           tags: ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
@@ -85,9 +151,6 @@ jobs:
       # a binary is by just extracting it from the container image itself.
       - name: extract vm-informant binary
         run: |
-          mkdir bin
-          # todo: do we actually need to pull here if we're pushing above?
-          docker pull --quiet ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           ID=$(docker create ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }})
           docker cp $ID:/usr/bin/vm-informant bin/vm-informant
           docker rm -f $ID
@@ -97,6 +160,10 @@ jobs:
         with:
           fail_on_unmatched_files: true
           files: |
+            bin/vm-builder
             bin/vm-informant
-            deploy/autoscaler-agent.yaml
             deploy/autoscale-scheduler.yaml
+            deploy/autoscaler-agent.yaml
+            neonvm/neonvm-multus.yaml
+            neonvm/neonvm-vxlan.yaml
+            neonvm/neonvm.yaml

@@ -2,7 +2,9 @@
 run:
   deadline: 5m
   issues-exit-code: 1
-
+  # TODO: fix all the issues for neonvm and enable linter for it
+  skip-dirs:
+    - neonvm
 
 output:
   format: colored-line-number
@@ -63,7 +65,7 @@ linters-settings:
       # k8s.io can be a large group; we want that visually distinguished
       - Prefix(k8s.io)
       # neonvm is *kind of* local, but not really. Don't lump it in with 'default'
-      - Prefix(github.com/neondatabase/neonvm)
+      - Prefix(github.com/neondatabase/autoscaling/neonvm)
       - Prefix(github.com/neondatabase/autoscaling)
 
   # see: <https://golangci-lint.run/usage/linters/#gocritic>, <https://go-critic.com/overview>
