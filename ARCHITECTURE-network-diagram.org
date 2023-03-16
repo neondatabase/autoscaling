@@ -22,7 +22,7 @@ awk '/#\+BEGIN_SRC/{flag=1;next}/#\+END_SRC/{flag=0}flag' ARCHITECTURE-network-d
         +-------------------+     +------------+    +-------------------+
         |                   |     |            |    |                   |
         | neonvm controller |---->* Kubernetes *<---|     Scheduler     |
-        |                   *<----| API server |--->*   (with plugin)   |
+        |                   *<----| API server |    |   (with plugin)   |
         |                   |     |            |    |                   |
         +-------------------+     +------*-----+    +--------*----------+
                   |                      ^                   ^ plugin/agent protocol
