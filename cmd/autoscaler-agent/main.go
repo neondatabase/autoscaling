@@ -49,7 +49,7 @@ func main() {
 		VMClient:   vmClient,
 	}
 
-	tm := task.NewRootTaskManager("autoscaler-agent")
+	tm := task.NewRootManager("autoscaler-agent")
 	errHandler := task.LogFatalError("Error during shutdown: %w")
 
 	tm = tm.WithShutdownErrorHandler(errHandler)

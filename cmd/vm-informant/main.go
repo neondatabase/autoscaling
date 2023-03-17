@@ -75,7 +75,7 @@ func main() {
 		klog.Infof("No cgroup selected")
 	}
 
-	tm := task.NewRootTaskManager("vm-informant").WithPanicHandler(task.LogPanicAndExit)
+	tm := task.NewRootManager("vm-informant").WithPanicHandler(task.LogPanicAndExit)
 	tm.ShutdownOnSigterm(informant.MakeShutdownContext)
 	defer func() {
 		ctx, cancel := informant.MakeShutdownContext()

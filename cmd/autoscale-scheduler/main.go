@@ -14,7 +14,7 @@ import (
 // all of the juicy bits are defined in pkg/plugin/
 
 func main() {
-	tm := task.NewRootTaskManager("autoscale-scheduler")
+	tm := task.NewRootManager("autoscale-scheduler")
 	shutdownErrorHandler := task.LogFatalError("Error during shutdown: %w")
 
 	tm = tm.WithShutdownErrorHandler(shutdownErrorHandler)
