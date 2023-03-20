@@ -122,8 +122,8 @@ github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e/go.mod h1:nSuG5e5P
 github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1/go.mod h1:Q3SI9o4m/ZMnBNeIyt5eFwwo7qiLfzFZmjNmxjkiQlU=
 github.com/cicdteam/go-ipam v0.2.0 h1:NOGwz0LGpbB6l7eVXDR8y/85gBSK5fyAWTpD02MvkM0=
 github.com/cicdteam/go-ipam v0.2.0/go.mod h1:XU4Y60hu3agEJSn6N6+QVixg7ya40UCAGx2K6NEOHjM=
-github.com/cilium/cilium v1.11.11 h1:R40hT823n5HEB6AateifnnZUcJHSZMkmxx6SmyqBocg=
-github.com/cilium/cilium v1.11.11/go.mod h1:I9zrulJIxoE3wGL5FrH2eZRYbIM1YLAFSMl86nEBKBE=
+github.com/cilium/cilium v1.11.15 h1:4yjeFqtSSQbU6oyjGs+grUzqtsiz6py7ptGzGC/WCM0=
+github.com/cilium/cilium v1.11.15/go.mod h1:Eo/MEdtcfw17P6IxOPaMSQwZMne6rG4dnT/LY4bxNNA=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=
 github.com/cncf/udpa/go v0.0.0-20200629203442-efcf912fb354/go.mod h1:WmhPx2Nbnhtbo57+VJT5O0JRkEi1Wbu0z5j0R8u5Hbk=
