@@ -34,10 +34,11 @@ type agentState struct {
 	vmClient             *vmclient.Clientset
 	schedulerEventBroker *pubsub.Broker[watchEvent]
 	schedulerStore       *util.WatchStore[corev1.Pod]
+	metrics              PromMetrics
 }
 
-func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) agentState {
-	return agentState{
+func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) (*agentState, error) {
+	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
 		config:               r.Config,
@@ -46,7 +47,16 @@ func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent
 		podIP:                podIP,
 		schedulerEventBroker: broker,
 		schedulerStore:       schedulerStore,
+		metrics:              PromMetrics{}, //nolint:exhaustruct // set below
 	}
+
+	var err error
+	state.metrics, err = startPrometheusServer(state)
+	if err != nil {
+		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
+	}
+
+	return state, nil
 }
 
 func vmIsOurResponsibility(vm *vmapi.VirtualMachine, config *Config, nodeName string) bool {

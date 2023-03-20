@@ -53,7 +53,10 @@ func (r MainRunner) Run(ctx context.Context) error {
 		go RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode)
 	}
 
-	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	globalState, err := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	if err != nil {
+		return fmt.Errorf("Error creating global state: %w", err)
+	}
 
 	if r.Config.DumpState != nil {
 		klog.Info("Starting 'dump state' server")

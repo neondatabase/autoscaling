@@ -54,6 +54,7 @@ import (
 	"io"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -1675,9 +1676,12 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
+		s.runner.global.metrics.schedulerRequests.WithLabelValues("<request error>").Inc()
 		return nil, s.handleRequestError(reqData, fmt.Errorf("Error doing request: %w", err))
 	}
 	defer response.Body.Close()
+
+	s.runner.global.metrics.schedulerRequests.WithLabelValues(strconv.Itoa(response.StatusCode)).Inc()
 
 	respBody, err := io.ReadAll(response.Body)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/tychoish/fun/srv"
@@ -34,7 +35,13 @@ const (
 func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var finalStatus int
+		defer func() {
+			e.metrics.resourceRequests.WithLabelValues(r.RemoteAddr, strconv.Itoa(finalStatus)).Inc()
+		}()
+
 		if r.Method != "POST" {
+			finalStatus = 400
 			w.WriteHeader(400)
 			_, _ = w.Write([]byte("must be POST"))
 			return
@@ -46,6 +53,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 		if err := jsonDecoder.Decode(&req); err != nil {
 			klog.Warningf("[autoscale-enforcer] Received bad JSON request: %s", err)
 			w.Header().Add("Content-Type", ContentTypeError)
+			finalStatus = 400
 			w.WriteHeader(400)
 			_, _ = w.Write([]byte("bad JSON"))
 			return
@@ -55,7 +63,11 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 			"[autoscale-enforcer] Received autoscaler-agent request (client = %s) %+v",
 			r.RemoteAddr, req,
 		)
-		resp, statusCode, err := e.handleAgentRequest(req)
+		nodeName := "<none>"
+		resp, statusCode, err := e.handleAgentRequest(req, &nodeName)
+		finalStatus = statusCode
+		e.metrics.validResourceRequests.WithLabelValues(nodeName, req.ProtoVersion.String(), strconv.FormatBool(req.Metrics != nil)).Inc()
+
 		if err != nil {
 			msg := fmt.Sprintf(
 				"[autoscale-enforcer] Responding with status code %d to pod %v: %s",
@@ -97,7 +109,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 }
 
 // Returns body (if successful), status code, error (if unsuccessful)
-func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.PluginResponse, int, error) {
+func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest, nodeName *string) (*api.PluginResponse, int, error) {
 	// Before doing anything, check that the version is within the range we're expecting.
 	expectedProtoRange := api.VersionRange[api.PluginProtoVersion]{
 		Min: MinPluginProtocolVersion,
@@ -129,6 +141,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest) (*api.Plugi
 	}
 
 	node := pod.node
+	*nodeName = node.name
 
 	mustMigrate := pod.migrationState == nil &&
 		// Check whether the pod *will* migrate, then update its resources, and THEN start its
