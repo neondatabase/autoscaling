@@ -132,6 +132,12 @@ func (s *billingMetricsState) collect(conf *BillingConfig, targetNode string, st
 			continue
 		}
 
+		if vm.Status.Node != targetNode {
+			// the VM watch store includes VMs from all nodes - we need to filter to just report the
+			// VMs for our own node.
+			continue
+		}
+
 		key := billingMetricsKey{
 			uid:        vm.UID,
 			endpointID: endpointID,
