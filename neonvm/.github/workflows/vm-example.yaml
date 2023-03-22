@@ -1,0 +1,53 @@
+name: vm-example
+
+on:
+  schedule:
+    - cron:  '42 4 * * 2'  # run once a week
+  workflow_dispatch: # adds ability to run this manually
+
+jobs:
+  vm-example:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: git checkout
+        uses: actions/checkout@v3
+
+      - name: install golang
+        uses: actions/setup-go@v3
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: build vm-builder
+        run:  go build -o bin/vm-builder tools/vm-builder/main.go
+
+      - name: docker - install qemu
+        uses: docker/setup-qemu-action@v2
+      - name: docker - setup buildx
+        uses: docker/setup-buildx-action@v2
+      - name: login to docker hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: build vm-alpine:3.16
+        run:  bin/vm-builder -src alpine:3.16 -dst neondatabase/vm-alpine:3.16
+      - name: push vm-alpine:3.16
+        run:  docker push -q neondatabase/vm-alpine:3.16
+
+      - name: build vm-ubuntu:22.04
+        run:  bin/vm-builder -src ubuntu:22.04 -dst neondatabase/vm-ubuntu:22.04
+      - name: push  vm-ubuntu:22.04
+        run:  docker push -q neondatabase/vm-ubuntu:22.04
+
+      - name: build vm-debian:11
+        run:  bin/vm-builder -src debian:11 -dst neondatabase/vm-debian:11
+      - name: push  vm-debian:11
+        run:  docker push -q neondatabase/vm-debian:11
+
+      - name: build vm-postgres:14-alpine
+        run:  bin/vm-builder -src postgres:14-alpine -dst neondatabase/vm-postgres:14-alpine
+      - name: push vm-postgres:14-alpine
+        run:  docker push -q neondatabase/vm-postgres:14-alpine

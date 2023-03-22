@@ -1,0 +1,40 @@
+#!/bin/sh
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# system mounts
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+mkdir -p /dev/shm
+chmod 1777 /dev/shm
+mount -t tmpfs tmp /dev/shm
+
+# start udev (mostlry used for auto-online hotplugged CPUs)
+udevd --daemon
+
+# networking
+ip link set up dev lo
+ETH_LIST=$(find /sys/class/net -mindepth 1 -maxdepth 1 -name "eth*")
+for i in ${ETH_LIST}; do
+    iface=$(basename $i)
+    ip link set up dev $iface
+    udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119
+done
+
+# postgresql init and start
+export PGDATA=/var/lib/postgresql
+su-exec postgres pg_ctl start -o '-c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf'
+
+echo -e "\nBoot took $(cut -d' ' -f1 /proc/uptime) seconds\n"
+
+echo "Start getty for console"
+while true; do
+  setsid -w /sbin/agetty --8bits --local-line --noissue --noclear --noreset --login-pause --autologin root 115200 ttyS0
+  sleep 1
+done
+
+echo "Exiting and shuting down vm"
+su-exec postgres pg_ctl stop
+poweroff -f

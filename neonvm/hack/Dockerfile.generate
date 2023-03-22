@@ -1,0 +1,12 @@
+FROM golang:1.19
+
+WORKDIR /workspace
+
+# temporary use old version of contoleer tools to fit k8s 1.23 branch
+#ENV CONTROLLER_TOOLS_VERSION v0.11.1
+ENV CONTROLLER_TOOLS_VERSION v0.9.2
+
+ENV CODE_GENERATOR_VERSION v0.26.0
+
+RUN git clone --branch=${CODE_GENERATOR_VERSION} --depth=1 https://github.com/kubernetes/code-generator.git $GOPATH/src/k8s.io/code-generator
+RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@${CONTROLLER_TOOLS_VERSION}

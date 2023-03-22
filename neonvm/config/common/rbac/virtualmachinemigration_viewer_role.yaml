@@ -1,0 +1,27 @@
+# permissions for end users to view virtualmachinemigrations.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: virtualmachinemigration-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: neonvm
+    app.kubernetes.io/part-of: neonvm
+    app.kubernetes.io/managed-by: kustomize
+  name: virtualmachinemigration-viewer-role
+rules:
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachinemigrations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachinemigrations/status
+  verbs:
+  - get

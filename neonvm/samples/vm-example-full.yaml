@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: example-config
+data:
+  file1.txt: "just a string"
+  file2.txt: |
+    multi-string 1
+    multi-string 2
+    multi-string 3
+    multi-string 4
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: example-secret
+stringData:
+  secret1: "secret string"
+  secret2: |
+    multi-string-secret 1
+    multi-string-secret 2
+    multi-string-secret 3
+    multi-string-secret 4
+
+---
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+spec:
+  guest:
+    cpus:
+      min: 1
+      max: 4
+      use: 1
+    memorySlotSize: 1Gi
+    memorySlots:
+      min: 1
+      max: 4
+      use: 1
+    rootDisk:
+      image: vm-postgres:14-alpine
+      size: 8Gi
+    command: ["/bin/sh"]
+    args:
+      - -c
+      - |
+        echo "Hello First World"
+        echo Hello Second World
+        echo $VAR1
+        echo $VAR2
+        ping 8.8.8.8
+    env:
+      - name: VAR1
+        value: value1
+      - name: VAR2
+        value: "value 2"
+    ports:
+      - port: 5432
+
+  disks:
+    - name: disk1
+      mountPath: /some/path/1
+      emptyDisk:
+        size: 2Gi
+    - name: disk2
+      mountPath: /some/path/2
+      configMap:
+        name: example-config
+    - name: disk3
+      mountPath: /some/path/3
+      readOnly: true
+      configMap:
+        name: example-config
+        items:
+          - key: file1.txt
+            path: renamed-file1.txt
+    - name: disk4
+      mountPath: /some/path/4
+      secret:
+        secretName: example-secret

@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vxlan-controller
+  namespace: system
+  labels:
+    control-plane: vxlan-controller
+    app.kubernetes.io/name: daemonset
+    app.kubernetes.io/instance: vxlan-controller
+    app.kubernetes.io/component: vxlan-controller
+    app.kubernetes.io/created-by: neonvm
+    app.kubernetes.io/part-of: neonvm
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: vxlan-controller
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: vxlan-controller
+      labels:
+        app.kubernetes.io/component: vxlan-controller
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      serviceAccount: vxlan-controller
+      serviceAccountName: vxlan-controller
+      terminationGracePeriodSeconds: 10
+      securityContext: {}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values:
+                    - amd64
+                - key: kubernetes.io/os
+                  operator: In
+                  values:
+                    - linux
+      initContainers:
+      - name: install-cni
+        image: vxlan-controller:dev
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - -c
+          - 'cp -rf /opt/cni/bin /host/opt/cni'
+        volumeMounts:
+          - mountPath: /host/opt/cni/bin
+            name: cni-bin-dir
+      containers:
+      - name: vxlan-controller
+        image: vxlan-controller:dev
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: MY_NODE_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
+          - name: IPAM_SERVER
+            value: "http://neonvm-vxlan-ipam:9090"
+        lifecycle:
+          preStop:
+            exec:
+              command: ["vxlan-controller", "-delete"]
+        volumeMounts:
+          - mountPath: /host/opt/cni/bin
+            name: cni-bin-dir
+        resources:
+          limits:
+            cpu: 100m
+            memory: 50Mi
+          requests:
+            cpu: 100m
+            memory: 50Mi
+        securityContext:
+          capabilities:
+            add:
+            - NET_RAW
+            - NET_ADMIN
+          privileged: false
+      tolerations:
+      - operator: Exists
+      volumes:
+        # Used by install-cni.
+        - name: cni-bin-dir
+          hostPath:
+            path: /opt/cni/bin

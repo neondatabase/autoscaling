@@ -1,0 +1,35 @@
+FROM debian:11 AS build
+
+ARG KERNEL_VERSION
+
+RUN set -e \
+    && echo "Build linux  kernel ${KERNEL_VERSION}" \
+    && test -n "${KERNEL_VERSION}"
+
+WORKDIR /build
+
+RUN apt-get update && apt-get -y install \
+    curl \
+    ca-certificates \
+    git \
+    build-essential \
+    flex \
+    bison \
+    libelf-dev \
+    bc \
+    libssl-dev \
+    python3 \
+    cpio \
+    zstd
+
+RUN set -e \
+    && mkdir linux \
+    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
+    && tar --strip-components=1 -C linux -xf linux-${KERNEL_VERSION}
+
+ADD hack/linux-config-${KERNEL_VERSION} linux/.config
+
+RUN cd linux && make -j `nproc`
+
+FROM scratch
+COPY --from=build /build/linux/arch/x86/boot/bzImage /vmlinuz

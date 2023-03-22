@@ -1,0 +1,40 @@
+name: vm-kernel
+
+on:
+  schedule:
+    - cron:  '42 4 * * 2'  # run once a week
+  workflow_dispatch: # adds ability to run this manually
+
+env:
+  VM_KERNEL_IMAGE:   "neondatabase/vm-kernel"
+  VM_KERNEL_VERSION: "5.15.80"
+
+jobs:
+  vm-kernel:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: git checkout
+        uses: actions/checkout@v3
+
+      - name: docker - install qemu
+        uses: docker/setup-qemu-action@v2
+      - name: docker - setup buildx
+        uses: docker/setup-buildx-action@v2
+      - name: login to docker hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: build linux kernel
+        uses: docker/build-push-action@v3
+        with:
+          build-args: KERNEL_VERSION=${{ env.VM_KERNEL_VERSION }}
+          context: .
+          platforms: linux/amd64
+          push: true
+          pull: true
+          no-cache: true
+          file: hack/Dockerfile.kernel-builder
+          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}
