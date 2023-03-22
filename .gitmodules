@@ -1,3 +1,0 @@
-[submodule "neonvm"]
-	path = neonvm
-	url = https://github.com/neondatabase/neonvm.git
