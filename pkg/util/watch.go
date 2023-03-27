@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -144,9 +143,11 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	// the initial list
 	opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
 
+	sendStop, stopSignal := NewSingleSignalPair()
+
 	store := WatchStore[T]{
-		objects: make(map[types.UID]*T),
-		stopCh:  make(chan struct{}),
+		objects:    make(map[types.UID]*T),
+		stopSignal: sendStop,
 	}
 
 	items := accessors.Items(initialList)
@@ -185,19 +186,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			watcher.Stop()
 		}()
 
-		defer func() {
-			if !store.closed.Swap(true) {
-				close(store.stopCh)
-			} else {
-				// Make sure we consume any "close" messages that might not have already been
-				// handled.
-
-				select {
-				case <-store.stopCh:
-				case <-ctx.Done():
-				}
-			}
-		}()
+		// explicitly stop on exit so that it's possible to know when the store is stopped
+		defer store.Stop()
 
 		// Handle any deferred calls to AddFunc
 		for i := range deferredAdds {
@@ -210,13 +200,11 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				return
 			}
 		}
-		// clear deferredAdds so the contents can be GC'd
-		deferredAdds = []T{}
 
 		for {
 			for {
 				select {
-				case <-store.stopCh:
+				case <-stopSignal.Recv():
 					return
 				case <-ctx.Done():
 					return
@@ -333,7 +321,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						continue
 					case <-ctx.Done():
 						return
-					case <-store.stopCh:
+					case <-stopSignal.Recv():
 						return
 					}
 				}
@@ -398,7 +386,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						continue
 					case <-ctx.Done():
 						return
-					case <-store.stopCh:
+					case <-stopSignal.Recv():
 						return
 					}
 				}
@@ -417,15 +405,12 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 type WatchStore[T any] struct {
 	objects map[types.UID]*T
 	mutex   sync.Mutex
-	stopCh  chan struct{}
-	closed  atomic.Bool
+
+	stopSignal SignalSender
 }
 
 func (w *WatchStore[T]) Stop() {
-	if !w.closed.Swap(true) {
-		w.stopCh <- struct{}{}
-		close(w.stopCh)
-	}
+	w.stopSignal.Send()
 }
 
 func (w *WatchStore[T]) Items() []*T {
