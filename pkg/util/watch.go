@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -407,10 +408,16 @@ type WatchStore[T any] struct {
 	mutex   sync.Mutex
 
 	stopSignal SignalSender
+	stopped    atomic.Bool
 }
 
 func (w *WatchStore[T]) Stop() {
 	w.stopSignal.Send()
+	w.stopped.Store(true)
+}
+
+func (w *WatchStore[T]) Stopped() bool {
+	return w.stopped.Load()
 }
 
 func (w *WatchStore[T]) Items() []*T {
