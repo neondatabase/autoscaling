@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
@@ -16,104 +15,27 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type podEvent struct {
-	kind    podEventKind
-	vmName  string
-	podName api.PodName
+type vmEvent struct {
+	kind    vmEventKind
+	vmInfo  api.VmInfo
+	podName string
 	podIP   string
 }
 
-type podEventKind string
+type vmEventKind string
 
 const (
-	podEventAdded   podEventKind = "added"
-	podEventDeleted podEventKind = "deleted"
+	vmEventAdded   vmEventKind = "added"
+	vmEventDeleted vmEventKind = "deleted"
 )
-
-func startPodWatcher(
-	ctx context.Context,
-	config *Config,
-	kubeClient *kubernetes.Clientset,
-	nodeName string,
-	podEvents chan<- podEvent,
-) (*util.WatchStore[corev1.Pod], error) {
-	return util.Watch(
-		ctx,
-		kubeClient.CoreV1().Pods(corev1.NamespaceAll),
-		util.WatchConfig{
-			LogName: "pods",
-			// Detecting new/deleted pods is not *critical*; we're ok retrying on a longer duration.
-			RetryRelistAfter: util.NewTimeRange(time.Second, 3, 5),
-			RetryWatchAfter:  util.NewTimeRange(time.Second, 3, 5),
-		},
-		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
-			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
-		},
-		util.InitWatchModeDefer,
-		metav1.ListOptions{
-			FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
-		},
-		util.WatchHandlerFuncs[*corev1.Pod]{
-			AddFunc: func(pod *corev1.Pod, preexisting bool) {
-				vmName, podHasVM := pod.Labels[vmapi.VirtualMachineNameLabel]
-				if podHasVM && podIsOurResponsibility(pod, config, nodeName) {
-					podEvents <- podEvent{
-						podName: api.PodName{Name: pod.Name, Namespace: pod.Namespace},
-						podIP:   pod.Status.PodIP,
-						vmName:  vmName,
-						kind:    podEventAdded,
-					}
-				}
-			},
-			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
-				vmName, podHasVM := newPod.Labels[vmapi.VirtualMachineNameLabel]
-				if podHasVM {
-					oldIsOurs := podIsOurResponsibility(oldPod, config, nodeName)
-					newIsOurs := podIsOurResponsibility(newPod, config, nodeName)
-
-					var kind podEventKind
-					var podIP string
-
-					if !oldIsOurs && newIsOurs {
-						kind = podEventAdded
-						podIP = newPod.Status.PodIP
-					} else if oldIsOurs && !newIsOurs {
-						kind = podEventDeleted
-						podIP = oldPod.Status.PodIP
-					} else {
-						// If oldIsOurs == newIsOurs, nothing's changed, so do nothing.
-						return
-					}
-
-					podEvents <- podEvent{
-						// doesn't matter which pod we take these from; they won't change.
-						podName: api.PodName{Name: newPod.Name, Namespace: newPod.Namespace},
-						podIP:   podIP,
-						vmName:  vmName,
-						kind:    kind,
-					}
-				}
-			},
-			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
-				vmName, podHadVM := pod.Labels[vmapi.VirtualMachineNameLabel]
-				if podHadVM && podIsOurResponsibility(pod, config, nodeName) {
-					podEvents <- podEvent{
-						podName: api.PodName{Name: pod.Name, Namespace: pod.Namespace},
-						podIP:   pod.Status.PodIP,
-						vmName:  vmName,
-						kind:    podEventDeleted,
-					}
-				}
-			},
-		},
-	)
-}
 
 // note: unlike startPodWatcher, we aren't able to use a field selector on VM status.node (currently; NeonVM v0.4.6)
 func startVMWatcher(
 	ctx context.Context,
+	config *Config,
 	vmClient *vmclient.Clientset,
 	nodeName string,
+	podEvents chan<- vmEvent,
 ) (*util.WatchStore[vmapi.VirtualMachine], error) {
 	return util.Watch(
 		ctx,
@@ -129,6 +51,41 @@ func startVMWatcher(
 		},
 		util.InitWatchModeDefer,
 		metav1.ListOptions{},
-		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{},
+		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{
+			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
+				if vmIsOurResponsibility(vm, config, nodeName) {
+					podEvents <- makeVMEvent(vm, vmEventAdded)
+				}
+			},
+			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
+				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
+				newIsOurs := vmIsOurResponsibility(newVM, config, nodeName)
+
+				if !oldIsOurs && newIsOurs {
+					podEvents <- makeVMEvent(newVM, vmEventAdded)
+				} else if oldIsOurs && !newIsOurs {
+					podEvents <- makeVMEvent(oldVM, vmEventDeleted)
+				}
+			},
+			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
+				if vmIsOurResponsibility(vm, config, nodeName) {
+					podEvents <- makeVMEvent(vm, vmEventDeleted)
+				}
+			},
+		},
 	)
+}
+
+func makeVMEvent(vm *vmapi.VirtualMachine, kind vmEventKind) vmEvent {
+	info, err := api.ExtractVmInfo(vm)
+	if err != nil {
+		panic(fmt.Errorf("unexpected failure while extracting VM info from %s:%s: %w", vm.Namespace, vm.Name, err))
+	}
+
+	return vmEvent{
+		kind:    kind,
+		vmInfo:  *info,
+		podName: vm.Status.PodName,
+		podIP:   vm.Status.PodIP,
+	}
 }

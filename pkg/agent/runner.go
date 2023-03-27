@@ -84,8 +84,7 @@ type Runner struct {
 	// logger is the shared logger for this Runner, giving all log lines a unique, relevant prefix
 	logger RunnerLogger
 
-	// vm is non-nil for the duration of all background tasks, but is expected to be nil before
-	// r.getInitialVMInfo is called by (*Runner).Run
+	// vm stores some common information about the VM.
 	//
 	// FIXME: the value of vm.Using() is sometimes inaccurate - we need to prematurely mark
 	// resources as being used so that a new scheduler won't send a Register request at the same
@@ -96,7 +95,7 @@ type Runner struct {
 	// This field MUST NOT be updated without holding BOTH lock AND vmStateLock.
 	//
 	// This field MAY be read while holding EITHER lock OR vmStateLock.
-	vm      *api.VmInfo
+	vm      api.VmInfo
 	podName api.PodName
 	podIP   string
 
@@ -314,14 +313,14 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 		LastApproved:          r.lastApproved,
 		LastSchedulerError:    r.lastSchedulerError,
 		LastInformantError:    r.lastInformantError,
-		VM:                    *r.vm,
+		VM:                    r.vm,
 		PodIP:                 r.podIP,
 		LogPrefix:             r.logger.prefix,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
 	}, nil
 }
 
-func (r *Runner) Spawn(ctx context.Context, vmName string) {
+func (r *Runner) Spawn(ctx context.Context) {
 	go func() {
 		// Gracefully handle panics:
 		defer func() {
@@ -334,7 +333,7 @@ func (r *Runner) Spawn(ctx context.Context, vmName string) {
 			}
 		}()
 
-		err := r.Run(ctx, vmName)
+		err := r.Run(ctx)
 
 		r.setStatus(func(stat *podStatus) {
 			r.status.done = true
@@ -356,24 +355,9 @@ func (r *Runner) setStatus(with func(*podStatus)) {
 }
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
-func (r *Runner) Run(ctx context.Context, vmName string) error {
+func (r *Runner) Run(ctx context.Context) error {
 	ctx, cancelCtx := context.WithCancel(ctx)
 	defer cancelCtx()
-
-	initVmInfo, err := r.getInitialVMInfo(ctx, vmName)
-	if ctx.Err() != nil {
-		return nil
-	} else if err != nil {
-		return err
-	}
-
-	// Updating r.vm has to be while r.lock is held, in case r.State() is concurrently called
-	func() {
-		r.lock.Lock()
-		defer r.lock.Unlock()
-
-		r.vm = initVmInfo
-	}()
 
 	schedulerWatch, scheduler, err := watchSchedulerUpdates(
 		ctx, r.logger, r.global.schedulerEventBroker, r.global.schedulerStore,
@@ -430,34 +414,6 @@ func (r *Runner) Run(ctx context.Context, vmName string) error {
 	case err := <-r.backgroundPanic:
 		panic(err)
 	}
-}
-
-func (r *Runner) getInitialVMInfo(ctx context.Context, vmName string) (*api.VmInfo, error) {
-	// In order to smoothly handle cases where the VM is missing, we perform a List request instead
-	// of a Get, with a FieldSelector that limits the result just to the target VM, if it exists.
-
-	name := api.PodName{Name: vmName, Namespace: r.podName.Namespace}
-
-	opts := metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s", name.Name),
-	}
-	list, err := r.global.vmClient.NeonvmV1().VirtualMachines(name.Namespace).List(ctx, opts)
-	if err != nil {
-		return nil, fmt.Errorf("Error listing VM %v: %w", name, err)
-	}
-
-	if len(list.Items) > 1 {
-		return nil, fmt.Errorf("List for VM %v returned > 1 item", name)
-	} else if len(list.Items) == 0 {
-		return nil, nil
-	}
-
-	vmInfo, err := api.ExtractVmInfo(&list.Items[0])
-	if err != nil {
-		return nil, fmt.Errorf("Error extracting VmInfo from %v: %w", name, err)
-	}
-
-	return vmInfo, nil
 }
 
 //////////////////////
@@ -1360,7 +1316,7 @@ func (r *Runner) getStateForVMUpdate(updateReason VMUpdateReason) *atomicUpdateS
 	return &atomicUpdateState{
 		computeUnit:      *r.computeUnit,
 		metrics:          *r.lastMetrics,
-		vm:               *r.vm,
+		vm:               r.vm,
 		lastApproved:     *r.lastApproved,
 		requestedUpscale: r.requestedUpscale,
 	}

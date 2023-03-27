@@ -23,21 +23,14 @@ type MainRunner struct {
 }
 
 func (r MainRunner) Run(ctx context.Context) error {
-	podEvents := make(chan podEvent)
+	podEvents := make(chan vmEvent)
 
 	buildInfo := util.GetBuildInfo()
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
-	klog.Info("Starting pod watcher")
-	podWatchStore, err := startPodWatcher(ctx, r.Config, r.KubeClient, r.EnvArgs.K8sNodeName, podEvents)
-	if err != nil {
-		return fmt.Errorf("Error starting pod watcher: %w", err)
-	}
-	klog.Info("Pod watcher started")
-
 	klog.Info("Starting VM watcher")
-	vmWatchStore, err := startVMWatcher(ctx, r.VMClient, r.EnvArgs.K8sNodeName)
+	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, r.EnvArgs.K8sNodeName, podEvents)
 	if err != nil {
 		return fmt.Errorf("Error starting VM watcher: %w", err)
 	}
@@ -72,7 +65,6 @@ func (r MainRunner) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			podWatchStore.Stop()
 			vmWatchStore.Stop()
 			schedulerStore.Stop()
 
