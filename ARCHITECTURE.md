@@ -79,9 +79,9 @@ discussed more in the [high-level consequences] section below.
     * `deploy/autoscaler-agent.yaml`
     * `deploy/autoscale-scheduler.yaml`
 * `kind/` — files specific to creating our [kind](https://kind.sigs.k8s.io/) cluster
-    * `kind/cni-bin/` — [CNI plugins](https://www.cni.dev/docs/) downloaded via
-      [`scripts/download-cni.sh`](scripts/download-cni.sh), required for our bridge network.
     * `kind/config.yaml` — configuration for the kind cluster
+* `neonvm/` — QEMU-based virtualisation API and controllers for k8s
+   * See [`neonvm/README.md](./neonvm/README.md) for details
 * `pkg/` — core go code from the scheduler plugin and `autoscaler-agent`. Where applicable, the
   purpose of individual files is commented at the top.
     * `pkg/agent/` — implementation of `autoscaler-agent`
@@ -94,7 +94,6 @@ discussed more in the [high-level consequences] section below.
     * `pkg/util/` — miscellaneous utilities that are too general to be included in `agent` or
       `plugin`.
 * `scripts/` — a collection of scripts for common tasks. Items of note:
-    * `scripts/cluster-init.sh` — sets up a kind cluster
     * `scripts/patch-*.json` — patches for testing live-updating of a VM or config
     * `scripts/replace-scheduler.sh` — replaces the currently running scheduler, for quick redeploy
     * `scripts/repeat-delete-scheduler.sh` — repeatedly deletes the scheduler (which will be
@@ -106,13 +105,12 @@ discussed more in the [high-level consequences] section below.
     * `scripts/start-vm-bridge.sh`
 * `tests/` — end-to-end tests
     * `tests/e2e` — [`kuttl`](https://kuttl.dev/) test scenarios itself
-    * `tests/vm-example` — Minimal VM for testing
 * `scripts-common.sh` — file with a handful of useful functions, used both in `build` and `scripts`
 * `vm-deploy.yaml` — sample creation of a single VM, for testing autoscaling
-* `vm_image/` — collection of things for building the VM image, notably:
-    * `vm_image/build.sh` — script to build the VM image
-    * `vm_image/clean.sh` — script to clean up files cached for `build.sh` runs
-    * Refer to [`vm_image/README.md`](./vm_image) for more information.
+* `vm-examples/` — collection of VMs:
+    * `pg14-disk-test/` — VM with Postgres 14 and and ssh access
+      * Refer to [`vm-examples/pg14-disk-test/README.md`](./vm-examples/pg14-disk-test)  for more information.
+    * `postgres-minimal/` — Minimal postgres 15 VM used in e2e tests
 
 ## Agent-Scheduler protocol details
 

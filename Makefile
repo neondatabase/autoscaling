@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= controller:dev
+IMG_CONTROLLER ?= controller:dev
 IMG_RUNNER ?= runner:dev
 IMG_VXLAN ?= vxlan-controller:dev
 VM_EXAMPLE_SOURCE ?= postgres:15-alpine
@@ -10,6 +10,7 @@ AUTOSCALER_SCHEDULER_IMG ?= kube-autoscale-scheduler:dev
 AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
 VM_INFORMANT_IMG ?= vm-informant:dev
 EXAMPLE_VM_IMG ?= vm-example:dev
+PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
 # kernel for guests
 VM_KERNEL_VERSION ?= "5.15.80"
@@ -100,11 +101,14 @@ vet: ## Run go vet against code.
 e2e: ## Run e2e kuttl tests
 	kubectl kuttl test --config tests/e2e/kuttl-test.yaml
 
-# TODO: fix/write tests
 .PHONY: test
 test: fmt vet envtest ## Run tests.
+	# chmodding KUBEBUILDER_ASSETS dir to make it deletable by owner,
+	# otherwise it fails with actions/checkout on self-hosted GitHub runners
+	# 	ref: https://github.com/kubernetes-sigs/controller-runtime/pull/2245
+	export KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
+	find $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
 	CGO_ENABLED=0 \
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 		go test ./... -coverprofile cover.out
 
 ##@ Build
@@ -125,42 +129,67 @@ run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
 
 .PHONY: vm-example
-vm-example: ## Build a VM image for testing
-	docker buildx build \
+vm-example: vm-informant bin/vm-builder ## Build a VM image for testing
+	docker build \
 		--tag tmp-$(EXAMPLE_VM_IMG) \
-		--file tests/vm-example/Dockerfile \
-		tests/vm-example/
+		--file vm-examples/postgres-minimal/Dockerfile \
+		vm-examples/postgres-minimal/
 	./bin/vm-builder -src tmp-$(EXAMPLE_VM_IMG) -use-inittab -dst $(EXAMPLE_VM_IMG)
 	kind load docker-image $(EXAMPLE_VM_IMG)
+
+.PHONY: pg14-disk-test
+pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
+	if [ -a 'vm-examples/pg14-disk-test/ssh_id_rsa' ]; then \
+	    echo "Skipping keygen because 'ssh_id_rsa' already exists"; \
+	else \
+	    echo "Generating new keypair with empty passphrase ..."; \
+	    ssh-keygen -t rsa -N '' -f 'vm-examples/pg14-disk-test/ssh_id_rsa'; \
+	    chmod uga+rw 'vm-examples/pg14-disk-test/ssh_id_rsa' 'vm-examples/pg14-disk-test/ssh_id_rsa.pub'; \
+	fi
+	kubectl create secret generic vm-ssh --from-file=private-key=vm-examples/pg14-disk-test/ssh_id_rsa
+
+	docker buildx build \
+		--tag tmp-$(PG14_DISK_TEST_IMG) \
+		--load \
+		--file vm-examples/pg14-disk-test/Dockerfile.vmdata \
+		vm-examples/pg14-disk-test/
+	./bin/vm-builder -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
+	kind load docker-image $(PG14_DISK_TEST_IMG)
+
+.PHONY: vm-informant
+vm-informant: ## Build vm-informant image
+	docker buildx build \
+		--tag $(VM_INFORMANT_IMG) \
+		--load \
+		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--file build/vm-informant/Dockerfile \
+		.
 
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: build ## Build docker image with the controller.
-	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG) -f neonvm/Dockerfile .
+docker-build: build vm-informant ## Build docker image with the controller.
+	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
 	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
 	bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
 	docker build -t $(IMG_VXLAN) -f neonvm/tools/vxlan/Dockerfile .
 	docker buildx build \
 		--tag $(AUTOSCALER_SCHEDULER_IMG) \
+		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscale-scheduler/Dockerfile \
 		.
 	docker buildx build \
 		--tag $(AUTOSCALER_AGENT_IMG) \
+		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscaler-agent/Dockerfile \
-		.
-	docker buildx build \
-		--tag $(VM_INFORMANT_IMG) \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
-		--file build/vm-informant/Dockerfile \
 		.
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
-#	docker push ${IMG}
+#	docker push ${IMG_CONTROLLER}
 
 # PLATFORMS defines the target platforms for  the controller image be build to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -176,7 +205,7 @@ docker-build: build ## Build docker image with the controller.
 #	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 #	- docker buildx create --name project-v3-builder
 #	docker buildx use project-v3-builder
-#	- docker buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross
+#	- docker buildx build --push --platform=$(PLATFORMS) --tag ${IMG_CONTROLLER} -f Dockerfile.cross
 #	- docker buildx rm project-v3-builder
 #	rm Dockerfile.cross
 
@@ -209,7 +238,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 DEPLOYTS := $(shell date +%s)
 .PHONY: deploy
 deploy: kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd neonvm/config/common/controller              && $(KUSTOMIZE) edit set image controller=$(IMG)             && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
+	cd neonvm/config/common/controller              && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)  && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	cd neonvm/config/default-vxlan/vxlan-ipam       && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > neonvm/neonvm-multus.yaml
@@ -229,7 +258,7 @@ deploy: kind-load manifests kustomize ## Deploy controller to the K8s cluster sp
 
 .PHONY: deploy-controller
 deploy-controller: kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
+	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	$(KUSTOMIZE) build neonvm/config/default > neonvm/neonvm.yaml
 	cd neonvm/config/common/controller && $(KUSTOMIZE) edit remove annotation deploytime
 	kubectl apply -f neonvm/neonvm.yaml
@@ -244,7 +273,7 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 
 .PHONY: local-cluster
 local-cluster:  ## Create local cluster by kind tool and prepared config
-	kind create cluster --config neonvm/hack/kind.yaml
+	kind create cluster --config kind/config.yaml
 	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	kubectl wait -n kube-system deployment calico-kube-controllers --for condition=Available --timeout -1s
@@ -252,7 +281,7 @@ local-cluster:  ## Create local cluster by kind tool and prepared config
 
 .PHONY: kind-load
 kind-load: docker-build  ## Push docker images to the kind cluster.
-	kind load docker-image $(IMG)
+	kind load docker-image $(IMG_CONTROLLER)
 	kind load docker-image $(IMG_RUNNER)
 	kind load docker-image $(IMG_VXLAN)
 	kind load docker-image $(VM_EXAMPLE_IMAGE)
