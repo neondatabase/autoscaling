@@ -35,7 +35,7 @@ settled on the following:
 * Use [VM live migration](https://www.qemu.org/docs/master/devel/migration.html) to move running
   postgres instances between physical nodes
 * QEMU is used as our hypervisor
-* [NeonVM](https://github.com/neondatabase/neonvm) orchestrates NeonVM VMs as custom resources in
+* [NeonVM](https://github.com/neondatabase/autoscaling/neonvm) orchestrates NeonVM VMs as custom resources in
   K8s, and is responsible for scaling allocated resources (CPU and memory _slots_)
 * A modified K8s scheduler ensures that we don't overcommit resources and triggers migrations when
   demand is above a pre-configured threshold
@@ -54,23 +54,28 @@ For more information, refer to [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 Build everything:
 
+Start local [`kind`] cluster:
+
 ```sh
-vm_image/build.sh
-build/autoscale-scheduler/build.sh
-build/autoscaler-agent/build.sh
+make local-cluster
 ```
 
-Download various dependencies:
+Build NeonVM Linux kernel (it takes time, can be run only once)
 
 ```sh
-scripts/download-cni.sh
-scripts/download-deployments.sh
+make kernel
 ```
 
-Set up the cluster:
+Build and deploy NeonVM and Autoscaling components
 
 ```sh
-scripts/cluster-init.sh
+make deploy
+```
+
+Build test VM:
+
+```sh
+make pg14-disk-test
 ```
 
 Start the test VM:
@@ -102,7 +107,7 @@ cgexec -g memory:neon-test allocate-loop 256 2280
 # run it in the neon-test cgroup  ;  use 256 <-> 2280 MiB
 ```
 
-[`allocate-loop`]: vm_image/allocate-loop.c
+[`allocate-loop`]: vm-examples/pg14-disk-test/allocate-loop.c
 
 ### Testing
 
@@ -114,9 +119,8 @@ To run e2e tests you need to install dependencies:
 You can either download them from their websites or install using Homebrew: `brew install kubectl kind kuttl`
 
 ```sh
-make -C neonvm local-cluster
-make -C neonvm kernel
-make -C neonvm deploy
+make local-cluster
+make kernel
 make deploy
 make vm-example
 make e2e
