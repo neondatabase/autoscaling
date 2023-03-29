@@ -253,7 +253,7 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 
 	// Check whether this downscaling would be ok for the cgroup.
 	//
-	// Also, lock changing the cgroup bewteen the initial calculations and later using them.
+	// Also, lock changing the cgroup between the initial calculations and later using them.
 	var newCgroupMemHigh uint64
 	if s.cgroup != nil {
 		s.cgroup.updateMemHighLock.Lock()

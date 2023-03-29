@@ -11,7 +11,7 @@ mkdir -p /dev/shm
 chmod 1777 /dev/shm
 mount -t tmpfs tmp /dev/shm
 
-# start udev (mostlry used for auto-online hotplugged CPUs)
+# start udev (mostly used for auto-online hotplugged CPUs)
 udevd --daemon
 
 # networking
@@ -35,6 +35,6 @@ while true; do
   sleep 1
 done
 
-echo "Exiting and shuting down vm"
+echo "Exiting and shutting down vm"
 su-exec postgres pg_ctl stop
 poweroff -f

@@ -3,7 +3,7 @@
 The goal of this document is to keep a consistent overview of how the components of our autoscaling
 setup fit together. Any protocol details are also written here as well.
 
-We also briefly touch on the implementation of [NeonVM](https://github.com/neondatabase/neonvm),
+We also briefly touch on the implementation of [NeonVM](https://github.com/neondatabase/autoscaling/tree/main/neonvm),
 because it's relevant to the inter-node communication that goes on.
 
 This document should be up-to-date. If it isn't, that's a mistake (open an issue!).
@@ -143,7 +143,7 @@ on each node, the scheduler can prevent
          controller, which then connects back to QEMU running outside the VM to make the change. The
          full flow is then: `autoscaler-agent` → API server → NeonVM controller → VM's QEMU.
     3. Send an `AgentRequest` with the desired resource allocation (even if it's the same!) and
-       metrics to the plugin. Sending the current resources as desired is useful for releiving
+       metrics to the plugin. Sending the current resources as desired is useful for relieving
        pressure from denied increases. (Refer to [Node pressure and
        watermarks](#node-pressure-and-watermarks) for more)
     4. The plugin's `PluginResponse` guarantees that its `Permit` will satisfy for each resource:

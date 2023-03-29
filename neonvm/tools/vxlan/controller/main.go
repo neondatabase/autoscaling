@@ -102,7 +102,7 @@ func main() {
 		log.Printf("found %d ip addresses", len(nodeIPs))
 
 		// update FDB
-		log.Print("udpate FDB table")
+		log.Print("update FDB table")
 		if err := updateFDB(VXLAN_IF_NAME, nodeIPs, ownNodeIP); err != nil {
 			log.Fatal(err)
 		}

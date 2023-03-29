@@ -1080,7 +1080,7 @@ spec:
                 properties:
                   enable:
                     default: false
-                    description: Enable extra netowrk interface
+                    description: Enable extra network interface
                     type: boolean
                   interface:
                     default: net1
@@ -1100,7 +1100,7 @@ spec:
                       type: string
                     type: array
                   command:
-                    description: Docker image Entrypoint array replcacement.
+                    description: Docker image Entrypoint array replacement.
                     items:
                       type: string
                     type: array

@@ -225,7 +225,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		break
 	}
 	if try >= 10 {
-		return ctrl.Result{}, fmt.Errorf("unable update .specextraNetwork for virtualmachine %s in %d attemps", virtualmachine.Name, try)
+		return ctrl.Result{}, fmt.Errorf("unable update .specextraNetwork for virtualmachine %s in %d attempts", virtualmachine.Name, try)
 	}
 
 	return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -308,7 +308,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				virtualmachine.Status.ExtraNetIP = ip.String()
 				virtualmachine.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", mask[0], mask[1], mask[2], mask[3])
 
-				r.Recorder.Event(virtualmachine, "Normal", "Aqcuired",
+				r.Recorder.Event(virtualmachine, "Normal", "Acquired",
 					fmt.Sprintf("Acquired IP %s for VirtualMachine %s",
 						virtualmachine.Status.ExtraNetIP,
 						virtualmachine.Name))
@@ -424,7 +424,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				}
 			}
 
-			// get CPU details from QEMU and upate status
+			// get CPU details from QEMU and update status
 			cpusPlugged, _, err := QmpGetCpus(virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
@@ -462,7 +462,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				}
 			}
 
-			// get Memory details from hypervisor and upate VM status
+			// get Memory details from hypervisor and update VM status
 			memorySize, err := QmpGetMemorySize(virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
@@ -521,7 +521,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		case vmv1.RestartPolicyOnFailure:
 			// TODO: restart VirtualMachine
 		case vmv1.RestartPolicyNever:
-			// TODO: implement TTL ot do nothing
+			// TODO: implement TTL or do nothing
 		default:
 			// do nothing
 		}

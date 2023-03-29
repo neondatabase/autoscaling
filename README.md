@@ -35,7 +35,7 @@ settled on the following:
 * Use [VM live migration](https://www.qemu.org/docs/master/devel/migration.html) to move running
   postgres instances between physical nodes
 * QEMU is used as our hypervisor
-* [NeonVM](https://github.com/neondatabase/autoscaling/neonvm) orchestrates NeonVM VMs as custom resources in
+* [NeonVM](https://github.com/neondatabase/autoscaling/tree/main/neonvm) orchestrates NeonVM VMs as custom resources in
   K8s, and is responsible for scaling allocated resources (CPU and memory _slots_)
 * A modified K8s scheduler ensures that we don't overcommit resources and triggers migrations when
   demand is above a pre-configured threshold

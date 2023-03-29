@@ -1,4 +1,4 @@
-# NeonVM: QEMU-based virtualization API and controlller for Kubernetes
+# NeonVM: QEMU-based virtualization API and controller for Kubernetes
 
 ## Description
 
@@ -15,8 +15,8 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/do
 ### Install NeonVM with VXLAN-based overlay network
 
 ```console
-kubectl apply -f https://github.com/neondatabase/neonvm/releases/latest/download/neonvm-multus.yaml
-kubectl apply -f https://github.com/neondatabase/neonvm/releases/latest/download/neonvm-vxlan.yaml
+kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm-multus.yaml
+kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm-vxlan.yaml
 ```
 
 ### Run virtual machine
@@ -129,7 +129,7 @@ kubectl exec -it $VM_POD -- screen /dev/pts/0
 
 <press Enter to see output>
 ```
-to exit from console presss `CTRL-a k` (see manual for `screen` tool)
+to exit from console press `CTRL-a k` (see manual for `screen` tool)
 
 #### 5. Plug/Unplug CPUs in VM
 
@@ -231,7 +231,7 @@ make undeploy
 ## How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
 
-It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/) 
+It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/)
 which provides a reconcile function responsible for synchronizing resources untile the desired state is reached on the cluster
 
 ## Roadmap

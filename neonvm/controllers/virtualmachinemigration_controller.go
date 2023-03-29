@@ -217,8 +217,8 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 	// More info: https://kubernetes.io/docs/tasks/administer-cluster/use-cascading-deletion/
 
 	// TODO:
-	// 1) send migration cancelation command
-	// 2) waht migration canceled
+	// 1) send migration cancellation command
+	// 2) wait migration canceled
 	// 3) remove target pod (or manage it via ownerRef)
 
 	// The following implementation will raise an event
@@ -307,7 +307,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			r.Recorder.Event(virtualmachinemigration, "Normal", "Created",
 				fmt.Sprintf("Created Target Pod for VirtualMachine %s",
 					vm.Name))
-			// once more retrive just created target pod details
+			// once more retrieve just created target pod details
 			r.Get(ctx, types.NamespacedName{Name: virtualmachinemigration.Status.TargetPodName, Namespace: virtualmachinemigration.Namespace}, targetRunner)
 		} else if err != nil {
 			log.Error(err, "Failed to get Target Pod")
@@ -391,17 +391,17 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 				r.Recorder.Event(virtualmachinemigration, "Normal", "Started",
 					fmt.Sprintf("VirtualMachine (%s) live migration started to target pod (%s)",
 						vm.Name, targetRunner.Name))
-				// finnaly update migration phase to Running
+				// finally update migration phase to Running
 				virtualmachinemigration.Status.Phase = vmv1.VmmRunning
 			}
 		case corev1.PodSucceeded:
-			// target runner pod finsihed without error? but it shouldn't finish
+			// target runner pod finished without error? but it shouldn't finish
 			virtualmachinemigration.Status.Phase = vmv1.VmmFailed
 			meta.SetStatusCondition(&virtualmachinemigration.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachineMigration,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Target Pod (%s) for VirtualMachine (%s) copmpleted", targetRunner.Name, vm.Name)})
+					Message: fmt.Sprintf("Target Pod (%s) for VirtualMachine (%s) completed", targetRunner.Name, vm.Name)})
 		case corev1.PodFailed:
 			virtualmachinemigration.Status.Phase = vmv1.VmmFailed
 			meta.SetStatusCondition(&virtualmachinemigration.Status.Conditions,
@@ -421,7 +421,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 		}
 
 	case vmv1.VmmRunning:
-		// retrive target pod details
+		// retrieve target pod details
 		targetRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: virtualmachinemigration.Status.TargetPodName, Namespace: virtualmachinemigration.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
@@ -442,7 +442,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			log.Error(err, "Failed to get target runner Pod")
 			return err
 		}
-		// retrive migration statistics and put it in Status
+		// retrieve migration statistics and put it in Status
 		migrationInfo, err := QmpGetMigrationInfo(vm)
 		if err != nil {
 			log.Error(err, "Failed to get migration info")
@@ -495,7 +495,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 				return err
 			}
 
-			// finnaly update migration phase to Succeeded
+			// finally update migration phase to Succeeded
 			virtualmachinemigration.Status.Phase = vmv1.VmmSucceeded
 		}
 

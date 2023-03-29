@@ -181,7 +181,7 @@ func QmpPlugCpu(virtualmachine *vmv1.VirtualMachine) error {
 	}
 	defer mon.Disconnect()
 
-	// empty list reversed, first cpu slot in the end of list and last cpu slot in the begining
+	// empty list reversed, first cpu slot in the end of list and last cpu slot in the beginning
 	slot := empty[len(empty)-1]
 	qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
 
@@ -208,7 +208,7 @@ func QmpPlugCpuToRunner(ip string, port int32) error {
 	}
 	defer mon.Disconnect()
 
-	// empty list reversed, first cpu slot in the end of list and last cpu slot in the begining
+	// empty list reversed, first cpu slot in the end of list and last cpu slot in the beginning
 	slot := empty[len(empty)-1]
 	qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
 
@@ -302,7 +302,7 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	// check if available mmory slots present
 	plugged := int32(len(memoryDevices))
 	if plugged >= slots {
-		return errors.New("no empy slots for Memory hotplug")
+		return errors.New("no empty slots for Memory hotplug")
 	}
 
 	mon, err := QmpConnect(virtualmachine)
@@ -312,7 +312,7 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	defer mon.Disconnect()
 
 	// add memdev object for next slot
-	// firstly check if such obect already present to avoid repeats
+	// firstly check if such object already present to avoid repeats
 	cmd := []byte(fmt.Sprintf(`{"execute": "qom-list", "arguments": {"path": "/objects/memslot%d"}}`, plugged+1))
 	_, err = mon.Run(cmd)
 	if err != nil {
@@ -327,7 +327,7 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "dimm%d", "driver": "pc-dimm", "memdev": "memslot%d"}}`, plugged+1, plugged+1))
 	_, err = mon.Run(cmd)
 	if err != nil {
-		// device_add comand failed... so try remove object that we just created
+		// device_add command failed... so try remove object that we just created
 		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, plugged+1))
 		mon.Run(cmd)
 		return err
@@ -350,7 +350,7 @@ func QmpPlugMemoryToRunner(ip string, port int32, size int64) error {
 	defer mon.Disconnect()
 
 	// add memdev object for next slot
-	// firstly check if such obect already present to avoid repeats
+	// firstly check if such object already present to avoid repeats
 	cmd := []byte(fmt.Sprintf(`{"execute": "qom-list", "arguments": {"path": "/objects/memslot%d"}}`, plugged+1))
 	_, err = mon.Run(cmd)
 	if err != nil {
@@ -365,7 +365,7 @@ func QmpPlugMemoryToRunner(ip string, port int32, size int64) error {
 	cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "dimm%d", "driver": "pc-dimm", "memdev": "memslot%d"}}`, plugged+1, plugged+1))
 	_, err = mon.Run(cmd)
 	if err != nil {
-		// device_add comand failed... so try remove object that we just created
+		// device_add command failed... so try remove object that we just created
 		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, plugged+1))
 		mon.Run(cmd)
 		return err

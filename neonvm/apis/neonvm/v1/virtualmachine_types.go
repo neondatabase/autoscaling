@@ -87,7 +87,7 @@ type Guest struct {
 	MemorySlots MemorySlots `json:"memorySlots"`
 	// +optional
 	RootDisk RootDisk `json:"rootDisk"`
-	// Docker image Entrypoint array replcacement.
+	// Docker image Entrypoint array replacement.
 	// +optional
 	Command []string `json:"command,omitempty"`
 	// Arguments to the entrypoint.
@@ -224,7 +224,7 @@ type TmpfsDiskSource struct {
 }
 
 type ExtraNetwork struct {
-	// Enable extra netowrk interface
+	// Enable extra network interface
 	// +kubebuilder:default:=false
 	// +optional
 	Enable bool `json:"enable"`
