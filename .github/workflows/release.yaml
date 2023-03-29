@@ -64,7 +64,6 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          load: true
           file: neonvm/runner/Dockerfile
           tags: ${{ env.IMG_RUNNER }}:${{ steps.get_vcs_info.outputs.version }}
 
@@ -75,7 +74,6 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          load: true
           file: neonvm/Dockerfile
           tags: ${{ env.IMG }}:${{ steps.get_vcs_info.outputs.version }}
 
@@ -85,7 +83,6 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          load: true
           file: neonvm/tools/vxlan/Dockerfile
           tags: ${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
 
@@ -121,7 +118,6 @@ jobs:
         with:
           context: .
           push: true
-          load: true
           file: build/autoscale-scheduler/Dockerfile
           tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
@@ -131,7 +127,6 @@ jobs:
         with:
           context: .
           push: true
-          load: true
           file: build/autoscaler-agent/Dockerfile
           tags: ${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
@@ -141,7 +136,6 @@ jobs:
         with:
           context: .
           push: true
-          load: true
           file: build/vm-informant/Dockerfile
           tags: ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
