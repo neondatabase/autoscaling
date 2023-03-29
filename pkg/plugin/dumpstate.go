@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/exp/slices"
+
 	"k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -150,6 +152,14 @@ func makePointerString[T any](t *T) pointerString {
 	return pointerString(fmt.Sprintf("%p", t))
 }
 
+func sortSliceByPodName[T any](slice []T, name func(T) api.PodName) {
+	slices.SortFunc(slice, func(a, b T) (less bool) {
+		aName := name(a)
+		bName := name(b)
+		return aName.Namespace < bName.Namespace && aName.Name < bName.Name
+	})
+}
+
 func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 	if err := s.lock.TryLock(ctx); err != nil {
 		return nil, err
@@ -160,16 +170,21 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 	for _, p := range s.podMap {
 		vmPods = append(vmPods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
 	}
+	sortSliceByPodName(vmPods, func(p podNameAndPointer) api.PodName { return p.PodName })
 
 	otherPods := make([]podNameAndPointer, 0, len(s.otherPods))
 	for _, p := range s.otherPods {
 		otherPods = append(otherPods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
 	}
+	sortSliceByPodName(otherPods, func(p podNameAndPointer) api.PodName { return p.PodName })
 
 	nodes := make([]keyed[string, nodeStateDump], 0, len(s.nodeMap))
 	for k, n := range s.nodeMap {
 		nodes = append(nodes, keyed[string, nodeStateDump]{Key: k, Value: n.dump()})
 	}
+	slices.SortFunc(nodes, func(kvx, kvy keyed[string, nodeStateDump]) (less bool) {
+		return kvx.Key < kvy.Key
+	})
 
 	return &pluginStateDump{
 		Nodes:                      nodes,
@@ -186,11 +201,13 @@ func (s *nodeState) dump() nodeStateDump {
 	for k, p := range s.pods {
 		pods = append(pods, keyed[api.PodName, podStateDump]{Key: k, Value: p.dump()})
 	}
+	sortSliceByPodName(pods, func(kv keyed[api.PodName, podStateDump]) api.PodName { return kv.Key })
 
 	otherPods := make([]keyed[api.PodName, otherPodStateDump], 0, len(s.otherPods))
 	for k, p := range s.otherPods {
 		otherPods = append(otherPods, keyed[api.PodName, otherPodStateDump]{Key: k, Value: p.dump()})
 	}
+	sortSliceByPodName(otherPods, func(kv keyed[api.PodName, otherPodStateDump]) api.PodName { return kv.Key })
 
 	mq := make([]*podNameAndPointer, 0, len(s.mq))
 	for _, p := range s.mq {

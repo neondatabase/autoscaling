@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/exp/slices"
+
 	"k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -112,6 +114,11 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 	// that to make it back to state.Pods when the context expires, instead of proactively aborting
 	// in *this* thread.
 	wg.Wait()
+
+	// Sort the pods by name, so that we produce a deterministic ordering
+	slices.SortFunc(state.Pods, func(a, b podStateDump) (less bool) {
+		return a.PodName.Namespace < b.PodName.Namespace && a.PodName.Name < b.PodName.Name
+	})
 
 	return &state, nil
 }
