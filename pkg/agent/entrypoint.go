@@ -61,6 +61,13 @@ func (r MainRunner) Run(ctx context.Context) error {
 
 	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
 
+	if r.Config.DumpState != nil {
+		klog.Info("Starting 'dump state' server")
+		if err := globalState.StartDumpStateServer(ctx, r.Config.DumpState); err != nil {
+			return fmt.Errorf("Error starting dump state server: %w", err)
+		}
+	}
+
 	klog.Info("Entering main loop")
 	for {
 		select {

@@ -23,7 +23,10 @@ import (
 //
 // All fields are immutable, except pods.
 type agentState struct {
-	pods                 map[api.PodName]*podState
+	// lock guards access to pods
+	lock util.ChanMutex
+	pods map[api.PodName]*podState
+
 	podIP                string
 	config               *Config
 	kubeClient           *kubernetes.Clientset
@@ -34,6 +37,7 @@ type agentState struct {
 
 func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) agentState {
 	return agentState{
+		lock:                 util.NewChanMutex(),
 		pods:                 make(map[api.PodName]*podState),
 		config:               r.Config,
 		kubeClient:           r.KubeClient,
@@ -52,6 +56,9 @@ func podIsOurResponsibility(pod *corev1.Pod, config *Config, nodeName string) bo
 }
 
 func (s *agentState) Stop() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	for _, pod := range s.pods {
 		pod.stop()
 	}
@@ -59,6 +66,12 @@ func (s *agentState) Stop() {
 
 func (s *agentState) handleEvent(ctx context.Context, event podEvent) {
 	klog.Infof("Handling pod event %+v", event)
+
+	if err := s.lock.TryLock(ctx); err != nil {
+		klog.Warningf("context canceled while starting to handle event: %s", err)
+		return
+	}
+	defer s.lock.Unlock()
 
 	state, hasPod := s.pods[event.podName]
 
@@ -132,9 +145,47 @@ type podState struct {
 	status *podStatus
 }
 
+type podStateDump struct {
+	PodName         api.PodName   `json:"podName"`
+	Status          podStatusDump `json:"status"`
+	Runner          *RunnerState  `json:"runner,omitempty"`
+	CollectionError error         `json:"collectionError,omitempty"`
+}
+
+func (p *podState) dump(ctx context.Context) podStateDump {
+	status := p.status.dump()
+	runner, collectErr := p.runner.State(ctx)
+	if collectErr != nil {
+		collectErr = fmt.Errorf("error reading runner state: %w", collectErr)
+	}
+	return podStateDump{
+		PodName:         p.podName,
+		Status:          status,
+		Runner:          runner,
+		CollectionError: collectErr,
+	}
+}
+
 type podStatus struct {
 	lock     sync.Mutex
 	done     bool // if true, the runner finished
 	errored  error
 	panicked bool // if true, errored will be non-nil
+}
+
+type podStatusDump struct {
+	Done     bool  `json:"done"`
+	Errored  error `json:"errored"`
+	Panicked bool  `json:"panicked"`
+}
+
+func (s *podStatus) dump() podStatusDump {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	return podStatusDump{
+		Done:     s.done,
+		Errored:  s.errored,
+		Panicked: s.panicked,
+	}
 }

@@ -67,6 +67,10 @@ data:
       "schedulerName": "autoscale-scheduler",
       "requestTimeoutSeconds": 2,
       "requestPort": 10299
+    },
+    "dumpState": {
+      "port": 10300,
+      "timeoutSeconds": 5
     }
   }'
 ---

@@ -7,11 +7,21 @@ import (
 )
 
 type Config struct {
-	Scaling   ScalingConfig   `json:"scaling"`
-	Informant InformantConfig `json:"informant"`
-	Metrics   MetricsConfig   `json:"metrics"`
-	Scheduler SchedulerConfig `json:"scheduler"`
-	Billing   *BillingConfig  `json:"billing,omitempty"`
+	Scaling   ScalingConfig    `json:"scaling"`
+	Informant InformantConfig  `json:"informant"`
+	Metrics   MetricsConfig    `json:"metrics"`
+	Scheduler SchedulerConfig  `json:"scheduler"`
+	Billing   *BillingConfig   `json:"billing,omitempty"`
+	DumpState *DumpStateConfig `json:"dumpState"`
+}
+
+// DumpStateConfig configures the endpoint to dump all internal state
+type DumpStateConfig struct {
+	// Port is the port to serve on
+	Port uint16 `json:"port"`
+	// TimeoutSeconds gives the maximum duration, in seconds, that we allow for a request to dump
+	// internal state.
+	TimeoutSeconds uint `json:"timeoutSeconds"`
 }
 
 // ScalingConfig defines the scheduling we use for scaling up and down
@@ -143,6 +153,10 @@ func (c *Config) validate() error {
 		return cannotBeZero(".billing.pushEverySeconds")
 	} else if c.Billing != nil && c.Billing.PushTimeoutSeconds == 0 {
 		return cannotBeZero(".billing.pushTimeoutSeconds")
+	} else if c.DumpState != nil && c.DumpState.Port == 0 {
+		return cannotBeZero(".dumpState.port")
+	} else if c.DumpState != nil && c.DumpState.TimeoutSeconds == 0 {
+		return cannotBeZero(".dumpState.timeoutSeconds")
 	}
 
 	return nil

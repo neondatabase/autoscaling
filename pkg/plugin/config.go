@@ -43,6 +43,9 @@ type Config struct {
 	// re-enable it.
 	DoMigration *bool `json:"doMigration"`
 
+	// DumpState, if provided, enables a server to dump internal state
+	DumpState *dumpStateConfig `json:"dumpState"`
+
 	// JSONString is the JSON string that was used to generate this config struct
 	JSONString string `json:"-"`
 }
@@ -102,6 +105,12 @@ func (c *Config) validate() (string, error) {
 
 	if c.SchedulerName == "" {
 		return "schedulerName", errors.New("string cannot be empty")
+	}
+
+	if c.DumpState != nil {
+		if path, err := c.DumpState.validate(); err != nil {
+			return fmt.Sprintf("dumpState.%s", path), err
+		}
 	}
 
 	return "", nil
