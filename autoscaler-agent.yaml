@@ -69,7 +69,7 @@ data:
       "requestPort": 10299
     },
     "billing": {
-      "url": "http://neon-internal-api.aws.neon.build/billing/api/v1",
+      "url": "http://neon-internal-api.aws.neon.tech/billing/api/v1",
       "cpuMetricName": "effective_compute_seconds",
       "activeTimeMetricName": "active_time_seconds",
       "collectEverySeconds": 5,
