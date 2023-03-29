@@ -15,8 +15,8 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/do
 ### Install NeonVM with VXLAN-based overlay network
 
 ```console
-kubectl apply -f https://github.com/neondatabase/neonvm/releases/latest/download/neonvm-multus.yaml
-kubectl apply -f https://github.com/neondatabase/neonvm/releases/latest/download/neonvm-vxlan.yaml
+kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm-multus.yaml
+kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm-vxlan.yaml
 ```
 
 ### Run virtual machine
@@ -231,7 +231,7 @@ make undeploy
 ## How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
 
-It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/) 
+It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/)
 which provides a reconcile function responsible for synchronizing resources untile the desired state is reached on the cluster
 
 ## Roadmap

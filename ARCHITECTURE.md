@@ -3,7 +3,7 @@
 The goal of this document is to keep a consistent overview of how the components of our autoscaling
 setup fit together. Any protocol details are also written here as well.
 
-We also briefly touch on the implementation of [NeonVM](https://github.com/neondatabase/neonvm),
+We also briefly touch on the implementation of [NeonVM](https://github.com/neondatabase/autoscaling/tree/main/neonvm),
 because it's relevant to the inter-node communication that goes on.
 
 This document should be up-to-date. If it isn't, that's a mistake (open an issue!).
