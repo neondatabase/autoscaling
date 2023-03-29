@@ -88,7 +88,7 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 	state := StateDump{
 		Stopped:   stopped,
 		BuildInfo: util.GetBuildInfo(),
-		Pods:      make([]podStateDump, 0, len(podList)),
+		Pods:      make([]podStateDump, len(podList)),
 	}
 
 	wg := sync.WaitGroup{}
