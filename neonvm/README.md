@@ -1,4 +1,4 @@
-# NeonVM: QEMU-based virtualization API and controlller for Kubernetes
+# NeonVM: QEMU-based virtualization API and controller for Kubernetes
 
 ## Description
 
@@ -129,7 +129,7 @@ kubectl exec -it $VM_POD -- screen /dev/pts/0
 
 <press Enter to see output>
 ```
-to exit from console presss `CTRL-a k` (see manual for `screen` tool)
+to exit from console press `CTRL-a k` (see manual for `screen` tool)
 
 #### 5. Plug/Unplug CPUs in VM
 

@@ -143,7 +143,7 @@ on each node, the scheduler can prevent
          controller, which then connects back to QEMU running outside the VM to make the change. The
          full flow is then: `autoscaler-agent` → API server → NeonVM controller → VM's QEMU.
     3. Send an `AgentRequest` with the desired resource allocation (even if it's the same!) and
-       metrics to the plugin. Sending the current resources as desired is useful for releiving
+       metrics to the plugin. Sending the current resources as desired is useful for relieving
        pressure from denied increases. (Refer to [Node pressure and
        watermarks](#node-pressure-and-watermarks) for more)
     4. The plugin's `PluginResponse` guarantees that its `Permit` will satisfy for each resource:
