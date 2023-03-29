@@ -103,7 +103,7 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 				wg.Done()
 			}()
 
-			state.Pods[i] = pod.Dump(ctx)
+			state.Pods[i] = pod.dump(ctx)
 		}()
 	}
 

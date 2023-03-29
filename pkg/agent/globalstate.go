@@ -152,8 +152,8 @@ type podStateDump struct {
 	CollectionError error         `json:"collectionError,omitempty"`
 }
 
-func (p *podState) Dump(ctx context.Context) podStateDump {
-	status := p.status.Dump()
+func (p *podState) dump(ctx context.Context) podStateDump {
+	status := p.status.dump()
 	runner, collectErr := p.runner.State(ctx)
 	if collectErr != nil {
 		collectErr = fmt.Errorf("error reading runner state: %w", collectErr)
@@ -179,7 +179,7 @@ type podStatusDump struct {
 	Panicked bool  `json:"panicked"`
 }
 
-func (s *podStatus) Dump() podStatusDump {
+func (s *podStatus) dump() podStatusDump {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
