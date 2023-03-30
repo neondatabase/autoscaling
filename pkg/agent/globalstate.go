@@ -107,6 +107,9 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 			logger: RunnerLogger{
 				prefix: fmt.Sprintf("Runner %v: ", event.podName),
 			},
+			schedulerRespondedWithMigration: false,
+
+			shutdown:              cancelRunnerContext,
 			vm:                    event.vmInfo,
 			podName:               podName,
 			podIP:                 event.podIP,

@@ -14,6 +14,7 @@ import (
 	klog "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -677,8 +678,28 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, vmClien
 		pod.name, oldNodeVCPUPressure, pod.node.vCPU.CapacityPressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.PressureAccountedFor,
 	)
 
-	// note: unimplemented for now, pending NeonVM implementation.
-	return errors.New("VM migration is currently unimplemented")
+	// Unlock to make the API request, then make sure we're locked on return.
+	s.lock.Unlock()
+	defer s.lock.Lock()
+
+	vmm := &vmapi.VirtualMachineMigration{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: fmt.Sprintf("%s-pluginvmm", pod.vmName),
+			Namespace:    pod.name.Namespace,
+		},
+		Spec: vmapi.VirtualMachineMigrationSpec{
+			VmName: pod.vmName,
+		},
+	}
+	klog.Infof("[autoscale-enforcer] VM Migration create request for VM %s:%s", pod.name.Namespace, pod.vmName)
+	_, err := vmClient.NeonvmV1().
+		VirtualMachineMigrations(pod.name.Namespace).
+		Create(ctx, vmm, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("Error executing VM Migration create request: %w", err)
+	}
+
+	return nil
 }
 
 // readClusterState sets the initial node and pod maps for the plugin's state, getting its

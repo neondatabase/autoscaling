@@ -84,6 +84,9 @@ type Runner struct {
 	// logger is the shared logger for this Runner, giving all log lines a unique, relevant prefix
 	logger RunnerLogger
 
+	// shutdown provides a clean way to trigger all background Runner threads to shut down
+	shutdown context.CancelFunc
+
 	// vm stores some common information about the VM.
 	//
 	// FIXME: the value of vm.Using() is sometimes inaccurate - we need to prematurely mark
@@ -98,6 +101,14 @@ type Runner struct {
 	vm      api.VmInfo
 	podName api.PodName
 	podIP   string
+
+	// schedulerRespondedWithMigration is true iff the scheduler has returned an api.PluginResponse
+	// indicating that it was prompted to start migrating the VM.
+	//
+	// This field MUST NOT be updated without holding BOTH lock and scheduler.requestLock.
+	//
+	// This field MAY be read while holding EITHER lock or scheduler.requestLock.
+	schedulerRespondedWithMigration bool
 
 	// lock guards the values of all mutable fields. The immutable fields are:
 	// - global
@@ -265,6 +276,8 @@ type RunnerState struct {
 	LastSchedulerError    error                 `json:"lastSchedulerError"`
 	LastInformantError    error                 `json:"lastInformantError"`
 	BackgroundWorkerCount int64                 `json:"backgroundWorkerCount"`
+
+	SchedulerRespondedWithMigration bool `json:"migrationStarted"`
 }
 
 // SchedulerState is the state of a Scheduler, constructed as part of a Runner's State Method
@@ -317,6 +330,8 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 		PodIP:                 r.podIP,
 		LogPrefix:             r.logger.prefix,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
+
+		SchedulerRespondedWithMigration: r.schedulerRespondedWithMigration,
 	}, nil
 }
 
@@ -356,8 +371,7 @@ func (r *Runner) setStatus(with func(*podStatus)) {
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
 func (r *Runner) Run(ctx context.Context) error {
-	ctx, cancelCtx := context.WithCancel(ctx)
-	defer cancelCtx()
+	defer r.shutdown()
 
 	schedulerWatch, scheduler, err := watchSchedulerUpdates(
 		ctx, r.logger, r.global.schedulerEventBroker, r.global.schedulerStore,
@@ -1051,6 +1065,10 @@ retry:
 			clearUpdatedMetricsSignal()
 			clearNewSchedulerSignal()
 
+			if r.schedulerRespondedWithMigration {
+				return nil, nil
+			}
+
 			state := r.getStateForVMUpdate(reason)
 			if state == nil {
 				// if state == nil, the reason why we can't do the operation was already logged.
@@ -1189,6 +1207,11 @@ retry:
 			sched.requestLock.Lock()
 			defer sched.requestLock.Unlock()
 
+			if r.schedulerRespondedWithMigration {
+				r.logger.Warningf("Unable to complete updating VM resources: VM is migrating")
+				return nil, nil
+			}
+
 			// It might have taken a while to acquire the lock. If the scheduler is no longer
 			// current, then we shouldn't try to make a request with it.
 			isCurrent := func() bool {
@@ -1225,12 +1248,8 @@ retry:
 				return nil, nil
 			}
 			if response.Migrate != nil {
-				// FIXME: honestly? panicking is kind of ok as a basic solution. We should figure
-				// out what to *actually* do here though. Probably move sched.requestLock into
-				// Runner itself, and have that guard requests to both the scheduler *and* NeonVM,
-				// with required checks against a Runner.migrating field. That would be simple
-				// *enough*, for the most part.
-				panic(errors.New("migration handling unimplemented"))
+				// info about migration has already been logged by DoRequest
+				return nil, nil
 			}
 
 			// We have a big comment about why preemptively increasing r.vm is necessary up above.
@@ -1669,10 +1688,11 @@ func (s *Scheduler) Register(ctx context.Context, signalOk func()) error {
 // * That the response matches with the state of s.runner.vm, if s.runner.scheduler == s
 //
 // This method may set:
-// * s.fatalError
-// * s.runner.{computeUnit,lastApproved,lastSchedulerError}, if s.runner.scheduler == s
+//   - s.fatalError
+//   - s.runner.{computeUnit,lastApproved,lastSchedulerError,schedulerRespondedWithMigration},
+//     if s.runner.scheduler == s.
 //
-// FIXME: when support for migration is added back, this method needs to similarly handle that.
+// This method MAY ALSO call s.runner.shutdown(), if s.runner.scheduler == s.
 //
 // This method MUST be called while holding s.requestLock AND NOT s.runner.lock. s.requestLock will
 // not be released during a call to this method.
@@ -1746,6 +1766,12 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 		s.runner.computeUnit = &respData.ComputeUnit
 		s.runner.lastApproved = &respData.Permit
 		s.runner.lastSchedulerError = nil
+
+		if respData.Migrate != nil {
+			s.logger.Infof("Shutting down Runner because scheduler response indicated migration started")
+			s.runner.schedulerRespondedWithMigration = true
+			s.runner.shutdown()
+		}
 	}
 
 	return &respData, nil
