@@ -177,11 +177,14 @@ func (e *AutoscaleEnforcer) handleResources(
 	}
 
 	// Check that the resources correspond to an integer number of compute units, based on what the
-	// pod was most recently informed of.
+	// pod was most recently informed of. The resources may only be mismatched if one of them is at
+	// the minimum or maximum of what's allowed for this VM.
 	if pod.mostRecentComputeUnit != nil {
 		cu := *pod.mostRecentComputeUnit
 		dividesCleanly := req.VCPU%cu.VCPU == 0 && req.Mem%cu.Mem == 0 && req.VCPU/cu.VCPU == req.Mem/cu.Mem
-		if !dividesCleanly {
+		atMin := req.VCPU == pod.vCPU.Min || req.Mem == pod.memSlots.Min
+		atMax := req.VCPU == pod.vCPU.Max || req.Mem == pod.memSlots.Max
+		if !dividesCleanly && !(atMin || atMax) {
 			err := fmt.Errorf(
 				"requested resources %+v do not divide cleanly by previous compute unit %+v",
 				req, cu,

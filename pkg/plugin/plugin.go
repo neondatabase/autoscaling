@@ -569,11 +569,23 @@ func (e *AutoscaleEnforcer) Reserve(
 		node.vCPU.Reserved = newNodeReservedCPU
 		node.memSlots.Reserved = newNodeReservedMemSlots
 		ps := &podState{
-			name:                     pName,
-			vmName:                   vmInfo.Name,
-			node:                     node,
-			vCPU:                     podResourceState[uint16]{Reserved: vmInfo.Cpu.Use, CapacityPressure: 0},
-			memSlots:                 podResourceState[uint16]{Reserved: vmInfo.Mem.Use, CapacityPressure: 0},
+			name:   pName,
+			vmName: vmInfo.Name,
+			node:   node,
+			vCPU: podResourceState[uint16]{
+				Reserved:         vmInfo.Cpu.Use,
+				Buffer:           0,
+				CapacityPressure: 0,
+				Min:              vmInfo.Cpu.Min,
+				Max:              vmInfo.Cpu.Max,
+			},
+			memSlots: podResourceState[uint16]{
+				Reserved:         vmInfo.Mem.Use,
+				Buffer:           0,
+				CapacityPressure: 0,
+				Min:              vmInfo.Mem.Min,
+				Max:              vmInfo.Mem.Max,
+			},
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 			mostRecentComputeUnit:    nil,
 			metrics:                  nil,
