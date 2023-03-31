@@ -28,6 +28,7 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
 * `ARCHITECTURE.md` — this file :)
 * [`config.go`] — definition of the `config` type, plus entrypoints for setting up update
   watching/handling and config validation.
+* [`dumpstate.go`] — HTTP server, types, and conversions for dumping all internal state
 * [`plugin.go`] — scheduler plugin interface implementations, plus type definition for
   `AutoscaleEnforcer`, the type implementing the `framework.*Plugin` interfaces.
 * [`queue.go`] — implementation of a metrics-based priority queue to select migration targets. Uses
@@ -43,6 +44,7 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
   [`util.Watch`](../util/watch.go).
 
 [`config.go`]: ./config.go
+[`dumpstate.go`]: ./dumpstate.go
 [`plugin.go`]: ./plugin.go
 [`queue.go`]: ./queue.go
 [`run.go`]: ./run.go
