@@ -1054,248 +1054,248 @@ func (r *Runner) updateVMResources(
 	var retryCount uint
 retry:
 	for ; ; retryCount += 1 {
-		// state variables
-		var (
-			target api.Resources
-			capped api.Resources // target, but capped by r.lastApproved
-		)
+	// state variables
+	var (
+		target api.Resources
+		capped api.Resources // target, but capped by r.lastApproved
+	)
 
-		state, err := func() (*atomicUpdateState, error) {
-			r.lock.Lock()
-			defer r.lock.Unlock()
+	state, err := func() (*atomicUpdateState, error) {
+		r.lock.Lock()
+		defer r.lock.Unlock()
 
-			clearUpdatedMetricsSignal()
-			clearNewSchedulerSignal()
-
-			if r.schedulerRespondedWithMigration {
-				return nil, nil
-			}
-
-			state := r.getStateForVMUpdate(reason)
-			if state == nil {
-				// if state == nil, the reason why we can't do the operation was already logged.
-				return nil, nil
-			} else if r.scheduler != nil && r.scheduler.fatalError != nil {
-				r.logger.Warningf("Unable to update VM resources because scheduler had a prior fatal error")
-				return nil, nil
-			}
-
-			// Calculate the current and desired state of the VM
-			target = state.desiredVMState(true) // note: this sets the state value in the loop body
-
-			current := state.vm.Using()
-
-			if target != current {
-				r.logger.Infof("Target VM state %+v different from current %+v", target, current)
-			} else {
-				r.logger.Infof("Target VM state is current %+v", target)
-			}
-
-			// Check if there's resources that can (or must) be updated before talking to the
-			// scheduler.
-			//
-			// During typical operation, this only occurs when the target state corresponds to fewer
-			// compute units than the current state. However, this can also happen when:
-			//
-			// * lastApproved and target are both greater than the VM's state; or
-			// * VM's state doesn't match the compute unit and only one resource is being decreased
-			//
-			// To make handling these edge-cases smooth, the code here is more generic than typical
-			// operation requires.
-
-			// note: r.atomicState already checks the validity of r.lastApproved - namely that it has no
-			// values less than r.vm.Using().
-			capped = target.Min(state.lastApproved) // note: this sets the state value in the loop body
-
-			// If there's any values with capped.V > current.V, we need to update r.vm BEFORE
-			// releasing r.lock, to prevent the following otherwise-possible sequence of events:
-			//
-			//   1. initial state: old := r.vm.Using(), less than lastApproved
-			//   2. us: r.lock.Lock()
-			//   3. us: calculate capped := target resources based on usage
-			//   4. us: r.lock.Unlock() // <- BAD, we can't do this.
-			//   5. sched watcher: receive delete event
-			//   6. sched watcher: receive add event for new scheduler
-			//   7. sched watcher: r.lock.Lock()
-			//   8. sched watcher: store old := r.vm.Using(), start sending a Register request with it
-			//   9. sched watcher: r.lock.Unlock()
-			//  10. us: send NeonVM request to set value of VM as capped
-			//  11. sched watcher: Register request completes, set lastApproved = old (!)
-			//
-			// The final couple steps would leave us AND the scheduler in an incorrect state. So we
-			// need to preemptively update r.vm.
-			//
-			// FIXME: Ideally, we'd have some notion of "confirmed" and "unconfirmed" values for the
-			// VM's state - in case the NeonVM request fails (so we don't overbill, etc).
-
-			preemptiveIncrease := current.Max(capped)
-			r.vm.SetUsing(preemptiveIncrease)
-
-			return state, nil
-		}()
-
-		// note: state == nil means that there's some other reason we couldn't do the operation that
-		// was already logged.
-		if err != nil || state == nil {
-			return err
-		}
-
-		// If there's an update that can be done immediately, do it! Typically, capped will
-		// represent the resources we'd like to downscale.
-		if capped != state.vm.Using() {
-			// If our downscale gets rejected, calculate a new target
-			rejectedDownscale := func() (newTarget api.Resources, _ error) {
-				target = state.desiredVMState(false /* don't allow downscaling */)
-				return target.Min(state.lastApproved), nil
-			}
-
-			nowUsing, err := r.doVMUpdate(ctx, state.vm.Using(), capped, rejectedDownscale)
-			if err != nil {
-				return fmt.Errorf("Error doing VM update 1: %w", err)
-			} else if nowUsing == nil {
-				// From the comment above doVMUpdate:
-				//
-				// > If the VM informant is required and unavailable (or becomes unavailable), this
-				// > method will: return nil, nil; log an appropriate warning; and reset the VM's
-				// > state to its current value.
-				//
-				// So we should just return nil. We can't update right now, and there isn't anything
-				// left to log.
-				return nil
-			}
-
-			state.vm.SetUsing(*nowUsing)
-		}
-
-		// Re-fetch the scheduler, to (a) inform it of the current state, and (b) request an
-		// increase, if we want one.
-		//
-		// If we can't reach the scheduler, then we've already done everything we can. Emit a
-		// warning and exit. We'll get notified to retry when a new one comes online.
-		//
-		// If the value of r.computeUnit has changed (i.e. a new scheduler appeared and changed it),
-		// then we might want to retry with the changed computeUnit.
-		sched, computeUnit := func() (*Scheduler, *api.Resources) {
-			r.lock.Lock()
-			defer r.lock.Unlock()
-
-			return r.scheduler, r.computeUnit
-		}()
-
+		clearUpdatedMetricsSignal()
 		clearNewSchedulerSignal()
 
-		if computeUnit == nil {
-			panic(errors.New("invalid state: computeUnit was previously non-nil but is now nil"))
-		} else if sched == nil {
-			r.logger.Warningf("Unable to complete updating VM resources: no scheduler registered")
-			return nil
-		} else if *computeUnit != state.computeUnit {
-			if retryCount < maxRetries {
-				r.logger.Warningf(
-					"Retrying (%d of %d) updating VM resources: compute unit changed from %+v to %+v",
-					retryCount+1, maxRetries, state.computeUnit, *computeUnit,
-				)
-				continue retry
-			} else {
-				r.logger.Warningf("Couldn't update VM resources: Compute Unit changed but no retries left")
-				return nil
-			}
+		if r.schedulerRespondedWithMigration {
+			return nil, nil
 		}
 
-		// Acquire the scheduler lock and try to make a request
+		state := r.getStateForVMUpdate(reason)
+		if state == nil {
+			// if state == nil, the reason why we can't do the operation was already logged.
+			return nil, nil
+		} else if r.scheduler != nil && r.scheduler.fatalError != nil {
+			r.logger.Warningf("Unable to update VM resources because scheduler had a prior fatal error")
+			return nil, nil
+		}
+
+		// Calculate the current and desired state of the VM
+		target = state.desiredVMState(true) // note: this sets the state value in the loop body
+
+		current := state.vm.Using()
+
+		if target != current {
+			r.logger.Infof("Target VM state %+v different from current %+v", target, current)
+		} else {
+			r.logger.Infof("Target VM state is current %+v", target)
+		}
+
+		// Check if there's resources that can (or must) be updated before talking to the
+		// scheduler.
 		//
-		// This anonymous function returns nil, nil if an error occurred that was already logged.
-		permit, err := func() (*api.Resources, error) {
-			sched.requestLock.Lock()
-			defer sched.requestLock.Unlock()
+		// During typical operation, this only occurs when the target state corresponds to fewer
+		// compute units than the current state. However, this can also happen when:
+		//
+		// * lastApproved and target are both greater than the VM's state; or
+		// * VM's state doesn't match the compute unit and only one resource is being decreased
+		//
+		// To make handling these edge-cases smooth, the code here is more generic than typical
+		// operation requires.
 
-			if r.schedulerRespondedWithMigration {
-				r.logger.Warningf("Unable to complete updating VM resources: VM is migrating")
-				return nil, nil
-			}
+		// note: r.atomicState already checks the validity of r.lastApproved - namely that it has no
+		// values less than r.vm.Using().
+		capped = target.Min(state.lastApproved) // note: this sets the state value in the loop body
 
-			// It might have taken a while to acquire the lock. If the scheduler is no longer
-			// current, then we shouldn't try to make a request with it.
-			isCurrent := func() bool {
-				r.lock.Lock()
-				defer r.lock.Unlock()
-				return r.scheduler == sched
-			}()
+		// If there's any values with capped.V > current.V, we need to update r.vm BEFORE
+		// releasing r.lock, to prevent the following otherwise-possible sequence of events:
+		//
+		//   1. initial state: old := r.vm.Using(), less than lastApproved
+		//   2. us: r.lock.Lock()
+		//   3. us: calculate capped := target resources based on usage
+		//   4. us: r.lock.Unlock() // <- BAD, we can't do this.
+		//   5. sched watcher: receive delete event
+		//   6. sched watcher: receive add event for new scheduler
+		//   7. sched watcher: r.lock.Lock()
+		//   8. sched watcher: store old := r.vm.Using(), start sending a Register request with it
+		//   9. sched watcher: r.lock.Unlock()
+		//  10. us: send NeonVM request to set value of VM as capped
+		//  11. sched watcher: Register request completes, set lastApproved = old (!)
+		//
+		// The final couple steps would leave us AND the scheduler in an incorrect state. So we
+		// need to preemptively update r.vm.
+		//
+		// FIXME: Ideally, we'd have some notion of "confirmed" and "unconfirmed" values for the
+		// VM's state - in case the NeonVM request fails (so we don't overbill, etc).
 
-			if !isCurrent {
-				r.logger.Warningf("Unable to complete updating VM resources: scheduler became old")
-				return nil, nil
-			}
+		preemptiveIncrease := current.Max(capped)
+		r.vm.SetUsing(preemptiveIncrease)
 
-			// if the scheduler is unregistered *after* we acquired its requestLock, then the
-			// initial Register request failed.
-			if !sched.registered {
-				if err := sched.Register(ctx, func() {}); err != nil {
-					sched.logger.Errorf("Error re-attempting register: %s", err)
-					r.logger.Warningf("Unable to complete updating VM resources: scheduler Register failed")
-					return nil, nil
-				}
-			}
+		return state, nil
+	}()
 
-			request := api.AgentRequest{
-				ProtoVersion: PluginProtocolVersion,
-				Pod:          r.podName,
-				Resources:    target,
-				Metrics:      &state.metrics, // FIXME: the metrics here *might* be a little out of date.
-			}
-			response, err := sched.DoRequest(ctx, &request)
-			if err != nil {
-				sched.logger.Errorf("Request failed: %s", err)
-				r.logger.Warningf("Unable to complete updating VM resources: scheduler request failed")
-				return nil, nil
-			}
-			if response.Migrate != nil {
-				// info about migration has already been logged by DoRequest
-				return nil, nil
-			}
+	// note: state == nil means that there's some other reason we couldn't do the operation that
+	// was already logged.
+	if err != nil || state == nil {
+		return err
+	}
 
-			// We have a big comment about why preemptively increasing r.vm is necessary up above.
-			// Refer to that for more information.
-
-			return &response.Permit, nil
-		}()
-
-		if permit == nil || err != nil {
-			return err
+	// If there's an update that can be done immediately, do it! Typically, capped will
+	// represent the resources we'd like to downscale.
+	if capped != state.vm.Using() {
+		// If our downscale gets rejected, calculate a new target
+		rejectedDownscale := func() (newTarget api.Resources, _ error) {
+			target = state.desiredVMState(false /* don't allow downscaling */)
+			return target.Min(state.lastApproved), nil
 		}
 
-		// sched.DoRequest should have validated the permit, meaning that it's not less than the
-		// current resource usage.
-		vmUsing := state.vm.Using()
-		if permit.HasFieldLessThan(vmUsing) {
-			panic(errors.New("invalid state: permit less than what's in use"))
-		} else if permit.HasFieldGreaterThan(target) {
-			panic(errors.New("invalid state: permit greater than target"))
-		}
-
-		if *permit == vmUsing {
-			if vmUsing != target {
-				r.logger.Infof("Scheduler denied increase, staying at %+v", vmUsing)
-			}
-
-			// nothing to do
-			return nil
-		} else /* permit > vmUsing */ {
-			if *permit != target {
-				r.logger.Infof("Scheduler capped increase to %+v", *permit)
-			} else {
-				r.logger.Infof("Scheduler allowed increase to %+v", *permit)
-			}
-
-			rejectedDownscale := func() (newTarget api.Resources, _ error) {
-				panic(errors.New("rejectedDownscale called but request should be increasing, not decreasing"))
-			}
-			if _, err := r.doVMUpdate(ctx, vmUsing, *permit, rejectedDownscale); err != nil {
-				return fmt.Errorf("Error doing VM update 2: %w", err)
-			}
-
+		nowUsing, err := r.doVMUpdate(ctx, state.vm.Using(), capped, rejectedDownscale)
+		if err != nil {
+			return fmt.Errorf("Error doing VM update 1: %w", err)
+		} else if nowUsing == nil {
+			// From the comment above doVMUpdate:
+			//
+			// > If the VM informant is required and unavailable (or becomes unavailable), this
+			// > method will: return nil, nil; log an appropriate warning; and reset the VM's
+			// > state to its current value.
+			//
+			// So we should just return nil. We can't update right now, and there isn't anything
+			// left to log.
 			return nil
 		}
+
+		state.vm.SetUsing(*nowUsing)
+	}
+
+	// Re-fetch the scheduler, to (a) inform it of the current state, and (b) request an
+	// increase, if we want one.
+	//
+	// If we can't reach the scheduler, then we've already done everything we can. Emit a
+	// warning and exit. We'll get notified to retry when a new one comes online.
+	//
+	// If the value of r.computeUnit has changed (i.e. a new scheduler appeared and changed it),
+	// then we might want to retry with the changed computeUnit.
+	sched, computeUnit := func() (*Scheduler, *api.Resources) {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+
+		return r.scheduler, r.computeUnit
+	}()
+
+	clearNewSchedulerSignal()
+
+	if computeUnit == nil {
+		panic(errors.New("invalid state: computeUnit was previously non-nil but is now nil"))
+	} else if sched == nil {
+		r.logger.Warningf("Unable to complete updating VM resources: no scheduler registered")
+		return nil
+	} else if *computeUnit != state.computeUnit {
+		if retryCount < maxRetries {
+			r.logger.Warningf(
+				"Retrying (%d of %d) updating VM resources: compute unit changed from %+v to %+v",
+				retryCount+1, maxRetries, state.computeUnit, *computeUnit,
+			)
+			continue retry
+		} else {
+			r.logger.Warningf("Couldn't update VM resources: Compute Unit changed but no retries left")
+			return nil
+		}
+	}
+
+	// Acquire the scheduler lock and try to make a request
+	//
+	// This anonymous function returns nil, nil if an error occurred that was already logged.
+	permit, err := func() (*api.Resources, error) {
+	sched.requestLock.Lock()
+	defer sched.requestLock.Unlock()
+
+	if r.schedulerRespondedWithMigration {
+		r.logger.Warningf("Unable to complete updating VM resources: VM is migrating")
+		return nil, nil
+	}
+
+	// It might have taken a while to acquire the lock. If the scheduler is no longer
+	// current, then we shouldn't try to make a request with it.
+	isCurrent := func() bool {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+		return r.scheduler == sched
+	}()
+
+	if !isCurrent {
+		r.logger.Warningf("Unable to complete updating VM resources: scheduler became old")
+		return nil, nil
+	}
+
+	// if the scheduler is unregistered *after* we acquired its requestLock, then the
+	// initial Register request failed.
+	if !sched.registered {
+		if err := sched.Register(ctx, func() {}); err != nil {
+			sched.logger.Errorf("Error re-attempting register: %s", err)
+			r.logger.Warningf("Unable to complete updating VM resources: scheduler Register failed")
+			return nil, nil
+		}
+	}
+
+	request := api.AgentRequest{
+		ProtoVersion: PluginProtocolVersion,
+		Pod:          r.podName,
+		Resources:    target,
+		Metrics:      &state.metrics, // FIXME: the metrics here *might* be a little out of date.
+	}
+	response, err := sched.DoRequest(ctx, &request)
+	if err != nil {
+		sched.logger.Errorf("Request failed: %s", err)
+		r.logger.Warningf("Unable to complete updating VM resources: scheduler request failed")
+		return nil, nil
+	}
+	if response.Migrate != nil {
+		// info about migration has already been logged by DoRequest
+		return nil, nil
+	}
+
+	// We have a big comment about why preemptively increasing r.vm is necessary up above.
+	// Refer to that for more information.
+
+	return &response.Permit, nil
+	}()
+
+	if permit == nil || err != nil {
+		return err
+	}
+
+	// sched.DoRequest should have validated the permit, meaning that it's not less than the
+	// current resource usage.
+	vmUsing := state.vm.Using()
+	if permit.HasFieldLessThan(vmUsing) {
+		panic(errors.New("invalid state: permit less than what's in use"))
+	} else if permit.HasFieldGreaterThan(target) {
+		panic(errors.New("invalid state: permit greater than target"))
+	}
+
+	if *permit == vmUsing {
+		if vmUsing != target {
+			r.logger.Infof("Scheduler denied increase, staying at %+v", vmUsing)
+		}
+
+		// nothing to do
+		return nil
+	} else /* permit > vmUsing */ {
+		if *permit != target {
+			r.logger.Infof("Scheduler capped increase to %+v", *permit)
+		} else {
+			r.logger.Infof("Scheduler allowed increase to %+v", *permit)
+		}
+
+		rejectedDownscale := func() (newTarget api.Resources, _ error) {
+			panic(errors.New("rejectedDownscale called but request should be increasing, not decreasing"))
+		}
+		if _, err := r.doVMUpdate(ctx, vmUsing, *permit, rejectedDownscale); err != nil {
+			return fmt.Errorf("Error doing VM update 2: %w", err)
+		}
+
+		return nil
+	}
 	}
 }
 
