@@ -1293,11 +1293,6 @@ func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint16 {
 // downscaling, rejectedDownscale will be called. If it returns an error, that error will be
 // returned and the update will be aborted. Otherwise, the returned newTarget will be used.
 //
-// FIXME: If the requested change is only upscaling, this method does not check that the VM
-// informant is available before making the request to NeonVM, which means we can incorrectly
-// cause changes to the VM while not enabled. This should be fixed in a broader rework, along with a
-// handful of other items.
-//
 // This method MUST be called while holding r.requestLock AND NOT r.lock.
 func (r *Runner) doVMUpdate(
 	ctx context.Context,
@@ -1314,6 +1309,21 @@ func (r *Runner) doVMUpdate(
 		defer r.lock.Unlock()
 
 		r.vm.SetUsing(amount)
+	}
+
+	invalidInformantErr := func() error {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+
+		if r.server == nil {
+			return errors.New("no informant server set")
+		}
+		return r.server.Valid()
+	}()
+	if invalidInformantErr != nil {
+		r.logger.Warningf("Aborting VM update because informant server is not valid: %w", invalidInformantErr)
+		resetVMTo(current)
+		return nil, nil
 	}
 
 	// If there's any fields that are being downscaled, request that from the VM informant.

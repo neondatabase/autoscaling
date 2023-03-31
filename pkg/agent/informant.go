@@ -710,7 +710,12 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 	}
 
 	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.runner.lock.Unlock()
+		}
+	}()
 
 	if s.exitStatus != nil {
 		return nil, 404, errors.New("Server has already exited")
@@ -745,6 +750,17 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 
 		return nil, 400, errors.New("Cannot suspend agent that is not yet registered")
 	}
+
+	// Acquire s.runner.requestLock so that when we return, we can guarantee that
+	locked = false
+	s.runner.lock.Unlock()
+
+	if err := s.runner.requestLock.TryLock(ctx); err != nil {
+		err = fmt.Errorf("Context expired while trying to acquire requestLock: %w", err)
+		s.runner.logger.Errorf("%s", err)
+		return nil, 500, err
+	}
+	s.runner.requestLock.Unlock() // dont' actually hold the lock, we just wanted to wait
 
 	return &api.AgentIdentificationMessage{
 		Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
