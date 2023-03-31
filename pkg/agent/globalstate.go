@@ -114,7 +114,7 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 			podName:               podName,
 			podIP:                 event.podIP,
 			lock:                  util.NewChanMutex(),
-			vmStateLock:           util.NewChanMutex(),
+			requestLock:           util.NewChanMutex(),
 			requestedUpscale:      api.MoreResources{Cpu: false, Memory: false},
 			lastMetrics:           nil,
 			scheduler:             nil,

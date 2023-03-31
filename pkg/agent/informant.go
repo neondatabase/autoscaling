@@ -80,8 +80,7 @@ type InformantServer struct {
 	// made at a time.
 	//
 	// If both requestLock and runner.lock are required, then requestLock MUST be acquired before
-	// runner.lock. Similarly, if both requestLock and runner.vmStateLock are required, then
-	// runner.vmStateLock MUST be acquired before requestLock.
+	// runner.lock.
 	requestLock util.ChanMutex
 
 	// exitStatus holds some information about why the server exited
