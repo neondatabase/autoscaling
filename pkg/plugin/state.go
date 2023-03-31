@@ -197,6 +197,10 @@ type podResourceState[T any] struct {
 	// CapacityPressure is this pod's contribution to this pod's node's CapacityPressure for this
 	// resource
 	CapacityPressure T
+
+	// Min and Max give the minimum and maxmium values of this resource that the VM may use.
+	Min T `json:"min"`
+	Max T `json:"max"`
 }
 
 // otherPodState tracks a little bit of information for the non-VM pods we're handling
@@ -838,11 +842,15 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 				Reserved:         vmInfo.Cpu.Max,
 				Buffer:           vmInfo.Cpu.Max - vmInfo.Cpu.Use,
 				CapacityPressure: 0,
+				Min:              vmInfo.Cpu.Min,
+				Max:              vmInfo.Cpu.Max,
 			},
 			memSlots: podResourceState[uint16]{
 				Reserved:         vmInfo.Mem.Max,
 				Buffer:           vmInfo.Mem.Max - vmInfo.Mem.Use,
 				CapacityPressure: 0,
+				Min:              vmInfo.Mem.Min,
+				Max:              vmInfo.Mem.Max,
 			},
 
 			mqIndex:               -1,
