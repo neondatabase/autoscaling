@@ -33,7 +33,7 @@ endif
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
-GIT_INFO := $(shell source ./scripts-common.sh && git_info)
+GIT_INFO := $(git describe --long --dirty)
 
 .PHONY: all
 all: build
