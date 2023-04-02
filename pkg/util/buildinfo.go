@@ -7,8 +7,9 @@ import (
 )
 
 // BuildGitInfo stores some pretty-formatted information about the repository and working tree at
-// build time. It's set by the GIT_INFO argument in the Dockerfiles and generated with the git_info
-// function in 'scripts-common.sh'.
+// build time. It's set by the GIT_INFO argument in the Dockerfiles and set to the output of:
+//
+//	git describe --long --dirty
 //
 // While public, this value is not expected to be used externally. You should use GetBuildInfo
 // instead.

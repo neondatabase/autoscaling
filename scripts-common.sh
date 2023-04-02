@@ -17,30 +17,6 @@ require_root () {
     fi
 }
 
-# Usage: GIT_INFO="$(git_info)"
-#
-# Generates and outputs some information about the current git status. Normally we'd use Go's
-# built-in "version" buildinfo, but with git worktress + docker, the git information isn't available
-# without some extra help.
-git_info () {
-    diff="git diff --exit-code --name-only"
-
-    if $diff >/dev/null && $diff --staged >/dev/null; then
-        dirty=''
-    else
-        dirty='+dirty'
-    fi
-
-    # notes on formatting: the combination of TZ=UTC0 and --date=iso-local means that we'll output
-    # ISO 8601 (-ish) format, interpreting the timestamp as relative to UTC+0.
-    #
-    # Looks like: 7b66271+dirty (2022-12-23 17:20:49 +0000) - agent: Handle metrics more gracefully
-    TZ=UTC0 git show -s --format=format:"%h$dirty (%cd) - %s" --date=iso-local | \
-        # Passing through layers of quotes means that git commits including a quote won't be
-        # handled correctly 🤦. We're better off just removing them.
-        sed -e "s:'\|\"::g"
-}
-
 # Usage: VAR_NAME="$(get_var VAR_NAME DEFAULT_VALUE)"
 #
 # Helper function that
