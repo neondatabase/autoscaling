@@ -64,11 +64,16 @@ jobs:
           VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
           VM_KERNEL_VERSION: "5.15.80"
 
+      # Explicitly build all the images beforehand. Building images while the cluster is up can
+      # sometimes affect the cluster. For more information:
+      # https://github.com/neondatabase/autoscaling/issues/120#issuecomment-1493405844
+      - run: make docker-build
+      - run: make docker-build-examples
+
       - run: make local-cluster
 
       - run: make deploy
-
-      - run: make vm-example
+      - run: make example-vms
 
       - name: Run make e2e
         run: |

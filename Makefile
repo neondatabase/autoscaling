@@ -128,34 +128,6 @@ bin/vm-builder: ## Build vm-builder binary.
 run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
 
-.PHONY: vm-example
-vm-example: vm-informant bin/vm-builder ## Build a VM image for testing
-	docker build \
-		--tag tmp-$(EXAMPLE_VM_IMG) \
-		--file vm-examples/postgres-minimal/Dockerfile \
-		vm-examples/postgres-minimal/
-	./bin/vm-builder -src tmp-$(EXAMPLE_VM_IMG) -use-inittab -dst $(EXAMPLE_VM_IMG)
-	kind load docker-image $(EXAMPLE_VM_IMG)
-
-.PHONY: pg14-disk-test
-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
-	if [ -a 'vm-examples/pg14-disk-test/ssh_id_rsa' ]; then \
-	    echo "Skipping keygen because 'ssh_id_rsa' already exists"; \
-	else \
-	    echo "Generating new keypair with empty passphrase ..."; \
-	    ssh-keygen -t rsa -N '' -f 'vm-examples/pg14-disk-test/ssh_id_rsa'; \
-	    chmod uga+rw 'vm-examples/pg14-disk-test/ssh_id_rsa' 'vm-examples/pg14-disk-test/ssh_id_rsa.pub'; \
-	fi
-	kubectl create secret generic vm-ssh --from-file=private-key=vm-examples/pg14-disk-test/ssh_id_rsa
-
-	docker buildx build \
-		--tag tmp-$(PG14_DISK_TEST_IMG) \
-		--load \
-		--file vm-examples/pg14-disk-test/Dockerfile.vmdata \
-		vm-examples/pg14-disk-test/
-	./bin/vm-builder -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
-	kind load docker-image $(PG14_DISK_TEST_IMG)
-
 .PHONY: vm-informant
 vm-informant: ## Build vm-informant image
 	docker buildx build \
@@ -169,10 +141,9 @@ vm-informant: ## Build vm-informant image
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: build vm-informant ## Build docker image with the controller.
+docker-build: build ## Build docker image with the controller.
 	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
 	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
-	bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
 	docker build -t $(IMG_VXLAN) -f neonvm/tools/vxlan/Dockerfile .
 	docker buildx build \
 		--tag $(AUTOSCALER_SCHEDULER_IMG) \
@@ -186,6 +157,32 @@ docker-build: build vm-informant ## Build docker image with the controller.
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscaler-agent/Dockerfile \
 		.
+
+.PHONY: docker-build-examples
+docker-build-examples: vm-informant bin/vm-builder ## Build docker images for testing VMs
+	docker build \
+		--tag tmp-$(EXAMPLE_VM_IMG) \
+		--file vm-examples/postgres-minimal/Dockerfile \
+		vm-examples/postgres-minimal/
+	./bin/vm-builder -src tmp-$(EXAMPLE_VM_IMG) -use-inittab -dst $(EXAMPLE_VM_IMG)
+	./bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
+
+.PHONY: docker-build-pg14-disk-test
+docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
+	if [ -a 'vm-examples/pg14-disk-test/ssh_id_rsa' ]; then \
+	    echo "Skipping keygen because 'ssh_id_rsa' already exists"; \
+	else \
+	    echo "Generating new keypair with empty passphrase ..."; \
+	    ssh-keygen -t rsa -N '' -f 'vm-examples/pg14-disk-test/ssh_id_rsa'; \
+	    chmod uga+rw 'vm-examples/pg14-disk-test/ssh_id_rsa' 'vm-examples/pg14-disk-test/ssh_id_rsa.pub'; \
+	fi
+
+	docker buildx build \
+		--tag tmp-$(PG14_DISK_TEST_IMG) \
+		--load \
+		--file vm-examples/pg14-disk-test/Dockerfile.vmdata \
+		vm-examples/pg14-disk-test/
+	./bin/vm-builder -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
@@ -284,10 +281,19 @@ kind-load: docker-build  ## Push docker images to the kind cluster.
 	kind load docker-image $(IMG_CONTROLLER)
 	kind load docker-image $(IMG_RUNNER)
 	kind load docker-image $(IMG_VXLAN)
-	kind load docker-image $(VM_EXAMPLE_IMAGE)
 
 	kind load docker-image $(AUTOSCALER_SCHEDULER_IMG)
 	kind load docker-image $(AUTOSCALER_AGENT_IMG)
+
+.PHONY: example-vms
+example-vms: docker-build-examples ## Build and push the testing VM images to the kind cluster.
+	kind load docker-image $(VM_EXAMPLE_IMAGE)
+	kind load docker-image $(EXAMPLE_VM_IMG)
+
+.PHONY: pg14-disk-test
+pg14-disk-test: docker-build-pg14-disk-test ## Build and push the pg14-disk-test VM test image to the kind cluster.
+	kubectl create secret generic vm-ssh --from-file=private-key=vm-examples/pg14-disk-test/ssh_id_rsa || true
+	kind load docker-image $(PG14_DISK_TEST_IMG)
 
 ##@ Build Dependencies
 
