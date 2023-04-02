@@ -27,6 +27,7 @@ type vmEventKind string
 
 const (
 	vmEventAdded   vmEventKind = "added"
+	vmEventUpdated vmEventKind = "updated"
 	vmEventDeleted vmEventKind = "deleted"
 )
 
@@ -77,7 +78,8 @@ func startVMWatcher(
 					vmForEvent = oldVM
 					eventKind = vmEventDeleted
 				} else {
-					return
+					vmForEvent = newVM
+					eventKind = vmEventUpdated
 				}
 
 				event, err := makeVMEvent(vmForEvent, eventKind)

@@ -285,7 +285,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	}, nil
 }
 
-func (r *Runner) Spawn(ctx context.Context) {
+func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiver) {
 	go func() {
 		// Gracefully handle panics:
 		defer func() {
@@ -298,7 +298,7 @@ func (r *Runner) Spawn(ctx context.Context) {
 			}
 		}()
 
-		err := r.Run(ctx)
+		err := r.Run(ctx, vmInfoUpdated)
 
 		r.setStatus(func(stat *podStatus) {
 			r.status.done = true
@@ -320,7 +320,7 @@ func (r *Runner) setStatus(with func(*podStatus)) {
 }
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
-func (r *Runner) Run(ctx context.Context) error {
+func (r *Runner) Run(ctx context.Context, vmInfoUpdated util.CondChannelReceiver) error {
 	ctx, r.shutdown = context.WithCancel(ctx)
 	defer r.shutdown()
 
@@ -365,7 +365,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.getMetricsLoop(c, sendMetricsSignal, recvInformantUpd)
 	})
 	r.spawnBackgroundWorker(ctx, "handle VM resources", func(c context.Context) {
-		r.handleVMResources(c, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal)
+		r.handleVMResources(c, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal, vmInfoUpdated)
 	})
 	r.spawnBackgroundWorker(ctx, "informant server loop", func(c context.Context) {
 		r.serveInformantLoop(c, sendInformantUpd, sendUpscaleRequested)
@@ -498,6 +498,7 @@ func (r *Runner) handleVMResources(
 	updatedMetrics util.CondChannelReceiver,
 	upscaleRequested util.CondChannelReceiver,
 	registeredScheduler util.CondChannelReceiver,
+	vmInfoUpdated util.CondChannelReceiver,
 ) {
 	for {
 		var reason VMUpdateReason
@@ -511,6 +512,89 @@ func (r *Runner) handleVMResources(
 			reason = UpscaleRequested
 		case <-registeredScheduler.Recv():
 			reason = RegisteredScheduler
+		case <-vmInfoUpdated.Recv():
+			// Only actually do the update if something we care about changed:
+			newVMInfo := func() api.VmInfo {
+				r.status.lock.Lock()
+				defer r.status.lock.Unlock()
+				return r.status.vmInfo
+			}()
+
+			if !newVMInfo.ScalingEnabled {
+				// This shouldn't happen because any update to the VM object that has
+				// ScalingEnabled=false should get translated into a "deletion" so the runner stops.
+				// So we shoudln't get an "update" event, and if we do, something's gone very wrong.
+				panic("explicit VM update given but scaling is disabled")
+			}
+
+			// Update r.vm and r.lastApproved (see comment explaining why)
+			if changed := func() (changed bool) {
+				r.lock.Lock()
+				defer r.lock.Unlock()
+
+				if r.vm.Mem.SlotSize.Cmp(newVMInfo.Mem.SlotSize) != 0 {
+					panic("VM changed memory slot size")
+				}
+
+				// Create vm, which is r.vm with some fields taken from newVMInfo.
+				//
+				// Instead of copying r.vm, we create the entire struct explicitly so that we can
+				// have field exhaustiveness checking make sure that we don't forget anything when
+				// fields are added to api.VmInfo.
+				vm := api.VmInfo{
+					Name:      r.vm.Name,
+					Namespace: r.vm.Namespace,
+					Cpu: api.VmCpuInfo{
+						Min: newVMInfo.Cpu.Min,
+						Use: r.vm.Cpu.Use, // TODO: Eventually we should explicitly take this as input, use newVMInfo
+						Max: newVMInfo.Cpu.Max,
+					},
+					Mem: api.VmMemInfo{
+						Min: newVMInfo.Mem.Min,
+						Use: r.vm.Mem.Use, // TODO: Eventually we should explicitly take this as input, use newVMInfo
+						Max: newVMInfo.Mem.Max,
+
+						SlotSize: r.vm.Mem.SlotSize, // checked for equality above.
+					},
+
+					AlwaysMigrate:  newVMInfo.AlwaysMigrate,
+					ScalingEnabled: newVMInfo.ScalingEnabled, // note: see above, checking newVMInfo.ScalingEnabled != false
+				}
+
+				changed = vm != r.vm
+				r.vm = vm
+
+				// As a final (necessary) precaution, update lastApproved so that it isn't possible
+				// for the scheduler to observe a temporary low upper bound that causes it to
+				// have state that's inconsistent with us (potentially causing overallocation). If
+				// we didn't handle this, the following sequence of actions would cause inconsistent
+				// state:
+				//
+				//   1. VM is at 4 CPU (of max 4), runner & scheduler agree
+				//   2. Scheduler dies
+				//   3. Runner loses contact with scheduler
+				//   4. VM Cpu.Max gets set to 2
+				//   5. Runner observes Cpu.Max = 2 and forces downscale to 2 CPU
+				//   6. New scheduler appears, observes Cpu.Max = 2
+				//   7. VM Cpu.Max gets set to 4
+				//   8. Runner observes Cpu.Max = 4 (lastApproved is still 4)
+				//   <-- INCONSISTENT STATE -->
+				//   9. Scheduler observes Cpu.Max = 4
+				//
+				// If the runner observes the updated state before the scheduler, it's entirely
+				// possible for the runner to make a request that *it* thinks is just informative,
+				// but that the scheduler thinks is requesting more resources. At that point, the
+				// request can unexpectedly fail, or the scheduler can over-allocate, etc.
+				if r.lastApproved != nil {
+					*r.lastApproved = r.lastApproved.Min(vm.Max())
+				}
+
+				return
+			}(); !changed {
+				continue
+			}
+
+			reason = UpdatedVMInfo
 		}
 
 		err := r.updateVMResources(
@@ -929,6 +1013,7 @@ const (
 	UpdatedMetrics      VMUpdateReason = "metrics"
 	UpscaleRequested    VMUpdateReason = "upscale requested"
 	RegisteredScheduler VMUpdateReason = "scheduler"
+	UpdatedVMInfo       VMUpdateReason = "updated VM info"
 )
 
 // atomicUpdateState holds some pre-validated data for (*Runner).updateVMResources, fetched

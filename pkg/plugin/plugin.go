@@ -2,11 +2,11 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
@@ -32,7 +32,17 @@ type AutoscaleEnforcer struct {
 	handle   framework.Handle
 	vmClient *vmclient.Clientset
 	state    pluginState
+
+	// vmStore provides access the current-ish state of VMs in the cluster. If something's missing,
+	// it can be updated with Resync().
+	//
+	// Keeping this store allows us to make sure that our event handling is never out-of-sync
+	// because all the information is coming from the same source.
+	vmStore IndexedVMStore
 }
+
+// abbreviation, because this type is pretty verbose
+type IndexedVMStore = util.IndexedWatchStore[vmapi.VirtualMachine, *util.NameIndex[vmapi.VirtualMachine]]
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
 var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
@@ -77,6 +87,7 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 			lock: util.NewChanMutex(),
 			conf: config,
 		},
+		vmStore: util.IndexedWatchStore[vmapi.VirtualMachine, *util.NameIndex[vmapi.VirtualMachine]]{}, // set below.
 	}
 
 	if p.state.conf.DumpState != nil {
@@ -90,10 +101,22 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	vmDeletions := make(chan util.NamespacedName)
 	vmDisabledScaling := make(chan util.NamespacedName)
 	podDeletions := make(chan util.NamespacedName)
+	vmBoundsChanged := make(chan struct {
+		vm      *api.VmInfo
+		podName string
+	})
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
-	if err := p.watchPodEvents(ctx, vmDeletions, vmDisabledScaling, podDeletions); err != nil {
+	if err := p.watchPodEvents(ctx, vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
+
+	klog.Infof("[autoscale-enforcer] Starting VM watcher")
+	vmStore, err := p.watchVMEvents(ctx, vmDisabledScaling, vmBoundsChanged)
+	if err != nil {
+		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
+	}
+
+	p.vmStore = util.NewIndexedWatchStore(vmStore, util.NewNameIndex[vmapi.VirtualMachine]())
 
 	// ... but before handling the deletion events, read the current cluster state:
 	klog.Infof("[autoscale-enforcer] Reading initial cluster state")
@@ -115,6 +138,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 				p.handleVMDisabledScaling(name)
 			case name := <-podDeletions:
 				p.handlePodDeletion(name)
+			case v := <-vmBoundsChanged:
+				p.handleUpdatedScalingBounds(v.vm, v.podName)
 			}
 		}
 	}()
@@ -149,15 +174,41 @@ func (e *AutoscaleEnforcer) Name() string {
 // getVmInfo is a helper for the plugin-related functions
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
-func getVmInfo(ctx context.Context, vmClient *vmclient.Clientset, pod *corev1.Pod) (*api.VmInfo, error) {
+func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 	vmName, ok := pod.Labels[LabelVM]
 	if !ok {
 		return nil, nil
 	}
 
-	vm, err := vmClient.NeonvmV1().VirtualMachines(pod.Namespace).Get(ctx, vmName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("Error getting VM object %s:%s: %w", pod.Namespace, vmName, err)
+	vm, ok := vmStore.GetIndexed(func(index *util.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
+		return index.Get(pod.Namespace, vmName)
+	})
+	if !ok {
+		klog.Warningf("VM %s:%s missing from local store. Relisting.", pod.Namespace, vmName)
+
+		// Use a reasonable timeout on the relist request, so that if the VM store is broken, we
+		// won't block forever.
+		//
+		// FIXME: make this configurable
+		timeout := 5 * time.Second
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case <-vmStore.Relist():
+		case <-timer.C:
+			return nil, fmt.Errorf("Timed out waiting on VM store relist (timeout = %s)", timeout)
+		}
+
+		// retry fetching the VM, now that we know it's been synced.
+		vm, ok = vmStore.GetIndexed(func(index *util.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
+			return index.Get(pod.Namespace, vmName)
+		})
+		if !ok {
+			// if the VM is still not present after relisting, then either it's already been deleted
+			// or there's a deeper problem.
+			return nil, errors.New("Could not find VM for pod, even after relist")
+		}
 	}
 
 	vmInfo, err := api.ExtractVmInfo(vm)
@@ -199,7 +250,7 @@ func (e *AutoscaleEnforcer) Filter(
 	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
 
-	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
+	vmInfo, err := getVmInfo(e.vmStore, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Filter: Error getting VM pod %v info: %s", pName, err)
 		return framework.NewStatus(
@@ -378,7 +429,7 @@ func (e *AutoscaleEnforcer) Score(
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
 	podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
+	vmInfo, err := getVmInfo(e.vmStore, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Score: Error getting info for pod %v: %s", podName, err)
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
@@ -446,7 +497,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
-	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
+	vmInfo, err := getVmInfo(e.vmStore, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Error getting pod %v info: %s", pName, err)
 		return framework.NewStatus(
