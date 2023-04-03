@@ -463,7 +463,6 @@ func (w *WatchStore[T]) Relist() <-chan struct{} {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
-	// note: this is sometimes racy, which will cause an extra relisting - that's mostly ok though.
 	select {
 	case w.triggerRelist <- struct{}{}:
 	default:
