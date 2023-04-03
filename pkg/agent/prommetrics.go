@@ -83,7 +83,9 @@ func startPrometheusServer(ctx context.Context, globalstate *agentState) (PromMe
 	// server shuts down for some other reason.
 	go func() {
 		<-shutdownCtx.Done()
-		srv.Shutdown(context.Background())
+		if err := srv.Shutdown(context.Background()); err != nil {
+			klog.Errorf("Error shutting down prometheus server: %w", err)
+		}
 	}()
 
 	go func() {
