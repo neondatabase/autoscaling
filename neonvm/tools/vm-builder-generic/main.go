@@ -22,61 +22,7 @@ import (
 
 const (
 	dockerfileVmBuilder = `
-ARG VM_INFORMANT_VERSION=v0.1.14
-FROM neondatabase/vm-informant:$VM_INFORMANT_VERSION as informant
-
-# Build cgroup-tools
-#
-# At time of writing (2023-03-14), debian bullseye has a version of cgroup-tools (technically
-# libcgroup) that doesn't support cgroup v2 (version 0.41-11). Unfortunately, the vm-informant
-# requires cgroup v2, so we'll build cgroup-tools ourselves.
-FROM debian:bullseye-slim as libcgroup-builder
-ENV LIBCGROUP_VERSION v2.0.3
-
-RUN set -exu \
-	&& apt update \
-	&& apt install --no-install-recommends -y \
-		git \
-		ca-certificates \
-		automake \
-		cmake \
-		make \
-		gcc \
-		byacc \
-		flex \
-		libtool \
-		libpam0g-dev \
-	&& git clone --depth 1 -b $LIBCGROUP_VERSION https://github.com/libcgroup/libcgroup \
-	&& INSTALL_DIR="/libcgroup-install" \
-	&& mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/include" \
-	&& cd libcgroup \
-	# extracted from bootstrap.sh, with modified flags:
-	&& (test -d m4 || mkdir m4) \
-	&& autoreconf -fi \
-	&& rm -rf autom4te.cache \
-	&& CFLAGS="-O3" ./configure --prefix="$INSTALL_DIR" --sysconfdir=/etc --localstatedir=/var --enable-opaque-hierarchy="name=systemd" \
-	# actually build the thing...
-	&& make install
-
-FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
-FROM quay.io/prometheus/node-exporter:v1.5.0 as node-exporter
-
 FROM {{.}} AS rootdisk
-
-USER root
-RUN adduser vm-informant --disabled-password --no-create-home
-
-USER postgres
-COPY cgconfig.conf /etc/cgconfig.conf
-COPY --from=informant /usr/bin/vm-informant /usr/local/bin/vm-informant
-COPY --from=libcgroup-builder /libcgroup-install/bin/*  /usr/bin/
-COPY --from=libcgroup-builder /libcgroup-install/lib/*  /usr/lib/
-COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
-COPY --from=node-exporter     /bin/node_exporter     /bin/node_exporter
-COPY --from=postgres-exporter /bin/postgres_exporter /bin/postgres_exporter
-
-ENTRYPOINT ["/usr/sbin/cgexec", "-g", "*:neon-postgres", "docker-entrypoint.sh"]
-#ENTRYPOINT ["/usr/sbin/cgexec", "-g", "*:neon-postgres", "/usr/local/bin/compute_ctl"]
 
 FROM alpine:3.16 AS vm-runtime
 # add busybox
@@ -179,14 +125,9 @@ fi
 
 	scriptInitTab = `
 ::sysinit:/neonvm/bin/vminit
-::sysinit:cgconfigparser -l /etc/cgconfig.conf -s 1664
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -s /bin/sh -l nobody --session-command /bin/node_exporter
-#::respawn:su -s /bin/sh -l nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
-::respawn:su -s /bin/sh -l nobody --session-command 'DATA_SOURCE_NAME="user=postgres sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
-#::respawn:su -s /bin/sh -l vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
@@ -237,21 +178,6 @@ for i in ${ETH_LIST}; do
     ip link set up dev $iface
     udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 done
-`
-
-// cgconfig.conf
-	configCgroup = `# Configuration for cgroups in VM compute nodes
-group neon-postgres {
-    perm {
-        admin {
-            uid = vm-informant;
-        }
-        task {
-            gid = users;
-        }
-    }
-    memory {}
-}
 `
 )
 
@@ -444,27 +370,18 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	// add 'cgconfig.conf' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(configCgroup)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "cgconfig.conf", b); err != nil {
-		log.Fatalln(err)
-	}
-
 	dockerFileTarReader := bytes.NewReader(buf.Bytes())
 
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
+
 	opt := types.ImageBuildOptions{
 		Tags: []string{
 			dstIm,
 		},
 		BuildArgs:      buildArgs,
 		SuppressOutput: true,
-		NoCache:        true,
+		NoCache:        false,
 		Context:        dockerFileTarReader,
 		Dockerfile:     "Dockerfile",
 		Remove:         true,
