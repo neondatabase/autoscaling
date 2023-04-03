@@ -751,16 +751,18 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 		return nil, 400, errors.New("Cannot suspend agent that is not yet registered")
 	}
 
-	// Acquire s.runner.requestLock so that when we return, we can guarantee that
 	locked = false
 	s.runner.lock.Unlock()
 
+	// Acquire s.runner.requestLock so that when we return, we can guarantee that any future
+	// requests to NeonVM or the scheduler will first observe that the informant is suspended and
+	// exit early, before actually making the request.
 	if err := s.runner.requestLock.TryLock(ctx); err != nil {
 		err = fmt.Errorf("Context expired while trying to acquire requestLock: %w", err)
 		s.runner.logger.Errorf("%s", err)
 		return nil, 500, err
 	}
-	s.runner.requestLock.Unlock() // dont' actually hold the lock, we just wanted to wait
+	s.runner.requestLock.Unlock() // don't actually hold the lock, we're just using it as a barrier.
 
 	return &api.AgentIdentificationMessage{
 		Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
