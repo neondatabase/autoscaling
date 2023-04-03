@@ -5,7 +5,6 @@ package plugin
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -57,9 +56,5 @@ func (e *AutoscaleEnforcer) watchPodDeletions(
 			},
 		},
 	)
-	if err != nil {
-		return fmt.Errorf("Error watching pod deletions: %w", err)
-	}
-
-	return nil
+	return err
 }
