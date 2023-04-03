@@ -37,7 +37,12 @@ type agentState struct {
 	metrics              PromMetrics
 }
 
-func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) (*agentState, error) {
+func (r MainRunner) newAgentState(
+	ctx context.Context,
+	podIP string,
+	broker *pubsub.Broker[watchEvent],
+	schedulerStore *util.WatchStore[corev1.Pod],
+) (*agentState, error) {
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
@@ -51,7 +56,7 @@ func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent
 	}
 
 	var err error
-	state.metrics, err = startPrometheusServer(state)
+	state.metrics, err = startPrometheusServer(ctx, state)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
 	}

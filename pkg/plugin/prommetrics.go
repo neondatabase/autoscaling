@@ -68,7 +68,18 @@ func (p *AutoscaleEnforcer) startPrometheusServer(ctx context.Context) error {
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
 	srv := &http.Server{Handler: mux}
 
+	shutdownCtx, shutdown := context.WithCancel(ctx)
+
+	// Shutdown the server when the context expires, but also exit the shutdown watcher if the
+	// server shuts down for some other reason.
 	go func() {
+		<-shutdownCtx.Done()
+		srv.Shutdown(context.Background())
+	}()
+
+	go func() {
+		// shutdown the shutdown watcher if we exit before it
+		defer shutdown()
 		if err := srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 			klog.Errorf("Prometheus server exited with unexpected error: %s", err)
 		}

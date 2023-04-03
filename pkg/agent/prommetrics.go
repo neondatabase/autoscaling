@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -19,7 +20,7 @@ type PromMetrics struct {
 	informantRequestsInbound  *prometheus.CounterVec
 }
 
-func startPrometheusServer(globalstate *agentState) (PromMetrics, error) {
+func startPrometheusServer(ctx context.Context, globalstate *agentState) (PromMetrics, error) {
 	// Separate binding from serving, so that we can catch any error in this thread, rather than the
 	// server's.
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: 9100}
@@ -76,7 +77,18 @@ func startPrometheusServer(globalstate *agentState) (PromMetrics, error) {
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
 	srv := &http.Server{Handler: mux}
 
+	shutdownCtx, shutdown := context.WithCancel(ctx)
+
+	// Shutdown the server when the context expires, but also exit the shutdown watcher if the
+	// server shuts down for some other reason.
 	go func() {
+		<-shutdownCtx.Done()
+		srv.Shutdown(context.Background())
+	}()
+
+	go func() {
+		// shutdown the shutdown watcher if we exit before it
+		defer shutdown()
 		if err := srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 			klog.Errorf("Prometheus server exited with unexpected error: %s", err)
 		}
