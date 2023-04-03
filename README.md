@@ -52,7 +52,17 @@ For more information, refer to [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Building and running
 
-Build everything:
+Build NeonVM Linux kernel (it takes time, can be run only once)
+
+```sh
+make kernel
+```
+
+Build docker images:
+
+```sh
+make docker-build
+```
 
 Start local [`kind`] cluster:
 
@@ -60,19 +70,13 @@ Start local [`kind`] cluster:
 make local-cluster
 ```
 
-Build NeonVM Linux kernel (it takes time, can be run only once)
-
-```sh
-make kernel
-```
-
-Build and deploy NeonVM and Autoscaling components
+Deploy NeonVM and Autoscaling components
 
 ```sh
 make deploy
 ```
 
-Build test VM:
+Build and load the test VM:
 
 ```sh
 make pg14-disk-test
@@ -122,7 +126,7 @@ You can either download them from their websites or install using Homebrew: `bre
 make local-cluster
 make kernel
 make deploy
-make vm-example
+make example-vms
 make e2e
 ```
 
