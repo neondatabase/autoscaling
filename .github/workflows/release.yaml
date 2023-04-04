@@ -43,7 +43,7 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: build binaries
-        run:  make build
+        run:  make VERSION=${{ steps.get_vcs_info.outputs.version }} VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} build
 
       - name: docker - install qemu
         uses: docker/setup-qemu-action@v2
@@ -159,6 +159,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             bin/vm-builder
+            bin/vm-builder-generic
             bin/vm-informant
             deploy/autoscale-scheduler.yaml
             deploy/autoscaler-agent.yaml
