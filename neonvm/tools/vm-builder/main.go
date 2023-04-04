@@ -75,8 +75,7 @@ COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
 COPY --from=node-exporter     /bin/node_exporter     /bin/node_exporter
 COPY --from=postgres-exporter /bin/postgres_exporter /bin/postgres_exporter
 
-ENTRYPOINT ["/usr/sbin/cgexec", "-g", "*:neon-postgres", "docker-entrypoint.sh"]
-#ENTRYPOINT ["/usr/sbin/cgexec", "-g", "*:neon-postgres", "/usr/local/bin/compute_ctl"]
+ENTRYPOINT ["/usr/sbin/cgexec", "-g", "*:neon-postgres", "/usr/local/bin/compute_ctl"]
 
 FROM alpine:3.16 AS vm-runtime
 # add busybox
@@ -184,9 +183,8 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vmstart
 ::respawn:su -s /bin/sh -l nobody --session-command /bin/node_exporter
-#::respawn:su -s /bin/sh -l nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
-::respawn:su -s /bin/sh -l nobody --session-command 'DATA_SOURCE_NAME="user=postgres sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
-#::respawn:su -s /bin/sh -l vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:su -s /bin/sh -l nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
+::respawn:su -s /bin/sh -l vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
