@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
@@ -54,32 +55,57 @@ func startVMWatcher(
 		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
-					podEvents <- makeVMEvent(vm, vmEventAdded)
+					event, err := makeVMEvent(vm, vmEventAdded)
+					if err != nil {
+						klog.Errorf("Erorr handling VM added: %s", err)
+						return
+					}
+					podEvents <- event
 				}
 			},
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
 				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
 				newIsOurs := vmIsOurResponsibility(newVM, config, nodeName)
 
+				var vmForEvent *vmapi.VirtualMachine
+				var eventKind vmEventKind
+
 				if !oldIsOurs && newIsOurs {
-					podEvents <- makeVMEvent(newVM, vmEventAdded)
+					vmForEvent = newVM
+					eventKind = vmEventAdded
 				} else if oldIsOurs && !newIsOurs {
-					podEvents <- makeVMEvent(oldVM, vmEventDeleted)
+					vmForEvent = oldVM
+					eventKind = vmEventDeleted
+				} else {
+					return
 				}
+
+				event, err := makeVMEvent(vmForEvent, eventKind)
+				if err != nil {
+					klog.Errorf("Error handling VM update: %s", err)
+					return
+				}
+
+				podEvents <- event
 			},
 			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
-					podEvents <- makeVMEvent(vm, vmEventDeleted)
+					event, err := makeVMEvent(vm, vmEventDeleted)
+					if err != nil {
+						klog.Errorf("Error handling VM deletion: %s", err)
+						return
+					}
+					podEvents <- event
 				}
 			},
 		},
 	)
 }
 
-func makeVMEvent(vm *vmapi.VirtualMachine, kind vmEventKind) vmEvent {
+func makeVMEvent(vm *vmapi.VirtualMachine, kind vmEventKind) (vmEvent, error) {
 	info, err := api.ExtractVmInfo(vm)
 	if err != nil {
-		panic(fmt.Errorf("unexpected failure while extracting VM info from %s:%s: %w", vm.Namespace, vm.Name, err))
+		return vmEvent{}, fmt.Errorf("Error extracting VM info from %s:%s: %w", vm.Namespace, vm.Name, err)
 	}
 
 	return vmEvent{
@@ -87,5 +113,5 @@ func makeVMEvent(vm *vmapi.VirtualMachine, kind vmEventKind) vmEvent {
 		vmInfo:  *info,
 		podName: vm.Status.PodName,
 		podIP:   vm.Status.PodIP,
-	}
+	}, nil
 }
