@@ -148,7 +148,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 	store := WatchStore[T]{
 		objects:       make(map[types.UID]*T),
-		triggerRelist: make(chan struct{}),
+		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
 		stopSignal:    sendStop,
 	}
