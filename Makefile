@@ -14,7 +14,8 @@ PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 VM_KERNEL_VERSION ?= "5.15.80"
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.23.1
+# List of available versions: https://storage.googleapis.com/kubebuilder-tools
+ENVTEST_K8S_VERSION = 1.24.2
 
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
