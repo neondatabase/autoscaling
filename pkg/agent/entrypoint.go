@@ -23,14 +23,14 @@ type MainRunner struct {
 }
 
 func (r MainRunner) Run(ctx context.Context) error {
-	podEvents := make(chan vmEvent)
+	vmEvents := make(chan vmEvent)
 
 	buildInfo := util.GetBuildInfo()
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	klog.Info("Starting VM watcher")
-	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, r.EnvArgs.K8sNodeName, podEvents)
+	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, r.EnvArgs.K8sNodeName, vmEvents)
 	if err != nil {
 		return fmt.Errorf("Error starting VM watcher: %w", err)
 	}
@@ -72,7 +72,7 @@ func (r MainRunner) Run(ctx context.Context) error {
 		loop:
 			for {
 				select {
-				case <-podEvents:
+				case <-vmEvents:
 				default:
 					break loop
 				}
@@ -80,7 +80,7 @@ func (r MainRunner) Run(ctx context.Context) error {
 
 			globalState.Stop()
 			return nil
-		case event := <-podEvents:
+		case event := <-vmEvents:
 			globalState.handleEvent(ctx, event)
 		}
 	}
