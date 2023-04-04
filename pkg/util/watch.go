@@ -147,8 +147,10 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	sendStop, stopSignal := NewSingleSignalPair()
 
 	store := WatchStore[T]{
-		objects:    make(map[types.UID]*T),
-		stopSignal: sendStop,
+		objects:       make(map[types.UID]*T),
+		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
+		relisted:      make(chan struct{}),
+		stopSignal:    sendStop,
 	}
 
 	items := accessors.Items(initialList)
@@ -203,12 +205,17 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		}
 
 		for {
+			// this is used exclusively for relisting, but must be defined up here so that our gotos
+			// don't jump over variables.
+			var signalRelistComplete []chan struct{}
 			for {
 				select {
 				case <-stopSignal.Recv():
 					return
 				case <-ctx.Done():
 					return
+				case <-store.triggerRelist:
+					continue
 				case event, ok := <-watcher.ResultChan():
 					if !ok {
 						klog.Infof("watch %s: watcher ended gracefully, restarting", config.LogName)
@@ -304,8 +311,40 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 			}
 
 		relist:
+			// Every time we make a new request, we create a channel for it. That's because we need
+			// to make sure that any user's call to WatchStore.Relist() that happens *while* we're
+			// actually making the request to K8s won't get overwritten by that request. Basically,
+			// we need to make sure that relisting is only marked as complete if there was a request
+			// that occurred *after* the call to Relist() returned.
+			//
+			// There's probably other ways we could do this - it's an area for possible improvement.
+			//
+			// Note: if we didn't do this at all, the alternative would be to ignore additional
+			// relist requests, having them handled naturally as we get around to watching again.
+			// This can amplify request failures - particularly if the K8s API server is overloaded.
+			signalRelistComplete = make([]chan struct{}, 0, 1)
+
 			klog.Infof("watch %s: re-listing", config.LogName)
-			for {
+			for first := true; ; first = false {
+				func() {
+					store.mutex.Lock()
+					defer store.mutex.Unlock()
+
+					newRelistTriggered := false
+
+					// consume any additional relist request
+					select {
+					case <-store.triggerRelist:
+						newRelistTriggered = true
+					default:
+					}
+
+					if first || newRelistTriggered {
+						signalRelistComplete = append(signalRelistComplete, store.relisted)
+						store.relisted = make(chan struct{})
+					}
+				}()
+
 				relistList, err := client.List(ctx, opts)
 				if err != nil {
 					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
@@ -367,8 +406,12 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				// Update ResourceVersion, recreate watcher.
 				opts.ResourceVersion = relistList.GetListMeta().GetResourceVersion()
 				klog.Infof("watch %s: re-list complete, restarting watcher", config.LogName)
+				for _, ch := range signalRelistComplete {
+					close(ch)
+				}
 				goto newWatcher
 			}
+
 		newWatcher:
 			for {
 				watcher, err = client.Watch(ctx, opts)
@@ -407,8 +450,25 @@ type WatchStore[T any] struct {
 	objects map[types.UID]*T
 	mutex   sync.Mutex
 
+	triggerRelist chan struct{}
+	relisted      chan struct{}
+
 	stopSignal SignalSender
 	stopped    atomic.Bool
+}
+
+// Relist triggers re-listing the WatchStore, returning a channel that will be closed once the
+// re-list is complete
+func (w *WatchStore[T]) Relist() <-chan struct{} {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	select {
+	case w.triggerRelist <- struct{}{}:
+	default:
+	}
+
+	return w.relisted
 }
 
 func (w *WatchStore[T]) Stop() {
