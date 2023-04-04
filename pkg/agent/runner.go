@@ -84,7 +84,8 @@ type Runner struct {
 	// logger is the shared logger for this Runner, giving all log lines a unique, relevant prefix
 	logger RunnerLogger
 
-	// shutdown provides a clean way to trigger all background Runner threads to shut down
+	// shutdown provides a clean way to trigger all background Runner threads to shut down. shutdown
+	// is set exactly once, by (*Runner).Run
 	shutdown context.CancelFunc
 
 	// vm stores some common information about the VM.
@@ -371,6 +372,7 @@ func (r *Runner) setStatus(with func(*podStatus)) {
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
 func (r *Runner) Run(ctx context.Context) error {
+	ctx, r.shutdown = context.WithCancel(ctx)
 	defer r.shutdown()
 
 	schedulerWatch, scheduler, err := watchSchedulerUpdates(

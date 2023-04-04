@@ -109,7 +109,7 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 			},
 			schedulerRespondedWithMigration: false,
 
-			shutdown:              cancelRunnerContext,
+			shutdown:              nil, // set by (*Runner).Run
 			vm:                    event.vmInfo,
 			podName:               podName,
 			podIP:                 event.podIP,
