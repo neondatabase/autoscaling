@@ -49,11 +49,14 @@ linters-settings:
     exclude:
       - '^net/http\.(Client|Server)'
       - '^net\.TCPAddr$'
-      # metav1.{GetOptions,ListOptions,WatchOptions,PatchOptions}
-      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Get|List|Watch|Patch)Options$'
+      # metav1.{CreateOptions,GetOptions,ListOptions,WatchOptions,PatchOptions}
+      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch)Options$'
+      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.ObjectMeta$'
       - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
       - '^github\.com/containerd/cgroups/v3/cgroup2\.(Resources|Memory)'
       - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
+      # vmapi.{VirtualMachine,VirtualMachineSpec,VirtualMachineMigration,VirtualMachineMigrationSpec}
+      - '^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.VirtualMachine(Migration)?(Spec)?$'
 
   # see: <https://golangci-lint.run/usage/linters/#gci>
   gci:
