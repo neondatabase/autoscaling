@@ -425,6 +425,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					for uid := range deleted {
 						obj := store.objects[uid]
 						delete(store.objects, uid)
+						for _, index := range store.indexes {
+							index.Delete(obj)
+						}
 						handlers.DeleteFunc(obj, true)
 					}
 
@@ -436,8 +439,14 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						oldObj, hasObj := oldObjects[uid]
 
 						if hasObj {
+							for _, index := range store.indexes {
+								index.Update(oldObj, obj)
+							}
 							handlers.UpdateFunc(oldObj, obj)
 						} else {
+							for _, index := range store.indexes {
+								index.Add(obj)
+							}
 							handlers.AddFunc(obj, false)
 						}
 					}
