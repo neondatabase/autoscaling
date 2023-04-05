@@ -374,19 +374,40 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				relistItems := accessors.Items(relistList)
 
 				func() {
-					// First, copy the contents of objects into oldObjects. We do this so that we can
-					// uphold some guarantees about the contents of the store.
-					oldObjects := make(map[types.UID]*T)
-					for uid, obj := range store.objects {
-						oldObjects[uid] = obj
-					}
-
 					store.mutex.Lock()
 					defer store.mutex.Unlock()
+
+					// Copy the current contents of objects, and start tracking which ones have
+					// since been deleted.
+					oldObjects := make(map[types.UID]*T)
+					deleted := make(map[types.UID]bool)
+					for uid, obj := range store.objects {
+						oldObjects[uid] = obj
+						deleted[uid] = true // initially mark everything as deleted, until we find it isn't
+					}
+
+					// Mark all items we still have as not deleted
+					for i := range relistItems {
+						uid := P(&relistItems[i]).GetObjectMeta().GetUID()
+						delete(deleted, uid)
+					}
+
+					// Generate deletion events for all objects that are no longer present. We do
+					// this first so that when there's externally-enforced uniqueness that isn't
+					// unique *across time* (e.g. object names), users can still rely on uniqueness
+					// at any time that handlers are called.
+					for uid, obj := range oldObjects {
+						delete(store.objects, uid)
+						handlers.DeleteFunc(obj, true)
+					}
 
 					for i := range relistItems {
 						obj := &relistItems[i]
 						uid := P(obj).GetObjectMeta().GetUID()
+
+						if deleted[uid] {
+							continue // already processed above
+						}
 
 						store.objects[uid] = obj
 						oldObj, hasObj := oldObjects[uid]
@@ -397,13 +418,6 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						} else {
 							handlers.AddFunc(obj, false)
 						}
-					}
-
-					// For everything that's still in oldObjects (i.e. wasn't covered by relistItems),
-					// generate deletion events:
-					for uid, obj := range oldObjects {
-						delete(store.objects, uid)
-						handlers.DeleteFunc(obj, true)
 					}
 				}()
 
