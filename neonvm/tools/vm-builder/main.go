@@ -60,19 +60,61 @@ RUN set -exu \
 FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
 FROM quay.io/prometheus/node-exporter:v1.5.0 as node-exporter
 
+# Build pgbouncer
+#
+FROM debian:bullseye-slim AS pgbouncer
+RUN set -e \
+	&& apt-get update \
+	&& apt-get install -y \
+		curl \
+		build-essential \
+		pkg-config \
+		libevent-dev \
+		libssl-dev
+
+ENV PGBOUNCER_VERSION 1.18.0
+ENV PGBOUNCER_GITPATH 1_18_0
+RUN set -e \
+	&& curl -sfSL https://github.com/pgbouncer/pgbouncer/releases/download/pgbouncer_${PGBOUNCER_GITPATH}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz -o pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
+	&& tar xzvf pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
+	&& cd pgbouncer-${PGBOUNCER_VERSION} \
+	&& ./configure --prefix=/usr/local/pgbouncer \
+	&& make -j $(nproc) \
+	&& make install
+
 FROM {{.RootDiskImage}} AS rootdisk
 
 USER root
 RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant
 
-USER postgres
+# tweak nofile limits
+RUN set -e \
+	&& echo 'fs.file-max = 1048576' >>/etc/sysctl.conf \
+	&& echo '*    - nofile 1048576' >>/etc/security/limits.conf \
+	&& echo 'root - nofile 1048576' >>/etc/security/limits.conf
+
 COPY cgconfig.conf /etc/cgconfig.conf
-COPY --from=informant /usr/bin/vm-informant /usr/local/bin/vm-informant
+COPY pgbouncer.ini /etc/pgbouncer.ini
+RUN set -e \
+	&& chown postgres:postgres /etc/pgbouncer.ini \
+	&& chmod 0644 /etc/pgbouncer.ini \
+	&& chmod 0644 /etc/cgconfig.conf
+
+# deps for pgbouncer
+RUN set -e \
+	&& apt-get update \
+	&& apt-get install -y --no-install-recommends libevent-2.1-7 \
+	&& rm -rf /var/lib/apt/lists/*
+
+USER postgres
+
+COPY --from=informant         /usr/bin/vm-informant /usr/local/bin/vm-informant
 COPY --from=libcgroup-builder /libcgroup-install/bin/*  /usr/bin/
 COPY --from=libcgroup-builder /libcgroup-install/lib/*  /usr/lib/
 COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
 COPY --from=node-exporter     /bin/node_exporter     /bin/node_exporter
 COPY --from=postgres-exporter /bin/postgres_exporter /bin/postgres_exporter
+COPY --from=pgbouncer         /usr/local/pgbouncer/bin/pgbouncer /usr/local/bin/pgbouncer
 
 ENTRYPOINT ["/usr/sbin/cgexec", "-g", "*:neon-postgres", "/usr/local/bin/compute_ctl"]
 
@@ -181,9 +223,10 @@ fi
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vmstart
-::respawn:/neonvm/bin/su-exec vm-informant /usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"
-::respawn:/neonvm/bin/su-exec nobody /bin/node_exporter
-::respawn:env DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /neonvm/bin/su-exec nobody /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1
+::respawn:su -p vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:su -p nobody --session-command '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
+::respawn:su -p nobody --session-command /bin/node_exporter
+::respawn:su -p nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
@@ -249,6 +292,22 @@ group neon-postgres {
     }
     memory {}
 }
+`
+
+	// pgbouncer.ini
+	configPgbouncer = `
+[databases]
+*=host=localhost port=5432 auth_user=cloud_admin
+[pgbouncer]
+listen_port=6432
+listen_addr=0.0.0.0
+auth_type=scram-sha-256
+auth_user=cloud_admin
+client_tls_sslmode=disable
+server_tls_sslmode=disable
+pool_mode=transaction
+max_client_conn=10000
+default_pool_size=16
 `
 )
 
@@ -463,6 +522,16 @@ func main() {
 		log.Fatalln(err)
 	}
 	if err = AddToTar(tw, "cgconfig.conf", b); err != nil {
+		log.Fatalln(err)
+	}
+
+	// add 'pgbouncer.ini' file to docker build context
+	b.Reset()
+	_, err = b.WriteString(configPgbouncer)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if err = AddToTar(tw, "pgbouncer.ini", b); err != nil {
 		log.Fatalln(err)
 	}
 
