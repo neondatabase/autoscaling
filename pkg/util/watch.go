@@ -134,6 +134,10 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		handlers.DeleteFunc = func(obj P, mayBeStale bool) {}
 	}
 
+	// Handling bookmarks means that sometimes the API server will be kind, allowing us to continue
+	// the watch instead of resyncing.
+	opts.AllowWatchBookmarks = true
+
 	// Perform an initial listing
 	initialList, err := client.List(ctx, opts)
 	if err != nil {
