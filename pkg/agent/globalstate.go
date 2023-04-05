@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -48,11 +49,11 @@ func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent
 	}
 }
 
-func podIsOurResponsibility(pod *corev1.Pod, config *Config, nodeName string) bool {
-	return pod.Spec.NodeName == nodeName &&
-		pod.Status.PodIP != "" &&
-		pod.Spec.SchedulerName == config.Scheduler.SchedulerName &&
-		util.PodReady(pod)
+func vmIsOurResponsibility(vm *vmapi.VirtualMachine, config *Config, nodeName string) bool {
+	return vm.Status.Node == nodeName &&
+		vm.Status.Phase == vmapi.VmRunning &&
+		vm.Status.PodIP != "" &&
+		vm.Spec.SchedulerName == config.Scheduler.SchedulerName
 }
 
 func (s *agentState) Stop() {
@@ -64,7 +65,7 @@ func (s *agentState) Stop() {
 	}
 }
 
-func (s *agentState) handleEvent(ctx context.Context, event podEvent) {
+func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 	klog.Infof("Handling pod event %+v", event)
 
 	if err := s.lock.TryLock(ctx); err != nil {
@@ -73,18 +74,19 @@ func (s *agentState) handleEvent(ctx context.Context, event podEvent) {
 	}
 	defer s.lock.Unlock()
 
-	state, hasPod := s.pods[event.podName]
+	podName := api.PodName{Namespace: event.vmInfo.Namespace, Name: event.podName}
+	state, hasPod := s.pods[podName]
 
 	switch event.kind {
-	case podEventDeleted:
+	case vmEventDeleted:
 		if !hasPod {
 			klog.Errorf("Received delete event for pod %v that isn't present", event.podName)
 			return
 		}
 
 		state.stop()
-		delete(s.pods, event.podName)
-	case podEventAdded:
+		delete(s.pods, podName)
+	case vmEventAdded:
 		if hasPod {
 			klog.Errorf("Received add event for pod %v while already present", event.podName)
 			return
@@ -105,9 +107,8 @@ func (s *agentState) handleEvent(ctx context.Context, event podEvent) {
 			logger: RunnerLogger{
 				prefix: fmt.Sprintf("Runner %v: ", event.podName),
 			},
-			// note: vm is expected to be nil before (*Runner).Run
-			vm:                    nil,
-			podName:               event.podName,
+			vm:                    event.vmInfo,
+			podName:               podName,
 			podIP:                 event.podIP,
 			lock:                  util.NewChanMutex(),
 			vmStateLock:           util.NewChanMutex(),
@@ -125,13 +126,13 @@ func (s *agentState) handleEvent(ctx context.Context, event podEvent) {
 		}
 
 		state = &podState{
-			podName: event.podName,
+			podName: podName,
 			stop:    cancelRunnerContext,
 			runner:  runner,
 			status:  status,
 		}
-		s.pods[event.podName] = state
-		runner.Spawn(runnerCtx, event.vmName)
+		s.pods[podName] = state
+		runner.Spawn(runnerCtx)
 	default:
 		panic(errors.New("bad event: unexpected event kind"))
 	}
