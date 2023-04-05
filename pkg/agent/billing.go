@@ -71,8 +71,7 @@ const (
 func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
 	conf *BillingConfig,
-	targetNode string,
-	store *util.WatchStore[vmapi.VirtualMachine],
+	store VMStoreForNode,
 ) {
 	client := billing.NewClient(conf.URL, http.DefaultClient)
 
@@ -90,7 +89,7 @@ func RunBillingMetricsCollector(
 		pushWindowStart: time.Now(),
 	}
 
-	state.collect(conf, targetNode, store)
+	state.collect(conf, store)
 	batch := client.NewBatch()
 
 	for {
@@ -100,7 +99,7 @@ func RunBillingMetricsCollector(
 			if store.Stopped() && backgroundCtx.Err() == nil {
 				panic(errors.New("VM store stopped but background context is still live"))
 			}
-			state.collect(conf, targetNode, store)
+			state.collect(conf, store)
 		case <-pushTicker.C:
 			klog.Infof("Creating billing batch")
 			state.drainAppendToBatch(conf, batch)
@@ -124,21 +123,18 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *billingMetricsState) collect(conf *BillingConfig, targetNode string, store *util.WatchStore[vmapi.VirtualMachine]) {
+func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode) {
 	now := time.Now()
 
 	old := s.present
 	s.present = make(map[billingMetricsKey]vmMetricsInstant)
-	for _, vm := range store.Items() {
+	vmsOnThisNode := store.ListIndexed(func(i *VMNodeIndex) []*vmapi.VirtualMachine {
+		return i.List()
+	})
+	for _, vm := range vmsOnThisNode {
 		endpointID, ok := vm.Labels[EndpointLabel]
 		if !ok {
 			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
-			continue
-		}
-
-		if vm.Status.Node != targetNode {
-			// the VM watch store includes VMs from all nodes - we need to filter to just report the
-			// VMs for our own node.
 			continue
 		}
 
