@@ -70,7 +70,9 @@ jobs:
       - run: make docker-build
       - run: make docker-build-examples
 
-      - run: make local-cluster
+      - name: make local-cluster
+        run: make local-cluster
+        id: make_local_cluster
 
       - run: make deploy
       - run: make example-vms
@@ -86,7 +88,7 @@ jobs:
           kubectl kuttl test --config tests/e2e/kuttl-test.yaml --skip-delete
 
       - name: Get k8s logs and events
-        if: failure()
+        if: steps.make_local_cluster.conclusion != skipped
         run: |
           namespaces=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
           for namespace in $namespaces; do
