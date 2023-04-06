@@ -88,8 +88,12 @@ jobs:
           kubectl kuttl test --config tests/e2e/kuttl-test.yaml --skip-delete
 
       - name: Get k8s logs and events
-        if: ${{ (failure() || cancelled()) && steps.make_local_cluster.conclusion != 'skipped' }}
+        if: ${{ failure() || cancelled() }}
         run: |
+          if ! kubectl config current-context; then
+            echo "skipping cluster logs because no cluster found in kubectl context"
+            exit 0
+          fi
           namespaces=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
           for namespace in $namespaces; do
             pods=$(kubectl get pods -n $namespace -o jsonpath='{.items[*].metadata.name}')
