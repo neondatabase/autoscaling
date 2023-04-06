@@ -70,7 +70,9 @@ jobs:
       - run: make docker-build
       - run: make docker-build-examples
 
-      - run: make local-cluster
+      - name: make local-cluster
+        run: make local-cluster
+        id: make_local_cluster
 
       - run: make deploy
       - run: make example-vms
@@ -86,8 +88,12 @@ jobs:
           kubectl kuttl test --config tests/e2e/kuttl-test.yaml --skip-delete
 
       - name: Get k8s logs and events
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         run: |
+          if ! kubectl config current-context; then
+            echo "skipping cluster logs because no cluster found in kubectl context"
+            exit 0
+          fi
           namespaces=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
           for namespace in $namespaces; do
             pods=$(kubectl get pods -n $namespace -o jsonpath='{.items[*].metadata.name}')
