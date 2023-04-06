@@ -166,11 +166,12 @@ RUN set -e \
 		e2fsprogs
 
 # init scripts
-ADD inittab  /neonvm/bin/inittab
-ADD vminit   /neonvm/bin/vminit
-ADD vmstart  /neonvm/bin/vmstart
-ADD vmacpi   /neonvm/acpi/vmacpi
-RUN chmod +x /neonvm/bin/vminit /neonvm/bin/vmstart
+ADD inittab   /neonvm/bin/inittab
+ADD vminit    /neonvm/bin/vminit
+ADD vmstart   /neonvm/bin/vmstart
+ADD vmacpi    /neonvm/acpi/vmacpi
+ADD powerdown /neonvm/bin/powerdown
+RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
@@ -232,7 +233,13 @@ ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --nor
 
 	scriptVmAcpi = `
 event=button/power
-action=/neonvm/bin/poweroff
+action=/neonvm/bin/powerdown
+`
+
+	scriptPowerDown = `#!/neonvm/bin/sh
+
+su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+/neonvm/bin/poweroff
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
@@ -502,6 +509,16 @@ func main() {
 		log.Fatalln(err)
 	}
 	if err = AddToTar(tw, "vmacpi", b); err != nil {
+		log.Fatalln(err)
+	}
+
+	// add 'powerdown' file to docker build context
+	b.Reset()
+	_, err = b.WriteString(scriptPowerDown)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if err = AddToTar(tw, "powerdown", b); err != nil {
 		log.Fatalln(err)
 	}
 
