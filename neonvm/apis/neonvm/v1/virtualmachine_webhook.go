@@ -154,6 +154,9 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	if !reflect.DeepEqual(r.Spec.Disks, before.Spec.Disks) {
 		return fmt.Errorf(".spec.disks is immutable")
 	}
+	if !reflect.DeepEqual(r.Spec.PodResources, before.Spec.PodResources) {
+		return fmt.Errorf(".spec.podResources is immutable")
+	}
 
 	// validate .spec.guest.cpu.use
 	if r.Spec.Guest.CPUs.Use != nil {
