@@ -186,8 +186,8 @@ type podResourceState[T any] struct {
 	// Reserved is the amount of T that this pod has reserved. It is guaranteed that the pod is
 	// using AT MOST Reserved T.
 	Reserved T `json:"reserved"`
-	// Buffer is the amount of Reserved that we've included in reserved to account for the
-	// possibility of unilateral increases by the autoscaler-agent
+	// Buffer is the amount of T that we've included in Reserved to account for the possibility of
+	// unilateral increases by the autoscaler-agent
 	//
 	// This value is only nonzero during startup (between initial state load and first communication
 	// from the autoscaler-agent), and MUST be less than or equal to reserved.
