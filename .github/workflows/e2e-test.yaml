@@ -11,7 +11,7 @@ on:
       - main
 
 jobs:
-  tests:
+  e2e-tests:
     runs-on: [ self-hosted, gen3, small ]
     steps:
       - uses: actions/checkout@v3
