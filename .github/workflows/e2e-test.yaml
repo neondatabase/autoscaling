@@ -110,4 +110,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          kind delete cluster
+          # check that kind exists before trying to delete the cluster. Avoids spurious errors
+          kind version 2>&1 >/dev/null && kind delete cluster
