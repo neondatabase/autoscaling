@@ -97,7 +97,7 @@ func RunBillingMetricsCollector(
 		select {
 		case <-collectTicker.C:
 			klog.Infof("Collecting billing state")
-			if store.Stopped() && backgroundCtx.Err() != nil {
+			if store.Stopped() && backgroundCtx.Err() == nil {
 				panic(errors.New("VM store stopped but background context is still live"))
 			}
 			state.collect(conf, targetNode, store)
