@@ -380,10 +380,10 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					// Copy the current contents of objects, and start tracking which ones have
 					// since been deleted.
 					oldObjects := make(map[types.UID]*T)
-					deleted := make(map[types.UID]bool)
+					deleted := make(map[types.UID]struct{}) // set of UIDs that have been deleted
 					for uid, obj := range store.objects {
 						oldObjects[uid] = obj
-						deleted[uid] = true // initially mark everything as deleted, until we find it isn't
+						deleted[uid] = struct{}{} // initially mark everything as deleted, until we find it isn't
 					}
 
 					// Mark all items we still have as not deleted
@@ -405,7 +405,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						obj := &relistItems[i]
 						uid := P(obj).GetObjectMeta().GetUID()
 
-						if deleted[uid] {
+						if _, deleted := deleted[uid]; deleted {
 							continue // already processed above
 						}
 
