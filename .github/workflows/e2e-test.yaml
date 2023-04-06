@@ -111,4 +111,6 @@ jobs:
         if: always()
         run: |
           # check that kind exists before trying to delete the cluster. Avoids spurious errors
-          which kind 2>/dev/null >/dev/null && kind delete cluster
+          if which kind 2>/dev/null >/dev/null; then
+            kind delete cluster
+          fi
