@@ -81,11 +81,15 @@ RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
+ARG USE_INITTAB
 COPY --from=rootdisk / /rootdisk
 COPY --from=vm-runtime /neonvm /rootdisk/neonvm
 RUN set -e \
     && mkdir -p /rootdisk/etc \
+    && (if [ -n "$USE_INITTAB" ]; then cp /rootdisk/etc/inittab /tmp/guest-inittab 2>/dev/null || true; fi) \
+    && touch /tmp/guest-inittab \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
+    && cat /tmp/guest-inittab >> /rootdisk/etc/inittab \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
@@ -188,11 +192,12 @@ done
 )
 
 var (
-	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
-	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
-	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
-	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
+	srcImage   = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
+	dstImage   = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	size       = flag.String("size", "1G", `Size for disk image: --size=1G`)
+	outFile    = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	useInittab = flag.Bool("use-inittab", false, `Use guest container's inittab, appending it to the default one`)
+	forcePull  = flag.Bool("pull", false, `Pull src image even if already present locally`)
 )
 
 func printReader(reader io.ReadCloser) error {
@@ -390,6 +395,12 @@ func main() {
 
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
+
+	var inittabArg string
+	if *useInittab {
+		inittabArg = "yes"
+	}
+	buildArgs["USE_INITTAB"] = &inittabArg
 
 	opt := types.ImageBuildOptions{
 		Tags: []string{

@@ -171,8 +171,8 @@ docker-build-examples: vm-informant bin/vm-builder ## Build docker images for te
 		--tag tmp-$(EXAMPLE_VM_IMG) \
 		--file vm-examples/postgres-minimal/Dockerfile \
 		vm-examples/postgres-minimal/
-	./bin/vm-builder -src tmp-$(EXAMPLE_VM_IMG) -use-inittab -dst $(EXAMPLE_VM_IMG)
-	./bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
+	./bin/vm-builder-generic -src tmp-$(EXAMPLE_VM_IMG) -use-inittab -dst $(EXAMPLE_VM_IMG)
+	./bin/vm-builder-generic -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
 
 .PHONY: docker-build-pg14-disk-test
 docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
@@ -189,7 +189,7 @@ docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for
 		--load \
 		--file vm-examples/pg14-disk-test/Dockerfile.vmdata \
 		vm-examples/pg14-disk-test/
-	./bin/vm-builder -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
+	./bin/vm-builder-generic -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
