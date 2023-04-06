@@ -16,7 +16,7 @@ const (
 	AgentBackgroundCheckTimeout time.Duration = 250 * time.Millisecond
 
 	AgentResumeTimeout  time.Duration = 100 * time.Millisecond
-	AgentSuspendTimeout time.Duration = 200 * time.Millisecond
+	AgentSuspendTimeout time.Duration = 5 * time.Second        // may take a while; it /suspend intentionally waits
 	AgentUpscaleTimeout time.Duration = 400 * time.Millisecond // does not include waiting for /upscale response
 )
 

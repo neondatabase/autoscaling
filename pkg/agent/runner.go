@@ -967,6 +967,16 @@ func (r *Runner) updateVMResources(
 
 	r.logger.Infof("Updating VM resources: reason = %q", reason)
 
+	// A /suspend request from a VM informant will wait until requestLock returns. So we're good to
+	// make whatever requests we need as long as the informant is here at the start.
+	//
+	// The reason we care about the informant server being "enabled" is that the VM informant uses
+	// it to ensure that there's at most one autoscaler-agent that's making requests on its behalf.
+	if err := r.validateInformant(); err != nil {
+		r.logger.Warningf("Unable to update VM resources because informant server is disabled: %w", err)
+		return nil
+	}
+
 	// state variables
 	var (
 		target api.Resources
@@ -1293,11 +1303,6 @@ func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint16 {
 // downscaling, rejectedDownscale will be called. If it returns an error, that error will be
 // returned and the update will be aborted. Otherwise, the returned newTarget will be used.
 //
-// FIXME: If the requested change is only upscaling, this method does not check that the VM
-// informant is available before making the request to NeonVM, which means we can incorrectly
-// cause changes to the VM while not enabled. This should be fixed in a broader rework, along with a
-// handful of other items.
-//
 // This method MUST be called while holding r.requestLock AND NOT r.lock.
 func (r *Runner) doVMUpdate(
 	ctx context.Context,
@@ -1314,6 +1319,12 @@ func (r *Runner) doVMUpdate(
 		defer r.lock.Unlock()
 
 		r.vm.SetUsing(amount)
+	}
+
+	if err := r.validateInformant(); err != nil {
+		r.logger.Warningf("Aborting VM update because informant server is not valid: %w", err)
+		resetVMTo(current)
+		return nil, nil
 	}
 
 	// If there's any fields that are being downscaled, request that from the VM informant.
@@ -1415,6 +1426,24 @@ func (r *Runner) doVMUpdate(
 
 	// Everything successful.
 	return &target, nil
+}
+
+// validateInformant checks that the Runner's informant server is present AND active (i.e. not
+// suspended).
+//
+// If either condition is false, this method returns error. This is typically used to check that the
+// Runner is enabled before making a request to NeonVM or the scheduler, in which case holding
+// r.requestLock is advised.
+//
+// This method MUST NOT be called while holding r.lock.
+func (r *Runner) validateInformant() error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	if r.server == nil {
+		return errors.New("no informant server set")
+	}
+	return r.server.Valid()
 }
 
 // doInformantDownscale is a convenience wrapper around (*InformantServer).Downscale that locks r,
