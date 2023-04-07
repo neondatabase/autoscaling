@@ -135,7 +135,6 @@ run: fmt vet ## Run a controller from your host.
 
 .PHONY: vm-informant
 vm-informant: ## Build vm-informant image
-	echo "---$(GIT_INFO)---"
 	docker buildx build \
 		--quiet \
 		--tag $(VM_INFORMANT_IMG) \
