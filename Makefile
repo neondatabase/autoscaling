@@ -1,4 +1,3 @@
-VERSION ?= dev
 # Image URL to use all building/pushing image targets
 IMG_CONTROLLER ?= controller:dev
 IMG_RUNNER ?= runner:dev
