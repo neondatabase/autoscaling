@@ -622,7 +622,7 @@ func NewNameIndex[T any]() *NameIndex[T] {
 		panic("type *T must implement metav1.ObjectMetaAccessor")
 	}
 
-	// FIXME: does this need to be a pointer?
+	// This doesn't *need* to be a pointer, but the intent is a little more clear this way.
 	return &NameIndex[T]{
 		namespacedNames: make(map[NamespacedName]*T),
 	}
