@@ -11,18 +11,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-// PodName represents the namespaced name of a pod
-//
-// Some analogous types already exist elsewhere (e.g., in the kubernetes API packages), but they
-// don't provide satisfactory JSON marshal/unmarshalling.
-type PodName struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
-
-func (n PodName) String() string {
-	return fmt.Sprintf("%s:%s", n.Namespace, n.Name)
-}
+type PodName = util.NamespacedName
 
 /////////////////////////////////
 // (Autoscaler) Agent Messages //
