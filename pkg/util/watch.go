@@ -623,32 +623,20 @@ func NewNameIndex[T any]() *NameIndex[T] {
 
 	// FIXME: does this need to be a pointer?
 	return &NameIndex[T]{
-		namespacedNames: make(map[struct {
-			namespace string
-			name      string
-		}]*T),
+		namespacedNames: make(map[NamespacedName]*T),
 	}
 }
 
 // NameIndex is a WatchIndex that provides efficient lookup for a value with a particular name
 type NameIndex[T any] struct {
-	namespacedNames map[struct {
-		namespace string
-		name      string
-	}]*T
+	namespacedNames map[NamespacedName]*T
 }
 
 // note: requires that *T implements metav1.ObjectMetaAccessor
-func keyForObj[T any](obj *T) struct {
-	namespace string
-	name      string
-} {
+func keyForObj[T any](obj *T) NamespacedName {
 	meta := any(obj).(metav1.ObjectMetaAccessor).GetObjectMeta()
 
-	return struct {
-		namespace string
-		name      string
-	}{namespace: meta.GetNamespace(), name: meta.GetName()}
+	return NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 }
 
 func (i *NameIndex[T]) Add(obj *T) {
@@ -663,9 +651,6 @@ func (i *NameIndex[T]) Delete(obj *T) {
 }
 
 func (i *NameIndex[T]) Get(namespace string, name string) (obj *T, ok bool) {
-	obj, ok = i.namespacedNames[struct {
-		namespace string
-		name      string
-	}{namespace, name}]
+	obj, ok = i.namespacedNames[NamespacedName{namespace, name}]
 	return
 }
