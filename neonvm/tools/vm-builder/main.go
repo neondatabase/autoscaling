@@ -320,7 +320,7 @@ default_pool_size=16
 
 var (
 	Version     string
-	VmInformant string
+	VMInformant string
 
 	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
 	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
