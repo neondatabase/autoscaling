@@ -585,7 +585,8 @@ type IndexedWatchStore[T any, I WatchIndex[T]] struct {
 
 	// id stores the id of this index in the WatchStore
 	id uint64
-	// collector allows us to
+	// collector has a destructor attached to it so that the index can be automatically removed from
+	// the WatchStore when it's no longer in use, without requiring users to manually get rid of it.
 	collector *struct{}
 }
 
