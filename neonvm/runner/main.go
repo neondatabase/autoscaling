@@ -532,7 +532,7 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	go terminateQemu(vmSpec.QMP)
+	go terminateQemuOnSigterm(vmSpec.QMP)
 	if err := execFg(QEMU_BIN, qemuCmd...); err != nil {
 		log.Fatal(err)
 	}
@@ -549,11 +549,13 @@ func terminateQemuOnSigterm(qmpPort int32) {
 		mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("127.0.0.1:%d", qmpPort), 2*time.Second)
 		if err != nil {
 			log.Println(err)
+			time.Sleep(time.Second)
 			continue
 		}
 
 		if err := mon.Connect(); err != nil {
 			log.Println(err)
+			time.Sleep(time.Second)
 			continue
 		}
 		defer mon.Disconnect()
@@ -562,6 +564,7 @@ func terminateQemuOnSigterm(qmpPort int32) {
 		_, err = mon.Run(qmpcmd)
 		if err != nil {
 			log.Println(err)
+			time.Sleep(time.Second)
 			continue
 		}
 
