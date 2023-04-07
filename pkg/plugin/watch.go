@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
 
-	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -25,8 +24,8 @@ import (
 // Events occurring before this method is called will not be sent.
 func (e *AutoscaleEnforcer) watchPodDeletions(
 	ctx context.Context,
-	vmDeletions chan<- api.PodName,
-	podDeletions chan<- api.PodName,
+	vmDeletions chan<- util.NamespacedName,
+	podDeletions chan<- util.NamespacedName,
 ) error {
 	_, err := util.Watch(
 		ctx,
@@ -46,7 +45,7 @@ func (e *AutoscaleEnforcer) watchPodDeletions(
 		metav1.ListOptions{},
 		util.WatchHandlerFuncs[*corev1.Pod]{
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
-				name := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+				name := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
 				if _, ok := pod.Labels[LabelVM]; ok {
 					vmDeletions <- name

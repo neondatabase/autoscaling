@@ -28,11 +28,11 @@ import (
 type pluginState struct {
 	lock util.ChanMutex
 
-	podMap  map[api.PodName]*podState
+	podMap  map[util.NamespacedName]*podState
 	nodeMap map[string]*nodeState
 
 	// otherPods stores information about non-VM pods
-	otherPods map[api.PodName]*otherPodState
+	otherPods map[util.NamespacedName]*otherPodState
 
 	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
 	// can appropriately scale our scoring
@@ -62,10 +62,10 @@ type nodeState struct {
 	//
 	// This includes both bound pods (i.e., pods fully committed to the node) and reserved pods
 	// (still may be unreserved)
-	pods map[api.PodName]*podState
+	pods map[util.NamespacedName]*podState
 
 	// otherPods are the non-VM pods that we're also tracking in this node
-	otherPods map[api.PodName]*otherPodState
+	otherPods map[util.NamespacedName]*otherPodState
 	// otherResources is the sum resource usage associated with the non-VM pods
 	otherResources nodeOtherResourceState
 
@@ -146,7 +146,7 @@ type podState struct {
 	// name is the namespace'd name of the pod
 	//
 	// name will not change after initialization, so it can be accessed without holding a lock.
-	name api.PodName
+	name util.NamespacedName
 
 	// vmName is the name of the VM, as given by the 'vm.neon.tech/name' label.
 	vmName string
@@ -206,7 +206,7 @@ type podResourceState[T any] struct {
 
 // otherPodState tracks a little bit of information for the non-VM pods we're handling
 type otherPodState struct {
-	name      api.PodName
+	name      util.NamespacedName
 	node      *nodeState
 	resources podOtherResourceState
 }
@@ -521,8 +521,8 @@ func buildInitialNodeState(node *corev1.Node, conf *Config) (*nodeState, error) 
 		name:      node.Name,
 		vCPU:      vCPU,
 		memSlots:  memSlots,
-		pods:      make(map[api.PodName]*podState),
-		otherPods: make(map[api.PodName]*otherPodState),
+		pods:      make(map[util.NamespacedName]*podState),
+		otherPods: make(map[util.NamespacedName]*otherPodState),
 		otherResources: nodeOtherResourceState{
 			RawCPU:           resource.Quantity{},
 			RawMemory:        resource.Quantity{},
@@ -585,7 +585,7 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
 // logs, so IMO it's worthwhile to have this separate.
-func (e *AutoscaleEnforcer) handleVMDeletion(podName api.PodName) {
+func (e *AutoscaleEnforcer) handleVMDeletion(podName util.NamespacedName) {
 	klog.Infof("[autoscale-enforcer] Handling deletion of VM pod %v", podName)
 
 	e.state.lock.Lock()
@@ -621,7 +621,7 @@ func (e *AutoscaleEnforcer) handleVMDeletion(podName api.PodName) {
 	klog.Infof(fmtString, migrating, pod.name, pod.node.name, vCPUVerdict, memVerdict)
 }
 
-func (e *AutoscaleEnforcer) handlePodDeletion(podName api.PodName) {
+func (e *AutoscaleEnforcer) handlePodDeletion(podName util.NamespacedName) {
 	klog.Infof("[autoscale-enforcer] Handling deletion of non-VM pod %v", podName)
 
 	e.state.lock.Lock()
@@ -752,8 +752,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	}
 
 	p.state.nodeMap = make(map[string]*nodeState)
-	p.state.podMap = make(map[api.PodName]*podState)
-	p.state.otherPods = make(map[api.PodName]*otherPodState)
+	p.state.podMap = make(map[util.NamespacedName]*podState)
+	p.state.otherPods = make(map[util.NamespacedName]*otherPodState)
 
 	// Build the node map
 	klog.Infof("[autoscale-enforcer] load state: Building node map")
@@ -778,10 +778,10 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 
 	// Store the PodSpecs by name, so we can access them as we're going through VMs
 	klog.Infof("[autoscale-enforcer] load state: Building initial PodSpecs map")
-	podSpecs := make(map[api.PodName]*corev1.Pod)
+	podSpecs := make(map[util.NamespacedName]*corev1.Pod)
 	for i := range pods.Items {
 		p := &pods.Items[i]
-		name := api.PodName{Name: p.Name, Namespace: p.Namespace}
+		name := util.NamespacedName{Name: p.Name, Namespace: p.Namespace}
 		podSpecs[name] = p
 	}
 
@@ -790,7 +790,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	skippedVms := 0
 	for i := range vms.Items {
 		vm := &vms.Items[i]
-		vmName := api.PodName{Name: vm.Name, Namespace: vm.Namespace}
+		vmName := util.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}
 		if vm.Spec.SchedulerName != p.state.conf.SchedulerName {
 			klog.Infof(
 				"[autoscale-enforcer] load state: Skipping VM %v, Spec.SchedulerName %q != our config.SchedulerName %q",
@@ -807,7 +807,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			continue
 		}
 
-		podName := api.PodName{Name: vm.Status.PodName, Namespace: vm.Namespace}
+		podName := util.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}
 		pod, ok := podSpecs[podName]
 		if !ok {
 			klog.Warningf(
@@ -909,7 +909,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	skippedOtherPods := 0
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+		podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 		if pod.Spec.SchedulerName != p.state.conf.SchedulerName {
 			klog.Infof(
 				"[autoscale-enforcer] load state: Skipping non-VM pod %v, Spec.SchedulerName %q != our config.SchedulerName %q",

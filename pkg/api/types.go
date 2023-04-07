@@ -11,8 +11,6 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type PodName = util.NamespacedName
-
 /////////////////////////////////
 // (Autoscaler) Agent Messages //
 /////////////////////////////////
@@ -90,7 +88,7 @@ type AgentRequest struct {
 	// If the scheduler does not support this version, then it will respond with a 400 status.
 	ProtoVersion PluginProtoVersion `json:"protoVersion"`
 	// Pod is the namespaced name of the pod making the request
-	Pod PodName `json:"pod"`
+	Pod util.NamespacedName `json:"pod"`
 	// Resources gives a requested or notified change in resources allocated to the VM.
 	//
 	// The requested amount MAY be equal to the current amount, in which case it serves as a

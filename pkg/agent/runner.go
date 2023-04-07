@@ -92,7 +92,7 @@ type Runner struct {
 	//
 	// This field MUST NOT be read or updated without holding lock.
 	vm      api.VmInfo
-	podName api.PodName
+	podName util.NamespacedName
 	podIP   string
 
 	// schedulerRespondedWithMigration is true iff the scheduler has returned an api.PluginResponse
