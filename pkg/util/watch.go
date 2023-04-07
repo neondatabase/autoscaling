@@ -396,7 +396,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					// this first so that when there's externally-enforced uniqueness that isn't
 					// unique *across time* (e.g. object names), users can still rely on uniqueness
 					// at any time that handlers are called.
-					for uid, obj := range oldObjects {
+					for uid := range deleted {
+						obj := store.objects[uid]
 						delete(store.objects, uid)
 						handlers.DeleteFunc(obj, true)
 					}
@@ -404,10 +405,6 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					for i := range relistItems {
 						obj := &relistItems[i]
 						uid := P(obj).GetObjectMeta().GetUID()
-
-						if _, deleted := deleted[uid]; deleted {
-							continue // already processed above
-						}
 
 						store.objects[uid] = obj
 						oldObj, hasObj := oldObjects[uid]
