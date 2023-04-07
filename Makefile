@@ -122,7 +122,7 @@ build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binarie
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VmInformant=${VM_INFORMANT_IMG}" neonvm/tools/vm-builder/main.go
+	go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMInformant=${VM_INFORMANT_IMG}" neonvm/tools/vm-builder/main.go
 
 .PHONY: bin/vm-builder-generic
 bin/vm-builder-generic: ## Build vm-builder-generic binary.

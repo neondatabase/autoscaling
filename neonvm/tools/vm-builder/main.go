@@ -327,7 +327,7 @@ var (
 	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
 	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
-	informant = flag.String("informant", VmInformant, `vm-informant docker image`)
+	informant = flag.String("informant", VMInformant, `vm-informant docker image`)
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 )
 
@@ -562,7 +562,7 @@ func main() {
 		},
 		BuildArgs:      buildArgs,
 		SuppressOutput: true,
-		NoCache:        true,
+		NoCache:        false,
 		Context:        dockerFileTarReader,
 		Dockerfile:     "Dockerfile",
 		Remove:         true,
