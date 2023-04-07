@@ -18,7 +18,7 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
+// vm-builder-generic --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
 
 const (
 	dockerfileVmBuilder = `
