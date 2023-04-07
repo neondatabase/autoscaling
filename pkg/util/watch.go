@@ -411,7 +411,6 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 						if hasObj {
 							handlers.UpdateFunc(oldObj, obj)
-							delete(oldObjects, uid)
 						} else {
 							handlers.AddFunc(obj, false)
 						}
