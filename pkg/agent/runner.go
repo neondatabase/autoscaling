@@ -730,7 +730,7 @@ startScheduler:
 			r.requestLock.Lock()
 			defer r.requestLock.Unlock()
 
-			// It's possible for another thread to take responsibility for regsitering the
+			// It's possible for another thread to take responsibility for registering the
 			// scheduler, instead of us. Don't need to double-register.
 			if sched.registered {
 				return
