@@ -199,7 +199,7 @@ type podResourceState[T any] struct {
 	// resource
 	CapacityPressure T `json:"capacityPressure"`
 
-	// Min and Max give the minimum and maxmium values of this resource that the VM may use.
+	// Min and Max give the minimum and maximum values of this resource that the VM may use.
 	Min T `json:"min"`
 	Max T `json:"max"`
 }
