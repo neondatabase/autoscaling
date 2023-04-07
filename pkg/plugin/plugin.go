@@ -87,8 +87,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}
 
 	// Start watching deletion events...
-	vmDeletions := make(chan api.PodName)
-	podDeletions := make(chan api.PodName)
+	vmDeletions := make(chan util.NamespacedName)
+	podDeletions := make(chan util.NamespacedName)
 	klog.Infof("[autoscale-enforcer] Starting pod deletion watcher")
 	if err := p.watchPodDeletions(ctx, vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting VM deletion watcher: %w", err)
@@ -171,7 +171,7 @@ func getVmInfo(ctx context.Context, vmClient *vmclient.Clientset, pod *corev1.Po
 // This method expects e.state.lock to be held when it is called. It will not release the lock.
 func (e *AutoscaleEnforcer) checkSchedulerName(pod *corev1.Pod) *framework.Status {
 	if e.state.conf.SchedulerName != pod.Spec.SchedulerName {
-		podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+		podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 		err := fmt.Sprintf(
 			"Mismatched SchedulerName for pod %v: our config has %q, but the pod has %q",
 			podName, e.state.conf.SchedulerName, pod.Spec.SchedulerName,
@@ -193,7 +193,7 @@ func (e *AutoscaleEnforcer) Filter(
 ) *framework.Status {
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
 
-	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
 
 	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
@@ -260,7 +260,7 @@ func (e *AutoscaleEnforcer) Filter(
 	otherResources.MarginMemory = node.otherResources.MarginMemory
 
 	for _, podInfo := range nodeInfo.Pods {
-		pn := api.PodName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
+		pn := util.NamespacedName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
 			totalNodeVCPU += podState.vCPU.Reserved
 			totalNodeMem += podState.memSlots.Reserved
@@ -374,7 +374,7 @@ func (e *AutoscaleEnforcer) Score(
 ) (int64, *framework.Status) {
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
-	podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+	podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
 	if err != nil {
 		klog.Errorf("[autoscale-enforcer] Score: Error getting info for pod %v: %s", podName, err)
@@ -440,7 +440,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) *framework.Status {
-	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
 	vmInfo, err := getVmInfo(ctx, e.vmClient, pod)
@@ -625,7 +625,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) {
-	pName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Unreserve: Handling request for pod %v, node %s", pName, nodeName)
 
 	e.state.lock.Lock()

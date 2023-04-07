@@ -14,19 +14,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type schedulerInfo struct {
-	PodName api.PodName
+	PodName util.NamespacedName
 	UID     types.UID
 	IP      string
 }
 
 func newSchedulerInfo(pod *corev1.Pod) schedulerInfo {
 	return schedulerInfo{
-		PodName: api.PodName{Name: pod.Name, Namespace: pod.Namespace},
+		PodName: util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace},
 		UID:     pod.UID,
 		IP:      pod.Status.PodIP,
 	}
@@ -111,7 +110,7 @@ func startSchedulerWatcher(
 		metav1.ListOptions{LabelSelector: schedulerLabelSelector(schedulerName)},
 		util.WatchHandlerFuncs[*corev1.Pod]{
 			AddFunc: func(pod *corev1.Pod, preexisting bool) {
-				podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+				podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 				if util.PodReady(pod) {
 					if pod.Status.PodIP == "" {
 						logger.Errorf("Pod %v is ready but has no IP", podName)
@@ -122,8 +121,8 @@ func startSchedulerWatcher(
 				}
 			},
 			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
-				oldPodName := api.PodName{Name: oldPod.Name, Namespace: oldPod.Namespace}
-				newPodName := api.PodName{Name: newPod.Name, Namespace: newPod.Namespace}
+				oldPodName := util.NamespacedName{Name: oldPod.Name, Namespace: oldPod.Namespace}
+				newPodName := util.NamespacedName{Name: newPod.Name, Namespace: newPod.Namespace}
 
 				if oldPod.Name != newPod.Name || oldPod.Namespace != newPod.Namespace {
 					logger.Errorf(
