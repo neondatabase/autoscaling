@@ -40,6 +40,12 @@ type VirtualMachineSpec struct {
 	// +optional
 	QMP int32 `json:"qmp"`
 
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default:=25183
+	// +optional
+	RunnerPort int32 `json:"runnerPort"`
+
 	// +kubebuilder:default:=5
 	// +optional
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds"`
@@ -109,17 +115,17 @@ type CPUs struct {
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	// +optional
 	// +kubebuilder:default:=1
-	Min *int32 `json:"min"`
+	Min *float64 `json:"min"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	// +optional
-	Max *int32 `json:"max,omitempty"`
+	Max *float64 `json:"max,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	// +optional
-	Use *int32 `json:"use,omitempty"`
+	Use *float64 `json:"use,omitempty"`
 }
 
 type MemorySlots struct {
@@ -265,7 +271,7 @@ type VirtualMachineStatus struct {
 	// +optional
 	Node string `json:"node,omitempty"`
 	// +optional
-	CPUs int `json:"cpus,omitempty"`
+	CPUs float64 `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 }

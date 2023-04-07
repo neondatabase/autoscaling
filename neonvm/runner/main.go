@@ -29,10 +29,13 @@ import (
 )
 
 const (
-	QEMU_BIN      = "qemu-system-x86_64"
-	QEMU_IMG_BIN  = "qemu-img"
-	kernelPath    = "/vm/kernel/vmlinuz"
-	kernelCmdline = "init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
+	QEMU_BIN          = "qemu-system-x86_64"
+	QEMU_IMG_BIN      = "qemu-img"
+	CGROUP_CREATE_BIN = "cgcreate"
+	CGROUP_SET_BIN    = "cgset"
+	CGROUP_EXEC_BIN   = "cgexec"
+	kernelPath        = "/vm/kernel/vmlinuz"
+	kernelCmdline     = "init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath    = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath = "/vm/images/runtime.iso"
@@ -50,6 +53,9 @@ const (
 	resolveDefaultPath = "/etc/resolv.conf"
 	// alternatePath is a path different from defaultPath, that may be used to resolve DNS. See Path().
 	resolveAlternatePath = "/run/systemd/resolve/resolv.conf"
+
+	qemuCgroupName = "vm"
+	cgroupPeriod   = 100000
 )
 
 var (
@@ -407,10 +413,12 @@ func main() {
 		log.Fatalf("Failed to unmarshal VM Status: %s", err)
 	}
 
+	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
+
 	cpus := []string{}
-	cpus = append(cpus, fmt.Sprintf("cpus=%d", *vmSpec.Guest.CPUs.Min))
-	if vmSpec.Guest.CPUs.Max != nil {
-		cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *vmSpec.Guest.CPUs.Max, *vmSpec.Guest.CPUs.Max))
+	cpus = append(cpus, fmt.Sprintf("cpus=%d", qemuCPUs.min))
+	if qemuCPUs.max != nil {
+		cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *qemuCPUs.max, *qemuCPUs.max))
 	}
 
 	memory := []string{}
@@ -527,8 +535,57 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	if err := execFg(QEMU_BIN, qemuCmd...); err != nil {
+	if err := createCgroup(); err != nil {
 		log.Fatal(err)
+	}
+
+	if err := setCgroupLimit(qemuCPUs.minFraction); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := execFg(CGROUP_EXEC_BIN, append([]string{"-g", fmt.Sprintf("cpu:%s", qemuCgroupName), QEMU_BIN}, qemuCmd...)...); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func setCgroupLimit(fraction float64) error {
+	out, err := exec.Command(CGROUP_SET_BIN, "-r", fmt.Sprintf("cpu.max=%d %d", int(fraction*float64(cgroupPeriod)), cgroupPeriod), qemuCgroupName).Output()
+	if err != nil {
+		return fmt.Errorf("failed to set cgroup limit for qemu %w (%s)", err, out)
+	}
+	return nil
+}
+
+func createCgroup() error {
+	out, err := exec.Command(CGROUP_CREATE_BIN, "-g", fmt.Sprintf("cpu:/", qemuCgroupName)).Output()
+	if err != nil {
+		return fmt.Errorf("failed to create cgroup for qemu %w (%s)", err, out)
+	}
+	return nil
+}
+
+type QemuCPUs struct {
+	max         *int
+	min         int
+	minFraction float64
+}
+
+func processCPUs(cpus vmv1.CPUs) QemuCPUs {
+	min := int(math.Ceil(*cpus.Min))
+	fraction := float64(min) - *cpus.Min
+	if fraction == 0 {
+		fraction = 1
+	}
+
+	var max *int
+	if cpus.Max != nil {
+		val := int(math.Ceil(*cpus.Max))
+		max = &val
+	}
+	return QemuCPUs{
+		max:         max,
+		min:         min,
+		minFraction: fraction,
 	}
 }
 
