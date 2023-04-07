@@ -48,7 +48,7 @@ func (i *VMNodeIndex) Delete(vm *vmapi.VirtualMachine) {
 }
 
 func (i *VMNodeIndex) List() []*vmapi.VirtualMachine {
-	items := make([]*vmapi.VirtualMachine, len(i.forNode))
+	items := make([]*vmapi.VirtualMachine, 0, len(i.forNode))
 	for _, vm := range i.forNode {
 		items = append(items, vm)
 	}
