@@ -166,6 +166,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		objects:       make(map[types.UID]*T),
 		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
+		nextIndexID:   0,
+		indexes:       make(map[uint64]WatchIndex[T]),
 		stopSignal:    sendStop,
 	}
 
@@ -562,6 +564,7 @@ func NewIndexedWatchStore[T any, I WatchIndex[T]](store *WatchStore[T], index I)
 
 	id := store.nextIndexID
 	store.nextIndexID += 1
+	store.indexes[id] = index
 
 	collector := &struct{}{}
 	// when this IndexedWatchStore is GC'd, remove its index from the WatchStore. This should
