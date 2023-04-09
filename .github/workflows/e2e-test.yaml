@@ -64,6 +64,8 @@ jobs:
           VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
           VM_KERNEL_VERSION: "5.15.80"
 
+      - run: git describe --long --dirty
+
       # Explicitly build all the images beforehand. Building images while the cluster is up can
       # sometimes affect the cluster. For more information:
       # https://github.com/neondatabase/autoscaling/issues/120#issuecomment-1493405844
