@@ -32,7 +32,7 @@ jobs:
         run: |
           echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           echo -n "git_info=" >> $GITHUB_OUTPUT
-          bash -c "set -eu -o pipefail; source ./scripts-common.sh; git_info" >> $GITHUB_OUTPUT
+          git describe --long --dirty >> $GITHUB_OUTPUT
       - name: install golang
         uses: actions/setup-go@v4
         with:
