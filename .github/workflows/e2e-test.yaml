@@ -15,6 +15,8 @@ jobs:
     runs-on: [ self-hosted, gen3, small ]
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # fetch all, so that we also include tags
 
       - uses: actions/setup-go@v4
         with:
