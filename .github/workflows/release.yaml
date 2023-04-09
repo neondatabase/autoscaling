@@ -32,7 +32,11 @@ jobs:
         run: |
           echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           echo -n "git_info=" >> $GITHUB_OUTPUT
-          git describe --long --dirty >> $GITHUB_OUTPUT
+          # note: --tags enables matching on lightweight (i.e. not annotated) tags, which normally
+          # wouldn't be necessary, except that actions/checkout@v3 does weird things to setup the
+          # repository that means that we actually end up checked out with *just* a lightweight tag
+          # to the tagged commit.
+          git describe --tags --long --dirty >> $GITHUB_OUTPUT
       - name: install golang
         uses: actions/setup-go@v4
         with:
