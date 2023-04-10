@@ -3,6 +3,9 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"path"
 
 	"bytes"
 	"flag"
@@ -54,8 +57,10 @@ const (
 	// alternatePath is a path different from defaultPath, that may be used to resolve DNS. See Path().
 	resolveAlternatePath = "/run/systemd/resolve/resolv.conf"
 
-	qemuCgroupName = "vm"
-	cgroupPeriod   = 100000
+	qemuCgroupName    = "vm"
+	cgroupPeriod      = 100000
+	cgroupSystemdBase = "/sys/fs/cgroup/cpu/"
+	cgroupPlainBase   = "/sys/fs/cgroup/"
 )
 
 var (
@@ -535,33 +540,85 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	if err := createCgroup(); err != nil {
+	isSystemd, err := isSystemdCgroup()
+	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := setCgroupLimit(qemuCPUs.minFraction); err != nil {
+	var cgroupPath string
+	if isSystemd {
+		cgroupPath = path.Join(cgroupSystemdBase, qemuCgroupName)
+	} else {
+		cgroupPath = path.Join(cgroupPlainBase, qemuCgroupName)
+	}
+
+	if err := createCgroup(cgroupPath); err != nil {
 		log.Fatal(err)
 	}
 
-	if err := execFg(CGROUP_EXEC_BIN, append([]string{"-g", fmt.Sprintf("cpu:%s", qemuCgroupName), QEMU_BIN}, qemuCmd...)...); err != nil {
+	if err := setCgroupLimit(qemuCPUs.minFraction, cgroupPath); err != nil {
+		log.Fatal(err)
+	}
+
+	qemuString := strings.Join(append([]string{QEMU_BIN}, qemuCmd...), " ")
+	cgropedQemu := fmt.Sprintf("echo $$ >> %s && %s", path.Join(cgroupPath, "procs"), qemuString)
+	// start a new shell, cgroup it and then start qemu. Qemu will get cgroup from the parent sh while runner is not cgrouped
+	if err := execFg("sh", "-c", cgropedQemu); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func setCgroupLimit(fraction float64) error {
-	out, err := exec.Command(CGROUP_SET_BIN, "-r", fmt.Sprintf("cpu.max=%d %d", int(fraction*float64(cgroupPeriod)), cgroupPeriod), qemuCgroupName).Output()
+// isSystemCgroup checks if we have systemd-managed-like cgroup layout
+func isSystemdCgroup() (bool, error) {
+	_, err := os.Stat("/sys/fs/cgroup/systemd")
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func setCgroupLimit(fraction float64, cgroupPath string) error {
+	isV2, err := isCgroupv2(cgroupPath)
 	if err != nil {
-		return fmt.Errorf("failed to set cgroup limit for qemu %w (%s)", err, out)
+		return err
+	}
+	if isV2 {
+		data := fmt.Sprintf("%d %d", int(fraction*float64(cgroupPeriod)), cgroupPeriod)
+		err := os.WriteFile(path.Join(cgroupPath, "cpu.max"), []byte(data), 0644)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	err = os.WriteFile(path.Join(cgroupPath, "cpu.cfs_period_us"), []byte(fmt.Sprintf("%s", cgroupPeriod)), 0644)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path.Join(cgroupPath, "cpu.cfs_quota_us"), []byte(fmt.Sprintf("%s", int(fraction*float64(cgroupPeriod)))), 0644)
+}
+
+func createCgroup(basePath string) error {
+	err := os.Mkdir(path.Join(basePath, qemuCgroupName), os.ModeDir)
+	if err != nil {
+		return fmt.Errorf("failed to create cgroup for qemu %w", err)
 	}
 	return nil
 }
 
-func createCgroup() error {
-	out, err := exec.Command(CGROUP_CREATE_BIN, "-g", fmt.Sprintf("cpu:/", qemuCgroupName)).Output()
-	if err != nil {
-		return fmt.Errorf("failed to create cgroup for qemu %w (%s)", err, out)
+// determines if cgroup v2 API is supported
+func isCgroupv2(cgroupPath string) (bool, error) {
+	_, err := os.Stat(path.Join(cgroupPath, "cpu.max"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
 	}
-	return nil
+
+	return true, nil
 }
 
 type QemuCPUs struct {
