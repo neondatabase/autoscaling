@@ -32,17 +32,17 @@ func (in *CPUs) DeepCopyInto(out *CPUs) {
 	*out = *in
 	if in.Min != nil {
 		in, out := &in.Min, &out.Min
-		*out = new(int32)
+		*out = new(float64)
 		**out = **in
 	}
 	if in.Max != nil {
 		in, out := &in.Max, &out.Max
-		*out = new(int32)
+		*out = new(float64)
 		**out = **in
 	}
 	if in.Use != nil {
 		in, out := &in.Use, &out.Use
-		*out = new(int32)
+		*out = new(float64)
 		**out = **in
 	}
 }

@@ -39,8 +39,7 @@ RUN apk add --no-cache \
     busybox-extras \
     e2fsprogs \
     qemu-system-x86_64 \
-    qemu-img \
-    cgroup-tools
+    qemu-img
 
 COPY --from=builder /runner /usr/bin/runner
 COPY neonvm/hack/vmlinuz /vm/kernel/vmlinuz

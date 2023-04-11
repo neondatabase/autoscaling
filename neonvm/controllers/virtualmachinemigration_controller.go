@@ -332,7 +332,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 					return err
 				}
 				// compare guest spec and count of plugged
-				if *vm.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
+				if int32(math.Ceil(*vm.Spec.Guest.CPUs.Use)) > int32(len(cpusPlugged)) {
 					// going to plug one CPU
 					err := QmpPlugCpuToRunner(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP)
 					if err != nil {

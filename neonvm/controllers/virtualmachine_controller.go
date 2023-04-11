@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -411,12 +412,12 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					return err
 				}
 				// compare guest spec and count of plugged
-				if *virtualmachine.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
+				if int32(math.Ceil(*virtualmachine.Spec.Guest.CPUs.Use)) > int32(len(cpusPlugged)) {
 					// going to plug one CPU
 					if err := QmpPlugCpu(virtualmachine); err != nil {
 						return err
 					}
-				} else if *virtualmachine.Spec.Guest.CPUs.Use < int32(len(cpusPlugged)) {
+				} else if int32(math.Ceil(*virtualmachine.Spec.Guest.CPUs.Use)) < int32(len(cpusPlugged)) {
 					// going to unplug one CPU
 					if err := QmpUnplugCpu(virtualmachine); err != nil {
 						return err
@@ -425,17 +426,18 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// get CPU details from QEMU and update status
-			cpusPlugged, _, err := QmpGetCpus(virtualmachine)
+			_, _, err := QmpGetCpus(virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
 			}
-			if virtualmachine.Status.CPUs != len(cpusPlugged) {
+			// also get cgroup?
+			if virtualmachine.Status.CPUs != *virtualmachine.Spec.Guest.CPUs.Use {
 				// update status by count of CPU cores used in VM
-				virtualmachine.Status.CPUs = len(cpusPlugged)
+				virtualmachine.Status.CPUs = *virtualmachine.Spec.Guest.CPUs.Use
 				// record event about cpus used in VM
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
-					fmt.Sprintf("VirtualMachine %s uses %d cpu cores",
+					fmt.Sprintf("VirtualMachine %s uses %f cpu cores",
 						virtualmachine.Name,
 						virtualmachine.Status.CPUs))
 			}

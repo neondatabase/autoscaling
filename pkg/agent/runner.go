@@ -52,6 +52,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"runtime/debug"
 	"sync/atomic"
@@ -1264,7 +1265,7 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 func (s *atomicUpdateState) computeUnitsBounds() (uint16, uint16) {
 	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is already guaranteed by
 	// the
-	minCPUUnits := (s.vm.Cpu.Use + s.computeUnit.VCPU - 1) / s.computeUnit.VCPU
+	minCPUUnits := (uint16(math.Ceil(s.vm.Cpu.Use)) + s.computeUnit.VCPU - 1) / s.computeUnit.VCPU
 	minMemUnits := (s.vm.Mem.Use + s.computeUnit.Mem - 1) / s.computeUnit.Mem
 
 	return util.Min(minCPUUnits, minMemUnits), util.Max(minCPUUnits, minMemUnits)
@@ -1283,7 +1284,7 @@ func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint16 {
 	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
 
 	if s.requestedUpscale.Cpu {
-		required = util.Max(required, s.vm.Cpu.Use/s.computeUnit.VCPU+1)
+		required = util.Max(required, uint16(math.Ceil(s.vm.Cpu.Use))/s.computeUnit.VCPU+1)
 	}
 	if s.requestedUpscale.Memory {
 		required = util.Max(required, s.vm.Mem.Use/s.computeUnit.Mem+1)

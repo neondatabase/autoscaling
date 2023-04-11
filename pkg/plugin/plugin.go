@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -295,7 +296,7 @@ func (e *AutoscaleEnforcer) Filter(
 
 	if vmInfo != nil {
 		var cpuCompare string
-		if totalNodeVCPU+vmInfo.Cpu.Use > nodeTotalReservableCPU {
+		if totalNodeVCPU+uint16(math.Ceil(vmInfo.Cpu.Use)) > nodeTotalReservableCPU {
 			cpuCompare = ">"
 			allowing = false
 		} else {
@@ -400,7 +401,7 @@ func (e *AutoscaleEnforcer) Score(
 
 	// Special case: return minimum score if we don't have room
 	noRoom := vmInfo != nil &&
-		(vmInfo.Cpu.Use > node.remainingReservableCPU() ||
+		(uint16(math.Ceil(vmInfo.Cpu.Use)) > node.remainingReservableCPU() ||
 			vmInfo.Mem.Use > node.remainingReservableMemSlots())
 	if noRoom {
 		return framework.MinNodeScore, nil
@@ -552,8 +553,8 @@ func (e *AutoscaleEnforcer) Reserve(
 	// checks will be handled in the calls to Filter, but it's possible for another VM to scale up
 	// in between the calls to Filter and Reserve, removing the resource availability that we
 	// thought we had.
-	if vmInfo.Cpu.Use <= node.remainingReservableCPU() && vmInfo.Mem.Use <= node.remainingReservableMemSlots() {
-		newNodeReservedCPU := node.vCPU.Reserved + vmInfo.Cpu.Use
+	if uint16(math.Ceil(vmInfo.Cpu.Use)) <= node.remainingReservableCPU() && vmInfo.Mem.Use <= node.remainingReservableMemSlots() {
+		newNodeReservedCPU := node.vCPU.Reserved + uint16(math.Ceil(vmInfo.Cpu.Use))
 		newNodeReservedMemSlots := node.memSlots.Reserved + vmInfo.Mem.Use
 
 		fmtString := "[autoscale-enforcer] Allowing VM pod %v (%d vCPU, %d mem slots) in node %s: " +
@@ -573,11 +574,11 @@ func (e *AutoscaleEnforcer) Reserve(
 			vmName: vmInfo.Name,
 			node:   node,
 			vCPU: podResourceState[uint16]{
-				Reserved:         vmInfo.Cpu.Use,
+				Reserved:         uint16(math.Ceil(vmInfo.Cpu.Use)),
 				Buffer:           0,
 				CapacityPressure: 0,
-				Min:              vmInfo.Cpu.Min,
-				Max:              vmInfo.Cpu.Max,
+				Min:              uint16(math.Ceil(vmInfo.Cpu.Min)),
+				Max:              uint16(math.Ceil(vmInfo.Cpu.Max)),
 			},
 			memSlots: podResourceState[uint16]{
 				Reserved:         vmInfo.Mem.Use,

@@ -860,11 +860,11 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			vmName: vm.Name,
 			node:   ns,
 			vCPU: podResourceState[uint16]{
-				Reserved:         vmInfo.Cpu.Max,
-				Buffer:           vmInfo.Cpu.Max - vmInfo.Cpu.Use,
+				Reserved:         uint16(math.Ceil(vmInfo.Cpu.Max)),
+				Buffer:           uint16(math.Ceil(vmInfo.Cpu.Max)) - uint16(math.Ceil(vmInfo.Cpu.Use)),
 				CapacityPressure: 0,
-				Min:              vmInfo.Cpu.Min,
-				Max:              vmInfo.Cpu.Max,
+				Min:              uint16(math.Ceil(vmInfo.Cpu.Min)),
+				Max:              uint16(math.Ceil(vmInfo.Cpu.Max)),
 			},
 			memSlots: podResourceState[uint16]{
 				Reserved:         vmInfo.Mem.Max,
