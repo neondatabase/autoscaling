@@ -561,7 +561,7 @@ func main() {
 	}
 
 	qemuString := strings.Join(append([]string{QEMU_BIN}, qemuCmd...), " ")
-	cgropedQemu := fmt.Sprintf("echo $$ >> %s && %s", path.Join(cgroupPath, "procs"), qemuString)
+	cgropedQemu := fmt.Sprintf("echo $$ >> %s && %s", path.Join(cgroupPath, "cgroup.procs"), qemuString)
 	// start a new shell, cgroup it and then start qemu. Qemu will get cgroup from the parent sh while runner is not cgrouped
 	if err := execFg("sh", "-c", cgropedQemu); err != nil {
 		log.Fatal(err)
