@@ -594,11 +594,11 @@ func setCgroupLimit(fraction float64, cgroupPath string) error {
 		return nil
 	}
 
-	err = os.WriteFile(path.Join(cgroupPath, "cpu.cfs_period_us"), []byte(fmt.Sprintf("%s", cgroupPeriod)), 0644)
+	err = os.WriteFile(path.Join(cgroupPath, "cpu.cfs_period_us"), []byte(fmt.Sprintf("%d", cgroupPeriod)), 0644)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path.Join(cgroupPath, "cpu.cfs_quota_us"), []byte(fmt.Sprintf("%s", int(fraction*float64(cgroupPeriod)))), 0644)
+	return os.WriteFile(path.Join(cgroupPath, "cpu.cfs_quota_us"), []byte(fmt.Sprintf("%d", int(fraction*float64(cgroupPeriod)))), 0644)
 }
 
 func createCgroup(basePath string) error {
