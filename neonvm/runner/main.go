@@ -601,8 +601,8 @@ func setCgroupLimit(fraction float64, cgroupPath string) error {
 	return os.WriteFile(path.Join(cgroupPath, "cpu.cfs_quota_us"), []byte(fmt.Sprintf("%d", int(fraction*float64(cgroupPeriod)))), 0644)
 }
 
-func createCgroup(basePath string) error {
-	err := os.Mkdir(path.Join(basePath, qemuCgroupName), os.ModeDir)
+func createCgroup(cgroupPath string) error {
+	err := os.Mkdir(cgroupPath, os.ModeDir)
 	if err != nil {
 		return fmt.Errorf("failed to create cgroup for qemu %w", err)
 	}
@@ -615,7 +615,7 @@ func isCgroupv2(cgroupPath string) (bool, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	} else if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check cgroup v2: %w", err)
 	}
 
 	return true, nil
