@@ -642,7 +642,6 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			NodeSelector:                  virtualmachine.Spec.NodeSelector,
 			ImagePullSecrets:              virtualmachine.Spec.ImagePullSecrets,
 			Tolerations:                   virtualmachine.Spec.Tolerations,
-			ServiceAccountName:            virtualmachine.Spec.ServiceAccountName,
 			SchedulerName:                 virtualmachine.Spec.SchedulerName,
 			Affinity:                      affinity,
 			InitContainers: []corev1.Container{{
