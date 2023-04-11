@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -277,7 +278,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		}
 		ext4blockCount = int64(math.Ceil(float64(ext4blocksMin) + float64((dirSize / ext4blockSize))))
 	} else {
-		return fmt.Errorf("diskSize or contentPath should be specified")
+		return errors.New("diskSize or contentPath should be specified")
 	}
 
 	if contentPath == nil {

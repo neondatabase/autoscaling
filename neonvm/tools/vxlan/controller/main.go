@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -358,7 +359,7 @@ func acquireIP(ipam string) (net.IP, net.IPMask, error) {
 	}
 	p := prefixes.Msg.Prefixes
 	if len(p) == 0 {
-		return net.IP{}, net.IPMask{}, fmt.Errorf("IPAM prefix not found")
+		return net.IP{}, net.IPMask{}, errors.New("IPAM prefix not found")
 	}
 	if len(p) > 1 {
 		return net.IP{}, net.IPMask{}, fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
@@ -400,7 +401,7 @@ func releaseIP(ipam string, ip net.IP) error {
 	}
 	p := prefixes.Msg.Prefixes
 	if len(p) == 0 {
-		return fmt.Errorf("IPAM prefix not found")
+		return errors.New("IPAM prefix not found")
 	}
 	if len(p) > 1 {
 		return fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
@@ -433,7 +434,7 @@ func getExtraNetCidr(ipam string) (string, error) {
 	}
 	p := prefixes.Msg.Prefixes
 	if len(p) == 0 {
-		return "", fmt.Errorf("IPAM prefix not found")
+		return "", errors.New("IPAM prefix not found")
 	}
 	return p[0].Cidr, nil
 }
