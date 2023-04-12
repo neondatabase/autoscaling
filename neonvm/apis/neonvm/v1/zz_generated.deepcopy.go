@@ -564,6 +564,7 @@ func (in *VirtualMachineStatus) DeepCopyInto(out *VirtualMachineStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	out.CPUs = in.CPUs.DeepCopy()
 	if in.MemorySize != nil {
 		in, out := &in.MemorySize, &out.MemorySize
 		x := (*in).DeepCopy()
