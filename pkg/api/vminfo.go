@@ -49,7 +49,7 @@ type VmMemInfo struct {
 	Max uint16 `json:"max"`
 	Use uint16 `json:"use"`
 
-	SlotSize resource.Quantity `json:"slotSize"`
+	SlotSize *resource.Quantity `json:"slotSize"`
 }
 
 // Using returns the Resources that this VmInfo says the VM is using
@@ -99,6 +99,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	_, alwaysMigrate := vm.Labels[LabelTestingOnlyAlwaysMigrate]
 	scalingEnabled := HasAutoscalingEnabled(vm)
 
+	slotSize := vm.Spec.Guest.MemorySlotSize // explicitly copy slot size so we aren't keeping the VM object around
 	info := VmInfo{
 		Name:      vm.Name,
 		Namespace: vm.Namespace,
@@ -111,7 +112,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
 			Max:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Max, ".spec.guest.memorySlots.max")),
 			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
-			SlotSize: vm.Spec.Guest.MemorySlotSize,
+			SlotSize: &slotSize,
 		},
 		AlwaysMigrate:  alwaysMigrate,
 		ScalingEnabled: scalingEnabled,
@@ -210,4 +211,55 @@ func (b resourceBound) validate(memSlotSize *resource.Quantity) (field string, _
 	}
 
 	return "", nil
+}
+
+// the reason we have custom formatting for VmInfo is because without it, the formatting of memory
+// slot size (which is a resource.Quanitty) has all the fields, meaning (a) it's hard to read, and
+// (b) there's a lot of unnecessary information. But in order to enable "proper" formatting given a
+// VmInfo, we have to implement Format from the top down, so we do.
+func (vm VmInfo) Format(state fmt.State, verb rune) {
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf("api.VmInfo{Name:%q, Namespace:%q, Cpu:", vm.Name, vm.Namespace)))
+		vm.Cpu.format(state, verb)
+		state.Write([]byte(", Mem:"))
+		vm.Mem.format(state, verb)
+		state.Write([]byte(fmt.Sprintf(", AlwaysMigrate:%t, ScalingEnabled:%t}", vm.AlwaysMigrate, vm.ScalingEnabled)))
+	default:
+		if verb != 'v' {
+			state.Write([]byte("%!"))
+			state.Write([]byte(string(verb)))
+			state.Write([]byte("(api.VmInfo="))
+		}
+
+		state.Write([]byte(fmt.Sprintf("{Name:%s Namespace:%s Cpu:", vm.Name, vm.Namespace)))
+		vm.Cpu.format(state, verb)
+		state.Write([]byte(" Mem:"))
+		vm.Mem.format(state, verb)
+		state.Write([]byte(fmt.Sprintf(" AlwaysMigrate:%t ScalingEnabled:%t}", vm.AlwaysMigrate, vm.ScalingEnabled)))
+
+		if verb != 'v' {
+			state.Write([]byte{')'})
+		}
+	}
+}
+
+func (cpu VmCpuInfo) format(state fmt.State, verb rune) {
+	// same-ish style as for VmInfo, differing slightly from default repr.
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf("api.VmCpuInfo{Min:%d, Max:%d, Use:%d}", cpu.Min, cpu.Max, cpu.Use)))
+	default:
+		state.Write([]byte(fmt.Sprintf("{Min:%d Max:%d Use:%d}", cpu.Min, cpu.Max, cpu.Use)))
+	}
+}
+
+func (mem VmMemInfo) format(state fmt.State, verb rune) {
+	// same-ish style as for VmInfo, differing slightly from default repr.
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf("api.VmMemInfo{Min:%d, Max:%d, Use:%d, SlotSize:%#v}", mem.Min, mem.Max, mem.Use, mem.SlotSize)))
+	default:
+		state.Write([]byte(fmt.Sprintf("{Min:%d Max:%d Use:%d SlotSize:%v}", mem.Min, mem.Max, mem.Use, mem.SlotSize)))
+	}
 }

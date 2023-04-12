@@ -859,7 +859,7 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 	s.runner.logger.Infof("Sending downscale %+v", to)
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
-	rawResources := to.ConvertToRaw(&s.runner.vm.Mem.SlotSize)
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
 	resp, statusCode, err := doInformantRequest[api.RawResources, api.DownscaleResult](
 		ctx, s, timeout, http.MethodPut, "/downscale", &rawResources,
@@ -901,7 +901,7 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 	s.runner.logger.Infof("Sending upscale %+v", to)
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
-	rawResources := to.ConvertToRaw(&s.runner.vm.Mem.SlotSize)
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
 	_, statusCode, err := doInformantRequest[api.RawResources, struct{}](
 		ctx, s, timeout, http.MethodPut, "/upscale", &rawResources,
