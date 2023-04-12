@@ -94,62 +94,72 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 		state.status.vmInfo = event.vmInfo
 		state.vmInfoUpdated.Send()
 	case vmEventAdded:
-		if hasPod {
-			klog.Errorf("Received add event for pod %v while already present", event.podName)
-			return
-		}
-
-		runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
-
-		status := &podStatus{
-			lock:     sync.Mutex{},
-			done:     false,
-			errored:  nil,
-			panicked: false,
-			vmInfo:   event.vmInfo,
-		}
-
-		runner := &Runner{
-			global: s,
-			status: status,
-			logger: RunnerLogger{
-				prefix: fmt.Sprintf("Runner %v: ", event.podName),
-			},
-			schedulerRespondedWithMigration: false,
-
-			shutdown:              nil, // set by (*Runner).Run
-			vm:                    event.vmInfo,
-			podName:               podName,
-			podIP:                 event.podIP,
-			lock:                  util.NewChanMutex(),
-			requestLock:           util.NewChanMutex(),
-			requestedUpscale:      api.MoreResources{Cpu: false, Memory: false},
-			lastMetrics:           nil,
-			scheduler:             nil,
-			server:                nil,
-			informant:             nil,
-			computeUnit:           nil,
-			lastApproved:          nil,
-			lastSchedulerError:    nil,
-			lastInformantError:    nil,
-			backgroundWorkerCount: atomic.Int64{},
-			backgroundPanic:       make(chan error),
-		}
-
-		txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
-
-		state = &podState{
-			podName:       podName,
-			stop:          cancelRunnerContext,
-			runner:        runner,
-			status:        status,
-			vmInfoUpdated: txVMUpdate,
-		}
-		s.pods[podName] = state
-		runner.Spawn(runnerCtx, rxVMUpdate)
+		s.handleVMEventAdded(ctx, event, podName)
 	default:
 		panic(errors.New("bad event: unexpected event kind"))
 	}
+}
+
+func (s *agentState) handleVMEventAdded(
+	ctx context.Context,
+	event vmEvent,
+	podName util.NamespacedName,
+) {
+	state, hasPod := s.pods[podName]
+
+	if hasPod {
+		klog.Errorf("Received add event for pod %v while already present", event.podName)
+		return
+	}
+
+	runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
+
+	status := &podStatus{
+		lock:     sync.Mutex{},
+		done:     false,
+		errored:  nil,
+		panicked: false,
+		vmInfo:   event.vmInfo,
+	}
+
+	runner := &Runner{
+		global: s,
+		status: status,
+		logger: RunnerLogger{
+			prefix: fmt.Sprintf("Runner %v: ", event.podName),
+		},
+		schedulerRespondedWithMigration: false,
+
+		shutdown:              nil, // set by (*Runner).Run
+		vm:                    event.vmInfo,
+		podName:               podName,
+		podIP:                 event.podIP,
+		lock:                  util.NewChanMutex(),
+		requestLock:           util.NewChanMutex(),
+		requestedUpscale:      api.MoreResources{Cpu: false, Memory: false},
+		lastMetrics:           nil,
+		scheduler:             nil,
+		server:                nil,
+		informant:             nil,
+		computeUnit:           nil,
+		lastApproved:          nil,
+		lastSchedulerError:    nil,
+		lastInformantError:    nil,
+		backgroundWorkerCount: atomic.Int64{},
+		backgroundPanic:       make(chan error),
+	}
+
+	txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
+
+	state = &podState{
+		podName:       podName,
+		stop:          cancelRunnerContext,
+		runner:        runner,
+		status:        status,
+		vmInfoUpdated: txVMUpdate,
+	}
+	s.pods[podName] = state
+	runner.Spawn(runnerCtx, rxVMUpdate)
 }
 
 type podState struct {
