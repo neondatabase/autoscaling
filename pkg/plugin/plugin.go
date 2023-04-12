@@ -101,10 +101,7 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	vmDeletions := make(chan util.NamespacedName)
 	vmDisabledScaling := make(chan util.NamespacedName)
 	podDeletions := make(chan util.NamespacedName)
-	vmBoundsChanged := make(chan struct {
-		vm      *api.VmInfo
-		podName string
-	})
+	vmBoundsChanged := make(chan vmPodInfo)
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
 	if err := p.watchPodEvents(ctx, vmDeletions, podDeletions); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)

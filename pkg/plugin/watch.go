@@ -65,6 +65,11 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	return nil
 }
 
+type vmPodInfo struct {
+	vm      *api.VmInfo
+	podName string
+}
+
 // watchVMEvents watches for changes in VMs: signaling when scaling becomes disabled and updating
 // stored information when scaling bounds change.
 //
@@ -96,10 +101,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
 	vmDisabledScaling chan<- util.NamespacedName,
-	updatedScalingBounds chan<- struct {
-		vm      *api.VmInfo
-		podName string
-	},
+	updatedScalingBounds chan<- vmPodInfo,
 ) (*util.WatchStore[vmapi.VirtualMachine], error) {
 	return util.Watch(
 		ctx,
@@ -158,10 +160,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
-				updatedScalingBounds <- struct {
-					vm      *api.VmInfo
-					podName string
-				}{newInfo, newVM.Status.PodName}
+				updatedScalingBounds <- vmPodInfo{vm: newInfo, podName: newVM.Status.PodName}
 			},
 		},
 	)
