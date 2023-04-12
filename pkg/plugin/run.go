@@ -114,7 +114,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	defer func() {
 		hasMetrics := req.Metrics != nil
 		e.metrics.validResourceRequests.
-			WithLabelValues(strconv.Itoa(status), req.ProtoVersion.String(), nodeName, strconv.FormatBool(hasMetrics)).
+			WithLabelValues(strconv.Itoa(status), nodeName, strconv.FormatBool(hasMetrics)).
 			Inc()
 	}()
 
