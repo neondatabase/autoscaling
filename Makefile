@@ -114,7 +114,7 @@ test: fmt vet envtest ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: fmt vet bin/vm-builder ## Build all neonvm binaries.
+build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
 	go build -o bin/vxlan-ipam       neonvm/tools/vxlan/ipam/main.go
@@ -122,7 +122,11 @@ build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	go build -o bin/vm-builder neonvm/tools/vm-builder/main.go
+	go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMInformant=${VM_INFORMANT_IMG}" neonvm/tools/vm-builder/main.go
+
+.PHONY: bin/vm-builder-generic
+bin/vm-builder-generic: ## Build vm-builder-generic binary.
+	go build -o bin/vm-builder-generic  neonvm/tools/vm-builder-generic/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
@@ -133,7 +137,7 @@ vm-informant: ## Build vm-informant image
 	docker buildx build \
 		--tag $(VM_INFORMANT_IMG) \
 		--load \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--build-arg GIT_INFO=$(GIT_INFO) \
 		--file build/vm-informant/Dockerfile \
 		.
 
@@ -164,7 +168,7 @@ docker-build-examples: vm-informant bin/vm-builder ## Build docker images for te
 		--tag tmp-$(EXAMPLE_VM_IMG) \
 		--file vm-examples/postgres-minimal/Dockerfile \
 		vm-examples/postgres-minimal/
-	./bin/vm-builder -src tmp-$(EXAMPLE_VM_IMG) -use-inittab -dst $(EXAMPLE_VM_IMG)
+	./bin/vm-builder -src tmp-$(EXAMPLE_VM_IMG) -dst $(EXAMPLE_VM_IMG)
 	./bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
 
 .PHONY: docker-build-pg14-disk-test
@@ -182,7 +186,7 @@ docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for
 		--load \
 		--file vm-examples/pg14-disk-test/Dockerfile.vmdata \
 		vm-examples/pg14-disk-test/
-	./bin/vm-builder -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
+	./bin/vm-builder-generic -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.

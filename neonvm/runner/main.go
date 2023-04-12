@@ -13,13 +13,17 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/alessio/shellescape"
 	"github.com/cilium/cilium/pkg/mac"
+	"github.com/digitalocean/go-qemu/qmp"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/libnetwork/types"
 	"github.com/kdomanski/iso9660"
@@ -528,9 +532,47 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
+	go terminateQemuOnSigterm(vmSpec.QMP)
 	if err := execFg(QEMU_BIN, qemuCmd...); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func terminateQemuOnSigterm(qmpPort int32) {
+	log.Println("watching OS signals")
+	c := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+	log.Println("got signal, sending powerdown command to QEMU")
+
+	for {
+		mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("127.0.0.1:%d", qmpPort), 2*time.Second)
+		if err != nil {
+			log.Println(err)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		if err := mon.Connect(); err != nil {
+			log.Println(err)
+			time.Sleep(time.Second)
+			continue
+		}
+		defer mon.Disconnect()
+
+		qmpcmd := []byte(`{"execute": "system_powerdown"}`)
+		_, err = mon.Run(qmpcmd)
+		if err != nil {
+			log.Println(err)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		log.Println("system_powerdown command sent to QEMU")
+		break
+	}
+
+	return
 }
 
 func calcIPs(cidr string) (net.IP, net.IP, net.IPMask, error) {
