@@ -130,7 +130,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		if err := bounds.validate(&info.Mem.SlotSize); err != nil {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
-		bounds.apply(&info)
+		info.applyBounds(bounds)
 	}
 
 	min := info.Min()
@@ -154,6 +154,16 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 
 func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
 	return vm.Min() != cmp.Min() || vm.Max() != cmp.Max()
+}
+
+func (vm *VmInfo) applyBounds(b scalingBounds) {
+	vm.Cpu.Min = *b.Min.CPU
+	vm.Cpu.Max = *b.Max.CPU
+
+	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
+	// (2^16-1) * info.Mem.SlotSize.Value().
+	vm.Mem.Min = uint16(b.Min.Mem.Value() / vm.Mem.SlotSize.Value())
+	vm.Mem.Max = uint16(b.Max.Mem.Value() / vm.Mem.SlotSize.Value())
 }
 
 type scalingBounds struct {
@@ -200,14 +210,4 @@ func (b resourceBound) validate(memSlotSize *resource.Quantity) (field string, _
 	}
 
 	return "", nil
-}
-
-func (b scalingBounds) apply(info *VmInfo) {
-	info.Cpu.Min = *b.Min.CPU
-	info.Cpu.Max = *b.Max.CPU
-
-	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
-	// (2^16-1) * info.Mem.SlotSize.Value().
-	info.Mem.Min = uint16(b.Min.Mem.Value() / info.Mem.SlotSize.Value())
-	info.Mem.Max = uint16(b.Max.Mem.Value() / info.Mem.SlotSize.Value())
 }
