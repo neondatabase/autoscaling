@@ -621,6 +621,30 @@ func (e *AutoscaleEnforcer) handleVMDeletion(podName util.NamespacedName) {
 	klog.Infof(fmtString, migrating, pod.name, pod.node.name, vCPUVerdict, memVerdict)
 }
 
+func (e *AutoscaleEnforcer) handleVMDisabledScaling(podName util.NamespacedName) {
+	klog.Infof("[autoscale-enforcer] Handling disabling autoscaling for VM pod %v", podName)
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	pod, ok := e.state.podMap[podName]
+	if !ok {
+		klog.Warningf("[autoscale-enforcer] disable autoscaling: Cannot find pod %v in podMap", podName)
+		return
+	}
+
+	// Reset buffer to zero:
+	vCPUVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+		handleAutoscalingDisabled()
+	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+		handleAutoscalingDisabled()
+
+	fmtString := "[autoscale-enforcer] Disabled autoscaling for VM pod %v in node %s:\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+	klog.Infof(fmtString, pod.name, pod.node.name, vCPUVerdict, memVerdict)
+}
+
 func (e *AutoscaleEnforcer) handlePodDeletion(podName util.NamespacedName) {
 	klog.Infof("[autoscale-enforcer] Handling deletion of non-VM pod %v", podName)
 
@@ -881,6 +905,16 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 		}
+
+		// If scaling isn't enabled, then we can be more precise about usage.
+		if !vmInfo.ScalingEnabled {
+			ps.vCPU.Buffer = 0
+			ps.vCPU.Reserved = vmInfo.Cpu.Use
+
+			ps.memSlots.Buffer = 0
+			ps.memSlots.Reserved = vmInfo.Mem.Use
+		}
+
 		oldNodeVCPUReserved := ns.vCPU.Reserved
 		oldNodeMemReserved := ns.memSlots.Reserved
 		oldNodeVCPUBuffer := ns.vCPU.Buffer
