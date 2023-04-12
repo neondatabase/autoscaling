@@ -63,10 +63,8 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 			"[autoscale-enforcer] Received autoscaler-agent request (client = %s) %+v",
 			r.RemoteAddr, req,
 		)
-		nodeName := "<none>"
-		resp, statusCode, err := e.handleAgentRequest(req, &nodeName)
+		resp, statusCode, err := e.handleAgentRequest(req)
 		finalStatus = statusCode
-		e.metrics.validResourceRequests.WithLabelValues(nodeName, req.ProtoVersion.String(), strconv.FormatBool(req.Metrics != nil)).Inc()
 
 		if err != nil {
 			msg := fmt.Sprintf(
@@ -109,7 +107,17 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 }
 
 // Returns body (if successful), status code, error (if unsuccessful)
-func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest, nodeName *string) (*api.PluginResponse, int, error) {
+func (e *AutoscaleEnforcer) handleAgentRequest(
+	req api.AgentRequest,
+) (_ *api.PluginResponse, status int, _ error) {
+	nodeName := "<none>" // override this later if we have a node name
+	defer func() {
+		hasMetrics := req.Metrics != nil
+		e.metrics.validResourceRequests.
+			WithLabelValues(strconv.Itoa(status), req.ProtoVersion.String(), nodeName, strconv.FormatBool(hasMetrics)).
+			Inc()
+	}()
+
 	// Before doing anything, check that the version is within the range we're expecting.
 	expectedProtoRange := api.VersionRange[api.PluginProtoVersion]{
 		Min: MinPluginProtocolVersion,
@@ -141,7 +149,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(req api.AgentRequest, nodeName *s
 	}
 
 	node := pod.node
-	*nodeName = node.name
+	nodeName = node.name // set nodeName for deferred metrics
 
 	mustMigrate := pod.migrationState == nil &&
 		// Check whether the pod *will* migrate, then update its resources, and THEN start its

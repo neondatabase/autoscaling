@@ -51,7 +51,7 @@ func (p *AutoscaleEnforcer) startPrometheusServer(ctx context.Context) error {
 				Name: "plugin_resource_requests_results_total",
 				Help: "Number of resource requests with various results",
 			},
-			[]string{"node", "protocol_version", "has_metrics"},
+			[]string{"code", "protocol_version", "node", "has_metrics"},
 		),
 	}
 
