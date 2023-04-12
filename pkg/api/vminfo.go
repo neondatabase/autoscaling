@@ -214,7 +214,7 @@ func (b resourceBound) validate(memSlotSize *resource.Quantity) (field string, _
 }
 
 // the reason we have custom formatting for VmInfo is because without it, the formatting of memory
-// slot size (which is a resource.Quanitty) has all the fields, meaning (a) it's hard to read, and
+// slot size (which is a resource.Quantity) has all the fields, meaning (a) it's hard to read, and
 // (b) there's a lot of unnecessary information. But in order to enable "proper" formatting given a
 // VmInfo, we have to implement Format from the top down, so we do.
 func (vm VmInfo) Format(state fmt.State, verb rune) {
