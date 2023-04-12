@@ -168,8 +168,8 @@ docker-build-examples: vm-informant bin/vm-builder ## Build docker images for te
 		--tag tmp-$(EXAMPLE_VM_IMG) \
 		--file vm-examples/postgres-minimal/Dockerfile \
 		vm-examples/postgres-minimal/
-	./bin/vm-builder-generic -src tmp-$(EXAMPLE_VM_IMG) -use-inittab -dst $(EXAMPLE_VM_IMG)
-	./bin/vm-builder-generic -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
+	./bin/vm-builder -src tmp-$(EXAMPLE_VM_IMG) -dst $(EXAMPLE_VM_IMG)
+	./bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
 
 .PHONY: docker-build-pg14-disk-test
 docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
