@@ -58,7 +58,6 @@ RUN set -exu \
 	&& make install
 
 FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
-FROM quay.io/prometheus/node-exporter:v1.5.0 as node-exporter
 
 # Build pgbouncer
 #
@@ -112,7 +111,6 @@ COPY --from=informant         /usr/bin/vm-informant /usr/local/bin/vm-informant
 COPY --from=libcgroup-builder /libcgroup-install/bin/*  /usr/bin/
 COPY --from=libcgroup-builder /libcgroup-install/lib/*  /usr/lib/
 COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
-COPY --from=node-exporter     /bin/node_exporter     /bin/node_exporter
 COPY --from=postgres-exporter /bin/postgres_exporter /bin/postgres_exporter
 COPY --from=pgbouncer         /usr/local/pgbouncer/bin/pgbouncer /usr/local/bin/pgbouncer
 
@@ -165,11 +163,17 @@ RUN set -e \
 		qemu-img \
 		e2fsprogs
 
+# Install vector.dev binary
+RUN set -e \
+    && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
+    | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-x86_64-unknown-linux-musl/bin/vector
+
 # init scripts
 ADD inittab   /neonvm/bin/inittab
 ADD vminit    /neonvm/bin/vminit
 ADD vmstart   /neonvm/bin/vmstart
 ADD vmacpi    /neonvm/acpi/vmacpi
+ADD vector.yaml /neonvm/config/vector.yaml
 ADD powerdown /neonvm/bin/powerdown
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
 
@@ -179,6 +183,7 @@ COPY --from=rootdisk / /rootdisk
 COPY --from=vm-runtime /neonvm /rootdisk/neonvm
 RUN set -e \
     && mkdir -p /rootdisk/etc \
+    && mkdir -p /rootdisk/etc/vector \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
@@ -223,10 +228,10 @@ fi
 ::sysinit:cgconfigparser -l /etc/cgconfig.conf -s 1664
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
+::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
 ::respawn:su -p vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
 ::respawn:su -p nobody --session-command '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
-::respawn:su -p nobody --session-command /bin/node_exporter
 ::respawn:su -p nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
@@ -285,7 +290,29 @@ for i in ${ETH_LIST}; do
     udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 done
 `
-
+	configVector = `---
+data_dir: /tmp
+api:
+  enabled: true
+  address: "0.0.0.0:8686"
+  playground: false
+sources:
+  host_metrics:
+    filesystem:
+      devices:
+        excludes: [binfmt_misc]
+      filesystems:
+        excludes: [binfmt_misc]
+      mountPoints:
+        excludes: ["*/proc/sys/fs/binfmt_misc"]
+    type: host_metrics
+sinks:
+  prom_exporter:
+    type: prometheus_exporter
+    inputs:
+      - host_metrics
+    address: "0.0.0.0:9100"
+`
 	// cgconfig.conf
 	configCgroup = `# Configuration for cgroups in VM compute nodes
 group neon-postgres {
@@ -539,6 +566,16 @@ func main() {
 		log.Fatalln(err)
 	}
 	if err = AddToTar(tw, "cgconfig.conf", b); err != nil {
+		log.Fatalln(err)
+	}
+
+	// add 'vector.yaml' file to docker build context
+	b.Reset()
+	_, err = b.WriteString(configVector)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if err = AddToTar(tw, "vector.yaml", b); err != nil {
 		log.Fatalln(err)
 	}
 
