@@ -27,8 +27,8 @@ import (
 // Events occurring before this method is called will not be sent.
 func (e *AutoscaleEnforcer) watchPodEvents(
 	ctx context.Context,
-	vmDeletions chan<- util.NamespacedName,
-	podDeletions chan<- util.NamespacedName,
+	submitVMDeletion func(util.NamespacedName),
+	submitPodDeletion func(util.NamespacedName),
 ) error {
 	_, err := util.Watch(
 		ctx,
@@ -51,9 +51,9 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 				name := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
 				if _, ok := pod.Labels[LabelVM]; ok {
-					vmDeletions <- name
+					submitVMDeletion(name)
 				} else {
-					podDeletions <- name
+					submitPodDeletion(name)
 				}
 			},
 		},
@@ -63,11 +63,6 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	}
 
 	return nil
-}
-
-type vmPodInfo struct {
-	vm      *api.VmInfo
-	podName string
 }
 
 // watchVMEvents watches for changes in VMs: signaling when scaling becomes disabled and updating
@@ -100,8 +95,8 @@ type vmPodInfo struct {
 // handled by cancelled contexts in *almost all* cases.
 func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
-	vmDisabledScaling chan<- util.NamespacedName,
-	updatedScalingBounds chan<- vmPodInfo,
+	submitVMDisabledScaling func(util.NamespacedName),
+	submitVMBoundsChanged func(_ *api.VmInfo, podName string),
 ) (*util.WatchStore[vmapi.VirtualMachine], error) {
 	return util.Watch(
 		ctx,
@@ -144,7 +139,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 						"[autoscale-enforcer] watch: Received update to disable autoscaling for pod %v",
 						name,
 					)
-					vmDisabledScaling <- name
+					submitVMDisabledScaling(name)
 				}
 
 				// If the pod changed, then we're going to handle a deletion event for the old pod,
@@ -160,7 +155,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
-				updatedScalingBounds <- vmPodInfo{vm: newInfo, podName: newVM.Status.PodName}
+				submitVMBoundsChanged(newInfo, newVM.Status.PodName)
 			},
 		},
 	)
