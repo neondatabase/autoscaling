@@ -36,7 +36,7 @@ type pluginState struct {
 
 	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
 	// can appropriately scale our scoring
-	maxTotalReservableCPU uint16
+	maxTotalReservableCPU milliCPU
 	// maxTotalReservableMemSlots is the same as maxTotalReservableCPU, but for memory slots instead
 	// of CPU
 	maxTotalReservableMemSlots uint16
@@ -52,7 +52,7 @@ type nodeState struct {
 	name string
 
 	// vCPU tracks the state of vCPU resources -- what's available and how
-	vCPU nodeResourceState[uint16]
+	vCPU nodeResourceState[milliCPU]
 	// memSlots tracks the state of memory slots -- what's available and how
 	memSlots nodeResourceState[uint16]
 
@@ -129,8 +129,8 @@ type nodeOtherResourceState struct {
 	RawCPU    resource.Quantity `json:"rawCPU"`
 	RawMemory resource.Quantity `json:"rawMemory"`
 
-	ReservedCPU      uint16 `json:"reservedCPU"`
-	ReservedMemSlots uint16 `json:"reservedMemSlots"`
+	ReservedCPU      milliCPU `json:"reservedCPU"`
+	ReservedMemSlots uint16   `json:"reservedMemSlots"`
 
 	// MarginCPU and MarginMemory track the amount of other resources we can get "for free" because
 	// they were left out when rounding the System usage to fit in integer units of CPUs or memory
@@ -158,7 +158,7 @@ type podState struct {
 	// node provides information about the node that this pod is bound to or reserved onto.
 	node *nodeState
 	// vCPU is the current state of this pod's vCPU utilization and pressure
-	vCPU podResourceState[uint16]
+	vCPU podResourceState[milliCPU]
 	// memSlots is the current state of this pod's memory slot(s) utilization and pressure
 	memSlots podResourceState[uint16]
 
@@ -181,6 +181,16 @@ type podState struct {
 
 // podMigrationState tracks the information about an ongoing pod's migration
 type podMigrationState struct{}
+
+type milliCPU uint16
+
+func FromResourceQuantity(r resource.Quantity) milliCPU {
+	return milliCPU(r.MilliValue())
+}
+
+func (m *milliCPU) toResourceQuantity() resource.Quantity {
+	return *resource.NewMilliQuantity(int64(*m), resource.BinarySI)
+}
 
 type podResourceState[T any] struct {
 	// Reserved is the amount of T that this pod has reserved. It is guaranteed that the pod is
@@ -301,8 +311,7 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 		// set cupCopy := r.rawCpu - r.marginCpu
 		cpuCopy := r.RawCPU.DeepCopy()
 		cpuCopy.Sub(*r.MarginCPU)
-		// note: Value() rounds up, which is the behavior we want here.
-		r.ReservedCPU = uint16(cpuCopy.Value())
+		r.ReservedCPU = milliCPU(cpuCopy.MilliValue())
 	}
 
 	// If rawMemory doesn't exceed the margin ..., set reserved = 0
@@ -327,7 +336,7 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 
 // totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
 // excluding the CPU pre-reserved for system tasks.
-func (s *nodeState) totalReservableCPU() uint16 {
+func (s *nodeState) totalReservableCPU() milliCPU {
 	return s.vCPU.Total - s.vCPU.System
 }
 
@@ -338,7 +347,7 @@ func (s *nodeState) totalReservableMemSlots() uint16 {
 }
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
-func (s *nodeState) remainingReservableCPU() uint16 {
+func (s *nodeState) remainingReservableCPU() milliCPU {
 	return s.totalReservableCPU() - s.vCPU.Reserved
 }
 
@@ -855,16 +864,18 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 		}
 
 		// Build the pod state, update the node
+		buffer := vmInfo.Cpu.Max.DeepCopy()
+		buffer.Sub(vmInfo.Cpu.Use)
 		ps := &podState{
 			name:   podName,
 			vmName: vm.Name,
 			node:   ns,
-			vCPU: podResourceState[uint16]{
-				Reserved:         uint16(math.Ceil(vmInfo.Cpu.Max)),
-				Buffer:           uint16(math.Ceil(vmInfo.Cpu.Max)) - uint16(math.Ceil(vmInfo.Cpu.Use)),
+			vCPU: podResourceState[milliCPU]{
+				Reserved:         FromResourceQuantity(vmInfo.Cpu.Max),
+				Buffer:           FromResourceQuantity(buffer),
 				CapacityPressure: 0,
-				Min:              uint16(math.Ceil(vmInfo.Cpu.Min)),
-				Max:              uint16(math.Ceil(vmInfo.Cpu.Max)),
+				Min:              FromResourceQuantity(vmInfo.Cpu.Min),
+				Max:              FromResourceQuantity(vmInfo.Cpu.Max),
 			},
 			memSlots: podResourceState[uint16]{
 				Reserved:         vmInfo.Mem.Max,

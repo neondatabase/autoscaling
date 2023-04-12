@@ -4,6 +4,7 @@ package util
 
 import (
 	"golang.org/x/exp/constraints"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // SaturatingSub returns x - y if x >= y, otherwise zero
@@ -25,9 +26,27 @@ func Max[T constraints.Ordered](x, y T) T {
 	}
 }
 
-// Max returns the minimum of the two values
+// Max returns the minimum of the two resource.Quantity values
+func MaxQuantity(x, y resource.Quantity) resource.Quantity {
+	if x.Cmp(y) == 1 {
+		return x
+	} else {
+		return y
+	}
+}
+
+// Min returns the minimum of the two values
 func Min[T constraints.Ordered](x, y T) T {
 	if x < y {
+		return x
+	} else {
+		return y
+	}
+}
+
+// Min returns the minimum of the two resource.Quantity values
+func MinQuantity(x, y resource.Quantity) resource.Quantity {
+	if x.Cmp(y) == -1 {
 		return x
 	} else {
 		return y

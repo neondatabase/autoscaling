@@ -13,6 +13,7 @@ import (
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/billing"
+	"github.com/neondatabase/autoscaling/pkg/plugin"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -147,7 +148,7 @@ func (s *billingMetricsState) collect(conf *BillingConfig, targetNode string, st
 			endpointID: endpointID,
 		}
 		presentMetrics := vmMetricsInstant{
-			cpu: uint16(*vm.Spec.Guest.CPUs.Use),
+			cpu: uint16(plugin.FromResourceQuantity(*vm.Spec.Guest.CPUs.Use)),
 		}
 		if oldMetrics, ok := old[key]; ok {
 			// The VM was present from s.lastTime to now. Add a time slice to its metrics history.

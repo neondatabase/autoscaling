@@ -546,12 +546,14 @@ func main() {
 	}
 
 	var cgroupPath string
+	cgroupName := fmt.Sprintf("%s-vm-runner", vmStatus.PodName)
 	if isSystemd {
-		cgroupPath = path.Join(cgroupSystemdBase, qemuCgroupName)
+		cgroupPath = path.Join(cgroupSystemdBase, cgroupName)
 	} else {
-		cgroupPath = path.Join(cgroupPlainBase, qemuCgroupName)
+		cgroupPath = path.Join(cgroupPlainBase, cgroupName)
 	}
 
+	// TODO(nikitakalyanov): cleanup cgroup in cleanup hook (it is visible from the host)
 	if err := createCgroup(cgroupPath); err != nil {
 		log.Fatal(err)
 	}
@@ -603,7 +605,10 @@ func setCgroupLimit(fraction float64, cgroupPath string) error {
 
 func createCgroup(cgroupPath string) error {
 	err := os.Mkdir(cgroupPath, os.ModeDir)
-	if err != nil {
+	if os.IsExist(err) {
+		// unlikely but possible
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("failed to create cgroup for qemu %w", err)
 	}
 	return nil
@@ -628,15 +633,15 @@ type QemuCPUs struct {
 }
 
 func processCPUs(cpus vmv1.CPUs) QemuCPUs {
-	min := int(math.Ceil(*cpus.Min))
-	fraction := float64(min) - *cpus.Min
+	min := int(cpus.Min.Value())
+	fraction := cpus.Min.AsApproximateFloat64() - float64(min)
 	if fraction == 0 {
 		fraction = 1
 	}
 
 	var max *int
 	if cpus.Max != nil {
-		val := int(math.Ceil(*cpus.Max))
+		val := int(cpus.Max.Value())
 		max = &val
 	}
 	return QemuCPUs{

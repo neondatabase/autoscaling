@@ -115,17 +115,17 @@ type CPUs struct {
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	// +optional
 	// +kubebuilder:default:=1
-	Min *float64 `json:"min"`
+	Min *resource.Quantity `json:"min"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	// +optional
-	Max *float64 `json:"max,omitempty"`
+	Max *resource.Quantity `json:"max,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	// +optional
-	Use *float64 `json:"use,omitempty"`
+	Use *resource.Quantity `json:"use,omitempty"`
 }
 
 type MemorySlots struct {
@@ -271,7 +271,7 @@ type VirtualMachineStatus struct {
 	// +optional
 	Node string `json:"node,omitempty"`
 	// +optional
-	CPUs float64 `json:"cpus,omitempty"`
+	CPUs resource.Quantity `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 }

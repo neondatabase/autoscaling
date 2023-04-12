@@ -4,7 +4,6 @@ package api
 
 import (
 	"fmt"
-	"math"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -24,9 +23,9 @@ type VmInfo struct {
 }
 
 type VmCpuInfo struct {
-	Min float64 `json:"min"`
-	Max float64 `json:"max"`
-	Use float64 `json:"use"`
+	Min resource.Quantity `json:"min"`
+	Max resource.Quantity `json:"max"`
+	Use resource.Quantity `json:"use"`
 }
 
 type VmMemInfo struct {
@@ -40,21 +39,21 @@ type VmMemInfo struct {
 // Using returns the Resources that this VmInfo says the VM is using
 func (vm VmInfo) Using() Resources {
 	return Resources{
-		VCPU: uint16(math.Ceil(vm.Cpu.Use)),
+		VCPU: vm.Cpu.Use,
 		Mem:  vm.Mem.Use,
 	}
 }
 
 // SetUsing sets the values of vm.{Cpu,Mem}.Use to those provided by r
 func (vm *VmInfo) SetUsing(r Resources) {
-	vm.Cpu.Use = float64(r.VCPU)
+	vm.Cpu.Use = r.VCPU
 	vm.Mem.Use = r.Mem
 }
 
 // Min returns the Resources representing the minimum amount this VmInfo says the VM must reserve
 func (vm VmInfo) Min() Resources {
 	return Resources{
-		VCPU: uint16(math.Ceil(vm.Cpu.Min)),
+		VCPU: vm.Cpu.Min,
 		Mem:  vm.Mem.Min,
 	}
 }
@@ -62,7 +61,7 @@ func (vm VmInfo) Min() Resources {
 // Max returns the Resources representing the maximum amount this VmInfo says the VM may reserve
 func (vm VmInfo) Max() Resources {
 	return Resources{
-		VCPU: uint16(math.Ceil(vm.Cpu.Max)),
+		VCPU: vm.Cpu.Max,
 		Mem:  vm.Mem.Max,
 	}
 }
@@ -81,7 +80,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		}
 	}
 
-	getNonNilFloat := func(err *error, ptr *float64, name string) (val float64) {
+	getNonNilResourceQuantity := func(err *error, ptr *resource.Quantity, name string) (val resource.Quantity) {
 		if *err != nil {
 			return
 		} else if ptr == nil {
@@ -98,9 +97,9 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		Name:      vm.Name,
 		Namespace: vm.Namespace,
 		Cpu: VmCpuInfo{
-			Min: getNonNilFloat(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min"),
-			Max: getNonNilFloat(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max"),
-			Use: getNonNilFloat(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use"),
+			Min: getNonNilResourceQuantity(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min"),
+			Max: getNonNilResourceQuantity(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max"),
+			Use: getNonNilResourceQuantity(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use"),
 		},
 		Mem: VmMemInfo{
 			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
