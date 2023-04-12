@@ -105,9 +105,8 @@ func (s *agentState) handleVMEventAdded(
 	event vmEvent,
 	podName util.NamespacedName,
 ) {
-	state, hasPod := s.pods[podName]
-
-	if hasPod {
+	state, ok := s.pods[podName]
+	if ok {
 		klog.Errorf("Received add event for pod %v while already present", event.podName)
 		return
 	}
