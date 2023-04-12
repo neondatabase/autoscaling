@@ -182,7 +182,7 @@ type podState struct {
 // podMigrationState tracks the information about an ongoing pod's migration
 type podMigrationState struct{}
 
-type milliCPU uint16
+type milliCPU uint32
 
 func FromResourceQuantity(r resource.Quantity) milliCPU {
 	return milliCPU(r.MilliValue())

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"io/ioutil"
+	"net/http"
 	"path"
 
 	"bytes"
@@ -33,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	neonApi "github.com/neondatabase/autoscaling/pkg/api"
 )
 
 const (
@@ -557,7 +561,6 @@ func main() {
 		cgroupPath = path.Join(cgroupPlainBase, cgroupName)
 	}
 
-	// TODO(nikitakalyanov): cleanup cgroup in cleanup hook (it is visible from the host)
 	if err := createCgroup(cgroupPath); err != nil {
 		log.Fatal(err)
 	}
@@ -566,13 +569,76 @@ func main() {
 		log.Fatal(err)
 	}
 
-	go terminateQemuOnSigterm(vmSpec.QMP)
+	go cleanupQemuOnSigterm(vmSpec.QMP, cgroupPath)
+	go listenForCPUChanges(vmSpec.RunnerPort, cgroupPath)
 
 	qemuString := shellescape.QuoteCommand(append([]string{QEMU_BIN}, qemuCmd...))
 	cgropedQemu := fmt.Sprintf("echo $$ >> %s && %s", path.Join(cgroupPath, "cgroup.procs"), qemuString)
 	// start a new shell, cgroup it and then start qemu. Qemu will get cgroup from the parent sh while runner is not cgrouped
 	if err := execFg("sh", "-c", cgropedQemu); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func handleCPUChange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		log.Printf("unexpected method: %s\n", r.Method)
+		w.WriteHeader(500)
+	}
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("could not read body: %s\n", err)
+		w.WriteHeader(500)
+	}
+
+	parsed := neonApi.VCPUChange{}
+	err = json.Unmarshal(body, &parsed)
+	if err != nil {
+		log.Printf("could not parse body: %s\n", err)
+		w.WriteHeader(500)
+	}
+
+	cgroupPath := r.Context().Value(cgroupContextKey{})
+	val, ok := cgroupPath.(string)
+	if !ok {
+		log.Println("no path in context")
+		w.WriteHeader(500)
+	}
+
+	// update cgroup
+	fraction := getCPUFraction(parsed.VCPUs)
+	err = setCgroupLimit(fraction, val)
+	if err != nil {
+		log.Printf("could not read body: %s\n", err)
+		w.WriteHeader(500)
+	}
+
+	w.WriteHeader(200)
+}
+
+type cgroupContextKey struct{}
+
+func listenForCPUChanges(port int32, cgroupPath string) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cpu_change", handleCPUChange)
+	baseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseCtx = context.WithValue(baseCtx, cgroupContextKey{}, cgroupPath)
+	server := http.Server{
+		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
+		Handler:           mux,
+		ReadTimeout:       5,
+		ReadHeaderTimeout: 5,
+		WriteTimeout:      5,
+		BaseContext: func(_ net.Listener) context.Context {
+			return baseCtx
+		},
+	}
+	err := server.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		log.Println("server closed")
+	} else if err != nil {
+		log.Fatalf("error starting server: %s\n", err)
 	}
 }
 
@@ -638,12 +704,19 @@ type QemuCPUs struct {
 	minFraction float64
 }
 
-func processCPUs(cpus vmv1.CPUs) QemuCPUs {
-	min := int(cpus.Min.Value())
-	fraction := cpus.Min.AsApproximateFloat64() - float64(min)
+func getCPUFraction(r resource.Quantity) float64 {
+	upperBound := int(r.Value())
+	fraction := r.AsApproximateFloat64() - float64(upperBound)
 	if fraction == 0 {
 		fraction = 1
 	}
+
+	return fraction
+}
+
+func processCPUs(cpus vmv1.CPUs) QemuCPUs {
+	min := int(cpus.Min.Value())
+	fraction := getCPUFraction(*cpus.Min)
 
 	var max *int
 	if cpus.Max != nil {
@@ -657,7 +730,7 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	}
 }
 
-func terminateQemuOnSigterm(qmpPort int32) {
+func cleanupQemuOnSigterm(qmpPort int32, cgroupPath string) {
 	log.Println("watching OS signals")
 	c := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -690,6 +763,13 @@ func terminateQemuOnSigterm(qmpPort int32) {
 		log.Println("system_powerdown command sent to QEMU")
 		break
 	}
+
+	fmt.Println("cleaning up cgroup...")
+	err := os.Remove(cgroupPath)
+	if err != nil {
+		log.Println(err)
+	}
+	log.Println("exiting")
 
 	return
 }

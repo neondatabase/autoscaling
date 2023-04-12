@@ -467,3 +467,7 @@ type SuspendAgent struct {
 type ResumeAgent struct {
 	ExpectedID uuid.UUID `json:"expectedID"`
 }
+
+type VCPUChange struct {
+	VCPUs resource.Quantity
+}

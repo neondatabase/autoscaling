@@ -17,6 +17,7 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -38,6 +39,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -49,6 +51,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 const (
@@ -412,14 +415,24 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					return err
 				}
 				// compare guest spec and count of plugged
-				if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) > int32(len(cpusPlugged)) {
+				if int32(virtualmachine.Spec.Guest.CPUs.Use.MilliValue()) > int32(len(cpusPlugged)*1000) {
 					// going to plug one CPU
-					if err := QmpPlugCpu(virtualmachine); err != nil {
+					if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) > int32(len(cpusPlugged)) {
+						if err := QmpPlugCpu(virtualmachine); err != nil {
+							return err
+						}
+					}
+					if err := notifyRunner(virtualmachine, *virtualmachine.Spec.Guest.CPUs.Use); err != nil {
 						return err
 					}
-				} else if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) < int32(len(cpusPlugged)) {
+				} else if int32(virtualmachine.Spec.Guest.CPUs.Use.MilliValue()) < int32(len(cpusPlugged)*1000) {
 					// going to unplug one CPU
-					if err := QmpUnplugCpu(virtualmachine); err != nil {
+					if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) < int32(len(cpusPlugged)) {
+						if err := QmpUnplugCpu(virtualmachine); err != nil {
+							return err
+						}
+					}
+					if err := notifyRunner(virtualmachine, *virtualmachine.Spec.Guest.CPUs.Use); err != nil {
 						return err
 					}
 				}
@@ -597,6 +610,29 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 			})
 	}
 	return a
+}
+
+func notifyRunner(vm *vmv1.VirtualMachine, r resource.Quantity) error {
+	client := http.Client{Timeout: 5}
+
+	url := fmt.Sprintf("%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
+
+	update := api.VCPUChange{VCPUs: r}
+
+	data, err := json.Marshal(update)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // imageForVirtualMachine gets the Operand image which is managed by this controller
