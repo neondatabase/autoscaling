@@ -409,17 +409,13 @@ func main() {
 	}
 
 	cpus := []string{}
-	cpus = append(cpus, fmt.Sprintf("cpus=%d", *vmSpec.Guest.CPUs.Min))
-	if vmSpec.Guest.CPUs.Max != nil {
-		cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *vmSpec.Guest.CPUs.Max, *vmSpec.Guest.CPUs.Max))
-	}
+	cpus = append(cpus, fmt.Sprintf("cpus=%d", vmSpec.Guest.CPUs.Min))
+	cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", vmSpec.Guest.CPUs.Max, vmSpec.Guest.CPUs.Max))
 
 	memory := []string{}
-	memory = append(memory, fmt.Sprintf("size=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Min)))
-	if vmSpec.Guest.MemorySlots.Max != nil {
-		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
-		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
-	}
+	memory = append(memory, fmt.Sprintf("size=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(vmSpec.Guest.MemorySlots.Min)))
+	memory = append(memory, fmt.Sprintf("slots=%d", vmSpec.Guest.MemorySlots.Max-vmSpec.Guest.MemorySlots.Min))
+	memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(vmSpec.Guest.MemorySlots.Max)))
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, vmSpec.Guest.Env, vmSpec.Disks); err != nil {

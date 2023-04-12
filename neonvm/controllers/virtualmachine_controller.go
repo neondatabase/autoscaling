@@ -450,12 +450,12 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					return err
 				}
 				// compare guest spec and count of plugged
-				if *virtualmachine.Spec.Guest.MemorySlots.Use > *virtualmachine.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
+				if *virtualmachine.Spec.Guest.MemorySlots.Use > virtualmachine.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
 					// going to plug one Memory Slot
 					if err := QmpPlugMemory(virtualmachine); err != nil {
 						return err
 					}
-				} else if *virtualmachine.Spec.Guest.MemorySlots.Use < *virtualmachine.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
+				} else if *virtualmachine.Spec.Guest.MemorySlots.Use < virtualmachine.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
 					// going to unplug one Memory Slot
 					if err := QmpUnplugMemory(virtualmachine); err != nil {
 						return err

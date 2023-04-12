@@ -58,35 +58,29 @@ func (r *VirtualMachine) ValidateCreate() error {
 
 	// validate .spec.guest.cpus.use and .spec.guest.cpus.max
 	if r.Spec.Guest.CPUs.Use != nil {
-		if r.Spec.Guest.CPUs.Max == nil {
-			return errors.New(".spec.guest.cpus.max must be defined if .spec.guest.cpus.use specified")
-		}
-		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
+		if *r.Spec.Guest.CPUs.Use < r.Spec.Guest.CPUs.Min {
 			return fmt.Errorf(".spec.guest.cpus.use (%d) should be greater than or equal to the .spec.guest.cpus.min (%d)",
 				*r.Spec.Guest.CPUs.Use,
-				*r.Spec.Guest.CPUs.Min)
+				r.Spec.Guest.CPUs.Min)
 		}
-		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
+		if *r.Spec.Guest.CPUs.Use > r.Spec.Guest.CPUs.Max {
 			return fmt.Errorf(".spec.guest.cpus.use (%d) should be less than or equal to the .spec.guest.cpus.max (%d)",
 				*r.Spec.Guest.CPUs.Use,
-				*r.Spec.Guest.CPUs.Max)
+				r.Spec.Guest.CPUs.Max)
 		}
 	}
 
 	// validate .spec.guest.memorySlots.use and .spec.guest.memorySlots.max
 	if r.Spec.Guest.MemorySlots.Use != nil {
-		if r.Spec.Guest.MemorySlots.Max == nil {
-			return errors.New(".spec.guest.memorySlots.max must be defined if .spec.guest.memorySlots.use specified")
-		}
-		if *r.Spec.Guest.MemorySlots.Use < *r.Spec.Guest.MemorySlots.Min {
+		if *r.Spec.Guest.MemorySlots.Use < r.Spec.Guest.MemorySlots.Min {
 			return fmt.Errorf(".spec.guest.memorySlots.use (%d) should be greater than or equal to the .spec.guest.memorySlots.min (%d)",
 				*r.Spec.Guest.MemorySlots.Use,
-				*r.Spec.Guest.MemorySlots.Min)
+				r.Spec.Guest.MemorySlots.Min)
 		}
-		if *r.Spec.Guest.MemorySlots.Use > *r.Spec.Guest.MemorySlots.Max {
+		if *r.Spec.Guest.MemorySlots.Use > r.Spec.Guest.MemorySlots.Max {
 			return fmt.Errorf(".spec.guest.memorySlots.use (%d) should be less than or equal to the .spec.guest.memorySlots.max (%d)",
 				*r.Spec.Guest.MemorySlots.Use,
-				*r.Spec.Guest.MemorySlots.Max)
+				r.Spec.Guest.MemorySlots.Max)
 		}
 	}
 
@@ -158,29 +152,29 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 
 	// validate .spec.guest.cpu.use
 	if r.Spec.Guest.CPUs.Use != nil {
-		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
+		if *r.Spec.Guest.CPUs.Use < r.Spec.Guest.CPUs.Min {
 			return fmt.Errorf(".cpus.use (%d) should be greater than or equal to the .cpus.min (%d)",
 				*r.Spec.Guest.CPUs.Use,
-				*r.Spec.Guest.CPUs.Min)
+				r.Spec.Guest.CPUs.Min)
 		}
-		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
+		if *r.Spec.Guest.CPUs.Use > r.Spec.Guest.CPUs.Max {
 			return fmt.Errorf(".cpus.use (%d) should be less than or equal to the .cpus.max (%d)",
 				*r.Spec.Guest.CPUs.Use,
-				*r.Spec.Guest.CPUs.Max)
+				r.Spec.Guest.CPUs.Max)
 		}
 	}
 
 	// validate .spec.guest.memorySlots.use
 	if r.Spec.Guest.MemorySlots.Use != nil {
-		if *r.Spec.Guest.MemorySlots.Use < *r.Spec.Guest.MemorySlots.Min {
+		if *r.Spec.Guest.MemorySlots.Use < r.Spec.Guest.MemorySlots.Min {
 			return fmt.Errorf(".memorySlots.use (%d) should be greater than or equal to the .memorySlots.min (%d)",
 				*r.Spec.Guest.MemorySlots.Use,
-				*r.Spec.Guest.MemorySlots.Min)
+				r.Spec.Guest.MemorySlots.Min)
 		}
-		if *r.Spec.Guest.MemorySlots.Use > *r.Spec.Guest.MemorySlots.Max {
+		if *r.Spec.Guest.MemorySlots.Use > r.Spec.Guest.MemorySlots.Max {
 			return fmt.Errorf(".memorySlots.use (%d) should be less than or equal to the .memorySlots.max (%d)",
 				*r.Spec.Guest.MemorySlots.Use,
-				*r.Spec.Guest.MemorySlots.Max)
+				r.Spec.Guest.MemorySlots.Max)
 		}
 	}
 

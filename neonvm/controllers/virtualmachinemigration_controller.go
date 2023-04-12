@@ -356,7 +356,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 					return err
 				}
 				// compare guest spec and count of plugged
-				if *vm.Spec.Guest.MemorySlots.Use > *vm.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
+				if *vm.Spec.Guest.MemorySlots.Use > vm.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
 					// going to plug one Memory Slot
 					err := QmpPlugMemoryToRunner(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP, vm.Spec.Guest.MemorySlotSize.Value())
 					if err != nil {

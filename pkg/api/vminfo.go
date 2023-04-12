@@ -99,13 +99,13 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		Name:      vm.Name,
 		Namespace: vm.Namespace,
 		Cpu: VmCpuInfo{
-			Min: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min")),
-			Max: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max")),
+			Min: uint16(vm.Spec.Guest.CPUs.Min),
+			Max: uint16(vm.Spec.Guest.CPUs.Max),
 			Use: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use")),
 		},
 		Mem: VmMemInfo{
-			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
-			Max:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Max, ".spec.guest.memorySlots.max")),
+			Min:      uint16(vm.Spec.Guest.MemorySlots.Min),
+			Max:      uint16(vm.Spec.Guest.MemorySlots.Max),
 			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
 			SlotSize: vm.Spec.Guest.MemorySlotSize,
 		},

@@ -292,7 +292,7 @@ func QmpQueryMemoryDevicesFromRunner(ip string, port int32) ([]QmpMemoryDevice, 
 
 func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	// slots - number of pluggable memory slots (Max - Min)
-	slots := *virtualmachine.Spec.Guest.MemorySlots.Max - *virtualmachine.Spec.Guest.MemorySlots.Min
+	slots := virtualmachine.Spec.Guest.MemorySlots.Max - virtualmachine.Spec.Guest.MemorySlots.Min
 
 	memoryDevices, err := QmpQueryMemoryDevices(virtualmachine)
 	if err != nil {
