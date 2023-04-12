@@ -25,8 +25,7 @@ type PromMetrics struct {
 func (p *AutoscaleEnforcer) startPrometheusServer(ctx context.Context) error {
 	// Separate binding from serving, so that we can catch any error in this thread, rather than the
 	// server's.
-	addr := net.TCPAddr{IP: net.IPv4zero, Port: 9100}
-	listener, err := net.ListenTCP("tcp", &addr)
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: 9100})
 	if err != nil {
 		return fmt.Errorf("Error listening on TCP: %w", err)
 	}
