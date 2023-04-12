@@ -22,17 +22,19 @@ metadata:
   name: example
   labels:
     autoscaling.neon.tech/enabled: "true"
+  annotations:
+    autoscaling.neon.tech/bounds: '{ "min": { "cpu": 1, "mem": "1Gi" }, "max": { "cpu": 4, "mem": "4Gi" } }'
 spec:
   schedulerName: autoscale-scheduler
   guest:
     cpus:
       min: 1
-      max: 4
+      max: 5 # set value greater than bounds so our tests check we don't exceed the bounds.
       use: 1
     memorySlotSize: 1Gi
     memorySlots:
       min: 1
-      max: 4
+      max: 5
       use: 1
     rootDisk:
       image: vm-example:dev

@@ -1,18 +1,18 @@
 package plugin
 
-// Implementation of watching Pods for Pod/VM deletions and changes so that a VM's autoscaling is
-// disabled.
-
-// Implementation of watching for VM deletions and VM migration completions, so we can unreserve the
-// associated resources
+// Implementation of watching for Pod deletions and changes to a VM's scaling settings (either
+// whether it's disabled, or the scaling bounds themselves).
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
+
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -25,6 +25,53 @@ import (
 // events once it returns (unless it returns error).
 //
 // Events occurring before this method is called will not be sent.
+func (e *AutoscaleEnforcer) watchPodEvents(
+	ctx context.Context,
+	vmDeletions chan<- util.NamespacedName,
+	podDeletions chan<- util.NamespacedName,
+) error {
+	_, err := util.Watch(
+		ctx,
+		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
+		util.WatchConfig{
+			LogName: "pods",
+			// We want to be up-to-date in tracking deletions, so that our reservations are correct.
+			//
+			// FIXME: make these configurable.
+			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
+			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
+		},
+		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
+			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
+		},
+		util.InitWatchModeSync, // note: doesn't matter, because AddFunc = nil.
+		metav1.ListOptions{},
+		util.WatchHandlerFuncs[*corev1.Pod]{
+			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
+				name := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
+				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
+				if _, ok := pod.Labels[LabelVM]; ok {
+					vmDeletions <- name
+				} else {
+					podDeletions <- name
+				}
+			},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("Error watching pod deletions: %w", err)
+	}
+
+	return nil
+}
+
+type vmPodInfo struct {
+	vm      *api.VmInfo
+	podName string
+}
+
+// watchVMEvents watches for changes in VMs: signaling when scaling becomes disabled and updating
+// stored information when scaling bounds change.
 //
 // The reason we care about when scaling is disabled is that if we don't, we can run into the
 // following race condition:
@@ -51,52 +98,70 @@ import (
 //
 // This one requires a very unlikely sequence of events to occur, that should be appropriately
 // handled by cancelled contexts in *almost all* cases.
-func (e *AutoscaleEnforcer) watchPodEvents(
+func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
-	vmDeletions chan<- util.NamespacedName,
 	vmDisabledScaling chan<- util.NamespacedName,
-	podDeletions chan<- util.NamespacedName,
-) error {
-	_, err := util.Watch(
+	updatedScalingBounds chan<- vmPodInfo,
+) (*util.WatchStore[vmapi.VirtualMachine], error) {
+	return util.Watch(
 		ctx,
-		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
+		e.vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		util.WatchConfig{
-			LogName: "pods",
-			// We want to be up-to-date in tracking deletions, so that our reservations are correct.
-			//
-			// FIXME: make these configurable.
+			LogName: "VMs",
+			// FIXME: make these durations configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
 		},
-		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
-			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
+		util.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
+			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
 		},
-		util.InitWatchModeSync, // note: doesn't matter, because AddFunc = nil.
+		util.InitWatchModeSync, // Must sync here so that initial cluster state is read correctly.
 		metav1.ListOptions{},
-		util.WatchHandlerFuncs[*corev1.Pod]{
-			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
-				// note: it doesn't matter whether we use newPod or oldPod for the name here; the
-				// pod name and namespace aren't allowed to change.
-				name := util.NamespacedName{Name: newPod.Name, Namespace: newPod.Namespace}
-				_, isVM := oldPod.Labels[LabelVM]
-				if isVM && api.HasAutoscalingEnabled(oldPod) && !api.HasAutoscalingEnabled(newPod) {
+		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{
+			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
+				oldInfo, err := api.ExtractVmInfo(oldVM)
+				if err != nil {
+					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %s:%s: %w", oldVM.Namespace, oldVM.Name, err)
+					return
+				}
+				newInfo, err := api.ExtractVmInfo(newVM)
+				if err != nil {
+					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %s:%s: %w", newVM.Namespace, newVM.Name, err)
+					return
+				}
+
+				if newVM.Status.PodName == "" {
+					klog.Infof(
+						"[autoscale-enforcer] Skipping update for VM %s:%s because .status.podName is empty",
+						newVM.Namespace, newVM.Name,
+					)
+					return
+				}
+
+				if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
+					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					klog.Infof(
 						"[autoscale-enforcer] watch: Received update to disable autoscaling for pod %v",
 						name,
 					)
 					vmDisabledScaling <- name
 				}
-			},
-			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
-				name := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
-				if _, ok := pod.Labels[LabelVM]; ok {
-					vmDeletions <- name
-				} else {
-					podDeletions <- name
+
+				// If the pod changed, then we're going to handle a deletion event for the old pod,
+				// plus creation event for the new pod. Don't worry about it - because all VM
+				// information comes from this WatchStore anyways, there's no possibility of missing
+				// an update.
+				if oldVM.Status.PodName != newVM.Status.PodName {
+					return
 				}
+
+				// If bounds didn't change, then no need to update
+				if oldInfo.EqualScalingBounds(*newInfo) {
+					return
+				}
+
+				updatedScalingBounds <- vmPodInfo{vm: newInfo, podName: newVM.Status.PodName}
 			},
 		},
 	)
-	return err
 }

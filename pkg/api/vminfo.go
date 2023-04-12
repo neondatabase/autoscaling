@@ -3,6 +3,8 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -14,6 +16,7 @@ import (
 const (
 	LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
+	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
 )
 
 // HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
@@ -24,7 +27,8 @@ func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
 }
 
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
-// care about
+// care about. It takes various labels and annotations into account, so certain fields might be
+// different from what's strictly in the VirtualMachine object.
 type VmInfo struct {
 	Name           string    `json:"name"`
 	Namespace      string    `json:"namespace"`
@@ -117,10 +121,28 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		return nil, err
 	}
 
+	if boundsJSON, ok := vm.Annotations[AnnotationAutoscalingBounds]; ok {
+		var bounds scalingBounds
+		if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
+			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
+		}
+
+		if err := bounds.validate(&info.Mem.SlotSize); err != nil {
+			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
+		}
+		info.applyBounds(bounds)
+	}
+
 	min := info.Min()
 	using := info.Using()
 	max := info.Max()
 
+	// check: min <= max
+	if min.HasFieldGreaterThan(max) {
+		return nil, fmt.Errorf("min resources %+v has field greater than maximum %+v", min, max)
+	}
+
+	// check: min <= using <= max
 	if using.HasFieldLessThan(min) {
 		return nil, fmt.Errorf("current usage %+v has field less than minimum %+v", using, min)
 	} else if using.HasFieldGreaterThan(max) {
@@ -128,4 +150,64 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	}
 
 	return &info, nil
+}
+
+func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
+	return vm.Min() != cmp.Min() || vm.Max() != cmp.Max()
+}
+
+func (vm *VmInfo) applyBounds(b scalingBounds) {
+	vm.Cpu.Min = *b.Min.CPU
+	vm.Cpu.Max = *b.Max.CPU
+
+	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
+	// (2^16-1) * info.Mem.SlotSize.Value().
+	vm.Mem.Min = uint16(b.Min.Mem.Value() / vm.Mem.SlotSize.Value())
+	vm.Mem.Max = uint16(b.Max.Mem.Value() / vm.Mem.SlotSize.Value())
+}
+
+type scalingBounds struct {
+	Min *resourceBound `json:"min,omitempty"`
+	Max *resourceBound `json:"max,omitempty"`
+}
+
+type resourceBound struct {
+	CPU *uint16            `json:"cpu,omitempty"`
+	Mem *resource.Quantity `json:"mem,omitempty"`
+}
+
+func (b scalingBounds) validate(memSlotSize *resource.Quantity) error {
+	if b.Min == nil {
+		return errors.New("missing field 'min'")
+	} else if b.Max == nil {
+		return errors.New("missing field 'max'")
+	}
+
+	if field, err := b.Min.validate(memSlotSize); err != nil {
+		return fmt.Errorf("error at .min%s: %w", field, err)
+	} else if field, err := b.Max.validate(memSlotSize); err != nil {
+		return fmt.Errorf("error at .max%s: %w", field, err)
+	}
+
+	return nil
+}
+
+func (b resourceBound) validate(memSlotSize *resource.Quantity) (field string, _ error) {
+	if b.CPU == nil {
+		return "", errors.New("missing field 'cpu'")
+	} else if b.Mem == nil {
+		return "", errors.New("missing field 'mem'")
+	}
+
+	if *b.CPU == 0 {
+		return ".cpu", errors.New("value cannot be zero")
+	}
+
+	if b.Mem.IsZero() || b.Mem.Value() < 0 {
+		return ".mem", errors.New("value must be greater than zero")
+	} else if b.Mem.Value()%memSlotSize.Value() != 0 {
+		return ".mem", fmt.Errorf("value must be divisible by VM memory slot size %s", memSlotSize)
+	}
+
+	return "", nil
 }
