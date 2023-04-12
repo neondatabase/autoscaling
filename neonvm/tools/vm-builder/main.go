@@ -22,8 +22,7 @@ import (
 
 const (
 	dockerfileVmBuilder = `
-ARG VM_INFORMANT_VERSION=v0.1.14
-FROM neondatabase/vm-informant:$VM_INFORMANT_VERSION as informant
+FROM {{.InformantImage}} as informant
 
 # Build cgroup-tools
 #
@@ -61,10 +60,10 @@ RUN set -exu \
 FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
 FROM quay.io/prometheus/node-exporter:v1.5.0 as node-exporter
 
-FROM {{.}} AS rootdisk
+FROM {{.RootDiskImage}} AS rootdisk
 
 USER root
-RUN adduser vm-informant --disabled-password --no-create-home
+RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant
 
 USER postgres
 COPY cgconfig.conf /etc/cgconfig.conf
@@ -182,9 +181,9 @@ fi
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -s /bin/sh -l nobody --session-command /bin/node_exporter
-::respawn:su -s /bin/sh -l nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
-::respawn:su -s /bin/sh -l vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:/neonvm/bin/su-exec vm-informant /usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"
+::respawn:/neonvm/bin/su-exec nobody /bin/node_exporter
+::respawn:env DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /neonvm/bin/su-exec nobody /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
@@ -237,7 +236,7 @@ for i in ${ETH_LIST}; do
 done
 `
 
-// cgconfig.conf
+	// cgconfig.conf
 	configCgroup = `# Configuration for cgroups in VM compute nodes
 group neon-postgres {
     perm {
@@ -254,11 +253,16 @@ group neon-postgres {
 )
 
 var (
-	srcImage   = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage   = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
-	size       = flag.String("size", "1G", `Size for disk image: --size=1G`)
-	outFile    = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
-	forcePull  = flag.Bool("pull", false, `Pull src image even if already present locally`)
+	Version     string
+	VmInformant string
+
+	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
+	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
+	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
+	informant = flag.String("informant", VmInformant, `vm-informant docker image`)
+	version   = flag.Bool("version", false, `Print vm-builder version`)
 )
 
 func printReader(reader io.ReadCloser) error {
@@ -295,9 +299,19 @@ type ImageSpec struct {
 	Env        []string
 }
 
+type Images struct {
+	RootDiskImage  string
+	InformantImage string
+}
+
 func main() {
 	flag.Parse()
 	var dstIm string
+
+	if *version {
+		fmt.Println(Version)
+		os.Exit(0)
+	}
 
 	if len(*srcImage) == 0 {
 		log.Println("-src not set, see usage info:")
@@ -386,7 +400,7 @@ func main() {
 		log.Fatal(err)
 	}
 	var dockerfileVmBuilderBuffer bytes.Buffer
-	err = dockerfileVmBuilderTmpl.Execute(&dockerfileVmBuilderBuffer, *srcImage)
+	err = dockerfileVmBuilderTmpl.Execute(&dockerfileVmBuilderBuffer, &Images{RootDiskImage: *srcImage, InformantImage: *informant})
 	if err != nil {
 		log.Fatalln(err)
 	}

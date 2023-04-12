@@ -1,3 +1,4 @@
+VERSION ?= dev
 # Image URL to use all building/pushing image targets
 IMG_CONTROLLER ?= controller:dev
 IMG_RUNNER ?= runner:dev
@@ -114,15 +115,19 @@ test: fmt vet envtest ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: fmt vet bin/vm-builder ## Build all neonvm binaries.
+build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
 	go build -o bin/vxlan-ipam       neonvm/tools/vxlan/ipam/main.go
 	go build -o bin/runner           neonvm/runner/main.go
 
 .PHONY: bin/vm-builder
-bin/vm-builder: ## Build vm-builder binary.
-	go build -o bin/vm-builder neonvm/tools/vm-builder/main.go
+bin/vm-builder: vm-informant ## Build vm-builder binary.
+	go build -o bin/vm-builder -ldflags "-X main.Version=${VERSION} -X main.VmInformant=${VM_INFORMANT_IMG}" neonvm/tools/vm-builder/main.go
+
+.PHONY: bin/vm-builder-generic
+bin/vm-builder-generic: ## Build vm-builder binary.
+	go build -o bin/vm-builder-generic  neonvm/tools/vm-builder-generic/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
@@ -130,10 +135,12 @@ run: fmt vet ## Run a controller from your host.
 
 .PHONY: vm-informant
 vm-informant: ## Build vm-informant image
+	echo "---$(GIT_INFO)---"
 	docker buildx build \
+		--quiet \
 		--tag $(VM_INFORMANT_IMG) \
 		--load \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--build-arg GIT_INFO=$(GIT_INFO) \
 		--file build/vm-informant/Dockerfile \
 		.
 
