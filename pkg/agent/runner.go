@@ -533,6 +533,11 @@ func (r *Runner) handleVMResources(
 				defer r.lock.Unlock()
 
 				if r.vm.Mem.SlotSize.Cmp(newVMInfo.Mem.SlotSize) != 0 {
+					// VM memory slot sizes can't change at runtime, at time of writing (2023-04-12).
+					// It's worth checking it here though, because something must have gone horribly
+					// wrong elsewhere for the memory slots size to change that it's worth aborting
+					// before anything else goes wrong - and if, in future, we allow them to change,
+					// it's better to panic than have subtly incorrect logic.
 					panic("VM changed memory slot size")
 				}
 
