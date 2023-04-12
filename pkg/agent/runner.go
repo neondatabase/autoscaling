@@ -314,8 +314,8 @@ func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiv
 }
 
 func (r *Runner) setStatus(with func(*podStatus)) {
-	r.status.lock.Lock()
-	defer r.status.lock.Unlock()
+	r.status.mu.Lock()
+	defer r.status.mu.Unlock()
 	with(r.status)
 }
 
@@ -515,8 +515,8 @@ func (r *Runner) handleVMResources(
 		case <-vmInfoUpdated.Recv():
 			// Only actually do the update if something we care about changed:
 			newVMInfo := func() api.VmInfo {
-				r.status.lock.Lock()
-				defer r.status.lock.Unlock()
+				r.status.mu.Lock()
+				defer r.status.mu.Unlock()
 				return r.status.vmInfo
 			}()
 
