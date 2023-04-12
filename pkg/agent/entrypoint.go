@@ -49,7 +49,8 @@ func (r MainRunner) Run(ctx context.Context) error {
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")
 		// TODO: catch panics here, bubble those into a clean-ish shutdown.
-		go RunBillingMetricsCollector(ctx, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)
+		storeForNode := util.NewIndexedWatchStore(vmWatchStore, NewVMNodeIndex(r.EnvArgs.K8sNodeName))
+		go RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode)
 	}
 
 	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)

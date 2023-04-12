@@ -92,7 +92,7 @@ type Runner struct {
 	//
 	// This field MUST NOT be read or updated without holding lock.
 	vm      api.VmInfo
-	podName api.PodName
+	podName util.NamespacedName
 	podIP   string
 
 	// schedulerRespondedWithMigration is true iff the scheduler has returned an api.PluginResponse
@@ -730,7 +730,7 @@ startScheduler:
 			r.requestLock.Lock()
 			defer r.requestLock.Unlock()
 
-			// It's possible for another thread to take responsibility for regsitering the
+			// It's possible for another thread to take responsibility for registering the
 			// scheduler, instead of us. Don't need to double-register.
 			if sched.registered {
 				return

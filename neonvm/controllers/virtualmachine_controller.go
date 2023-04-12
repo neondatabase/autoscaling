@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -642,7 +643,6 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			NodeSelector:                  virtualmachine.Spec.NodeSelector,
 			ImagePullSecrets:              virtualmachine.Spec.ImagePullSecrets,
 			Tolerations:                   virtualmachine.Spec.Tolerations,
-			ServiceAccountName:            virtualmachine.Spec.ServiceAccountName,
 			SchedulerName:                 virtualmachine.Spec.SchedulerName,
 			Affinity:                      affinity,
 			InitContainers: []corev1.Container{{
@@ -816,7 +816,7 @@ func acquireIP(ctx context.Context, ipam string) (net.IP, net.IPMask, error) {
 	}
 	p := prefixes.Msg.Prefixes
 	if len(p) == 0 {
-		return net.IP{}, net.IPMask{}, fmt.Errorf("IPAM prefix not found")
+		return net.IP{}, net.IPMask{}, errors.New("IPAM prefix not found")
 	}
 	if len(p) > 1 {
 		return net.IP{}, net.IPMask{}, fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
@@ -857,7 +857,7 @@ func releaseIP(ctx context.Context, ipam string, ip string) error {
 	}
 	p := prefixes.Msg.Prefixes
 	if len(p) == 0 {
-		return fmt.Errorf("IPAM prefix not found")
+		return errors.New("IPAM prefix not found")
 	}
 	if len(p) > 1 {
 		return fmt.Errorf("too many IPAM prefixes found (%d)", len(p))

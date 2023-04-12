@@ -57,7 +57,7 @@ func startVMWatcher(
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(vm, vmEventAdded)
 					if err != nil {
-						klog.Errorf("Erorr handling VM added: %s", err)
+						klog.Errorf("Error handling VM added: %s", err)
 						return
 					}
 					vmEvents <- event

@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	// "fmt"
+	// "errors"
 	"os"
 	"time"
 
@@ -120,7 +121,7 @@ var _ = Describe("VirtualMachine controller", func() {
 							Status: metav1.ConditionTrue, Reason: "Reconciling",
 							Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", virtualmachine.Name, virtualmachine.Spec.Size)}
 						if latestStatusCondition != expectedLatestStatusCondition {
-							return fmt.Errorf("The latest status condition added to the virtualmachine instance is not as expected")
+							return errors.New("The latest status condition added to the virtualmachine instance is not as expected")
 						}
 					}
 					return nil

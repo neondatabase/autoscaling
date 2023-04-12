@@ -110,25 +110,25 @@ type pluginStateDump struct {
 }
 
 type podNameAndPointer struct {
-	Obj     pointerString `json:"obj"`
-	PodName api.PodName   `json:"podName"`
+	Obj     pointerString       `json:"obj"`
+	PodName util.NamespacedName `json:"podName"`
 }
 
 type pointerString string
 
 type nodeStateDump struct {
-	Obj       pointerString                           `json:"obj"`
-	Name      string                                  `json:"name"`
-	VCPU      nodeResourceState[milliCPU]             `json:"vCPU"`
-	MemSlots  nodeResourceState[uint16]               `json:"memSlots"`
-	Pods      []keyed[api.PodName, podStateDump]      `json:"pods"`
-	OtherPods []keyed[api.PodName, otherPodStateDump] `json:"otherPods"`
-	Mq        []*podNameAndPointer                    `json:"mq"`
+	Obj       pointerString                                   `json:"obj"`
+	Name      string                                          `json:"name"`
+	VCPU      nodeResourceState[milliCPU]                     `json:"vCPU"`
+	MemSlots  nodeResourceState[uint16]                       `json:"memSlots"`
+	Pods      []keyed[util.NamespacedName, podStateDump]      `json:"pods"`
+	OtherPods []keyed[util.NamespacedName, otherPodStateDump] `json:"otherPods"`
+	Mq        []*podNameAndPointer                            `json:"mq"`
 }
 
 type podStateDump struct {
 	Obj                      pointerString              `json:"obj"`
-	Name                     api.PodName                `json:"name"`
+	Name                     util.NamespacedName        `json:"name"`
 	VMName                   string                     `json:"vmName"`
 	Node                     pointerString              `json:"node"`
 	TestingOnlyAlwaysMigrate bool                       `json:"testingOnlyAlwaysMigrate"`
@@ -152,7 +152,7 @@ func makePointerString[T any](t *T) pointerString {
 	return pointerString(fmt.Sprintf("%p", t))
 }
 
-func sortSliceByPodName[T any](slice []T, name func(T) api.PodName) {
+func sortSliceByPodName[T any](slice []T, name func(T) util.NamespacedName) {
 	slices.SortFunc(slice, func(a, b T) (less bool) {
 		aName := name(a)
 		bName := name(b)
@@ -170,13 +170,13 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 	for _, p := range s.podMap {
 		vmPods = append(vmPods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
 	}
-	sortSliceByPodName(vmPods, func(p podNameAndPointer) api.PodName { return p.PodName })
+	sortSliceByPodName(vmPods, func(p podNameAndPointer) util.NamespacedName { return p.PodName })
 
 	otherPods := make([]podNameAndPointer, 0, len(s.otherPods))
 	for _, p := range s.otherPods {
 		otherPods = append(otherPods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
 	}
-	sortSliceByPodName(otherPods, func(p podNameAndPointer) api.PodName { return p.PodName })
+	sortSliceByPodName(otherPods, func(p podNameAndPointer) util.NamespacedName { return p.PodName })
 
 	nodes := make([]keyed[string, nodeStateDump], 0, len(s.nodeMap))
 	for k, n := range s.nodeMap {
@@ -197,17 +197,17 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 }
 
 func (s *nodeState) dump() nodeStateDump {
-	pods := make([]keyed[api.PodName, podStateDump], 0, len(s.pods))
+	pods := make([]keyed[util.NamespacedName, podStateDump], 0, len(s.pods))
 	for k, p := range s.pods {
-		pods = append(pods, keyed[api.PodName, podStateDump]{Key: k, Value: p.dump()})
+		pods = append(pods, keyed[util.NamespacedName, podStateDump]{Key: k, Value: p.dump()})
 	}
-	sortSliceByPodName(pods, func(kv keyed[api.PodName, podStateDump]) api.PodName { return kv.Key })
+	sortSliceByPodName(pods, func(kv keyed[util.NamespacedName, podStateDump]) util.NamespacedName { return kv.Key })
 
-	otherPods := make([]keyed[api.PodName, otherPodStateDump], 0, len(s.otherPods))
+	otherPods := make([]keyed[util.NamespacedName, otherPodStateDump], 0, len(s.otherPods))
 	for k, p := range s.otherPods {
-		otherPods = append(otherPods, keyed[api.PodName, otherPodStateDump]{Key: k, Value: p.dump()})
+		otherPods = append(otherPods, keyed[util.NamespacedName, otherPodStateDump]{Key: k, Value: p.dump()})
 	}
-	sortSliceByPodName(otherPods, func(kv keyed[api.PodName, otherPodStateDump]) api.PodName { return kv.Key })
+	sortSliceByPodName(otherPods, func(kv keyed[util.NamespacedName, otherPodStateDump]) util.NamespacedName { return kv.Key })
 
 	mq := make([]*podNameAndPointer, 0, len(s.mq))
 	for _, p := range s.mq {

@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -58,7 +59,7 @@ func (r *VirtualMachine) ValidateCreate() error {
 	// validate .spec.guest.cpus.use and .spec.guest.cpus.max
 	if r.Spec.Guest.CPUs.Use != nil {
 		if r.Spec.Guest.CPUs.Max == nil {
-			return fmt.Errorf(".spec.guest.cpus.max must be defined if .spec.guest.cpus.use specified")
+			return errors.New(".spec.guest.cpus.max must be defined if .spec.guest.cpus.use specified")
 		}
 		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Min) == -1 {
 			return fmt.Errorf(".spec.guest.cpus.use (%v) should be greater than or equal to the .spec.guest.cpus.min (%v)",
@@ -75,7 +76,7 @@ func (r *VirtualMachine) ValidateCreate() error {
 	// validate .spec.guest.memorySlots.use and .spec.guest.memorySlots.max
 	if r.Spec.Guest.MemorySlots.Use != nil {
 		if r.Spec.Guest.MemorySlots.Max == nil {
-			return fmt.Errorf(".spec.guest.memorySlots.max must be defined if .spec.guest.memorySlots.use specified")
+			return errors.New(".spec.guest.memorySlots.max must be defined if .spec.guest.memorySlots.use specified")
 		}
 		if *r.Spec.Guest.MemorySlots.Use < *r.Spec.Guest.MemorySlots.Min {
 			return fmt.Errorf(".spec.guest.memorySlots.use (%d) should be greater than or equal to the .spec.guest.memorySlots.min (%d)",
@@ -93,13 +94,13 @@ func (r *VirtualMachine) ValidateCreate() error {
 	for _, disk := range r.Spec.Disks {
 		virtualmachinelog.Info("validate disk", "name", disk.Name)
 		if disk.Name == "virtualmachineimages" {
-			return fmt.Errorf("'virtualmachineimages' is reserved name for .spec.disks[].name")
+			return errors.New("'virtualmachineimages' is reserved name for .spec.disks[].name")
 		}
 		if disk.Name == "vmroot" {
-			return fmt.Errorf("'vmroot' is reserved name for .spec.disks[].name")
+			return errors.New("'vmroot' is reserved name for .spec.disks[].name")
 		}
 		if disk.Name == "vmruntime" {
-			return fmt.Errorf("'vmruntime' is reserved name for .spec.disks[].name")
+			return errors.New("'vmruntime' is reserved name for .spec.disks[].name")
 		}
 		if len(disk.Name) > 32 {
 			return fmt.Errorf("disk name '%s' too long, should be less than or equal to 32", disk.Name)
@@ -110,7 +111,7 @@ func (r *VirtualMachine) ValidateCreate() error {
 	for _, port := range r.Spec.Guest.Ports {
 		virtualmachinelog.Info("validate port ", "name", port.Name)
 		if len(port.Name) != 0 && port.Name == "qmp" {
-			return fmt.Errorf("'qmp' is reserved name for .spec.guest.ports[].name")
+			return errors.New("'qmp' is reserved name for .spec.guest.ports[].name")
 		}
 	}
 
@@ -125,34 +126,34 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	before, _ := old.(*VirtualMachine)
 
 	if !reflect.DeepEqual(r.Spec.Guest.CPUs.Min, before.Spec.Guest.CPUs.Min) {
-		return fmt.Errorf(".spec.guest.cpus.min is immutable")
+		return errors.New(".spec.guest.cpus.min is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.CPUs.Max, before.Spec.Guest.CPUs.Max) {
-		return fmt.Errorf(".spec.guest.cpus.max is immutable")
+		return errors.New(".spec.guest.cpus.max is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.MemorySlots.Min, before.Spec.Guest.MemorySlots.Min) {
-		return fmt.Errorf(".spec.guest.memorySlots.min is immutable")
+		return errors.New(".spec.guest.memorySlots.min is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.MemorySlots.Max, before.Spec.Guest.MemorySlots.Max) {
-		return fmt.Errorf(".spec.guest.memorySlots.max is immutable")
+		return errors.New(".spec.guest.memorySlots.max is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Ports, before.Spec.Guest.Ports) {
-		return fmt.Errorf(".spec.guest.ports is immutable")
+		return errors.New(".spec.guest.ports is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.RootDisk, before.Spec.Guest.RootDisk) {
-		return fmt.Errorf(".spec.guest.rootDisk is immutable")
+		return errors.New(".spec.guest.rootDisk is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Command, before.Spec.Guest.Command) {
-		return fmt.Errorf(".spec.guest.command is immutable")
+		return errors.New(".spec.guest.command is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Args, before.Spec.Guest.Args) {
-		return fmt.Errorf(".spec.guest.args is immutable")
+		return errors.New(".spec.guest.args is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Guest.Env, before.Spec.Guest.Env) {
-		return fmt.Errorf(".spec.guest.env is immutable")
+		return errors.New(".spec.guest.env is immutable")
 	}
 	if !reflect.DeepEqual(r.Spec.Disks, before.Spec.Disks) {
-		return fmt.Errorf(".spec.disks is immutable")
+		return errors.New(".spec.disks is immutable")
 	}
 
 	// validate .spec.guest.cpu.use

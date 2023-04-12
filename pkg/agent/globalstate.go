@@ -26,7 +26,7 @@ import (
 type agentState struct {
 	// lock guards access to pods
 	lock util.ChanMutex
-	pods map[api.PodName]*podState
+	pods map[util.NamespacedName]*podState
 
 	podIP                string
 	config               *Config
@@ -39,7 +39,7 @@ type agentState struct {
 func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) agentState {
 	return agentState{
 		lock:                 util.NewChanMutex(),
-		pods:                 make(map[api.PodName]*podState),
+		pods:                 make(map[util.NamespacedName]*podState),
 		config:               r.Config,
 		kubeClient:           r.KubeClient,
 		vmClient:             r.VMClient,
@@ -53,6 +53,7 @@ func vmIsOurResponsibility(vm *vmapi.VirtualMachine, config *Config, nodeName st
 	return vm.Status.Node == nodeName &&
 		vm.Status.Phase == vmapi.VmRunning &&
 		vm.Status.PodIP != "" &&
+		api.HasAutoscalingEnabled(vm) &&
 		vm.Spec.SchedulerName == config.Scheduler.SchedulerName
 }
 
@@ -74,7 +75,7 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 	}
 	defer s.lock.Unlock()
 
-	podName := api.PodName{Namespace: event.vmInfo.Namespace, Name: event.podName}
+	podName := util.NamespacedName{Namespace: event.vmInfo.Namespace, Name: event.podName}
 	state, hasPod := s.pods[podName]
 
 	switch event.kind {
@@ -142,7 +143,7 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 }
 
 type podState struct {
-	podName api.PodName
+	podName util.NamespacedName
 
 	stop   context.CancelFunc
 	runner *Runner
@@ -150,10 +151,10 @@ type podState struct {
 }
 
 type podStateDump struct {
-	PodName         api.PodName   `json:"podName"`
-	Status          podStatusDump `json:"status"`
-	Runner          *RunnerState  `json:"runner,omitempty"`
-	CollectionError error         `json:"collectionError,omitempty"`
+	PodName         util.NamespacedName `json:"podName"`
+	Status          podStatusDump       `json:"status"`
+	Runner          *RunnerState        `json:"runner,omitempty"`
+	CollectionError error               `json:"collectionError,omitempty"`
 }
 
 func (p *podState) dump(ctx context.Context) podStateDump {
