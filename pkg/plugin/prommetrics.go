@@ -3,12 +3,8 @@ package plugin
 // defines prometheus metrics and provides the server, via (*AutoscaleEnforcer).startPrometheusServer()
 
 import (
-	"context"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type PromMetrics struct {
@@ -17,7 +13,7 @@ type PromMetrics struct {
 	validResourceRequests *prometheus.CounterVec
 }
 
-func (p *AutoscaleEnforcer) startPrometheusServer(ctx context.Context) error {
+func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 	p.metrics = PromMetrics{
 		pluginCalls: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -51,5 +47,5 @@ func (p *AutoscaleEnforcer) startPrometheusServer(ctx context.Context) error {
 		p.metrics.validResourceRequests,
 	)
 
-	return util.StartPrometheusMetricsServer(ctx, 9100, reg)
+	return reg
 }

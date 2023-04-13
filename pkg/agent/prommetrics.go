@@ -1,12 +1,8 @@
 package agent
 
 import (
-	"context"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type PromMetrics struct {
@@ -15,7 +11,7 @@ type PromMetrics struct {
 	informantRequestsInbound  *prometheus.CounterVec
 }
 
-func startPrometheusServer(ctx context.Context, globalstate *agentState) (PromMetrics, error) {
+func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Registry) {
 	schedulerRequests := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "scheduler_plugin_requests_total",
@@ -60,13 +56,9 @@ func startPrometheusServer(ctx context.Context, globalstate *agentState) (PromMe
 		totalVMs,
 	)
 
-	if err := util.StartPrometheusMetricsServer(ctx, 9100, reg); err != nil {
-		return PromMetrics{}, err
-	}
-
 	return PromMetrics{
 		schedulerRequests:         schedulerRequests,
 		informantRequestsOutbound: informantRequestsOutbound,
 		informantRequestsInbound:  informantRequestsInbound,
-	}, nil
+	}, reg
 }

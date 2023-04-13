@@ -151,7 +151,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		}
 	}()
 
-	if err := p.startPrometheusServer(ctx); err != nil {
+	promReg := p.makePrometheusRegistry()
+	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
 		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
 	}
 
