@@ -85,8 +85,8 @@ FROM {{.RootDiskImage}} AS rootdisk
 
 USER root
 # Try debian adduser first, if it failes try busybox version
-RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant \
-  || adduser -S -D -H -h /nonexistent -g "informant user" -s /bin/false vm-informant
+RUN grep vm-informant /etc/passwd || ( adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant \
+  || adduser -S -D -H -h /nonexistent -g "informant user" -s /bin/false vm-informant )
 
 # tweak nofile limits
 RUN set -e \
