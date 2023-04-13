@@ -719,6 +719,8 @@ retryServer:
 				return
 			}
 
+			r.logger.Warningf("Error registering with informant: %s", err)
+
 			// Server exited; can't just retry registering.
 			if server.ExitStatus() != nil {
 				normalRetryWait = time.After(normalWait)
