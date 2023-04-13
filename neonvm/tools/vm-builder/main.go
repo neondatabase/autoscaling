@@ -56,6 +56,7 @@ RUN set -exu \
 	&& CFLAGS="-O3" ./configure --prefix="$INSTALL_DIR" --sysconfdir=/etc --localstatedir=/var --enable-opaque-hierarchy="name=systemd" \
 	# actually build the thing...
 	&& make install
+RUN ls $INSTALL_DIR/bin
 
 FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
 
@@ -84,9 +85,7 @@ RUN set -e \
 FROM {{.RootDiskImage}} AS rootdisk
 
 USER root
-# Try debian adduser first, if it failes try busybox version
-RUN grep vm-informant /etc/passwd || ( adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant \
-  || adduser -S -D -H -h /nonexistent -g "informant user" -s /bin/false vm-informant )
+RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant
 
 # tweak nofile limits
 RUN set -e \
@@ -228,9 +227,10 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
-::respawn:su -p nobody --session-command '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
-::respawn:su -p nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
+::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres'
+#::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
+::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
