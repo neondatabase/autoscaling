@@ -2,16 +2,11 @@ package agent
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"net"
-	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"k8s.io/klog/v2"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type PromMetrics struct {
@@ -21,13 +16,6 @@ type PromMetrics struct {
 }
 
 func startPrometheusServer(ctx context.Context, globalstate *agentState) (PromMetrics, error) {
-	// Separate binding from serving, so that we can catch any error in this thread, rather than the
-	// server's.
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: 9100})
-	if err != nil {
-		return PromMetrics{}, fmt.Errorf("Error listening on TCP: %w", err)
-	}
-
 	schedulerRequests := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "scheduler_plugin_requests_total",
@@ -72,28 +60,9 @@ func startPrometheusServer(ctx context.Context, globalstate *agentState) (PromMe
 		totalVMs,
 	)
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
-	srv := &http.Server{Handler: mux}
-
-	shutdownCtx, shutdown := context.WithCancel(ctx)
-
-	// Shutdown the server when the context expires, but also exit the shutdown watcher if the
-	// server shuts down for some other reason.
-	go func() {
-		<-shutdownCtx.Done()
-		if err := srv.Shutdown(context.Background()); err != nil {
-			klog.Errorf("Error shutting down prometheus server: %w", err)
-		}
-	}()
-
-	go func() {
-		// shutdown the shutdown watcher if we exit before it
-		defer shutdown()
-		if err := srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
-			klog.Errorf("Prometheus server exited with unexpected error: %s", err)
-		}
-	}()
+	if err := util.StartPrometheusMetricsServer(ctx, 9100, reg); err != nil {
+		return PromMetrics{}, err
+	}
 
 	return PromMetrics{
 		schedulerRequests:         schedulerRequests,
