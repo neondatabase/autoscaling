@@ -77,7 +77,7 @@ RUN set -e \
 	&& curl -sfSL https://github.com/pgbouncer/pgbouncer/releases/download/pgbouncer_${PGBOUNCER_GITPATH}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz -o pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& tar xzvf pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& cd pgbouncer-${PGBOUNCER_VERSION} \
-	&& ./configure --prefix=/usr/local/pgbouncer \
+	&& LDFLAGS=-static ./configure --prefix=/usr/local/pgbouncer --without-openssl \
 	&& make -j $(nproc) \
 	&& make install
 
@@ -102,12 +102,6 @@ RUN set -e \
 	&& chown postgres:postgres /etc/pgbouncer.ini \
 	&& chmod 0644 /etc/pgbouncer.ini \
 	&& chmod 0644 /etc/cgconfig.conf
-
-# deps for pgbouncer
-RUN set -e \
-	&& apt-get update \
-	&& apt-get install -y --no-install-recommends libevent-2.1-7 \
-	&& rm -rf /var/lib/apt/lists/*
 
 USER postgres
 
