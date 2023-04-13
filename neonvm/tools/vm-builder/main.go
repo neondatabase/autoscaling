@@ -491,27 +491,30 @@ func main() {
 		tmplArgs.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
 	}
 
-	buf := new(bytes.Buffer)
-	tw := tar.NewWriter(buf)
+	tarBuffer := new(bytes.Buffer)
+	tw := tar.NewWriter(tarBuffer)
 	defer tw.Close()
 
-	add := func(filename string, tmpl string) {
-		if err := AddTemplatedFileToTar(tw, tmplArgs, filename, tmpl); err != nil {
+	files := []struct {
+		filename string
+		tmpl     string
+	}{
+		{"Dockerfile", dockerfileVmBuilder},
+		{"vmstart", scriptVmStart},
+		{"inittab", scriptInitTab},
+		{"vmacpi", scriptVmAcpi},
+		{"powerdown", scriptPowerDown},
+		{"vminit", scriptVmInit},
+		{"cgconfig.conf", configCgroup},
+		{"vector.yaml", configVector},
+		{"pgbouncer.ini", configPgbouncer},
+	}
+
+	for _, f := range files {
+		if err := AddTemplatedFileToTar(tw, tmplArgs, f.filename, f.tmpl); err != nil {
 			log.Fatalln(err)
 		}
 	}
-
-	add("Dockerfile", dockerfileVmBuilder)
-	add("vmstart", scriptVmStart)
-	add("inittab", scriptInitTab)
-	add("vmacpi", scriptVmAcpi)
-	add("powerdown", scriptPowerDown)
-	add("vminit", scriptVmInit)
-	add("cgconfig.conf", configCgroup)
-	add("vector.yaml", configVector)
-	add("pgbouncer.ini", configPgbouncer)
-
-	dockerFileTarReader := bytes.NewReader(buf.Bytes())
 
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
@@ -522,12 +525,12 @@ func main() {
 		BuildArgs:      buildArgs,
 		SuppressOutput: true,
 		NoCache:        false,
-		Context:        dockerFileTarReader,
+		Context:        tarBuffer,
 		Dockerfile:     "Dockerfile",
 		Remove:         true,
 		ForceRemove:    true,
 	}
-	buildResp, err := cli.ImageBuild(ctx, dockerFileTarReader, opt)
+	buildResp, err := cli.ImageBuild(ctx, tarBuffer, opt)
 	if err != nil {
 		log.Fatalln(err)
 	}
