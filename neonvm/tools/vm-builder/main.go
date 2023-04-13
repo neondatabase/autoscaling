@@ -91,8 +91,10 @@ RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gec
 # tweak nofile limits
 RUN set -e \
 	&& echo 'fs.file-max = 1048576' >>/etc/sysctl.conf \
-	&& echo '*    - nofile 1048576' >>/etc/security/limits.conf \
-	&& echo 'root - nofile 1048576' >>/etc/security/limits.conf
+	&& test ! -e /etc/security || { \
+	   echo '*    - nofile 1048576' >>/etc/security/limits.conf \
+	&& echo 'root - nofile 1048576' >>/etc/security/limits.conf \
+	   }
 
 COPY cgconfig.conf /etc/cgconfig.conf
 COPY pgbouncer.ini /etc/pgbouncer.ini
