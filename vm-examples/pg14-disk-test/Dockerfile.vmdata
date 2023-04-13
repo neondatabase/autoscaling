@@ -40,6 +40,13 @@ RUN adduser vm-informant --disabled-password --no-create-home
 # but we still have proper handling around cgroups, etc.
 RUN echo "::respawn:su vm-informant -c '/bin/vm-informant --auto-restart --cgroup=neon-test'" >> /etc/inittab
 
+# Install vector.dev binary
+RUN set -e \
+    && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
+    | tar xzvf - --strip-components 3 -C /bin/ ./vector-x86_64-unknown-linux-musl/bin/vector
+ADD vector.yaml /etc/vector.yaml
+RUN echo "::respawn:/bin/vector -c /etc/vector.yaml --config-dir /etc/vector" >> /etc/inittab
+
 # postgresql stuff
 RUN set -e \
 	&& apk add --no-cache \
