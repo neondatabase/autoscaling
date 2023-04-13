@@ -367,14 +367,14 @@ func printReader(reader io.ReadCloser) error {
 	return nil
 }
 
-func AddTemplatedFileToTar(tw *tar.Writer, buf *bytes.Buffer, tmplData any, filename string, tmplString string) error {
+func AddTemplatedFileToTar(tw *tar.Writer, tmplData any, filename string, tmplString string) error {
 	tmpl, err := template.New(filename).Parse(tmplString)
 	if err != nil {
 		return fmt.Errorf("failed to parse template for %q: %w", filename, err)
 	}
 
-	buf.Reset()
-	if err = tmpl.Execute(buf, tmplData); err != nil {
+	var buf bytes.Buffer
+	if err = tmpl.Execute(&buf, tmplData); err != nil {
 		return fmt.Errorf("failed to execute template for %q: %w", filename, err)
 	}
 
@@ -494,7 +494,7 @@ func main() {
 	defer tw.Close()
 
 	add := func(filename string, tmpl string) {
-		if err := AddTemplatedFileToTar(tw, buf, tmplCtx, filename, tmpl); err != nil {
+		if err := AddTemplatedFileToTar(tw, tmplCtx, filename, tmpl); err != nil {
 			log.Fatalln(err)
 		}
 	}
