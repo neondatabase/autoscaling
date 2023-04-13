@@ -211,14 +211,14 @@ func printReader(reader io.ReadCloser) error {
 	return nil
 }
 
-func AddTemplatedFileToTar(tw *tar.Writer, tmplData any, filename string, tmplString string) error {
+func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
 	tmpl, err := template.New(filename).Parse(tmplString)
 	if err != nil {
 		return fmt.Errorf("failed to parse template for %q: %w", filename, err)
 	}
 
 	var buf bytes.Buffer
-	if err = tmpl.Execute(&buf, tmplData); err != nil {
+	if err = tmpl.Execute(&buf, tmplArgs); err != nil {
 		return fmt.Errorf("failed to execute template for %q: %w", filename, err)
 	}
 
@@ -308,7 +308,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	tmplCtx := TemplatesContext{
+	tmplArgs := TemplatesContext{
 		SrcImage:   *srcImage,
 		Entrypoint: imageSpec.Config.Entrypoint,
 		Cmd:        imageSpec.Config.Cmd,
@@ -316,14 +316,14 @@ func main() {
 	}
 
 	if len(imageSpec.Config.User) != 0 {
-		tmplCtx.User = imageSpec.Config.User
+		tmplArgs.User = imageSpec.Config.User
 	} else {
-		tmplCtx.User = "root"
+		tmplArgs.User = "root"
 	}
 
 	// if no entrypoint and cmd in docker image then use sleep for 10 years as stub
-	if len(tmplCtx.Entrypoint) == 0 && len(tmplCtx.Cmd) == 0 {
-		tmplCtx.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
+	if len(tmplArgs.Entrypoint) == 0 && len(tmplArgs.Cmd) == 0 {
+		tmplArgs.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
 	}
 
 	buf := new(bytes.Buffer)
@@ -331,7 +331,7 @@ func main() {
 	defer tw.Close()
 
 	add := func(filename string, tmpl string) {
-		if err := AddTemplatedFileToTar(tw, tmplCtx, filename, tmpl); err != nil {
+		if err := AddTemplatedFileToTar(tw, tmplArgs, filename, tmpl); err != nil {
 			log.Fatalln(err)
 		}
 	}
