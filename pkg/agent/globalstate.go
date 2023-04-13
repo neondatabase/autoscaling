@@ -105,8 +105,7 @@ func (s *agentState) handleVMEventAdded(
 	event vmEvent,
 	podName util.NamespacedName,
 ) {
-	state, ok := s.pods[podName]
-	if ok {
+	if _, ok := s.pods[podName]; ok {
 		klog.Errorf("Received add event for pod %v while already present", event.podName)
 		return
 	}
@@ -150,14 +149,13 @@ func (s *agentState) handleVMEventAdded(
 
 	txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
 
-	state = &podState{
+	s.pods[podName] = &podState{
 		podName:       podName,
 		stop:          cancelRunnerContext,
 		runner:        runner,
 		status:        status,
 		vmInfoUpdated: txVMUpdate,
 	}
-	s.pods[podName] = state
 	runner.Spawn(runnerCtx, rxVMUpdate)
 }
 
