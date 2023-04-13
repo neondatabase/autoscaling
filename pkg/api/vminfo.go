@@ -220,11 +220,10 @@ func (b resourceBound) validate(memSlotSize *resource.Quantity) (field string, _
 func (vm VmInfo) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
-		state.Write([]byte(fmt.Sprintf("api.VmInfo{Name:%q, Namespace:%q, Cpu:", vm.Name, vm.Namespace)))
-		vm.Cpu.format(state, verb)
-		state.Write([]byte(", Mem:"))
-		vm.Mem.format(state, verb)
-		state.Write([]byte(fmt.Sprintf(", AlwaysMigrate:%t, ScalingEnabled:%t}", vm.AlwaysMigrate, vm.ScalingEnabled)))
+		state.Write([]byte(fmt.Sprintf(
+			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.AlwaysMigrate, vm.ScalingEnabled,
+		)))
 	default:
 		if verb != 'v' {
 			state.Write([]byte("%!"))
@@ -232,11 +231,10 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 			state.Write([]byte("(api.VmInfo="))
 		}
 
-		state.Write([]byte(fmt.Sprintf("{Name:%s Namespace:%s Cpu:", vm.Name, vm.Namespace)))
-		vm.Cpu.format(state, verb)
-		state.Write([]byte(" Mem:"))
-		vm.Mem.format(state, verb)
-		state.Write([]byte(fmt.Sprintf(" AlwaysMigrate:%t ScalingEnabled:%t}", vm.AlwaysMigrate, vm.ScalingEnabled)))
+		state.Write([]byte(fmt.Sprintf(
+			"{Name:%s Namespace:%s Cpu:%v Mem:%v AlwaysMigrate:%t ScalingEnabled:%t}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.AlwaysMigrate, vm.ScalingEnabled,
+		)))
 
 		if verb != 'v' {
 			state.Write([]byte{')'})
@@ -244,7 +242,7 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 	}
 }
 
-func (cpu VmCpuInfo) format(state fmt.State, verb rune) {
+func (cpu VmCpuInfo) Format(state fmt.State, verb rune) {
 	// same-ish style as for VmInfo, differing slightly from default repr.
 	switch {
 	case verb == 'v' && state.Flag('#'):
@@ -254,7 +252,7 @@ func (cpu VmCpuInfo) format(state fmt.State, verb rune) {
 	}
 }
 
-func (mem VmMemInfo) format(state fmt.State, verb rune) {
+func (mem VmMemInfo) Format(state fmt.State, verb rune) {
 	// same-ish style as for VmInfo, differing slightly from default repr.
 	switch {
 	case verb == 'v' && state.Flag('#'):
