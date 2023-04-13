@@ -66,6 +66,7 @@ jobs:
           VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
           VM_KERNEL_VERSION: "5.15.80"
 
+      # our docker builds use the output of 'git describe' for embedding git information
       - run: git describe --long --dirty
 
       # Explicitly build all the images beforehand. Building images while the cluster is up can
