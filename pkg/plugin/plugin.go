@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tychoish/fun/pubsub"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	scheme "k8s.io/client-go/kubernetes/scheme"
@@ -97,47 +99,53 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		}
 	}
 
-	// Start watching Pod/VM events...
-	vmDeletions := make(chan util.NamespacedName)
-	vmDisabledScaling := make(chan util.NamespacedName)
-	podDeletions := make(chan util.NamespacedName)
-	vmBoundsChanged := make(chan vmPodInfo)
+	// Start watching Pod/VM events, adding them to a shared queue to process them in order
+	queue := pubsub.NewUnlimitedQueue[func()]()
+	pushToQueue := func(f func()) {
+		if err := queue.Add(f); err != nil {
+			klog.Warningf("[autoscale-enforcer] error adding to pod/VM event queue: %s", err)
+		}
+	}
+	submitVMPodDeletion := func(pod util.NamespacedName) {
+		pushToQueue(func() { p.handleVMDeletion(pod) })
+	}
+	submitNonVMPodDeletion := func(name util.NamespacedName) {
+		pushToQueue(func() { p.handlePodDeletion(name) })
+	}
+	submitVMDisabledScaling := func(pod util.NamespacedName) {
+		pushToQueue(func() { p.handleVMDisabledScaling(pod) })
+	}
+	submitVMBoundsChanged := func(vm *api.VmInfo, podName string) {
+		pushToQueue(func() { p.handleUpdatedScalingBounds(vm, podName) })
+	}
+
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
-	if err := p.watchPodEvents(ctx, vmDeletions, podDeletions); err != nil {
+	if err := p.watchPodEvents(ctx, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, vmDisabledScaling, vmBoundsChanged)
+	vmStore, err := p.watchVMEvents(ctx, submitVMDisabledScaling, submitVMBoundsChanged)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
 
 	p.vmStore = util.NewIndexedWatchStore(vmStore, util.NewNameIndex[vmapi.VirtualMachine]())
 
-	// ... but before handling the deletion events, read the current cluster state:
+	// ... but before handling the events, read the current cluster state:
 	klog.Infof("[autoscale-enforcer] Reading initial cluster state")
 	if err = p.readClusterState(ctx); err != nil {
 		return nil, fmt.Errorf("Error reading cluster state: %w", err)
 	}
 
-	// TODO: this is a little clumsy; both channels are sent on by the same goroutine and both
-	// consumed by this one. This should be changed, probably with handleVMDeletion and
-	// handlePodDeletion being merged into one function.
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case name := <-vmDeletions:
-				p.handleVMDeletion(name)
-			case name := <-vmDisabledScaling:
-				p.handleVMDisabledScaling(name)
-			case name := <-podDeletions:
-				p.handlePodDeletion(name)
-			case v := <-vmBoundsChanged:
-				p.handleUpdatedScalingBounds(v.vm, v.podName)
-			}
+		iter := queue.Iterator()
+		for iter.Next(ctx) {
+			callback := iter.Value()
+			callback()
+		}
+		if err := iter.Close(); err != nil {
+			klog.Infof("[autoscale-enforcer] stopped waiting on pod/VM queue: %s", err)
 		}
 	}()
 
