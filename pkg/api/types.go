@@ -146,10 +146,10 @@ func (r Resources) ValidateNonZero() error {
 }
 
 func (r Resources) SanityCheck() error {
-	if r.VCPU.Cmp(*resource.NewQuantity(250, resource.BinarySI)) == -1 {
+	if r.VCPU.Cmp(*resource.NewMilliQuantity(250, resource.BinarySI)) == -1 {
 		return errors.New("VCPU is too small")
 	}
-	if r.VCPU.Cmp(*resource.NewQuantity(128*1000, resource.BinarySI)) == 1 {
+	if r.VCPU.Cmp(*resource.NewMilliQuantity(128*1000, resource.BinarySI)) == 1 {
 		return errors.New("VCPU is too big")
 	}
 
