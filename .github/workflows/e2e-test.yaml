@@ -15,6 +15,8 @@ jobs:
     runs-on: [ self-hosted, gen3, small ]
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # fetch all, so that we also include tags
 
       - uses: actions/setup-go@v4
         with:
@@ -63,6 +65,9 @@ jobs:
         env:
           VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
           VM_KERNEL_VERSION: "5.15.80"
+
+      # our docker builds use the output of 'git describe' for embedding git information
+      - run: git describe --long --dirty
 
       # Explicitly build all the images beforehand. Building images while the cluster is up can
       # sometimes affect the cluster. For more information:
