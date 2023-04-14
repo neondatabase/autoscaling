@@ -139,14 +139,13 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}
 
 	go func() {
-		for {
-			callback, err := queue.Wait(ctx)
-			if err != nil {
-				klog.Infof("[autoscale-enforcer] stopped waiting on pod/VM queue: %s", err)
-				return
-			}
-
+		iter := queue.Iterator()
+		for iter.Next(ctx) {
+			callback := iter.Value()
 			callback()
+		}
+		if err := iter.Close(); err != nil {
+			klog.Infof("[autoscale-enforcer] stopped waiting on pod/VM queue: %s", err)
 		}
 	}()
 
