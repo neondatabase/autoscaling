@@ -108,7 +108,7 @@ type CPUs struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
-	Max int32 `json:"max,omitempty"`
+	Max int32 `json:"max"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
@@ -124,7 +124,7 @@ type MemorySlots struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
-	Max int32 `json:"max,omitempty"`
+	Max int32 `json:"max"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
