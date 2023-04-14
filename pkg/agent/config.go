@@ -13,6 +13,9 @@ type Config struct {
 	Scheduler SchedulerConfig  `json:"scheduler"`
 	Billing   *BillingConfig   `json:"billing,omitempty"`
 	DumpState *DumpStateConfig `json:"dumpState"`
+
+	InformantUnhealthyAfterSilenceDurationSeconds uint `json:"informantUnhealthyAfterSilenceDurationSeconds"`
+	InformantUnhealthyStartupGracePeriodSeconds   uint `json:"informantUnhealthyStartupGracePeriodSeconds"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
@@ -157,6 +160,10 @@ func (c *Config) validate() error {
 		return cannotBeZero(".dumpState.port")
 	} else if c.DumpState != nil && c.DumpState.TimeoutSeconds == 0 {
 		return cannotBeZero(".dumpState.timeoutSeconds")
+	} else if c.InformantUnhealthyAfterSilenceDurationSeconds == 0 {
+		return cannotBeZero(".informantUnhealthyAfterSilenceDurationSeconds")
+	} else if c.InformantUnhealthyStartupGracePeriodSeconds == 0 {
+		return cannotBeZero(".informantUnhealthyStartupGracePeriodSeconds")
 	}
 
 	return nil

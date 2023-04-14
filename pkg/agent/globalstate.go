@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tychoish/fun/pubsub"
@@ -130,6 +131,9 @@ func (s *agentState) handleVMEventAdded(
 		errored:  nil,
 		panicked: false,
 		vmInfo:   event.vmInfo,
+
+		startTime:                   time.Now(),
+		lastSuccessfulInformantComm: nil,
 	}
 
 	runner := &Runner{
@@ -203,10 +207,13 @@ func (p *podState) dump(ctx context.Context) podStateDump {
 }
 
 type podStatus struct {
-	mu       sync.Mutex
-	done     bool // if true, the runner finished
-	errored  error
-	panicked bool // if true, errored will be non-nil
+	mu        sync.Mutex
+	done      bool // if true, the runner finished
+	errored   error
+	panicked  bool // if true, errored will be non-nil
+	startTime time.Time
+
+	lastSuccessfulInformantComm *time.Time
 
 	// vmInfo stores the latest information about the VM, as given by the global VM watcher.
 	//
@@ -216,11 +223,28 @@ type podStatus struct {
 }
 
 type podStatusDump struct {
-	Done     bool  `json:"done"`
-	Errored  error `json:"errored"`
-	Panicked bool  `json:"panicked"`
+	Done      bool      `json:"done"`
+	Errored   error     `json:"errored"`
+	Panicked  bool      `json:"panicked"`
+	StartTime time.Time `json:"startTime"`
+
+	LastSuccessfulInformantComm *time.Time `json:"lastSuccessfulInformantComm"`
 
 	VMInfo api.VmInfo `json:"vmInfo"`
+}
+
+func (s *podStatus) informantIsUnhealthy(config *Config) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	startupGracePeriod := time.Second * time.Duration(config.InformantUnhealthyStartupGracePeriodSeconds)
+	unhealthySilencePeriod := time.Second * time.Duration(config.InformantUnhealthyAfterSilenceDurationSeconds)
+
+	if s.lastSuccessfulInformantComm == nil {
+		return time.Since(s.startTime) >= startupGracePeriod
+	} else {
+		return time.Since(*s.lastSuccessfulInformantComm) >= unhealthySilencePeriod
+	}
 }
 
 func (s *podStatus) dump() podStatusDump {
@@ -232,6 +256,9 @@ func (s *podStatus) dump() podStatusDump {
 		Errored:  s.errored,
 		Panicked: s.panicked,
 		// FIXME: api.VmInfo contains a resource.Quantity - is that safe to copy by value?
-		VMInfo: s.vmInfo,
+		VMInfo:    s.vmInfo,
+		StartTime: s.startTime,
+
+		LastSuccessfulInformantComm: s.lastSuccessfulInformantComm,
 	}
 }
