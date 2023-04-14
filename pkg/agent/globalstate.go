@@ -88,8 +88,8 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 		state.stop()
 		delete(s.pods, podName)
 	case vmEventUpdated:
-		state.status.lock.Lock()
-		defer state.status.lock.Unlock()
+		state.status.mu.Lock()
+		defer state.status.mu.Unlock()
 
 		state.status.vmInfo = event.vmInfo
 		state.vmInfoUpdated.Send()
@@ -102,7 +102,7 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 		runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
 
 		status := &podStatus{
-			lock:     sync.Mutex{},
+			mu:       sync.Mutex{},
 			done:     false,
 			errored:  nil,
 			panicked: false,
@@ -184,7 +184,7 @@ func (p *podState) dump(ctx context.Context) podStateDump {
 }
 
 type podStatus struct {
-	lock     sync.Mutex
+	mu       sync.Mutex
 	done     bool // if true, the runner finished
 	errored  error
 	panicked bool // if true, errored will be non-nil
@@ -205,8 +205,8 @@ type podStatusDump struct {
 }
 
 func (s *podStatus) dump() podStatusDump {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	return podStatusDump{
 		Done:     s.done,
