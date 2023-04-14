@@ -257,9 +257,9 @@ func (cpu VmCpuInfo) Format(state fmt.State, verb rune) {
 	// same-ish style as for VmInfo, differing slightly from default repr.
 	switch {
 	case verb == 'v' && state.Flag('#'):
-		state.Write([]byte(fmt.Sprintf("api.VmCpuInfo{Min:%d, Max:%d, Use:%d}", cpu.Min, cpu.Max, cpu.Use)))
+		state.Write([]byte(fmt.Sprintf("api.VmCpuInfo{Min:%d, Max:%d, Use:%d}", cpu.Min.MilliValue(), cpu.Max.MilliValue(), cpu.Use.MilliValue())))
 	default:
-		state.Write([]byte(fmt.Sprintf("{Min:%d Max:%d Use:%d}", cpu.Min, cpu.Max, cpu.Use)))
+		state.Write([]byte(fmt.Sprintf("{Min:%d Max:%d Use:%d}", cpu.Min.MilliValue(), cpu.Max.MilliValue(), cpu.Use.MilliValue())))
 	}
 }
 
