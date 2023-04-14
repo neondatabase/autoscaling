@@ -11,7 +11,7 @@ metadata:
 spec:
   initContainers:
   - name: wait-for-pg
-    image: postgres:15-debian
+    image: postgres:15-bullseye
     command:
     - sh
     - "-c"
@@ -21,7 +21,7 @@ spec:
         sleep 1
       done
   - name: pgbench-initialize
-    image: postgres:15-debian
+    image: postgres:15-bullseye
     command:
     - pgbench
     args:
@@ -30,7 +30,7 @@ spec:
     - --scale=10
   containers:
   - name: pgbench
-    image: postgres:15-debian
+    image: postgres:15-bullseye
     command:
     - pgbench
     args:
