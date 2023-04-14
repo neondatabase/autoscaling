@@ -693,7 +693,8 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, podName s
 	// FIXME: this definition of receivedContact may be inaccurate if there was an error with the
 	// autoscaler-agent's request.
 	receivedContact := pod.mostRecentComputeUnit != nil
-	cpuVerdict := handleUpdatedLimits(&pod.node.vCPU, &pod.vCPU, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
+	var n *nodeResourceState[milliCPU] = &pod.node.vCPU
+	cpuVerdict := handleUpdatedLimits(n, &pod.vCPU, receivedContact, FromResourceQuantity(vm.Cpu.Min), FromResourceQuantity(vm.Cpu.Max))
 	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, receivedContact, vm.Mem.Min, vm.Mem.Max)
 
 	fmtString := "[autoscale-enforcer] Updated scaling bounds for VM pod %s:%s from node %s:\n" +

@@ -183,7 +183,7 @@ type scalingBounds struct {
 }
 
 type resourceBound struct {
-	CPU *uint16            `json:"cpu,omitempty"`
+	CPU *resource.Quantity `json:"cpu,omitempty"`
 	Mem *resource.Quantity `json:"mem,omitempty"`
 }
 
@@ -210,7 +210,7 @@ func (b resourceBound) validate(memSlotSize *resource.Quantity) (field string, _
 		return "", errors.New("missing field 'mem'")
 	}
 
-	if *b.CPU == 0 {
+	if b.CPU.IsZero() {
 		return ".cpu", errors.New("value cannot be zero")
 	}
 
