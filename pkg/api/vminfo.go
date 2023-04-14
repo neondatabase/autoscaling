@@ -128,7 +128,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 
-		if err := bounds.validate(&info.Mem.SlotSize); err != nil {
+		if err := bounds.validate(info.Mem.SlotSize); err != nil {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
