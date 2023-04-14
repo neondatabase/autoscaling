@@ -614,7 +614,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 
 	// update cgroup
 	fraction := getCPUFraction(parsed.VCPUs)
-	log.Println("got CPU update %v (%v)", parsed.VCPUs, fraction)
+	log.Printf("got CPU update %v (%v)\n", parsed.VCPUs, fraction)
 	err = setCgroupLimit(fraction, val)
 	if err != nil {
 		log.Printf("could not read body: %s\n", err)
