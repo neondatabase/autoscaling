@@ -415,19 +415,15 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					return err
 				}
 				// compare guest spec and count of plugged
-				if int32(virtualmachine.Spec.Guest.CPUs.Use.MilliValue()) > int32(len(cpusPlugged)*1000) {
+				if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) > int32(len(cpusPlugged)) {
 					// going to plug one CPU
-					if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) > int32(len(cpusPlugged)) {
-						if err := QmpPlugCpu(virtualmachine); err != nil {
-							return err
-						}
+					if err := QmpPlugCpu(virtualmachine); err != nil {
+						return err
 					}
-				} else if int32(virtualmachine.Spec.Guest.CPUs.Use.MilliValue()) < int32(len(cpusPlugged)*1000) {
+				} else if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) < int32(len(cpusPlugged)) {
 					// going to unplug one CPU
-					if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) < int32(len(cpusPlugged)) {
-						if err := QmpUnplugCpu(virtualmachine); err != nil {
-							return err
-						}
+					if err := QmpUnplugCpu(virtualmachine); err != nil {
+						return err
 					}
 				}
 				// we should notify even if had'n plug/unplug anything because we may scale by cgroup

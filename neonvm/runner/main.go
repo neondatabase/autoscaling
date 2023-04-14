@@ -40,13 +40,10 @@ import (
 )
 
 const (
-	QEMU_BIN          = "qemu-system-x86_64"
-	QEMU_IMG_BIN      = "qemu-img"
-	CGROUP_CREATE_BIN = "cgcreate"
-	CGROUP_SET_BIN    = "cgset"
-	CGROUP_EXEC_BIN   = "cgexec"
-	kernelPath        = "/vm/kernel/vmlinuz"
-	kernelCmdline     = "init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
+	QEMU_BIN      = "qemu-system-x86_64"
+	QEMU_IMG_BIN  = "qemu-img"
+	kernelPath    = "/vm/kernel/vmlinuz"
+	kernelCmdline = "init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath    = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath = "/vm/images/runtime.iso"
@@ -65,7 +62,6 @@ const (
 	// alternatePath is a path different from defaultPath, that may be used to resolve DNS. See Path().
 	resolveAlternatePath = "/run/systemd/resolve/resolv.conf"
 
-	qemuCgroupName    = "vm"
 	cgroupPeriod      = 100000
 	cgroupSystemdBase = "/sys/fs/cgroup/cpu/"
 	cgroupPlainBase   = "/sys/fs/cgroup/"
@@ -569,7 +565,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	go cleanupQemuOnSigterm(vmSpec.QMP)
+	go terminateQemuOnSigterm(vmSpec.QMP)
 	go listenForCPUChanges(vmSpec.RunnerPort, cgroupPath)
 
 	qemuString := shellescape.QuoteCommand(append([]string{QEMU_BIN}, qemuCmd...))
@@ -741,7 +737,7 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	}
 }
 
-func cleanupQemuOnSigterm(qmpPort int32) {
+func terminateQemuOnSigterm(qmpPort int32) {
 	log.Println("watching OS signals")
 	c := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
