@@ -237,8 +237,8 @@ func (s *podStatus) informantIsUnhealthy(config *Config) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	startupGracePeriod := time.Second * time.Duration(config.InformantUnhealthyStartupGracePeriodSeconds)
-	unhealthySilencePeriod := time.Second * time.Duration(config.InformantUnhealthyAfterSilenceDurationSeconds)
+	startupGracePeriod := time.Second * time.Duration(config.Informant.UnhealthyStartupGracePeriodSeconds)
+	unhealthySilencePeriod := time.Second * time.Duration(config.Informant.UnhealthyAfterSilenceDurationSeconds)
 
 	if s.lastSuccessfulInformantComm == nil {
 		return time.Since(s.startTime) >= startupGracePeriod
