@@ -422,9 +422,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 							return err
 						}
 					}
-					if err := notifyRunner(virtualmachine, *virtualmachine.Spec.Guest.CPUs.Use); err != nil {
-						return err
-					}
 				} else if int32(virtualmachine.Spec.Guest.CPUs.Use.MilliValue()) < int32(len(cpusPlugged)*1000) {
 					// going to unplug one CPU
 					if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) < int32(len(cpusPlugged)) {
@@ -432,9 +429,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 							return err
 						}
 					}
-					if err := notifyRunner(virtualmachine, *virtualmachine.Spec.Guest.CPUs.Use); err != nil {
-						return err
-					}
+				}
+				// we should notify even if had'n plug/unplug anything because we may scale by cgroup
+				if err := notifyRunner(virtualmachine, *virtualmachine.Spec.Guest.CPUs.Use); err != nil {
+					return err
 				}
 			}
 
@@ -613,9 +611,9 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 }
 
 func notifyRunner(vm *vmv1.VirtualMachine, r resource.Quantity) error {
-	client := http.Client{Timeout: 5}
+	client := http.Client{Timeout: 5 * time.Second}
 
-	url := fmt.Sprintf("%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
+	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
 
 	update := api.VCPUChange{VCPUs: r}
 

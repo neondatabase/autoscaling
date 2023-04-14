@@ -569,26 +569,35 @@ func main() {
 		log.Fatal(err)
 	}
 
-	go cleanupQemuOnSigterm(vmSpec.QMP, cgroupPath)
+	go cleanupQemuOnSigterm(vmSpec.QMP)
 	go listenForCPUChanges(vmSpec.RunnerPort, cgroupPath)
 
 	qemuString := shellescape.QuoteCommand(append([]string{QEMU_BIN}, qemuCmd...))
 	cgropedQemu := fmt.Sprintf("echo $$ >> %s && %s", path.Join(cgroupPath, "cgroup.procs"), qemuString)
 	// start a new shell, cgroup it and then start qemu. Qemu will get cgroup from the parent sh while runner is not cgrouped
 	if err := execFg("sh", "-c", cgropedQemu); err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
+
+	fmt.Println("cleaning up cgroup...")
+	err = os.Remove(cgroupPath)
+	if err != nil {
+		log.Println(err)
+	}
+	log.Println("exiting")
 }
 
 func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		log.Printf("unexpected method: %s\n", r.Method)
 		w.WriteHeader(500)
+		return
 	}
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("could not read body: %s\n", err)
 		w.WriteHeader(500)
+		return
 	}
 
 	parsed := neonApi.VCPUChange{}
@@ -596,6 +605,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("could not parse body: %s\n", err)
 		w.WriteHeader(500)
+		return
 	}
 
 	cgroupPath := r.Context().Value(cgroupContextKey{})
@@ -603,6 +613,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		log.Println("no path in context")
 		w.WriteHeader(500)
+		return
 	}
 
 	// update cgroup
@@ -611,6 +622,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("could not read body: %s\n", err)
 		w.WriteHeader(500)
+		return
 	}
 
 	w.WriteHeader(200)
@@ -627,9 +639,9 @@ func listenForCPUChanges(port int32, cgroupPath string) {
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
 		Handler:           mux,
-		ReadTimeout:       5,
-		ReadHeaderTimeout: 5,
-		WriteTimeout:      5,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      5 * time.Second,
 		BaseContext: func(_ net.Listener) context.Context {
 			return baseCtx
 		},
@@ -705,8 +717,7 @@ type QemuCPUs struct {
 }
 
 func getCPUFraction(r resource.Quantity) float64 {
-	upperBound := int(r.Value())
-	fraction := r.AsApproximateFloat64() - float64(upperBound)
+	fraction := r.AsApproximateFloat64()
 	if fraction == 0 {
 		fraction = 1
 	}
@@ -730,7 +741,7 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	}
 }
 
-func cleanupQemuOnSigterm(qmpPort int32, cgroupPath string) {
+func cleanupQemuOnSigterm(qmpPort int32) {
 	log.Println("watching OS signals")
 	c := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -763,13 +774,6 @@ func cleanupQemuOnSigterm(qmpPort int32, cgroupPath string) {
 		log.Println("system_powerdown command sent to QEMU")
 		break
 	}
-
-	fmt.Println("cleaning up cgroup...")
-	err := os.Remove(cgroupPath)
-	if err != nil {
-		log.Println(err)
-	}
-	log.Println("exiting")
 
 	return
 }
