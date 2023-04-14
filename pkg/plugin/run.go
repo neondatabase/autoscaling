@@ -183,7 +183,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	// the minimum or maximum of what's allowed for this VM.
 	if pod.mostRecentComputeUnit != nil {
 		cu := *pod.mostRecentComputeUnit
-		dividesCleanly := FromResourceQuantity(req.VCPU)%FromResourceQuantity(cu.VCPU) == 0 && req.Mem%cu.Mem == 0 && uint16(FromResourceQuantity(req.VCPU)/FromResourceQuantity(cu.VCPU)) == req.Mem/cu.Mem
+		dividesCleanly := FromResourceQuantity(req.VCPU)%FromResourceQuantity(cu.VCPU) == 0 && req.Mem%cu.Mem == 0 && uint32(FromResourceQuantity(req.VCPU)/FromResourceQuantity(cu.VCPU)) == uint32(req.Mem/cu.Mem)
 		atMin := milliVCPUs == pod.vCPU.Min || req.Mem == pod.memSlots.Min
 		atMax := milliVCPUs == pod.vCPU.Max || req.Mem == pod.memSlots.Max
 		if !dividesCleanly && !(atMin || atMax) {

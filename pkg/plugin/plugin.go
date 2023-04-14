@@ -613,7 +613,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		klog.Infof(
 			fmtString,
 			// allowing pod %v (%d vCpu, %d mem slots) in node %s
-			pName, vmInfo.Cpu.Use, vmInfo.Mem.Use, nodeName,
+			pName, vmInfo.Cpu.Use.MilliValue(), vmInfo.Mem.Use, nodeName,
 			// node vcpu reserved %d -> %d, node mem slots reserved %d -> %d
 			node.vCPU.Reserved, newNodeReservedCPU, node.memSlots.Reserved, newNodeReservedMemSlots,
 		)
