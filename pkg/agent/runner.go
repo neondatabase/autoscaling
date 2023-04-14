@@ -314,8 +314,8 @@ func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiv
 }
 
 func (r *Runner) setStatus(with func(*podStatus)) {
-	r.status.lock.Lock()
-	defer r.status.lock.Unlock()
+	r.status.mu.Lock()
+	defer r.status.mu.Unlock()
 	with(r.status)
 }
 
@@ -515,8 +515,8 @@ func (r *Runner) handleVMResources(
 		case <-vmInfoUpdated.Recv():
 			// Only actually do the update if something we care about changed:
 			newVMInfo := func() api.VmInfo {
-				r.status.lock.Lock()
-				defer r.status.lock.Unlock()
+				r.status.mu.Lock()
+				defer r.status.mu.Unlock()
 				return r.status.vmInfo
 			}()
 
@@ -532,7 +532,7 @@ func (r *Runner) handleVMResources(
 				r.lock.Lock()
 				defer r.lock.Unlock()
 
-				if r.vm.Mem.SlotSize.Cmp(newVMInfo.Mem.SlotSize) != 0 {
+				if r.vm.Mem.SlotSize.Cmp(*newVMInfo.Mem.SlotSize) != 0 {
 					// VM memory slot sizes can't change at runtime, at time of writing (2023-04-12).
 					// It's worth checking it here though, because something must have gone horribly
 					// wrong elsewhere for the memory slots size to change that it's worth aborting
