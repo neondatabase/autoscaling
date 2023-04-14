@@ -37,7 +37,7 @@ spec:
       max: 5
       use: 1
     rootDisk:
-      image: vm-example:dev
+      image: vm-postgres:15-bullseye
       size: 8Gi
     args:
       - -c
