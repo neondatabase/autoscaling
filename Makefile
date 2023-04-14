@@ -7,7 +7,7 @@ IMG_VXLAN ?= vxlan-controller:dev
 AUTOSCALER_SCHEDULER_IMG ?= kube-autoscale-scheduler:dev
 AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
 VM_INFORMANT_IMG ?= vm-informant:dev
-EXAMPLE_VM_IMG ?= vm-example:dev
+E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
 # kernel for guests
@@ -162,7 +162,7 @@ docker-build: build ## Build docker image with the controller.
 
 .PHONY: docker-build-examples
 docker-build-examples: vm-informant bin/vm-builder ## Build docker images for testing VMs
-	./bin/vm-builder -src postgres:15-bullseye -dst $(EXAMPLE_VM_IMG)
+	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG)
 
 .PHONY: docker-build-pg14-disk-test
 docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
@@ -284,7 +284,7 @@ kind-load: docker-build  ## Push docker images to the kind cluster.
 
 .PHONY: example-vms
 example-vms: docker-build-examples ## Build and push the testing VM images to the kind cluster.
-	kind load docker-image $(EXAMPLE_VM_IMG)
+	kind load docker-image $(E2E_TESTS_VM_IMG)
 
 .PHONY: pg14-disk-test
 pg14-disk-test: docker-build-pg14-disk-test ## Build and push the pg14-disk-test VM test image to the kind cluster.
