@@ -77,13 +77,11 @@ const (
 )
 
 type Guest struct {
-	// +optional
 	CPUs CPUs `json:"cpus"`
 	// +optional
 	// +kubebuilder:default:="1Gi"
 	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
-	// +optional
-	MemorySlots MemorySlots `json:"memorySlots"`
+	MemorySlots    MemorySlots       `json:"memorySlots"`
 	// +optional
 	RootDisk RootDisk `json:"rootDisk"`
 	// Docker image Entrypoint array replacement.
