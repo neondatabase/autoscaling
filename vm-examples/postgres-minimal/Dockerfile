@@ -1,7 +1,7 @@
 FROM vm-informant:dev as informant
 # ^ don't do anything with this; we just want it around for later use.
 
-FROM postgres:15-alpine
+FROM postgres:15-bullseye
 
 RUN set -e \
     && rm -f /etc/inittab \

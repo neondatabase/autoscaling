@@ -56,6 +56,7 @@ RUN set -exu \
 	&& CFLAGS="-O3" ./configure --prefix="$INSTALL_DIR" --sysconfdir=/etc --localstatedir=/var --enable-opaque-hierarchy="name=systemd" \
 	# actually build the thing...
 	&& make install
+RUN ls $INSTALL_DIR/bin
 
 FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
 
@@ -77,7 +78,7 @@ RUN set -e \
 	&& curl -sfSL https://github.com/pgbouncer/pgbouncer/releases/download/pgbouncer_${PGBOUNCER_GITPATH}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz -o pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& tar xzvf pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& cd pgbouncer-${PGBOUNCER_VERSION} \
-	&& ./configure --prefix=/usr/local/pgbouncer \
+	&& LDFLAGS=-static ./configure --prefix=/usr/local/pgbouncer --without-openssl \
 	&& make -j $(nproc) \
 	&& make install
 
@@ -89,8 +90,10 @@ RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gec
 # tweak nofile limits
 RUN set -e \
 	&& echo 'fs.file-max = 1048576' >>/etc/sysctl.conf \
-	&& echo '*    - nofile 1048576' >>/etc/security/limits.conf \
-	&& echo 'root - nofile 1048576' >>/etc/security/limits.conf
+	&& test ! -e /etc/security || ( \
+	   echo '*    - nofile 1048576' >>/etc/security/limits.conf \
+	&& echo 'root - nofile 1048576' >>/etc/security/limits.conf \
+	   )
 
 COPY cgconfig.conf /etc/cgconfig.conf
 COPY pgbouncer.ini /etc/pgbouncer.ini
@@ -98,12 +101,6 @@ RUN set -e \
 	&& chown postgres:postgres /etc/pgbouncer.ini \
 	&& chmod 0644 /etc/pgbouncer.ini \
 	&& chmod 0644 /etc/cgconfig.conf
-
-# deps for pgbouncer
-RUN set -e \
-	&& apt-get update \
-	&& apt-get install -y --no-install-recommends libevent-2.1-7 \
-	&& rm -rf /var/lib/apt/lists/*
 
 USER postgres
 
@@ -230,9 +227,10 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
-::respawn:su -p nobody --session-command '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
-::respawn:su -p nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
+::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres'
+#::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
+::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
