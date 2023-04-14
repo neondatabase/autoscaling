@@ -20,8 +20,7 @@ ARG GIT_INFO
 # -mod readonly is for future compat: don't modify go.mod if we have a vendor directory
 RUN go build -mod readonly ./...
 
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    go build -a \
+RUN go build -a \
 	# future compat: don't modify go.mod if we have a vendor directory \
 	-mod readonly \
     # -ldflags "-X ..." allows us to overwrite the value of a variable in a package \
