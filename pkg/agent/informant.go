@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -554,6 +555,11 @@ func doInformantRequest[Q any, R any](
 	path string,
 	reqData *Q,
 ) (_ *R, statusCode int, _ error) {
+	result := "<internal error>"
+	defer func() {
+		s.runner.global.metrics.informantRequestsOutbound.WithLabelValues(result).Inc()
+	}()
+
 	reqBody, err := json.Marshal(reqData)
 	if err != nil {
 		return nil, statusCode, fmt.Errorf("Error encoding request JSON: %w", err)
@@ -573,16 +579,18 @@ func doInformantRequest[Q any, R any](
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
+		result = "<error>"
 		return nil, statusCode, fmt.Errorf("Error doing request: %w", err)
 	}
 	defer response.Body.Close()
+
+	statusCode = response.StatusCode
+	result = strconv.Itoa(statusCode)
 
 	respBody, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, statusCode, fmt.Errorf("Error reading body for response: %w", err)
 	}
-
-	statusCode = response.StatusCode
 
 	if statusCode != 200 {
 		return nil, statusCode, fmt.Errorf(
@@ -624,7 +632,11 @@ func (s *InformantServer) informantURL(path string) string {
 // of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/id", strconv.Itoa(code)).Inc()
+	}()
+
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
 
@@ -644,7 +656,11 @@ func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.Ag
 // outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/resume", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -703,7 +719,11 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 // called outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/suspend", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -777,7 +797,11 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 func (s *InformantServer) handleTryUpscale(
 	ctx context.Context,
 	body *api.MoreResourcesRequest,
-) (*api.AgentIdentificationMessage, int, error) {
+) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/upscale", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tychoish/fun/pubsub"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,10 +35,15 @@ type agentState struct {
 	vmClient             *vmclient.Clientset
 	schedulerEventBroker *pubsub.Broker[watchEvent]
 	schedulerStore       *util.WatchStore[corev1.Pod]
+	metrics              PromMetrics
 }
 
-func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) agentState {
-	return agentState{
+func (r MainRunner) newAgentState(
+	podIP string,
+	broker *pubsub.Broker[watchEvent],
+	schedulerStore *util.WatchStore[corev1.Pod],
+) (*agentState, *prometheus.Registry) {
+	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
 		config:               r.Config,
@@ -46,7 +52,13 @@ func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent
 		podIP:                podIP,
 		schedulerEventBroker: broker,
 		schedulerStore:       schedulerStore,
+		metrics:              PromMetrics{}, //nolint:exhaustruct // set below
 	}
+
+	var promReg *prometheus.Registry
+	state.metrics, promReg = makePrometheusParts(state)
+
+	return state, promReg
 }
 
 func vmIsOurResponsibility(vm *vmapi.VirtualMachine, config *Config, nodeName string) bool {

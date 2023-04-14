@@ -53,7 +53,10 @@ func (r MainRunner) Run(ctx context.Context) error {
 		go RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode)
 	}
 
-	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	globalState, promReg := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
+		return fmt.Errorf("Error starting prometheus metrics server: %w", err)
+	}
 
 	if r.Config.DumpState != nil {
 		klog.Info("Starting 'dump state' server")
