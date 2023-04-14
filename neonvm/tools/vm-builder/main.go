@@ -230,7 +230,7 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:su -p vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres {{.InformantFileCacheArgs}}'
 ::respawn:su -p nobody --session-command '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
@@ -349,13 +349,14 @@ var (
 	Version     string
 	VMInformant string
 
-	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
-	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
-	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
-	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
-	informant = flag.String("informant", VMInformant, `vm-informant docker image`)
-	version   = flag.Bool("version", false, `Print vm-builder version`)
+	srcImage        = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
+	dstImage        = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	size            = flag.String("size", "1G", `Size for disk image: --size=1G`)
+	outFile         = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	forcePull       = flag.Bool("pull", false, `Pull src image even if already present locally`)
+	informant       = flag.String("informant", VMInformant, `vm-informant docker image`)
+	enableFileCache = flag.Bool("enable-file-cache", false, `Enables the vm-informant's Neon file cache integration`)
+	version         = flag.Bool("version", false, `Print vm-builder version`)
 )
 
 func printReader(reader io.ReadCloser) error {
@@ -395,12 +396,13 @@ func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplSt
 }
 
 type TemplatesContext struct {
-	User           string
-	Entrypoint     []string
-	Cmd            []string
-	Env            []string
-	RootDiskImage  string
-	InformantImage string
+	User                   string
+	Entrypoint             []string
+	Cmd                    []string
+	Env                    []string
+	RootDiskImage          string
+	InformantImage         string
+	InformantFileCacheArgs string
 }
 
 func main() {
@@ -489,6 +491,11 @@ func main() {
 	// if no entrypoint and cmd in docker image then use sleep for 10 years as stub
 	if len(tmplArgs.Entrypoint) == 0 && len(tmplArgs.Cmd) == 0 {
 		tmplArgs.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
+	}
+
+	// if file cache enabled, add the connection string to the vm-informant's args
+	if *enableFileCache {
+		tmplArgs.InformantFileCacheArgs = `--pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"`
 	}
 
 	tarBuffer := new(bytes.Buffer)
