@@ -8,14 +8,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// FIXME: K8s uses '/' as its separator. We currently use this for backwards-compatibility, but we
-// should change to '/'. That change will involve fixing the many places where we create strings
-// with %s:%s instead of %s/%s as well; those should just use NamespacedName directly.
-const Separator = ':'
+const Separator = '/'
 
 // NamespacedName represents a resource name with the namespace it's in.
 //
-// When printed with '%s' or '%v', NamespacedName is rendered as "<namespace>:<name>". Printing with
+// When printed with '%v', NamespacedName is rendered as "<namespace>/<name>". Printing with
 // '%+v' or '%#v' renders as it would normally.
 type NamespacedName struct {
 	Namespace string `json:"namespace"`
