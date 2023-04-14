@@ -713,7 +713,7 @@ type QemuCPUs struct {
 }
 
 func getCPUFraction(r resource.Quantity) float64 {
-	fraction := r.AsApproximateFloat64()
+	fraction := float64(r.MilliValue()) / float64(r.Value()*1000)
 	if fraction == 0 {
 		fraction = 1
 	}
