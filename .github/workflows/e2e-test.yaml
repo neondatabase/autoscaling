@@ -14,7 +14,7 @@ jobs:
   e2e-tests:
     runs-on: [ self-hosted, gen3, small ]
     container:
-      image: 369495373322.dkr.ecr.eu-central-1.amazonaws.com/base:pinned
+      image: 369495373322.dkr.ecr.eu-central-1.amazonaws.com/ansible:pinned
     steps:
       - uses: actions/checkout@v3
         with:
