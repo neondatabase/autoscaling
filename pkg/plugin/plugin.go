@@ -654,7 +654,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		err := fmt.Errorf(
 			fmtString,
 			// need %d vCPU, %d mem slots
-			vmInfo.Cpu.Use, vmInfo.Mem.Use,
+			vmInfo.Cpu.Use.MilliValue(), vmInfo.Mem.Use,
 			// have %d vCPU, %d mem slots
 			node.remainingReservableCPU(), node.remainingReservableMemSlots(),
 		)
