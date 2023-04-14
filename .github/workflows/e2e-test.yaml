@@ -22,6 +22,11 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
+      - name: Reset Docker Hub login
+        run: |
+          # ECR Credential Helper & Docker Hub don't work together in config, hence reset
+          echo "" > ~/.docker/config.json
+
       - name: Login to DockerHub
         uses: docker/login-action@v2
         with:
