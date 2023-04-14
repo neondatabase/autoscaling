@@ -678,6 +678,30 @@ func (e *AutoscaleEnforcer) handlePodDeletion(podName util.NamespacedName) {
 	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
 }
 
+func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, podName string) {
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	klog.Infof("Handling updated scaling bounds for VM pod %s:%s", vm.Namespace, podName)
+
+	pod, ok := e.state.podMap[util.NamespacedName{Namespace: vm.Namespace, Name: podName}]
+	if !ok {
+		klog.Errorf("[autoscale-enforcer] cannot find VM pod %s:%s to update scaling bounds", vm.Namespace, podName)
+		return
+	}
+
+	// FIXME: this definition of receivedContact may be inaccurate if there was an error with the
+	// autoscaler-agent's request.
+	receivedContact := pod.mostRecentComputeUnit != nil
+	cpuVerdict := handleUpdatedLimits(&pod.node.vCPU, &pod.vCPU, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
+	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, receivedContact, vm.Mem.Min, vm.Mem.Max)
+
+	fmtString := "[autoscale-enforcer] Updated scaling bounds for VM pod %s:%s from node %s:\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+	klog.Infof(fmtString, vm.Namespace, podName, pod.node.name, cpuVerdict, memVerdict)
+}
+
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
 	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
 	if s.metrics == nil || other.metrics == nil {
@@ -765,12 +789,11 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	// was present at the start and still running has its pod visible to us. VMs that are started
 	// between the VM listing and pod listing won't be handled, but that's ok because we are
 	// probably about to schedule them anyways.
+	//
+	// As a final note: the VM store is already present, and its startup guarantees that the listing
+	// has already been made.
 
-	klog.Infof("[autoscale-enforcer] load state: Listing VMs")
-	vms, err := p.vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("Error listing VirtualMachines: %w", err)
-	}
+	vms := p.vmStore.Items()
 
 	klog.Infof("[autoscale-enforcer] load state: Listing Pods")
 	pods, err := p.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll).List(ctx, metav1.ListOptions{})
@@ -821,8 +844,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	// Add all VM pods to the map, by going through the VM list.
 	klog.Infof("[autoscale-enforcer] load state: Adding VM pods to podMap")
 	skippedVms := 0
-	for i := range vms.Items {
-		vm := &vms.Items[i]
+	for i := range vms {
+		vm := vms[i]
 		vmName := util.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}
 		if vm.Spec.SchedulerName != p.state.conf.SchedulerName {
 			klog.Infof(

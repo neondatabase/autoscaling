@@ -56,6 +56,7 @@ RUN set -exu \
 	&& CFLAGS="-O3" ./configure --prefix="$INSTALL_DIR" --sysconfdir=/etc --localstatedir=/var --enable-opaque-hierarchy="name=systemd" \
 	# actually build the thing...
 	&& make install
+RUN ls $INSTALL_DIR/bin
 
 FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
 
@@ -77,7 +78,7 @@ RUN set -e \
 	&& curl -sfSL https://github.com/pgbouncer/pgbouncer/releases/download/pgbouncer_${PGBOUNCER_GITPATH}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz -o pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& tar xzvf pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& cd pgbouncer-${PGBOUNCER_VERSION} \
-	&& ./configure --prefix=/usr/local/pgbouncer \
+	&& LDFLAGS=-static ./configure --prefix=/usr/local/pgbouncer --without-openssl \
 	&& make -j $(nproc) \
 	&& make install
 
@@ -89,8 +90,10 @@ RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gec
 # tweak nofile limits
 RUN set -e \
 	&& echo 'fs.file-max = 1048576' >>/etc/sysctl.conf \
-	&& echo '*    - nofile 1048576' >>/etc/security/limits.conf \
-	&& echo 'root - nofile 1048576' >>/etc/security/limits.conf
+	&& test ! -e /etc/security || ( \
+	   echo '*    - nofile 1048576' >>/etc/security/limits.conf \
+	&& echo 'root - nofile 1048576' >>/etc/security/limits.conf \
+	   )
 
 COPY cgconfig.conf /etc/cgconfig.conf
 COPY pgbouncer.ini /etc/pgbouncer.ini
@@ -98,12 +101,6 @@ RUN set -e \
 	&& chown postgres:postgres /etc/pgbouncer.ini \
 	&& chmod 0644 /etc/pgbouncer.ini \
 	&& chmod 0644 /etc/cgconfig.conf
-
-# deps for pgbouncer
-RUN set -e \
-	&& apt-get update \
-	&& apt-get install -y --no-install-recommends libevent-2.1-7 \
-	&& rm -rf /var/lib/apt/lists/*
 
 USER postgres
 
@@ -230,9 +227,10 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant --session-command '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
-::respawn:su -p nobody --session-command '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
-::respawn:su -p nobody --session-command 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
+::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres'
+#::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
+::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
@@ -369,30 +367,36 @@ func printReader(reader io.ReadCloser) error {
 	return nil
 }
 
-func AddToTar(tw *tar.Writer, filename string, buf bytes.Buffer) error {
+func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
+	tmpl, err := template.New(filename).Parse(tmplString)
+	if err != nil {
+		return fmt.Errorf("failed to parse template for %q: %w", filename, err)
+	}
+
+	var buf bytes.Buffer
+	if err = tmpl.Execute(&buf, tmplArgs); err != nil {
+		return fmt.Errorf("failed to execute template for %q: %w", filename, err)
+	}
+
 	tarHeader := &tar.Header{
 		Name: filename,
-		Size: int64(len(buf.String())),
+		Size: int64(buf.Len()),
 	}
-	err := tw.WriteHeader(tarHeader)
-	if err != nil {
-		return err
+	if err = tw.WriteHeader(tarHeader); err != nil {
+		return fmt.Errorf("failed to write tar header for %q: %w", filename, err)
 	}
-	_, err = tw.Write(buf.Bytes())
-	if err != nil {
-		return err
+	if _, err = tw.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to write file content for %q: %w", filename, err)
 	}
+
 	return nil
 }
 
-type ImageSpec struct {
-	User       string
-	Entrypoint []string
-	Cmd        []string
-	Env        []string
-}
-
-type Images struct {
+type TemplatesContext struct {
+	User           string
+	Entrypoint     []string
+	Cmd            []string
+	Env            []string
 	RootDiskImage  string
 	InformantImage string
 }
@@ -466,130 +470,49 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	var SrcImageSpec ImageSpec
+	tmplArgs := TemplatesContext{
+		Entrypoint:     imageSpec.Config.Entrypoint,
+		Cmd:            imageSpec.Config.Cmd,
+		Env:            imageSpec.Config.Env,
+		RootDiskImage:  *srcImage,
+		InformantImage: *informant,
+	}
 
 	if len(imageSpec.Config.User) != 0 {
-		SrcImageSpec.User = imageSpec.Config.User
+		tmplArgs.User = imageSpec.Config.User
 	} else {
-		SrcImageSpec.User = "root"
+		tmplArgs.User = "root"
 	}
 
-	SrcImageSpec.Entrypoint = imageSpec.Config.Entrypoint
-	SrcImageSpec.Cmd = imageSpec.Config.Cmd
 	// if no entrypoint and cmd in docker image then use sleep for 10 years as stub
-	if len(SrcImageSpec.Entrypoint) == 0 && len(SrcImageSpec.Cmd) == 0 {
-		SrcImageSpec.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
+	if len(tmplArgs.Entrypoint) == 0 && len(tmplArgs.Cmd) == 0 {
+		tmplArgs.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
 	}
 
-	SrcImageSpec.Env = imageSpec.Config.Env
-
-	buf := new(bytes.Buffer)
-	tw := tar.NewWriter(buf)
+	tarBuffer := new(bytes.Buffer)
+	tw := tar.NewWriter(tarBuffer)
 	defer tw.Close()
 
-	// generate Dockerfile from template
-	dockerfileVmBuilderTmpl, err := template.New("vm-builder").Parse(dockerfileVmBuilder)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var dockerfileVmBuilderBuffer bytes.Buffer
-	err = dockerfileVmBuilderTmpl.Execute(&dockerfileVmBuilderBuffer, &Images{RootDiskImage: *srcImage, InformantImage: *informant})
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	// generate vmstart script from template
-	scriptVmStartTmpl, err := template.New("vmstart").Parse(scriptVmStart)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var scriptVmStartBuffer bytes.Buffer
-	err = scriptVmStartTmpl.Execute(&scriptVmStartBuffer, SrcImageSpec)
-	if err != nil {
-		log.Fatalln(err)
+	files := []struct {
+		filename string
+		tmpl     string
+	}{
+		{"Dockerfile", dockerfileVmBuilder},
+		{"vmstart", scriptVmStart},
+		{"inittab", scriptInitTab},
+		{"vmacpi", scriptVmAcpi},
+		{"powerdown", scriptPowerDown},
+		{"vminit", scriptVmInit},
+		{"cgconfig.conf", configCgroup},
+		{"vector.yaml", configVector},
+		{"pgbouncer.ini", configPgbouncer},
 	}
 
-	// add 'Dockerfile' file to docker build context
-	if err = AddToTar(tw, "Dockerfile", dockerfileVmBuilderBuffer); err != nil {
-		log.Fatalln(err)
+	for _, f := range files {
+		if err := AddTemplatedFileToTar(tw, tmplArgs, f.filename, f.tmpl); err != nil {
+			log.Fatalln(err)
+		}
 	}
-	// add 'vmstart' file to docker build context
-	if err = AddToTar(tw, "vmstart", scriptVmStartBuffer); err != nil {
-		log.Fatalln(err)
-	}
-
-	var b bytes.Buffer
-
-	// add 'inittab' file to docker build context
-	_, err = b.WriteString(scriptInitTab)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "inittab", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'vmacpi' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(scriptVmAcpi)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "vmacpi", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'powerdown' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(scriptPowerDown)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "powerdown", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'vminit' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(scriptVmInit)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "vminit", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'cgconfig.conf' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(configCgroup)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "cgconfig.conf", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'vector.yaml' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(configVector)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "vector.yaml", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'pgbouncer.ini' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(configPgbouncer)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "pgbouncer.ini", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	dockerFileTarReader := bytes.NewReader(buf.Bytes())
 
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
@@ -600,12 +523,12 @@ func main() {
 		BuildArgs:      buildArgs,
 		SuppressOutput: true,
 		NoCache:        false,
-		Context:        dockerFileTarReader,
+		Context:        tarBuffer,
 		Dockerfile:     "Dockerfile",
 		Remove:         true,
 		ForceRemove:    true,
 	}
-	buildResp, err := cli.ImageBuild(ctx, dockerFileTarReader, opt)
+	buildResp, err := cli.ImageBuild(ctx, tarBuffer, opt)
 	if err != nil {
 		log.Fatalln(err)
 	}

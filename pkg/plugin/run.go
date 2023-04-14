@@ -187,11 +187,11 @@ func (e *AutoscaleEnforcer) handleResources(
 		atMin := milliVCPUs == pod.vCPU.Min || req.Mem == pod.memSlots.Min
 		atMax := milliVCPUs == pod.vCPU.Max || req.Mem == pod.memSlots.Max
 		if !dividesCleanly && !(atMin || atMax) {
-			err := fmt.Errorf(
-				"requested resources %+v do not divide cleanly by previous compute unit %+v",
-				req, cu,
+			contextString := "If the VM's bounds did not just change, then this indicates a bug in the autoscaler-agent."
+			klog.Warningf(
+				"[autoscale-enforcer] requested resources %+v do not divide cleanly by previous compute unit %+v. %s",
+				req, cu, contextString,
 			)
-			return api.Resources{}, 400, err
 		}
 	}
 

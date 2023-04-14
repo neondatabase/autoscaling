@@ -22,7 +22,7 @@ import (
 
 const (
 	dockerfileVmBuilder = `
-FROM {{.}} AS rootdisk
+FROM {{.SrcImage}} AS rootdisk
 
 FROM alpine:3.16 AS vm-runtime
 # add busybox
@@ -211,23 +211,33 @@ func printReader(reader io.ReadCloser) error {
 	return nil
 }
 
-func AddToTar(tw *tar.Writer, filename string, buf bytes.Buffer) error {
+func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
+	tmpl, err := template.New(filename).Parse(tmplString)
+	if err != nil {
+		return fmt.Errorf("failed to parse template for %q: %w", filename, err)
+	}
+
+	var buf bytes.Buffer
+	if err = tmpl.Execute(&buf, tmplArgs); err != nil {
+		return fmt.Errorf("failed to execute template for %q: %w", filename, err)
+	}
+
 	tarHeader := &tar.Header{
 		Name: filename,
-		Size: int64(len(buf.String())),
+		Size: int64(buf.Len()),
 	}
-	err := tw.WriteHeader(tarHeader)
-	if err != nil {
-		return err
+	if err = tw.WriteHeader(tarHeader); err != nil {
+		return fmt.Errorf("failed to write tar header for %q: %w", filename, err)
 	}
-	_, err = tw.Write(buf.Bytes())
-	if err != nil {
-		return err
+	if _, err = tw.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to write file content for %q: %w", filename, err)
 	}
+
 	return nil
 }
 
-type ImageSpec struct {
+type TemplatesContext struct {
+	SrcImage   string
 	User       string
 	Entrypoint []string
 	Cmd        []string
@@ -298,100 +308,45 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	var SrcImageSpec ImageSpec
+	tmplArgs := TemplatesContext{
+		SrcImage:   *srcImage,
+		Entrypoint: imageSpec.Config.Entrypoint,
+		Cmd:        imageSpec.Config.Cmd,
+		Env:        imageSpec.Config.Env,
+	}
 
 	if len(imageSpec.Config.User) != 0 {
-		SrcImageSpec.User = imageSpec.Config.User
+		tmplArgs.User = imageSpec.Config.User
 	} else {
-		SrcImageSpec.User = "root"
+		tmplArgs.User = "root"
 	}
 
-	SrcImageSpec.Entrypoint = imageSpec.Config.Entrypoint
-	SrcImageSpec.Cmd = imageSpec.Config.Cmd
 	// if no entrypoint and cmd in docker image then use sleep for 10 years as stub
-	if len(SrcImageSpec.Entrypoint) == 0 && len(SrcImageSpec.Cmd) == 0 {
-		SrcImageSpec.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
+	if len(tmplArgs.Entrypoint) == 0 && len(tmplArgs.Cmd) == 0 {
+		tmplArgs.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
 	}
 
-	SrcImageSpec.Env = imageSpec.Config.Env
-
-	buf := new(bytes.Buffer)
-	tw := tar.NewWriter(buf)
+	tarBuffer := new(bytes.Buffer)
+	tw := tar.NewWriter(tarBuffer)
 	defer tw.Close()
 
-	// generate Dockerfile from template
-	dockerfileVmBuilderTmpl, err := template.New("vm-builder").Parse(dockerfileVmBuilder)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var dockerfileVmBuilderBuffer bytes.Buffer
-	err = dockerfileVmBuilderTmpl.Execute(&dockerfileVmBuilderBuffer, *srcImage)
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	// generate vmstart script from template
-	scriptVmStartTmpl, err := template.New("vmstart").Parse(scriptVmStart)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var scriptVmStartBuffer bytes.Buffer
-	err = scriptVmStartTmpl.Execute(&scriptVmStartBuffer, SrcImageSpec)
-	if err != nil {
-		log.Fatalln(err)
+	files := []struct {
+		filename string
+		tmpl     string
+	}{
+		{"Dockerfile", dockerfileVmBuilder},
+		{"vmstart", scriptVmStart},
+		{"inittab", scriptInitTab},
+		{"vmacpi", scriptVmAcpi},
+		{"powerdown", scriptPowerDown},
+		{"vminit", scriptVmInit},
 	}
 
-	// add 'Dockerfile' file to docker build context
-	if err = AddToTar(tw, "Dockerfile", dockerfileVmBuilderBuffer); err != nil {
-		log.Fatalln(err)
+	for _, f := range files {
+		if err := AddTemplatedFileToTar(tw, tmplArgs, f.filename, f.tmpl); err != nil {
+			log.Fatalln(err)
+		}
 	}
-	// add 'vmstart' file to docker build context
-	if err = AddToTar(tw, "vmstart", scriptVmStartBuffer); err != nil {
-		log.Fatalln(err)
-	}
-
-	var b bytes.Buffer
-
-	// add 'inittab' file to docker build context
-	_, err = b.WriteString(scriptInitTab)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "inittab", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'vmacpi' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(scriptVmAcpi)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "vmacpi", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'powerdown' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(scriptPowerDown)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "powerdown", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	// add 'vminit' file to docker build context
-	b.Reset()
-	_, err = b.WriteString(scriptVmInit)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if err = AddToTar(tw, "vminit", b); err != nil {
-		log.Fatalln(err)
-	}
-
-	dockerFileTarReader := bytes.NewReader(buf.Bytes())
 
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
@@ -409,12 +364,12 @@ func main() {
 		BuildArgs:      buildArgs,
 		SuppressOutput: true,
 		NoCache:        false,
-		Context:        dockerFileTarReader,
+		Context:        tarBuffer,
 		Dockerfile:     "Dockerfile",
 		Remove:         true,
 		ForceRemove:    true,
 	}
-	buildResp, err := cli.ImageBuild(ctx, dockerFileTarReader, opt)
+	buildResp, err := cli.ImageBuild(ctx, tarBuffer, opt)
 	if err != nil {
 		log.Fatalln(err)
 	}

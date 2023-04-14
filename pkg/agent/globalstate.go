@@ -78,15 +78,21 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 	podName := util.NamespacedName{Namespace: event.vmInfo.Namespace, Name: event.podName}
 	state, hasPod := s.pods[podName]
 
+	if event.kind != vmEventAdded && !hasPod {
+		klog.Errorf("Received %s event for pod %v that isn't present", event.kind, event.podName)
+		return
+	}
+
 	switch event.kind {
 	case vmEventDeleted:
-		if !hasPod {
-			klog.Errorf("Received delete event for pod %v that isn't present", event.podName)
-			return
-		}
-
 		state.stop()
 		delete(s.pods, podName)
+	case vmEventUpdated:
+		state.status.lock.Lock()
+		defer state.status.lock.Unlock()
+
+		state.status.vmInfo = event.vmInfo
+		state.vmInfoUpdated.Send()
 	case vmEventAdded:
 		if hasPod {
 			klog.Errorf("Received add event for pod %v while already present", event.podName)
@@ -100,6 +106,7 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 			done:     false,
 			errored:  nil,
 			panicked: false,
+			vmInfo:   event.vmInfo,
 		}
 
 		runner := &Runner{
@@ -129,14 +136,17 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 			backgroundPanic:       make(chan error),
 		}
 
+		txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
+
 		state = &podState{
-			podName: podName,
-			stop:    cancelRunnerContext,
-			runner:  runner,
-			status:  status,
+			podName:       podName,
+			stop:          cancelRunnerContext,
+			runner:        runner,
+			status:        status,
+			vmInfoUpdated: txVMUpdate,
 		}
 		s.pods[podName] = state
-		runner.Spawn(runnerCtx)
+		runner.Spawn(runnerCtx, rxVMUpdate)
 	default:
 		panic(errors.New("bad event: unexpected event kind"))
 	}
@@ -148,6 +158,8 @@ type podState struct {
 	stop   context.CancelFunc
 	runner *Runner
 	status *podStatus
+
+	vmInfoUpdated util.CondChannelSender
 }
 
 type podStateDump struct {
@@ -176,12 +188,20 @@ type podStatus struct {
 	done     bool // if true, the runner finished
 	errored  error
 	panicked bool // if true, errored will be non-nil
+
+	// vmInfo stores the latest information about the VM, as given by the global VM watcher.
+	//
+	// There is also a similar field inside the Runner itself, but it's better to store this out
+	// here, where we don't have to rely on the Runner being well-behaved w.r.t. locking.
+	vmInfo api.VmInfo
 }
 
 type podStatusDump struct {
 	Done     bool  `json:"done"`
 	Errored  error `json:"errored"`
 	Panicked bool  `json:"panicked"`
+
+	VMInfo api.VmInfo `json:"vmInfo"`
 }
 
 func (s *podStatus) dump() podStatusDump {
@@ -192,5 +212,7 @@ func (s *podStatus) dump() podStatusDump {
 		Done:     s.done,
 		Errored:  s.errored,
 		Panicked: s.panicked,
+		// FIXME: api.VmInfo contains a resource.Quantity - is that safe to copy by value?
+		VMInfo: s.vmInfo,
 	}
 }

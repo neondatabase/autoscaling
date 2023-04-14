@@ -124,7 +124,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		)
 		return verdict
 	} else /* typical "request for increase" */ {
-		// The following comment was made 2022-11-28:
+		// The following comment was made 2022-11-28 (updated 2023-04-06):
 		//
 		// Note: this function as currently written will actively cause the autoscaler-agent to use
 		// resources that are uneven w.r.t. the number of compute units they represent.
@@ -136,10 +136,11 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		//
 		// This obviously isn't great. However, this *is* the most resilient solution, and it is
 		// significantly simpler to implement, so it is the one I went with. As it currently stands,
-		// the autoscaler-agent is still required to submit requests that are multiples of compute
-		// units, so the system will *eventually* stabilize. This allows us to gracefully handle many
-		// kinds of stressors. Handling the resources separately *from the scheduler's point of
-		// view* makes it much, much easier to deal with.
+		// the autoscaler-agent is still expected to submit requests that are multiples of compute
+		// units, so the system should *eventually* stabilize (provided that the autoscaler-agent is
+		// not violating its own guarantees). This allows us to gracefully handle many kinds of
+		// stressors. Handling the resources separately *from the scheduler's point of view* makes
+		// it much, much easier to deal with.
 		//
 		// Please think carefully before changing this.
 
@@ -240,6 +241,77 @@ func (r resourceTransition[T]) handleAutoscalingDisabled() (verdict string) {
 		r.oldNode.reserved, r.node.Reserved, r.oldNode.capacityPressure, r.node.CapacityPressure,
 	)
 	return verdict
+}
+
+func handleUpdatedLimits[T constraints.Unsigned](
+	node *nodeResourceState[T],
+	pod *podResourceState[T],
+	receivedContact bool,
+	newMin T,
+	newMax T,
+) (verdict string) {
+	if newMin == pod.Min && newMax == pod.Max {
+		return fmt.Sprintf("limits unchanged (min = %d, max = %d)", newMin, newMax)
+	}
+
+	// if we haven't yet been contacted by the autoscaler-agent, then we should update
+	// {node,pod}.Buffer based on the change in the maximum bound so that we can make a best-effort
+	// attempt to avoid overcommitting. This solution can't be perfect (because we're intentionally
+	// not using the "hard" limits provided by NeonVM, which would be overly conservative).
+	// However. This solution should be *good enough* - the cases it protects against are already
+	// exceptionally rare, and the imperfections even more so.
+	//
+	// To be clear, the cases we're worried about are things like the following sequence of events:
+	//
+	//   1. VM is at 4 CPU (of max 4)
+	//   2. Scheduler dies, autoscaler-agent loses contact
+	//   3. autoscaler-agent downscales to 2 CPU
+	//   3. VM Cpu.Max gets set to 2 (autoscaler-agent misses this)
+	//   4. Scheduler appears, observes Cpu.Max = 2
+	//   5. VM Cpu.Max gets set to 4
+	//   6. autoscaler-agent observes Cpu.Max is still 4
+	//   7. autoscaler-agent scales VM up to 4 CPU, which it is able to do because a previous
+	//      scheduler approved 4 CPU.
+	//   <-- INCONSISTENT STATE -->
+	//   8. autoscaler-agent reconnects with scheduler, informing it that it's using 4 CPU
+	//
+	// Again: we can't handle this perfectly with the current system. However, a good best-effort
+	// attempt to prevent this is worthwhile here. (realistically, the things we can't prevent would
+	// require a "perfect storm" of other failures in order to be relevant - which is good!)
+	bufferVerdict := ""
+	updateBuffer := !receivedContact && pod.Max != newMax
+	if updateBuffer {
+		oldPodBuffer := pod.Buffer
+		oldNodeBuffer := node.Buffer
+		oldPodReserved := pod.Reserved
+		oldNodeReserved := node.Reserved
+
+		// Recalculate Reserved and Buffer from scratch because it's easier than doing the math
+		// directly.
+		//
+		// Note that we don't want to reserve *below* what we think the VM is using if the bounds
+		// decrease; it may be that the autoscaler-agent has not yet reacted to that.
+		using := pod.Reserved - pod.Buffer
+		pod.Reserved = util.Max(newMax, using)
+		pod.Buffer = pod.Reserved - using
+
+		node.Reserved = node.Reserved + pod.Reserved - oldPodReserved
+		node.Buffer = node.Buffer + pod.Buffer - oldPodBuffer
+
+		bufferVerdict = fmt.Sprintf(
+			". no contact yet: pod reserved %d -> %d (buffer %d -> %d), node reserved %d -> %d (buffer %d -> %d)",
+			oldPodReserved, pod.Reserved, oldPodBuffer, pod.Buffer,
+			oldNodeReserved, node.Reserved, oldNodeBuffer, node.Buffer,
+		)
+	}
+
+	oldMin := pod.Min
+	oldMax := pod.Max
+
+	pod.Min = newMin
+	pod.Max = newMax
+
+	return fmt.Sprintf("updated min %d -> %d, max %d -> %d%s", oldMin, newMin, oldMax, newMax, bufferVerdict)
 }
 
 // handleDeletedPod is kind of like handleDeleted, except that it returns both verdicts side by

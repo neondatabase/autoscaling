@@ -45,7 +45,7 @@ spec:
       max: 2
       use: 2
     rootDisk:
-      image: vm-postgres:15-alpine
+      image: vm-postgres:15-bullseye
       size: 8Gi
     args:
       - -c
