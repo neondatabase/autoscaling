@@ -14,9 +14,13 @@ COPY neonvm/client neonvm/client
 
 ARG GIT_INFO
 
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    go build -a \
-	# future compat: don't modify go.mod if we have a vendor directory \
+# Do an intermediate build step so that there's a shared base for the various autoscaling
+# components, which allows quicker "build everything" at the cost of slower "build one thing"
+#
+# -mod readonly is for future compat: don't modify go.mod if we have a vendor directory
+RUN go build -mod readonly ./...
+
+RUN go build -a \
 	-mod readonly \
     # -ldflags "-X ..." allows us to overwrite the value of a variable in a package \
     -ldflags "-X 'github.com/neondatabase/autoscaling/pkg/util.BuildGitInfo=$GIT_INFO'" \
