@@ -125,35 +125,26 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	// process immutable fields
 	before, _ := old.(*VirtualMachine)
 
-	if !reflect.DeepEqual(r.Spec.Guest.CPUs.Min, before.Spec.Guest.CPUs.Min) {
-		return errors.New(".spec.guest.cpus.min is immutable")
+	immutableFields := []struct {
+		fieldName string
+		getter    func(*VirtualMachine) any
+	}{
+		{".spec.guest.cpus.min", func(v *VirtualMachine) any { return v.Spec.Guest.CPUs.Min }},
+		{".spec.guest.cpus.max", func(v *VirtualMachine) any { return v.Spec.Guest.CPUs.Max }},
+		{".spec.guest.memorySlots.min", func(v *VirtualMachine) any { return v.Spec.Guest.MemorySlots.Min }},
+		{".spec.guest.memorySlots.max", func(v *VirtualMachine) any { return v.Spec.Guest.MemorySlots.Max }},
+		{".spec.guest.ports", func(v *VirtualMachine) any { return v.Spec.Guest.Ports }},
+		{".spec.guest.rootDisk", func(v *VirtualMachine) any { return v.Spec.Guest.RootDisk }},
+		{".spec.guest.command", func(v *VirtualMachine) any { return v.Spec.Guest.Command }},
+		{".spec.guest.args", func(v *VirtualMachine) any { return v.Spec.Guest.Args }},
+		{".spec.guest.env", func(v *VirtualMachine) any { return v.Spec.Guest.Env }},
+		{".spec.disk", func(v *VirtualMachine) any { return v.Spec.Disks }},
 	}
-	if !reflect.DeepEqual(r.Spec.Guest.CPUs.Max, before.Spec.Guest.CPUs.Max) {
-		return errors.New(".spec.guest.cpus.max is immutable")
-	}
-	if !reflect.DeepEqual(r.Spec.Guest.MemorySlots.Min, before.Spec.Guest.MemorySlots.Min) {
-		return errors.New(".spec.guest.memorySlots.min is immutable")
-	}
-	if !reflect.DeepEqual(r.Spec.Guest.MemorySlots.Max, before.Spec.Guest.MemorySlots.Max) {
-		return errors.New(".spec.guest.memorySlots.max is immutable")
-	}
-	if !reflect.DeepEqual(r.Spec.Guest.Ports, before.Spec.Guest.Ports) {
-		return errors.New(".spec.guest.ports is immutable")
-	}
-	if !reflect.DeepEqual(r.Spec.Guest.RootDisk, before.Spec.Guest.RootDisk) {
-		return errors.New(".spec.guest.rootDisk is immutable")
-	}
-	if !reflect.DeepEqual(r.Spec.Guest.Command, before.Spec.Guest.Command) {
-		return errors.New(".spec.guest.command is immutable")
-	}
-	if !reflect.DeepEqual(r.Spec.Guest.Args, before.Spec.Guest.Args) {
-		return errors.New(".spec.guest.args is immutable")
-	}
-	if !reflect.DeepEqual(r.Spec.Guest.Env, before.Spec.Guest.Env) {
-		return errors.New(".spec.guest.env is immutable")
-	}
-	if !reflect.DeepEqual(r.Spec.Disks, before.Spec.Disks) {
-		return errors.New(".spec.disks is immutable")
+
+	for _, info := range immutableFields {
+		if !reflect.DeepEqual(info.getter(r), info.getter(before)) {
+			return fmt.Errorf("%s is immutable", info.fieldName)
+		}
 	}
 
 	// validate .spec.guest.cpu.use
