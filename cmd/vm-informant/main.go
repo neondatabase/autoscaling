@@ -25,9 +25,9 @@ const minSubProcessRestartInterval = 5 * time.Second
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
-	ctx = srv.SetShutdown(ctx)      // allows workers to cause a shutdown
-	ctx = srv.WithOrchestrator(ctx) // creates and starts an orchestrator
-	ctx = srv.SetBaseContext(ctx)   // sets a context for starting async work in request scopes
+	ctx = srv.SetShutdownSignal(ctx) // allows workers to cause a shutdown
+	ctx = srv.WithOrchestrator(ctx)  // creates and starts an orchestrator
+	ctx = srv.SetBaseContext(ctx)    // sets a context for starting async work in request scopes
 
 	orca := srv.GetOrchestrator(ctx)
 
@@ -80,8 +80,9 @@ func main() {
 		}
 
 		runRestartOnFailure(ctx, args, cleanupHooks)
-		// this cancels the context
-		srv.GetShutdown(ctx)()
+		closer := srv.GetShutdownSignal(ctx)
+		// this cancels the process' underlying context
+		closer()
 		// this drops to the defer that waits for all services to shutdown
 		// will run now.
 		return
