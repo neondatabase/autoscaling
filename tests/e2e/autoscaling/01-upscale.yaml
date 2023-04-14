@@ -9,7 +9,7 @@ metadata:
 spec:
   initContainers:
   - name: wait-for-pg
-    image: postgres:15-alpine
+    image: postgres:15-bullseye
     command:
     - sh
     - "-c"
@@ -20,7 +20,7 @@ spec:
       done
   containers:
   - name: pgbench
-    image: postgres:15-alpine
+    image: postgres:15-bullseye
     volumeMounts:
     - name: my-volume
       mountPath: /etc/misc

@@ -170,7 +170,7 @@ inspect VM details to see on what node it running
 ```sh
 $ kubectl get neonvm -owide
 NAME      CPUS   MEMORY   POD             STATUS    AGE   NODE          IMAGE
-example   1      2Gi      example-xdw4s   Running   31s   kind-worker   vm-postgres:15-alpine
+example   1      2Gi      example-xdw4s   Running   31s   kind-worker   vm-postgres:15-bullseye
 ```
 
 trigger live migration
@@ -192,7 +192,7 @@ inspect VM details again (look at pod name and node)
 ```sh
 $ kubectl get neonvm -owide
 NAME      CPUS   MEMORY   POD             STATUS    AGE     NODE           IMAGE
-example   1      2Gi      example-7ztb2   Running   4m12s   kind-worker2   vm-postgres:15-alpine
+example   1      2Gi      example-7ztb2   Running   4m12s   kind-worker2   vm-postgres:15-bullseye
 ```
 
 inspect migration details
