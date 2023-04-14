@@ -575,7 +575,7 @@ func main() {
 		log.Println(err)
 	}
 
-	fmt.Println("cleaning up cgroup...")
+	log.Println("cleaning up cgroup...")
 	err = os.Remove(cgroupPath)
 	if err != nil {
 		log.Println(err)
@@ -614,6 +614,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 
 	// update cgroup
 	fraction := getCPUFraction(parsed.VCPUs)
+	log.Println("got CPU update %v (%v)", parsed.VCPUs, fraction)
 	err = setCgroupLimit(fraction, val)
 	if err != nil {
 		log.Printf("could not read body: %s\n", err)

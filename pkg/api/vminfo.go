@@ -149,6 +149,16 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	using := info.Using()
 	max := info.Max()
 
+	// we can't do validation for resource.Quantity with kubebuilder
+	// so do it here
+	if err = min.SanityCheck(); err != nil {
+		return nil, err
+	}
+
+	if err = max.SanityCheck(); err != nil {
+		return nil, err
+	}
+
 	// check: min <= max
 	if min.HasFieldGreaterThan(max) {
 		return nil, fmt.Errorf("min resources %+v has field greater than maximum %+v", min, max)

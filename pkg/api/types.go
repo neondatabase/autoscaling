@@ -145,6 +145,17 @@ func (r Resources) ValidateNonZero() error {
 	return nil
 }
 
+func (r Resources) SanityCheck() error {
+	if r.VCPU.Cmp(*resource.NewQuantity(250, resource.BinarySI)) == -1 {
+		return errors.New("VCPU is too small")
+	}
+	if r.VCPU.Cmp(*resource.NewQuantity(128*1000, resource.BinarySI)) == 1 {
+		return errors.New("VCPU is too big")
+	}
+
+	return nil
+}
+
 // HasFieldGreaterThan returns true if and only if there is a field F where r.F > cmp.F
 func (r Resources) HasFieldGreaterThan(cmp Resources) bool {
 	return r.VCPU.Cmp(cmp.VCPU) == 1 || r.Mem > cmp.Mem
