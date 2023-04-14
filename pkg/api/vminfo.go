@@ -151,11 +151,11 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 
 	// we can't do validation for resource.Quantity with kubebuilder
 	// so do it here
-	if err = min.SanityCheck(); err != nil {
+	if err := min.SanityCheck(); err != nil {
 		return nil, err
 	}
 
-	if err = max.SanityCheck(); err != nil {
+	if err := max.SanityCheck(); err != nil {
 		return nil, err
 	}
 
