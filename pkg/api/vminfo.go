@@ -11,6 +11,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 const (
@@ -86,6 +88,10 @@ func (vm VmInfo) Max() Resources {
 		VCPU: vm.Cpu.Max,
 		Mem:  vm.Mem.Max,
 	}
+}
+
+func (vm VmInfo) NamespacedName() util.NamespacedName {
+	return util.NamespacedName{Namespace: vm.Namespace, Name: vm.Name}
 }
 
 func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {

@@ -129,7 +129,7 @@ type nodeStateDump struct {
 type podStateDump struct {
 	Obj                      pointerString            `json:"obj"`
 	Name                     util.NamespacedName      `json:"name"`
-	VMName                   string                   `json:"vmName"`
+	VMName                   util.NamespacedName      `json:"vmName"`
 	Node                     pointerString            `json:"node"`
 	TestingOnlyAlwaysMigrate bool                     `json:"testingOnlyAlwaysMigrate"`
 	VCPU                     podResourceState[uint16] `json:"vCPU"`

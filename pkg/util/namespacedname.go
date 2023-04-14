@@ -4,6 +4,8 @@ package util
 
 import (
 	"fmt"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // FIXME: K8s uses '/' as its separator. We currently use this for backwards-compatibility, but we
@@ -18,6 +20,11 @@ const Separator = ':'
 type NamespacedName struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
+}
+
+func GetNamespacedName(obj metav1.ObjectMetaAccessor) NamespacedName {
+	meta := obj.GetObjectMeta()
+	return NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 }
 
 func (n NamespacedName) Format(state fmt.State, verb rune) {

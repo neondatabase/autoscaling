@@ -116,19 +116,19 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
 				oldInfo, err := api.ExtractVmInfo(oldVM)
 				if err != nil {
-					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %s:%s: %w", oldVM.Namespace, oldVM.Name, err)
+					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %w", util.GetNamespacedName(oldVM), err)
 					return
 				}
 				newInfo, err := api.ExtractVmInfo(newVM)
 				if err != nil {
-					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %s:%s: %w", newVM.Namespace, newVM.Name, err)
+					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %w", util.GetNamespacedName(newVM), err)
 					return
 				}
 
 				if newVM.Status.PodName == "" {
 					klog.Infof(
-						"[autoscale-enforcer] Skipping update for VM %s:%s because .status.podName is empty",
-						newVM.Namespace, newVM.Name,
+						"[autoscale-enforcer] Skipping update for VM %v because .status.podName is empty",
+						util.GetNamespacedName(newVM),
 					)
 					return
 				}
