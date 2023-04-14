@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/tychoish/fun/erc"
 )
 
 type Config struct {
@@ -108,56 +110,34 @@ func ReadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	cannotBeZero := func(fieldPath string) error {
-		return fmt.Errorf("Field %s cannot be zero", fieldPath)
-	}
-	cannotBeEmpty := func(fieldPath string) error {
-		return fmt.Errorf("Field %s cannot be empty", fieldPath)
-	}
+	ec := &erc.Collector{}
 
-	if c.Scaling.RequestTimeoutSeconds == 0 {
-		return cannotBeZero(".scaling.requestTimeoutSeconds")
-	} else if c.Informant.ServerPort == 0 {
-		return cannotBeZero(".informant.serverPort")
-	} else if c.Informant.RetryServerMinWaitSeconds == 0 {
-		return cannotBeZero(".informant.retryServerMinWaitSeconds")
-	} else if c.Informant.RetryServerNormalWaitSeconds == 0 {
-		return cannotBeZero(".informant.retryServerNormalWaitSeconds")
-	} else if c.Informant.RegisterRetrySeconds == 0 {
-		return cannotBeZero(".informant.registerRetrySeconds")
-	} else if c.Informant.RequestTimeoutSeconds == 0 {
-		return cannotBeZero(".informant.requestTimeoutSeconds")
-	} else if c.Informant.RegisterTimeoutSeconds == 0 {
-		return cannotBeZero(".informant.registerTimeoutSeconds")
-	} else if c.Informant.DownscaleTimeoutSeconds == 0 {
-		return cannotBeZero(".informant.downscaleTimeoutSeconds")
-	} else if c.Metrics.SecondsBetweenRequests == 0 {
-		return cannotBeZero(".metrics.secondsBetweenRequests")
-	} else if c.Metrics.LoadMetricPrefix == "" {
-		return cannotBeEmpty(".metrics.loadMetricPrefix")
-	} else if c.Scheduler.SchedulerName == "" {
-		return cannotBeEmpty(".scheduler.schedulerName")
-	} else if c.Scheduler.RequestTimeoutSeconds == 0 {
-		return cannotBeZero(".scheduler.requestTimeoutSeconds")
-	} else if c.Scheduler.RequestPort == 0 {
-		return cannotBeZero(".scheduler.requestPort")
-	} else if c.Billing != nil && c.Billing.URL == "" {
-		return cannotBeEmpty(".billing.url")
-	} else if c.Billing != nil && c.Billing.CPUMetricName == "" {
-		return cannotBeEmpty(".billing.cpuMetricName")
-	} else if c.Billing != nil && c.Billing.ActiveTimeMetricName == "" {
-		return cannotBeEmpty(".billing.activeTimeMetricName")
-	} else if c.Billing != nil && c.Billing.CollectEverySeconds == 0 {
-		return cannotBeZero(".billing.collectEverySeconds")
-	} else if c.Billing != nil && c.Billing.PushEverySeconds == 0 {
-		return cannotBeZero(".billing.pushEverySeconds")
-	} else if c.Billing != nil && c.Billing.PushTimeoutSeconds == 0 {
-		return cannotBeZero(".billing.pushTimeoutSeconds")
-	} else if c.DumpState != nil && c.DumpState.Port == 0 {
-		return cannotBeZero(".dumpState.port")
-	} else if c.DumpState != nil && c.DumpState.TimeoutSeconds == 0 {
-		return cannotBeZero(".dumpState.timeoutSeconds")
-	}
+	const (
+		emptyTmpl = "filed %q cannot be empty"
+		zeroTmpl  = "field %q cannot be zero"
+	)
 
-	return nil
+	erc.Whenf(ec, c.Billing != nil && c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.PushEverySeconds == 0, zeroTmpl, ".billing.pushEverySeconds")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.PushTimeoutSeconds == 0, zeroTmpl, ".billing.pushTimeoutSeconds")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.URL == "", emptyTmpl, ".billing.url")
+	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
+	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
+	erc.Whenf(ec, c.Informant.DownscaleTimeoutSeconds == 0, zeroTmpl, ".informant.downscaleTimeoutSeconds")
+	erc.Whenf(ec, c.Informant.RegisterRetrySeconds == 0, zeroTmpl, ".informant.registerRetrySeconds")
+	erc.Whenf(ec, c.Informant.RegisterTimeoutSeconds == 0, zeroTmpl, ".informant.registerTimeoutSeconds")
+	erc.Whenf(ec, c.Informant.RequestTimeoutSeconds == 0, zeroTmpl, ".informant.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Informant.RetryServerMinWaitSeconds == 0, zeroTmpl, ".informant.retryServerMinWaitSeconds")
+	erc.Whenf(ec, c.Informant.RetryServerNormalWaitSeconds == 0, zeroTmpl, ".informant.retryServerNormalWaitSeconds")
+	erc.Whenf(ec, c.Informant.ServerPort == 0, zeroTmpl, ".informant.serverPort")
+	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
+	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
+	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
+	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
+
+	return ec.Resolve()
 }
