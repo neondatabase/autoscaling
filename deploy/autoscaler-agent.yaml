@@ -58,7 +58,7 @@ data:
       "registerTimeoutSeconds": 2,
       "downscaleTimeoutSeconds": 2,
       "unhealthyAfterSilenceDurationSeconds": 20,
-      "unhealthyStartupGracePeriodSeconds": 20,
+      "unhealthyStartupGracePeriodSeconds": 20
     },
     "metrics": {
       "loadMetricPrefix": "host_",
