@@ -56,7 +56,9 @@ data:
       "registerRetrySeconds": 5,
       "requestTimeoutSeconds": 1,
       "registerTimeoutSeconds": 2,
-      "downscaleTimeoutSeconds": 2
+      "downscaleTimeoutSeconds": 2,
+      "unhealthyAfterSilenceDurationSeconds": 20,
+      "unhealthyStartupGracePeriodSeconds": 20
     },
     "metrics": {
       "loadMetricPrefix": "host_",
@@ -101,7 +103,7 @@ spec:
         - name: autoscaler-agent
           # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
           # update that as well if you change this line!
-          image: neondatabase/autoscaler-agent:v0.5.2
+          image: neondatabase/autoscaler-agent:v0.6.0
           resources:
             limits:
               memory: 100Mi
