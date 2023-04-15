@@ -59,6 +59,14 @@ type InformantConfig struct {
 	// This is a separate field from RequestTimeoutSeconds it's possible that downscaling may
 	// require some non-trivial work that we want to allow to complete.
 	DownscaleTimeoutSeconds uint `json:"downscaleTimeoutSeconds"`
+
+	// UnhealthyAfterSilenceDurationSeconds gives the duration, in seconds, after which failing to
+	// receive a successful request from the informant indicates that it is probably unhealthy.
+	UnhealthyAfterSilenceDurationSeconds uint `json:"unhealthyAfterSilenceDurationSeconds"`
+	// UnhealthyStartupGracePeriodSeconds gives the duration, in seconds, after which we will no
+	// longer excuse total VM informant failures - i.e. when unhealthyAfterSilenceDurationSeconds
+	// kicks in.
+	UnhealthyStartupGracePeriodSeconds uint `json:"unhealthyStartupGracePeriodSeconds"`
 }
 
 // MetricsConfig defines a few parameters for metrics requests to the VM
@@ -131,6 +139,10 @@ func (c *Config) validate() error {
 		return cannotBeZero(".informant.registerTimeoutSeconds")
 	} else if c.Informant.DownscaleTimeoutSeconds == 0 {
 		return cannotBeZero(".informant.downscaleTimeoutSeconds")
+	} else if c.Informant.UnhealthyAfterSilenceDurationSeconds == 0 {
+		return cannotBeZero(".informant.unhealthyAfterSilenceDurationSeconds")
+	} else if c.Informant.UnhealthyStartupGracePeriodSeconds == 0 {
+		return cannotBeZero(".informant.unhealthyStartupGracePeriodSeconds")
 	} else if c.Metrics.SecondsBetweenRequests == 0 {
 		return cannotBeZero(".metrics.secondsBetweenRequests")
 	} else if c.Metrics.LoadMetricPrefix == "" {
