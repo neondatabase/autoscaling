@@ -58,7 +58,7 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
-	ctx = srv.SetShutdown(ctx)
+	ctx = srv.SetShutdownSignal(ctx)
 	ctx = srv.SetBaseContext(ctx)
 	ctx = srv.WithOrchestrator(ctx)
 	defer func() {

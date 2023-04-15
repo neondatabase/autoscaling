@@ -43,7 +43,7 @@ func runProgram() (err error) {
 	// without needing a sleep.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
-	ctx = srv.SetShutdown(ctx)
+	ctx = srv.SetShutdownSignal(ctx)
 	ctx = srv.WithOrchestrator(ctx)
 	ctx = srv.SetBaseContext(ctx)
 	orca := srv.GetOrchestrator(ctx)
