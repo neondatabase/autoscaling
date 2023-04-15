@@ -68,6 +68,10 @@ func startVMWatcher(
 				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
 				newIsOurs := vmIsOurResponsibility(newVM, config, nodeName)
 
+				if !oldIsOurs && !newIsOurs {
+					return
+				}
+
 				var vmForEvent *vmapi.VirtualMachine
 				var eventKind vmEventKind
 
