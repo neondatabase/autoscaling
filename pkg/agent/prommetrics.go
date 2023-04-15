@@ -47,7 +47,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 	)
 	totalVMsWithUnhealthyInformants := prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
-			Name: "vms_unsuccessful_communication_with_informant_current",
+			Name: "autoscaling_vms_unsuccessful_communication_with_informant_current",
 			Help: "Number of VMs whose vm-informants aren't successfully communicating with the autoscaler-agent",
 		},
 		func() float64 {
