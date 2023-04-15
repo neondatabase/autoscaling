@@ -401,6 +401,8 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(
 			r.backgroundWorkerCount.Add(-1)
 
 			if v := recover(); v != nil {
+				r.global.metrics.runnerThreadPanics.Inc()
+
 				err := fmt.Errorf("background worker %q panicked: %v", name, v)
 				r.logger.Errorf("%s", err)
 				// note: In Go, the stack doesn't "unwind" on panic. Instead, a panic will traverse up
