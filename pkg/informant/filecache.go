@@ -129,12 +129,13 @@ func (s *FileCacheState) GetFileCacheSize(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
 	}
 
+	// The file cache GUC variable is in MiB, but the conversion with pg_size_bytes means that the
+	// end result we get is in bytes.
 	var sizeInBytes uint64
 	if err := db.QueryRowContext(ctx, `SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));`).Scan(&sizeInBytes); err != nil {
 		return 0, fmt.Errorf("Error querying file cache size: %w", err)
 	}
 
-	// The file cache GUC variable is in MiB
 	return sizeInBytes, nil
 }
 
