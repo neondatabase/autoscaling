@@ -113,7 +113,7 @@ func (c *Config) validate() error {
 	ec := &erc.Collector{}
 
 	const (
-		emptyTmpl = "filed %q cannot be empty"
+		emptyTmpl = "field %q cannot be empty"
 		zeroTmpl  = "field %q cannot be zero"
 	)
 
