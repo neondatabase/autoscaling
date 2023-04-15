@@ -94,5 +94,6 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		schedulerRequests:         schedulerRequests,
 		informantRequestsOutbound: informantRequestsOutbound,
 		informantRequestsInbound:  informantRequestsInbound,
+		runnerThreadPanics:        runnerThreadPanics,
 	}, reg
 }
