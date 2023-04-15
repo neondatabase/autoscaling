@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	stdruntime "runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,6 +91,17 @@ type WatchHandlerFuncs[P any] struct {
 	DeleteFunc func(obj P, mayBeStale bool)
 }
 
+// WatchIndex represents types that provide some kind of additional index on top of the base listing
+//
+// Indexing is functionally implemented in the same way that WatchHandlerFuncs is, with the main
+// difference being that more things are done for you with WatchIndexes. In particular, indexes can
+// be added and removed after the Watch has already started, and the locking behavior is explicit.
+type WatchIndex[T any] interface {
+	Add(obj *T)
+	Update(oldObj, newObj *T)
+	Delete(obj *T)
+}
+
 // InitWatchMode dictates the behavior of Watch with respect to any initial calls to
 // handlers.AddFunc before returning
 //
@@ -154,6 +166,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		objects:       make(map[types.UID]*T),
 		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
+		nextIndexID:   0,
+		indexes:       make(map[uint64]WatchIndex[T]),
 		stopSignal:    sendStop,
 	}
 
@@ -252,9 +266,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					// event, which we're currently processing.
 					opts.ResourceVersion = meta.GetResourceVersion()
 
-					name := func(m metav1.Object) string {
-						return fmt.Sprintf("%s:%s", m.GetNamespace(), m.GetName())
-					}
+					name := GetNamespacedName(obj)
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
 					err := func() error {
@@ -265,11 +277,14 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 							if _, ok := store.objects[uid]; ok {
 								return fmt.Errorf(
-									"watch %s: received add event for object %s that we already have",
-									config.LogName, name(meta),
+									"watch %s: received add event for object %v that we already have",
+									config.LogName, name,
 								)
 							}
 							store.objects[uid] = (*T)(obj)
+							for _, index := range store.indexes {
+								index.Add((*T)(obj))
+							}
 							handlers.AddFunc((*T)(obj), false)
 						case watch.Bookmark:
 							// Nothing to do, just serves to give us a new ResourceVersion.
@@ -282,22 +297,33 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 							old, ok := store.objects[uid]
 							if !ok {
 								return fmt.Errorf(
-									"watch %s: received delete event for object %s that's not present",
-									config.LogName, name(meta),
+									"watch %s: received delete event for object %v that's not present",
+									config.LogName, name,
 								)
 							}
+							// Update:
+							for _, index := range store.indexes {
+								index.Update(old, (*T)(obj))
+							}
 							handlers.UpdateFunc(old, (*T)(obj))
+							// Delete:
 							delete(store.objects, uid)
+							for _, index := range store.indexes {
+								index.Delete((*T)(obj))
+							}
 							handlers.DeleteFunc((*T)(obj), false)
 						case watch.Modified:
 							old, ok := store.objects[uid]
 							if !ok {
 								return fmt.Errorf(
-									"watch %s: received update event for object %s that's not present",
-									config.LogName, name(meta),
+									"watch %s: received update event for object %v that's not present",
+									config.LogName, name,
 								)
 							}
 							store.objects[uid] = (*T)(obj)
+							for _, index := range store.indexes {
+								index.Update(old, (*T)(obj))
+							}
 							handlers.UpdateFunc(old, (*T)(obj))
 						case watch.Error:
 							panic(errors.New("unreachable code reached")) // handled above
@@ -374,15 +400,36 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				relistItems := accessors.Items(relistList)
 
 				func() {
-					// First, copy the contents of objects into oldObjects. We do this so that we can
-					// uphold some guarantees about the contents of the store.
-					oldObjects := make(map[types.UID]*T)
-					for uid, obj := range store.objects {
-						oldObjects[uid] = obj
-					}
-
 					store.mutex.Lock()
 					defer store.mutex.Unlock()
+
+					// Copy the current contents of objects, and start tracking which ones have
+					// since been deleted.
+					oldObjects := make(map[types.UID]*T)
+					deleted := make(map[types.UID]struct{}) // set of UIDs that have been deleted
+					for uid, obj := range store.objects {
+						oldObjects[uid] = obj
+						deleted[uid] = struct{}{} // initially mark everything as deleted, until we find it isn't
+					}
+
+					// Mark all items we still have as not deleted
+					for i := range relistItems {
+						uid := P(&relistItems[i]).GetObjectMeta().GetUID()
+						delete(deleted, uid)
+					}
+
+					// Generate deletion events for all objects that are no longer present. We do
+					// this first so that when there's externally-enforced uniqueness that isn't
+					// unique *across time* (e.g. object names), users can still rely on uniqueness
+					// at any time that handlers are called.
+					for uid := range deleted {
+						obj := store.objects[uid]
+						delete(store.objects, uid)
+						for _, index := range store.indexes {
+							index.Delete(obj)
+						}
+						handlers.DeleteFunc(obj, true)
+					}
 
 					for i := range relistItems {
 						obj := &relistItems[i]
@@ -392,18 +439,16 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						oldObj, hasObj := oldObjects[uid]
 
 						if hasObj {
+							for _, index := range store.indexes {
+								index.Update(oldObj, obj)
+							}
 							handlers.UpdateFunc(oldObj, obj)
-							delete(oldObjects, uid)
 						} else {
+							for _, index := range store.indexes {
+								index.Add(obj)
+							}
 							handlers.AddFunc(obj, false)
 						}
-					}
-
-					// For everything that's still in oldObjects (i.e. wasn't covered by relistItems),
-					// generate deletion events:
-					for uid, obj := range oldObjects {
-						delete(store.objects, uid)
-						handlers.DeleteFunc(obj, true)
 					}
 				}()
 
@@ -457,6 +502,9 @@ type WatchStore[T any] struct {
 	triggerRelist chan struct{}
 	relisted      chan struct{}
 
+	nextIndexID uint64
+	indexes     map[uint64]WatchIndex[T]
+
 	stopSignal SignalSender
 	stopped    atomic.Bool
 }
@@ -496,4 +544,115 @@ func (w *WatchStore[T]) Items() []*T {
 	}
 
 	return items
+}
+
+// NewIndexedWatchStore creates a new IndexedWatchStore from the WatchStore and the index to use.
+//
+// Note: the index type is assumed to have reference semantics; i.e. any shallow copy of the value
+// will affect any other shallow copy.
+//
+// For more information, refer to IndexedWatchStore.
+func NewIndexedWatchStore[T any, I WatchIndex[T]](store *WatchStore[T], index I) IndexedWatchStore[T, I] {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	for _, obj := range store.objects {
+		index.Add(obj)
+	}
+
+	id := store.nextIndexID
+	store.nextIndexID += 1
+	store.indexes[id] = index
+
+	collector := &struct{}{}
+	// when this IndexedWatchStore is GC'd, remove its index from the WatchStore. This should
+	// provide a reliable way of making sure that indexes always get cleaned up.
+	stdruntime.SetFinalizer(collector, func(_ any) {
+		// note: finalizers always run in a separate goroutine, so it's ok to lock here.
+		store.mutex.Lock()
+		defer store.mutex.Unlock()
+		delete(store.indexes, id)
+	})
+
+	return IndexedWatchStore[T, I]{store, index, id, collector}
+}
+
+// IndexedWatchStore represents a WatchStore, wrapped with a privileged WatchIndex that can be used
+// to efficiently answer queries.
+type IndexedWatchStore[T any, I WatchIndex[T]] struct {
+	*WatchStore[T]
+
+	index I
+
+	// id stores the id of this index in the WatchStore
+	id uint64
+	// collector has a destructor attached to it so that the index can be automatically removed from
+	// the WatchStore when it's no longer in use, without requiring users to manually get rid of it.
+	collector *struct{}
+}
+
+// WithIndex calls a function with the current state of the index, locking the WatchStore around it.
+//
+// It is almost guaranteed to be an error to indirectly return the index with this function.
+func (w IndexedWatchStore[T, I]) WithIndex(f func(I)) {
+	w.WatchStore.mutex.Lock()
+	defer w.WatchStore.mutex.Unlock()
+
+	f(w.index)
+}
+
+func (w IndexedWatchStore[T, I]) GetIndexed(f func(I) (*T, bool)) (obj *T, ok bool) {
+	w.WithIndex(func(i I) {
+		obj, ok = f(i)
+	})
+	return
+}
+
+func (w IndexedWatchStore[T, I]) ListIndexed(f func(I) []*T) (list []*T) {
+	w.WithIndex(func(i I) {
+		list = f(i)
+	})
+	return
+}
+
+func NewNameIndex[T any]() *NameIndex[T] {
+	// check that *T implements metav1.ObjectMetaAccessor
+	var zero T
+	ptrToZero := any(&zero)
+	if _, ok := ptrToZero.(metav1.ObjectMetaAccessor); !ok {
+		panic("type *T must implement metav1.ObjectMetaAccessor")
+	}
+
+	// This doesn't *need* to be a pointer, but the intent is a little more clear this way.
+	return &NameIndex[T]{
+		namespacedNames: make(map[NamespacedName]*T),
+	}
+}
+
+// NameIndex is a WatchIndex that provides efficient lookup for a value with a particular name
+type NameIndex[T any] struct {
+	namespacedNames map[NamespacedName]*T
+}
+
+// note: requires that *T implements metav1.ObjectMetaAccessor
+func keyForObj[T any](obj *T) NamespacedName {
+	meta := any(obj).(metav1.ObjectMetaAccessor).GetObjectMeta()
+
+	return NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
+}
+
+func (i *NameIndex[T]) Add(obj *T) {
+	i.namespacedNames[keyForObj(obj)] = obj
+}
+func (i *NameIndex[T]) Update(oldObj, newObj *T) {
+	i.Delete(oldObj)
+	i.Add(newObj)
+}
+func (i *NameIndex[T]) Delete(obj *T) {
+	delete(i.namespacedNames, keyForObj(obj))
+}
+
+func (i *NameIndex[T]) Get(namespace string, name string) (obj *T, ok bool) {
+	obj, ok = i.namespacedNames[NamespacedName{namespace, name}]
+	return
 }

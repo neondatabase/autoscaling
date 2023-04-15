@@ -28,11 +28,11 @@ import (
 type pluginState struct {
 	lock util.ChanMutex
 
-	podMap  map[api.PodName]*podState
+	podMap  map[util.NamespacedName]*podState
 	nodeMap map[string]*nodeState
 
 	// otherPods stores information about non-VM pods
-	otherPods map[api.PodName]*otherPodState
+	otherPods map[util.NamespacedName]*otherPodState
 
 	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
 	// can appropriately scale our scoring
@@ -62,10 +62,10 @@ type nodeState struct {
 	//
 	// This includes both bound pods (i.e., pods fully committed to the node) and reserved pods
 	// (still may be unreserved)
-	pods map[api.PodName]*podState
+	pods map[util.NamespacedName]*podState
 
 	// otherPods are the non-VM pods that we're also tracking in this node
-	otherPods map[api.PodName]*otherPodState
+	otherPods map[util.NamespacedName]*otherPodState
 	// otherResources is the sum resource usage associated with the non-VM pods
 	otherResources nodeOtherResourceState
 
@@ -146,10 +146,10 @@ type podState struct {
 	// name is the namespace'd name of the pod
 	//
 	// name will not change after initialization, so it can be accessed without holding a lock.
-	name api.PodName
+	name util.NamespacedName
 
-	// vmName is the name of the VM, as given by the 'vm.neon.tech/name' label.
-	vmName string
+	// vmName is the name of the VM, as given by the 'vm.neon.tech/name' label (and name.Namespace)
+	vmName util.NamespacedName
 
 	// testingOnlyAlwaysMigrate is a test-only debugging flag that, if present in the pod's labels,
 	// will always prompt it to mgirate, regardless of whether the VM actually *needs* to.
@@ -186,8 +186,8 @@ type podResourceState[T any] struct {
 	// Reserved is the amount of T that this pod has reserved. It is guaranteed that the pod is
 	// using AT MOST Reserved T.
 	Reserved T `json:"reserved"`
-	// Buffer is the amount of Reserved that we've included in reserved to account for the
-	// possibility of unilateral increases by the autoscaler-agent
+	// Buffer is the amount of T that we've included in Reserved to account for the possibility of
+	// unilateral increases by the autoscaler-agent
 	//
 	// This value is only nonzero during startup (between initial state load and first communication
 	// from the autoscaler-agent), and MUST be less than or equal to reserved.
@@ -199,14 +199,14 @@ type podResourceState[T any] struct {
 	// resource
 	CapacityPressure T `json:"capacityPressure"`
 
-	// Min and Max give the minimum and maxmium values of this resource that the VM may use.
+	// Min and Max give the minimum and maximum values of this resource that the VM may use.
 	Min T `json:"min"`
 	Max T `json:"max"`
 }
 
 // otherPodState tracks a little bit of information for the non-VM pods we're handling
 type otherPodState struct {
-	name      api.PodName
+	name      util.NamespacedName
 	node      *nodeState
 	resources podOtherResourceState
 }
@@ -521,8 +521,8 @@ func buildInitialNodeState(node *corev1.Node, conf *Config) (*nodeState, error) 
 		name:      node.Name,
 		vCPU:      vCPU,
 		memSlots:  memSlots,
-		pods:      make(map[api.PodName]*podState),
-		otherPods: make(map[api.PodName]*otherPodState),
+		pods:      make(map[util.NamespacedName]*podState),
+		otherPods: make(map[util.NamespacedName]*otherPodState),
 		otherResources: nodeOtherResourceState{
 			RawCPU:           resource.Quantity{},
 			RawMemory:        resource.Quantity{},
@@ -585,7 +585,7 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
 // logs, so IMO it's worthwhile to have this separate.
-func (e *AutoscaleEnforcer) handleVMDeletion(podName api.PodName) {
+func (e *AutoscaleEnforcer) handleVMDeletion(podName util.NamespacedName) {
 	klog.Infof("[autoscale-enforcer] Handling deletion of VM pod %v", podName)
 
 	e.state.lock.Lock()
@@ -621,7 +621,31 @@ func (e *AutoscaleEnforcer) handleVMDeletion(podName api.PodName) {
 	klog.Infof(fmtString, migrating, pod.name, pod.node.name, vCPUVerdict, memVerdict)
 }
 
-func (e *AutoscaleEnforcer) handlePodDeletion(podName api.PodName) {
+func (e *AutoscaleEnforcer) handleVMDisabledScaling(podName util.NamespacedName) {
+	klog.Infof("[autoscale-enforcer] Handling disabling autoscaling for VM pod %v", podName)
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	pod, ok := e.state.podMap[podName]
+	if !ok {
+		klog.Warningf("[autoscale-enforcer] disable autoscaling: Cannot find pod %v in podMap", podName)
+		return
+	}
+
+	// Reset buffer to zero:
+	vCPUVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+		handleAutoscalingDisabled()
+	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+		handleAutoscalingDisabled()
+
+	fmtString := "[autoscale-enforcer] Disabled autoscaling for VM pod %v in node %s:\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+	klog.Infof(fmtString, pod.name, pod.node.name, vCPUVerdict, memVerdict)
+}
+
+func (e *AutoscaleEnforcer) handlePodDeletion(podName util.NamespacedName) {
 	klog.Infof("[autoscale-enforcer] Handling deletion of non-VM pod %v", podName)
 
 	e.state.lock.Lock()
@@ -640,6 +664,32 @@ func (e *AutoscaleEnforcer) handlePodDeletion(podName api.PodName) {
 	delete(pod.node.otherPods, podName)
 
 	fmtString := "[autoscale-enforcer] Deleted non-VM pod %v from node %s:\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
+}
+
+func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, unqualifiedPodName string) {
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	podName := util.NamespacedName{Namespace: vm.Namespace, Name: unqualifiedPodName}
+
+	klog.Infof("Handling updated scaling bounds for VM pod %v", podName)
+
+	pod, ok := e.state.podMap[podName]
+	if !ok {
+		klog.Errorf("[autoscale-enforcer] cannot find VM pod %v to update scaling bounds", podName)
+		return
+	}
+
+	// FIXME: this definition of receivedContact may be inaccurate if there was an error with the
+	// autoscaler-agent's request.
+	receivedContact := pod.mostRecentComputeUnit != nil
+	cpuVerdict := handleUpdatedLimits(&pod.node.vCPU, &pod.vCPU, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
+	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, receivedContact, vm.Mem.Min, vm.Mem.Max)
+
+	fmtString := "[autoscale-enforcer] Updated scaling bounds for VM pod %v from node %s:\n" +
 		"\tvCPU verdict: %s\n" +
 		"\t mem verdict: %s"
 	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
@@ -684,14 +734,14 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, vmClien
 
 	vmm := &vmapi.VirtualMachineMigration{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-pluginvmm", pod.vmName),
+			GenerateName: fmt.Sprintf("%s-pluginvmm", pod.vmName.Name),
 			Namespace:    pod.name.Namespace,
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
-			VmName: pod.vmName,
+			VmName: pod.vmName.Name,
 		},
 	}
-	klog.Infof("[autoscale-enforcer] VM Migration create request for VM %s:%s", pod.name.Namespace, pod.vmName)
+	klog.Infof("[autoscale-enforcer] VM Migration create request for VM %v", pod.vmName)
 	_, err := vmClient.NeonvmV1().
 		VirtualMachineMigrations(pod.name.Namespace).
 		Create(ctx, vmm, metav1.CreateOptions{})
@@ -732,12 +782,11 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	// was present at the start and still running has its pod visible to us. VMs that are started
 	// between the VM listing and pod listing won't be handled, but that's ok because we are
 	// probably about to schedule them anyways.
+	//
+	// As a final note: the VM store is already present, and its startup guarantees that the listing
+	// has already been made.
 
-	klog.Infof("[autoscale-enforcer] load state: Listing VMs")
-	vms, err := p.vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("Error listing VirtualMachines: %w", err)
-	}
+	vms := p.vmStore.Items()
 
 	klog.Infof("[autoscale-enforcer] load state: Listing Pods")
 	pods, err := p.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll).List(ctx, metav1.ListOptions{})
@@ -752,8 +801,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	}
 
 	p.state.nodeMap = make(map[string]*nodeState)
-	p.state.podMap = make(map[api.PodName]*podState)
-	p.state.otherPods = make(map[api.PodName]*otherPodState)
+	p.state.podMap = make(map[util.NamespacedName]*podState)
+	p.state.otherPods = make(map[util.NamespacedName]*otherPodState)
 
 	// Build the node map
 	klog.Infof("[autoscale-enforcer] load state: Building node map")
@@ -778,19 +827,19 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 
 	// Store the PodSpecs by name, so we can access them as we're going through VMs
 	klog.Infof("[autoscale-enforcer] load state: Building initial PodSpecs map")
-	podSpecs := make(map[api.PodName]*corev1.Pod)
+	podSpecs := make(map[util.NamespacedName]*corev1.Pod)
 	for i := range pods.Items {
 		p := &pods.Items[i]
-		name := api.PodName{Name: p.Name, Namespace: p.Namespace}
+		name := util.NamespacedName{Name: p.Name, Namespace: p.Namespace}
 		podSpecs[name] = p
 	}
 
 	// Add all VM pods to the map, by going through the VM list.
 	klog.Infof("[autoscale-enforcer] load state: Adding VM pods to podMap")
 	skippedVms := 0
-	for i := range vms.Items {
-		vm := &vms.Items[i]
-		vmName := api.PodName{Name: vm.Name, Namespace: vm.Namespace}
+	for i := range vms {
+		vm := vms[i]
+		vmName := util.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}
 		if vm.Spec.SchedulerName != p.state.conf.SchedulerName {
 			klog.Infof(
 				"[autoscale-enforcer] load state: Skipping VM %v, Spec.SchedulerName %q != our config.SchedulerName %q",
@@ -807,7 +856,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			continue
 		}
 
-		podName := api.PodName{Name: vm.Status.PodName, Namespace: vm.Namespace}
+		podName := util.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}
 		pod, ok := podSpecs[podName]
 		if !ok {
 			klog.Warningf(
@@ -857,7 +906,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 		// Build the pod state, update the node
 		ps := &podState{
 			name:   podName,
-			vmName: vm.Name,
+			vmName: util.GetNamespacedName(vm),
 			node:   ns,
 			vCPU: podResourceState[uint16]{
 				Reserved:         vmInfo.Cpu.Max,
@@ -881,6 +930,16 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 		}
+
+		// If scaling isn't enabled, then we can be more precise about usage.
+		if !vmInfo.ScalingEnabled {
+			ps.vCPU.Buffer = 0
+			ps.vCPU.Reserved = vmInfo.Cpu.Use
+
+			ps.memSlots.Buffer = 0
+			ps.memSlots.Reserved = vmInfo.Mem.Use
+		}
+
 		oldNodeVCPUReserved := ns.vCPU.Reserved
 		oldNodeMemReserved := ns.memSlots.Reserved
 		oldNodeVCPUBuffer := ns.vCPU.Buffer
@@ -909,7 +968,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 	skippedOtherPods := 0
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		podName := api.PodName{Name: pod.Name, Namespace: pod.Namespace}
+		podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 		if pod.Spec.SchedulerName != p.state.conf.SchedulerName {
 			klog.Infof(
 				"[autoscale-enforcer] load state: Skipping non-VM pod %v, Spec.SchedulerName %q != our config.SchedulerName %q",

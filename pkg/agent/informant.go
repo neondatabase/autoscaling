@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,8 +81,7 @@ type InformantServer struct {
 	// made at a time.
 	//
 	// If both requestLock and runner.lock are required, then requestLock MUST be acquired before
-	// runner.lock. Similarly, if both requestLock and runner.vmStateLock are required, then
-	// runner.vmStateLock MUST be acquired before requestLock.
+	// runner.lock.
 	requestLock util.ChanMutex
 
 	// exitStatus holds some information about why the server exited
@@ -555,6 +555,11 @@ func doInformantRequest[Q any, R any](
 	path string,
 	reqData *Q,
 ) (_ *R, statusCode int, _ error) {
+	result := "<internal error>"
+	defer func() {
+		s.runner.global.metrics.informantRequestsOutbound.WithLabelValues(result).Inc()
+	}()
+
 	reqBody, err := json.Marshal(reqData)
 	if err != nil {
 		return nil, statusCode, fmt.Errorf("Error encoding request JSON: %w", err)
@@ -574,16 +579,18 @@ func doInformantRequest[Q any, R any](
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
+		result = "<error>"
 		return nil, statusCode, fmt.Errorf("Error doing request: %w", err)
 	}
 	defer response.Body.Close()
+
+	statusCode = response.StatusCode
+	result = strconv.Itoa(statusCode)
 
 	respBody, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, statusCode, fmt.Errorf("Error reading body for response: %w", err)
 	}
-
-	statusCode = response.StatusCode
 
 	if statusCode != 200 {
 		return nil, statusCode, fmt.Errorf(
@@ -625,7 +632,11 @@ func (s *InformantServer) informantURL(path string) string {
 // of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/id", strconv.Itoa(code)).Inc()
+	}()
+
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
 
@@ -633,6 +644,16 @@ func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.Ag
 
 	if s.exitStatus != nil {
 		return nil, 404, errors.New("Server has already exited")
+	}
+
+	// Update our record of the last successful time we heard from the informant, if the server is
+	// currently enabled. This allows us to detect cases where the informant is not currently
+	// communicating back to the agent - OR when the informant never /resume'd the agent.
+	if s.mode == InformantServerRunning {
+		s.runner.setStatus(func(s *podStatus) {
+			now := time.Now()
+			s.lastSuccessfulInformantComm = &now
+		})
 	}
 
 	return &api.AgentIdentificationMessage{
@@ -645,7 +666,11 @@ func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.Ag
 // outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/resume", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -704,14 +729,23 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 // called outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/suspend", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
 	}
 
 	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.runner.lock.Unlock()
+		}
+	}()
 
 	if s.exitStatus != nil {
 		return nil, 404, errors.New("Server has already exited")
@@ -747,6 +781,19 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 		return nil, 400, errors.New("Cannot suspend agent that is not yet registered")
 	}
 
+	locked = false
+	s.runner.lock.Unlock()
+
+	// Acquire s.runner.requestLock so that when we return, we can guarantee that any future
+	// requests to NeonVM or the scheduler will first observe that the informant is suspended and
+	// exit early, before actually making the request.
+	if err := s.runner.requestLock.TryLock(ctx); err != nil {
+		err = fmt.Errorf("Context expired while trying to acquire requestLock: %w", err)
+		s.runner.logger.Errorf("%s", err)
+		return nil, 500, err
+	}
+	s.runner.requestLock.Unlock() // don't actually hold the lock, we're just using it as a barrier.
+
 	return &api.AgentIdentificationMessage{
 		Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
 		SequenceNumber: s.incrementSequenceNumber(),
@@ -760,7 +807,11 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 func (s *InformantServer) handleTryUpscale(
 	ctx context.Context,
 	body *api.MoreResourcesRequest,
-) (*api.AgentIdentificationMessage, int, error) {
+) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/upscale", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -842,7 +893,7 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 	s.runner.logger.Infof("Sending downscale %+v", to)
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
-	rawResources := to.ConvertToRaw(&s.runner.vm.Mem.SlotSize)
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
 	resp, statusCode, err := doInformantRequest[api.RawResources, api.DownscaleResult](
 		ctx, s, timeout, http.MethodPut, "/downscale", &rawResources,
@@ -884,7 +935,7 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 	s.runner.logger.Infof("Sending upscale %+v", to)
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
-	rawResources := to.ConvertToRaw(&s.runner.vm.Mem.SlotSize)
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
 	_, statusCode, err := doInformantRequest[api.RawResources, struct{}](
 		ctx, s, timeout, http.MethodPut, "/upscale", &rawResources,

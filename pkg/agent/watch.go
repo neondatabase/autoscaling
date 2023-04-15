@@ -27,6 +27,7 @@ type vmEventKind string
 
 const (
 	vmEventAdded   vmEventKind = "added"
+	vmEventUpdated vmEventKind = "updated"
 	vmEventDeleted vmEventKind = "deleted"
 )
 
@@ -57,7 +58,7 @@ func startVMWatcher(
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(vm, vmEventAdded)
 					if err != nil {
-						klog.Errorf("Erorr handling VM added: %s", err)
+						klog.Errorf("Error handling VM added: %s", err)
 						return
 					}
 					vmEvents <- event
@@ -77,7 +78,8 @@ func startVMWatcher(
 					vmForEvent = oldVM
 					eventKind = vmEventDeleted
 				} else {
-					return
+					vmForEvent = newVM
+					eventKind = vmEventUpdated
 				}
 
 				event, err := makeVMEvent(vmForEvent, eventKind)
@@ -103,9 +105,11 @@ func startVMWatcher(
 }
 
 func makeVMEvent(vm *vmapi.VirtualMachine, kind vmEventKind) (vmEvent, error) {
+	vmName := util.NamespacedName{Namespace: vm.Namespace, Name: vm.Name}
+
 	info, err := api.ExtractVmInfo(vm)
 	if err != nil {
-		return vmEvent{}, fmt.Errorf("Error extracting VM info from %s:%s: %w", vm.Namespace, vm.Name, err)
+		return vmEvent{}, fmt.Errorf("Error extracting VM info from %v: %w", vmName, err)
 	}
 
 	return vmEvent{

@@ -11,10 +11,12 @@ on:
       - main
 
 jobs:
-  tests:
+  e2e-tests:
     runs-on: [ self-hosted, gen3, small ]
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # fetch all, so that we also include tags
 
       - uses: actions/setup-go@v4
         with:
@@ -64,6 +66,9 @@ jobs:
           VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
           VM_KERNEL_VERSION: "5.15.80"
 
+      # our docker builds use the output of 'git describe' for embedding git information
+      - run: git describe --long --dirty
+
       # Explicitly build all the images beforehand. Building images while the cluster is up can
       # sometimes affect the cluster. For more information:
       # https://github.com/neondatabase/autoscaling/issues/120#issuecomment-1493405844
@@ -75,19 +80,15 @@ jobs:
       - run: make deploy
       - run: make example-vms
 
-      - name: Run make e2e
-        run: |
-          # Increase inotify limits for dnsmasq to fix
-          #   "dnsmasq: failed to create inotify: No file descriptors available"
-          sudo sysctl fs.inotify.max_user_instances=8192
-          sudo sysctl fs.inotify.max_user_watches=524288
-          sudo sysctl -p
-
-          kubectl kuttl test --config tests/e2e/kuttl-test.yaml --skip-delete
+      - run: make e2e
 
       - name: Get k8s logs and events
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         run: |
+          if ! kubectl config current-context; then
+            echo "skipping cluster logs because no cluster found in kubectl context"
+            exit 0
+          fi
           namespaces=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
           for namespace in $namespaces; do
             pods=$(kubectl get pods -n $namespace -o jsonpath='{.items[*].metadata.name}')
@@ -104,4 +105,7 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          kind delete cluster
+          # check that kind exists before trying to delete the cluster. Avoids spurious errors
+          if which kind 2>/dev/null >/dev/null; then
+            kind delete cluster
+          fi

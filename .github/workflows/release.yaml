@@ -32,14 +32,18 @@ jobs:
         run: |
           echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           echo -n "git_info=" >> $GITHUB_OUTPUT
-          bash -c "set -eu -o pipefail; source ./scripts-common.sh; git_info" >> $GITHUB_OUTPUT
+          # note: --tags enables matching on lightweight (i.e. not annotated) tags, which normally
+          # wouldn't be necessary, except that actions/checkout@v3 does weird things to setup the
+          # repository that means that we actually end up checked out with *just* a lightweight tag
+          # to the tagged commit.
+          git describe --tags --long --dirty >> $GITHUB_OUTPUT
       - name: install golang
         uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
 
       - name: build binaries
-        run:  make build
+        run:  make VERSION=${{ steps.get_vcs_info.outputs.version }} VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} build
 
       - name: docker - install qemu
         uses: docker/setup-qemu-action@v2
@@ -155,6 +159,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             bin/vm-builder
+            bin/vm-builder-generic
             bin/vm-informant
             deploy/autoscale-scheduler.yaml
             deploy/autoscaler-agent.yaml

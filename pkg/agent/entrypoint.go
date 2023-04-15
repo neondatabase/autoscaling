@@ -49,10 +49,14 @@ func (r MainRunner) Run(ctx context.Context) error {
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")
 		// TODO: catch panics here, bubble those into a clean-ish shutdown.
-		go RunBillingMetricsCollector(ctx, r.Config.Billing, r.EnvArgs.K8sNodeName, vmWatchStore)
+		storeForNode := util.NewIndexedWatchStore(vmWatchStore, NewVMNodeIndex(r.EnvArgs.K8sNodeName))
+		go RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode)
 	}
 
-	globalState := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	globalState, promReg := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
+		return fmt.Errorf("Error starting prometheus metrics server: %w", err)
+	}
 
 	if r.Config.DumpState != nil {
 		klog.Info("Starting 'dump state' server")

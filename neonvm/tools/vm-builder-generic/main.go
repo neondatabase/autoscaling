@@ -18,100 +18,11 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
+// vm-builder-generic --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
 
 const (
 	dockerfileVmBuilder = `
-FROM {{.InformantImage}} as informant
-
-# Build cgroup-tools
-#
-# At time of writing (2023-03-14), debian bullseye has a version of cgroup-tools (technically
-# libcgroup) that doesn't support cgroup v2 (version 0.41-11). Unfortunately, the vm-informant
-# requires cgroup v2, so we'll build cgroup-tools ourselves.
-FROM debian:bullseye-slim as libcgroup-builder
-ENV LIBCGROUP_VERSION v2.0.3
-
-RUN set -exu \
-	&& apt update \
-	&& apt install --no-install-recommends -y \
-		git \
-		ca-certificates \
-		automake \
-		cmake \
-		make \
-		gcc \
-		byacc \
-		flex \
-		libtool \
-		libpam0g-dev \
-	&& git clone --depth 1 -b $LIBCGROUP_VERSION https://github.com/libcgroup/libcgroup \
-	&& INSTALL_DIR="/libcgroup-install" \
-	&& mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/include" \
-	&& cd libcgroup \
-	# extracted from bootstrap.sh, with modified flags:
-	&& (test -d m4 || mkdir m4) \
-	&& autoreconf -fi \
-	&& rm -rf autom4te.cache \
-	&& CFLAGS="-O3" ./configure --prefix="$INSTALL_DIR" --sysconfdir=/etc --localstatedir=/var --enable-opaque-hierarchy="name=systemd" \
-	# actually build the thing...
-	&& make install
-RUN ls $INSTALL_DIR/bin
-
-FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
-
-# Build pgbouncer
-#
-FROM debian:bullseye-slim AS pgbouncer
-RUN set -e \
-	&& apt-get update \
-	&& apt-get install -y \
-		curl \
-		build-essential \
-		pkg-config \
-		libevent-dev \
-		libssl-dev
-
-ENV PGBOUNCER_VERSION 1.18.0
-ENV PGBOUNCER_GITPATH 1_18_0
-RUN set -e \
-	&& curl -sfSL https://github.com/pgbouncer/pgbouncer/releases/download/pgbouncer_${PGBOUNCER_GITPATH}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz -o pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
-	&& tar xzvf pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
-	&& cd pgbouncer-${PGBOUNCER_VERSION} \
-	&& LDFLAGS=-static ./configure --prefix=/usr/local/pgbouncer --without-openssl \
-	&& make -j $(nproc) \
-	&& make install
-
-FROM {{.RootDiskImage}} AS rootdisk
-
-USER root
-RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant
-
-# tweak nofile limits
-RUN set -e \
-	&& echo 'fs.file-max = 1048576' >>/etc/sysctl.conf \
-	&& test ! -e /etc/security || ( \
-	   echo '*    - nofile 1048576' >>/etc/security/limits.conf \
-	&& echo 'root - nofile 1048576' >>/etc/security/limits.conf \
-	   )
-
-COPY cgconfig.conf /etc/cgconfig.conf
-COPY pgbouncer.ini /etc/pgbouncer.ini
-RUN set -e \
-	&& chown postgres:postgres /etc/pgbouncer.ini \
-	&& chmod 0644 /etc/pgbouncer.ini \
-	&& chmod 0644 /etc/cgconfig.conf
-
-USER postgres
-
-COPY --from=informant         /usr/bin/vm-informant /usr/local/bin/vm-informant
-COPY --from=libcgroup-builder /libcgroup-install/bin/*  /usr/bin/
-COPY --from=libcgroup-builder /libcgroup-install/lib/*  /usr/lib/
-COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
-COPY --from=postgres-exporter /bin/postgres_exporter /bin/postgres_exporter
-COPY --from=pgbouncer         /usr/local/pgbouncer/bin/pgbouncer /usr/local/bin/pgbouncer
-
-ENTRYPOINT ["/usr/sbin/cgexec", "-g", "*:neon-postgres", "/usr/local/bin/compute_ctl"]
+FROM {{.SrcImage}} AS rootdisk
 
 FROM alpine:3.16 AS vm-runtime
 # add busybox
@@ -160,28 +71,25 @@ RUN set -e \
 		qemu-img \
 		e2fsprogs
 
-# Install vector.dev binary
-RUN set -e \
-    && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
-    | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-x86_64-unknown-linux-musl/bin/vector
-
 # init scripts
 ADD inittab   /neonvm/bin/inittab
 ADD vminit    /neonvm/bin/vminit
 ADD vmstart   /neonvm/bin/vmstart
 ADD vmacpi    /neonvm/acpi/vmacpi
-ADD vector.yaml /neonvm/config/vector.yaml
 ADD powerdown /neonvm/bin/powerdown
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
+ARG USE_INITTAB
 COPY --from=rootdisk / /rootdisk
 COPY --from=vm-runtime /neonvm /rootdisk/neonvm
 RUN set -e \
     && mkdir -p /rootdisk/etc \
-    && mkdir -p /rootdisk/etc/vector \
+    && (if [ -n "$USE_INITTAB" ]; then cp /rootdisk/etc/inittab /tmp/guest-inittab 2>/dev/null || true; fi) \
+    && touch /tmp/guest-inittab \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
+    && cat /tmp/guest-inittab >> /rootdisk/etc/inittab \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
@@ -222,15 +130,9 @@ fi
 
 	scriptInitTab = `
 ::sysinit:/neonvm/bin/vminit
-::sysinit:cgconfigparser -l /etc/cgconfig.conf -s 1664
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
-::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres'
-#::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
-::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
-::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 `
 
@@ -241,7 +143,6 @@ action=/neonvm/bin/powerdown
 
 	scriptPowerDown = `#!/neonvm/bin/sh
 
-su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
 /neonvm/bin/poweroff
 `
 
@@ -288,73 +189,16 @@ for i in ${ETH_LIST}; do
     udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 done
 `
-	configVector = `---
-data_dir: /tmp
-api:
-  enabled: true
-  address: "0.0.0.0:8686"
-  playground: false
-sources:
-  host_metrics:
-    filesystem:
-      devices:
-        excludes: [binfmt_misc]
-      filesystems:
-        excludes: [binfmt_misc]
-      mountPoints:
-        excludes: ["*/proc/sys/fs/binfmt_misc"]
-    type: host_metrics
-sinks:
-  prom_exporter:
-    type: prometheus_exporter
-    inputs:
-      - host_metrics
-    address: "0.0.0.0:9100"
-`
-	// cgconfig.conf
-	configCgroup = `# Configuration for cgroups in VM compute nodes
-group neon-postgres {
-    perm {
-        admin {
-            uid = vm-informant;
-        }
-        task {
-            gid = users;
-        }
-    }
-    memory {}
-}
-`
-
-	// pgbouncer.ini
-	configPgbouncer = `
-[databases]
-*=host=localhost port=5432 auth_user=cloud_admin
-[pgbouncer]
-listen_port=6432
-listen_addr=0.0.0.0
-auth_type=scram-sha-256
-auth_user=cloud_admin
-client_tls_sslmode=disable
-server_tls_sslmode=disable
-pool_mode=transaction
-max_client_conn=10000
-default_pool_size=16
-`
 )
 
 var (
-	Version     string
-	VMInformant string
-
-	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
-	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
-	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
-	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
-	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
-	informant = flag.String("informant", VMInformant, `vm-informant docker image`)
-	version   = flag.Bool("version", false, `Print vm-builder version`)
+	srcImage   = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
+	dstImage   = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	size       = flag.String("size", "1G", `Size for disk image: --size=1G`)
+	outFile    = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	quiet      = flag.Bool("quiet", false, `Show less output from the docker build process`)
+	useInittab = flag.Bool("use-inittab", false, `Use guest container's inittab, appending it to the default one`)
+	forcePull  = flag.Bool("pull", false, `Pull src image even if already present locally`)
 )
 
 func printReader(reader io.ReadCloser) error {
@@ -394,22 +238,16 @@ func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplSt
 }
 
 type TemplatesContext struct {
-	User           string
-	Entrypoint     []string
-	Cmd            []string
-	Env            []string
-	RootDiskImage  string
-	InformantImage string
+	SrcImage   string
+	User       string
+	Entrypoint []string
+	Cmd        []string
+	Env        []string
 }
 
 func main() {
 	flag.Parse()
 	var dstIm string
-
-	if *version {
-		fmt.Println(Version)
-		os.Exit(0)
-	}
 
 	if len(*srcImage) == 0 {
 		log.Println("-src not set, see usage info:")
@@ -472,11 +310,10 @@ func main() {
 	}
 
 	tmplArgs := TemplatesContext{
-		Entrypoint:     imageSpec.Config.Entrypoint,
-		Cmd:            imageSpec.Config.Cmd,
-		Env:            imageSpec.Config.Env,
-		RootDiskImage:  *srcImage,
-		InformantImage: *informant,
+		SrcImage:   *srcImage,
+		Entrypoint: imageSpec.Config.Entrypoint,
+		Cmd:        imageSpec.Config.Cmd,
+		Env:        imageSpec.Config.Env,
 	}
 
 	if len(imageSpec.Config.User) != 0 {
@@ -504,9 +341,6 @@ func main() {
 		{"vmacpi", scriptVmAcpi},
 		{"powerdown", scriptPowerDown},
 		{"vminit", scriptVmInit},
-		{"cgconfig.conf", configCgroup},
-		{"vector.yaml", configVector},
-		{"pgbouncer.ini", configPgbouncer},
 	}
 
 	for _, f := range files {
@@ -517,6 +351,13 @@ func main() {
 
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
+
+	var inittabArg string
+	if *useInittab {
+		inittabArg = "yes"
+	}
+	buildArgs["USE_INITTAB"] = &inittabArg
+
 	opt := types.ImageBuildOptions{
 		Tags: []string{
 			dstIm,

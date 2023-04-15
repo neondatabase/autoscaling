@@ -3,9 +3,13 @@ apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
   name: postgres14-disk-test
+  annotations:
+    # In this example, these bounds aren't necessary. So... here's what they look like :)
+    autoscaling.neon.tech/bounds: '{ "min": { "cpu": 1, "mem": "1Gi" }, "max": { "cpu": 4, "mem": "4Gi" } }'
   labels:
-    # Uncomment the line below to continuously migrate the VM (TESTING ONLY)
-    # autoscaler/testing-only-always-migrate: ""
+    autoscaling.neon.tech/enabled: "true"
+    # Set to "true" to continuously migrate the VM (TESTING ONLY)
+    autoscaling.neon.tech/testing-only-always-migrate: "false"
 spec:
   schedulerName: autoscale-scheduler
   guest:

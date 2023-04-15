@@ -2,14 +2,12 @@
 IMG_CONTROLLER ?= controller:dev
 IMG_RUNNER ?= runner:dev
 IMG_VXLAN ?= vxlan-controller:dev
-VM_EXAMPLE_SOURCE ?= postgres:15-alpine
-VM_EXAMPLE_IMAGE ?= vm-postgres:15-alpine
 
 # Autoscaler related images
 AUTOSCALER_SCHEDULER_IMG ?= kube-autoscale-scheduler:dev
 AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
 VM_INFORMANT_IMG ?= vm-informant:dev
-EXAMPLE_VM_IMG ?= vm-example:dev
+E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
 # kernel for guests
@@ -33,7 +31,7 @@ endif
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
-GIT_INFO := $(git describe --long --dirty)
+GIT_INFO := $(shell git describe --long --dirty)
 
 .PHONY: all
 all: build
@@ -114,7 +112,7 @@ test: fmt vet envtest ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: fmt vet bin/vm-builder ## Build all neonvm binaries.
+build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
 	go build -o bin/vxlan-ipam       neonvm/tools/vxlan/ipam/main.go
@@ -122,7 +120,11 @@ build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	go build -o bin/vm-builder neonvm/tools/vm-builder/main.go
+	go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMInformant=${VM_INFORMANT_IMG}" neonvm/tools/vm-builder/main.go
+
+.PHONY: bin/vm-builder-generic
+bin/vm-builder-generic: ## Build vm-builder-generic binary.
+	go build -o bin/vm-builder-generic  neonvm/tools/vm-builder-generic/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
@@ -133,7 +135,7 @@ vm-informant: ## Build vm-informant image
 	docker buildx build \
 		--tag $(VM_INFORMANT_IMG) \
 		--load \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--build-arg GIT_INFO=$(GIT_INFO) \
 		--file build/vm-informant/Dockerfile \
 		.
 
@@ -160,12 +162,7 @@ docker-build: build ## Build docker image with the controller.
 
 .PHONY: docker-build-examples
 docker-build-examples: vm-informant bin/vm-builder ## Build docker images for testing VMs
-	docker build \
-		--tag tmp-$(EXAMPLE_VM_IMG) \
-		--file vm-examples/postgres-minimal/Dockerfile \
-		vm-examples/postgres-minimal/
-	./bin/vm-builder -src tmp-$(EXAMPLE_VM_IMG) -use-inittab -dst $(EXAMPLE_VM_IMG)
-	./bin/vm-builder -src $(VM_EXAMPLE_SOURCE) -dst $(VM_EXAMPLE_IMAGE)
+	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG)
 
 .PHONY: docker-build-pg14-disk-test
 docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
@@ -182,7 +179,7 @@ docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for
 		--load \
 		--file vm-examples/pg14-disk-test/Dockerfile.vmdata \
 		vm-examples/pg14-disk-test/
-	./bin/vm-builder -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
+	./bin/vm-builder-generic -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
@@ -287,8 +284,7 @@ kind-load: docker-build  ## Push docker images to the kind cluster.
 
 .PHONY: example-vms
 example-vms: docker-build-examples ## Build and push the testing VM images to the kind cluster.
-	kind load docker-image $(VM_EXAMPLE_IMAGE)
-	kind load docker-image $(EXAMPLE_VM_IMG)
+	kind load docker-image $(E2E_TESTS_VM_IMG)
 
 .PHONY: pg14-disk-test
 pg14-disk-test: docker-build-pg14-disk-test ## Build and push the pg14-disk-test VM test image to the kind cluster.
