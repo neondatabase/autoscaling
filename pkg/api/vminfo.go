@@ -137,12 +137,12 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	}
 
 	if boundsJSON, ok := vm.Annotations[AnnotationAutoscalingBounds]; ok {
-		var bounds scalingBounds
+		var bounds ScalingBounds
 		if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 
-		if err := bounds.validate(info.Mem.SlotSize); err != nil {
+		if err := bounds.Validate(info.Mem.SlotSize); err != nil {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
@@ -171,7 +171,7 @@ func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
 	return vm.Min() != cmp.Min() || vm.Max() != cmp.Max()
 }
 
-func (vm *VmInfo) applyBounds(b scalingBounds) {
+func (vm *VmInfo) applyBounds(b ScalingBounds) {
 	vm.Cpu.Min = b.Min.CPU
 	vm.Cpu.Max = b.Max.CPU
 
@@ -181,17 +181,24 @@ func (vm *VmInfo) applyBounds(b scalingBounds) {
 	vm.Mem.Max = uint16(b.Max.Mem.Value() / vm.Mem.SlotSize.Value())
 }
 
-type scalingBounds struct {
-	Min resourceBound `json:"min"`
-	Max resourceBound `json:"max"`
+// ScalingBounds is the type that we deserialize from the "autoscaling.neon.tech/bounds" annotation
+//
+// All fields (and sub-fields) are pointers so that our handling can distinguish between "field not
+// set" and "field equal to zero". Please note that all field are still required to be set and
+// non-zero, though.
+type ScalingBounds struct {
+	Min ResourceBounds `json:"min"`
+	Max ResourceBounds `json:"max"`
 }
 
-type resourceBound struct {
+type ResourceBounds struct {
 	CPU uint16            `json:"cpu"`
 	Mem resource.Quantity `json:"mem"`
 }
 
-func (b scalingBounds) validate(memSlotSize *resource.Quantity) error {
+// Validate checks that the ScalingBounds are all reasonable values - all fields initialized and
+// non-zero.
+func (b ScalingBounds) Validate(memSlotSize *resource.Quantity) error {
 	ec := &erc.Collector{}
 
 	b.Min.validate(ec, ".min", memSlotSize)
@@ -202,7 +209,7 @@ func (b scalingBounds) validate(memSlotSize *resource.Quantity) error {
 
 // TODO: This could be made better - see:
 // https://github.com/neondatabase/autoscaling/pull/190#discussion_r1169405645
-func (b resourceBound) validate(ec *erc.Collector, path string, memSlotSize *resource.Quantity) {
+func (b ResourceBounds) validate(ec *erc.Collector, path string, memSlotSize *resource.Quantity) {
 	errAt := func(field string, err error) error {
 		return fmt.Errorf("error at %s%s: %w", path, field, err)
 	}
