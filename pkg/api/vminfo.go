@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
+	LabelTestingOnlyAlwaysMigrate = "autoscaling.neon.tech/testing-only-always-migrate"
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
 )
@@ -23,6 +23,12 @@ const (
 func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
 	labels := obj.GetObjectMeta().GetLabels()
 	value, ok := labels[LabelEnableAutoscaling]
+	return ok && value == "true"
+}
+
+func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
+	labels := obj.GetObjectMeta().GetLabels()
+	value, ok := labels[LabelTestingOnlyAlwaysMigrate]
 	return ok && value == "true"
 }
 
@@ -96,8 +102,8 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		}
 	}
 
-	_, alwaysMigrate := vm.Labels[LabelTestingOnlyAlwaysMigrate]
 	scalingEnabled := HasAutoscalingEnabled(vm)
+	alwaysMigrate := HasAlwaysMigrateLabel(vm)
 
 	slotSize := vm.Spec.Guest.MemorySlotSize // explicitly copy slot size so we aren't keeping the VM object around
 	info := VmInfo{
