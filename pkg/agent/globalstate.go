@@ -124,7 +124,7 @@ func (s *agentState) handleVMEventAdded(
 		global: s,
 		status: status,
 		logger: RunnerLogger{
-			prefix: fmt.Sprintf("Runner %v: ", event.podName),
+			prefix: fmt.Sprintf("Runner %v: ", podName),
 		},
 		schedulerRespondedWithMigration: false,
 
