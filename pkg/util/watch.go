@@ -266,9 +266,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					// event, which we're currently processing.
 					opts.ResourceVersion = meta.GetResourceVersion()
 
-					name := func(m metav1.Object) string {
-						return fmt.Sprintf("%s:%s", m.GetNamespace(), m.GetName())
-					}
+					name := GetNamespacedName(obj)
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
 					err := func() error {
@@ -279,8 +277,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 							if _, ok := store.objects[uid]; ok {
 								return fmt.Errorf(
-									"watch %s: received add event for object %s that we already have",
-									config.LogName, name(meta),
+									"watch %s: received add event for object %v that we already have",
+									config.LogName, name,
 								)
 							}
 							store.objects[uid] = (*T)(obj)
@@ -299,8 +297,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 							old, ok := store.objects[uid]
 							if !ok {
 								return fmt.Errorf(
-									"watch %s: received delete event for object %s that's not present",
-									config.LogName, name(meta),
+									"watch %s: received delete event for object %v that's not present",
+									config.LogName, name,
 								)
 							}
 							// Update:
@@ -318,8 +316,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 							old, ok := store.objects[uid]
 							if !ok {
 								return fmt.Errorf(
-									"watch %s: received update event for object %s that's not present",
-									config.LogName, name(meta),
+									"watch %s: received update event for object %v that's not present",
+									config.LogName, name,
 								)
 							}
 							store.objects[uid] = (*T)(obj)

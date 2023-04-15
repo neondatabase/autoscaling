@@ -646,6 +646,16 @@ func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (_ *api.
 		return nil, 404, errors.New("Server has already exited")
 	}
 
+	// Update our record of the last successful time we heard from the informant, if the server is
+	// currently enabled. This allows us to detect cases where the informant is not currently
+	// communicating back to the agent - OR when the informant never /resume'd the agent.
+	if s.mode == InformantServerRunning {
+		s.runner.setStatus(func(s *podStatus) {
+			now := time.Now()
+			s.lastSuccessfulInformantComm = &now
+		})
+	}
+
 	return &api.AgentIdentificationMessage{
 		Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
 		SequenceNumber: s.incrementSequenceNumber(),

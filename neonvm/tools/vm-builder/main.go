@@ -204,15 +204,13 @@ fi
 if /neonvm/bin/test -f /neonvm/runtime/command.sh; then
     /neonvm/bin/cat /neonvm/runtime/command.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo -n '{{- range .Entrypoint}}{{.}} {{- end }}' >>/neonvm/bin/vmstarter.sh
+    /neonvm/bin/echo -n '{{$first := true}}{{range .Entrypoint}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
 fi
-
-echo -n ' ' >>/neonvm/bin/vmstarter.sh
-
+{{if and .Entrypoint .Cmd}}echo -n ' ' >>/neonvm/bin/vmstarter.sh{{end}}
 if /neonvm/bin/test -f /neonvm/runtime/args.sh; then
     /neonvm/bin/cat /neonvm/runtime/args.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo '{{- range .Cmd }}{{.}} {{- end }}' >>/neonvm/bin/vmstarter.sh
+    /neonvm/bin/echo '{{$first := true}}{{range .Cmd}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
 fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh

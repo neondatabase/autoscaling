@@ -758,8 +758,8 @@ github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhV
 github.com/tmc/grpc-websocket-proxy v0.0.0-20190109142713-0ad062ec5ee5/go.mod h1:ncp9v5uamzpCO7NfCPTXjqaC+bZgJeR0sMTm6dMHP7U=
 github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 h1:uruHq4dN7GR16kFc5fp3d1RIYzJW5onx8Ybykw2YQFA=
 github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802/go.mod h1:ncp9v5uamzpCO7NfCPTXjqaC+bZgJeR0sMTm6dMHP7U=
-github.com/tychoish/fun v0.7.1 h1:Jup/3zWZ+LYzMMTbg9rj76ZY8zxGPzP/ZLGU4o9hjes=
-github.com/tychoish/fun v0.7.1/go.mod h1:84A+BwGecz23UotmbB4mtvVS5ZcsZpspecduxpwF/XM=
+github.com/tychoish/fun v0.8.5 h1:8uTFk2fG8mxDyRmqMj6llKE8+vTuQRclUkl0/tyYwAU=
+github.com/tychoish/fun v0.8.5/go.mod h1:84A+BwGecz23UotmbB4mtvVS5ZcsZpspecduxpwF/XM=
 github.com/ugorji/go v1.1.4/go.mod h1:uQMGLiO92mf5W77hV/PUCpI3pbzQx3CRekS0kk+RGrc=
 github.com/unrolled/mapstore v1.0.1 h1:p40O90HN2L9ZIkvyrOsOJUv9VfVS1NVZtc9pD3CuiIQ=
 github.com/unrolled/mapstore v1.0.1/go.mod h1:Vbmbuen0gueNVGMpEDBurAD6/797qQ3hzbDPYLLPL2U=

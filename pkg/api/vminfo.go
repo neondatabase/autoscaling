@@ -11,10 +11,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 const (
-	LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
+	LabelTestingOnlyAlwaysMigrate = "autoscaling.neon.tech/testing-only-always-migrate"
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
 )
@@ -23,6 +25,12 @@ const (
 func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
 	labels := obj.GetObjectMeta().GetLabels()
 	value, ok := labels[LabelEnableAutoscaling]
+	return ok && value == "true"
+}
+
+func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
+	labels := obj.GetObjectMeta().GetLabels()
+	value, ok := labels[LabelTestingOnlyAlwaysMigrate]
 	return ok && value == "true"
 }
 
@@ -82,6 +90,10 @@ func (vm VmInfo) Max() Resources {
 	}
 }
 
+func (vm VmInfo) NamespacedName() util.NamespacedName {
+	return util.NamespacedName{Namespace: vm.Namespace, Name: vm.Name}
+}
+
 func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	var err error
 
@@ -96,8 +108,8 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		}
 	}
 
-	_, alwaysMigrate := vm.Labels[LabelTestingOnlyAlwaysMigrate]
 	scalingEnabled := HasAutoscalingEnabled(vm)
+	alwaysMigrate := HasAlwaysMigrateLabel(vm)
 
 	slotSize := vm.Spec.Guest.MemorySlotSize // explicitly copy slot size so we aren't keeping the VM object around
 	info := VmInfo{

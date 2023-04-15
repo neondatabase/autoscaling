@@ -85,8 +85,8 @@ discussed more in the [high-level consequences] section below.
 * `pkg/` — core go code from the scheduler plugin and `autoscaler-agent`. Where applicable, the
   purpose of individual files is commented at the top.
     * `pkg/agent/` — implementation of `autoscaler-agent`
-    * `pkg/api/` — types for scheduler plugin <-> `autoscaler-agent` communication, plus some
-        protocol-relevant types independently used by both.
+    * `pkg/api/` — all types for inter-component communications, plus some protocol-relevant types
+        independently used by multiple components.
     * `pkg/billing/` — consumption metrics API, primarily used in
         [`pkg/agent/billing.go`](pkg/agent/billing.go)
     * `pkg/informant/` — implementation of the VM informant

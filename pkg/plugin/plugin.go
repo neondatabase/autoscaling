@@ -187,16 +187,20 @@ func (e *AutoscaleEnforcer) Name() string {
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
 func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
-	vmName, ok := pod.Labels[LabelVM]
+	var vmName util.NamespacedName
+	vmName.Namespace = pod.Namespace
+
+	var ok bool
+	vmName.Name, ok = pod.Labels[LabelVM]
 	if !ok {
 		return nil, nil
 	}
 
 	vm, ok := vmStore.GetIndexed(func(index *util.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
-		return index.Get(pod.Namespace, vmName)
+		return index.Get(vmName.Namespace, vmName.Name)
 	})
 	if !ok {
-		klog.Warningf("VM %s:%s missing from local store. Relisting.", pod.Namespace, vmName)
+		klog.Warningf("VM %v missing from local store. Relisting.", vmName)
 
 		// Use a reasonable timeout on the relist request, so that if the VM store is broken, we
 		// won't block forever.
@@ -214,7 +218,7 @@ func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 
 		// retry fetching the VM, now that we know it's been synced.
 		vm, ok = vmStore.GetIndexed(func(index *util.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
-			return index.Get(pod.Namespace, vmName)
+			return index.Get(vmName.Namespace, vmName.Name)
 		})
 		if !ok {
 			// if the VM is still not present after relisting, then either it's already been deleted
@@ -642,7 +646,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		node.memSlots.Reserved = newNodeReservedMemSlots
 		ps := &podState{
 			name:   pName,
-			vmName: vmInfo.Name,
+			vmName: vmInfo.NamespacedName(),
 			node:   node,
 			vCPU: podResourceState[uint16]{
 				Reserved:         vmInfo.Cpu.Use,
