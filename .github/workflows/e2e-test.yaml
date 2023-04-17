@@ -83,7 +83,7 @@ jobs:
       - run: make e2e
 
       - name: Get k8s logs and events
-        if: ${{ failure() || cancelled() }}
+        if: always()
         run: |
           if ! kubectl config current-context; then
             echo "skipping cluster logs because no cluster found in kubectl context"
