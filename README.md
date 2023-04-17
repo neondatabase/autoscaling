@@ -20,3 +20,5 @@ config.billing = {
       "pushTimeoutSeconds": 2
 }
 ```
+
+... and all of `vmscrape.yaml`.

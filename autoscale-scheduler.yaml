@@ -168,6 +168,10 @@ spec:
       # update that as well if you change this line!
       - image: neondatabase/autoscale-scheduler:v0.6.0
         command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
+        ports:
+        - name: metrics
+          containerPort: 9100
+          protocol: TCP
         livenessProbe:
           httpGet:
             path: /healthz

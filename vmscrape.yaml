@@ -1,0 +1,19 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: autoscaling-components
+  namespace: monitoring
+spec:
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 10s
+      scrapeTimeout: 10s
+  selector:
+    matchExpressions:
+      - key: name
+        operator: In
+        values: [autoscaler-agent, autoscale-scheduler]
+  namespaceSelector:
+    matchNames:
+      - kube-system

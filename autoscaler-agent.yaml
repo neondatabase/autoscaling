@@ -104,6 +104,10 @@ spec:
           # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
           # update that as well if you change this line!
           image: neondatabase/autoscaler-agent:v0.6.0
+          ports:
+            - name: metrics
+              containerPort: 9100
+              protocol: TCP
           resources:
             limits:
               memory: 100Mi
