@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/tychoish/fun/erc"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -170,8 +172,8 @@ func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
 }
 
 func (vm *VmInfo) applyBounds(b scalingBounds) {
-	vm.Cpu.Min = *b.Min.CPU
-	vm.Cpu.Max = *b.Max.CPU
+	vm.Cpu.Min = b.Min.CPU
+	vm.Cpu.Max = b.Max.CPU
 
 	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
 	// (2^16-1) * info.Mem.SlotSize.Value().
@@ -180,49 +182,40 @@ func (vm *VmInfo) applyBounds(b scalingBounds) {
 }
 
 type scalingBounds struct {
-	Min *resourceBound `json:"min,omitempty"`
-	Max *resourceBound `json:"max,omitempty"`
+	Min resourceBound `json:"min"`
+	Max resourceBound `json:"max"`
 }
 
 type resourceBound struct {
-	CPU *uint16            `json:"cpu,omitempty"`
-	Mem *resource.Quantity `json:"mem,omitempty"`
+	CPU uint16            `json:"cpu"`
+	Mem resource.Quantity `json:"mem"`
 }
 
 func (b scalingBounds) validate(memSlotSize *resource.Quantity) error {
-	if b.Min == nil {
-		return errors.New("missing field 'min'")
-	} else if b.Max == nil {
-		return errors.New("missing field 'max'")
-	}
+	ec := &erc.Collector{}
 
-	if field, err := b.Min.validate(memSlotSize); err != nil {
-		return fmt.Errorf("error at .min%s: %w", field, err)
-	} else if field, err := b.Max.validate(memSlotSize); err != nil {
-		return fmt.Errorf("error at .max%s: %w", field, err)
-	}
+	b.Min.validate(ec, ".min", memSlotSize)
+	b.Max.validate(ec, ".max", memSlotSize)
 
-	return nil
+	return ec.Resolve()
 }
 
-func (b resourceBound) validate(memSlotSize *resource.Quantity) (field string, _ error) {
-	if b.CPU == nil {
-		return "", errors.New("missing field 'cpu'")
-	} else if b.Mem == nil {
-		return "", errors.New("missing field 'mem'")
+// TODO: This could be made better - see:
+// https://github.com/neondatabase/autoscaling/pull/190#discussion_r1169405645
+func (b resourceBound) validate(ec *erc.Collector, path string, memSlotSize *resource.Quantity) {
+	errAt := func(field string, err error) error {
+		return fmt.Errorf("error at %s%s: %w", path, field, err)
 	}
 
-	if *b.CPU == 0 {
-		return ".cpu", errors.New("value cannot be zero")
+	if b.CPU == 0 {
+		ec.Add(errAt(".cpu", errors.New("must be set to a non-zero value")))
 	}
 
 	if b.Mem.IsZero() || b.Mem.Value() < 0 {
-		return ".mem", errors.New("value must be greater than zero")
+		ec.Add(errAt(".mem", errors.New("must be set to a value greater than zero")))
 	} else if b.Mem.Value()%memSlotSize.Value() != 0 {
-		return ".mem", fmt.Errorf("value must be divisible by VM memory slot size %s", memSlotSize)
+		ec.Add(errAt(".mem", fmt.Errorf("must be divisible by VM memory slot size %s", memSlotSize)))
 	}
-
-	return "", nil
 }
 
 // the reason we have custom formatting for VmInfo is because without it, the formatting of memory
