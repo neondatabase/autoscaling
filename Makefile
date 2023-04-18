@@ -20,6 +20,10 @@ ENVTEST_K8S_VERSION = 1.24.2
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
 
+# Go 1.20 changed the handling of git worktrees:
+# https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
+export GOFLAGS=-buildvcs=false
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(GOPATH)/bin
