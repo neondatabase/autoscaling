@@ -1,11 +1,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 
+	"github.com/tychoish/fun"
 	"github.com/tychoish/fun/erc"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 type Config struct {
@@ -30,6 +34,9 @@ type DumpStateConfig struct {
 type ScalingConfig struct {
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
+	// DefaultConfig gives the default scaling config, to be used if there is no configuration
+	// supplied with the "autoscaling.neon.tech/config" annotation.
+	DefaultConfig api.ScalingConfig `json:"defaultConfig"`
 }
 
 type InformantConfig struct {
@@ -145,6 +152,10 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
 	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
+	if err := c.Scaling.DefaultConfig.Validate(); err != nil {
+		stack := err.(*erc.Stack)
+		fun.Observe(context.TODO(), stack.Iterator(), ec.Add)
+	}
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
 	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
 	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
