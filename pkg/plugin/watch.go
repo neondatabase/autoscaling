@@ -116,12 +116,12 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
 				oldInfo, err := api.ExtractVmInfo(oldVM)
 				if err != nil {
-					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %w", util.GetNamespacedName(oldVM), err)
+					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %s", util.GetNamespacedName(oldVM), err)
 					return
 				}
 				newInfo, err := api.ExtractVmInfo(newVM)
 				if err != nil {
-					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %w", util.GetNamespacedName(newVM), err)
+					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %s", util.GetNamespacedName(newVM), err)
 					return
 				}
 
