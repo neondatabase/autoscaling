@@ -22,6 +22,8 @@ config.billing = {
 }
 ```
 
+... and all of `vmscrape.yaml`.
+
 The following production clusters have autoscaling deployed with the config represented in this
 branch.
 
