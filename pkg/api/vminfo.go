@@ -192,10 +192,10 @@ type resourceBound struct {
 }
 
 func (b scalingBounds) validate(memSlotSize *resource.Quantity) error {
-	ec := erc.Collector{}
+	ec := &erc.Collector{}
 
-	b.Min.validate(&ec, ".min", memSlotSize)
-	b.Max.validate(&ec, ".max", memSlotSize)
+	b.Min.validate(ec, ".min", memSlotSize)
+	b.Max.validate(ec, ".max", memSlotSize)
 
 	return ec.Resolve()
 }
