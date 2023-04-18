@@ -200,6 +200,8 @@ func (b scalingBounds) validate(memSlotSize *resource.Quantity) error {
 	return ec.Resolve()
 }
 
+// TODO: This could be made better - see:
+// https://github.com/neondatabase/autoscaling/pull/190#discussion_r1169405645
 func (b resourceBound) validate(ec *erc.Collector, path string, memSlotSize *resource.Quantity) {
 	errAt := func(field string, err error) error {
 		return fmt.Errorf("error at %s%s: %w", path, field, err)
