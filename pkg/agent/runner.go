@@ -1066,7 +1066,7 @@ func (r *Runner) updateVMResources(
 	// The reason we care about the informant server being "enabled" is that the VM informant uses
 	// it to ensure that there's at most one autoscaler-agent that's making requests on its behalf.
 	if err := r.validateInformant(); err != nil {
-		r.logger.Warningf("Unable to update VM resources because informant server is disabled: %w", err)
+		r.logger.Warningf("Unable to update VM resources because informant server is disabled: %s", err)
 		return nil
 	}
 
@@ -1415,7 +1415,7 @@ func (r *Runner) doVMUpdate(
 	}
 
 	if err := r.validateInformant(); err != nil {
-		r.logger.Warningf("Aborting VM update because informant server is not valid: %w", err)
+		r.logger.Warningf("Aborting VM update because informant server is not valid: %s", err)
 		resetVMTo(current)
 		return nil, nil
 	}

@@ -34,7 +34,7 @@ func StartPrometheusMetricsServer(ctx context.Context, port uint16, reg *prometh
 	go func() {
 		<-shutdownCtx.Done()
 		if err := srv.Shutdown(context.Background()); err != nil {
-			klog.Errorf("Error shutting down prometheus server: %w", err)
+			klog.Errorf("Error shutting down prometheus server: %s", err)
 		}
 	}()
 

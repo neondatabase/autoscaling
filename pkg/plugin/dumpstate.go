@@ -72,7 +72,7 @@ func (p *AutoscaleEnforcer) startDumpStateServer(shutdownCtx context.Context) er
 		// internal state after shutdown has started.
 		server := &http.Server{Handler: mux}
 		if err := server.Serve(listener); err != nil {
-			klog.Errorf("dump-state server exited: %w", err)
+			klog.Errorf("dump-state server exited: %s", err)
 		}
 	}()
 
