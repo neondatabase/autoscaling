@@ -43,8 +43,10 @@ jobs:
 
           echo ${LOCALBIN} >> $GITHUB_PATH
         env:
-          KUBECTL_VERSION: v1.26.1
-          KIND_VERSION: v0.17.0
+          # kubectl is supported within one minor version (older or newer) of k8s
+          # https://kubernetes.io/releases/version-skew-policy/#kubectl
+          KUBECTL_VERSION: v1.25.9
+          KIND_VERSION: v0.18.0
           KUTTL_VERSION: v0.15.0
 
       - name: Check dependencies
