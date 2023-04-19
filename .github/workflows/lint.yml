@@ -17,12 +17,6 @@ jobs:
       - uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
-      - uses: technote-space/get-diff-action@v6
-        with:
-          PATTERNS: |
-            **/**.go
-            go.mod
-            go.sum
       - uses: golangci/golangci-lint-action@v3
         with:
           # Required: the version of golangci-lint is required and
@@ -33,7 +27,6 @@ jobs:
           # caching issues, see: https://github.com/golangci/golangci-lint-action/issues/244#issuecomment-1052190775
           skip-pkg-cache: true
           skip-build-cache: true
-        if: env.GIT_DIFF
 
       - name: go mod tidy
         run: |
@@ -44,3 +37,14 @@ jobs:
             echo "ERROR: 'go mod tidy' modified the source tree."
             exit 1
           fi
+
+      - name: make manifests
+        run: |
+          make manifests
+          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+            git ls-files --exclude-standard --others .
+            git diff .
+            echo "ERROR: 'make manifests' modified the source tree."
+            exit 1
+          fi
+

@@ -47,7 +47,10 @@ metadata:
 data:
   config.json: '{
     "scaling": {
-      "requestTimeoutSeconds": 10
+      "requestTimeoutSeconds": 10,
+      "defaultConfig": {
+        "loadAverageFractionTarget": 0.9
+      }
     },
     "informant": {
       "serverPort": 10301,

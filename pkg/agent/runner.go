@@ -52,6 +52,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -565,6 +566,7 @@ func (r *Runner) handleVMResources(
 						SlotSize: r.vm.Mem.SlotSize, // checked for equality above.
 					},
 
+					ScalingConfig:  newVMInfo.ScalingConfig,
 					AlwaysMigrate:  newVMInfo.AlwaysMigrate,
 					ScalingEnabled: newVMInfo.ScalingEnabled, // note: see above, checking newVMInfo.ScalingEnabled != false
 				}
@@ -1037,6 +1039,7 @@ type atomicUpdateState struct {
 	vm               api.VmInfo
 	lastApproved     api.Resources
 	requestedUpscale api.MoreResources
+	config           api.ScalingConfig
 }
 
 // updateVMResources is responsible for the high-level logic that orchestrates a single update to
@@ -1274,22 +1277,23 @@ func (r *Runner) getStateForVMUpdate(updateReason VMUpdateReason) *atomicUpdateS
 		))
 	}
 
+	config := r.global.config.Scaling.DefaultConfig
+	if r.vm.ScalingConfig != nil {
+		config = *r.vm.ScalingConfig
+	}
+
 	return &atomicUpdateState{
 		computeUnit:      *r.computeUnit,
 		metrics:          *r.lastMetrics,
 		vm:               r.vm,
 		lastApproved:     *r.lastApproved,
 		requestedUpscale: r.requestedUpscale,
+		config:           config,
 	}
 }
 
 // desiredVMState calculates what the resource allocation to the VM should be, given the metrics and
 // current state.
-//
-// FIXME: This should have *some* access to prior scaling decisions, so that we can e.g. use slower
-// scaling to start, and accelerate it over time.
-//
-// FIXME: Even factoring in the above, this implementation is *pretty bad*.
 func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// There's some annoying edge cases that this function has to be able to handle properly. For
 	// the sake of completeness, they are:
@@ -1302,28 +1306,25 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	//    is low so we should just decrease *anyways*.
 	//
 	// ---
-	// Now, it's worth noting that we only *barely* handle the edge cases above. We don't do it
-	// well, but we do handle them in a protocol-compliant way, and that's what counts! Eventually,
-	// this function will be rewritten, this note removed, and all will be well.
+	//
+	// Broadly, the implementation works like this:
+	// 1. Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
+	// 2. Cap the goal CU by min/max, etc
+	// 3. that's it!
 
-	lowerBoundCU, upperBoundCU := s.computeUnitsBounds()
-
-	currentCU := upperBoundCU
-
-	// if we don't have an even compute unit *and* we're allowed to decrease, pick the middle.
-	if lowerBoundCU != upperBoundCU && allowDecrease {
-		currentCU = lowerBoundCU + (upperBoundCU-lowerBoundCU+1)/2 // +1 so we round up
-	}
-
-	goalCU := currentCU
-	if s.metrics.LoadAverage1Min > 0.9*float32(s.vm.Cpu.Use) {
-		goalCU *= 2
-	} else if s.metrics.LoadAverage1Min < 0.4*float32(s.vm.Cpu.Use) && allowDecrease {
-		goalCU /= 2
-	}
+	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
+	// average),
+	// which we can get by dividing LA by LAFT.
+	goalCU := uint16(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
 
 	// Update goalCU based on any requested upscaling
 	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling())
+
+	// new CU must be >= current CU if !allowDecrease
+	if !allowDecrease {
+		_, upperBoundCU := s.computeUnitsBounds()
+		goalCU = util.Max(goalCU, upperBoundCU)
+	}
 
 	// resources for the desired "goal" compute units
 	goal := s.computeUnit.Mul(goalCU)
