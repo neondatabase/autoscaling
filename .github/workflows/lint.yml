@@ -41,3 +41,14 @@ jobs:
             echo "ERROR: 'go mod tidy' modified the source tree."
             exit 1
           fi
+
+      - name: make manifests
+        run: |
+          make manifests
+          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+            git ls-files --exclude-standard --others .
+            git diff .
+            echo "ERROR: 'make manifests' modified the source tree."
+            exit 1
+          fi
+
