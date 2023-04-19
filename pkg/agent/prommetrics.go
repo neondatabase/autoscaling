@@ -9,6 +9,7 @@ type PromMetrics struct {
 	schedulerRequests         *prometheus.CounterVec
 	informantRequestsOutbound *prometheus.CounterVec
 	informantRequestsInbound  *prometheus.CounterVec
+	runnerThreadPanics        prometheus.Counter
 }
 
 func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Registry) {
@@ -32,6 +33,37 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 			Help: "Number of HTTP requests from vm-informants received by autoscaler-agents",
 		},
 		[]string{"endpoint", "code"},
+	)
+	runnerThreadPanics := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "autoscaling_agent_runner_thread_panics_total",
+			Help: "Number of panics from autoscaler-agent per-VM runner threads",
+		},
+	)
+	totalPanickedVMs := prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Name: "autoscaling_panicked_vm_runners_current",
+			Help: "Number of VMs whose per-VM runner has panicked (and not restarted)",
+		},
+		func() float64 {
+			globalstate.lock.Lock()
+			defer globalstate.lock.Unlock()
+
+			count := 0
+
+			for _, p := range globalstate.pods {
+				func() {
+					p.status.mu.Lock()
+					defer p.status.mu.Unlock()
+
+					if p.status.panicked {
+						count += 1
+					}
+				}()
+			}
+
+			return float64(count)
+		},
 	)
 	totalVMs := prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
@@ -73,6 +105,8 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		schedulerRequests,
 		informantRequestsOutbound,
 		informantRequestsInbound,
+		runnerThreadPanics,
+		totalPanickedVMs,
 		totalVMs,
 		totalVMsWithUnhealthyInformants,
 	)
@@ -81,5 +115,6 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		schedulerRequests:         schedulerRequests,
 		informantRequestsOutbound: informantRequestsOutbound,
 		informantRequestsInbound:  informantRequestsInbound,
+		runnerThreadPanics:        runnerThreadPanics,
 	}, reg
 }
