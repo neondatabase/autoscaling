@@ -1,12 +1,10 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 
-	"github.com/tychoish/fun"
 	"github.com/tychoish/fun/erc"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
