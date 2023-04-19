@@ -17,12 +17,6 @@ jobs:
       - uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
-      - uses: technote-space/get-diff-action@v6
-        with:
-          PATTERNS: |
-            **/**.go
-            go.mod
-            go.sum
       - uses: golangci/golangci-lint-action@v3
         with:
           # Required: the version of golangci-lint is required and
@@ -30,7 +24,6 @@ jobs:
           version: v1.52.2
           args: --timeout 5m --fix
           github-token: ${{ secrets.github_token }}
-        if: env.GIT_DIFF
 
       - name: go mod tidy
         run: |
