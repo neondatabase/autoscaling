@@ -21,6 +21,7 @@ const (
 	LabelTestingOnlyAlwaysMigrate = "autoscaling.neon.tech/testing-only-always-migrate"
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
+	AnnotationAutoscalingConfig   = "autoscaling.neon.tech/config"
 )
 
 // HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
@@ -40,12 +41,13 @@ func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
 // care about. It takes various labels and annotations into account, so certain fields might be
 // different from what's strictly in the VirtualMachine object.
 type VmInfo struct {
-	Name           string    `json:"name"`
-	Namespace      string    `json:"namespace"`
-	Cpu            VmCpuInfo `json:"cpu"`
-	Mem            VmMemInfo `json:"mem"`
-	AlwaysMigrate  bool      `json:"alwaysMigrate"`
-	ScalingEnabled bool      `json:"scalingEnabled"`
+	Name           string         `json:"name"`
+	Namespace      string         `json:"namespace"`
+	Cpu            VmCpuInfo      `json:"cpu"`
+	Mem            VmMemInfo      `json:"mem"`
+	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
+	AlwaysMigrate  bool           `json:"alwaysMigrate"`
+	ScalingEnabled bool           `json:"scalingEnabled"`
 }
 
 type VmCpuInfo struct {
@@ -128,6 +130,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
 			SlotSize: &slotSize,
 		},
+		ScalingConfig:  nil, // set below, maybe
 		AlwaysMigrate:  alwaysMigrate,
 		ScalingEnabled: scalingEnabled,
 	}
@@ -146,6 +149,18 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
+	}
+
+	if configJSON, ok := vm.Annotations[AnnotationAutoscalingConfig]; ok {
+		var config ScalingConfig
+		if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
+			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingConfig, err)
+		}
+
+		if err := config.Validate(); err != nil {
+			return nil, fmt.Errorf("Bad scaling config in annotation %q: %w", AnnotationAutoscalingConfig, err)
+		}
+		info.ScalingConfig = &config
 	}
 
 	min := info.Min()
@@ -225,6 +240,28 @@ func (b ResourceBounds) validate(ec *erc.Collector, path string, memSlotSize *re
 	}
 }
 
+// ScalingConfig provides bits of configuration for how the autoscaler-agent makes scaling decisions
+type ScalingConfig struct {
+	// LoadAverageFractionTarget sets the desired fraction of current CPU that the load average
+	// should be. For example, with a value of 0.7, we'd want load average to sit at 0.7 ×
+	// CPU,
+	// scaling CPU to make this happen.
+	LoadAverageFractionTarget float64 `json:"loadAverageFractionTarget"`
+}
+
+func (c *ScalingConfig) Validate() error {
+	ec := &erc.Collector{}
+
+	// Check c.loadAverageFractionTarget is between 0 and 2. We don't
+	// *strictly* need the upper
+	// bound, but it's a good safety check.
+	erc.Whenf(ec, c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
+	erc.Whenf(ec, c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget")
+
+	// heads-up! some functions elsewhere depend on the concrete return type of this function.
+	return ec.Resolve()
+}
+
 // the reason we have custom formatting for VmInfo is because without it, the formatting of memory
 // slot size (which is a resource.Quantity) has all the fields, meaning (a) it's hard to read, and
 // (b) there's a lot of unnecessary information. But in order to enable "proper" formatting given a
@@ -233,8 +270,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
 		state.Write([]byte(fmt.Sprintf(
-			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, ScalingConfig:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
 		)))
 	default:
 		if verb != 'v' {
@@ -244,8 +281,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 		}
 
 		state.Write([]byte(fmt.Sprintf(
-			"{Name:%s Namespace:%s Cpu:%v Mem:%v AlwaysMigrate:%t ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"{Name:%s Namespace:%s Cpu:%v Mem:%v ScalingConfig:%+v AlwaysMigrate:%t ScalingEnabled:%t}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
 		)))
 
 		if verb != 'v' {
