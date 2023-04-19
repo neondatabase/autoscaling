@@ -96,8 +96,20 @@ jobs:
             pods=$(kubectl get pods -n $namespace -o jsonpath='{.items[*].metadata.name}')
             for pod in $pods; do
               echo "*** Namespace=$namespace Pod=$pod ***"
-              echo "Logs:"
-              kubectl logs -n $namespace $pod || echo 'Error getting logs'
+              restarts=$(
+                kubectl get pod -n $namespace $pod -o jsonpath='{.status.containerStatuses[0].restartCount}' || echo '0'
+              )
+              if [ "$restarts" -ne 0 ]; then
+                echo "CONTAINER RESTARTED $restarts TIME(S)"
+                echo "Previous logs:"
+                kubectl logs -n $namespace -p $pod || echo 'Error getting logs'
+                echo "Current logs:"
+                kubectl logs -n $namespace $pod || echo 'Error getting logs'
+              else
+                echo "Logs:"
+                kubectl logs -n $namespace $pod || echo 'Error getting logs'
+              fi
+
               echo "Events:"
               kubectl get events --namespace $namespace --field-selector involvedObject.name=$pod || echo 'Error getting events'
               echo ""
