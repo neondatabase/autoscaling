@@ -152,12 +152,8 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
 	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
-	if err := c.Scaling.DefaultConfig.Validate(); err != nil {
-		stack := err.(*erc.Stack) //nolint:errorlint // return ty guaranteed by Validate()
-		if err := fun.Observe(context.TODO(), stack.Iterator(), ec.Add); err != nil {
-			panic(fmt.Errorf("unexpected failure Observe-ing errors: %w", err))
-		}
-	}
+	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
+	ec.Add(c.Scaling.DefaultConfig.Validate())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
 	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
 	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
