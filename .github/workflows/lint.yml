@@ -30,6 +30,9 @@ jobs:
           version: v1.52.2
           args: --timeout 5m --fix
           github-token: ${{ secrets.github_token }}
+          # caching issues, see: https://github.com/golangci/golangci-lint-action/issues/244#issuecomment-1052190775
+          skip-pkg-cache: true
+          skip-build-cache: true
         if: env.GIT_DIFF
 
       - name: go mod tidy
