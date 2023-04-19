@@ -38,7 +38,7 @@ require (
 	github.com/bufbuild/connect-grpchealth-go v1.0.0
 	github.com/bufbuild/connect-grpcreflect-go v1.0.0
 	github.com/cicdteam/go-ipam v0.2.0
-	github.com/cilium/cilium v1.11.15
+	github.com/cilium/cilium v1.11.16
 	github.com/containerd/cgroups/v3 v3.0.1
 	github.com/coreos/go-iptables v0.6.0
 	github.com/digitalocean/go-qemu v0.0.0-20220826173844-d5f5e3ceed89
