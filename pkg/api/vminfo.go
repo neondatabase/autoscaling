@@ -258,6 +258,7 @@ func (c *ScalingConfig) Validate() error {
 	erc.Whenf(ec, c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
 	erc.Whenf(ec, c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget")
 
+	// heads-up! some functions elsewhere depend on the concrete return type of this function.
 	return ec.Resolve()
 }
 
@@ -269,8 +270,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
 		state.Write([]byte(fmt.Sprintf(
-			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, ScalingConfig:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
 		)))
 	default:
 		if verb != 'v' {
@@ -280,8 +281,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 		}
 
 		state.Write([]byte(fmt.Sprintf(
-			"{Name:%s Namespace:%s Cpu:%v Mem:%v AlwaysMigrate:%t ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"{Name:%s Namespace:%s Cpu:%v Mem:%v ScalingConfig:%+v AlwaysMigrate:%t ScalingEnabled:%t}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
 		)))
 
 		if verb != 'v' {
