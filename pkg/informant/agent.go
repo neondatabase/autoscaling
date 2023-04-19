@@ -22,10 +22,13 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-// ProtocolVersion is the current version of the agent<->informant protocol in use by this informant
+// The VM informant currently supports v1.1 and v1.2 of the agent<->informant protocol.
 //
-// Currently, each VM informant supports only one version at a time. In the future, this may change.
-const ProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
+// If you update either of these values, make sure to also update VERSIONING.md.
+const (
+	MinProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
+	MaxProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_2
+)
 
 // AgentSet is the global state handling various autoscaler-agents that we could connect to
 type AgentSet struct {
@@ -264,8 +267,8 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 // Returns: protocol version, status code, error (if unsuccessful)
 func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVersion, int, error) {
 	expectedRange := api.VersionRange[api.InformantProtoVersion]{
-		Min: ProtocolVersion,
-		Max: ProtocolVersion,
+		Min: MinProtocolVersion,
+		Max: MaxProtocolVersion,
 	}
 
 	descProtoRange := info.ProtocolRange()

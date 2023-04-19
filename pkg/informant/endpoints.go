@@ -220,6 +220,14 @@ func (s *State) RegisterAgent(ctx context.Context, info *api.AgentDesc) (*api.In
 	return &desc, 200, nil
 }
 
+// HealthCheck is a dummy endpoint that allows the autoscaler-agent to check that (a) the informant
+// is up and running, and (b) the agent is still registered.
+//
+// Returns: body (if successful), status code, error (if unsuccessful)
+func (s *State) HealthCheck(ctx context.Context, info *api.AgentDesc) (*api.InformantHealthCheckResp, int, error) {
+	panic("todo")
+}
+
 // TryDownscale tries to downscale the VM's current resource usage, returning whether the proposed
 // amount is ok
 //
