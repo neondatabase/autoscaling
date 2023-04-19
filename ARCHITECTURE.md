@@ -81,7 +81,7 @@ discussed more in the [high-level consequences] section below.
 * `kind/` — files specific to creating our [kind](https://kind.sigs.k8s.io/) cluster
     * `kind/config.yaml` — configuration for the kind cluster
 * `neonvm/` — QEMU-based virtualisation API and controllers for k8s
-   * See [`neonvm/README.md](./neonvm/README.md) for details
+   * See [`neonvm/README.md`](./neonvm/README.md) for details
 * `pkg/` — core go code from the scheduler plugin and `autoscaler-agent`. Where applicable, the
   purpose of individual files is commented at the top.
     * `pkg/agent/` — implementation of `autoscaler-agent`
