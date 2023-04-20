@@ -39,9 +39,14 @@ func startVMWatcher(
 	nodeName string,
 	vmEvents chan<- vmEvent,
 ) (*util.WatchStore[vmapi.VirtualMachine], error) {
+	namespace := corev1.NamespaceAll
+	if config.RestrictNamespace != "" && config.RestrictNamespace != api.NoNamespaceRestrictions {
+		namespace = config.RestrictNamespace
+	}
+
 	return util.Watch(
 		ctx,
-		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
+		vmClient.NeonvmV1().VirtualMachines(namespace),
 		util.WatchConfig{
 			LogName: "VMs",
 			// We want to be relatively snappy; don't wait for too long before retrying.

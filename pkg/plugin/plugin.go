@@ -261,6 +261,10 @@ func (e *AutoscaleEnforcer) Filter(
 	pod *corev1.Pod,
 	nodeInfo *framework.NodeInfo,
 ) *framework.Status {
+	if !e.state.conf.allowedNamespace(pod.Namespace) {
+		return nil
+	}
+
 	e.metrics.pluginCalls.WithLabelValues("filter").Inc()
 
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
@@ -444,6 +448,10 @@ func (e *AutoscaleEnforcer) Score(
 	pod *corev1.Pod,
 	nodeName string,
 ) (int64, *framework.Status) {
+	if !e.state.conf.allowedNamespace(pod.Namespace) {
+		return framework.MinNodeScore, nil
+	}
+
 	e.metrics.pluginCalls.WithLabelValues("score").Inc()
 
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
@@ -514,6 +522,10 @@ func (e *AutoscaleEnforcer) Reserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) *framework.Status {
+	if !e.state.conf.allowedNamespace(pod.Namespace) {
+		return nil
+	}
+
 	e.metrics.pluginCalls.WithLabelValues("reserve").Inc()
 
 	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
@@ -701,6 +713,10 @@ func (e *AutoscaleEnforcer) Unreserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) {
+	if !e.state.conf.allowedNamespace(pod.Namespace) {
+		return
+	}
+
 	e.metrics.pluginCalls.WithLabelValues("unreserve").Inc()
 
 	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}

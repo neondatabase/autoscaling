@@ -46,6 +46,7 @@ metadata:
   namespace: kube-system
 data:
   config.json: '{
+    "restrictNamespace": "<no namespace restrictions>",
     "scaling": {
       "requestTimeoutSeconds": 10,
       "defaultConfig": {

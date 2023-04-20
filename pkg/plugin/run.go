@@ -134,6 +134,13 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		)
 	}
 
+	if !e.state.conf.allowedNamespace(req.Pod.Namespace) {
+		return nil, 404, fmt.Errorf(
+			"Pod namespace is ignored by this scheduler: expected %q but got %q",
+			e.state.conf.RestrictNamespace, req.Pod.Namespace,
+		)
+	}
+
 	// if req.Metrics is nil, check that the protocol version allows that.
 	if req.Metrics == nil && !req.ProtoVersion.AllowsNilMetrics() {
 		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)

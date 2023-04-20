@@ -17,6 +17,12 @@ import (
 //////////////////
 
 type Config struct {
+	// RestrictNamespace forces the scheduler to operate wholly within a single namespace, ignoring
+	// all resources outside of it. THIS IS FOR TESTING ONLY.
+	//
+	// The plugin *will* make bad decisions under this model.
+	RestrictNamespace string `json:"restrictNamespace"`
+
 	// NodeDefaults is the default node configuration used when not overridden
 	NodeDefaults nodeConfig `json:"nodeDefaults"`
 	// NodeOverrides is a list of node configurations that override the default for a small set of
@@ -188,6 +194,15 @@ func ReadConfig(path string) (*Config, error) {
 //////////////////////////////////////
 // HELPER METHODS FOR USING CONFIGS //
 //////////////////////////////////////
+
+func (c *Config) allowedNamespace(ns string) bool {
+	switch c.RestrictNamespace {
+	case "", api.NoNamespaceRestrictions:
+		return true
+	default:
+		return c.RestrictNamespace == ns
+	}
+}
 
 // forNode returns the individual nodeConfig for a node with a particular name, taking override
 // settings into account
