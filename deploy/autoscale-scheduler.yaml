@@ -116,8 +116,6 @@ data:
             enabled:
               - name: AutoscaleEnforcer
 ---
-# note: this ConfigMap is not meant to be mounted. For better responsiveness, the scheduler listens
-# for updates on the ConfigMap object directly.
 apiVersion: v1
 kind: ConfigMap
 metadata:
