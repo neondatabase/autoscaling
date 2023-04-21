@@ -258,6 +258,7 @@ func NewInformantServer(
 	runner.spawnBackgroundWorker(backgroundCtx, healthCheckerName, func(c context.Context) {
 		// FIXME: make this duration configurable
 		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-c.Done():
