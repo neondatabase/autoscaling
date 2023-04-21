@@ -266,13 +266,13 @@ func NewInformantServer(
 			case <-ticker.C:
 			}
 
-			// If we've already registered with the informant, and it doesn't support health checks,
-			// exit.
 			var done bool
 			func() {
 				server.requestLock.Lock()
 				defer server.requestLock.Unlock()
 
+				// If we've already registered with the informant, and it doesn't support health
+				// checks, exit.
 				if server.protoVersion != nil && !server.protoVersion.AllowsHealthCheck() {
 					runner.logger.Infof("Aborting future informant health checks because it does not support them")
 					done = true
