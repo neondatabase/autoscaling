@@ -928,7 +928,7 @@ func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealth
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.RequestTimeoutSeconds)
 	id := api.AgentIdentification{AgentID: s.desc.AgentID}
 
-	s.runner.logger.Infof("Sending health-check %+v")
+	s.runner.logger.Infof("Sending health-check %+v", id)
 	resp, statusCode, err := doInformantRequest[api.AgentIdentification, api.InformantHealthCheckResp](
 		ctx, s, timeout, http.MethodPut, "/health-check", &id,
 	)
