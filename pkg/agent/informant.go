@@ -913,9 +913,6 @@ func (s *InformantServer) handleTryUpscale(
 //
 // This method MUST be called while holding i.server.requestLock AND NOT i.server.runner.lock.
 func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealthCheckResp, error) {
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
