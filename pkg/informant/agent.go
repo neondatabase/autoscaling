@@ -75,6 +75,8 @@ type Agent struct {
 	id         uuid.UUID
 	serverAddr string
 
+	protoVersion api.InformantProtoVersion
+
 	// all sends on requestQueue are made through the doRequest method; all receives are made from
 	// the runHandler background task.
 	requestQueue  chan agentRequest
@@ -293,6 +295,8 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 
 		id:         info.AgentID,
 		serverAddr: info.ServerAddr,
+
+		protoVersion: protoVersion,
 
 		lastSeqNumber: 0,
 		requestQueue:  make(chan agentRequest),

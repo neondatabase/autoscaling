@@ -119,6 +119,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	util.AddHandler("", mux, "/register", http.MethodPost, "AgentDesc", state.RegisterAgent)
+	util.AddHandler("", mux, "/health-check", http.MethodPut, "AgentIdentification", state.HealthCheck)
 	// FIXME: /downscale and /upscale should have the AgentID in the request body
 	util.AddHandler("", mux, "/downscale", http.MethodPut, "RawResources", state.TryDownscale)
 	util.AddHandler("", mux, "/upscale", http.MethodPut, "RawResources", state.NotifyUpscale)

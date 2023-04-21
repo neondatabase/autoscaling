@@ -224,8 +224,15 @@ func (s *State) RegisterAgent(ctx context.Context, info *api.AgentDesc) (*api.In
 // is up and running, and (b) the agent is still registered.
 //
 // Returns: body (if successful), status code, error (if unsuccessful)
-func (s *State) HealthCheck(ctx context.Context, info *api.AgentDesc) (*api.InformantHealthCheckResp, int, error) {
-	panic("todo")
+func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) (*api.InformantHealthCheckResp, int, error) {
+	agent, ok := s.agents.Get(info.AgentID)
+	if !ok {
+		return nil, 404, fmt.Errorf("No Agent with ID %s registered", agent.id)
+	} else if !agent.protoVersion.AllowsHealthCheck() {
+		return nil, 400, fmt.Errorf("health checks are not supported in protocol version %v", agent.protoVersion)
+	}
+
+	return &api.InformantHealthCheckResp{}, 200, nil
 }
 
 // TryDownscale tries to downscale the VM's current resource usage, returning whether the proposed
