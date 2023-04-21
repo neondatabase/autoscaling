@@ -280,7 +280,7 @@ func NewInformantServer(
 				}
 
 				if _, err := server.HealthCheck(c); err != nil {
-					runner.logger.Warningf("Informant health check failed: %w", err)
+					runner.logger.Warningf("Informant health check failed: %s", err)
 				}
 			}()
 			if done {
