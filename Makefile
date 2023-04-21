@@ -148,21 +148,36 @@ vm-informant: ## Build vm-informant image
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: build ## Build docker image with the controller.
+docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
+
+.PHONY: docker-build-neonvm-controller
+docker-build-controller: ## Build docker image for NeonVM controller
 	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
+
+.PHONY: docker-build-neonvm-runner
+docker-build-runner: ## Build docker image for NeonVM runner
 	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
+
+.PHONY: docker-build-vxlan-controller
+docker-build-vxlan-controller: ## Build docker image for NeonVM vxlan controller
 	docker build -t $(IMG_VXLAN) -f neonvm/tools/vxlan/Dockerfile .
-	docker buildx build \
-		--tag $(AUTOSCALER_SCHEDULER_IMG) \
-		--load \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
-		--file build/autoscale-scheduler/Dockerfile \
-		.
+
+.PHONY: docker-build-autoscaler-agent
+docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
 	docker buildx build \
 		--tag $(AUTOSCALER_AGENT_IMG) \
 		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscaler-agent/Dockerfile \
+		.
+
+.PHONY: docker-build-scheduler
+docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
+	docker buildx build \
+		--tag $(AUTOSCALER_SCHEDULER_IMG) \
+		--load \
+		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--file build/autoscale-scheduler/Dockerfile \
 		.
 
 .PHONY: docker-build-examples
