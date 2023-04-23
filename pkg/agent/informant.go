@@ -257,7 +257,7 @@ func NewInformantServer(
 
 	// Thread waiting for the context to be canceled so we can use it to shut down the server
 	shutdownWaiterName := fmt.Sprintf("InformantServer shutdown waiter (%s)", server.desc.AgentID)
-	runner.spawnBackgroundWorker(ctx, shutdownWaiterName, func(c context.Context) {
+	runner.spawnBackgroundWorker(ctx, shutdownWaiterName, func(context.Context) {
 		// Wait until parent context OR server's context is done.
 		<-backgroundCtx.Done()
 		server.exit(InformantServerExitStatus{Err: nil, RetryShouldFix: false})
