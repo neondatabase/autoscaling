@@ -253,8 +253,17 @@ const (
 	//
 	// * Adds /try-upscale endpoint to the autoscaler-agent.
 	//
-	// Currently the latest version.
+	// Last used in release version v0.6.0.
 	InformantProtoV1_1
+
+	// InformantProtoV1_2 represents v1.2 of the agent<->informant protocol.
+	//
+	// Changes from v1.1:
+	//
+	// * Adds /health-check endpoint to the vm-informant.
+	//
+	// Currently the latest version.
+	InformantProtoV1_2
 
 	// latestInformantProtoVersion represents the latest version of the agent<->informant protocol
 	//
@@ -274,6 +283,8 @@ func (v InformantProtoVersion) String() string {
 		return "v1.0"
 	case InformantProtoV1_1:
 		return "v1.1"
+	case InformantProtoV1_2:
+		return "v1.2"
 	default:
 		diff := v - latestInformantProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestInformantProtoVersion, diff)
@@ -290,6 +301,14 @@ func (v InformantProtoVersion) IsValid() bool {
 // This is true for version v1.1 and greater.
 func (v InformantProtoVersion) HasTryUpscale() bool {
 	return v >= InformantProtoV1_1
+}
+
+// AllowsHealthCheck returns whether this version of the protocol has the informant's /health-check
+// endpoint
+//
+// This is true for version v1.2 and greater.
+func (v InformantProtoVersion) AllowsHealthCheck() bool {
+	return v >= InformantProtoV1_2
 }
 
 // AgentMessage is used for (almost) every message sent from the autoscaler-agent to the VM
@@ -395,6 +414,10 @@ type InformantMetricsMethod struct {
 type MetricsMethodPrometheus struct {
 	Port uint16 `json:"port"`
 }
+
+// InformantHealthCheckResp is the result of a successful request to a VM informant's /health-check
+// endpoint.
+type InformantHealthCheckResp struct{}
 
 // UnregisterAgent is the result of a successful request to a VM informant's /unregister endpoint
 type UnregisterAgent struct {

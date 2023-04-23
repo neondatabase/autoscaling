@@ -2,11 +2,6 @@ name: e2e-test
 on:
   pull_request:
   push:
-    paths:
-      - "neonvm/**"
-      - "tests/**"
-      - "**.go"
-      - "Makefile"
     branches:
       - main
 
@@ -74,6 +69,7 @@ jobs:
       # Explicitly build all the images beforehand. Building images while the cluster is up can
       # sometimes affect the cluster. For more information:
       # https://github.com/neondatabase/autoscaling/issues/120#issuecomment-1493405844
+      - run: make build
       - run: make docker-build
       - run: make docker-build-examples
 

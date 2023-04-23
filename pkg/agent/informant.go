@@ -25,7 +25,7 @@ import (
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_0
-	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
+	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_2
 )
 
 type InformantServer struct {
@@ -261,6 +261,41 @@ func NewInformantServer(
 		// Wait until parent context OR server's context is done.
 		<-backgroundCtx.Done()
 		server.exit(InformantServerExitStatus{Err: nil, RetryShouldFix: false})
+	})
+
+	healthCheckerName := fmt.Sprintf("InformantServer health-checker (%s)", server.desc.AgentID)
+	runner.spawnBackgroundWorker(backgroundCtx, healthCheckerName, func(c context.Context) {
+		// FIXME: make this duration configurable
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-c.Done():
+				return
+			case <-ticker.C:
+			}
+
+			var done bool
+			func() {
+				server.requestLock.Lock()
+				defer server.requestLock.Unlock()
+
+				// If we've already registered with the informant, and it doesn't support health
+				// checks, exit.
+				if server.protoVersion != nil && !server.protoVersion.AllowsHealthCheck() {
+					runner.logger.Infof("Aborting future informant health checks because it does not support them")
+					done = true
+					return
+				}
+
+				if _, err := server.HealthCheck(c); err != nil {
+					runner.logger.Warningf("Informant health check failed: %s", err)
+				}
+			}()
+			if done {
+				return
+			}
+		}
 	})
 
 	return server, recvFinished, nil
@@ -881,6 +916,47 @@ func (s *InformantServer) handleTryUpscale(
 	default:
 		panic(fmt.Errorf("unexpected server mode: %q", s.mode))
 	}
+}
+
+// HealthCheck makes a request to the informant's /health-check endpoint, using the server's ID.
+//
+// This method MUST be called while holding i.server.requestLock AND NOT i.server.runner.lock.
+func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealthCheckResp, error) {
+	err := func() error {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		return s.Valid()
+	}()
+	if err != nil {
+		return nil, err
+	}
+
+	timeout := time.Second * time.Duration(s.runner.global.config.Informant.RequestTimeoutSeconds)
+	id := api.AgentIdentification{AgentID: s.desc.AgentID}
+
+	s.runner.logger.Infof("Sending health-check %+v", id)
+	resp, statusCode, err := doInformantRequest[api.AgentIdentification, api.InformantHealthCheckResp](
+		ctx, s, timeout, http.MethodPut, "/health-check", &id,
+	)
+	if err != nil {
+		func() {
+			s.runner.lock.Lock()
+			defer s.runner.lock.Unlock()
+
+			s.setLastInformantError(fmt.Errorf("Health-check request failed: %w", err), true)
+
+			if 400 <= statusCode && statusCode <= 599 {
+				s.exit(InformantServerExitStatus{
+					Err:            err,
+					RetryShouldFix: statusCode == 404,
+				})
+			}
+		}()
+		return nil, err
+	}
+
+	s.runner.logger.Infof("Received health-check result %+v", *resp)
+	return resp, nil
 }
 
 // Downscale makes a request to the informant's /downscale endpoit with the api.Resources
