@@ -308,14 +308,14 @@ func IsNormalInformantError(err error) bool {
 		errors.Is(err, InformantServerNotCurrentError)
 }
 
-// Valid checks if the InformantServer is good to use for communication, returning an error if not
+// valid checks if the InformantServer is good to use for communication, returning an error if not
 //
 // This method can return errors for a number of unavoidably-racy protocol states - errors from this
 // method should be handled as unusual, but not unexpected. Any error returned will be one of
 // InformantServer{AlreadyExited,Suspended,Confirmed}Error.
 //
 // This method MUST be called while holding s.runner.lock.
-func (s *InformantServer) Valid() error {
+func (s *InformantServer) valid() error {
 	if s.exitStatus != nil {
 		return InformantServerAlreadyExitedError
 	}
@@ -916,7 +916,7 @@ func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealth
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
-		return s.Valid()
+		return s.valid()
 	}()
 	if err != nil {
 		return nil, err
@@ -960,7 +960,7 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
-		return s.Valid()
+		return s.valid()
 	}()
 	if err != nil {
 		return nil, err
@@ -1002,7 +1002,7 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
-		return s.Valid()
+		return s.valid()
 	}()
 	if err != nil {
 		return err

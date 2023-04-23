@@ -1539,7 +1539,7 @@ func (r *Runner) validateInformant() error {
 	if r.server == nil {
 		return errors.New("no informant server set")
 	}
-	return r.server.Valid()
+	return r.server.valid()
 }
 
 // doInformantDownscale is a convenience wrapper around (*InformantServer).Downscale that locks r,
