@@ -283,6 +283,8 @@ func (v InformantProtoVersion) String() string {
 		return "v1.0"
 	case InformantProtoV1_1:
 		return "v1.1"
+	case InformantProtoV1_2:
+		return "v1.2"
 	default:
 		diff := v - latestInformantProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestInformantProtoVersion, diff)
