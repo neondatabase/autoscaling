@@ -916,7 +916,7 @@ func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealth
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
-		return s.Valid()
+		return s.valid()
 	}()
 	if err != nil {
 		return nil, err
