@@ -227,7 +227,7 @@ func (s *State) RegisterAgent(ctx context.Context, info *api.AgentDesc) (*api.In
 func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) (*api.InformantHealthCheckResp, int, error) {
 	agent, ok := s.agents.Get(info.AgentID)
 	if !ok {
-		return nil, 404, fmt.Errorf("No Agent with ID %s registered", agent.id)
+		return nil, 404, fmt.Errorf("No Agent with ID %s registered", info.AgentID)
 	} else if !agent.protoVersion.AllowsHealthCheck() {
 		return nil, 400, fmt.Errorf("health checks are not supported in protocol version %v", agent.protoVersion)
 	}
