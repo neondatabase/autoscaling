@@ -718,7 +718,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 		delete(e.state.otherPods, pName)
 		delete(otherPs.node.otherPods, pName)
 
-		fmtString := "[autoscale-enforcer] Unreserved non-VM pod from node %s:\n" +
+		fmtString := "[autoscale-enforcer] Unreserved non-VM pod %v from node %s:\n" +
 			"\tvCPU verdict: %s\n" +
 			"\t mem verdict: %s"
 		klog.Infof(fmtString, otherPs.name, otherPs.node.name, vCPUVerdict, memVerdict)
