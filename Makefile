@@ -185,7 +185,7 @@ docker-build-examples: vm-informant bin/vm-builder ## Build docker images for te
 	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG)
 
 .PHONY: docker-build-pg14-disk-test
-docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
+docker-build-pg14-disk-test: vm-informant bin/vm-builder-generic ## Build a VM image for testing
 	if [ -a 'vm-examples/pg14-disk-test/ssh_id_rsa' ]; then \
 	    echo "Skipping keygen because 'ssh_id_rsa' already exists"; \
 	else \
