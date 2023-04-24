@@ -114,7 +114,8 @@ type InformantServerState struct {
 }
 
 type InformantServerExitStatus struct {
-	// Err is the non-nil error that caused the server to exit
+	// Err is the error, if any, that caused the server to exit. This is only non-nil when context
+	// used to start the server becomes canceled (i.e. the Runner is exiting).
 	Err error
 	// RetryShouldFix is true if simply retrying should resolve err. This is true when e.g. the
 	// informant responds with a 404 to a downscale or upscale request - it might've restarted, so
@@ -252,6 +253,14 @@ func NewInformantServer(
 				RetryShouldFix: false,
 			}
 		}
+	})
+
+	// Thread waiting for the context to be canceled so we can use it to shut down the server
+	shutdownWaiterName := fmt.Sprintf("InformantServer shutdown waiter (%s)", server.desc.AgentID)
+	runner.spawnBackgroundWorker(ctx, shutdownWaiterName, func(context.Context) {
+		// Wait until parent context OR server's context is done.
+		<-backgroundCtx.Done()
+		server.exit(InformantServerExitStatus{Err: nil, RetryShouldFix: false})
 	})
 
 	healthCheckerName := fmt.Sprintf("InformantServer health-checker (%s)", server.desc.AgentID)
