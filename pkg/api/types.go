@@ -127,7 +127,7 @@ func (r AgentRequest) ProtocolRange() VersionRange[PluginProtoVersion] {
 //
 // In all cases, each resource type is considered separately from the others.
 type Resources struct {
-	VCPU resource.Quantity `json:"vCPUs"`
+	VCPU MilliCPU `json:"vCPUs"`
 	// Mem gives the number of slots of memory (typically 1G ea.) requested. The slot size is set by
 	// the value of the VM's VirtualMachineSpec.Guest.MemorySlotSize.
 	Mem uint16 `json:"mem"`
@@ -136,7 +136,7 @@ type Resources struct {
 // ValidateNonZero checks that neither of the Resources fields are equal to zero, returning an error
 // if either is.
 func (r Resources) ValidateNonZero() error {
-	if r.VCPU.Value() == 0 {
+	if r.VCPU == 0 {
 		return errors.New("vCPUs must be non-zero")
 	} else if r.Mem == 0 {
 		return errors.New("mem must be non-zero")
@@ -145,12 +145,12 @@ func (r Resources) ValidateNonZero() error {
 	return nil
 }
 
-func (r Resources) SanityCheck() error {
-	if r.VCPU.Cmp(*resource.NewMilliQuantity(250, resource.BinarySI)) == -1 {
-		return errors.New("VCPU is too small")
+func (r Resources) CheckValuesAreReasonablySized() error {
+	if r.VCPU < 50 {
+		return errors.New("VCPU is smaller than 0.05")
 	}
-	if r.VCPU.Cmp(*resource.NewMilliQuantity(128*1000, resource.BinarySI)) == 1 {
-		return errors.New("VCPU is too big")
+	if r.VCPU > 512*1000 {
+		return errors.New("VCPU is bigger than 512")
 	}
 
 	return nil
@@ -158,7 +158,7 @@ func (r Resources) SanityCheck() error {
 
 // HasFieldGreaterThan returns true if and only if there is a field F where r.F > cmp.F
 func (r Resources) HasFieldGreaterThan(cmp Resources) bool {
-	return r.VCPU.Cmp(cmp.VCPU) == 1 || r.Mem > cmp.Mem
+	return r.VCPU > cmp.VCPU || r.Mem > cmp.Mem
 }
 
 // HasFieldGreaterThan returns true if and only if there is a field F where r.F < cmp.F
@@ -169,7 +169,7 @@ func (r Resources) HasFieldLessThan(cmp Resources) bool {
 // Min returns a new Resources value with each field F as the minimum of r.F and cmp.F
 func (r Resources) Min(cmp Resources) Resources {
 	return Resources{
-		VCPU: util.MinQuantity(r.VCPU, cmp.VCPU),
+		VCPU: util.Min(r.VCPU, cmp.VCPU),
 		Mem:  util.Min(r.Mem, cmp.Mem),
 	}
 }
@@ -177,16 +177,15 @@ func (r Resources) Min(cmp Resources) Resources {
 // Max returns a new Resources value with each field F as the maximum of r.F and cmp.F
 func (r Resources) Max(cmp Resources) Resources {
 	return Resources{
-		VCPU: util.MaxQuantity(r.VCPU, cmp.VCPU),
+		VCPU: util.Max(r.VCPU, cmp.VCPU),
 		Mem:  util.Max(r.Mem, cmp.Mem),
 	}
 }
 
 // Mul returns the result of multiplying each resource by factor
 func (r Resources) Mul(factor uint16) Resources {
-	milli := uint16(r.VCPU.MilliValue())
 	return Resources{
-		VCPU: *resource.NewMilliQuantity(int64(factor*milli), resource.BinarySI),
+		VCPU: MilliCPU(uint32(factor) * uint32(r.VCPU)),
 		Mem:  factor * r.Mem,
 	}
 }
@@ -194,16 +193,16 @@ func (r Resources) Mul(factor uint16) Resources {
 // Increase returns a MoreResources with each field F true when r.F > old.F.
 func (r Resources) IncreaseFrom(old Resources) MoreResources {
 	return MoreResources{
-		Cpu:    r.VCPU.Cmp(old.VCPU) == 1,
+		Cpu:    r.VCPU > old.VCPU,
 		Memory: r.Mem > old.Mem,
 	}
 }
 
 // ConvertToRaw produces the RawResources equivalent to these Resources with the given slot size
 func (r Resources) ConvertToRaw(memSlotSize *resource.Quantity) RawResources {
-	cpuCopy := r.VCPU.DeepCopy()
+	cpuQuantity := r.VCPU.ToResourceQuantity()
 	return RawResources{
-		Cpu:    &cpuCopy,
+		Cpu:    &cpuQuantity,
 		Memory: resource.NewQuantity(int64(r.Mem)*memSlotSize.Value(), resource.BinarySI),
 	}
 }
@@ -481,4 +480,14 @@ type ResumeAgent struct {
 
 type VCPUChange struct {
 	VCPUs resource.Quantity
+}
+
+type MilliCPU uint32
+
+func MilliCPUFromResourceQuantity(r resource.Quantity) MilliCPU {
+	return MilliCPU(r.MilliValue())
+}
+
+func (m *MilliCPU) ToResourceQuantity() resource.Quantity {
+	return *resource.NewMilliQuantity(int64(*m), resource.BinarySI)
 }

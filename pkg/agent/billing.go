@@ -12,8 +12,8 @@ import (
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
+	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/billing"
-	"github.com/neondatabase/autoscaling/pkg/plugin"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -53,7 +53,7 @@ func (m *metricsTimeSlice) Duration() time.Duration { return m.endTime.Sub(m.sta
 
 type vmMetricsInstant struct {
 	// cpu stores the cpu allocation at a particular instant.
-	cpu uint16
+	cpu uint32
 }
 
 // vmMetricsSeconds is like vmMetrics, but the values cover the allocation over time
@@ -144,7 +144,7 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode)
 			endpointID: endpointID,
 		}
 		presentMetrics := vmMetricsInstant{
-			cpu: uint16(plugin.FromResourceQuantity(*vm.Spec.Guest.CPUs.Use)),
+			cpu: uint32(api.MilliCPUFromResourceQuantity(*vm.Spec.Guest.CPUs.Use)),
 		}
 		if oldMetrics, ok := old[key]; ok {
 			// The VM was present from s.lastTime to now. Add a time slice to its metrics history.

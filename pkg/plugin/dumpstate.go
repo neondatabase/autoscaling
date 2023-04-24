@@ -103,8 +103,8 @@ type pluginStateDump struct {
 	VMPods    []podNameAndPointer `json:"vmPods"`
 	OtherPods []podNameAndPointer `json:"otherPods"`
 
-	MaxTotalReservableCPU      milliCPU `json:"maxTotalReservableCPU"`
-	MaxTotalReservableMemSlots uint16   `json:"maxTotalReservableMemSlots"`
+	MaxTotalReservableCPU      api.MilliCPU `json:"maxTotalReservableCPU"`
+	MaxTotalReservableMemSlots uint16       `json:"maxTotalReservableMemSlots"`
 
 	Conf Config `json:"config"`
 }
@@ -119,7 +119,7 @@ type pointerString string
 type nodeStateDump struct {
 	Obj       pointerString                                   `json:"obj"`
 	Name      string                                          `json:"name"`
-	VCPU      nodeResourceState[milliCPU]                     `json:"vCPU"`
+	VCPU      nodeResourceState[api.MilliCPU]                 `json:"vCPU"`
 	MemSlots  nodeResourceState[uint16]                       `json:"memSlots"`
 	Pods      []keyed[util.NamespacedName, podStateDump]      `json:"pods"`
 	OtherPods []keyed[util.NamespacedName, otherPodStateDump] `json:"otherPods"`
@@ -127,17 +127,17 @@ type nodeStateDump struct {
 }
 
 type podStateDump struct {
-	Obj                      pointerString              `json:"obj"`
-	Name                     util.NamespacedName        `json:"name"`
-	VMName                   string                     `json:"vmName"`
-	Node                     pointerString              `json:"node"`
-	TestingOnlyAlwaysMigrate bool                       `json:"testingOnlyAlwaysMigrate"`
-	VCPU                     podResourceState[milliCPU] `json:"vCPU"`
-	MemSlots                 podResourceState[uint16]   `json:"memSlots"`
-	MostRecentComputeUnit    *api.Resources             `json:"mostRecentComputeUnit"`
-	Metrics                  *api.Metrics               `json:"metrics"`
-	MqIndex                  int                        `json:"mqIndex"`
-	MigrationState           *podMigrationStateDump     `json:"migrationState"`
+	Obj                      pointerString                  `json:"obj"`
+	Name                     util.NamespacedName            `json:"name"`
+	VMName                   string                         `json:"vmName"`
+	Node                     pointerString                  `json:"node"`
+	TestingOnlyAlwaysMigrate bool                           `json:"testingOnlyAlwaysMigrate"`
+	VCPU                     podResourceState[api.MilliCPU] `json:"vCPU"`
+	MemSlots                 podResourceState[uint16]       `json:"memSlots"`
+	MostRecentComputeUnit    *api.Resources                 `json:"mostRecentComputeUnit"`
+	Metrics                  *api.Metrics                   `json:"metrics"`
+	MqIndex                  int                            `json:"mqIndex"`
+	MigrationState           *podMigrationStateDump         `json:"migrationState"`
 }
 
 type podMigrationStateDump struct{}

@@ -15,9 +15,9 @@ func TestFormatting(t *testing.T) {
 		Name:      "foo",
 		Namespace: "bar",
 		Cpu: api.VmCpuInfo{
-			Min: *resource.NewQuantity(1, resource.BinarySI),
-			Max: *resource.NewQuantity(5, resource.BinarySI),
-			Use: *resource.NewQuantity(3, resource.BinarySI),
+			Min: 1,
+			Max: 5,
+			Use: 3,
 		},
 		Mem: api.VmMemInfo{
 			Min:      2,

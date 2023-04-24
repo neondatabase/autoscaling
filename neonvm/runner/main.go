@@ -5,10 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"io/ioutil"
 	"net/http"
-	"path"
 
 	"bytes"
 	"flag"
@@ -28,15 +26,19 @@ import (
 
 	"github.com/alessio/shellescape"
 	"github.com/cilium/cilium/pkg/mac"
+	"github.com/containerd/cgroups/v3"
+	"github.com/containerd/cgroups/v3/cgroup1"
+	"github.com/containerd/cgroups/v3/cgroup2"
 	"github.com/digitalocean/go-qemu/qmp"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/libnetwork/types"
 	"github.com/kdomanski/iso9660"
+	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	neonApi "github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 const (
@@ -62,9 +64,11 @@ const (
 	// alternatePath is a path different from defaultPath, that may be used to resolve DNS. See Path().
 	resolveAlternatePath = "/run/systemd/resolve/resolv.conf"
 
-	cgroupPeriod      = 100000
-	cgroupSystemdBase = "/sys/fs/cgroup/cpu/"
-	cgroupPlainBase   = "/sys/fs/cgroup/"
+	// cgroupPeriod is the period for evaluating cgroup quota
+	// in microseconds. Min 1000 microseconds, max 1 second
+	// the actual quota is <= this period
+	cgroupPeriod     = uint64(100000)
+	cgroupMountPoint = "/sys/fs/cgroup"
 )
 
 var (
@@ -544,43 +548,28 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	isSystemd, err := isSystemdCgroup()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var cgroupPath string
-	cgroupName := fmt.Sprintf("%s-vm-runner", vmStatus.PodName)
-	if isSystemd {
-		cgroupPath = path.Join(cgroupSystemdBase, cgroupName)
-	} else {
-		cgroupPath = path.Join(cgroupPlainBase, cgroupName)
-	}
-
-	if err := createCgroup(cgroupPath); err != nil {
-		log.Fatal(err)
-	}
+	// leading slash is important
+	cgroupPath := fmt.Sprintf("/%s-vm-runner", vmStatus.PodName)
 
 	if err := setCgroupLimit(qemuCPUs.minFraction, cgroupPath); err != nil {
 		log.Fatal(err)
 	}
+	defer cleanupCgroup(cgroupPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	wg := sync.WaitGroup{}
 
-	go terminateQemuOnSigterm(vmSpec.QMP)
-	go listenForCPUChanges(vmSpec.RunnerPort, cgroupPath)
+	wg.Add(1)
+	go terminateQemuOnSigterm(ctx, vmSpec.QMP, wg)
+	wg.Add(1)
+	go listenForCPUChanges(ctx, vmSpec.RunnerPort, cgroupPath, wg)
 
 	qemuString := shellescape.QuoteCommand(append([]string{QEMU_BIN}, qemuCmd...))
-	cgropedQemu := fmt.Sprintf("echo $$ >> %s && %s", path.Join(cgroupPath, "cgroup.procs"), qemuString)
-	// start a new shell, cgroup it and then start qemu. Qemu will get cgroup from the parent sh while runner is not cgrouped
-	if err := execFg("sh", "-c", cgropedQemu); err != nil {
+	if err := execFg("cgexec", "-g", fmt.Sprintf("cpu:%s", cgroupPath), qemuString); err != nil {
 		log.Println(err)
 	}
 
-	log.Println("cleaning up cgroup...")
-	err = os.Remove(cgroupPath)
-	if err != nil {
-		log.Println(err)
-	}
-	log.Println("exiting")
+	cancel()
+	wg.Wait()
 }
 
 func handleCPUChange(w http.ResponseWriter, r *http.Request) {
@@ -596,7 +585,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsed := neonApi.VCPUChange{}
+	parsed := api.VCPUChange{}
 	err = json.Unmarshal(body, &parsed)
 	if err != nil {
 		log.Printf("could not parse body: %s\n", err)
@@ -627,7 +616,8 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 
 type cgroupContextKey struct{}
 
-func listenForCPUChanges(port int32, cgroupPath string) {
+func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg sync.WaitGroup) {
+	defer wg.Done()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cpu_change", handleCPUChange)
 	baseCtx, cancel := context.WithCancel(context.Background())
@@ -643,68 +633,67 @@ func listenForCPUChanges(port int32, cgroupPath string) {
 			return baseCtx
 		},
 	}
-	err := server.ListenAndServe()
-	if errors.Is(err, http.ErrServerClosed) {
-		log.Println("server closed")
-	} else if err != nil {
-		log.Fatalf("error starting server: %s\n", err)
+	errChan := make(chan error)
+	go func() {
+		errChan <- server.ListenAndServe()
+	}()
+	select {
+	case err := <-errChan:
+		if errors.Is(err, http.ErrServerClosed) {
+			log.Println("cpu_change server closed")
+		} else if err != nil {
+			log.Fatalf("error starting server: %s\n", err)
+		}
+	case <-ctx.Done():
+		err := server.Shutdown(baseCtx)
+		log.Println(err)
 	}
-}
-
-// isSystemCgroup checks if we have systemd-managed-like cgroup layout
-func isSystemdCgroup() (bool, error) {
-	_, err := os.Stat("/sys/fs/cgroup/systemd")
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-
-	return true, nil
 }
 
 func setCgroupLimit(fraction float64, cgroupPath string) error {
-	isV2, err := isCgroupv2(cgroupPath)
-	if err != nil {
-		return err
-	}
+	isV2 := cgroups.Mode() == cgroups.Unified
+	period := cgroupPeriod
+	quota := int64(fraction * float64(cgroupPeriod))
 	if isV2 {
-		data := fmt.Sprintf("%d %d", int(fraction*float64(cgroupPeriod)), cgroupPeriod)
-		err := os.WriteFile(path.Join(cgroupPath, "cpu.max"), []byte(data), 0644)
+		resources := cgroup2.Resources{
+			CPU: &cgroup2.CPU{
+				Max: cgroup2.NewCPUMax(&quota, &period),
+			},
+		}
+		_, err := cgroup2.NewManager("/sys/fs/cgroup", cgroupPath, &resources)
 		if err != nil {
 			return err
 		}
-		return nil
+	} else {
+		_, err := cgroup1.New(cgroup1.StaticPath(cgroupPath), &specs.LinuxResources{
+			CPU: &specs.LinuxCPU{
+				Quota:  &quota,
+				Period: &period,
+			},
+		})
+		if err != nil {
+			return err
+		}
 	}
 
-	err = os.WriteFile(path.Join(cgroupPath, "cpu.cfs_period_us"), []byte(fmt.Sprintf("%d", cgroupPeriod)), 0644)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path.Join(cgroupPath, "cpu.cfs_quota_us"), []byte(fmt.Sprintf("%d", int(fraction*float64(cgroupPeriod)))), 0644)
-}
-
-func createCgroup(cgroupPath string) error {
-	err := os.Mkdir(cgroupPath, os.ModeDir)
-	if os.IsExist(err) {
-		// unlikely but possible
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("failed to create cgroup for qemu %w", err)
-	}
 	return nil
 }
 
-// determines if cgroup v2 API is supported
-func isCgroupv2(cgroupPath string) (bool, error) {
-	_, err := os.Stat(path.Join(cgroupPath, "cpu.max"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	} else if err != nil {
-		return false, fmt.Errorf("failed to check cgroup v2: %w", err)
+func cleanupCgroup(cgroupPath string) error {
+	isV2 := cgroups.Mode() == cgroups.Unified
+	if isV2 {
+		control, err := cgroup2.Load(cgroupPath)
+		if err != nil {
+			return err
+		}
+		return control.Delete()
+	} else {
+		control, err := cgroup1.Load(cgroup1.StaticPath(cgroupPath))
+		if err != nil {
+			return err
+		}
+		return control.Delete()
 	}
-
-	return true, nil
 }
 
 type QemuCPUs struct {
@@ -724,7 +713,11 @@ func getCPUFraction(r resource.Quantity) float64 {
 
 func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	min := int(cpus.Min.Value())
-	fraction := getCPUFraction(*cpus.Min)
+	use := *cpus.Min
+	if cpus.Use != nil {
+		use = *cpus.Use
+	}
+	fraction := getCPUFraction(use)
 
 	var max *int
 	if cpus.Max != nil {
@@ -738,11 +731,15 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	}
 }
 
-func terminateQemuOnSigterm(qmpPort int32) {
+func terminateQemuOnSigterm(ctx context.Context, qmpPort int32, wg sync.WaitGroup) {
+	defer wg.Done()
 	log.Println("watching OS signals")
 	c := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
+	select {
+	case <-c:
+	case <-ctx.Done():
+	}
 	log.Println("got signal, sending powerdown command to QEMU")
 
 	for {

@@ -166,16 +166,15 @@ func (e *AutoscaleEnforcer) handleResources(
 	req api.Resources,
 	startingMigration bool,
 ) (api.Resources, int, error) {
-	milliVCPUs := FromResourceQuantity(req.VCPU)
 	// Check that we aren't being asked to do something during migration:
 	if pod.currentlyMigrating() {
 		// The agent shouldn't have asked for a change after already receiving notice that it's
 		// migrating.
-		if milliVCPUs != pod.vCPU.Reserved || req.Mem != pod.memSlots.Reserved {
+		if req.VCPU != pod.vCPU.Reserved || req.Mem != pod.memSlots.Reserved {
 			err := errors.New("cannot change resources: agent has already been informed that pod is migrating")
 			return api.Resources{}, 400, err
 		}
-		return api.Resources{VCPU: pod.vCPU.Reserved.toResourceQuantity(), Mem: pod.memSlots.Reserved}, 200, nil
+		return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
 	}
 
 	// Check that the resources correspond to an integer number of compute units, based on what the
@@ -183,9 +182,9 @@ func (e *AutoscaleEnforcer) handleResources(
 	// the minimum or maximum of what's allowed for this VM.
 	if pod.mostRecentComputeUnit != nil {
 		cu := *pod.mostRecentComputeUnit
-		dividesCleanly := FromResourceQuantity(req.VCPU)%FromResourceQuantity(cu.VCPU) == 0 && req.Mem%cu.Mem == 0 && uint32(FromResourceQuantity(req.VCPU)/FromResourceQuantity(cu.VCPU)) == uint32(req.Mem/cu.Mem)
-		atMin := milliVCPUs == pod.vCPU.Min || req.Mem == pod.memSlots.Min
-		atMax := milliVCPUs == pod.vCPU.Max || req.Mem == pod.memSlots.Max
+		dividesCleanly := req.VCPU%cu.VCPU == 0 && req.Mem%cu.Mem == 0 && uint32(req.VCPU/cu.VCPU) == uint32(req.Mem/cu.Mem)
+		atMin := req.VCPU == pod.vCPU.Min || req.Mem == pod.memSlots.Min
+		atMax := req.VCPU == pod.vCPU.Max || req.Mem == pod.memSlots.Max
 		if !dividesCleanly && !(atMin || atMax) {
 			contextString := "If the VM's bounds did not just change, then this indicates a bug in the autoscaler-agent."
 			klog.Warningf(
@@ -199,7 +198,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	memTransition := collectResourceTransition(&node.memSlots, &pod.memSlots)
 
 	vCPUVerdict := vCPUTransition.handleRequested(
-		FromResourceQuantity(req.VCPU), startingMigration)
+		req.VCPU, startingMigration)
 	memVerdict := memTransition.handleRequested(req.Mem, startingMigration)
 
 	fmtString := "[autoscale-enforcer] Handled resources from pod %v AgentRequest.\n" +
@@ -207,7 +206,7 @@ func (e *AutoscaleEnforcer) handleResources(
 		"\t mem verdict: %s"
 	klog.Infof(fmtString, pod.name, vCPUVerdict, memVerdict)
 
-	return api.Resources{VCPU: pod.vCPU.Reserved.toResourceQuantity(), Mem: pod.memSlots.Reserved}, 200, nil
+	return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
 }
 
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(

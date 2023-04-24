@@ -63,13 +63,13 @@ func (r *VirtualMachine) ValidateCreate() error {
 		}
 		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Min) == -1 {
 			return fmt.Errorf(".spec.guest.cpus.use (%v) should be greater than or equal to the .spec.guest.cpus.min (%v)",
-				*r.Spec.Guest.CPUs.Use,
-				*r.Spec.Guest.CPUs.Min)
+				r.Spec.Guest.CPUs.Use,
+				r.Spec.Guest.CPUs.Min)
 		}
 		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Max) == 1 {
 			return fmt.Errorf(".spec.guest.cpus.use (%v) should be less than or equal to the .spec.guest.cpus.max (%v)",
-				*r.Spec.Guest.CPUs.Use,
-				*r.Spec.Guest.CPUs.Max)
+				r.Spec.Guest.CPUs.Use,
+				r.Spec.Guest.CPUs.Max)
 		}
 	}
 
@@ -160,13 +160,13 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	if r.Spec.Guest.CPUs.Use != nil {
 		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Min) == -1 {
 			return fmt.Errorf(".cpus.use (%v) should be greater than or equal to the .cpus.min (%v)",
-				*r.Spec.Guest.CPUs.Use,
-				*r.Spec.Guest.CPUs.Min)
+				r.Spec.Guest.CPUs.Use,
+				r.Spec.Guest.CPUs.Min)
 		}
 		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Max) == 1 {
 			return fmt.Errorf(".cpus.use (%v) should be less than or equal to the .cpus.max (%v)",
-				*r.Spec.Guest.CPUs.Use,
-				*r.Spec.Guest.CPUs.Max)
+				r.Spec.Guest.CPUs.Use,
+				r.Spec.Guest.CPUs.Max)
 		}
 	}
 

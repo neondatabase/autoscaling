@@ -427,7 +427,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					}
 				}
 				// we should notify even if had'n plug/unplug anything because we may scale by cgroup
-				if err := notifyRunner(virtualmachine, *virtualmachine.Spec.Guest.CPUs.Use); err != nil {
+				if err := notifyRunner(ctx, virtualmachine, *virtualmachine.Spec.Guest.CPUs.Use); err != nil {
 					return err
 				}
 			}
@@ -446,7 +446,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
 					fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
 						virtualmachine.Name,
-						virtualmachine.Status.CPUs))
+						&virtualmachine.Status.CPUs))
 			}
 
 			// do hotplug/unplug Memory if .spec.guest.memorySlots.use defined
@@ -606,7 +606,7 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 	return a
 }
 
-func notifyRunner(vm *vmv1.VirtualMachine, r resource.Quantity) error {
+func notifyRunner(ctx context.Context, vm *vmv1.VirtualMachine, r resource.Quantity) error {
 	client := http.Client{Timeout: 5 * time.Second}
 
 	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
@@ -618,13 +618,19 @@ func notifyRunner(vm *vmv1.VirtualMachine, r resource.Quantity) error {
 		return err
 	}
 
-	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return fmt.Errorf("unexpected status %s", resp.Status)
 	}
 	return nil
 }

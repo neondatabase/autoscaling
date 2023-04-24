@@ -304,7 +304,7 @@ func (e *AutoscaleEnforcer) Filter(
 	// preemption.
 	//
 	// So we have to actually count up the resource usage of all pods in nodeInfo:
-	var totalNodeVCPU milliCPU
+	var totalNodeVCPU api.MilliCPU
 	var totalNodeMem uint16
 	var otherResources nodeOtherResourceState
 
@@ -347,7 +347,7 @@ func (e *AutoscaleEnforcer) Filter(
 
 	if vmInfo != nil {
 		var cpuCompare string
-		if totalNodeVCPU+FromResourceQuantity(vmInfo.Cpu.Use) > nodeTotalReservableCPU {
+		if totalNodeVCPU+vmInfo.Cpu.Use > nodeTotalReservableCPU {
 			cpuCompare = ">"
 			allowing = false
 		} else {
@@ -452,7 +452,7 @@ func (e *AutoscaleEnforcer) Score(
 
 	// Special case: return minimum score if we don't have room
 	noRoom := vmInfo != nil &&
-		(FromResourceQuantity(vmInfo.Cpu.Use) > node.remainingReservableCPU() ||
+		(vmInfo.Cpu.Use > node.remainingReservableCPU() ||
 			vmInfo.Mem.Use > node.remainingReservableMemSlots())
 	if noRoom {
 		return framework.MinNodeScore, nil
@@ -604,8 +604,8 @@ func (e *AutoscaleEnforcer) Reserve(
 	// checks will be handled in the calls to Filter, but it's possible for another VM to scale up
 	// in between the calls to Filter and Reserve, removing the resource availability that we
 	// thought we had.
-	if FromResourceQuantity(vmInfo.Cpu.Use) <= node.remainingReservableCPU() && vmInfo.Mem.Use <= node.remainingReservableMemSlots() {
-		newNodeReservedCPU := node.vCPU.Reserved + FromResourceQuantity(vmInfo.Cpu.Use)
+	if vmInfo.Cpu.Use <= node.remainingReservableCPU() && vmInfo.Mem.Use <= node.remainingReservableMemSlots() {
+		newNodeReservedCPU := node.vCPU.Reserved + vmInfo.Cpu.Use
 		newNodeReservedMemSlots := node.memSlots.Reserved + vmInfo.Mem.Use
 
 		fmtString := "[autoscale-enforcer] Allowing VM pod %v (%d vCPU, %d mem slots) in node %s: " +
@@ -613,7 +613,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		klog.Infof(
 			fmtString,
 			// allowing pod %v (%d vCpu, %d mem slots) in node %s
-			pName, vmInfo.Cpu.Use.MilliValue(), vmInfo.Mem.Use, nodeName,
+			pName, vmInfo.Cpu.Use, vmInfo.Mem.Use, nodeName,
 			// node vcpu reserved %d -> %d, node mem slots reserved %d -> %d
 			node.vCPU.Reserved, newNodeReservedCPU, node.memSlots.Reserved, newNodeReservedMemSlots,
 		)
@@ -624,12 +624,12 @@ func (e *AutoscaleEnforcer) Reserve(
 			name:   pName,
 			vmName: vmInfo.Name,
 			node:   node,
-			vCPU: podResourceState[milliCPU]{
-				Reserved:         FromResourceQuantity(vmInfo.Cpu.Use),
+			vCPU: podResourceState[api.MilliCPU]{
+				Reserved:         vmInfo.Cpu.Use,
 				Buffer:           0,
 				CapacityPressure: 0,
-				Min:              FromResourceQuantity(vmInfo.Cpu.Min),
-				Max:              FromResourceQuantity(vmInfo.Cpu.Max),
+				Min:              vmInfo.Cpu.Min,
+				Max:              vmInfo.Cpu.Max,
 			},
 			memSlots: podResourceState[uint16]{
 				Reserved:         vmInfo.Mem.Use,
@@ -654,7 +654,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		err := fmt.Errorf(
 			fmtString,
 			// need %d vCPU, %d mem slots
-			vmInfo.Cpu.Use.MilliValue(), vmInfo.Mem.Use,
+			vmInfo.Cpu.Use, vmInfo.Mem.Use,
 			// have %d vCPU, %d mem slots
 			node.remainingReservableCPU(), node.remainingReservableMemSlots(),
 		)
