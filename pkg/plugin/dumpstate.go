@@ -72,7 +72,7 @@ func (p *AutoscaleEnforcer) startDumpStateServer(shutdownCtx context.Context) er
 		// internal state after shutdown has started.
 		server := &http.Server{Handler: mux}
 		if err := server.Serve(listener); err != nil {
-			klog.Errorf("dump-state server exited: %w", err)
+			klog.Errorf("dump-state server exited: %s", err)
 		}
 	}()
 
@@ -129,7 +129,7 @@ type nodeStateDump struct {
 type podStateDump struct {
 	Obj                      pointerString                  `json:"obj"`
 	Name                     util.NamespacedName            `json:"name"`
-	VMName                   string                         `json:"vmName"`
+	VMName                   util.NamespacedName            `json:"vmName"`
 	Node                     pointerString                  `json:"node"`
 	TestingOnlyAlwaysMigrate bool                           `json:"testingOnlyAlwaysMigrate"`
 	VCPU                     podResourceState[api.MilliCPU] `json:"vCPU"`

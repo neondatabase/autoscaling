@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tychoish/fun/pubsub"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	scheme "k8s.io/client-go/kubernetes/scheme"
@@ -32,6 +34,7 @@ type AutoscaleEnforcer struct {
 	handle   framework.Handle
 	vmClient *vmclient.Clientset
 	state    pluginState
+	metrics  PromMetrics
 
 	// vmStore provides access the current-ish state of VMs in the cluster. If something's missing,
 	// it can be updated with Resync().
@@ -82,11 +85,12 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	p := AutoscaleEnforcer{
 		handle:   h,
 		vmClient: vmClient,
-		// remaining fields are set by p.readClusterState
+		// remaining fields are set by p.readClusterState and p.startPrometheusServer
 		state: pluginState{ //nolint:exhaustruct // see above.
 			lock: util.NewChanMutex(),
 			conf: config,
 		},
+		metrics: PromMetrics{},                                                                         //nolint:exhaustruct // set by startPrometheusServer
 		vmStore: util.IndexedWatchStore[vmapi.VirtualMachine, *util.NameIndex[vmapi.VirtualMachine]]{}, // set below.
 	}
 
@@ -97,49 +101,60 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		}
 	}
 
-	// Start watching Pod/VM events...
-	vmDeletions := make(chan util.NamespacedName)
-	vmDisabledScaling := make(chan util.NamespacedName)
-	podDeletions := make(chan util.NamespacedName)
-	vmBoundsChanged := make(chan vmPodInfo)
+	// Start watching Pod/VM events, adding them to a shared queue to process them in order
+	queue := pubsub.NewUnlimitedQueue[func()]()
+	pushToQueue := func(f func()) {
+		if err := queue.Add(f); err != nil {
+			klog.Warningf("[autoscale-enforcer] error adding to pod/VM event queue: %s", err)
+		}
+	}
+	submitVMPodDeletion := func(pod util.NamespacedName) {
+		pushToQueue(func() { p.handleVMDeletion(pod) })
+	}
+	submitNonVMPodDeletion := func(name util.NamespacedName) {
+		pushToQueue(func() { p.handlePodDeletion(name) })
+	}
+	submitVMDisabledScaling := func(pod util.NamespacedName) {
+		pushToQueue(func() { p.handleVMDisabledScaling(pod) })
+	}
+	submitVMBoundsChanged := func(vm *api.VmInfo, podName string) {
+		pushToQueue(func() { p.handleUpdatedScalingBounds(vm, podName) })
+	}
+
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
-	if err := p.watchPodEvents(ctx, vmDeletions, podDeletions); err != nil {
+	if err := p.watchPodEvents(ctx, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, vmDisabledScaling, vmBoundsChanged)
+	vmStore, err := p.watchVMEvents(ctx, submitVMDisabledScaling, submitVMBoundsChanged)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
 
 	p.vmStore = util.NewIndexedWatchStore(vmStore, util.NewNameIndex[vmapi.VirtualMachine]())
 
-	// ... but before handling the deletion events, read the current cluster state:
+	// ... but before handling the events, read the current cluster state:
 	klog.Infof("[autoscale-enforcer] Reading initial cluster state")
 	if err = p.readClusterState(ctx); err != nil {
 		return nil, fmt.Errorf("Error reading cluster state: %w", err)
 	}
 
-	// TODO: this is a little clumsy; both channels are sent on by the same goroutine and both
-	// consumed by this one. This should be changed, probably with handleVMDeletion and
-	// handlePodDeletion being merged into one function.
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case name := <-vmDeletions:
-				p.handleVMDeletion(name)
-			case name := <-vmDisabledScaling:
-				p.handleVMDisabledScaling(name)
-			case name := <-podDeletions:
-				p.handlePodDeletion(name)
-			case v := <-vmBoundsChanged:
-				p.handleUpdatedScalingBounds(v.vm, v.podName)
-			}
+		iter := queue.Iterator()
+		for iter.Next(ctx) {
+			callback := iter.Value()
+			callback()
+		}
+		if err := iter.Close(); err != nil {
+			klog.Infof("[autoscale-enforcer] stopped waiting on pod/VM queue: %s", err)
 		}
 	}()
+
+	promReg := p.makePrometheusRegistry()
+	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
+		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
+	}
 
 	if err := p.startPermitHandler(ctx); err != nil {
 		return nil, fmt.Errorf("permit handler: %w", err)
@@ -172,16 +187,20 @@ func (e *AutoscaleEnforcer) Name() string {
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
 func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
-	vmName, ok := pod.Labels[LabelVM]
+	var vmName util.NamespacedName
+	vmName.Namespace = pod.Namespace
+
+	var ok bool
+	vmName.Name, ok = pod.Labels[LabelVM]
 	if !ok {
 		return nil, nil
 	}
 
 	vm, ok := vmStore.GetIndexed(func(index *util.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
-		return index.Get(pod.Namespace, vmName)
+		return index.Get(vmName.Namespace, vmName.Name)
 	})
 	if !ok {
-		klog.Warningf("VM %s:%s missing from local store. Relisting.", pod.Namespace, vmName)
+		klog.Warningf("VM %v missing from local store. Relisting.", vmName)
 
 		// Use a reasonable timeout on the relist request, so that if the VM store is broken, we
 		// won't block forever.
@@ -199,7 +218,7 @@ func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 
 		// retry fetching the VM, now that we know it's been synced.
 		vm, ok = vmStore.GetIndexed(func(index *util.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
-			return index.Get(pod.Namespace, vmName)
+			return index.Get(vmName.Namespace, vmName.Name)
 		})
 		if !ok {
 			// if the VM is still not present after relisting, then either it's already been deleted
@@ -242,6 +261,8 @@ func (e *AutoscaleEnforcer) Filter(
 	pod *corev1.Pod,
 	nodeInfo *framework.NodeInfo,
 ) *framework.Status {
+	e.metrics.pluginCalls.WithLabelValues("filter").Inc()
+
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
 
 	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
@@ -424,6 +445,8 @@ func (e *AutoscaleEnforcer) Score(
 	pod *corev1.Pod,
 	nodeName string,
 ) (int64, *framework.Status) {
+	e.metrics.pluginCalls.WithLabelValues("score").Inc()
+
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
 	podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
@@ -492,6 +515,8 @@ func (e *AutoscaleEnforcer) Reserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) *framework.Status {
+	e.metrics.pluginCalls.WithLabelValues("reserve").Inc()
+
 	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
 
@@ -622,7 +647,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		node.memSlots.Reserved = newNodeReservedMemSlots
 		ps := &podState{
 			name:   pName,
-			vmName: vmInfo.Name,
+			vmName: vmInfo.NamespacedName(),
 			node:   node,
 			vCPU: podResourceState[api.MilliCPU]{
 				Reserved:         vmInfo.Cpu.Use,
@@ -677,6 +702,8 @@ func (e *AutoscaleEnforcer) Unreserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) {
+	e.metrics.pluginCalls.WithLabelValues("unreserve").Inc()
+
 	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 	klog.Infof("[autoscale-enforcer] Unreserve: Handling request for pod %v, node %s", pName, nodeName)
 
@@ -692,7 +719,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 		delete(e.state.otherPods, pName)
 		delete(otherPs.node.otherPods, pName)
 
-		fmtString := "[autoscale-enforcer] Unreserved non-VM pod from node %s:\n" +
+		fmtString := "[autoscale-enforcer] Unreserved non-VM pod %v from node %s:\n" +
 			"\tvCPU verdict: %s\n" +
 			"\t mem verdict: %s"
 		klog.Infof(fmtString, otherPs.name, otherPs.node.name, vCPUVerdict, memVerdict)

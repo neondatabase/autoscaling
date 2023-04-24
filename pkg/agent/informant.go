@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_0
-	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
+	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_2
 )
 
 type InformantServer struct {
@@ -253,6 +254,41 @@ func NewInformantServer(
 		}
 	})
 
+	healthCheckerName := fmt.Sprintf("InformantServer health-checker (%s)", server.desc.AgentID)
+	runner.spawnBackgroundWorker(backgroundCtx, healthCheckerName, func(c context.Context) {
+		// FIXME: make this duration configurable
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-c.Done():
+				return
+			case <-ticker.C:
+			}
+
+			var done bool
+			func() {
+				server.requestLock.Lock()
+				defer server.requestLock.Unlock()
+
+				// If we've already registered with the informant, and it doesn't support health
+				// checks, exit.
+				if server.protoVersion != nil && !server.protoVersion.AllowsHealthCheck() {
+					runner.logger.Infof("Aborting future informant health checks because it does not support them")
+					done = true
+					return
+				}
+
+				if _, err := server.HealthCheck(c); err != nil {
+					runner.logger.Warningf("Informant health check failed: %s", err)
+				}
+			}()
+			if done {
+				return
+			}
+		}
+	})
+
 	return server, recvFinished, nil
 }
 
@@ -272,14 +308,14 @@ func IsNormalInformantError(err error) bool {
 		errors.Is(err, InformantServerNotCurrentError)
 }
 
-// Valid checks if the InformantServer is good to use for communication, returning an error if not
+// valid checks if the InformantServer is good to use for communication, returning an error if not
 //
 // This method can return errors for a number of unavoidably-racy protocol states - errors from this
 // method should be handled as unusual, but not unexpected. Any error returned will be one of
 // InformantServer{AlreadyExited,Suspended,Confirmed}Error.
 //
 // This method MUST be called while holding s.runner.lock.
-func (s *InformantServer) Valid() error {
+func (s *InformantServer) valid() error {
 	if s.exitStatus != nil {
 		return InformantServerAlreadyExitedError
 	}
@@ -554,6 +590,11 @@ func doInformantRequest[Q any, R any](
 	path string,
 	reqData *Q,
 ) (_ *R, statusCode int, _ error) {
+	result := "<internal error>"
+	defer func() {
+		s.runner.global.metrics.informantRequestsOutbound.WithLabelValues(result).Inc()
+	}()
+
 	reqBody, err := json.Marshal(reqData)
 	if err != nil {
 		return nil, statusCode, fmt.Errorf("Error encoding request JSON: %w", err)
@@ -573,16 +614,18 @@ func doInformantRequest[Q any, R any](
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
+		result = "[error doing request]"
 		return nil, statusCode, fmt.Errorf("Error doing request: %w", err)
 	}
 	defer response.Body.Close()
+
+	statusCode = response.StatusCode
+	result = strconv.Itoa(statusCode)
 
 	respBody, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, statusCode, fmt.Errorf("Error reading body for response: %w", err)
 	}
-
-	statusCode = response.StatusCode
 
 	if statusCode != 200 {
 		return nil, statusCode, fmt.Errorf(
@@ -624,7 +667,11 @@ func (s *InformantServer) informantURL(path string) string {
 // of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/id", strconv.Itoa(code)).Inc()
+	}()
+
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
 
@@ -632,6 +679,16 @@ func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.Ag
 
 	if s.exitStatus != nil {
 		return nil, 404, errors.New("Server has already exited")
+	}
+
+	// Update our record of the last successful time we heard from the informant, if the server is
+	// currently enabled. This allows us to detect cases where the informant is not currently
+	// communicating back to the agent - OR when the informant never /resume'd the agent.
+	if s.mode == InformantServerRunning {
+		s.runner.setStatus(func(s *podStatus) {
+			now := time.Now()
+			s.lastSuccessfulInformantComm = &now
+		})
 	}
 
 	return &api.AgentIdentificationMessage{
@@ -644,7 +701,11 @@ func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (*api.Ag
 // outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/resume", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -703,7 +764,11 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 // called outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (*api.AgentIdentificationMessage, int, error) {
+func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/suspend", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -777,7 +842,11 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 func (s *InformantServer) handleTryUpscale(
 	ctx context.Context,
 	body *api.MoreResourcesRequest,
-) (*api.AgentIdentificationMessage, int, error) {
+) (_ *api.AgentIdentificationMessage, code int, _ error) {
+	defer func() {
+		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/upscale", strconv.Itoa(code)).Inc()
+	}()
+
 	if body.ExpectedID != s.desc.AgentID {
 		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
@@ -840,6 +909,47 @@ func (s *InformantServer) handleTryUpscale(
 	}
 }
 
+// HealthCheck makes a request to the informant's /health-check endpoint, using the server's ID.
+//
+// This method MUST be called while holding i.server.requestLock AND NOT i.server.runner.lock.
+func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealthCheckResp, error) {
+	err := func() error {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		return s.valid()
+	}()
+	if err != nil {
+		return nil, err
+	}
+
+	timeout := time.Second * time.Duration(s.runner.global.config.Informant.RequestTimeoutSeconds)
+	id := api.AgentIdentification{AgentID: s.desc.AgentID}
+
+	s.runner.logger.Infof("Sending health-check %+v", id)
+	resp, statusCode, err := doInformantRequest[api.AgentIdentification, api.InformantHealthCheckResp](
+		ctx, s, timeout, http.MethodPut, "/health-check", &id,
+	)
+	if err != nil {
+		func() {
+			s.runner.lock.Lock()
+			defer s.runner.lock.Unlock()
+
+			s.setLastInformantError(fmt.Errorf("Health-check request failed: %w", err), true)
+
+			if 400 <= statusCode && statusCode <= 599 {
+				s.exit(InformantServerExitStatus{
+					Err:            err,
+					RetryShouldFix: statusCode == 404,
+				})
+			}
+		}()
+		return nil, err
+	}
+
+	s.runner.logger.Infof("Received health-check result %+v", *resp)
+	return resp, nil
+}
+
 // Downscale makes a request to the informant's /downscale endpoit with the api.Resources
 //
 // This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
@@ -850,7 +960,7 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
-		return s.Valid()
+		return s.valid()
 	}()
 	if err != nil {
 		return nil, err
@@ -892,7 +1002,7 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
-		return s.Valid()
+		return s.valid()
 	}()
 	if err != nil {
 		return err

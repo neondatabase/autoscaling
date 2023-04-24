@@ -2,11 +2,6 @@ name: e2e-test
 on:
   pull_request:
   push:
-    paths:
-      - "neonvm/**"
-      - "tests/**"
-      - "**.go"
-      - "Makefile"
     branches:
       - main
 
@@ -15,6 +10,8 @@ jobs:
     runs-on: [ self-hosted, gen3, small ]
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # fetch all, so that we also include tags
 
       - uses: actions/setup-go@v4
         with:
@@ -41,8 +38,10 @@ jobs:
 
           echo ${LOCALBIN} >> $GITHUB_PATH
         env:
-          KUBECTL_VERSION: v1.26.1
-          KIND_VERSION: v0.17.0
+          # kubectl is supported within one minor version (older or newer) of k8s
+          # https://kubernetes.io/releases/version-skew-policy/#kubectl
+          KUBECTL_VERSION: v1.25.9
+          KIND_VERSION: v0.18.0
           KUTTL_VERSION: v0.15.0
 
       - name: Check dependencies
@@ -64,9 +63,13 @@ jobs:
           VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
           VM_KERNEL_VERSION: "5.15.80"
 
+      # our docker builds use the output of 'git describe' for embedding git information
+      - run: git describe --long --dirty
+
       # Explicitly build all the images beforehand. Building images while the cluster is up can
       # sometimes affect the cluster. For more information:
       # https://github.com/neondatabase/autoscaling/issues/120#issuecomment-1493405844
+      - run: make build
       - run: make docker-build
       - run: make docker-build-examples
 
@@ -78,7 +81,7 @@ jobs:
       - run: make e2e
 
       - name: Get k8s logs and events
-        if: ${{ failure() || cancelled() }}
+        if: always()
         run: |
           if ! kubectl config current-context; then
             echo "skipping cluster logs because no cluster found in kubectl context"
@@ -89,8 +92,20 @@ jobs:
             pods=$(kubectl get pods -n $namespace -o jsonpath='{.items[*].metadata.name}')
             for pod in $pods; do
               echo "*** Namespace=$namespace Pod=$pod ***"
-              echo "Logs:"
-              kubectl logs -n $namespace $pod || echo 'Error getting logs'
+              restarts=$(
+                kubectl get pod -n $namespace $pod -o jsonpath='{.status.containerStatuses[0].restartCount}' || echo '0'
+              )
+              if [ "$restarts" -ne 0 ]; then
+                echo "CONTAINER RESTARTED $restarts TIME(S)"
+                echo "Previous logs:"
+                kubectl logs -n $namespace -p $pod || echo 'Error getting logs'
+                echo "Current logs:"
+                kubectl logs -n $namespace $pod || echo 'Error getting logs'
+              else
+                echo "Logs:"
+                kubectl logs -n $namespace $pod || echo 'Error getting logs'
+              fi
+
               echo "Events:"
               kubectl get events --namespace $namespace --field-selector involvedObject.name=$pod || echo 'Error getting events'
               echo ""

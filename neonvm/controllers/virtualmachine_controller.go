@@ -713,6 +713,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 					Name:      "virtualmachineimages",
 					MountPath: "/vm/images",
 				}},
+				Resources: virtualmachine.Spec.PodResources,
 			}},
 			Volumes: []corev1.Volume{{
 				Name: "virtualmachineimages",

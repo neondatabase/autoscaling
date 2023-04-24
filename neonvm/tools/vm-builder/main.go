@@ -204,15 +204,13 @@ fi
 if /neonvm/bin/test -f /neonvm/runtime/command.sh; then
     /neonvm/bin/cat /neonvm/runtime/command.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo -n '{{- range .Entrypoint}}{{.}} {{- end }}' >>/neonvm/bin/vmstarter.sh
+    /neonvm/bin/echo -n '{{$first := true}}{{range .Entrypoint}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
 fi
-
-echo -n ' ' >>/neonvm/bin/vmstarter.sh
-
+{{if and .Entrypoint .Cmd}}echo -n ' ' >>/neonvm/bin/vmstarter.sh{{end}}
 if /neonvm/bin/test -f /neonvm/runtime/args.sh; then
     /neonvm/bin/cat /neonvm/runtime/args.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo '{{- range .Cmd }}{{.}} {{- end }}' >>/neonvm/bin/vmstarter.sh
+    /neonvm/bin/echo '{{$first := true}}{{range .Cmd}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
 fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
@@ -351,6 +349,7 @@ var (
 	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
 	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
 	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
 	informant = flag.String("informant", VMInformant, `vm-informant docker image`)
 	version   = flag.Bool("version", false, `Print vm-builder version`)
@@ -521,7 +520,7 @@ func main() {
 			dstIm,
 		},
 		BuildArgs:      buildArgs,
-		SuppressOutput: true,
+		SuppressOutput: *quiet,
 		NoCache:        false,
 		Context:        tarBuffer,
 		Dockerfile:     "Dockerfile",

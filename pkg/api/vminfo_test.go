@@ -25,11 +25,14 @@ func TestFormatting(t *testing.T) {
 			Use:      4,
 			SlotSize: &slotSize,
 		},
+		ScalingConfig: &api.ScalingConfig{
+			LoadAverageFractionTarget: 0.7,
+		},
 		AlwaysMigrate:  false,
 		ScalingEnabled: true,
 	})
-	defaultFormat := "{Name:foo Namespace:bar Cpu:{Min:1000 Max:5000 Use:3000} Mem:{Min:2 Max:6 Use:4 SlotSize:1Gi} AlwaysMigrate:false ScalingEnabled:true}"
-	goSyntaxRepr := `api.VmInfo{Name:"foo", Namespace:"bar", Cpu:api.VmCpuInfo{Min:1000, Max:5000, Use:3000}, Mem:api.VmMemInfo{Min:2, Max:6, Use:4, SlotSize:&resource.Quantity{i:resource.int64Amount{value:1073741824, scale:0}, d:resource.infDecAmount{Dec:(*inf.Dec)(nil)}, s:"1Gi", Format:"BinarySI"}}, AlwaysMigrate:false, ScalingEnabled:true}`
+	defaultFormat := "{Name:foo Namespace:bar Cpu:{Min:1000 Max:5000 Use:3000} Mem:{Min:2 Max:6 Use:4 SlotSize:1Gi} ScalingConfig:&{LoadAverageFractionTarget:0.7} AlwaysMigrate:false ScalingEnabled:true}"
+	goSyntaxRepr := `api.VmInfo{Name:"foo", Namespace:"bar", Cpu:api.VmCpuInfo{Min:1000, Max:5000, Use:3000}, Mem:api.VmMemInfo{Min:2, Max:6, Use:4, SlotSize:&resource.Quantity{i:resource.int64Amount{value:1073741824, scale:0}, d:resource.infDecAmount{Dec:(*inf.Dec)(nil)}, s:"1Gi", Format:"BinarySI"}}, ScalingConfig:&api.ScalingConfig{LoadAverageFractionTarget:0.7}, AlwaysMigrate:false, ScalingEnabled:true}`
 	cases := []struct {
 		name     string
 		expected string

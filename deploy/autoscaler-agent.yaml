@@ -47,7 +47,10 @@ metadata:
 data:
   config.json: '{
     "scaling": {
-      "requestTimeoutSeconds": 10
+      "requestTimeoutSeconds": 10,
+      "defaultConfig": {
+        "loadAverageFractionTarget": 0.9
+      }
     },
     "informant": {
       "serverPort": 10301,
@@ -56,7 +59,9 @@ data:
       "registerRetrySeconds": 5,
       "requestTimeoutSeconds": 1,
       "registerTimeoutSeconds": 2,
-      "downscaleTimeoutSeconds": 2
+      "downscaleTimeoutSeconds": 2,
+      "unhealthyAfterSilenceDurationSeconds": 20,
+      "unhealthyStartupGracePeriodSeconds": 20
     },
     "metrics": {
       "loadMetricPrefix": "host_",

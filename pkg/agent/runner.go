@@ -52,8 +52,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -400,6 +402,8 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(
 			r.backgroundWorkerCount.Add(-1)
 
 			if v := recover(); v != nil {
+				r.global.metrics.runnerThreadPanics.Inc()
+
 				err := fmt.Errorf("background worker %q panicked: %v", name, v)
 				r.logger.Errorf("%s", err)
 				// note: In Go, the stack doesn't "unwind" on panic. Instead, a panic will traverse up
@@ -562,6 +566,7 @@ func (r *Runner) handleVMResources(
 						SlotSize: r.vm.Mem.SlotSize, // checked for equality above.
 					},
 
+					ScalingConfig:  newVMInfo.ScalingConfig,
 					AlwaysMigrate:  newVMInfo.AlwaysMigrate,
 					ScalingEnabled: newVMInfo.ScalingEnabled, // note: see above, checking newVMInfo.ScalingEnabled != false
 				}
@@ -1034,6 +1039,7 @@ type atomicUpdateState struct {
 	vm               api.VmInfo
 	lastApproved     api.Resources
 	requestedUpscale api.MoreResources
+	config           api.ScalingConfig
 }
 
 // updateVMResources is responsible for the high-level logic that orchestrates a single update to
@@ -1065,7 +1071,7 @@ func (r *Runner) updateVMResources(
 	// The reason we care about the informant server being "enabled" is that the VM informant uses
 	// it to ensure that there's at most one autoscaler-agent that's making requests on its behalf.
 	if err := r.validateInformant(); err != nil {
-		r.logger.Warningf("Unable to update VM resources because informant server is disabled: %w", err)
+		r.logger.Warningf("Unable to update VM resources because informant server is disabled: %s", err)
 		return nil
 	}
 
@@ -1271,22 +1277,23 @@ func (r *Runner) getStateForVMUpdate(updateReason VMUpdateReason) *atomicUpdateS
 		))
 	}
 
+	config := r.global.config.Scaling.DefaultConfig
+	if r.vm.ScalingConfig != nil {
+		config = *r.vm.ScalingConfig
+	}
+
 	return &atomicUpdateState{
 		computeUnit:      *r.computeUnit,
 		metrics:          *r.lastMetrics,
 		vm:               r.vm,
 		lastApproved:     *r.lastApproved,
 		requestedUpscale: r.requestedUpscale,
+		config:           config,
 	}
 }
 
 // desiredVMState calculates what the resource allocation to the VM should be, given the metrics and
 // current state.
-//
-// FIXME: This should have *some* access to prior scaling decisions, so that we can e.g. use slower
-// scaling to start, and accelerate it over time.
-//
-// FIXME: Even factoring in the above, this implementation is *pretty bad*.
 func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// There's some annoying edge cases that this function has to be able to handle properly. For
 	// the sake of completeness, they are:
@@ -1299,28 +1306,25 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	//    is low so we should just decrease *anyways*.
 	//
 	// ---
-	// Now, it's worth noting that we only *barely* handle the edge cases above. We don't do it
-	// well, but we do handle them in a protocol-compliant way, and that's what counts! Eventually,
-	// this function will be rewritten, this note removed, and all will be well.
+	//
+	// Broadly, the implementation works like this:
+	// 1. Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
+	// 2. Cap the goal CU by min/max, etc
+	// 3. that's it!
 
-	lowerBoundCU, upperBoundCU := s.computeUnitsBounds()
-
-	currentCU := upperBoundCU
-
-	// if we don't have an even compute unit *and* we're allowed to decrease, pick the middle.
-	if lowerBoundCU != upperBoundCU && allowDecrease {
-		currentCU = lowerBoundCU + (upperBoundCU-lowerBoundCU+1)/2 // +1 so we round up
-	}
-
-	goalCU := currentCU
-	if s.metrics.LoadAverage1Min*1000 > 0.9*float32(s.vm.Cpu.Use) {
-		goalCU *= 2
-	} else if s.metrics.LoadAverage1Min*1000 < 0.4*float32(s.vm.Cpu.Use) && allowDecrease {
-		goalCU /= 2
-	}
+	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
+	// average),
+	// which we can get by dividing LA by LAFT.
+	goalCU := uint16(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
 
 	// Update goalCU based on any requested upscaling
 	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling())
+
+	// new CU must be >= current CU if !allowDecrease
+	if !allowDecrease {
+		_, upperBoundCU := s.computeUnitsBounds()
+		goalCU = util.Max(goalCU, upperBoundCU)
+	}
 
 	// resources for the desired "goal" compute units
 	goal := s.computeUnit.Mul(goalCU)
@@ -1414,7 +1418,7 @@ func (r *Runner) doVMUpdate(
 	}
 
 	if err := r.validateInformant(); err != nil {
-		r.logger.Warningf("Aborting VM update because informant server is not valid: %w", err)
+		r.logger.Warningf("Aborting VM update because informant server is not valid: %s", err)
 		resetVMTo(current)
 		return nil, nil
 	}
@@ -1535,7 +1539,7 @@ func (r *Runner) validateInformant() error {
 	if r.server == nil {
 		return errors.New("no informant server set")
 	}
-	return r.server.Valid()
+	return r.server.valid()
 }
 
 // doInformantDownscale is a convenience wrapper around (*InformantServer).Downscale that locks r,
@@ -1675,9 +1679,12 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
+		s.runner.global.metrics.schedulerRequests.WithLabelValues("[error doing request]").Inc()
 		return nil, s.handleRequestError(reqData, fmt.Errorf("Error doing request: %w", err))
 	}
 	defer response.Body.Close()
+
+	s.runner.global.metrics.schedulerRequests.WithLabelValues(strconv.Itoa(response.StatusCode)).Inc()
 
 	respBody, err := io.ReadAll(response.Body)
 	if err != nil {

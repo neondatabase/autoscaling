@@ -8,8 +8,8 @@ metadata:
     autoscaling.neon.tech/bounds: '{ "min": { "cpu": 0.25, "mem": "1Gi" }, "max": { "cpu": 1.5, "mem": "4Gi" } }'
   labels:
     autoscaling.neon.tech/enabled: "true"
-    # Uncomment the line below to continuously migrate the VM (TESTING ONLY)
-    # autoscaler/testing-only-always-migrate: ""
+    # Set to "true" to continuously migrate the VM (TESTING ONLY)
+    autoscaling.neon.tech/testing-only-always-migrate: "false"
 spec:
   schedulerName: autoscale-scheduler
   guest:

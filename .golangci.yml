@@ -53,6 +53,7 @@ linters-settings:
       - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch)Options$'
       - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.ObjectMeta$'
       - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
+      - '^github.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'
       - '^github\.com/containerd/cgroups/v3/cgroup2\.(Resources|Memory)'
       - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
       # vmapi.{VirtualMachine,VirtualMachineSpec,VirtualMachineMigration,VirtualMachineMigrationSpec}

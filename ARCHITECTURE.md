@@ -81,12 +81,12 @@ discussed more in the [high-level consequences] section below.
 * `kind/` — files specific to creating our [kind](https://kind.sigs.k8s.io/) cluster
     * `kind/config.yaml` — configuration for the kind cluster
 * `neonvm/` — QEMU-based virtualisation API and controllers for k8s
-   * See [`neonvm/README.md](./neonvm/README.md) for details
+   * See [`neonvm/README.md`](./neonvm/README.md) for details
 * `pkg/` — core go code from the scheduler plugin and `autoscaler-agent`. Where applicable, the
   purpose of individual files is commented at the top.
     * `pkg/agent/` — implementation of `autoscaler-agent`
-    * `pkg/api/` — types for scheduler plugin <-> `autoscaler-agent` communication, plus some
-        protocol-relevant types independently used by both.
+    * `pkg/api/` — all types for inter-component communications, plus some protocol-relevant types
+        independently used by multiple components.
     * `pkg/billing/` — consumption metrics API, primarily used in
         [`pkg/agent/billing.go`](pkg/agent/billing.go)
     * `pkg/informant/` — implementation of the VM informant
@@ -226,22 +226,25 @@ The protocol is as follows:
 4. Begin "normal operation". During this, there are a few types of requests made between the agent
    and informant. Each party can make **only one request at a time**. The agent starts in the
    "suspended" state.
-    1. The informant's `/downscale` endpoint (via PUT), with `RawResources`. This serves as the
+    1. The informant's `/health-check` endpoint (via PUT), with `AgentIdentification`. This allows
+       the autoscaler-agent to check that the informant is up and running, and that it still
+       recognizes the agent.
+    2. The informant's `/downscale` endpoint (via PUT), with `RawResources`. This serves as the
        agent _politely asking_ the informant to decrease resource usage to the specified amount.
        The informant returns a `DownscaleResult` indicating whether it was able to downscale (it may
        not, if e.g. memory usage is too high).
-    2. The informant's `/upscale` endpoint (via PUT), with `RawResources`. This serves as the agent
+    3. The informant's `/upscale` endpoint (via PUT), with `RawResources`. This serves as the agent
        _notifying_ the informant that its resources have increased to the provided amount.
-    3. The agent's `/suspend` endpoint (via POST), with `SuspendAgent`. This allows the informant to
+    4. The agent's `/suspend` endpoint (via POST), with `SuspendAgent`. This allows the informant to
        inform the agent that it is no longer in use for the VM. While suspended, the agent **must
        not** make any `downscale` or `upscale` requests. The informant **must not** double-suspend
        an agent.
-    4. The agent's `/resume` endpoint (via POST), with `ResumeAgent`. This allows the informant to
+    5. The agent's `/resume` endpoint (via POST), with `ResumeAgent`. This allows the informant to
        pick up communication with an agent that was previously suspended. The informant **must not**
        double-resume an agent.
-    5. The agent's `/id` endpoint (via GET) is also available during normal operation, and is used
+    6. The agent's `/id` endpoint (via GET) is also available during normal operation, and is used
        as a health check by the informant.
-    6. The agent's `/try-upscale` endpoint (via POST), with `MoreResources`. This allows the
+    7. The agent's `/try-upscale` endpoint (via POST), with `MoreResources`. This allows the
        informant to request more of a particular resource (e.g. memory). The agent MUST respond
        immediately with an `AgentIdentification`. It MAY later send an `/upscale` request to the
        informant once the requested increase in resources has been achieved.

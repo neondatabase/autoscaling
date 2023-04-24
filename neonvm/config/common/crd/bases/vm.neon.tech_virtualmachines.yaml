@@ -355,9 +355,7 @@ spec:
                                     field and the ones listed in the namespaces field.
                                     null selector and null or empty namespaces list
                                     means "this pod's namespace". An empty selector
-                                    ({}) matches all namespaces. This field is beta-level
-                                    and is only honored when PodAffinityNamespaceSelector
-                                    feature is enabled.
+                                    ({}) matches all namespaces.
                                   properties:
                                     matchExpressions:
                                       description: matchExpressions is a list of label
@@ -413,7 +411,7 @@ spec:
                                     term is applied to the union of the namespaces
                                     listed in this field and the ones selected by
                                     namespaceSelector. null or empty namespaces list
-                                    and null namespaceSelector means "this pod's namespace"
+                                    and null namespaceSelector means "this pod's namespace".
                                   items:
                                     type: string
                                   type: array
@@ -513,8 +511,6 @@ spec:
                                 the ones listed in the namespaces field. null selector
                                 and null or empty namespaces list means "this pod's
                                 namespace". An empty selector ({}) matches all namespaces.
-                                This field is beta-level and is only honored when
-                                PodAffinityNamespaceSelector feature is enabled.
                               properties:
                                 matchExpressions:
                                   description: matchExpressions is a list of label
@@ -566,7 +562,7 @@ spec:
                                 to the union of the namespaces listed in this field
                                 and the ones selected by namespaceSelector. null or
                                 empty namespaces list and null namespaceSelector means
-                                "this pod's namespace"
+                                "this pod's namespace".
                               items:
                                 type: string
                               type: array
@@ -668,9 +664,7 @@ spec:
                                     field and the ones listed in the namespaces field.
                                     null selector and null or empty namespaces list
                                     means "this pod's namespace". An empty selector
-                                    ({}) matches all namespaces. This field is beta-level
-                                    and is only honored when PodAffinityNamespaceSelector
-                                    feature is enabled.
+                                    ({}) matches all namespaces.
                                   properties:
                                     matchExpressions:
                                       description: matchExpressions is a list of label
@@ -726,7 +720,7 @@ spec:
                                     term is applied to the union of the namespaces
                                     listed in this field and the ones selected by
                                     namespaceSelector. null or empty namespaces list
-                                    and null namespaceSelector means "this pod's namespace"
+                                    and null namespaceSelector means "this pod's namespace".
                                   items:
                                     type: string
                                   type: array
@@ -826,8 +820,6 @@ spec:
                                 the ones listed in the namespaces field. null selector
                                 and null or empty namespaces list means "this pod's
                                 namespace". An empty selector ({}) matches all namespaces.
-                                This field is beta-level and is only honored when
-                                PodAffinityNamespaceSelector feature is enabled.
                               properties:
                                 matchExpressions:
                                   description: matchExpressions is a list of label
@@ -879,7 +871,7 @@ spec:
                                 to the union of the namespaces listed in this field
                                 and the ones selected by namespaceSelector. null or
                                 empty namespaces list and null namespaceSelector means
-                                "this pod's namespace"
+                                "this pod's namespace".
                               items:
                                 type: string
                               type: array
@@ -907,20 +899,20 @@ spec:
                         this disk
                       properties:
                         defaultMode:
-                          description: 'Optional: mode bits used to set permissions
-                            on created files by default. Must be an octal value between
-                            0000 and 0777 or a decimal value between 0 and 511. YAML
-                            accepts both octal and decimal values, JSON requires decimal
-                            values for mode bits. Defaults to 0644. Directories within
-                            the path are not affected by this setting. This might
-                            be in conflict with other options that affect the file
-                            mode, like fsGroup, and the result can be other mode bits
-                            set.'
+                          description: 'defaultMode is optional: mode bits used to
+                            set permissions on created files by default. Must be an
+                            octal value between 0000 and 0777 or a decimal value between
+                            0 and 511. YAML accepts both octal and decimal values,
+                            JSON requires decimal values for mode bits. Defaults to
+                            0644. Directories within the path are not affected by
+                            this setting. This might be in conflict with other options
+                            that affect the file mode, like fsGroup, and the result
+                            can be other mode bits set.'
                           format: int32
                           type: integer
                         items:
-                          description: If unspecified, each key-value pair in the
-                            Data field of the referenced ConfigMap will be projected
+                          description: items if unspecified, each key-value pair in
+                            the Data field of the referenced ConfigMap will be projected
                             into the volume as a file whose name is the key and content
                             is the value. If specified, the listed keys will be projected
                             into the specified paths, and unlisted keys will not be
@@ -932,25 +924,25 @@ spec:
                             description: Maps a string key to a path within a volume.
                             properties:
                               key:
-                                description: The key to project.
+                                description: key is the key to project.
                                 type: string
                               mode:
-                                description: 'Optional: mode bits used to set permissions
-                                  on this file. Must be an octal value between 0000
-                                  and 0777 or a decimal value between 0 and 511. YAML
-                                  accepts both octal and decimal values, JSON requires
-                                  decimal values for mode bits. If not specified,
-                                  the volume defaultMode will be used. This might
-                                  be in conflict with other options that affect the
-                                  file mode, like fsGroup, and the result can be other
-                                  mode bits set.'
+                                description: 'mode is Optional: mode bits used to
+                                  set permissions on this file. Must be an octal value
+                                  between 0000 and 0777 or a decimal value between
+                                  0 and 511. YAML accepts both octal and decimal values,
+                                  JSON requires decimal values for mode bits. If not
+                                  specified, the volume defaultMode will be used.
+                                  This might be in conflict with other options that
+                                  affect the file mode, like fsGroup, and the result
+                                  can be other mode bits set.'
                                 format: int32
                                 type: integer
                               path:
-                                description: The relative path of the file to map
-                                  the key to. May not be an absolute path. May not
-                                  contain the path element '..'. May not start with
-                                  the string '..'.
+                                description: path is the relative path of the file
+                                  to map the key to. May not be an absolute path.
+                                  May not contain the path element '..'. May not start
+                                  with the string '..'.
                                 type: string
                             required:
                             - key
@@ -962,8 +954,8 @@ spec:
                             TODO: Add other useful fields. apiVersion, kind, uid?'
                           type: string
                         optional:
-                          description: Specify whether the ConfigMap or its keys must
-                            be defined
+                          description: optional specify whether the ConfigMap or its
+                            keys must be defined
                           type: boolean
                       type: object
                       x-kubernetes-map-type: atomic
@@ -998,20 +990,20 @@ spec:
                         this disk.
                       properties:
                         defaultMode:
-                          description: 'Optional: mode bits used to set permissions
-                            on created files by default. Must be an octal value between
-                            0000 and 0777 or a decimal value between 0 and 511. YAML
-                            accepts both octal and decimal values, JSON requires decimal
-                            values for mode bits. Defaults to 0644. Directories within
-                            the path are not affected by this setting. This might
-                            be in conflict with other options that affect the file
-                            mode, like fsGroup, and the result can be other mode bits
-                            set.'
+                          description: 'defaultMode is Optional: mode bits used to
+                            set permissions on created files by default. Must be an
+                            octal value between 0000 and 0777 or a decimal value between
+                            0 and 511. YAML accepts both octal and decimal values,
+                            JSON requires decimal values for mode bits. Defaults to
+                            0644. Directories within the path are not affected by
+                            this setting. This might be in conflict with other options
+                            that affect the file mode, like fsGroup, and the result
+                            can be other mode bits set.'
                           format: int32
                           type: integer
                         items:
-                          description: If unspecified, each key-value pair in the
-                            Data field of the referenced Secret will be projected
+                          description: items If unspecified, each key-value pair in
+                            the Data field of the referenced Secret will be projected
                             into the volume as a file whose name is the key and content
                             is the value. If specified, the listed keys will be projected
                             into the specified paths, and unlisted keys will not be
@@ -1023,25 +1015,25 @@ spec:
                             description: Maps a string key to a path within a volume.
                             properties:
                               key:
-                                description: The key to project.
+                                description: key is the key to project.
                                 type: string
                               mode:
-                                description: 'Optional: mode bits used to set permissions
-                                  on this file. Must be an octal value between 0000
-                                  and 0777 or a decimal value between 0 and 511. YAML
-                                  accepts both octal and decimal values, JSON requires
-                                  decimal values for mode bits. If not specified,
-                                  the volume defaultMode will be used. This might
-                                  be in conflict with other options that affect the
-                                  file mode, like fsGroup, and the result can be other
-                                  mode bits set.'
+                                description: 'mode is Optional: mode bits used to
+                                  set permissions on this file. Must be an octal value
+                                  between 0000 and 0777 or a decimal value between
+                                  0 and 511. YAML accepts both octal and decimal values,
+                                  JSON requires decimal values for mode bits. If not
+                                  specified, the volume defaultMode will be used.
+                                  This might be in conflict with other options that
+                                  affect the file mode, like fsGroup, and the result
+                                  can be other mode bits set.'
                                 format: int32
                                 type: integer
                               path:
-                                description: The relative path of the file to map
-                                  the key to. May not be an absolute path. May not
-                                  contain the path element '..'. May not start with
-                                  the string '..'.
+                                description: path is the relative path of the file
+                                  to map the key to. May not be an absolute path.
+                                  May not contain the path element '..'. May not start
+                                  with the string '..'.
                                 type: string
                             required:
                             - key
@@ -1049,12 +1041,12 @@ spec:
                             type: object
                           type: array
                         optional:
-                          description: Specify whether the Secret or its keys must
-                            be defined
+                          description: optional field specify whether the Secret or
+                            its keys must be defined
                           type: boolean
                         secretName:
-                          description: 'Name of the secret in the pod''s namespace
-                            to use. More info: https://kubernetes.io/docs/concepts/storage/volumes#secret'
+                          description: 'secretName is the name of the secret in the
+                            pod''s namespace to use. More info: https://kubernetes.io/docs/concepts/storage/volumes#secret'
                           type: string
                       type: object
                     tmpfs:
@@ -1334,8 +1326,8 @@ spec:
                   description: "Condition contains details for one aspect of the current
                     state of this API Resource. --- This struct is intended for direct
                     use as an array at the field path .status.conditions.  For example,
-                    type FooStatus struct{ // Represents the observations of a foo's
-                    current state. // Known .status.conditions.type are: \"Available\",
+                    \n type FooStatus struct{ // Represents the observations of a
+                    foo's current state. // Known .status.conditions.type are: \"Available\",
                     \"Progressing\", and \"Degraded\" // +patchMergeKey=type // +patchStrategy=merge
                     // +listType=map // +listMapKey=type Conditions []metav1.Condition
                     `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\"

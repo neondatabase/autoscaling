@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/tychoish/fun/erc"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 type Config struct {
@@ -28,6 +32,9 @@ type DumpStateConfig struct {
 type ScalingConfig struct {
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
+	// DefaultConfig gives the default scaling config, to be used if there is no configuration
+	// supplied with the "autoscaling.neon.tech/config" annotation.
+	DefaultConfig api.ScalingConfig `json:"defaultConfig"`
 }
 
 type InformantConfig struct {
@@ -59,6 +66,14 @@ type InformantConfig struct {
 	// This is a separate field from RequestTimeoutSeconds it's possible that downscaling may
 	// require some non-trivial work that we want to allow to complete.
 	DownscaleTimeoutSeconds uint `json:"downscaleTimeoutSeconds"`
+
+	// UnhealthyAfterSilenceDurationSeconds gives the duration, in seconds, after which failing to
+	// receive a successful request from the informant indicates that it is probably unhealthy.
+	UnhealthyAfterSilenceDurationSeconds uint `json:"unhealthyAfterSilenceDurationSeconds"`
+	// UnhealthyStartupGracePeriodSeconds gives the duration, in seconds, after which we will no
+	// longer excuse total VM informant failures - i.e. when unhealthyAfterSilenceDurationSeconds
+	// kicks in.
+	UnhealthyStartupGracePeriodSeconds uint `json:"unhealthyStartupGracePeriodSeconds"`
 }
 
 // MetricsConfig defines a few parameters for metrics requests to the VM
@@ -108,56 +123,38 @@ func ReadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	cannotBeZero := func(fieldPath string) error {
-		return fmt.Errorf("Field %s cannot be zero", fieldPath)
-	}
-	cannotBeEmpty := func(fieldPath string) error {
-		return fmt.Errorf("Field %s cannot be empty", fieldPath)
-	}
+	ec := &erc.Collector{}
 
-	if c.Scaling.RequestTimeoutSeconds == 0 {
-		return cannotBeZero(".scaling.requestTimeoutSeconds")
-	} else if c.Informant.ServerPort == 0 {
-		return cannotBeZero(".informant.serverPort")
-	} else if c.Informant.RetryServerMinWaitSeconds == 0 {
-		return cannotBeZero(".informant.retryServerMinWaitSeconds")
-	} else if c.Informant.RetryServerNormalWaitSeconds == 0 {
-		return cannotBeZero(".informant.retryServerNormalWaitSeconds")
-	} else if c.Informant.RegisterRetrySeconds == 0 {
-		return cannotBeZero(".informant.registerRetrySeconds")
-	} else if c.Informant.RequestTimeoutSeconds == 0 {
-		return cannotBeZero(".informant.requestTimeoutSeconds")
-	} else if c.Informant.RegisterTimeoutSeconds == 0 {
-		return cannotBeZero(".informant.registerTimeoutSeconds")
-	} else if c.Informant.DownscaleTimeoutSeconds == 0 {
-		return cannotBeZero(".informant.downscaleTimeoutSeconds")
-	} else if c.Metrics.SecondsBetweenRequests == 0 {
-		return cannotBeZero(".metrics.secondsBetweenRequests")
-	} else if c.Metrics.LoadMetricPrefix == "" {
-		return cannotBeEmpty(".metrics.loadMetricPrefix")
-	} else if c.Scheduler.SchedulerName == "" {
-		return cannotBeEmpty(".scheduler.schedulerName")
-	} else if c.Scheduler.RequestTimeoutSeconds == 0 {
-		return cannotBeZero(".scheduler.requestTimeoutSeconds")
-	} else if c.Scheduler.RequestPort == 0 {
-		return cannotBeZero(".scheduler.requestPort")
-	} else if c.Billing != nil && c.Billing.URL == "" {
-		return cannotBeEmpty(".billing.url")
-	} else if c.Billing != nil && c.Billing.CPUMetricName == "" {
-		return cannotBeEmpty(".billing.cpuMetricName")
-	} else if c.Billing != nil && c.Billing.ActiveTimeMetricName == "" {
-		return cannotBeEmpty(".billing.activeTimeMetricName")
-	} else if c.Billing != nil && c.Billing.CollectEverySeconds == 0 {
-		return cannotBeZero(".billing.collectEverySeconds")
-	} else if c.Billing != nil && c.Billing.PushEverySeconds == 0 {
-		return cannotBeZero(".billing.pushEverySeconds")
-	} else if c.Billing != nil && c.Billing.PushTimeoutSeconds == 0 {
-		return cannotBeZero(".billing.pushTimeoutSeconds")
-	} else if c.DumpState != nil && c.DumpState.Port == 0 {
-		return cannotBeZero(".dumpState.port")
-	} else if c.DumpState != nil && c.DumpState.TimeoutSeconds == 0 {
-		return cannotBeZero(".dumpState.timeoutSeconds")
-	}
+	const (
+		emptyTmpl = "field %q cannot be empty"
+		zeroTmpl  = "field %q cannot be zero"
+	)
 
-	return nil
+	erc.Whenf(ec, c.Billing != nil && c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.PushEverySeconds == 0, zeroTmpl, ".billing.pushEverySeconds")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.PushTimeoutSeconds == 0, zeroTmpl, ".billing.pushTimeoutSeconds")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.URL == "", emptyTmpl, ".billing.url")
+	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
+	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
+	erc.Whenf(ec, c.Informant.DownscaleTimeoutSeconds == 0, zeroTmpl, ".informant.downscaleTimeoutSeconds")
+	erc.Whenf(ec, c.Informant.RegisterRetrySeconds == 0, zeroTmpl, ".informant.registerRetrySeconds")
+	erc.Whenf(ec, c.Informant.RegisterTimeoutSeconds == 0, zeroTmpl, ".informant.registerTimeoutSeconds")
+	erc.Whenf(ec, c.Informant.RequestTimeoutSeconds == 0, zeroTmpl, ".informant.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Informant.RetryServerMinWaitSeconds == 0, zeroTmpl, ".informant.retryServerMinWaitSeconds")
+	erc.Whenf(ec, c.Informant.RetryServerNormalWaitSeconds == 0, zeroTmpl, ".informant.retryServerNormalWaitSeconds")
+	erc.Whenf(ec, c.Informant.ServerPort == 0, zeroTmpl, ".informant.serverPort")
+	erc.Whenf(ec, c.Informant.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".informant.unhealthyAfterSilenceDurationSeconds")
+	erc.Whenf(ec, c.Informant.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".informant.unhealthyStartupGracePeriodSeconds")
+	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
+	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
+	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
+	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
+	ec.Add(c.Scaling.DefaultConfig.Validate())
+	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
+	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
+
+	return ec.Resolve()
 }

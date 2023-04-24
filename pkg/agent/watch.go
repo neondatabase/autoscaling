@@ -68,6 +68,10 @@ func startVMWatcher(
 				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
 				newIsOurs := vmIsOurResponsibility(newVM, config, nodeName)
 
+				if !oldIsOurs && !newIsOurs {
+					return
+				}
+
 				var vmForEvent *vmapi.VirtualMachine
 				var eventKind vmEventKind
 
@@ -105,9 +109,11 @@ func startVMWatcher(
 }
 
 func makeVMEvent(vm *vmapi.VirtualMachine, kind vmEventKind) (vmEvent, error) {
+	vmName := util.NamespacedName{Namespace: vm.Namespace, Name: vm.Name}
+
 	info, err := api.ExtractVmInfo(vm)
 	if err != nil {
-		return vmEvent{}, fmt.Errorf("Error extracting VM info from %s:%s: %w", vm.Namespace, vm.Name, err)
+		return vmEvent{}, fmt.Errorf("Error extracting VM info from %v: %w", vmName, err)
 	}
 
 	return vmEvent{

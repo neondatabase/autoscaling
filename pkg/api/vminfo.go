@@ -7,16 +7,21 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/tychoish/fun/erc"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 const (
-	LabelTestingOnlyAlwaysMigrate = "autoscaler/testing-only-always-migrate"
+	LabelTestingOnlyAlwaysMigrate = "autoscaling.neon.tech/testing-only-always-migrate"
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
+	AnnotationAutoscalingConfig   = "autoscaling.neon.tech/config"
 )
 
 // HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
@@ -26,16 +31,23 @@ func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
 	return ok && value == "true"
 }
 
+func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
+	labels := obj.GetObjectMeta().GetLabels()
+	value, ok := labels[LabelTestingOnlyAlwaysMigrate]
+	return ok && value == "true"
+}
+
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
 // care about. It takes various labels and annotations into account, so certain fields might be
 // different from what's strictly in the VirtualMachine object.
 type VmInfo struct {
-	Name           string    `json:"name"`
-	Namespace      string    `json:"namespace"`
-	Cpu            VmCpuInfo `json:"cpu"`
-	Mem            VmMemInfo `json:"mem"`
-	AlwaysMigrate  bool      `json:"alwaysMigrate"`
-	ScalingEnabled bool      `json:"scalingEnabled"`
+	Name           string         `json:"name"`
+	Namespace      string         `json:"namespace"`
+	Cpu            VmCpuInfo      `json:"cpu"`
+	Mem            VmMemInfo      `json:"mem"`
+	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
+	AlwaysMigrate  bool           `json:"alwaysMigrate"`
+	ScalingEnabled bool           `json:"scalingEnabled"`
 }
 
 type VmCpuInfo struct {
@@ -82,6 +94,10 @@ func (vm VmInfo) Max() Resources {
 	}
 }
 
+func (vm VmInfo) NamespacedName() util.NamespacedName {
+	return util.NamespacedName{Namespace: vm.Namespace, Name: vm.Name}
+}
+
 func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	var err error
 
@@ -107,8 +123,8 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		}
 	}
 
-	_, alwaysMigrate := vm.Labels[LabelTestingOnlyAlwaysMigrate]
 	scalingEnabled := HasAutoscalingEnabled(vm)
+	alwaysMigrate := HasAlwaysMigrateLabel(vm)
 
 	slotSize := vm.Spec.Guest.MemorySlotSize // explicitly copy slot size so we aren't keeping the VM object around
 	info := VmInfo{
@@ -125,6 +141,7 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
 			SlotSize: &slotSize,
 		},
+		ScalingConfig:  nil, // set below, maybe
 		AlwaysMigrate:  alwaysMigrate,
 		ScalingEnabled: scalingEnabled,
 	}
@@ -134,15 +151,27 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	}
 
 	if boundsJSON, ok := vm.Annotations[AnnotationAutoscalingBounds]; ok {
-		var bounds scalingBounds
+		var bounds ScalingBounds
 		if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 
-		if err := bounds.validate(info.Mem.SlotSize); err != nil {
+		if err := bounds.Validate(info.Mem.SlotSize); err != nil {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
+	}
+
+	if configJSON, ok := vm.Annotations[AnnotationAutoscalingConfig]; ok {
+		var config ScalingConfig
+		if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
+			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingConfig, err)
+		}
+
+		if err := config.Validate(); err != nil {
+			return nil, fmt.Errorf("Bad scaling config in annotation %q: %w", AnnotationAutoscalingConfig, err)
+		}
+		info.ScalingConfig = &config
 	}
 
 	min := info.Min()
@@ -178,9 +207,9 @@ func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
 	return vm.Min() != cmp.Min() || vm.Max() != cmp.Max()
 }
 
-func (vm *VmInfo) applyBounds(b scalingBounds) {
-	vm.Cpu.Min = MilliCPUFromResourceQuantity(*b.Min.CPU)
-	vm.Cpu.Max = MilliCPUFromResourceQuantity(*b.Max.CPU)
+func (vm *VmInfo) applyBounds(b ScalingBounds) {
+	vm.Cpu.Min = MilliCPUFromResourceQuantity(b.Min.CPU)
+	vm.Cpu.Max = MilliCPUFromResourceQuantity(b.Max.CPU)
 
 	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
 	// (2^16-1) * info.Mem.SlotSize.Value().
@@ -188,50 +217,70 @@ func (vm *VmInfo) applyBounds(b scalingBounds) {
 	vm.Mem.Max = uint16(b.Max.Mem.Value() / vm.Mem.SlotSize.Value())
 }
 
-type scalingBounds struct {
-	Min *resourceBound `json:"min,omitempty"`
-	Max *resourceBound `json:"max,omitempty"`
+// ScalingBounds is the type that we deserialize from the "autoscaling.neon.tech/bounds" annotation
+//
+// All fields (and sub-fields) are pointers so that our handling can distinguish between "field not
+// set" and "field equal to zero". Please note that all field are still required to be set and
+// non-zero, though.
+type ScalingBounds struct {
+	Min ResourceBounds `json:"min"`
+	Max ResourceBounds `json:"max"`
 }
 
-type resourceBound struct {
-	CPU *resource.Quantity `json:"cpu,omitempty"`
-	Mem *resource.Quantity `json:"mem,omitempty"`
+type ResourceBounds struct {
+	CPU resource.Quantity `json:"cpu"`
+	Mem resource.Quantity `json:"mem"`
 }
 
-func (b scalingBounds) validate(memSlotSize *resource.Quantity) error {
-	if b.Min == nil {
-		return errors.New("missing field 'min'")
-	} else if b.Max == nil {
-		return errors.New("missing field 'max'")
-	}
+// Validate checks that the ScalingBounds are all reasonable values - all fields initialized and
+// non-zero.
+func (b ScalingBounds) Validate(memSlotSize *resource.Quantity) error {
+	ec := &erc.Collector{}
 
-	if field, err := b.Min.validate(memSlotSize); err != nil {
-		return fmt.Errorf("error at .min%s: %w", field, err)
-	} else if field, err := b.Max.validate(memSlotSize); err != nil {
-		return fmt.Errorf("error at .max%s: %w", field, err)
-	}
+	b.Min.validate(ec, ".min", memSlotSize)
+	b.Max.validate(ec, ".max", memSlotSize)
 
-	return nil
+	return ec.Resolve()
 }
 
-func (b resourceBound) validate(memSlotSize *resource.Quantity) (field string, _ error) {
-	if b.CPU == nil {
-		return "", errors.New("missing field 'cpu'")
-	} else if b.Mem == nil {
-		return "", errors.New("missing field 'mem'")
+// TODO: This could be made better - see:
+// https://github.com/neondatabase/autoscaling/pull/190#discussion_r1169405645
+func (b ResourceBounds) validate(ec *erc.Collector, path string, memSlotSize *resource.Quantity) {
+	errAt := func(field string, err error) error {
+		return fmt.Errorf("error at %s%s: %w", path, field, err)
 	}
 
 	if b.CPU.IsZero() {
-		return ".cpu", errors.New("value cannot be zero")
+		ec.Add(errAt(".cpu", errors.New("must be set to a non-zero value")))
 	}
 
 	if b.Mem.IsZero() || b.Mem.Value() < 0 {
-		return ".mem", errors.New("value must be greater than zero")
+		ec.Add(errAt(".mem", errors.New("must be set to a value greater than zero")))
 	} else if b.Mem.Value()%memSlotSize.Value() != 0 {
-		return ".mem", fmt.Errorf("value must be divisible by VM memory slot size %s", memSlotSize)
+		ec.Add(errAt(".mem", fmt.Errorf("must be divisible by VM memory slot size %s", memSlotSize)))
 	}
+}
 
-	return "", nil
+// ScalingConfig provides bits of configuration for how the autoscaler-agent makes scaling decisions
+type ScalingConfig struct {
+	// LoadAverageFractionTarget sets the desired fraction of current CPU that the load average
+	// should be. For example, with a value of 0.7, we'd want load average to sit at 0.7 ×
+	// CPU,
+	// scaling CPU to make this happen.
+	LoadAverageFractionTarget float64 `json:"loadAverageFractionTarget"`
+}
+
+func (c *ScalingConfig) Validate() error {
+	ec := &erc.Collector{}
+
+	// Check c.loadAverageFractionTarget is between 0 and 2. We don't
+	// *strictly* need the upper
+	// bound, but it's a good safety check.
+	erc.Whenf(ec, c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
+	erc.Whenf(ec, c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget")
+
+	// heads-up! some functions elsewhere depend on the concrete return type of this function.
+	return ec.Resolve()
 }
 
 // the reason we have custom formatting for VmInfo is because without it, the formatting of memory
@@ -242,8 +291,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
 		state.Write([]byte(fmt.Sprintf(
-			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, ScalingConfig:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
 		)))
 	default:
 		if verb != 'v' {
@@ -253,8 +302,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 		}
 
 		state.Write([]byte(fmt.Sprintf(
-			"{Name:%s Namespace:%s Cpu:%v Mem:%v AlwaysMigrate:%t ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"{Name:%s Namespace:%s Cpu:%v Mem:%v ScalingConfig:%+v AlwaysMigrate:%t ScalingEnabled:%t}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
 		)))
 
 		if verb != 'v' {

@@ -33,6 +33,7 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
   `AutoscaleEnforcer`, the type implementing the `framework.*Plugin` interfaces.
 * [`queue.go`] — implementation of a metrics-based priority queue to select migration targets. Uses
   `container/heap` internally.
+* [`prommetrics.go`] — prometheus metrics collectors.
 * [`run.go`] — handling for `autoscaler-agent` requests, to a point. The nitty-gritty of resource
   handling relies on `trans.go`.
 * [`state.go`] — definitions of `pluginState`, `nodeState`, `podState`. Also _many_ functions to

@@ -14,10 +14,15 @@ PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 VM_KERNEL_VERSION ?= "5.15.80"
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.23.1
+# List of available versions: https://storage.googleapis.com/kubebuilder-tools
+ENVTEST_K8S_VERSION = 1.24.2
 
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
+
+# Go 1.20 changed the handling of git worktrees:
+# https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
+export GOFLAGS=-buildvcs=false
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -143,21 +148,36 @@ vm-informant: ## Build vm-informant image
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: build ## Build docker image with the controller.
+docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
+
+.PHONY: docker-build-neonvm-controller
+docker-build-controller: ## Build docker image for NeonVM controller
 	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
+
+.PHONY: docker-build-neonvm-runner
+docker-build-runner: ## Build docker image for NeonVM runner
 	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
+
+.PHONY: docker-build-vxlan-controller
+docker-build-vxlan-controller: ## Build docker image for NeonVM vxlan controller
 	docker build -t $(IMG_VXLAN) -f neonvm/tools/vxlan/Dockerfile .
-	docker buildx build \
-		--tag $(AUTOSCALER_SCHEDULER_IMG) \
-		--load \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
-		--file build/autoscale-scheduler/Dockerfile \
-		.
+
+.PHONY: docker-build-autoscaler-agent
+docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
 	docker buildx build \
 		--tag $(AUTOSCALER_AGENT_IMG) \
 		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscaler-agent/Dockerfile \
+		.
+
+.PHONY: docker-build-scheduler
+docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
+	docker buildx build \
+		--tag $(AUTOSCALER_SCHEDULER_IMG) \
+		--load \
+		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--file build/autoscale-scheduler/Dockerfile \
 		.
 
 .PHONY: docker-build-examples

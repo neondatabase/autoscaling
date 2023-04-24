@@ -148,8 +148,8 @@ type podState struct {
 	// name will not change after initialization, so it can be accessed without holding a lock.
 	name util.NamespacedName
 
-	// vmName is the name of the VM, as given by the 'vm.neon.tech/name' label.
-	vmName string
+	// vmName is the name of the VM, as given by the 'vm.neon.tech/name' label (and name.Namespace)
+	vmName util.NamespacedName
 
 	// testingOnlyAlwaysMigrate is a test-only debugging flag that, if present in the pod's labels,
 	// will always prompt it to mgirate, regardless of whether the VM actually *needs* to.
@@ -668,15 +668,17 @@ func (e *AutoscaleEnforcer) handlePodDeletion(podName util.NamespacedName) {
 	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
 }
 
-func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, podName string) {
+func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, unqualifiedPodName string) {
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	klog.Infof("Handling updated scaling bounds for VM pod %s:%s", vm.Namespace, podName)
+	podName := util.NamespacedName{Namespace: vm.Namespace, Name: unqualifiedPodName}
 
-	pod, ok := e.state.podMap[util.NamespacedName{Namespace: vm.Namespace, Name: podName}]
+	klog.Infof("Handling updated scaling bounds for VM pod %v", podName)
+
+	pod, ok := e.state.podMap[podName]
 	if !ok {
-		klog.Errorf("[autoscale-enforcer] cannot find VM pod %s:%s to update scaling bounds", vm.Namespace, podName)
+		klog.Errorf("[autoscale-enforcer] cannot find VM pod %v to update scaling bounds", podName)
 		return
 	}
 
@@ -687,10 +689,10 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, podName s
 	cpuVerdict := handleUpdatedLimits(n, &pod.vCPU, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
 	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, receivedContact, vm.Mem.Min, vm.Mem.Max)
 
-	fmtString := "[autoscale-enforcer] Updated scaling bounds for VM pod %s:%s from node %s:\n" +
+	fmtString := "[autoscale-enforcer] Updated scaling bounds for VM pod %v from node %s:\n" +
 		"\tvCPU verdict: %s\n" +
 		"\t mem verdict: %s"
-	klog.Infof(fmtString, vm.Namespace, podName, pod.node.name, cpuVerdict, memVerdict)
+	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
 }
 
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
@@ -732,14 +734,14 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, vmClien
 
 	vmm := &vmapi.VirtualMachineMigration{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-pluginvmm", pod.vmName),
+			GenerateName: fmt.Sprintf("%s-pluginvmm", pod.vmName.Name),
 			Namespace:    pod.name.Namespace,
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
-			VmName: pod.vmName,
+			VmName: pod.vmName.Name,
 		},
 	}
-	klog.Infof("[autoscale-enforcer] VM Migration create request for VM %s:%s", pod.name.Namespace, pod.vmName)
+	klog.Infof("[autoscale-enforcer] VM Migration create request for VM %v", pod.vmName)
 	_, err := vmClient.NeonvmV1().
 		VirtualMachineMigrations(pod.name.Namespace).
 		Create(ctx, vmm, metav1.CreateOptions{})
@@ -904,7 +906,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 		// Build the pod state, update the node
 		ps := &podState{
 			name:   podName,
-			vmName: vm.Name,
+			vmName: util.GetNamespacedName(vm),
 			node:   ns,
 			vCPU: podResourceState[api.MilliCPU]{
 				Reserved:         vmInfo.Cpu.Max,

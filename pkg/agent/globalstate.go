@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tychoish/fun/pubsub"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,10 +36,15 @@ type agentState struct {
 	vmClient             *vmclient.Clientset
 	schedulerEventBroker *pubsub.Broker[watchEvent]
 	schedulerStore       *util.WatchStore[corev1.Pod]
+	metrics              PromMetrics
 }
 
-func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent], schedulerStore *util.WatchStore[corev1.Pod]) agentState {
-	return agentState{
+func (r MainRunner) newAgentState(
+	podIP string,
+	broker *pubsub.Broker[watchEvent],
+	schedulerStore *util.WatchStore[corev1.Pod],
+) (*agentState, *prometheus.Registry) {
+	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
 		config:               r.Config,
@@ -46,7 +53,13 @@ func (r MainRunner) newAgentState(podIP string, broker *pubsub.Broker[watchEvent
 		podIP:                podIP,
 		schedulerEventBroker: broker,
 		schedulerStore:       schedulerStore,
+		metrics:              PromMetrics{}, //nolint:exhaustruct // set below
 	}
+
+	var promReg *prometheus.Registry
+	state.metrics, promReg = makePrometheusParts(state)
+
+	return state, promReg
 }
 
 func vmIsOurResponsibility(vm *vmapi.VirtualMachine, config *Config, nodeName string) bool {
@@ -94,62 +107,72 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 		state.status.vmInfo = event.vmInfo
 		state.vmInfoUpdated.Send()
 	case vmEventAdded:
-		if hasPod {
-			klog.Errorf("Received add event for pod %v while already present", event.podName)
-			return
-		}
-
-		runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
-
-		status := &podStatus{
-			mu:       sync.Mutex{},
-			done:     false,
-			errored:  nil,
-			panicked: false,
-			vmInfo:   event.vmInfo,
-		}
-
-		runner := &Runner{
-			global: s,
-			status: status,
-			logger: RunnerLogger{
-				prefix: fmt.Sprintf("Runner %v: ", podName),
-			},
-			schedulerRespondedWithMigration: false,
-
-			shutdown:              nil, // set by (*Runner).Run
-			vm:                    event.vmInfo,
-			podName:               podName,
-			podIP:                 event.podIP,
-			lock:                  util.NewChanMutex(),
-			requestLock:           util.NewChanMutex(),
-			requestedUpscale:      api.MoreResources{Cpu: false, Memory: false},
-			lastMetrics:           nil,
-			scheduler:             nil,
-			server:                nil,
-			informant:             nil,
-			computeUnit:           nil,
-			lastApproved:          nil,
-			lastSchedulerError:    nil,
-			lastInformantError:    nil,
-			backgroundWorkerCount: atomic.Int64{},
-			backgroundPanic:       make(chan error),
-		}
-
-		txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
-
-		state = &podState{
-			podName:       podName,
-			stop:          cancelRunnerContext,
-			runner:        runner,
-			status:        status,
-			vmInfoUpdated: txVMUpdate,
-		}
-		s.pods[podName] = state
-		runner.Spawn(runnerCtx, rxVMUpdate)
+		s.handleVMEventAdded(ctx, event, podName)
 	default:
 		panic(errors.New("bad event: unexpected event kind"))
 	}
+}
+
+func (s *agentState) handleVMEventAdded(
+	ctx context.Context,
+	event vmEvent,
+	podName util.NamespacedName,
+) {
+	if _, ok := s.pods[podName]; ok {
+		klog.Errorf("Received add event for pod %v while already present", event.podName)
+		return
+	}
+
+	runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
+
+	status := &podStatus{
+		mu:       sync.Mutex{},
+		done:     false,
+		errored:  nil,
+		panicked: false,
+		vmInfo:   event.vmInfo,
+
+		startTime:                   time.Now(),
+		lastSuccessfulInformantComm: nil,
+	}
+
+	runner := &Runner{
+		global: s,
+		status: status,
+		logger: RunnerLogger{
+			prefix: fmt.Sprintf("Runner %v: ", podName),
+		},
+		schedulerRespondedWithMigration: false,
+
+		shutdown:              nil, // set by (*Runner).Run
+		vm:                    event.vmInfo,
+		podName:               podName,
+		podIP:                 event.podIP,
+		lock:                  util.NewChanMutex(),
+		requestLock:           util.NewChanMutex(),
+		requestedUpscale:      api.MoreResources{Cpu: false, Memory: false},
+		lastMetrics:           nil,
+		scheduler:             nil,
+		server:                nil,
+		informant:             nil,
+		computeUnit:           nil,
+		lastApproved:          nil,
+		lastSchedulerError:    nil,
+		lastInformantError:    nil,
+		backgroundWorkerCount: atomic.Int64{},
+		backgroundPanic:       make(chan error),
+	}
+
+	txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
+
+	s.pods[podName] = &podState{
+		podName:       podName,
+		stop:          cancelRunnerContext,
+		runner:        runner,
+		status:        status,
+		vmInfoUpdated: txVMUpdate,
+	}
+	runner.Spawn(runnerCtx, rxVMUpdate)
 }
 
 type podState struct {
@@ -184,10 +207,13 @@ func (p *podState) dump(ctx context.Context) podStateDump {
 }
 
 type podStatus struct {
-	mu       sync.Mutex
-	done     bool // if true, the runner finished
-	errored  error
-	panicked bool // if true, errored will be non-nil
+	mu        sync.Mutex
+	done      bool // if true, the runner finished
+	errored   error
+	panicked  bool // if true, errored will be non-nil
+	startTime time.Time
+
+	lastSuccessfulInformantComm *time.Time
 
 	// vmInfo stores the latest information about the VM, as given by the global VM watcher.
 	//
@@ -197,11 +223,28 @@ type podStatus struct {
 }
 
 type podStatusDump struct {
-	Done     bool  `json:"done"`
-	Errored  error `json:"errored"`
-	Panicked bool  `json:"panicked"`
+	Done      bool      `json:"done"`
+	Errored   error     `json:"errored"`
+	Panicked  bool      `json:"panicked"`
+	StartTime time.Time `json:"startTime"`
+
+	LastSuccessfulInformantComm *time.Time `json:"lastSuccessfulInformantComm"`
 
 	VMInfo api.VmInfo `json:"vmInfo"`
+}
+
+func (s *podStatus) informantIsUnhealthy(config *Config) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	startupGracePeriod := time.Second * time.Duration(config.Informant.UnhealthyStartupGracePeriodSeconds)
+	unhealthySilencePeriod := time.Second * time.Duration(config.Informant.UnhealthyAfterSilenceDurationSeconds)
+
+	if s.lastSuccessfulInformantComm == nil {
+		return time.Since(s.startTime) >= startupGracePeriod
+	} else {
+		return time.Since(*s.lastSuccessfulInformantComm) >= unhealthySilencePeriod
+	}
 }
 
 func (s *podStatus) dump() podStatusDump {
@@ -213,6 +256,9 @@ func (s *podStatus) dump() podStatusDump {
 		Errored:  s.errored,
 		Panicked: s.panicked,
 		// FIXME: api.VmInfo contains a resource.Quantity - is that safe to copy by value?
-		VMInfo: s.vmInfo,
+		VMInfo:    s.vmInfo,
+		StartTime: s.startTime,
+
+		LastSuccessfulInformantComm: s.lastSuccessfulInformantComm,
 	}
 }
