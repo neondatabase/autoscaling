@@ -563,9 +563,9 @@ func main() {
 	wg.Add(1)
 	go listenForCPUChanges(ctx, vmSpec.RunnerPort, cgroupPath, wg)
 
-	qemuString := shellescape.QuoteCommand(append([]string{QEMU_BIN}, qemuCmd...))
-	log.Printf("build qemu string: %s", qemuString)
-	if err := execFg("cgexec", "-g", fmt.Sprintf("cpu:%s", cgroupPath), qemuString); err != nil {
+	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
+	log.Printf("build qemu args: %s", args)
+	if err := execFg("cgexec", args...); err != nil {
 		log.Printf("Qemu exited: %s", err)
 	}
 
