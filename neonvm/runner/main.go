@@ -443,7 +443,7 @@ func main() {
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
-		log.Fatalln(err)
+		log.Fatalf("Failed to createISO9660runtime %s", err)
 	}
 
 	// resize rootDisk image of size specified and new size more than current
@@ -453,7 +453,7 @@ func main() {
 	// get current disk size by qemu-img info command
 	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalf("Failed to get disk size: %s", err)
 	}
 	imageSize := QemuImgOutputPartial{}
 	json.Unmarshal(qemuImgOut, &imageSize)
@@ -464,7 +464,7 @@ func main() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
 			log.Printf("resizing rootDisk from %s to %s\n", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
 			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
-				log.Fatal(err)
+				log.Fatalf("Failed to resize disk: %s", err)
 			}
 		} else {
 			log.Printf("rootDisk.size (%s) should be more than size in image (%s)\n", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
@@ -498,7 +498,7 @@ func main() {
 			log.Printf("creating QCOW2 image '%s' with empty ext4 filesystem", disk.Name)
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
-				log.Fatalln(err)
+				log.Fatalf("Failed to create QCOW2: %s", err)
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none", disk.Name, dPath))
 		case disk.ConfigMap != nil || disk.Secret != nil:
@@ -506,7 +506,7 @@ func main() {
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 			log.Printf("creating iso9660 image '%s' for '%s' from path '%s'", dPath, disk.Name, mnt)
 			if err := createISO9660FromPath(disk.Name, dPath, mnt); err != nil {
-				log.Fatalln(err)
+				log.Fatalf("Failed to create ISO9660 image: %s", err)
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
 		default:
@@ -552,7 +552,7 @@ func main() {
 	cgroupPath := fmt.Sprintf("/%s-vm-runner", vmStatus.PodName)
 
 	if err := setCgroupLimit(qemuCPUs.minFraction, cgroupPath); err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to set cgroup limit: %s", err)
 	}
 	defer cleanupCgroup(cgroupPath)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -564,8 +564,9 @@ func main() {
 	go listenForCPUChanges(ctx, vmSpec.RunnerPort, cgroupPath, wg)
 
 	qemuString := shellescape.QuoteCommand(append([]string{QEMU_BIN}, qemuCmd...))
+	log.Printf("build qemu string: %s", qemuString)
 	if err := execFg("cgexec", "-g", fmt.Sprintf("cpu:%s", cgroupPath), qemuString); err != nil {
-		log.Println(err)
+		log.Printf("Qemu exited: %s", err)
 	}
 
 	cancel()
@@ -646,7 +647,7 @@ func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg 
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(baseCtx)
-		log.Println(err)
+		log.Printf("shut down cpu_change server: %v", err)
 	}
 }
 
