@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -513,4 +514,17 @@ func MilliCPUFromResourceQuantity(r resource.Quantity) MilliCPU {
 
 func (m *MilliCPU) ToResourceQuantity() resource.Quantity {
 	return *resource.NewMilliQuantity(int64(*m), resource.BinarySI)
+}
+
+// this is used to parse scheduler config
+// we used resource.Qunatity as underlying transport format for MilliCPU
+func (m *MilliCPU) UnmarshalJSON(data []byte) error {
+	var quantity resource.Quantity
+	err := json.Unmarshal(data, &quantity)
+	if err != nil {
+		return err
+	}
+
+	*m = MilliCPUFromResourceQuantity(quantity)
+	return nil
 }
