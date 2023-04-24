@@ -15,9 +15,9 @@ func TestFormatting(t *testing.T) {
 		Name:      "foo",
 		Namespace: "bar",
 		Cpu: api.VmCpuInfo{
-			Min: 1,
-			Max: 5,
-			Use: 3,
+			Min: 1000,
+			Max: 5000,
+			Use: 3000,
 		},
 		Mem: api.VmMemInfo{
 			Min:      2,
