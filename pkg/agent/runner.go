@@ -1456,7 +1456,7 @@ func (r *Runner) doVMUpdate(
 	patches := []util.JSONPatch{{
 		Op:    util.PatchReplace,
 		Path:  "/spec/guest/cpus/use",
-		Value: target.VCPU,
+		Value: target.VCPU.ToResourceQuantity(),
 	}, {
 		Op:    util.PatchReplace,
 		Path:  "/spec/guest/memorySlots/use",
