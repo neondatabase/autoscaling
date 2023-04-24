@@ -516,7 +516,7 @@ func (m *MilliCPU) ToResourceQuantity() resource.Quantity {
 	return *resource.NewMilliQuantity(int64(*m), resource.BinarySI)
 }
 
-// this is used to parse scheduler config
+// this is used to parse scheduler config and communication between components
 // we used resource.Qunatity as underlying transport format for MilliCPU
 func (m *MilliCPU) UnmarshalJSON(data []byte) error {
 	var quantity resource.Quantity
@@ -527,4 +527,8 @@ func (m *MilliCPU) UnmarshalJSON(data []byte) error {
 
 	*m = MilliCPUFromResourceQuantity(quantity)
 	return nil
+}
+
+func (m *MilliCPU) MarshalJSON() ([]byte, error) {
+	return json.Marshal(m.ToResourceQuantity())
 }
