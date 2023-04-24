@@ -559,9 +559,9 @@ func main() {
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go terminateQemuOnSigterm(ctx, vmSpec.QMP, wg)
+	go terminateQemuOnSigterm(ctx, vmSpec.QMP, &wg)
 	wg.Add(1)
-	go listenForCPUChanges(ctx, vmSpec.RunnerPort, cgroupPath, wg)
+	go listenForCPUChanges(ctx, vmSpec.RunnerPort, cgroupPath, &wg)
 
 	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
 	log.Printf("build qemu args: %s", args)
@@ -617,7 +617,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 
 type cgroupContextKey struct{}
 
-func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg sync.WaitGroup) {
+func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg *sync.WaitGroup) {
 	defer wg.Done()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cpu_change", handleCPUChange)
@@ -732,7 +732,7 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	}
 }
 
-func terminateQemuOnSigterm(ctx context.Context, qmpPort int32, wg sync.WaitGroup) {
+func terminateQemuOnSigterm(ctx context.Context, qmpPort int32, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Println("watching OS signals")
 	c := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
