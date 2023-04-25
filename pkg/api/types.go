@@ -551,6 +551,11 @@ func (m *MilliCPU) MarshalJSON() ([]byte, error) {
 }
 
 func (m MilliCPU) Format(state fmt.State, verb rune) {
-	quantity := m.ToResourceQuantity()
-	state.Write([]byte(fmt.Sprintf("%v", quantity.AsApproximateFloat64())))
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf("%v", uint32(m))))
+	default:
+		quantity := m.ToResourceQuantity()
+		state.Write([]byte(fmt.Sprintf("%v", quantity.AsApproximateFloat64())))
+	}
 }
