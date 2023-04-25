@@ -1315,7 +1315,7 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
 	// average),
 	// which we can get by dividing LA by LAFT.
-	goalCU := uint16(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
+	goalCU := uint32(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
 
 	// Update goalCU based on any requested upscaling
 	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling())
@@ -1327,7 +1327,7 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	}
 
 	// resources for the desired "goal" compute units
-	goal := s.computeUnit.Mul(goalCU)
+	goal := s.computeUnit.Mul(uint16(goalCU))
 
 	// bound goal by the minimum and maximum resource amounts for the VM
 	result := goal.Min(s.vm.Max()).Max(s.vm.Min())
