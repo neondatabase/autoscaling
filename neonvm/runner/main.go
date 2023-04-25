@@ -671,7 +671,7 @@ func setCgroupLimit(r resource.Quantity, cgroupPath string) error {
 	// quota may be greater than period if the cgroup is allowed
 	// to use more than 100% of a CPU.
 	quota := int64(float64(r.MilliValue()) / float64(1000) * float64(cgroupPeriod))
-	fmt.Printf("setting cgroup to %s %s", quota, period)
+	fmt.Printf("setting cgroup to %v %v", quota, period)
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
