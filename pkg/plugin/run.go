@@ -218,8 +218,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	vCPUTransition := collectResourceTransition(&node.vCPU, &pod.vCPU)
 	memTransition := collectResourceTransition(&node.memSlots, &pod.memSlots)
 
-	vCPUVerdict := vCPUTransition.handleRequested(
-		req.VCPU, startingMigration)
+	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration)
 	memVerdict := memTransition.handleRequested(req.Mem, startingMigration)
 
 	fmtString := "[autoscale-enforcer] Handled resources from pod %v AgentRequest.\n" +

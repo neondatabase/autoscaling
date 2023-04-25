@@ -261,7 +261,7 @@ type VirtualMachineStatus struct {
 	// +optional
 	Node string `json:"node,omitempty"`
 	// +optional
-	CPUs resource.Quantity `json:"cpus,omitempty"`
+	CPUs *resource.Quantity `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 }

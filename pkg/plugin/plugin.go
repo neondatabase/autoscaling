@@ -481,14 +481,14 @@ func (e *AutoscaleEnforcer) Score(
 		return framework.MinNodeScore, nil
 	}
 
-	totalCpu := int64(node.totalReservableCPU())
+	totalMilliCpu := int64(node.totalReservableCPU())
 	totalMem := int64(node.totalReservableMemSlots())
-	maxTotalCpu := int64(e.state.maxTotalReservableCPU)
+	maxTotalMilliCpu := int64(e.state.maxTotalReservableCPU)
 	maxTotalMem := int64(e.state.maxTotalReservableMemSlots)
 
 	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
 	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	scoreCpu := framework.MinNodeScore + scoreLen*totalCpu/maxTotalCpu
+	scoreCpu := framework.MinNodeScore + scoreLen*totalMilliCpu/maxTotalMilliCpu
 	scoreMem := framework.MinNodeScore + scoreLen*totalMem/maxTotalMem
 
 	// return the minimum of the two resources scores

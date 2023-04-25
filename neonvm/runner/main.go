@@ -5,8 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net/http"
+	"strconv"
 
 	"bytes"
 	"flag"
@@ -551,7 +552,7 @@ func main() {
 	// leading slash is important
 	cgroupPath := fmt.Sprintf("/%s-vm-runner", vmStatus.PodName)
 
-	if err := setCgroupLimit(qemuCPUs.minFraction, cgroupPath); err != nil {
+	if err := setCgroupLimit(qemuCPUs.use, cgroupPath); err != nil {
 		log.Fatalf("Failed to set cgroup limit: %s", err)
 	}
 	defer cleanupCgroup(cgroupPath)
@@ -573,16 +574,16 @@ func main() {
 	wg.Wait()
 }
 
-func handleCPUChange(w http.ResponseWriter, r *http.Request) {
+func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "POST" {
 		log.Printf("unexpected method: %s\n", r.Method)
-		w.WriteHeader(500)
+		w.WriteHeader(400)
 		return
 	}
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("could not read body: %s\n", err)
-		w.WriteHeader(500)
+		w.WriteHeader(400)
 		return
 	}
 
@@ -590,24 +591,15 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 	err = json.Unmarshal(body, &parsed)
 	if err != nil {
 		log.Printf("could not parse body: %s\n", err)
-		w.WriteHeader(500)
-		return
-	}
-
-	cgroupPath := r.Context().Value(cgroupContextKey{})
-	val, ok := cgroupPath.(string)
-	if !ok {
-		log.Println("no path in context")
-		w.WriteHeader(500)
+		w.WriteHeader(400)
 		return
 	}
 
 	// update cgroup
-	fraction := getCPUFraction(parsed.VCPUs)
-	log.Printf("got CPU update %v (%v)\n", parsed.VCPUs, fraction)
-	err = setCgroupLimit(fraction, val)
+	log.Printf("got CPU update %v", parsed.VCPUs)
+	err = setCgroupLimit(parsed.VCPUs, cgroupPath)
 	if err != nil {
-		log.Printf("could not read body: %s\n", err)
+		log.Printf("could not set cgroup limit: %s\n", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -615,24 +607,46 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-type cgroupContextKey struct{}
+func handleCPUCurrent(w http.ResponseWriter, r *http.Request, cgroupPath string) {
+	if r.Method != "GET" {
+		log.Printf("unexpected method: %s\n", r.Method)
+		w.WriteHeader(400)
+		return
+	}
+
+	cpus, err := getCgroupQuota(cgroupPath)
+	if err != nil {
+		log.Printf("could not get cgroup quota: %s\n", err)
+		w.WriteHeader(500)
+		return
+	}
+	resp := api.VCPUCgroup{VCPUs: *cpus}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		log.Printf("could not marshal body: %s\n", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	w.Write(body)
+}
 
 func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg *sync.WaitGroup) {
 	defer wg.Done()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/cpu_change", handleCPUChange)
-	baseCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	baseCtx = context.WithValue(baseCtx, cgroupContextKey{}, cgroupPath)
+	mux.HandleFunc("/cpu_change", func(w http.ResponseWriter, r *http.Request) {
+		handleCPUChange(w, r, cgroupPath)
+	})
+	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
+		handleCPUCurrent(w, r, cgroupPath)
+	})
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
 		Handler:           mux,
 		ReadTimeout:       5 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      5 * time.Second,
-		BaseContext: func(_ net.Listener) context.Context {
-			return baseCtx
-		},
 	}
 	errChan := make(chan error)
 	go func() {
@@ -646,22 +660,25 @@ func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg 
 			log.Fatalf("error starting server: %s\n", err)
 		}
 	case <-ctx.Done():
-		err := server.Shutdown(baseCtx)
+		err := server.Shutdown(context.Background())
 		log.Printf("shut down cpu_change server: %v", err)
 	}
 }
 
-func setCgroupLimit(fraction float64, cgroupPath string) error {
+func setCgroupLimit(r resource.Quantity, cgroupPath string) error {
 	isV2 := cgroups.Mode() == cgroups.Unified
 	period := cgroupPeriod
-	quota := int64(fraction * float64(cgroupPeriod))
+	// quota may be greater than period if the cgroup is allowed
+	// to use more than 100% of a CPU.
+	quota := int64(float64(r.MilliValue()) / float64(1000) * float64(cgroupPeriod))
+	fmt.Printf("setting cgroup to %s %s", quota, period)
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
 				Max: cgroup2.NewCPUMax(&quota, &period),
 			},
 		}
-		_, err := cgroup2.NewManager("/sys/fs/cgroup", cgroupPath, &resources)
+		_, err := cgroup2.NewManager(cgroupMountPoint, cgroupPath, &resources)
 		if err != nil {
 			return err
 		}
@@ -697,19 +714,35 @@ func cleanupCgroup(cgroupPath string) error {
 	}
 }
 
-type QemuCPUs struct {
-	max         *int
-	min         int
-	minFraction float64
-}
-
-func getCPUFraction(r resource.Quantity) float64 {
-	fraction := float64(r.MilliValue()) / float64(r.Value()*1000)
-	if fraction == 0 {
-		fraction = 1
+func getCgroupQuota(cgroupPath string) (*resource.Quantity, error) {
+	isV2 := cgroups.Mode() == cgroups.Unified
+	var path string
+	if isV2 {
+		path = filepath.Join(cgroupMountPoint, cgroupPath, "cpu.max")
+	} else {
+		path = filepath.Join(cgroupMountPoint, cgroupPath, "cpu.cfs_quota_us")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
 	}
 
-	return fraction
+	arr := strings.Split(strings.Trim(string(data), "\n"), " ")
+	if len(arr) == 0 {
+		return nil, fmt.Errorf("unexpected cgroup data")
+	}
+	quota, err := strconv.ParseUint(arr[0], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return resource.NewMilliQuantity(
+		int64(quota*1000/cgroupPeriod), resource.BinarySI), nil
+}
+
+type QemuCPUs struct {
+	max *int
+	min int
+	use resource.Quantity
 }
 
 func processCPUs(cpus vmv1.CPUs) QemuCPUs {
@@ -718,7 +751,6 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	if cpus.Use != nil {
 		use = *cpus.Use
 	}
-	fraction := getCPUFraction(use)
 
 	var max *int
 	if cpus.Max != nil {
@@ -726,9 +758,9 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 		max = &val
 	}
 	return QemuCPUs{
-		max:         max,
-		min:         min,
-		minFraction: fraction,
+		max: max,
+		min: min,
+		use: use,
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -415,33 +416,52 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					return err
 				}
 				// compare guest spec and count of plugged
-				if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) > int32(len(cpusPlugged)) {
+				if virtualmachine.Spec.Guest.CPUs.Use.Value() > int64(len(cpusPlugged)) {
 					// going to plug one CPU
 					if err := QmpPlugCpu(virtualmachine); err != nil {
 						return err
 					}
-				} else if int32(virtualmachine.Spec.Guest.CPUs.Use.Value()) < int32(len(cpusPlugged)) {
+				} else if virtualmachine.Spec.Guest.CPUs.Use.Value() < int64(len(cpusPlugged)) {
 					// going to unplug one CPU
 					if err := QmpUnplugCpu(virtualmachine); err != nil {
 						return err
 					}
 				}
-				// we should notify even if had'n plug/unplug anything because we may scale by cgroup
-				if err := notifyRunner(ctx, virtualmachine, *virtualmachine.Spec.Guest.CPUs.Use); err != nil {
-					return err
-				}
 			}
 
 			// get CPU details from QEMU and update status
-			_, _, err := QmpGetCpus(virtualmachine)
+			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
 			}
-			// also get cgroup?
+			specCPU := virtualmachine.Spec.Guest.CPUs.Use
+			pluggedCPU := int64(len(cpuSlotsPlugged))
+			cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+			if err != nil {
+				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+
+			// update cgroup when necessary
+			// if we're done scaling (plugged all CPU) then apply cgroup
+			// else just use all
+			var targetCPUUsage resource.Quantity
+			if specCPU != nil && specCPU.Value() == pluggedCPU {
+				targetCPUUsage = *specCPU
+			} else {
+				targetCPUUsage = *resource.NewQuantity(pluggedCPU, resource.BinarySI)
+			}
+
+			if targetCPUUsage.Cmp(cgroupUsage.VCPUs) != 0 {
+				if err := notifyRunner(ctx, virtualmachine, targetCPUUsage); err != nil {
+					return err
+				}
+			}
+
 			if virtualmachine.Status.CPUs.Cmp(*virtualmachine.Spec.Guest.CPUs.Use) != 0 {
 				// update status by count of CPU cores used in VM
-				virtualmachine.Status.CPUs = *virtualmachine.Spec.Guest.CPUs.Use
+				virtualmachine.Status.CPUs = virtualmachine.Spec.Guest.CPUs.Use
 				// record event about cpus used in VM
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
 					fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
@@ -607,7 +627,8 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 }
 
 func notifyRunner(ctx context.Context, vm *vmv1.VirtualMachine, r resource.Quantity) error {
-	client := http.Client{Timeout: 5 * time.Second}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
 	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
 
@@ -624,7 +645,7 @@ func notifyRunner(ctx context.Context, vm *vmv1.VirtualMachine, r resource.Quant
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -633,6 +654,41 @@ func notifyRunner(ctx context.Context, vm *vmv1.VirtualMachine, r resource.Quant
 		return fmt.Errorf("unexpected status %s", resp.Status)
 	}
 	return nil
+}
+
+func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (api.VCPUCgroup, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result := api.VCPUCgroup{}
+
+	url := fmt.Sprintf("http://%s:%d/cpu_current", vm.Status.PodIP, vm.Spec.RunnerPort)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return result, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return result, err
+	}
+
+	if resp.StatusCode != 200 {
+		return result, fmt.Errorf("unexpected status %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+	if err != nil {
+		return result, err
+	}
+
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
 }
 
 // imageForVirtualMachine gets the Operand image which is managed by this controller

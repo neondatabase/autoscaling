@@ -53,14 +53,14 @@ func (m *metricsTimeSlice) Duration() time.Duration { return m.endTime.Sub(m.sta
 
 type vmMetricsInstant struct {
 	// cpu stores the cpu allocation at a particular instant.
-	cpu uint32
+	cpu api.MilliCPU
 }
 
 // vmMetricsSeconds is like vmMetrics, but the values cover the allocation over time
 type vmMetricsSeconds struct {
 	// cpu stores the CPU seconds allocated to the VM, roughly equivalent to the integral of CPU
 	// usage over time.
-	cpu uint32
+	cpu api.MilliCPU
 	// activeTime stores the total time that the VM was active
 	activeTime time.Duration
 }
@@ -144,7 +144,7 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode)
 			endpointID: endpointID,
 		}
 		presentMetrics := vmMetricsInstant{
-			cpu: uint32(api.MilliCPUFromResourceQuantity(*vm.Spec.Guest.CPUs.Use)),
+			cpu: api.MilliCPUFromResourceQuantity(*vm.Spec.Guest.CPUs.Use),
 		}
 		if oldMetrics, ok := old[key]; ok {
 			// The VM was present from s.lastTime to now. Add a time slice to its metrics history.
@@ -205,7 +205,7 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 	// TODO: This approach is imperfect. Floating-point math is probably *fine*, but really not
 	// something we want to rely on. A "proper" solution is a lot of work, but long-term valuable.
 	metricsSeconds := vmMetricsSeconds{
-		cpu:        uint32(math.Round(float64(h.lastSlice.metrics.cpu) * seconds)),
+		cpu:        api.MilliCPU(math.Round(float64(h.lastSlice.metrics.cpu) * seconds)),
 		activeTime: duration,
 	}
 	h.total.cpu += metricsSeconds.cpu
@@ -232,6 +232,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
+		cpu := history.total.cpu.ToResourceQuantity()
 
 		batch.AddIncrementalEvent(billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
@@ -242,7 +243,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			// That way we can be aligned to collection, rather than pushing.
 			StartTime: s.pushWindowStart,
 			StopTime:  now,
-			Value:     int(history.total.cpu),
+			Value:     cpu.AsApproximateFloat64(),
 		})
 		batch.AddIncrementalEvent(billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
@@ -251,7 +252,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
-			Value:          int(math.Round(history.total.activeTime.Seconds())),
+			Value:          math.Round(history.total.activeTime.Seconds()),
 		})
 	}
 

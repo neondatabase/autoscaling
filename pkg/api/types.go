@@ -186,7 +186,7 @@ func (r Resources) Max(cmp Resources) Resources {
 // Mul returns the result of multiplying each resource by factor
 func (r Resources) Mul(factor uint16) Resources {
 	return Resources{
-		VCPU: MilliCPU(uint32(factor) * uint32(r.VCPU)),
+		VCPU: MilliCPU(factor) * r.VCPU,
 		Mem:  factor * r.Mem,
 	}
 }
@@ -502,22 +502,39 @@ type ResumeAgent struct {
 	ExpectedID uuid.UUID `json:"expectedID"`
 }
 
+////////////////////////////////////
+// Controller <-> Runner Messages //
+////////////////////////////////////
+
+// VCPUChange is used to notify runner that it had some changes in its CPUs
+// runner uses this info to adjust qemu cgroup
 type VCPUChange struct {
 	VCPUs resource.Quantity
 }
 
+// VCPUCgroup is used in runner to reply to controller
+// it represents the vCPU usage as controlled by cgroup
+type VCPUCgroup struct {
+	VCPUs resource.Quantity
+}
+
+// MilliCPU is a special type to represent vCPUs * 1000
+// e.g. 2 vCPU is 2000, 0.25 is 250
 type MilliCPU uint32
 
+// MilliCPUFromResourceQuantity converts resource.Qunatity into MilliCPU
 func MilliCPUFromResourceQuantity(r resource.Quantity) MilliCPU {
 	return MilliCPU(r.MilliValue())
 }
 
+// ToResourceQuantity converts a MilliCPU to resource.Qunatity
+// this is useful for formatting/serialization
 func (m *MilliCPU) ToResourceQuantity() resource.Quantity {
 	return *resource.NewMilliQuantity(int64(*m), resource.BinarySI)
 }
 
 // this is used to parse scheduler config and communication between components
-// we used resource.Qunatity as underlying transport format for MilliCPU
+// we used resource.Quantity as underlying transport format for MilliCPU
 func (m *MilliCPU) UnmarshalJSON(data []byte) error {
 	var quantity resource.Quantity
 	err := json.Unmarshal(data, &quantity)

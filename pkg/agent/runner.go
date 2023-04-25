@@ -1357,11 +1357,11 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 // divide to a multiple of the Compute Unit, the upper and lower bounds will be different. This can
 // happen when the Compute Unit is changed, or when the VM's maximum or minimum resource allocations
 // has previously prevented it from being set to a multiple of the Compute Unit.
-func (s *atomicUpdateState) computeUnitsBounds() (uint16, uint16) {
+func (s *atomicUpdateState) computeUnitsBounds() (uint32, uint32) {
 	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is already guaranteed by
 	// the
-	minCPUUnits := uint16((uint32(s.vm.Cpu.Use) + uint32(s.computeUnit.VCPU) - 1) / uint32(s.computeUnit.VCPU))
-	minMemUnits := (s.vm.Mem.Use + s.computeUnit.Mem - 1) / s.computeUnit.Mem
+	minCPUUnits := (uint32(s.vm.Cpu.Use) + uint32(s.computeUnit.VCPU) - 1) / uint32(s.computeUnit.VCPU)
+	minMemUnits := uint32((s.vm.Mem.Use + s.computeUnit.Mem - 1) / s.computeUnit.Mem)
 
 	return util.Min(minCPUUnits, minMemUnits), util.Max(minCPUUnits, minMemUnits)
 }
@@ -1373,16 +1373,16 @@ func (s *atomicUpdateState) computeUnitsBounds() (uint16, uint16) {
 //
 // This method does not respect any bounds on Compute Units placed by the VM's maximum or minimum
 // resource allocation.
-func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint16 {
-	var required uint16
+func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint32 {
+	var required uint32
 
 	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
 
 	if s.requestedUpscale.Cpu {
-		required = util.Max(required, uint16(s.vm.Cpu.Use/s.computeUnit.VCPU)+1)
+		required = util.Max(required, uint32(s.vm.Cpu.Use/s.computeUnit.VCPU)+1)
 	}
 	if s.requestedUpscale.Memory {
-		required = util.Max(required, s.vm.Mem.Use/s.computeUnit.Mem+1)
+		required = util.Max(required, uint32(s.vm.Mem.Use/s.computeUnit.Mem+1))
 	}
 
 	return required

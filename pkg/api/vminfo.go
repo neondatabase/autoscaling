@@ -181,11 +181,11 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	// we can't do validation for resource.Quantity with kubebuilder
 	// so do it here
 	if err := min.CheckValuesAreReasonablySized(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("min resources are invalid: %w", err)
 	}
 
 	if err := max.CheckValuesAreReasonablySized(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("max resources are invalid: %w", err)
 	}
 
 	// check: min <= max
@@ -316,9 +316,9 @@ func (cpu VmCpuInfo) Format(state fmt.State, verb rune) {
 	// same-ish style as for VmInfo, differing slightly from default repr.
 	switch {
 	case verb == 'v' && state.Flag('#'):
-		state.Write([]byte(fmt.Sprintf("api.VmCpuInfo{Min:%d, Max:%d, Use:%d}", cpu.Min, cpu.Max, cpu.Use)))
+		state.Write([]byte(fmt.Sprintf("api.VmCpuInfo{Min:api.MilliCPU(%d), Max:api.MilliCPU(%d), Use:api.MilliCPU(%d)}", cpu.Min, cpu.Max, cpu.Use)))
 	default:
-		state.Write([]byte(fmt.Sprintf("{Min:%d Max:%d Use:%d}", cpu.Min, cpu.Max, cpu.Use)))
+		state.Write([]byte(fmt.Sprintf("{Min:%v Max:%v Use:%v}", cpu.Min.ToResourceQuantity(), cpu.Max.ToResourceQuantity(), cpu.Use.ToResourceQuantity())))
 	}
 }
 
