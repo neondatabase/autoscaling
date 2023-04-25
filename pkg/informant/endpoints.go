@@ -26,7 +26,10 @@ type State struct {
 	// memReservedForFileCache stores the amount of memory that's currently reserved for the file
 	// cache.
 	//
-	// This field is mostly used during initialization, where it allows us to
+	// This field is mostly used during initialization, where it allows us to pass state from the
+	// file cache's startup hook to the cgroup's hook.
+	//
+	// There's definitely better ways of doing this, but the solution we have will work for now.
 	memReservedForFileCache uint64
 }
 
