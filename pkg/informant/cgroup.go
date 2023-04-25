@@ -32,10 +32,11 @@ type CgroupState struct {
 
 // CgroupConfig provides some configuration options for State cgroup handling
 type CgroupConfig struct {
-	// OOMBufferBytes gives the amount of memory, in bytes, below system memory that the cgroup's
-	// memory.high should be set to.
+	// OOMBufferBytes gives the target difference between the total memory reserved for the cgroup
+	// and the value of the cgroup's memory.high.
 	//
-	// In other words, memory.high + OOMBufferBytes will equal total system memory.
+	// In other words, memory.high + OOMBufferBytes will equal the total memory that the cgroup may
+	// use (equal to system memory, minus whatever's taken out for the file cache).
 	OOMBufferBytes uint64
 
 	// MemoryHighBufferBytes gives the amount of memory, in bytes, below a proposed new value for
