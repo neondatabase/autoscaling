@@ -550,7 +550,7 @@ func (m *MilliCPU) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m.ToResourceQuantity())
 }
 
-func (m *MilliCPU) Format(state fmt.State, verb rune) {
+func (m MilliCPU) Format(state fmt.State, verb rune) {
 	quantity := m.ToResourceQuantity()
 	state.Write([]byte(fmt.Sprintf("%v", quantity.AsApproximateFloat64())))
 }
