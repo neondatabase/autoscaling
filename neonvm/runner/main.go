@@ -67,7 +67,6 @@ const (
 
 	// cgroupPeriod is the period for evaluating cgroup quota
 	// in microseconds. Min 1000 microseconds, max 1 second
-	// the actual quota is <= this period
 	cgroupPeriod     = uint64(100000)
 	cgroupMountPoint = "/sys/fs/cgroup"
 )
@@ -444,7 +443,7 @@ func main() {
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
-		log.Fatalf("Failed to createISO9660runtime %s", err)
+		log.Fatalln(err)
 	}
 
 	// resize rootDisk image of size specified and new size more than current
@@ -454,7 +453,7 @@ func main() {
 	// get current disk size by qemu-img info command
 	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
-		log.Fatalf("Failed to get disk size: %s", err)
+		log.Fatalln(err)
 	}
 	imageSize := QemuImgOutputPartial{}
 	json.Unmarshal(qemuImgOut, &imageSize)
@@ -465,7 +464,7 @@ func main() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
 			log.Printf("resizing rootDisk from %s to %s\n", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
 			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
-				log.Fatalf("Failed to resize disk: %s", err)
+				log.Fatal(err)
 			}
 		} else {
 			log.Printf("rootDisk.size (%s) should be more than size in image (%s)\n", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
@@ -499,7 +498,7 @@ func main() {
 			log.Printf("creating QCOW2 image '%s' with empty ext4 filesystem", disk.Name)
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
-				log.Fatalf("Failed to create QCOW2: %s", err)
+				log.Fatalln(err)
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none", disk.Name, dPath))
 		case disk.ConfigMap != nil || disk.Secret != nil:
@@ -507,7 +506,7 @@ func main() {
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 			log.Printf("creating iso9660 image '%s' for '%s' from path '%s'", dPath, disk.Name, mnt)
 			if err := createISO9660FromPath(disk.Name, dPath, mnt); err != nil {
-				log.Fatalf("Failed to create ISO9660 image: %s", err)
+				log.Fatalln(err)
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
 		default:
