@@ -577,7 +577,7 @@ func (s *InformantServer) unregisterFromInformant(ctx context.Context) error {
 		return err // the errors returned by doInformantRequest are descriptive enough.
 	}
 
-	s.runner.logger.Infof("Unregister %s request successful: %+v", *resp)
+	s.runner.logger.Infof("Unregister %s request successful: %+v", s.desc.AgentID, *resp)
 	return nil
 }
 
