@@ -25,7 +25,7 @@ func Max[T constraints.Ordered](x, y T) T {
 	}
 }
 
-// Max returns the minimum of the two values
+// Min returns the minimum of the two values
 func Min[T constraints.Ordered](x, y T) T {
 	if x < y {
 		return x
