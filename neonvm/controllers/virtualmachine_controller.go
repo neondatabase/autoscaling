@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -276,6 +277,20 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 			virtualmachine.Namespace))
 }
 
+func runnerSupportsCgroup(pod *corev1.Pod) bool {
+	val, ok := pod.Labels[vmv1.RunnerPodVersion]
+	if !ok {
+		return false
+	}
+
+	uintVal, err := strconv.ParseUint(val, 10, 32)
+	if err != nil {
+		return false
+	}
+
+	return api.RunnerProtoVersion(uintVal).SupportsCgroup()
+}
+
 func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
 	log := log.FromContext(ctx)
 
@@ -437,7 +452,11 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 			specCPU := virtualmachine.Spec.Guest.CPUs.Use
 			pluggedCPU := int64(len(cpuSlotsPlugged))
-			cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+			var cgroupUsage api.VCPUCgroup
+			supportsCgroup := runnerSupportsCgroup(vmRunner)
+			if supportsCgroup {
+				cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
+			}
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
 				return err
@@ -453,7 +472,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				targetCPUUsage = *resource.NewQuantity(pluggedCPU, resource.BinarySI)
 			}
 
-			if targetCPUUsage.Cmp(cgroupUsage.VCPUs) != 0 {
+			if targetCPUUsage.Cmp(cgroupUsage.VCPUs) != 0 && supportsCgroup {
 				if err := notifyRunner(ctx, virtualmachine, targetCPUUsage); err != nil {
 					return err
 				}
@@ -589,6 +608,7 @@ func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]str
 	}
 	l["app.kubernetes.io/name"] = "NeonVM"
 	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
+	l[vmv1.RunnerPodVersion] = fmt.Sprintf("%d", api.RunnerProtoV1_0)
 	return l
 }
 

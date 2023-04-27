@@ -344,8 +344,10 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 					// seems all CPUs plugged to target runner
 					readyToMigrateCPU = true
 				}
-				if err := notifyRunner(ctx, vm, *vm.Spec.Guest.CPUs.Use); err != nil {
-					return err
+				if runnerSupportsCgroup(targetRunner) {
+					if err := notifyRunner(ctx, vm, *vm.Spec.Guest.CPUs.Use); err != nil {
+						return err
+					}
 				}
 			}
 

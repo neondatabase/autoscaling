@@ -595,7 +595,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	}
 
 	// update cgroup
-	log.Printf("got CPU update %v", parsed.VCPUs)
+	log.Printf("got CPU update %v", parsed.VCPUs.AsApproximateFloat64())
 	err = setCgroupLimit(parsed.VCPUs, cgroupPath)
 	if err != nil {
 		log.Printf("could not set cgroup limit: %s\n", err)

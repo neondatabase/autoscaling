@@ -559,3 +559,15 @@ func (m MilliCPU) Format(state fmt.State, verb rune) {
 		state.Write([]byte(fmt.Sprintf("%v", quantity.AsApproximateFloat64())))
 	}
 }
+
+// this a similar version type for controller <-> runner communications
+// see PluginProtoVersion comment for details
+type RunnerProtoVersion uint32
+
+const (
+	RunnerProtoV1_0 RunnerProtoVersion = iota + 1
+)
+
+func (v RunnerProtoVersion) SupportsCgroup() bool {
+	return v >= RunnerProtoV1_0
+}
