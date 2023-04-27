@@ -238,7 +238,7 @@ func NewInformantServer(
 	// handling, but that's about it.
 	serverName := fmt.Sprintf("InformantServer (%s)", server.desc.AgentID)
 	runner.spawnBackgroundWorker(ctx, serverName, func(c context.Context) {
-		if err := httpServer.Serve(listener); errors.Is(err, http.ErrServerClosed) {
+		if err := httpServer.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 			runner.logger.Errorf("InformantServer exited with unexpected error: %s", err)
 		}
 
