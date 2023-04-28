@@ -2,6 +2,8 @@
 # https://github.com/kubernetes/autoscaler/blob/<GIT_TAG>/builder/Dockerfile
 FROM golang:1.19.7 AS builder
 
+WORKDIR /workspace
+
 ARG CA_GIT_TAG
 
 # Download the repo. It's... quite large, but thankfuly this should get cached
@@ -21,6 +23,6 @@ RUN cd autoscaler/cluster-autoscaler \
 
 FROM gcr.io/distroless/static:nonroot-amd64
 
-COPY --from=builder cluster-autoscaler /cluster-autoscaler
 WORKDIR /
+COPY --from=builder /workspace/cluster-autoscaler .
 CMD ["/cluster-autoscaler"]
