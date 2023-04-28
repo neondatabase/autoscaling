@@ -158,7 +158,9 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		// Don't migrate if it's disabled
 		e.state.conf.migrationEnabled()
 
-	permit, status, err := e.handleResources(pod, node, req.Resources, mustMigrate)
+	supportsFractional := req.ProtoVersion.SupportsFractionalCPU()
+
+	permit, status, err := e.handleResources(pod, node, req.Resources, mustMigrate, supportsFractional)
 	if err != nil {
 		return nil, status, err
 	}
@@ -175,10 +177,25 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	resp := api.PluginResponse{
 		Permit:      permit,
 		Migrate:     migrateDecision,
-		ComputeUnit: *node.computeUnit,
+		ComputeUnit: getComputeUnitForResponse(node, supportsFractional),
 	}
 	pod.mostRecentComputeUnit = node.computeUnit // refer to common allocation
 	return &resp, 200, nil
+}
+
+// getComputeUnitForResponse tries to return compute unit that the agent supports
+// if we have a fractional CPU but the agent does not support it we multiply the result
+func getComputeUnitForResponse(node *nodeState, supportsFractional bool) api.Resources {
+	computeUnit := *node.computeUnit
+	if !supportsFractional {
+		initialCU := computeUnit
+		i := uint16(2)
+		for ; computeUnit.VCPU < 1000; i++ {
+			computeUnit = initialCU.Mul(i)
+		}
+	}
+
+	return computeUnit
 }
 
 func (e *AutoscaleEnforcer) handleResources(
@@ -186,6 +203,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	node *nodeState,
 	req api.Resources,
 	startingMigration bool,
+	suportsFractional bool,
 ) (api.Resources, int, error) {
 	// Check that we aren't being asked to do something during migration:
 	if pod.currentlyMigrating() {
@@ -218,8 +236,8 @@ func (e *AutoscaleEnforcer) handleResources(
 	vCPUTransition := collectResourceTransition(&node.vCPU, &pod.vCPU)
 	memTransition := collectResourceTransition(&node.memSlots, &pod.memSlots)
 
-	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration)
-	memVerdict := memTransition.handleRequested(req.Mem, startingMigration)
+	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration, !suportsFractional)
+	memVerdict := memTransition.handleRequested(req.Mem, startingMigration, false)
 
 	fmtString := "[autoscale-enforcer] Handled resources from pod %v AgentRequest.\n" +
 		"\tvCPU verdict: %s\n" +
