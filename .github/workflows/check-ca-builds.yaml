@@ -1,7 +1,13 @@
 name: check-cluster-autoscaler-builds
 on:
   pull_request:
+    paths:
+      - "cluster-autoscaler/ca.tag"
+      - "cluster-autoscaler/ca.patch"
+      - "cluster-autoscaler/Dockerfile"
   push:
+    branches:
+      - main
     paths:
       - "cluster-autoscaler/ca.tag"
       - "cluster-autoscaler/ca.patch"
