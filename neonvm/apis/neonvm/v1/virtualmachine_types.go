@@ -30,6 +30,19 @@ import (
 // VM's name).
 const VirtualMachineNameLabel string = "vm.neon.tech/name"
 
+// VirtualMachineUsageAnnotation is the annotation added to each runner Pod, mirroring information
+// about the resource allocations of the VM running in the pod.
+//
+// The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
+const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
+
+// VirtualMachineUsage provides information about a VM's current usage. This is the type of the
+// JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
+type VirtualMachineUsage struct {
+	CPU    int32              `json:"cpu"`
+	Memory *resource.Quantity `json:"memory"`
+}
+
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // VirtualMachineSpec defines the desired state of VirtualMachine

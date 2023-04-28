@@ -38,6 +38,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -49,6 +50,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 const (
@@ -403,6 +406,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// update Node name where runner working
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
+			// update Pod "usage" annotation before anything else, so that it will be correctly set,
+			// even if the rest of the reconcile operation fails.
+			if err := updateRunnerUsageAnnotation(ctx, r.Client, virtualmachine, virtualmachine.Status.PodName); err != nil {
+				log.Error(err, "Failed to set Pod usage annotation", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+
 			// do hotplug/unplug CPU if .spec.guest.cpus.use defined
 			if virtualmachine.Spec.Guest.CPUs.Use != nil {
 				// firstly get current state from QEMU
@@ -534,6 +544,67 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 	return nil
 }
 
+var usageAnnotationJSONPointer = fmt.Sprintf("/metadata/annotations/%s", util.PatchPathEscape(vmv1.VirtualMachineUsageAnnotation))
+
+func updateRunnerUsageAnnotation(ctx context.Context, c client.Client, vm *vmv1.VirtualMachine, podName string) error {
+	patches := []util.JSONPatch{{
+		// From RFC 6902 (JSON patch):
+		//
+		// > The "add" operation performs one of the following functions, depending upon what the
+		// > target location references:
+		// >
+		// > [ ... ]
+		// >
+		// > * If the target location specifies an object member that does not already exist, a new
+		// >   member is added to the object.
+		// > * If the target location specifies an object member that does exist, that member's
+		// >   value is replaced.
+		//
+		// So: if the annotation isn't already there, we'll add it. And if it *is* there, we'll
+		// replace it.
+		Op:    util.PatchAdd,
+		Path:  usageAnnotationJSONPointer, // these are *technically* called "JSON pointers" (from RFC 6901)
+		Value: extractVirtualMachineUsageJSON(vm.Spec),
+	}}
+
+	patchData, err := json.Marshal(patches)
+	if err != nil {
+		panic(fmt.Errorf("error marshalling JSON patch: %w", err))
+	}
+
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: vm.Namespace,
+			Name:      podName,
+		},
+	}
+	return c.Patch(ctx, &pod, client.RawPatch(types.JSONPatchType, patchData))
+}
+
+func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
+	cpu := *spec.Guest.CPUs.Min
+	if spec.Guest.CPUs.Use != nil {
+		cpu = *spec.Guest.CPUs.Use
+	}
+
+	memorySlots := *spec.Guest.MemorySlots.Min
+	if spec.Guest.MemorySlots.Use != nil {
+		memorySlots = *spec.Guest.MemorySlots.Use
+	}
+
+	usage := vmv1.VirtualMachineUsage{
+		CPU:    cpu,
+		Memory: resource.NewQuantity(spec.Guest.MemorySlotSize.Value()*int64(memorySlots), resource.BinarySI),
+	}
+
+	usageJSON, err := json.Marshal(usage)
+	if err != nil {
+		panic(fmt.Errorf("error marshalling JSON: %w", err))
+	}
+
+	return string(usageJSON)
+}
+
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
@@ -562,6 +633,15 @@ func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]str
 	l["app.kubernetes.io/name"] = "NeonVM"
 	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
 	return l
+}
+
+func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
+	a := virtualmachine.Annotations
+	if a == nil {
+		a = map[string]string{}
+	}
+	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
+	return a
 }
 
 func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affinity {
@@ -611,6 +691,7 @@ func imageForVmRunner() (string, error) {
 
 func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	labels := labelsForVirtualMachine(virtualmachine)
+	annotations := annotationsForVirtualMachine(virtualmachine)
 	affinity := affinityForVirtualMachine(virtualmachine)
 
 	// Get the Operand image
@@ -634,7 +715,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			Name:        virtualmachine.Status.PodName,
 			Namespace:   virtualmachine.Namespace,
 			Labels:      labels,
-			Annotations: virtualmachine.Annotations,
+			Annotations: annotations,
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy:                 corev1.RestartPolicy(virtualmachine.Spec.RestartPolicy),
