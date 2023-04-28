@@ -22,4 +22,5 @@ RUN cd autoscaler/cluster-autoscaler \
 FROM grc.io/distroless/static:nonroot-amd64
 
 COPY --from=builder cluster-autoscaler /cluster-autoscaler
+WORKDIR /
 CMD ["/cluster-autoscaler"]
