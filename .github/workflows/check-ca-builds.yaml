@@ -17,4 +17,4 @@ jobs:
         # FIXME: is there a way to use docker/build-push without actually pushing here? It'd be good
         # to take advantage of all their extra stuff (build caches, etc.)
       - name: Build cluster-autoscaler
-        run: docker buildx build --build-arg CA_GIT_TAG=$(cat ca.tag) cluster-autoscaler
+        run: docker buildx build --build-arg CA_GIT_TAG=$(cat cluster-autoscaler/ca.tag) cluster-autoscaler
