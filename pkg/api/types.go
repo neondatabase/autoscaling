@@ -42,6 +42,15 @@ const (
 	// Currently the latest version.
 	PluginProtoV1_1
 
+	// PluginProtoV2_0 represents v2.0 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v1.1:
+	//
+	// * Supports fractional CU
+	//
+	// Currently the latest version.
+	PluginProtoV2_0
+
 	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
 	// protocol
 	//
@@ -61,6 +70,8 @@ func (v PluginProtoVersion) String() string {
 		return "v1.0"
 	case PluginProtoV1_1:
 		return "v1.1"
+	case PluginProtoV2_0:
+		return "v2.0"
 	default:
 		diff := v - latestPluginProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)
@@ -78,6 +89,10 @@ func (v PluginProtoVersion) IsValid() bool {
 // This is true for version v1.1 and greater.
 func (v PluginProtoVersion) AllowsNilMetrics() bool {
 	return v >= PluginProtoV1_1
+}
+
+func (v PluginProtoVersion) SupportsFractionalCPU() bool {
+	return v >= PluginProtoV2_0
 }
 
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
@@ -522,12 +537,12 @@ type VCPUCgroup struct {
 // e.g. 2 vCPU is 2000, 0.25 is 250
 type MilliCPU uint32
 
-// MilliCPUFromResourceQuantity converts resource.Qunatity into MilliCPU
+// MilliCPUFromResourceQuantity converts resource.Quantity into MilliCPU
 func MilliCPUFromResourceQuantity(r resource.Quantity) MilliCPU {
 	return MilliCPU(r.MilliValue())
 }
 
-// ToResourceQuantity converts a MilliCPU to resource.Qunatity
+// ToResourceQuantity converts a MilliCPU to resource.Quantity
 // this is useful for formatting/serialization
 func (m *MilliCPU) ToResourceQuantity() resource.Quantity {
 	return *resource.NewMilliQuantity(int64(*m), resource.BinarySI)
@@ -565,9 +580,9 @@ func (m MilliCPU) Format(state fmt.State, verb rune) {
 type RunnerProtoVersion uint32
 
 const (
-	RunnerProtoV1_0 RunnerProtoVersion = iota + 1
+	RunnerProtoV1 RunnerProtoVersion = iota + 1
 )
 
-func (v RunnerProtoVersion) SupportsCgroup() bool {
-	return v >= RunnerProtoV1_0
+func (v RunnerProtoVersion) SupportsCgroupFractionalCPU() bool {
+	return v >= RunnerProtoV1
 }

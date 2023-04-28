@@ -1382,7 +1382,7 @@ func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint32 {
 		required = util.Max(required, uint32(s.vm.Cpu.Use/s.computeUnit.VCPU)+1)
 	}
 	if s.requestedUpscale.Memory {
-		required = util.Max(required, uint32(s.vm.Mem.Use/s.computeUnit.Mem+1))
+		required = util.Max(required, uint32(s.vm.Mem.Use/s.computeUnit.Mem)+1)
 	}
 
 	return required
