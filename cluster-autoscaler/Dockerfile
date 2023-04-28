@@ -9,7 +9,7 @@ RUN git clone --depth=1 -b $CA_GIT_TAG https://github.com/kubernetes/autoscaler
 
 # Only ADD the patch after downloading, to avoid wrecking the cache
 ADD ca.patch ca.patch
-RUN git -C autoscaler apply ca.patch
+RUN git -C autoscaler apply ../ca.patch
 
 RUN cd autoscaler/cluster-autoscaler \
     && go build -o ../../cluster-autoscaler main.go
