@@ -150,11 +150,11 @@ vm-informant: ## Build vm-informant image
 .PHONY: docker-build
 docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
 
-.PHONY: docker-build-neonvm-controller
+.PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
 	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
 
-.PHONY: docker-build-neonvm-runner
+.PHONY: docker-build-runner
 docker-build-runner: ## Build docker image for NeonVM runner
 	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
 
