@@ -316,7 +316,7 @@ func (e *AutoscaleEnforcer) Filter(
 		)
 	}
 
-	// The pod will resources according to vmInfo.{Cpu,Mem}.Use reserved for it when it does get
+	// The pod will get resources according to vmInfo.{Cpu,Mem}.Use reserved for it when it does get
 	// scheduled. Now we can check whether this node has capacity for the pod.
 	//
 	// Technically speaking, the VM pods in nodeInfo might not match what we have recorded for the
