@@ -39,14 +39,14 @@ const (
 	//
 	// * Allows a nil value of the AgentRequest.Metrics field.
 	//
-	// Currently the latest version.
+	// Last used in release version v0.6.0.
 	PluginProtoV1_1
 
 	// PluginProtoV2_0 represents v2.0 of the agent<->scheduler plugin protocol.
 	//
 	// Changes from v1.1:
 	//
-	// * Supports fractional CU
+	// * Supports fractional CPU
 	//
 	// Currently the latest version.
 	PluginProtoV2_0
