@@ -12,7 +12,6 @@ package plugin
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"golang.org/x/exp/constraints"
 
