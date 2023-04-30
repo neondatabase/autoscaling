@@ -562,6 +562,12 @@ func (m *MilliCPU) UnmarshalJSON(data []byte) error {
 }
 
 func (m *MilliCPU) MarshalJSON() ([]byte, error) {
+	// Mashal as an integer if we can, for backwards-compatibility with components that wouldn't be
+	// expecting a string here.
+	if *m%1000 == 0 {
+		return json.Marshal(uint32(*m / 1000))
+	}
+
 	return json.Marshal(m.ToResourceQuantity())
 }
 
