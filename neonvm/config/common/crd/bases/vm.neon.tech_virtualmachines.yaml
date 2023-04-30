@@ -1099,24 +1099,21 @@ spec:
                   cpus:
                     properties:
                       max:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
+                        description: MilliCPU is a special type to represent vCPUs
+                          * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
+                        format: int32
+                        type: integer
                       min:
-                        anyOf:
-                        - type: integer
-                        - type: string
                         default: 1
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
+                        description: MilliCPU is a special type to represent vCPUs
+                          * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
+                        format: int32
+                        type: integer
                       use:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
+                        description: MilliCPU is a special type to represent vCPUs
+                          * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
+                        format: int32
+                        type: integer
                     type: object
                   env:
                     description: List of environment variables to set in the vmstart
@@ -1390,11 +1387,10 @@ spec:
                   type: object
                 type: array
               cpus:
-                anyOf:
-                - type: integer
-                - type: string
-                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                x-kubernetes-int-or-string: true
+                description: MilliCPU is a special type to represent vCPUs * 1000
+                  e.g. 2 vCPU is 2000, 0.25 is 250
+                format: int32
+                type: integer
               extraNetIP:
                 type: string
               extraNetMask:

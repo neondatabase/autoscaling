@@ -61,12 +61,12 @@ func (r *VirtualMachine) ValidateCreate() error {
 		if r.Spec.Guest.CPUs.Max == nil {
 			return errors.New(".spec.guest.cpus.max must be defined if .spec.guest.cpus.use specified")
 		}
-		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Min) == -1 {
+		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
 			return fmt.Errorf(".spec.guest.cpus.use (%v) should be greater than or equal to the .spec.guest.cpus.min (%v)",
 				r.Spec.Guest.CPUs.Use,
 				r.Spec.Guest.CPUs.Min)
 		}
-		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Max) == 1 {
+		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
 			return fmt.Errorf(".spec.guest.cpus.use (%v) should be less than or equal to the .spec.guest.cpus.max (%v)",
 				r.Spec.Guest.CPUs.Use,
 				r.Spec.Guest.CPUs.Max)
@@ -150,12 +150,12 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 
 	// validate .spec.guest.cpu.use
 	if r.Spec.Guest.CPUs.Use != nil {
-		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Min) == -1 {
+		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
 			return fmt.Errorf(".cpus.use (%v) should be greater than or equal to the .cpus.min (%v)",
 				r.Spec.Guest.CPUs.Use,
 				r.Spec.Guest.CPUs.Min)
 		}
-		if r.Spec.Guest.CPUs.Use.Cmp(*r.Spec.Guest.CPUs.Max) == 1 {
+		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
 			return fmt.Errorf(".cpus.use (%v) should be less than or equal to the .cpus.max (%v)",
 				r.Spec.Guest.CPUs.Use,
 				r.Spec.Guest.CPUs.Max)

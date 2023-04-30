@@ -51,9 +51,9 @@ type VmInfo struct {
 }
 
 type VmCpuInfo struct {
-	Min MilliCPU `json:"min"`
-	Max MilliCPU `json:"max"`
-	Use MilliCPU `json:"use"`
+	Min vmapi.MilliCPU `json:"min"`
+	Max vmapi.MilliCPU `json:"max"`
+	Use vmapi.MilliCPU `json:"use"`
 }
 
 type VmMemInfo struct {
@@ -112,14 +112,14 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		}
 	}
 
-	getNonNilMilliCPU := func(err *error, ptr *resource.Quantity, name string) (val MilliCPU) {
+	getNonNilMilliCPU := func(err *error, ptr *vmapi.MilliCPU, name string) (val vmapi.MilliCPU) {
 		if *err != nil {
 			return
 		} else if ptr == nil {
 			*err = fmt.Errorf("expected non-nil field %s", name)
 			return
 		} else {
-			return MilliCPUFromResourceQuantity(*ptr)
+			return *ptr
 		}
 	}
 
@@ -208,8 +208,8 @@ func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
 }
 
 func (vm *VmInfo) applyBounds(b ScalingBounds) {
-	vm.Cpu.Min = MilliCPUFromResourceQuantity(b.Min.CPU)
-	vm.Cpu.Max = MilliCPUFromResourceQuantity(b.Max.CPU)
+	vm.Cpu.Min = vmapi.MilliCPUFromResourceQuantity(b.Min.CPU)
+	vm.Cpu.Max = vmapi.MilliCPUFromResourceQuantity(b.Max.CPU)
 
 	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
 	// (2^16-1) * info.Mem.SlotSize.Value().
