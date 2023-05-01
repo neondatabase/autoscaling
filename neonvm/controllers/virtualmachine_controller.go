@@ -628,6 +628,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal VM Status: %s", err)
 	}
+	serviceLinks := false
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -637,6 +638,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			Annotations: virtualmachine.Annotations,
 		},
 		Spec: corev1.PodSpec{
+			EnableServiceLinks:            &serviceLinks,
 			RestartPolicy:                 corev1.RestartPolicy(virtualmachine.Spec.RestartPolicy),
 			TerminationGracePeriodSeconds: virtualmachine.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  virtualmachine.Spec.NodeSelector,
