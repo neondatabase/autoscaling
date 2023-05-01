@@ -126,7 +126,10 @@ type CPUs struct {
 
 // MilliCPU is a special type to represent vCPUs * 1000
 // e.g. 2 vCPU is 2000, 0.25 is 250
-type MilliCPU uint32
+//
+// +kubebuilder:validation:XIntOrString
+// +kubebuilder:validation:Pattern=^[0-9]+((\.[0-9]*)?|m)
+type MilliCPU uint32 // note: pattern is more restrictive than resource.Quantity, because we're just using it for CPU
 
 // RoundedUp returns the smallest integer number of CPUs greater than or equal to the effective
 // value of m.

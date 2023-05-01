@@ -1102,18 +1102,24 @@ spec:
                         description: MilliCPU is a special type to represent vCPUs
                           * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
                         format: int32
+                        pattern: ^[0-9]+((\.[0-9]*)?|m)
                         type: integer
+                        x-kubernetes-int-or-string: true
                       min:
                         default: 1
                         description: MilliCPU is a special type to represent vCPUs
                           * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
                         format: int32
+                        pattern: ^[0-9]+((\.[0-9]*)?|m)
                         type: integer
+                        x-kubernetes-int-or-string: true
                       use:
                         description: MilliCPU is a special type to represent vCPUs
                           * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
                         format: int32
+                        pattern: ^[0-9]+((\.[0-9]*)?|m)
                         type: integer
+                        x-kubernetes-int-or-string: true
                     type: object
                   env:
                     description: List of environment variables to set in the vmstart
@@ -1390,7 +1396,9 @@ spec:
                 description: MilliCPU is a special type to represent vCPUs * 1000
                   e.g. 2 vCPU is 2000, 0.25 is 250
                 format: int32
+                pattern: ^[0-9]+((\.[0-9]*)?|m)
                 type: integer
+                x-kubernetes-int-or-string: true
               extraNetIP:
                 type: string
               extraNetMask:
