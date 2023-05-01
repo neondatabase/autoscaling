@@ -484,7 +484,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
 					fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
 						virtualmachine.Name,
-						&virtualmachine.Status.CPUs))
+						virtualmachine.Status.CPUs))
 			}
 
 			// do hotplug/unplug Memory if .spec.guest.memorySlots.use defined
