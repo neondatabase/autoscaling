@@ -145,8 +145,8 @@ func MilliCPUFromResourceQuantity(r resource.Quantity) MilliCPU {
 
 // ToResourceQuantity converts a MilliCPU to resource.Quantity
 // this is useful for formatting/serialization
-func (m *MilliCPU) ToResourceQuantity() *resource.Quantity {
-	return resource.NewMilliQuantity(int64(*m), resource.BinarySI)
+func (m MilliCPU) ToResourceQuantity() *resource.Quantity {
+	return resource.NewMilliQuantity(int64(m), resource.BinarySI)
 }
 
 // this is used to parse scheduler config and communication between components
@@ -162,11 +162,11 @@ func (m *MilliCPU) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (m *MilliCPU) MarshalJSON() ([]byte, error) {
+func (m MilliCPU) MarshalJSON() ([]byte, error) {
 	// Mashal as an integer if we can, for backwards-compatibility with components that wouldn't be
 	// expecting a string here.
-	if *m%1000 == 0 {
-		return json.Marshal(uint32(*m / 1000))
+	if m%1000 == 0 {
+		return json.Marshal(uint32(m / 1000))
 	}
 
 	return json.Marshal(m.ToResourceQuantity())
