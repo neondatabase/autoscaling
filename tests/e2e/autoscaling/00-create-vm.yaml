@@ -23,14 +23,14 @@ metadata:
   labels:
     autoscaling.neon.tech/enabled: "true"
   annotations:
-    autoscaling.neon.tech/bounds: '{ "min": { "cpu": 1, "mem": "1Gi" }, "max": { "cpu": 4, "mem": "4Gi" } }'
+    autoscaling.neon.tech/bounds: '{ "min": { "cpu": "250m", "mem": "1Gi" }, "max": {"cpu": 1, "mem": "4Gi" } }'
 spec:
   schedulerName: autoscale-scheduler
   guest:
     cpus:
-      min: 1
-      max: 5 # set value greater than bounds so our tests check we don't exceed the bounds.
-      use: 1
+      min: 0.25
+      max: 1.25 # set value greater than bounds so our tests check we don't exceed the bounds.
+      use: 0.5
     memorySlotSize: 1Gi
     memorySlots:
       min: 1

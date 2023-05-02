@@ -16,6 +16,8 @@ COPY neonvm/main.go      neonvm/main.go
 COPY neonvm/apis/        neonvm/apis/
 COPY neonvm/controllers/ neonvm/controllers/
 COPY neonvm/runner/      neonvm/runner/
+COPY pkg/api/ pkg/api
+COPY pkg/util pkg/util
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -39,7 +41,8 @@ RUN apk add --no-cache \
     busybox-extras \
     e2fsprogs \
     qemu-system-x86_64 \
-    qemu-img
+    qemu-img \
+    cgroup-tools
 
 COPY --from=builder /runner /usr/bin/runner
 COPY neonvm/hack/vmlinuz /vm/kernel/vmlinuz

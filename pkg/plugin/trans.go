@@ -12,6 +12,7 @@ package plugin
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"golang.org/x/exp/constraints"
 
@@ -70,7 +71,7 @@ func collectResourceTransition[T constraints.Unsigned](
 // what's possible given the remaining resources.
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
-func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool) (verdict string) {
+func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool, onlyThousands bool) (verdict string) {
 	totalReservable := r.node.Total - r.node.System
 	// note: it's possible to temporarily have reserved > totalReservable, after loading state or
 	// config change; we have to use SaturatingSub here to account for that.
@@ -152,6 +153,10 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
 			// directly += or -= (implicitly relying on overflow).
 			r.node.CapacityPressure = r.node.CapacityPressure - r.oldPod.capacityPressure + r.pod.CapacityPressure
+			if onlyThousands {
+				// this branch is for the case when caller requests increase in thousands
+				maxIncrease = T(math.Floor(float64(maxIncrease) / 1000.0))
+			}
 			increase = maxIncrease // cap at maxIncrease.
 		} else {
 			// If we're not capped by maxIncrease, relieve pressure coming from this pod

@@ -30,6 +30,9 @@ import (
 // VM's name).
 const VirtualMachineNameLabel string = "vm.neon.tech/name"
 
+// Label that determines the version of runner pod. May be missing on older runners
+const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
+
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // VirtualMachineSpec defines the desired state of VirtualMachine
@@ -39,6 +42,12 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=20183
 	// +optional
 	QMP int32 `json:"qmp"`
+
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default:=25183
+	// +optional
+	RunnerPort int32 `json:"runnerPort"`
 
 	// +kubebuilder:default:=5
 	// +optional
@@ -103,22 +112,13 @@ type Guest struct {
 }
 
 type CPUs struct {
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=255
-	// +kubebuilder:validation:ExclusiveMaximum=false
 	// +optional
 	// +kubebuilder:default:=1
-	Min *int32 `json:"min"`
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=128
-	// +kubebuilder:validation:ExclusiveMaximum=false
+	Min *resource.Quantity `json:"min"`
 	// +optional
-	Max *int32 `json:"max,omitempty"`
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=128
-	// +kubebuilder:validation:ExclusiveMaximum=false
+	Max *resource.Quantity `json:"max,omitempty"`
 	// +optional
-	Use *int32 `json:"use,omitempty"`
+	Use *resource.Quantity `json:"use,omitempty"`
 }
 
 type MemorySlots struct {
@@ -264,7 +264,7 @@ type VirtualMachineStatus struct {
 	// +optional
 	Node string `json:"node,omitempty"`
 	// +optional
-	CPUs int `json:"cpus,omitempty"`
+	CPUs *resource.Quantity `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 }

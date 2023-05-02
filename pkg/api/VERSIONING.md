@@ -69,3 +69,10 @@ number.
 | 0.1.2 | v0.0 only | v0.0 only |
 | 0.1.1 | v0.0 only | v0.0 only |
 | 0.1.0 | **v0.0** only | **v0.0** only |
+
+## controller<->runner protocol
+
+Note: Components v0.6.0 and below did not have a versioned protocol between the controller and the runner.
+| Release | controller | runner |
+|---------|------------|--------|
+| _Current_ | 0 - 1 | 1 |
