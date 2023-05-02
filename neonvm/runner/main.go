@@ -595,7 +595,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	}
 
 	// update cgroup
-	log.Printf("got CPU update %v", parsed.VCPUs.AsApproximateFloat64())
+	log.Printf("got CPU update %v", parsed.VCPUs.ToResourceQuantity().AsApproximateFloat64())
 	err = setCgroupLimit(parsed.VCPUs, cgroupPath)
 	if err != nil {
 		log.Printf("could not set cgroup limit: %s\n", err)
@@ -664,13 +664,13 @@ func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg 
 	}
 }
 
-func setCgroupLimit(r resource.Quantity, cgroupPath string) error {
+func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	isV2 := cgroups.Mode() == cgroups.Unified
 	period := cgroupPeriod
 	// quota may be greater than period if the cgroup is allowed
 	// to use more than 100% of a CPU.
-	quota := int64(float64(r.MilliValue()) / float64(1000) * float64(cgroupPeriod))
-	fmt.Printf("setting cgroup to %v %v", quota, period)
+	quota := int64(float64(r) / float64(1000) * float64(cgroupPeriod))
+	fmt.Printf("setting cgroup to %v %v\n", quota, period)
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
@@ -713,7 +713,7 @@ func cleanupCgroup(cgroupPath string) error {
 	}
 }
 
-func getCgroupQuota(cgroupPath string) (*resource.Quantity, error) {
+func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 	isV2 := cgroups.Mode() == cgroups.Unified
 	var path string
 	if isV2 {
@@ -734,18 +734,18 @@ func getCgroupQuota(cgroupPath string) (*resource.Quantity, error) {
 	if err != nil {
 		return nil, err
 	}
-	return resource.NewMilliQuantity(
-		int64(quota*1000/cgroupPeriod), resource.BinarySI), nil
+	cpu := vmv1.MilliCPU(uint32(quota * 1000 / cgroupPeriod))
+	return &cpu, nil
 }
 
 type QemuCPUs struct {
 	max *int
 	min int
-	use resource.Quantity
+	use vmv1.MilliCPU
 }
 
 func processCPUs(cpus vmv1.CPUs) QemuCPUs {
-	min := int(cpus.Min.Value())
+	min := int(cpus.Min.RoundedUp())
 	use := *cpus.Min
 	if cpus.Use != nil {
 		use = *cpus.Use
@@ -753,7 +753,7 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 
 	var max *int
 	if cpus.Max != nil {
-		val := int(cpus.Max.Value())
+		val := int(cpus.Max.RoundedUp())
 		max = &val
 	}
 	return QemuCPUs{

@@ -41,7 +41,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -431,12 +430,12 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					return err
 				}
 				// compare guest spec and count of plugged
-				if virtualmachine.Spec.Guest.CPUs.Use.Value() > int64(len(cpusPlugged)) {
+				if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() > uint32(len(cpusPlugged)) {
 					// going to plug one CPU
 					if err := QmpPlugCpu(virtualmachine); err != nil {
 						return err
 					}
-				} else if virtualmachine.Spec.Guest.CPUs.Use.Value() < int64(len(cpusPlugged)) {
+				} else if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() < uint32(len(cpusPlugged)) {
 					// going to unplug one CPU
 					if err := QmpUnplugCpu(virtualmachine); err != nil {
 						return err
@@ -451,7 +450,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				return err
 			}
 			specCPU := virtualmachine.Spec.Guest.CPUs.Use
-			pluggedCPU := int64(len(cpuSlotsPlugged))
+			pluggedCPU := uint32(len(cpuSlotsPlugged))
 			var cgroupUsage api.VCPUCgroup
 			supportsCgroup := runnerSupportsCgroup(vmRunner)
 			if supportsCgroup {
@@ -465,27 +464,27 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// update cgroup when necessary
 			// if we're done scaling (plugged all CPU) then apply cgroup
 			// else just use all
-			var targetCPUUsage resource.Quantity
-			if specCPU != nil && specCPU.Value() == pluggedCPU {
+			var targetCPUUsage vmv1.MilliCPU
+			if specCPU != nil && specCPU.RoundedUp() == pluggedCPU {
 				targetCPUUsage = *specCPU
 			} else {
-				targetCPUUsage = *resource.NewQuantity(pluggedCPU, resource.BinarySI)
+				targetCPUUsage = vmv1.MilliCPU(1000 * pluggedCPU)
 			}
 
-			if supportsCgroup && targetCPUUsage.Cmp(cgroupUsage.VCPUs) != 0 {
+			if supportsCgroup && targetCPUUsage != cgroupUsage.VCPUs {
 				if err := notifyRunner(ctx, virtualmachine, targetCPUUsage); err != nil {
 					return err
 				}
 			}
 
-			if virtualmachine.Status.CPUs == nil || virtualmachine.Status.CPUs.Cmp(*virtualmachine.Spec.Guest.CPUs.Use) != 0 {
+			if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != *virtualmachine.Spec.Guest.CPUs.Use {
 				// update status by count of CPU cores used in VM
 				virtualmachine.Status.CPUs = virtualmachine.Spec.Guest.CPUs.Use
 				// record event about cpus used in VM
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
 					fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
 						virtualmachine.Name,
-						&virtualmachine.Status.CPUs))
+						virtualmachine.Status.CPUs))
 			}
 
 			// do hotplug/unplug Memory if .spec.guest.memorySlots.use defined
@@ -646,13 +645,13 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 	return a
 }
 
-func notifyRunner(ctx context.Context, vm *vmv1.VirtualMachine, r resource.Quantity) error {
+func notifyRunner(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.MilliCPU) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
 
-	update := api.VCPUChange{VCPUs: r}
+	update := api.VCPUChange{VCPUs: cpu}
 
 	data, err := json.Marshal(update)
 	if err != nil {

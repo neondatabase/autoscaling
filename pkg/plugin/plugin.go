@@ -325,7 +325,7 @@ func (e *AutoscaleEnforcer) Filter(
 	// preemption.
 	//
 	// So we have to actually count up the resource usage of all pods in nodeInfo:
-	var totalNodeVCPU api.MilliCPU
+	var totalNodeVCPU vmapi.MilliCPU
 	var totalNodeMem uint16
 	var otherResources nodeOtherResourceState
 
@@ -649,7 +649,7 @@ func (e *AutoscaleEnforcer) Reserve(
 			name:   pName,
 			vmName: vmInfo.NamespacedName(),
 			node:   node,
-			vCPU: podResourceState[api.MilliCPU]{
+			vCPU: podResourceState[vmapi.MilliCPU]{
 				Reserved:         vmInfo.Cpu.Use,
 				Buffer:           0,
 				CapacityPressure: 0,

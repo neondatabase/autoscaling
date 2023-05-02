@@ -1,13 +1,14 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -39,14 +40,14 @@ const (
 	//
 	// * Allows a nil value of the AgentRequest.Metrics field.
 	//
-	// Currently the latest version.
+	// Last used in release version v0.6.0.
 	PluginProtoV1_1
 
 	// PluginProtoV2_0 represents v2.0 of the agent<->scheduler plugin protocol.
 	//
 	// Changes from v1.1:
 	//
-	// * Supports fractional CU
+	// * Supports fractional CPU
 	//
 	// Currently the latest version.
 	PluginProtoV2_0
@@ -143,7 +144,7 @@ func (r AgentRequest) ProtocolRange() VersionRange[PluginProtoVersion] {
 //
 // In all cases, each resource type is considered separately from the others.
 type Resources struct {
-	VCPU MilliCPU `json:"vCPUs"`
+	VCPU vmapi.MilliCPU `json:"vCPUs"`
 	// Mem gives the number of slots of memory (typically 1G ea.) requested. The slot size is set by
 	// the value of the VM's VirtualMachineSpec.Guest.MemorySlotSize.
 	Mem uint16 `json:"mem"`
@@ -201,7 +202,7 @@ func (r Resources) Max(cmp Resources) Resources {
 // Mul returns the result of multiplying each resource by factor
 func (r Resources) Mul(factor uint16) Resources {
 	return Resources{
-		VCPU: MilliCPU(factor) * r.VCPU,
+		VCPU: vmapi.MilliCPU(factor) * r.VCPU,
 		Mem:  factor * r.Mem,
 	}
 }
@@ -216,9 +217,8 @@ func (r Resources) IncreaseFrom(old Resources) MoreResources {
 
 // ConvertToRaw produces the RawResources equivalent to these Resources with the given slot size
 func (r Resources) ConvertToRaw(memSlotSize *resource.Quantity) RawResources {
-	cpuQuantity := r.VCPU.ToResourceQuantity()
 	return RawResources{
-		Cpu:    &cpuQuantity,
+		Cpu:    r.VCPU.ToResourceQuantity(),
 		Memory: resource.NewQuantity(int64(r.Mem)*memSlotSize.Value(), resource.BinarySI),
 	}
 }
@@ -524,55 +524,13 @@ type ResumeAgent struct {
 // VCPUChange is used to notify runner that it had some changes in its CPUs
 // runner uses this info to adjust qemu cgroup
 type VCPUChange struct {
-	VCPUs resource.Quantity
+	VCPUs vmapi.MilliCPU
 }
 
 // VCPUCgroup is used in runner to reply to controller
 // it represents the vCPU usage as controlled by cgroup
 type VCPUCgroup struct {
-	VCPUs resource.Quantity
-}
-
-// MilliCPU is a special type to represent vCPUs * 1000
-// e.g. 2 vCPU is 2000, 0.25 is 250
-type MilliCPU uint32
-
-// MilliCPUFromResourceQuantity converts resource.Quantity into MilliCPU
-func MilliCPUFromResourceQuantity(r resource.Quantity) MilliCPU {
-	return MilliCPU(r.MilliValue())
-}
-
-// ToResourceQuantity converts a MilliCPU to resource.Quantity
-// this is useful for formatting/serialization
-func (m *MilliCPU) ToResourceQuantity() resource.Quantity {
-	return *resource.NewMilliQuantity(int64(*m), resource.BinarySI)
-}
-
-// this is used to parse scheduler config and communication between components
-// we used resource.Quantity as underlying transport format for MilliCPU
-func (m *MilliCPU) UnmarshalJSON(data []byte) error {
-	var quantity resource.Quantity
-	err := json.Unmarshal(data, &quantity)
-	if err != nil {
-		return err
-	}
-
-	*m = MilliCPUFromResourceQuantity(quantity)
-	return nil
-}
-
-func (m *MilliCPU) MarshalJSON() ([]byte, error) {
-	return json.Marshal(m.ToResourceQuantity())
-}
-
-func (m MilliCPU) Format(state fmt.State, verb rune) {
-	switch {
-	case verb == 'v' && state.Flag('#'):
-		state.Write([]byte(fmt.Sprintf("%v", uint32(m))))
-	default:
-		quantity := m.ToResourceQuantity()
-		state.Write([]byte(fmt.Sprintf("%v", quantity.AsApproximateFloat64())))
-	}
+	VCPUs vmapi.MilliCPU
 }
 
 // this a similar version type for controller <-> runner communications

@@ -6,6 +6,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -15,9 +17,9 @@ func TestFormatting(t *testing.T) {
 		Name:      "foo",
 		Namespace: "bar",
 		Cpu: api.VmCpuInfo{
-			Min: api.MilliCPU(1000),
-			Max: api.MilliCPU(5000),
-			Use: api.MilliCPU(3750),
+			Min: vmapi.MilliCPU(1000),
+			Max: vmapi.MilliCPU(5000),
+			Use: vmapi.MilliCPU(3750),
 		},
 		Mem: api.VmMemInfo{
 			Min:      2,

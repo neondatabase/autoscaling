@@ -32,18 +32,18 @@ func (in *CPUs) DeepCopyInto(out *CPUs) {
 	*out = *in
 	if in.Min != nil {
 		in, out := &in.Min, &out.Min
-		x := (*in).DeepCopy()
-		*out = &x
+		*out = new(MilliCPU)
+		**out = **in
 	}
 	if in.Max != nil {
 		in, out := &in.Max, &out.Max
-		x := (*in).DeepCopy()
-		*out = &x
+		*out = new(MilliCPU)
+		**out = **in
 	}
 	if in.Use != nil {
 		in, out := &in.Use, &out.Use
-		x := (*in).DeepCopy()
-		*out = &x
+		*out = new(MilliCPU)
+		**out = **in
 	}
 }
 
@@ -566,8 +566,8 @@ func (in *VirtualMachineStatus) DeepCopyInto(out *VirtualMachineStatus) {
 	}
 	if in.CPUs != nil {
 		in, out := &in.CPUs, &out.CPUs
-		x := (*in).DeepCopy()
-		*out = &x
+		*out = new(MilliCPU)
+		**out = **in
 	}
 	if in.MemorySize != nil {
 		in, out := &in.MemorySize, &out.MemorySize

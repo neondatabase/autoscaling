@@ -12,7 +12,6 @@ package plugin
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"golang.org/x/exp/constraints"
 
@@ -148,15 +147,16 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		increase := requested - r.pod.Reserved
 		// Increases are bounded by what's left in the node
 		maxIncrease := remainingReservable
+		// if only in thousands, round down maxIncrease to nearest multiple of 1000
+		if onlyThousands {
+			thousand := T(100) * 10 // avoid compiler complaining about 1000 > maximum int8
+			maxIncrease = (maxIncrease / thousand) * thousand
+		}
 		if increase > maxIncrease /* increases are bound by what's left in the node */ {
 			r.pod.CapacityPressure = increase - maxIncrease
 			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
 			// directly += or -= (implicitly relying on overflow).
 			r.node.CapacityPressure = r.node.CapacityPressure - r.oldPod.capacityPressure + r.pod.CapacityPressure
-			if onlyThousands {
-				// this branch is for the case when caller requests increase in thousands
-				maxIncrease = T(math.Floor(float64(maxIncrease) / 1000.0))
-			}
 			increase = maxIncrease // cap at maxIncrease.
 		} else {
 			// If we're not capped by maxIncrease, relieve pressure coming from this pod

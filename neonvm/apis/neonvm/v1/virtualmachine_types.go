@@ -17,6 +17,9 @@ limitations under the License.
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -114,11 +117,72 @@ type Guest struct {
 type CPUs struct {
 	// +optional
 	// +kubebuilder:default:=1
-	Min *resource.Quantity `json:"min"`
+	Min *MilliCPU `json:"min"`
 	// +optional
-	Max *resource.Quantity `json:"max,omitempty"`
+	Max *MilliCPU `json:"max,omitempty"`
 	// +optional
-	Use *resource.Quantity `json:"use,omitempty"`
+	Use *MilliCPU `json:"use,omitempty"`
+}
+
+// MilliCPU is a special type to represent vCPUs * 1000
+// e.g. 2 vCPU is 2000, 0.25 is 250
+//
+// +kubebuilder:validation:XIntOrString
+// +kubebuilder:validation:Pattern=^[0-9]+((\.[0-9]*)?|m)
+type MilliCPU uint32 // note: pattern is more restrictive than resource.Quantity, because we're just using it for CPU
+
+// RoundedUp returns the smallest integer number of CPUs greater than or equal to the effective
+// value of m.
+func (m MilliCPU) RoundedUp() uint32 {
+	r := uint32(m) / 1000
+	if m%1000 != 0 {
+		r += 1
+	}
+	return r
+}
+
+// MilliCPUFromResourceQuantity converts resource.Quantity into MilliCPU
+func MilliCPUFromResourceQuantity(r resource.Quantity) MilliCPU {
+	return MilliCPU(r.MilliValue())
+}
+
+// ToResourceQuantity converts a MilliCPU to resource.Quantity
+// this is useful for formatting/serialization
+func (m MilliCPU) ToResourceQuantity() *resource.Quantity {
+	return resource.NewMilliQuantity(int64(m), resource.BinarySI)
+}
+
+// this is used to parse scheduler config and communication between components
+// we used resource.Quantity as underlying transport format for MilliCPU
+func (m *MilliCPU) UnmarshalJSON(data []byte) error {
+	var quantity resource.Quantity
+	err := json.Unmarshal(data, &quantity)
+	if err != nil {
+		return err
+	}
+
+	*m = MilliCPUFromResourceQuantity(quantity)
+	return nil
+}
+
+func (m MilliCPU) MarshalJSON() ([]byte, error) {
+	// Mashal as an integer if we can, for backwards-compatibility with components that wouldn't be
+	// expecting a string here.
+	if m%1000 == 0 {
+		return json.Marshal(uint32(m / 1000))
+	}
+
+	return json.Marshal(m.ToResourceQuantity())
+}
+
+func (m MilliCPU) Format(state fmt.State, verb rune) {
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf("%v", uint32(m))))
+	default:
+		quantity := m.ToResourceQuantity()
+		state.Write([]byte(fmt.Sprintf("%v", quantity.AsApproximateFloat64())))
+	}
 }
 
 type MemorySlots struct {
@@ -264,7 +328,7 @@ type VirtualMachineStatus struct {
 	// +optional
 	Node string `json:"node,omitempty"`
 	// +optional
-	CPUs *resource.Quantity `json:"cpus,omitempty"`
+	CPUs *MilliCPU `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 }

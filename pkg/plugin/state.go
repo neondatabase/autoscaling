@@ -36,7 +36,7 @@ type pluginState struct {
 
 	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
 	// can appropriately scale our scoring
-	maxTotalReservableCPU api.MilliCPU
+	maxTotalReservableCPU vmapi.MilliCPU
 	// maxTotalReservableMemSlots is the same as maxTotalReservableCPU, but for memory slots instead
 	// of CPU
 	maxTotalReservableMemSlots uint16
@@ -52,7 +52,7 @@ type nodeState struct {
 	name string
 
 	// vCPU tracks the state of vCPU resources -- what's available and how
-	vCPU nodeResourceState[api.MilliCPU]
+	vCPU nodeResourceState[vmapi.MilliCPU]
 	// memSlots tracks the state of memory slots -- what's available and how
 	memSlots nodeResourceState[uint16]
 
@@ -129,8 +129,8 @@ type nodeOtherResourceState struct {
 	RawCPU    resource.Quantity `json:"rawCPU"`
 	RawMemory resource.Quantity `json:"rawMemory"`
 
-	ReservedCPU      api.MilliCPU `json:"reservedCPU"`
-	ReservedMemSlots uint16       `json:"reservedMemSlots"`
+	ReservedCPU      vmapi.MilliCPU `json:"reservedCPU"`
+	ReservedMemSlots uint16         `json:"reservedMemSlots"`
 
 	// MarginCPU and MarginMemory track the amount of other resources we can get "for free" because
 	// they were left out when rounding the System usage to fit in integer units of CPUs or memory
@@ -158,7 +158,7 @@ type podState struct {
 	// node provides information about the node that this pod is bound to or reserved onto.
 	node *nodeState
 	// vCPU is the current state of this pod's vCPU utilization and pressure
-	vCPU podResourceState[api.MilliCPU]
+	vCPU podResourceState[vmapi.MilliCPU]
 	// memSlots is the current state of this pod's memory slot(s) utilization and pressure
 	memSlots podResourceState[uint16]
 
@@ -301,7 +301,7 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 		// set cupCopy := r.rawCpu - r.marginCpu
 		cpuCopy := r.RawCPU.DeepCopy()
 		cpuCopy.Sub(*r.MarginCPU)
-		r.ReservedCPU = api.MilliCPUFromResourceQuantity(cpuCopy)
+		r.ReservedCPU = vmapi.MilliCPUFromResourceQuantity(cpuCopy)
 	}
 
 	// If rawMemory doesn't exceed the margin ..., set reserved = 0
@@ -326,7 +326,7 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 
 // totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
 // excluding the CPU pre-reserved for system tasks.
-func (s *nodeState) totalReservableCPU() api.MilliCPU {
+func (s *nodeState) totalReservableCPU() vmapi.MilliCPU {
 	return s.vCPU.Total - s.vCPU.System
 }
 
@@ -337,7 +337,7 @@ func (s *nodeState) totalReservableMemSlots() uint16 {
 }
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
-func (s *nodeState) remainingReservableCPU() api.MilliCPU {
+func (s *nodeState) remainingReservableCPU() vmapi.MilliCPU {
 	return s.totalReservableCPU() - s.vCPU.Reserved
 }
 
@@ -685,7 +685,7 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, unqualifi
 	// FIXME: this definition of receivedContact may be inaccurate if there was an error with the
 	// autoscaler-agent's request.
 	receivedContact := pod.mostRecentComputeUnit != nil
-	var n *nodeResourceState[api.MilliCPU] = &pod.node.vCPU
+	var n *nodeResourceState[vmapi.MilliCPU] = &pod.node.vCPU
 	cpuVerdict := handleUpdatedLimits(n, &pod.vCPU, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
 	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, receivedContact, vm.Mem.Min, vm.Mem.Max)
 
@@ -908,7 +908,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			name:   podName,
 			vmName: util.GetNamespacedName(vm),
 			node:   ns,
-			vCPU: podResourceState[api.MilliCPU]{
+			vCPU: podResourceState[vmapi.MilliCPU]{
 				Reserved:         vmInfo.Cpu.Max,
 				Buffer:           vmInfo.Cpu.Max - vmInfo.Cpu.Use,
 				CapacityPressure: 0,
