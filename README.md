@@ -22,3 +22,10 @@ config.billing = {
 ```
 
 ... and all of `vmscrape.yaml`.
+
+### Other regions
+
+The other "dev" regions have the following deployed:
+
+* dev-eu-central-1-alpha: `autoscale-scheduler-disabled.yaml`
+* dev-eu-west-1-zeta: `autoscale-scheduler-disabled.yaml`
