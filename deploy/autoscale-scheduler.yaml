@@ -128,7 +128,7 @@ data:
       "nodeDefaults": {
         "cpu": { "watermark": 0.7, "system": "500m" },
         "memory": { "watermark": 0.7, "system": "0.5Gi" },
-        "computeUnit": { "vCPUs": 1, "mem": 1 }
+        "computeUnit": { "vCPUs": 0.25, "mem": 1 }
       },
       "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",

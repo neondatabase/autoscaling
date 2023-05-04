@@ -9,6 +9,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -203,12 +205,12 @@ func (c *Config) forNode(nodeName string) *nodeConfig {
 	return &c.NodeDefaults
 }
 
-func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[uint16], margin *resource.Quantity, _ error) {
+func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[vmapi.MilliCPU], margin *resource.Quantity, _ error) {
 	// We check both Value and MilliValue here in case the value overflows an int64 when
 	// multiplied by 1000, which is possible if c.Cpu.System is not in units of milli-CPU
 	if c.Cpu.System.Value() > total.Value() || c.Cpu.System.MilliValue() > total.MilliValue() {
 		err := fmt.Errorf("desired system vCPU %v greater than node total %v", &c.Cpu.System, total)
-		return nodeResourceState[uint16]{}, nil, err
+		return nodeResourceState[vmapi.MilliCPU]{}, nil, err
 	}
 
 	totalRounded := total.MilliValue() / 1000
@@ -226,10 +228,10 @@ func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[u
 	margin = resource.NewMilliQuantity(unreservableCpuMillis, c.Cpu.System.Format)
 	margin.Sub(c.Cpu.System)
 
-	return nodeResourceState[uint16]{
-		Total:                uint16(totalRounded),
-		System:               uint16(systemCpus),
-		Watermark:            uint16(c.Cpu.Watermark * float32(reservableCpus)),
+	return nodeResourceState[vmapi.MilliCPU]{
+		Total:                vmapi.MilliCPU(totalRounded * 1000),
+		System:               vmapi.MilliCPU(systemCpus * 1000),
+		Watermark:            vmapi.MilliCPU(c.Cpu.Watermark * float32(reservableCpus) * 1000),
 		Reserved:             0,
 		CapacityPressure:     0,
 		PressureAccountedFor: 0,

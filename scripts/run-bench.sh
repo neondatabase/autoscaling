@@ -31,7 +31,7 @@ apk add postgresql-client
 echo '"'$QUERY'"' > factorial.sql
 echo "Running pgbench. Query:"
 echo '"'   $QUERY'"'
-pgbench -h '"$vm_ip"' -U postgres -c 20 -T 1000 -P 1 -f factorial.sql postgres
+pgbench -h '"$vm_ip"' -U postgres -c 10 -T 1000 -P 1 -f factorial.sql postgres
 '
 
 # FIXME: same multus stuff as above.

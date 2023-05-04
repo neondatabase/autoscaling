@@ -339,7 +339,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 					return err
 				}
 				// compare guest spec and count of plugged
-				if *vm.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
+				if vm.Spec.Guest.CPUs.Use.RoundedUp() > uint32(len(cpusPlugged)) {
 					// going to plug one CPU
 					err := QmpPlugCpuToRunner(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP)
 					if err != nil {
@@ -350,6 +350,11 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 				} else {
 					// seems all CPUs plugged to target runner
 					readyToMigrateCPU = true
+				}
+				if runnerSupportsCgroup(targetRunner) {
+					if err := notifyRunner(ctx, vm, *vm.Spec.Guest.CPUs.Use); err != nil {
+						return err
+					}
 				}
 			}
 

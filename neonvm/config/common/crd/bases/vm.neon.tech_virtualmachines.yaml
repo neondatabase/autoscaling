@@ -1099,21 +1099,27 @@ spec:
                   cpus:
                     properties:
                       max:
+                        description: MilliCPU is a special type to represent vCPUs
+                          * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
                         format: int32
-                        maximum: 128
-                        minimum: 1
+                        pattern: ^[0-9]+((\.[0-9]*)?|m)
                         type: integer
+                        x-kubernetes-int-or-string: true
                       min:
                         default: 1
+                        description: MilliCPU is a special type to represent vCPUs
+                          * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
                         format: int32
-                        maximum: 255
-                        minimum: 1
+                        pattern: ^[0-9]+((\.[0-9]*)?|m)
                         type: integer
+                        x-kubernetes-int-or-string: true
                       use:
+                        description: MilliCPU is a special type to represent vCPUs
+                          * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
                         format: int32
-                        maximum: 128
-                        minimum: 1
+                        pattern: ^[0-9]+((\.[0-9]*)?|m)
                         type: integer
+                        x-kubernetes-int-or-string: true
                     type: object
                   env:
                     description: List of environment variables to set in the vmstart
@@ -1261,6 +1267,12 @@ spec:
                 - OnFailure
                 - Never
                 type: string
+              runnerPort:
+                default: 25183
+                format: int32
+                maximum: 65535
+                minimum: 1
+                type: integer
               schedulerName:
                 type: string
               terminationGracePeriodSeconds:
@@ -1381,7 +1393,12 @@ spec:
                   type: object
                 type: array
               cpus:
+                description: MilliCPU is a special type to represent vCPUs * 1000
+                  e.g. 2 vCPU is 2000, 0.25 is 250
+                format: int32
+                pattern: ^[0-9]+((\.[0-9]*)?|m)
                 type: integer
+                x-kubernetes-int-or-string: true
               extraNetIP:
                 type: string
               extraNetMask:

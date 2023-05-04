@@ -17,15 +17,18 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +54,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
+	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -275,6 +279,20 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 			virtualmachine.Namespace))
 }
 
+func runnerSupportsCgroup(pod *corev1.Pod) bool {
+	val, ok := pod.Labels[vmv1.RunnerPodVersionLabel]
+	if !ok {
+		return false
+	}
+
+	uintVal, err := strconv.ParseUint(val, 10, 32)
+	if err != nil {
+		return false
+	}
+
+	return api.RunnerProtoVersion(uintVal).SupportsCgroupFractionalCPU()
+}
+
 func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
 	log := log.FromContext(ctx)
 
@@ -422,12 +440,12 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					return err
 				}
 				// compare guest spec and count of plugged
-				if *virtualmachine.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
+				if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() > uint32(len(cpusPlugged)) {
 					// going to plug one CPU
 					if err := QmpPlugCpu(virtualmachine); err != nil {
 						return err
 					}
-				} else if *virtualmachine.Spec.Guest.CPUs.Use < int32(len(cpusPlugged)) {
+				} else if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() < uint32(len(cpusPlugged)) {
 					// going to unplug one CPU
 					if err := QmpUnplugCpu(virtualmachine); err != nil {
 						return err
@@ -436,17 +454,45 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// get CPU details from QEMU and update status
-			cpusPlugged, _, err := QmpGetCpus(virtualmachine)
+			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
 			}
-			if virtualmachine.Status.CPUs != len(cpusPlugged) {
+			specCPU := virtualmachine.Spec.Guest.CPUs.Use
+			pluggedCPU := uint32(len(cpuSlotsPlugged))
+			var cgroupUsage api.VCPUCgroup
+			supportsCgroup := runnerSupportsCgroup(vmRunner)
+			if supportsCgroup {
+				cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
+				if err != nil {
+					log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+					return err
+				}
+			}
+
+			// update cgroup when necessary
+			// if we're done scaling (plugged all CPU) then apply cgroup
+			// else just use all
+			var targetCPUUsage vmv1.MilliCPU
+			if specCPU != nil && specCPU.RoundedUp() == pluggedCPU {
+				targetCPUUsage = *specCPU
+			} else {
+				targetCPUUsage = vmv1.MilliCPU(1000 * pluggedCPU)
+			}
+
+			if supportsCgroup && targetCPUUsage != cgroupUsage.VCPUs {
+				if err := notifyRunner(ctx, virtualmachine, targetCPUUsage); err != nil {
+					return err
+				}
+			}
+
+			if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != *virtualmachine.Spec.Guest.CPUs.Use {
 				// update status by count of CPU cores used in VM
-				virtualmachine.Status.CPUs = len(cpusPlugged)
+				virtualmachine.Status.CPUs = virtualmachine.Spec.Guest.CPUs.Use
 				// record event about cpus used in VM
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
-					fmt.Sprintf("VirtualMachine %s uses %d cpu cores",
+					fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
 						virtualmachine.Name,
 						virtualmachine.Status.CPUs))
 			}
@@ -593,7 +639,7 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 	}
 
 	usage := vmv1.VirtualMachineUsage{
-		CPU:    cpu,
+		CPU:    cpu.ToResourceQuantity(),
 		Memory: resource.NewQuantity(spec.Guest.MemorySlotSize.Value()*int64(memorySlots), resource.BinarySI),
 	}
 
@@ -632,6 +678,7 @@ func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]str
 	}
 	l["app.kubernetes.io/name"] = "NeonVM"
 	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
+	l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", api.RunnerProtoV1)
 	return l
 }
 
@@ -676,6 +723,71 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 			})
 	}
 	return a
+}
+
+func notifyRunner(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.MilliCPU) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
+
+	update := api.VCPUChange{VCPUs: cpu}
+
+	data, err := json.Marshal(update)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("unexpected status %s", resp.Status)
+	}
+	return nil
+}
+
+func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (api.VCPUCgroup, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result := api.VCPUCgroup{}
+
+	url := fmt.Sprintf("http://%s:%d/cpu_current", vm.Status.PodIP, vm.Spec.RunnerPort)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return result, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return result, err
+	}
+
+	if resp.StatusCode != 200 {
+		return result, fmt.Errorf("unexpected status %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+	if err != nil {
+		return result, err
+	}
+
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
 }
 
 // imageForVirtualMachine gets the Operand image which is managed by this controller
