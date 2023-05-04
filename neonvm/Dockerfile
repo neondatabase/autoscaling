@@ -12,6 +12,7 @@ COPY go.sum go.sum
 RUN go mod download
 
 # Copy the go source
+COPY pkg/util            pkg/util
 COPY neonvm/main.go      neonvm/main.go
 COPY neonvm/apis/        neonvm/apis/
 COPY neonvm/controllers/ neonvm/controllers/
