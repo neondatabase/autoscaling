@@ -4,7 +4,7 @@ IMG_RUNNER ?= runner:dev
 IMG_VXLAN ?= vxlan-controller:dev
 
 # Autoscaler related images
-AUTOSCALER_SCHEDULER_IMG ?= kube-autoscale-scheduler:dev
+AUTOSCALER_SCHEDULER_IMG ?= autoscale-scheduler:dev
 AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
 VM_INFORMANT_IMG ?= vm-informant:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
