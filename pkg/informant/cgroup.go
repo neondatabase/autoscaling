@@ -187,7 +187,7 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 								s.requestUpscale()
 							}
 
-							memHigh, err := s.mgr.FetchMemoryHigh()
+							memHigh, err := s.mgr.FetchMemoryHighBytes()
 							if err != nil {
 								panic(fmt.Errorf("Error fetching memory.high: %w", err))
 							} else if memHigh == nil {
@@ -200,7 +200,7 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 								float64(*memHigh)/float64(1<<20), float64(newMemHigh)/float64(1<<20),
 							)
 
-							if err := s.mgr.SetMemHigh(newMemHigh); err != nil {
+							if err := s.mgr.SetMemHighBytes(newMemHigh); err != nil {
 								panic(fmt.Errorf("Error setting memory limits: %w", err))
 							}
 						}()

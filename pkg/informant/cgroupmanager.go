@@ -257,7 +257,7 @@ func (c *CgroupManager) SetMemLimits(limits memoryLimits) error {
 	})
 }
 
-func (c *CgroupManager) SetMemHigh(bytes uint64) error {
+func (c *CgroupManager) SetMemHighBytes(bytes uint64) error {
 	high := int64(bytes)
 	return c.manager.Update(&cgroup2.Resources{
 		Memory: &cgroup2.Memory{
@@ -266,7 +266,7 @@ func (c *CgroupManager) SetMemHigh(bytes uint64) error {
 	})
 }
 
-func (c *CgroupManager) FetchMemoryHigh() (*uint64, error) {
+func (c *CgroupManager) FetchMemoryHighBytes() (*uint64, error) {
 	path := cgroupPath(c.name, "memory.high")
 	content, err := os.ReadFile(path)
 	if err != nil {
