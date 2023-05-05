@@ -830,6 +830,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			Annotations: annotations,
 		},
 		Spec: corev1.PodSpec{
+			EnableServiceLinks:            virtualmachine.Spec.ServiceLinks,
 			RestartPolicy:                 corev1.RestartPolicy(virtualmachine.Spec.RestartPolicy),
 			TerminationGracePeriodSeconds: virtualmachine.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  virtualmachine.Spec.NodeSelector,
