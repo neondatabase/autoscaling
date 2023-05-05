@@ -1263,6 +1263,8 @@ spec:
                 type: string
               schedulerName:
                 type: string
+              service_links:
+                type: boolean
               terminationGracePeriodSeconds:
                 default: 5
                 format: int64
