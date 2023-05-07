@@ -1717,9 +1717,19 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 	s.logger.Infof("Received PluginResponse: %s", string(respBody))
 
 	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.runner.lock.Unlock()
+		}
+	}()
 
 	if err := s.validatePluginResponse(reqData, &respData); err != nil {
+		// Must unlock before handling because it's required by validatePluginResponse, but
+		// handleFatalError is required not to have it.
+		locked = false
+		s.runner.lock.Unlock()
+
 		// Fatal, because an invalid response indicates mismatched state, so we can't assume
 		// anything about the plugin's state.
 		return nil, s.handleFatalError(reqData, fmt.Errorf("Semantically invalid response: %w", err))
