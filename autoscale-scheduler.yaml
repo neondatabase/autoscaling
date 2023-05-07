@@ -116,8 +116,6 @@ data:
             enabled:
               - name: AutoscaleEnforcer
 ---
-# note: this ConfigMap is not meant to be mounted. For better responsiveness, the scheduler listens
-# for updates on the ConfigMap object directly.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -130,7 +128,7 @@ data:
       "nodeDefaults": {
         "cpu": { "watermark": 0.7, "system": "500m" },
         "memory": { "watermark": 0.7, "system": "0.5Gi" },
-        "computeUnit": { "vCPUs": 1, "mem": 4 }
+        "computeUnit": { "vCPUs": 0.25, "mem": 1 }
       },
       "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
@@ -162,11 +160,12 @@ spec:
         name: autoscale-scheduler # stable name
         tier: control-plane
     spec:
+      priorityClassName: system-cluster-critical
       serviceAccountName: autoscale-scheduler
       containers:
       # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
       # update that as well if you change this line!
-      - image: neondatabase/autoscale-scheduler:v0.6.0
+      - image: neondatabase/autoscale-scheduler:v0.7.0
         command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
         ports:
         - name: metrics
@@ -178,7 +177,7 @@ spec:
             port: 10259
             scheme: HTTPS
           initialDelaySeconds: 15
-        name: kube-second-scheduler
+        name: autoscale-scheduler
         readinessProbe:
           httpGet:
             path: /healthz

@@ -8,8 +8,6 @@ we want to preserve.
 Currently these are:
 
 ```js
-// Scheduler:
-config.nodeDefaults.computeUnit = { "vCPUs": 1, "mem": 4 }
 // Agent:
 config.billing = {
       "url": "http://neon-internal-api.aws.neon.build/billing/api/v1",
