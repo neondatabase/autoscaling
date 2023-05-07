@@ -80,7 +80,7 @@ func (s *agentState) Stop() {
 }
 
 func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
-	klog.Infof("Handling pod event %+v", event)
+	klog.Infof("Handling VM event %+v", event)
 
 	if err := s.lock.TryLock(ctx); err != nil {
 		klog.Warningf("context canceled while starting to handle event: %s", err)
@@ -92,7 +92,7 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 	state, hasPod := s.pods[podName]
 
 	if event.kind != vmEventAdded && !hasPod {
-		klog.Errorf("Received %s event for pod %v that isn't present", event.kind, event.podName)
+		klog.Errorf("Received %s event for pod %v that isn't present", event.kind, podName)
 		return
 	}
 
@@ -119,7 +119,7 @@ func (s *agentState) handleVMEventAdded(
 	podName util.NamespacedName,
 ) {
 	if _, ok := s.pods[podName]; ok {
-		klog.Errorf("Received add event for pod %v while already present", event.podName)
+		klog.Errorf("Received add event for pod %v while already present", podName)
 		return
 	}
 
