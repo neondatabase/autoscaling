@@ -160,6 +160,7 @@ spec:
         name: autoscale-scheduler # stable name
         tier: control-plane
     spec:
+      priorityClassName: system-cluster-critical
       serviceAccountName: autoscale-scheduler
       containers:
       # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
