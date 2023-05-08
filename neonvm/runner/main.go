@@ -719,7 +719,7 @@ func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 	if isV2 {
 		path = filepath.Join(cgroupMountPoint, cgroupPath, "cpu.max")
 	} else {
-		path = filepath.Join(cgroupMountPoint, cgroupPath, "cpu.cfs_quota_us")
+		path = filepath.Join(cgroupMountPoint, "cpu", cgroupPath, "cpu.cfs_quota_us")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
