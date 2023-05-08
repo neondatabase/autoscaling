@@ -71,7 +71,7 @@ import (
 //
 // Currently, each autoscaler-agent supports only one version at a time. In the future, this may
 // change.
-const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_1
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV2_0
 
 // Runner is per-VM Pod god object responsible for handling everything
 //
@@ -1315,7 +1315,7 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
 	// average),
 	// which we can get by dividing LA by LAFT.
-	goalCU := uint16(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
+	goalCU := uint32(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
 
 	// Update goalCU based on any requested upscaling
 	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling())
@@ -1327,7 +1327,7 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	}
 
 	// resources for the desired "goal" compute units
-	goal := s.computeUnit.Mul(goalCU)
+	goal := s.computeUnit.Mul(uint16(goalCU))
 
 	// bound goal by the minimum and maximum resource amounts for the VM
 	result := goal.Min(s.vm.Max()).Max(s.vm.Min())
@@ -1357,11 +1357,11 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 // divide to a multiple of the Compute Unit, the upper and lower bounds will be different. This can
 // happen when the Compute Unit is changed, or when the VM's maximum or minimum resource allocations
 // has previously prevented it from being set to a multiple of the Compute Unit.
-func (s *atomicUpdateState) computeUnitsBounds() (uint16, uint16) {
+func (s *atomicUpdateState) computeUnitsBounds() (uint32, uint32) {
 	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is already guaranteed by
 	// the
-	minCPUUnits := (s.vm.Cpu.Use + s.computeUnit.VCPU - 1) / s.computeUnit.VCPU
-	minMemUnits := (s.vm.Mem.Use + s.computeUnit.Mem - 1) / s.computeUnit.Mem
+	minCPUUnits := (uint32(s.vm.Cpu.Use) + uint32(s.computeUnit.VCPU) - 1) / uint32(s.computeUnit.VCPU)
+	minMemUnits := uint32((s.vm.Mem.Use + s.computeUnit.Mem - 1) / s.computeUnit.Mem)
 
 	return util.Min(minCPUUnits, minMemUnits), util.Max(minCPUUnits, minMemUnits)
 }
@@ -1373,16 +1373,16 @@ func (s *atomicUpdateState) computeUnitsBounds() (uint16, uint16) {
 //
 // This method does not respect any bounds on Compute Units placed by the VM's maximum or minimum
 // resource allocation.
-func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint16 {
-	var required uint16
+func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint32 {
+	var required uint32
 
 	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
 
 	if s.requestedUpscale.Cpu {
-		required = util.Max(required, s.vm.Cpu.Use/s.computeUnit.VCPU+1)
+		required = util.Max(required, uint32(s.vm.Cpu.Use/s.computeUnit.VCPU)+1)
 	}
 	if s.requestedUpscale.Memory {
-		required = util.Max(required, s.vm.Mem.Use/s.computeUnit.Mem+1)
+		required = util.Max(required, uint32(s.vm.Mem.Use/s.computeUnit.Mem)+1)
 	}
 
 	return required
@@ -1456,7 +1456,7 @@ func (r *Runner) doVMUpdate(
 	patches := []util.JSONPatch{{
 		Op:    util.PatchReplace,
 		Path:  "/spec/guest/cpus/use",
-		Value: target.VCPU,
+		Value: target.VCPU.ToResourceQuantity(),
 	}, {
 		Op:    util.PatchReplace,
 		Path:  "/spec/guest/memorySlots/use",
@@ -1717,9 +1717,19 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 	s.logger.Infof("Received PluginResponse: %s", string(respBody))
 
 	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.runner.lock.Unlock()
+		}
+	}()
 
 	if err := s.validatePluginResponse(reqData, &respData); err != nil {
+		// Must unlock before handling because it's required by validatePluginResponse, but
+		// handleFatalError is required not to have it.
+		locked = false
+		s.runner.lock.Unlock()
+
 		// Fatal, because an invalid response indicates mismatched state, so we can't assume
 		// anything about the plugin's state.
 		return nil, s.handleFatalError(reqData, fmt.Errorf("Semantically invalid response: %w", err))

@@ -28,7 +28,7 @@ const (
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_1
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV2_0
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
@@ -158,7 +158,9 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		// Don't migrate if it's disabled
 		e.state.conf.migrationEnabled()
 
-	permit, status, err := e.handleResources(pod, node, req.Resources, mustMigrate)
+	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
+
+	permit, status, err := e.handleResources(pod, node, req.Resources, mustMigrate, supportsFractionalCPU)
 	if err != nil {
 		return nil, status, err
 	}
@@ -175,10 +177,24 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	resp := api.PluginResponse{
 		Permit:      permit,
 		Migrate:     migrateDecision,
-		ComputeUnit: *node.computeUnit,
+		ComputeUnit: getComputeUnitForResponse(node, supportsFractionalCPU),
 	}
 	pod.mostRecentComputeUnit = node.computeUnit // refer to common allocation
 	return &resp, 200, nil
+}
+
+// getComputeUnitForResponse tries to return compute unit that the agent supports
+// if we have a fractional CPU but the agent does not support it we multiply the result
+func getComputeUnitForResponse(node *nodeState, supportsFractional bool) api.Resources {
+	computeUnit := *node.computeUnit
+	if !supportsFractional {
+		initialCU := computeUnit
+		for i := uint16(2); computeUnit.VCPU%1000 != 0; i++ {
+			computeUnit = initialCU.Mul(i)
+		}
+	}
+
+	return computeUnit
 }
 
 func (e *AutoscaleEnforcer) handleResources(
@@ -186,7 +202,13 @@ func (e *AutoscaleEnforcer) handleResources(
 	node *nodeState,
 	req api.Resources,
 	startingMigration bool,
+	supportsFractionalCPU bool,
 ) (api.Resources, int, error) {
+	if !supportsFractionalCPU && req.VCPU%1000 != 0 {
+		err := errors.New("agent requested fractional CPU with protocol version that does not support it")
+		return api.Resources{}, 400, err
+	}
+
 	// Check that we aren't being asked to do something during migration:
 	if pod.currentlyMigrating() {
 		// The agent shouldn't have asked for a change after already receiving notice that it's
@@ -203,7 +225,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	// the minimum or maximum of what's allowed for this VM.
 	if pod.mostRecentComputeUnit != nil {
 		cu := *pod.mostRecentComputeUnit
-		dividesCleanly := req.VCPU%cu.VCPU == 0 && req.Mem%cu.Mem == 0 && req.VCPU/cu.VCPU == req.Mem/cu.Mem
+		dividesCleanly := req.VCPU%cu.VCPU == 0 && req.Mem%cu.Mem == 0 && uint32(req.VCPU/cu.VCPU) == uint32(req.Mem/cu.Mem)
 		atMin := req.VCPU == pod.vCPU.Min || req.Mem == pod.memSlots.Min
 		atMax := req.VCPU == pod.vCPU.Max || req.Mem == pod.memSlots.Max
 		if !dividesCleanly && !(atMin || atMax) {
@@ -218,8 +240,8 @@ func (e *AutoscaleEnforcer) handleResources(
 	vCPUTransition := collectResourceTransition(&node.vCPU, &pod.vCPU)
 	memTransition := collectResourceTransition(&node.memSlots, &pod.memSlots)
 
-	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration)
-	memVerdict := memTransition.handleRequested(req.Mem, startingMigration)
+	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration, !supportsFractionalCPU)
+	memVerdict := memTransition.handleRequested(req.Mem, startingMigration, false)
 
 	fmtString := "[autoscale-enforcer] Handled resources from pod %v AgentRequest.\n" +
 		"\tvCPU verdict: %s\n" +

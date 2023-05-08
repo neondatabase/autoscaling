@@ -3,3 +3,6 @@ kind: Kustomization
 
 bases:
 - https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/v3.9.3/deployments/multus-daemonset-thick-plugin.yml
+
+patchesStrategicMerge:
+- daemonset_patch.yaml

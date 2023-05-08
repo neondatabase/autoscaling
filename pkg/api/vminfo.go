@@ -51,9 +51,9 @@ type VmInfo struct {
 }
 
 type VmCpuInfo struct {
-	Min uint16 `json:"min"`
-	Max uint16 `json:"max"`
-	Use uint16 `json:"use"`
+	Min vmapi.MilliCPU `json:"min"`
+	Max vmapi.MilliCPU `json:"max"`
+	Use vmapi.MilliCPU `json:"use"`
 }
 
 type VmMemInfo struct {
@@ -112,6 +112,17 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		}
 	}
 
+	getNonNilMilliCPU := func(err *error, ptr *vmapi.MilliCPU, name string) (val vmapi.MilliCPU) {
+		if *err != nil {
+			return
+		} else if ptr == nil {
+			*err = fmt.Errorf("expected non-nil field %s", name)
+			return
+		} else {
+			return *ptr
+		}
+	}
+
 	scalingEnabled := HasAutoscalingEnabled(vm)
 	alwaysMigrate := HasAlwaysMigrateLabel(vm)
 
@@ -120,9 +131,9 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 		Name:      vm.Name,
 		Namespace: vm.Namespace,
 		Cpu: VmCpuInfo{
-			Min: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min")),
-			Max: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max")),
-			Use: uint16(getNonNilInt(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use")),
+			Min: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min"),
+			Max: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max"),
+			Use: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use"),
 		},
 		Mem: VmMemInfo{
 			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
@@ -167,6 +178,16 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	using := info.Using()
 	max := info.Max()
 
+	// we can't do validation for resource.Quantity with kubebuilder
+	// so do it here
+	if err := min.CheckValuesAreReasonablySized(); err != nil {
+		return nil, fmt.Errorf("min resources are invalid: %w", err)
+	}
+
+	if err := max.CheckValuesAreReasonablySized(); err != nil {
+		return nil, fmt.Errorf("max resources are invalid: %w", err)
+	}
+
 	// check: min <= max
 	if min.HasFieldGreaterThan(max) {
 		return nil, fmt.Errorf("min resources %+v has field greater than maximum %+v", min, max)
@@ -187,8 +208,8 @@ func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
 }
 
 func (vm *VmInfo) applyBounds(b ScalingBounds) {
-	vm.Cpu.Min = b.Min.CPU
-	vm.Cpu.Max = b.Max.CPU
+	vm.Cpu.Min = vmapi.MilliCPUFromResourceQuantity(b.Min.CPU)
+	vm.Cpu.Max = vmapi.MilliCPUFromResourceQuantity(b.Max.CPU)
 
 	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
 	// (2^16-1) * info.Mem.SlotSize.Value().
@@ -207,7 +228,7 @@ type ScalingBounds struct {
 }
 
 type ResourceBounds struct {
-	CPU uint16            `json:"cpu"`
+	CPU resource.Quantity `json:"cpu"`
 	Mem resource.Quantity `json:"mem"`
 }
 
@@ -229,7 +250,7 @@ func (b ResourceBounds) validate(ec *erc.Collector, path string, memSlotSize *re
 		return fmt.Errorf("error at %s%s: %w", path, field, err)
 	}
 
-	if b.CPU == 0 {
+	if b.CPU.IsZero() {
 		ec.Add(errAt(".cpu", errors.New("must be set to a non-zero value")))
 	}
 
@@ -295,9 +316,9 @@ func (cpu VmCpuInfo) Format(state fmt.State, verb rune) {
 	// same-ish style as for VmInfo, differing slightly from default repr.
 	switch {
 	case verb == 'v' && state.Flag('#'):
-		state.Write([]byte(fmt.Sprintf("api.VmCpuInfo{Min:%d, Max:%d, Use:%d}", cpu.Min, cpu.Max, cpu.Use)))
+		state.Write([]byte(fmt.Sprintf("api.VmCpuInfo{Min:api.MilliCPU(%#v), Max:api.MilliCPU(%#v), Use:api.MilliCPU(%#v)}", cpu.Min, cpu.Max, cpu.Use)))
 	default:
-		state.Write([]byte(fmt.Sprintf("{Min:%d Max:%d Use:%d}", cpu.Min, cpu.Max, cpu.Use)))
+		state.Write([]byte(fmt.Sprintf("{Min:%v Max:%v Use:%v}", cpu.Min, cpu.Max, cpu.Use)))
 	}
 }
 
