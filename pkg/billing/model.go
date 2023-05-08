@@ -21,5 +21,5 @@ type IncrementalEvent struct {
 	EndpointID     string    `json:"endpoint_id"`
 	StartTime      time.Time `json:"start_time"`
 	StopTime       time.Time `json:"stop_time"`
-	Value          float64   `json:"value"`
+	Value          int       `json:"value"`
 }

@@ -59,7 +59,7 @@ type vmMetricsInstant struct {
 type vmMetricsSeconds struct {
 	// cpu stores the CPU seconds allocated to the VM, roughly equivalent to the integral of CPU
 	// usage over time.
-	cpu vmapi.MilliCPU
+	cpu float64
 	// activeTime stores the total time that the VM was active
 	activeTime time.Duration
 }
@@ -200,11 +200,10 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 		panic("negative duration")
 	}
 
-	seconds := duration.Seconds()
 	// TODO: This approach is imperfect. Floating-point math is probably *fine*, but really not
 	// something we want to rely on. A "proper" solution is a lot of work, but long-term valuable.
 	metricsSeconds := vmMetricsSeconds{
-		cpu:        vmapi.MilliCPU(math.Round(float64(h.lastSlice.metrics.cpu) * seconds)),
+		cpu:        duration.Seconds() * h.lastSlice.metrics.cpu.ToResourceQuantity().AsApproximateFloat64(),
 		activeTime: duration,
 	}
 	h.total.cpu += metricsSeconds.cpu
@@ -231,8 +230,6 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
-		cpu := history.total.cpu.ToResourceQuantity()
-
 		batch.AddIncrementalEvent(billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
 			Type:           "", // set in batch method
@@ -242,7 +239,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			// That way we can be aligned to collection, rather than pushing.
 			StartTime: s.pushWindowStart,
 			StopTime:  now,
-			Value:     cpu.AsApproximateFloat64(),
+			Value:     int(math.Round(history.total.cpu)),
 		})
 		batch.AddIncrementalEvent(billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
@@ -251,7 +248,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
-			Value:          history.total.activeTime.Seconds(),
+			Value:          int(math.Round(history.total.activeTime.Seconds())),
 		})
 	}
 
