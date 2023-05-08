@@ -45,11 +45,10 @@ const (
 
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
-	defaultNetworkCIDR       = "10.255.255.252/30"
+	defaultNetworkCIDR       = "169.254.254.252/30"
 
 	overlayNetworkBridgeName = "br-overlay"
 	overlayNetworkTapName    = "tap-overlay"
-	overlayNetworkCIDR       = "169.254.254.252/30" // from private link-local special IP range (169.254.0.0/16)
 
 	// defaultPath is the default path to the resolv.conf that contains information to resolve DNS. See Path().
 	resolveDefaultPath = "/etc/resolv.conf"
@@ -387,6 +386,16 @@ func checkKVM() bool {
 	return mode&os.ModeCharDevice == os.ModeCharDevice
 }
 
+func checkDevTun() bool {
+	info, err := os.Stat("/dev/net/tun")
+	if err != nil {
+		return false
+	}
+	mode := info.Mode()
+
+	return mode&os.ModeCharDevice == os.ModeCharDevice
+}
+
 func main() {
 	var vmSpecDump string
 	var vmStatusDump string
@@ -457,6 +466,7 @@ func main() {
 
 	// prepare qemu command line
 	qemuCmd := []string{
+		"-runas", "qemu",
 		"-machine", "q35",
 		"-nographic",
 		"-no-reboot",
@@ -468,10 +478,6 @@ func main() {
 		"-msg", "timestamp=on",
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
 	}
-
-	// kernel details
-	qemuCmd = append(qemuCmd, "-kernel", kernelPath)
-	qemuCmd = append(qemuCmd, "-append", kernelCmdline)
 
 	// disk details
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
@@ -500,7 +506,7 @@ func main() {
 
 	// cpu details
 	if checkKVM() {
-		log.Printf("using KVM acceleration\n")
+		log.Println("using KVM acceleration")
 		qemuCmd = append(qemuCmd, "-enable-kvm")
 	}
 	qemuCmd = append(qemuCmd, "-cpu", "max")
@@ -525,6 +531,14 @@ func main() {
 		}
 		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
 		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
+	}
+
+	// kernel details
+	qemuCmd = append(qemuCmd, "-kernel", kernelPath)
+	if len(vmStatus.ExtraNetIP) != 0 {
+		qemuCmd = append(qemuCmd, "-append", fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName, kernelCmdline))
+	} else {
+		qemuCmd = append(qemuCmd, "-append", kernelCmdline)
 	}
 
 	// should runner receive migration ?
@@ -621,6 +635,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	}
 
 	// create an configure linux bridge
+	log.Printf("setup bridge interface %s", defaultNetworkBridgeName)
 	bridge := &netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkBridgeName,
@@ -647,6 +662,20 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	}
 
 	// create an configure TAP interface
+	if !checkDevTun() {
+		log.Printf("create /dev/net/tun")
+		if err := execFg("mkdir", "-p", "/dev/net"); err != nil {
+			return nil, err
+		}
+		if err := execFg("mknod", "/dev/net/tun", "c", "10", "200"); err != nil {
+			return nil, err
+		}
+		if err := execFg("chown", "qemu:kvm", "/dev/net/tun"); err != nil {
+			return nil, err
+		}
+	}
+
+	log.Printf("setup tap interface %s", defaultNetworkTapName)
 	tap := &netlink.Tuntap{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkTapName,
@@ -664,18 +693,15 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		return nil, err
 	}
 
-	// enable routing
-	if err := execFg("sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
-		return nil, err
-	}
-
 	// setup masquerading outgoing (from VM) traffic
+	log.Println("setup masquerading for outgoing traffic")
 	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
 		return nil, err
 	}
 
 	// pass incoming traffic to .Guest.Spec.Ports into VM
 	for _, port := range ports {
+		log.Printf("setup DNAT for incoming traffic, port %d", port.Port)
 		iptablesArgs := []string{
 			"-t", "nat", "-A", "PREROUTING",
 			"-i", "eth0", "-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
@@ -695,6 +721,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	dnsSearch := strings.Join(getSearchDomains(resolvConf.Content), ",")
 
 	// prepare dnsmask command line (instead of config file)
+	log.Printf("run dnsmqsq for interface %s", defaultNetworkBridgeName)
 	dnsMaskCmd := []string{
 		"--port=0",
 		"--bind-interfaces",
@@ -723,7 +750,7 @@ func overlayNetwork(iface, ip, mask string) (mac.MAC, error) {
 		return nil, err
 	}
 
-	// create an configure linux bridge
+	// create and configure linux bridge
 	bridge := &netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: overlayNetworkBridgeName,
@@ -733,19 +760,6 @@ func overlayNetwork(iface, ip, mask string) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.LinkAdd(bridge); err != nil {
-		return nil, err
-	}
-	ipBrige, _, maskBridge, err := calcIPs(overlayNetworkCIDR)
-	if err != nil {
-		return nil, err
-	}
-	bridgeAddr := &netlink.Addr{
-		IPNet: &net.IPNet{
-			IP:   ipBrige,
-			Mask: maskBridge,
-		},
-	}
-	if err := netlink.AddrAdd(bridge, bridgeAddr); err != nil {
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(bridge); err != nil {
@@ -776,21 +790,6 @@ func overlayNetwork(iface, ip, mask string) (mac.MAC, error) {
 		return nil, err
 	}
 	if err := netlink.LinkSetMaster(overlayLink, bridge); err != nil {
-		return nil, err
-	}
-
-	// prepare dnsmask command line (instead of config file)
-	dnsMaskCmd := []string{
-		"--port=0",
-		"--bind-interfaces",
-		"--dhcp-authoritative",
-		fmt.Sprintf("--interface=%s", overlayNetworkBridgeName),
-		fmt.Sprintf("--dhcp-range=%s,static,%s", ip, mask),
-		fmt.Sprintf("--dhcp-host=%s,%s,infinite", mac.String(), ip),
-		fmt.Sprintf("--shared-network=%s,%s", overlayNetworkBridgeName, ip),
-	}
-	// run dnsmasq for default Guest interface
-	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
 		return nil, err
 	}
 

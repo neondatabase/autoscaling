@@ -38,6 +38,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -226,7 +227,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		break
 	}
 	if try >= 10 {
-		return ctrl.Result{}, fmt.Errorf("unable update .specextraNetwork for virtualmachine %s in %d attempts", virtualmachine.Name, try)
+		return ctrl.Result{}, fmt.Errorf("unable update .status for virtualmachine %s in %d attempts", virtualmachine.Name, try)
 	}
 
 	return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -644,16 +645,26 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			Tolerations:                   virtualmachine.Spec.Tolerations,
 			SchedulerName:                 virtualmachine.Spec.SchedulerName,
 			Affinity:                      affinity,
-			InitContainers: []corev1.Container{{
-				Image:           virtualmachine.Spec.Guest.RootDisk.Image,
-				Name:            "init-rootdisk",
-				ImagePullPolicy: virtualmachine.Spec.Guest.RootDisk.ImagePullPolicy,
-				Args:            []string{"cp", "/disk.qcow2", "/vm/images/rootdisk.qcow2"},
-				VolumeMounts: []corev1.VolumeMount{{
-					Name:      "virtualmachineimages",
-					MountPath: "/vm/images",
-				}},
-			}},
+			InitContainers: []corev1.Container{
+				{
+					Image:           virtualmachine.Spec.Guest.RootDisk.Image,
+					Name:            "init-rootdisk",
+					ImagePullPolicy: virtualmachine.Spec.Guest.RootDisk.ImagePullPolicy,
+					Args:            []string{"cp", "/disk.qcow2", "/vm/images/rootdisk.qcow2"},
+					VolumeMounts: []corev1.VolumeMount{{
+						Name:      "virtualmachineimages",
+						MountPath: "/vm/images",
+					}},
+				},
+				{
+					Image:   image,
+					Name:    "sysctl",
+					Command: []string{"sysctl", "-w", "net.ipv4.ip_forward=1"},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: &[]bool{true}[0],
+					},
+				},
+			},
 			Containers: []corev1.Container{{
 				Image:           image,
 				Name:            "runner",
@@ -661,7 +672,14 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 				// Ensure restrictive context for the container
 				// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
 				SecurityContext: &corev1.SecurityContext{
-					Privileged: &[]bool{true}[0],
+					Privileged: &[]bool{false}[0],
+					Capabilities: &corev1.Capabilities{
+						Add: []corev1.Capability{
+							"NET_ADMIN",
+							"SYS_ADMIN",
+							"SYS_RESOURCE",
+						},
+					},
 				},
 				Ports: []corev1.ContainerPort{{
 					ContainerPort: virtualmachine.Spec.QMP,
@@ -686,6 +704,12 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			}},
 		},
 	}
+
+	// allow access to /dev/kvm and /dev/vhost-net devices by generic-device-plugin for kubelet
+	if pod.Spec.Containers[0].Resources.Limits == nil {
+		pod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{}
+	}
+	pod.Spec.Containers[0].Resources.Limits["neonvm/kvm"] = resource.MustParse("1")
 
 	for _, port := range virtualmachine.Spec.Guest.Ports {
 		cPort := corev1.ContainerPort{
@@ -757,6 +781,11 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		}
 		pod.ObjectMeta.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
 	}
+
+	if pod.ObjectMeta.Annotations == nil {
+		pod.ObjectMeta.Annotations = map[string]string{}
+	}
+	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "runner"
 
 	return pod, nil
 }

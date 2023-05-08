@@ -100,9 +100,9 @@ jobs:
             cd ${GITHUB_WORKSPACE}/neonvm/config/default-vxlan/vxlan-controller && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
             cd ${GITHUB_WORKSPACE}/neonvm/config/default-vxlan/vxlan-ipam       && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
             cd ${GITHUB_WORKSPACE}/neonvm/
-            kustomize build config/default-vxlan/multus --output neonvm-multus.yaml
-            kustomize build config/default-vxlan        --output neonvm-vxlan.yaml
-            kustomize build config/default              --output neonvm.yaml
+            kustomize build config/default-vxlan/multus     --output multus.yaml
+            kustomize build config/default-vxlan/multus-eks --output multus-eks.yaml
+            kustomize build config/default-vxlan            --output neonvm-vxlan.yaml
 
       # note: We *could* use something like kustomize for this. But there's extra steps (e.g.,
       # adding kustomization.yaml) and sed is simple; so we can deal with this for now.
@@ -163,6 +163,6 @@ jobs:
             bin/vm-informant
             deploy/autoscale-scheduler.yaml
             deploy/autoscaler-agent.yaml
-            neonvm/neonvm-multus.yaml
+            neonvm/multus.yaml
+            neonvm/multus-eks.yaml
             neonvm/neonvm-vxlan.yaml
-            neonvm/neonvm.yaml

@@ -27,9 +27,10 @@ bases:
 - vxlan-ipam
 - vxlan-controller
 - network
+- ../common/device-plugin
 
 patchesStrategicMerge:
-- manager_config_patch.yaml 
+- manager_config_patch.yaml
 
 # Protect the /metrics endpoint by putting it behind auth.
 # If you want your controller to expose the /metrics

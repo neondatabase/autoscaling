@@ -27,4 +27,5 @@ testbin/*
 neonvm/hack/vmlinuz
 neonvm/neonvm.yaml
 neonvm/neonvm-vxlan.yaml
-neonvm/neonvm-multus.yaml
+neonvm/multus.yaml
+neonvm/multus-eks.yaml

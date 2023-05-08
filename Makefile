@@ -240,14 +240,14 @@ deploy: kind-load manifests kustomize ## Deploy controller to the K8s cluster sp
 	cd neonvm/config/common/controller              && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)  && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	cd neonvm/config/default-vxlan/vxlan-ipam       && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > neonvm/neonvm-multus.yaml
-	$(KUSTOMIZE) build neonvm/config/default-vxlan > neonvm/neonvm-vxlan.yaml
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > neonvm/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/default-vxlan > neonvm/neonvm.yaml
 	cd neonvm/config/common/controller              && $(KUSTOMIZE) edit remove annotation deploytime
 	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit remove annotation deploytime
 	cd neonvm/config/default-vxlan/vxlan-ipam       && $(KUSTOMIZE) edit remove annotation deploytime
-	kubectl apply -f neonvm/neonvm-multus.yaml
+	kubectl apply -f neonvm/multus.yaml
 	kubectl -n kube-system rollout status daemonset kube-multus-ds
-	kubectl apply -f neonvm/neonvm-vxlan.yaml
+	kubectl apply -f neonvm/neonvm.yaml
 	kubectl -n neonvm-system rollout status  deployment neonvm-vxlan-ipam
 	kubectl -n neonvm-system rollout status  daemonset  neonvm-vxlan-controller
 	kubectl -n neonvm-system rollout status  deployment neonvm-controller
@@ -258,7 +258,7 @@ deploy: kind-load manifests kustomize ## Deploy controller to the K8s cluster sp
 .PHONY: deploy-controller
 deploy-controller: kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
-	$(KUSTOMIZE) build neonvm/config/default > neonvm/neonvm.yaml
+	$(KUSTOMIZE) build neonvm/config/default-vxlan > neonvm/neonvm.yaml
 	cd neonvm/config/common/controller && $(KUSTOMIZE) edit remove annotation deploytime
 	kubectl apply -f neonvm/neonvm.yaml
 	kubectl -n neonvm-system rollout status deployment neonvm-controller
@@ -273,9 +273,9 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 .PHONY: local-cluster
 local-cluster:  ## Create local cluster by kind tool and prepared config
 	kind create cluster --config kind/config.yaml
-	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
+#	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
+#	kubectl wait -n kube-system deployment calico-kube-controllers --for condition=Available --timeout -1s
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
-	kubectl wait -n kube-system deployment calico-kube-controllers --for condition=Available --timeout -1s
 	kubectl wait -n cert-manager deployment cert-manager --for condition=Available --timeout -1s
 
 .PHONY: kind-load
