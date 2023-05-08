@@ -106,7 +106,7 @@ spec:
         - name: autoscaler-agent
           # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
           # update that as well if you change this line!
-          image: neondatabase/autoscaler-agent:v0.7.1
+          image: neondatabase/autoscaler-agent:v0.7.2
           ports:
             - name: metrics
               containerPort: 9100
