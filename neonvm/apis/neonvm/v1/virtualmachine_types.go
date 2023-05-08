@@ -17,6 +17,9 @@ limitations under the License.
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +33,22 @@ import (
 // VM's name).
 const VirtualMachineNameLabel string = "vm.neon.tech/name"
 
+// Label that determines the version of runner pod. May be missing on older runners
+const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
+
+// VirtualMachineUsageAnnotation is the annotation added to each runner Pod, mirroring information
+// about the resource allocations of the VM running in the pod.
+//
+// The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
+const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
+
+// VirtualMachineUsage provides information about a VM's current usage. This is the type of the
+// JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
+type VirtualMachineUsage struct {
+	CPU    *resource.Quantity `json:"cpu"`
+	Memory *resource.Quantity `json:"memory"`
+}
+
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // VirtualMachineSpec defines the desired state of VirtualMachine
@@ -39,6 +58,12 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=20183
 	// +optional
 	QMP int32 `json:"qmp"`
+
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default:=25183
+	// +optional
+	RunnerPort int32 `json:"runnerPort"`
 
 	// +kubebuilder:default:=5
 	// +optional
@@ -65,6 +90,9 @@ type VirtualMachineSpec struct {
 	// Extra network interface attached to network provided by Mutlus CNI.
 	// +optional
 	ExtraNetwork *ExtraNetwork `json:"extraNetwork,omitempty"`
+
+	// +optional
+	ServiceLinks *bool `json:"service_links,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
@@ -103,22 +131,74 @@ type Guest struct {
 }
 
 type CPUs struct {
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=255
-	// +kubebuilder:validation:ExclusiveMaximum=false
 	// +optional
 	// +kubebuilder:default:=1
-	Min *int32 `json:"min"`
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=128
-	// +kubebuilder:validation:ExclusiveMaximum=false
+	Min *MilliCPU `json:"min"`
 	// +optional
-	Max *int32 `json:"max,omitempty"`
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=128
-	// +kubebuilder:validation:ExclusiveMaximum=false
+	Max *MilliCPU `json:"max,omitempty"`
 	// +optional
-	Use *int32 `json:"use,omitempty"`
+	Use *MilliCPU `json:"use,omitempty"`
+}
+
+// MilliCPU is a special type to represent vCPUs * 1000
+// e.g. 2 vCPU is 2000, 0.25 is 250
+//
+// +kubebuilder:validation:XIntOrString
+// +kubebuilder:validation:Pattern=^[0-9]+((\.[0-9]*)?|m)
+type MilliCPU uint32 // note: pattern is more restrictive than resource.Quantity, because we're just using it for CPU
+
+// RoundedUp returns the smallest integer number of CPUs greater than or equal to the effective
+// value of m.
+func (m MilliCPU) RoundedUp() uint32 {
+	r := uint32(m) / 1000
+	if m%1000 != 0 {
+		r += 1
+	}
+	return r
+}
+
+// MilliCPUFromResourceQuantity converts resource.Quantity into MilliCPU
+func MilliCPUFromResourceQuantity(r resource.Quantity) MilliCPU {
+	return MilliCPU(r.MilliValue())
+}
+
+// ToResourceQuantity converts a MilliCPU to resource.Quantity
+// this is useful for formatting/serialization
+func (m MilliCPU) ToResourceQuantity() *resource.Quantity {
+	return resource.NewMilliQuantity(int64(m), resource.BinarySI)
+}
+
+// this is used to parse scheduler config and communication between components
+// we used resource.Quantity as underlying transport format for MilliCPU
+func (m *MilliCPU) UnmarshalJSON(data []byte) error {
+	var quantity resource.Quantity
+	err := json.Unmarshal(data, &quantity)
+	if err != nil {
+		return err
+	}
+
+	*m = MilliCPUFromResourceQuantity(quantity)
+	return nil
+}
+
+func (m MilliCPU) MarshalJSON() ([]byte, error) {
+	// Mashal as an integer if we can, for backwards-compatibility with components that wouldn't be
+	// expecting a string here.
+	if m%1000 == 0 {
+		return json.Marshal(uint32(m / 1000))
+	}
+
+	return json.Marshal(m.ToResourceQuantity())
+}
+
+func (m MilliCPU) Format(state fmt.State, verb rune) {
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf("%v", uint32(m))))
+	default:
+		quantity := m.ToResourceQuantity()
+		state.Write([]byte(fmt.Sprintf("%v", quantity.AsApproximateFloat64())))
+	}
 }
 
 type MemorySlots struct {
@@ -264,7 +344,7 @@ type VirtualMachineStatus struct {
 	// +optional
 	Node string `json:"node,omitempty"`
 	// +optional
-	CPUs int `json:"cpus,omitempty"`
+	CPUs *MilliCPU `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 }

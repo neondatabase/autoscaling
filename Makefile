@@ -4,7 +4,7 @@ IMG_RUNNER ?= runner:dev
 IMG_VXLAN ?= vxlan-controller:dev
 
 # Autoscaler related images
-AUTOSCALER_SCHEDULER_IMG ?= kube-autoscale-scheduler:dev
+AUTOSCALER_SCHEDULER_IMG ?= autoscale-scheduler:dev
 AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
 VM_INFORMANT_IMG ?= vm-informant:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
@@ -148,16 +148,22 @@ vm-informant: ## Build vm-informant image
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: build ## Build docker image with the controller.
+docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
+
+.PHONY: docker-build-controller
+docker-build-controller: ## Build docker image for NeonVM controller
 	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
+
+.PHONY: docker-build-runner
+docker-build-runner: ## Build docker image for NeonVM runner
 	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
+
+.PHONY: docker-build-vxlan-controller
+docker-build-vxlan-controller: ## Build docker image for NeonVM vxlan controller
 	docker build -t $(IMG_VXLAN) -f neonvm/tools/vxlan/Dockerfile .
-	docker buildx build \
-		--tag $(AUTOSCALER_SCHEDULER_IMG) \
-		--load \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
-		--file build/autoscale-scheduler/Dockerfile \
-		.
+
+.PHONY: docker-build-autoscaler-agent
+docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
 	docker buildx build \
 		--tag $(AUTOSCALER_AGENT_IMG) \
 		--load \
@@ -165,12 +171,21 @@ docker-build: build ## Build docker image with the controller.
 		--file build/autoscaler-agent/Dockerfile \
 		.
 
+.PHONY: docker-build-scheduler
+docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
+	docker buildx build \
+		--tag $(AUTOSCALER_SCHEDULER_IMG) \
+		--load \
+		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--file build/autoscale-scheduler/Dockerfile \
+		.
+
 .PHONY: docker-build-examples
 docker-build-examples: vm-informant bin/vm-builder ## Build docker images for testing VMs
 	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG)
 
 .PHONY: docker-build-pg14-disk-test
-docker-build-pg14-disk-test: vm-informant bin/vm-builder ## Build a VM image for testing
+docker-build-pg14-disk-test: vm-informant bin/vm-builder-generic ## Build a VM image for testing
 	if [ -a 'vm-examples/pg14-disk-test/ssh_id_rsa' ]; then \
 	    echo "Skipping keygen because 'ssh_id_rsa' already exists"; \
 	else \

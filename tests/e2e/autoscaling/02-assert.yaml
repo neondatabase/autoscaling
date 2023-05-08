@@ -11,5 +11,5 @@ status:
   conditions:
     - type: Available
       status: "True"
-  cpus: 1
+  cpus: 250m
   memorySize: 1Gi

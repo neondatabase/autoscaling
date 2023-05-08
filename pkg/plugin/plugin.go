@@ -316,7 +316,7 @@ func (e *AutoscaleEnforcer) Filter(
 		)
 	}
 
-	// The pod will resources according to vmInfo.{Cpu,Mem}.Use reserved for it when it does get
+	// The pod will get resources according to vmInfo.{Cpu,Mem}.Use reserved for it when it does get
 	// scheduled. Now we can check whether this node has capacity for the pod.
 	//
 	// Technically speaking, the VM pods in nodeInfo might not match what we have recorded for the
@@ -325,7 +325,8 @@ func (e *AutoscaleEnforcer) Filter(
 	// preemption.
 	//
 	// So we have to actually count up the resource usage of all pods in nodeInfo:
-	var totalNodeVCPU, totalNodeMem uint16
+	var totalNodeVCPU vmapi.MilliCPU
+	var totalNodeMem uint16
 	var otherResources nodeOtherResourceState
 
 	otherResources.MarginCPU = node.otherResources.MarginCPU
@@ -480,14 +481,14 @@ func (e *AutoscaleEnforcer) Score(
 		return framework.MinNodeScore, nil
 	}
 
-	totalCpu := int64(node.totalReservableCPU())
+	totalMilliCpu := int64(node.totalReservableCPU())
 	totalMem := int64(node.totalReservableMemSlots())
-	maxTotalCpu := int64(e.state.maxTotalReservableCPU)
+	maxTotalMilliCpu := int64(e.state.maxTotalReservableCPU)
 	maxTotalMem := int64(e.state.maxTotalReservableMemSlots)
 
 	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
 	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	scoreCpu := framework.MinNodeScore + scoreLen*totalCpu/maxTotalCpu
+	scoreCpu := framework.MinNodeScore + scoreLen*totalMilliCpu/maxTotalMilliCpu
 	scoreMem := framework.MinNodeScore + scoreLen*totalMem/maxTotalMem
 
 	// return the minimum of the two resources scores
@@ -648,7 +649,7 @@ func (e *AutoscaleEnforcer) Reserve(
 			name:   pName,
 			vmName: vmInfo.NamespacedName(),
 			node:   node,
-			vCPU: podResourceState[uint16]{
+			vCPU: podResourceState[vmapi.MilliCPU]{
 				Reserved:         vmInfo.Cpu.Use,
 				Buffer:           0,
 				CapacityPressure: 0,

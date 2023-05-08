@@ -10,7 +10,7 @@ env:
   INFORMANT_IMAGE: "neondatabase/vm-informant"
 
   LOCAL_AGENT_IMAGE: "autoscaler-agent:dev"
-  LOCAL_SCHED_IMAGE: "kube-autoscale-scheduler:dev"
+  LOCAL_SCHED_IMAGE: "autoscale-scheduler:dev"
 
   KUSTOMIZE_VERSION:        "4.5.7"
   CONTROLLER_TOOLS_VERSION: "0.9.2"

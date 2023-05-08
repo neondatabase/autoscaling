@@ -25,7 +25,7 @@ import (
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_0
-	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
+	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_2
 )
 
 type InformantServer struct {
@@ -114,7 +114,8 @@ type InformantServerState struct {
 }
 
 type InformantServerExitStatus struct {
-	// Err is the non-nil error that caused the server to exit
+	// Err is the error, if any, that caused the server to exit. This is only non-nil when context
+	// used to start the server becomes canceled (i.e. the Runner is exiting).
 	Err error
 	// RetryShouldFix is true if simply retrying should resolve err. This is true when e.g. the
 	// informant responds with a 404 to a downscale or upscale request - it might've restarted, so
@@ -237,7 +238,7 @@ func NewInformantServer(
 	// handling, but that's about it.
 	serverName := fmt.Sprintf("InformantServer (%s)", server.desc.AgentID)
 	runner.spawnBackgroundWorker(ctx, serverName, func(c context.Context) {
-		if err := httpServer.Serve(listener); errors.Is(err, http.ErrServerClosed) {
+		if err := httpServer.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 			runner.logger.Errorf("InformantServer exited with unexpected error: %s", err)
 		}
 
@@ -250,6 +251,49 @@ func NewInformantServer(
 			server.exitStatus = &InformantServerExitStatus{
 				Err:            fmt.Errorf("Unexpected exit: %w", err),
 				RetryShouldFix: false,
+			}
+		}
+	})
+
+	// Thread waiting for the context to be canceled so we can use it to shut down the server
+	shutdownWaiterName := fmt.Sprintf("InformantServer shutdown waiter (%s)", server.desc.AgentID)
+	runner.spawnBackgroundWorker(ctx, shutdownWaiterName, func(context.Context) {
+		// Wait until parent context OR server's context is done.
+		<-backgroundCtx.Done()
+		server.exit(InformantServerExitStatus{Err: nil, RetryShouldFix: false})
+	})
+
+	healthCheckerName := fmt.Sprintf("InformantServer health-checker (%s)", server.desc.AgentID)
+	runner.spawnBackgroundWorker(backgroundCtx, healthCheckerName, func(c context.Context) {
+		// FIXME: make this duration configurable
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-c.Done():
+				return
+			case <-ticker.C:
+			}
+
+			var done bool
+			func() {
+				server.requestLock.Lock()
+				defer server.requestLock.Unlock()
+
+				// If we've already registered with the informant, and it doesn't support health
+				// checks, exit.
+				if server.protoVersion != nil && !server.protoVersion.AllowsHealthCheck() {
+					runner.logger.Infof("Aborting future informant health checks because it does not support them")
+					done = true
+					return
+				}
+
+				if _, err := server.HealthCheck(c); err != nil {
+					runner.logger.Warningf("Informant health check failed: %s", err)
+				}
+			}()
+			if done {
+				return
 			}
 		}
 	})
@@ -273,14 +317,14 @@ func IsNormalInformantError(err error) bool {
 		errors.Is(err, InformantServerNotCurrentError)
 }
 
-// Valid checks if the InformantServer is good to use for communication, returning an error if not
+// valid checks if the InformantServer is good to use for communication, returning an error if not
 //
 // This method can return errors for a number of unavoidably-racy protocol states - errors from this
 // method should be handled as unusual, but not unexpected. Any error returned will be one of
 // InformantServer{AlreadyExited,Suspended,Confirmed}Error.
 //
 // This method MUST be called while holding s.runner.lock.
-func (s *InformantServer) Valid() error {
+func (s *InformantServer) valid() error {
 	if s.exitStatus != nil {
 		return InformantServerAlreadyExitedError
 	}
@@ -533,7 +577,7 @@ func (s *InformantServer) unregisterFromInformant(ctx context.Context) error {
 		return err // the errors returned by doInformantRequest are descriptive enough.
 	}
 
-	s.runner.logger.Infof("Unregister %s request successful: %+v", *resp)
+	s.runner.logger.Infof("Unregister %s request successful: %+v", s.desc.AgentID, *resp)
 	return nil
 }
 
@@ -874,6 +918,47 @@ func (s *InformantServer) handleTryUpscale(
 	}
 }
 
+// HealthCheck makes a request to the informant's /health-check endpoint, using the server's ID.
+//
+// This method MUST be called while holding i.server.requestLock AND NOT i.server.runner.lock.
+func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealthCheckResp, error) {
+	err := func() error {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		return s.valid()
+	}()
+	if err != nil {
+		return nil, err
+	}
+
+	timeout := time.Second * time.Duration(s.runner.global.config.Informant.RequestTimeoutSeconds)
+	id := api.AgentIdentification{AgentID: s.desc.AgentID}
+
+	s.runner.logger.Infof("Sending health-check %+v", id)
+	resp, statusCode, err := doInformantRequest[api.AgentIdentification, api.InformantHealthCheckResp](
+		ctx, s, timeout, http.MethodPut, "/health-check", &id,
+	)
+	if err != nil {
+		func() {
+			s.runner.lock.Lock()
+			defer s.runner.lock.Unlock()
+
+			s.setLastInformantError(fmt.Errorf("Health-check request failed: %w", err), true)
+
+			if 400 <= statusCode && statusCode <= 599 {
+				s.exit(InformantServerExitStatus{
+					Err:            err,
+					RetryShouldFix: statusCode == 404,
+				})
+			}
+		}()
+		return nil, err
+	}
+
+	s.runner.logger.Infof("Received health-check result %+v", *resp)
+	return resp, nil
+}
+
 // Downscale makes a request to the informant's /downscale endpoit with the api.Resources
 //
 // This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
@@ -884,7 +969,7 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
-		return s.Valid()
+		return s.valid()
 	}()
 	if err != nil {
 		return nil, err
@@ -926,7 +1011,7 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
-		return s.Valid()
+		return s.valid()
 	}()
 	if err != nil {
 		return err

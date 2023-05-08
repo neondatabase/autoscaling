@@ -8,6 +8,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -38,8 +40,17 @@ const (
 	//
 	// * Allows a nil value of the AgentRequest.Metrics field.
 	//
-	// Currently the latest version.
+	// Last used in release version v0.6.0.
 	PluginProtoV1_1
+
+	// PluginProtoV2_0 represents v2.0 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v1.1:
+	//
+	// * Supports fractional CPU
+	//
+	// Currently the latest version.
+	PluginProtoV2_0
 
 	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
 	// protocol
@@ -60,6 +71,8 @@ func (v PluginProtoVersion) String() string {
 		return "v1.0"
 	case PluginProtoV1_1:
 		return "v1.1"
+	case PluginProtoV2_0:
+		return "v2.0"
 	default:
 		diff := v - latestPluginProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)
@@ -77,6 +90,10 @@ func (v PluginProtoVersion) IsValid() bool {
 // This is true for version v1.1 and greater.
 func (v PluginProtoVersion) AllowsNilMetrics() bool {
 	return v >= PluginProtoV1_1
+}
+
+func (v PluginProtoVersion) SupportsFractionalCPU() bool {
+	return v >= PluginProtoV2_0
 }
 
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
@@ -127,7 +144,7 @@ func (r AgentRequest) ProtocolRange() VersionRange[PluginProtoVersion] {
 //
 // In all cases, each resource type is considered separately from the others.
 type Resources struct {
-	VCPU uint16 `json:"vCPUs"`
+	VCPU vmapi.MilliCPU `json:"vCPUs"`
 	// Mem gives the number of slots of memory (typically 1G ea.) requested. The slot size is set by
 	// the value of the VM's VirtualMachineSpec.Guest.MemorySlotSize.
 	Mem uint16 `json:"mem"`
@@ -140,6 +157,17 @@ func (r Resources) ValidateNonZero() error {
 		return errors.New("vCPUs must be non-zero")
 	} else if r.Mem == 0 {
 		return errors.New("mem must be non-zero")
+	}
+
+	return nil
+}
+
+func (r Resources) CheckValuesAreReasonablySized() error {
+	if r.VCPU < 50 {
+		return errors.New("VCPU is smaller than 0.05")
+	}
+	if r.VCPU > 512*1000 {
+		return errors.New("VCPU is bigger than 512")
 	}
 
 	return nil
@@ -174,7 +202,7 @@ func (r Resources) Max(cmp Resources) Resources {
 // Mul returns the result of multiplying each resource by factor
 func (r Resources) Mul(factor uint16) Resources {
 	return Resources{
-		VCPU: factor * r.VCPU,
+		VCPU: vmapi.MilliCPU(factor) * r.VCPU,
 		Mem:  factor * r.Mem,
 	}
 }
@@ -190,7 +218,7 @@ func (r Resources) IncreaseFrom(old Resources) MoreResources {
 // ConvertToRaw produces the RawResources equivalent to these Resources with the given slot size
 func (r Resources) ConvertToRaw(memSlotSize *resource.Quantity) RawResources {
 	return RawResources{
-		Cpu:    resource.NewQuantity(int64(r.VCPU), resource.DecimalSI),
+		Cpu:    r.VCPU.ToResourceQuantity(),
 		Memory: resource.NewQuantity(int64(r.Mem)*memSlotSize.Value(), resource.BinarySI),
 	}
 }
@@ -253,8 +281,17 @@ const (
 	//
 	// * Adds /try-upscale endpoint to the autoscaler-agent.
 	//
-	// Currently the latest version.
+	// Last used in release version v0.6.0.
 	InformantProtoV1_1
+
+	// InformantProtoV1_2 represents v1.2 of the agent<->informant protocol.
+	//
+	// Changes from v1.1:
+	//
+	// * Adds /health-check endpoint to the vm-informant.
+	//
+	// Currently the latest version.
+	InformantProtoV1_2
 
 	// latestInformantProtoVersion represents the latest version of the agent<->informant protocol
 	//
@@ -274,6 +311,8 @@ func (v InformantProtoVersion) String() string {
 		return "v1.0"
 	case InformantProtoV1_1:
 		return "v1.1"
+	case InformantProtoV1_2:
+		return "v1.2"
 	default:
 		diff := v - latestInformantProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestInformantProtoVersion, diff)
@@ -290,6 +329,14 @@ func (v InformantProtoVersion) IsValid() bool {
 // This is true for version v1.1 and greater.
 func (v InformantProtoVersion) HasTryUpscale() bool {
 	return v >= InformantProtoV1_1
+}
+
+// AllowsHealthCheck returns whether this version of the protocol has the informant's /health-check
+// endpoint
+//
+// This is true for version v1.2 and greater.
+func (v InformantProtoVersion) AllowsHealthCheck() bool {
+	return v >= InformantProtoV1_2
 }
 
 // AgentMessage is used for (almost) every message sent from the autoscaler-agent to the VM
@@ -396,6 +443,10 @@ type MetricsMethodPrometheus struct {
 	Port uint16 `json:"port"`
 }
 
+// InformantHealthCheckResp is the result of a successful request to a VM informant's /health-check
+// endpoint.
+type InformantHealthCheckResp struct{}
+
 // UnregisterAgent is the result of a successful request to a VM informant's /unregister endpoint
 type UnregisterAgent struct {
 	// WasActive indicates whether the unregistered autoscaler-agent was the one in-use by the VM
@@ -464,4 +515,32 @@ type SuspendAgent struct {
 // previously suspended.
 type ResumeAgent struct {
 	ExpectedID uuid.UUID `json:"expectedID"`
+}
+
+////////////////////////////////////
+// Controller <-> Runner Messages //
+////////////////////////////////////
+
+// VCPUChange is used to notify runner that it had some changes in its CPUs
+// runner uses this info to adjust qemu cgroup
+type VCPUChange struct {
+	VCPUs vmapi.MilliCPU
+}
+
+// VCPUCgroup is used in runner to reply to controller
+// it represents the vCPU usage as controlled by cgroup
+type VCPUCgroup struct {
+	VCPUs vmapi.MilliCPU
+}
+
+// this a similar version type for controller <-> runner communications
+// see PluginProtoVersion comment for details
+type RunnerProtoVersion uint32
+
+const (
+	RunnerProtoV1 RunnerProtoVersion = iota + 1
+)
+
+func (v RunnerProtoVersion) SupportsCgroupFractionalCPU() bool {
+	return v >= RunnerProtoV1
 }

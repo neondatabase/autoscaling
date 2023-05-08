@@ -17,15 +17,18 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +53,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 const (
@@ -273,6 +279,20 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 			virtualmachine.Namespace))
 }
 
+func runnerSupportsCgroup(pod *corev1.Pod) bool {
+	val, ok := pod.Labels[vmv1.RunnerPodVersionLabel]
+	if !ok {
+		return false
+	}
+
+	uintVal, err := strconv.ParseUint(val, 10, 32)
+	if err != nil {
+		return false
+	}
+
+	return api.RunnerProtoVersion(uintVal).SupportsCgroupFractionalCPU()
+}
+
 func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
 	log := log.FromContext(ctx)
 
@@ -404,6 +424,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// update Node name where runner working
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
+			// update Pod "usage" annotation before anything else, so that it will be correctly set,
+			// even if the rest of the reconcile operation fails.
+			if err := updateRunnerUsageAnnotation(ctx, r.Client, virtualmachine, virtualmachine.Status.PodName); err != nil {
+				log.Error(err, "Failed to set Pod usage annotation", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+
 			// do hotplug/unplug CPU if .spec.guest.cpus.use defined
 			if virtualmachine.Spec.Guest.CPUs.Use != nil {
 				// firstly get current state from QEMU
@@ -413,12 +440,12 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					return err
 				}
 				// compare guest spec and count of plugged
-				if *virtualmachine.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
+				if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() > uint32(len(cpusPlugged)) {
 					// going to plug one CPU
 					if err := QmpPlugCpu(virtualmachine); err != nil {
 						return err
 					}
-				} else if *virtualmachine.Spec.Guest.CPUs.Use < int32(len(cpusPlugged)) {
+				} else if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() < uint32(len(cpusPlugged)) {
 					// going to unplug one CPU
 					if err := QmpUnplugCpu(virtualmachine); err != nil {
 						return err
@@ -427,17 +454,45 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// get CPU details from QEMU and update status
-			cpusPlugged, _, err := QmpGetCpus(virtualmachine)
+			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
 			}
-			if virtualmachine.Status.CPUs != len(cpusPlugged) {
+			specCPU := virtualmachine.Spec.Guest.CPUs.Use
+			pluggedCPU := uint32(len(cpuSlotsPlugged))
+			var cgroupUsage api.VCPUCgroup
+			supportsCgroup := runnerSupportsCgroup(vmRunner)
+			if supportsCgroup {
+				cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
+				if err != nil {
+					log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+					return err
+				}
+			}
+
+			// update cgroup when necessary
+			// if we're done scaling (plugged all CPU) then apply cgroup
+			// else just use all
+			var targetCPUUsage vmv1.MilliCPU
+			if specCPU != nil && specCPU.RoundedUp() == pluggedCPU {
+				targetCPUUsage = *specCPU
+			} else {
+				targetCPUUsage = vmv1.MilliCPU(1000 * pluggedCPU)
+			}
+
+			if supportsCgroup && targetCPUUsage != cgroupUsage.VCPUs {
+				if err := notifyRunner(ctx, virtualmachine, targetCPUUsage); err != nil {
+					return err
+				}
+			}
+
+			if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != *virtualmachine.Spec.Guest.CPUs.Use {
 				// update status by count of CPU cores used in VM
-				virtualmachine.Status.CPUs = len(cpusPlugged)
+				virtualmachine.Status.CPUs = virtualmachine.Spec.Guest.CPUs.Use
 				// record event about cpus used in VM
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
-					fmt.Sprintf("VirtualMachine %s uses %d cpu cores",
+					fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
 						virtualmachine.Name,
 						virtualmachine.Status.CPUs))
 			}
@@ -535,6 +590,67 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 	return nil
 }
 
+var usageAnnotationJSONPointer = fmt.Sprintf("/metadata/annotations/%s", util.PatchPathEscape(vmv1.VirtualMachineUsageAnnotation))
+
+func updateRunnerUsageAnnotation(ctx context.Context, c client.Client, vm *vmv1.VirtualMachine, podName string) error {
+	patches := []util.JSONPatch{{
+		// From RFC 6902 (JSON patch):
+		//
+		// > The "add" operation performs one of the following functions, depending upon what the
+		// > target location references:
+		// >
+		// > [ ... ]
+		// >
+		// > * If the target location specifies an object member that does not already exist, a new
+		// >   member is added to the object.
+		// > * If the target location specifies an object member that does exist, that member's
+		// >   value is replaced.
+		//
+		// So: if the annotation isn't already there, we'll add it. And if it *is* there, we'll
+		// replace it.
+		Op:    util.PatchAdd,
+		Path:  usageAnnotationJSONPointer, // these are *technically* called "JSON pointers" (from RFC 6901)
+		Value: extractVirtualMachineUsageJSON(vm.Spec),
+	}}
+
+	patchData, err := json.Marshal(patches)
+	if err != nil {
+		panic(fmt.Errorf("error marshalling JSON patch: %w", err))
+	}
+
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: vm.Namespace,
+			Name:      podName,
+		},
+	}
+	return c.Patch(ctx, &pod, client.RawPatch(types.JSONPatchType, patchData))
+}
+
+func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
+	cpu := *spec.Guest.CPUs.Min
+	if spec.Guest.CPUs.Use != nil {
+		cpu = *spec.Guest.CPUs.Use
+	}
+
+	memorySlots := *spec.Guest.MemorySlots.Min
+	if spec.Guest.MemorySlots.Use != nil {
+		memorySlots = *spec.Guest.MemorySlots.Use
+	}
+
+	usage := vmv1.VirtualMachineUsage{
+		CPU:    cpu.ToResourceQuantity(),
+		Memory: resource.NewQuantity(spec.Guest.MemorySlotSize.Value()*int64(memorySlots), resource.BinarySI),
+	}
+
+	usageJSON, err := json.Marshal(usage)
+	if err != nil {
+		panic(fmt.Errorf("error marshalling JSON: %w", err))
+	}
+
+	return string(usageJSON)
+}
+
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
@@ -562,7 +678,17 @@ func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]str
 	}
 	l["app.kubernetes.io/name"] = "NeonVM"
 	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
+	l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", api.RunnerProtoV1)
 	return l
+}
+
+func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
+	a := virtualmachine.Annotations
+	if a == nil {
+		a = map[string]string{}
+	}
+	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
+	return a
 }
 
 func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affinity {
@@ -577,7 +703,7 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
 
-	// if NodeSelectorTerms list is empty - add default values (arch==amd84 or os==linux)
+	// if NodeSelectorTerms list is empty - add default values (arch==amd64 or os==linux)
 	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
 			a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
@@ -599,6 +725,71 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 	return a
 }
 
+func notifyRunner(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.MilliCPU) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
+
+	update := api.VCPUChange{VCPUs: cpu}
+
+	data, err := json.Marshal(update)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("unexpected status %s", resp.Status)
+	}
+	return nil
+}
+
+func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (api.VCPUCgroup, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result := api.VCPUCgroup{}
+
+	url := fmt.Sprintf("http://%s:%d/cpu_current", vm.Status.PodIP, vm.Spec.RunnerPort)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return result, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return result, err
+	}
+
+	if resp.StatusCode != 200 {
+		return result, fmt.Errorf("unexpected status %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+	if err != nil {
+		return result, err
+	}
+
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
 // imageForVirtualMachine gets the Operand image which is managed by this controller
 // from the VM_RUNNER_IMAGE environment variable defined in the config/manager/manager.yaml
 func imageForVmRunner() (string, error) {
@@ -612,6 +803,7 @@ func imageForVmRunner() (string, error) {
 
 func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	labels := labelsForVirtualMachine(virtualmachine)
+	annotations := annotationsForVirtualMachine(virtualmachine)
 	affinity := affinityForVirtualMachine(virtualmachine)
 
 	// Get the Operand image
@@ -635,9 +827,10 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			Name:        virtualmachine.Status.PodName,
 			Namespace:   virtualmachine.Namespace,
 			Labels:      labels,
-			Annotations: virtualmachine.Annotations,
+			Annotations: annotations,
 		},
 		Spec: corev1.PodSpec{
+			EnableServiceLinks:            virtualmachine.Spec.ServiceLinks,
 			RestartPolicy:                 corev1.RestartPolicy(virtualmachine.Spec.RestartPolicy),
 			TerminationGracePeriodSeconds: virtualmachine.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  virtualmachine.Spec.NodeSelector,

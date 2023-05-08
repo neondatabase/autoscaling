@@ -12,3 +12,6 @@ bases:
 images:
 - name: ghcr.io/k8snetworkplumbingwg/whereabouts
   newTag: v0.6.1-amd64
+
+patchesStrategicMerge:
+- daemonset_patch.yaml

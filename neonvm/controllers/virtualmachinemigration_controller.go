@@ -322,6 +322,13 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			virtualmachinemigration.Status.SourcePodIP = vm.Status.PodIP
 			virtualmachinemigration.Status.TargetPodIP = targetRunner.Status.PodIP
 
+			// Set the target runner's "usage" annotation before anything else, so that it will be
+			// correct even if the rest of the reconcile operation fails
+			if err := updateRunnerUsageAnnotation(ctx, r.Client, vm, targetRunner.Name); err != nil {
+				log.Error(err, "Failed to set target Pod usage annotation", "VirtualMachineMigration", virtualmachinemigration)
+				return err
+			}
+
 			readyToMigrateCPU := false
 			// do hotplugCPU in targetRunner before migration if .spec.guest.cpus.use defined
 			if vm.Spec.Guest.CPUs.Use != nil {
@@ -332,7 +339,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 					return err
 				}
 				// compare guest spec and count of plugged
-				if *vm.Spec.Guest.CPUs.Use > int32(len(cpusPlugged)) {
+				if vm.Spec.Guest.CPUs.Use.RoundedUp() > uint32(len(cpusPlugged)) {
 					// going to plug one CPU
 					err := QmpPlugCpuToRunner(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP)
 					if err != nil {
@@ -343,6 +350,11 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 				} else {
 					// seems all CPUs plugged to target runner
 					readyToMigrateCPU = true
+				}
+				if runnerSupportsCgroup(targetRunner) {
+					if err := notifyRunner(ctx, vm, *vm.Spec.Guest.CPUs.Use); err != nil {
+						return err
+					}
 				}
 			}
 

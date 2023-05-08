@@ -70,7 +70,7 @@ func collectResourceTransition[T constraints.Unsigned](
 // what's possible given the remaining resources.
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
-func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool) (verdict string) {
+func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool, onlyThousands bool) (verdict string) {
 	totalReservable := r.node.Total - r.node.System
 	// note: it's possible to temporarily have reserved > totalReservable, after loading state or
 	// config change; we have to use SaturatingSub here to account for that.
@@ -147,6 +147,11 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		increase := requested - r.pod.Reserved
 		// Increases are bounded by what's left in the node
 		maxIncrease := remainingReservable
+		// if only in thousands, round down maxIncrease to nearest multiple of 1000
+		if onlyThousands {
+			thousand := T(100) * 10 // avoid compiler complaining about 1000 > maximum int8
+			maxIncrease = (maxIncrease / thousand) * thousand
+		}
 		if increase > maxIncrease /* increases are bound by what's left in the node */ {
 			r.pod.CapacityPressure = increase - maxIncrease
 			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
