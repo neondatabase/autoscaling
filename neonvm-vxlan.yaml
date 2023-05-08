@@ -2321,7 +2321,7 @@ spec:
         env:
         - name: IPAM_SERVER
           value: http://neonvm-vxlan-ipam:9090
-        image: sharnoff/neonvm-controller:v0.7.1-alpha1
+        image: neondatabase/neonvm-controller:v0.7.1
         livenessProbe:
           httpGet:
             path: /healthz
@@ -2434,7 +2434,7 @@ spec:
         envFrom:
         - configMapRef:
             name: neonvm-vxlan-ipam
-        image: neondatabase/neonvm-vxlan-controller:v0.7.0
+        image: neondatabase/neonvm-vxlan-controller:v0.7.1
         imagePullPolicy: IfNotPresent
         livenessProbe:
           exec:
@@ -2511,7 +2511,7 @@ spec:
               fieldPath: status.hostIP
         - name: IPAM_SERVER
           value: http://neonvm-vxlan-ipam:9090
-        image: neondatabase/neonvm-vxlan-controller:v0.7.0
+        image: neondatabase/neonvm-vxlan-controller:v0.7.1
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -2543,7 +2543,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.7.0
+        image: neondatabase/neonvm-vxlan-controller:v0.7.1
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
