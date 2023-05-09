@@ -233,6 +233,12 @@ func createISO9660runtime(diskPath string, command []string, args []string, env 
 		return err
 	}
 
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	err = outputFile.Chown(36, 34)
+	if err != nil {
+		return err
+	}
+
 	err = writer.WriteTo(outputFile, "vmruntime")
 	if err != nil {
 		return err
@@ -317,6 +323,11 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		return err
 	}
 
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	if err := execFg("chown", "36", "34", diskPath); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -374,6 +385,11 @@ func createISO9660FromPath(diskName string, diskPath string, contentPath string)
 	}
 
 	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	err = outputFile.Chown(36, 34)
 	if err != nil {
 		return err
 	}
@@ -804,34 +820,29 @@ func terminateQemuOnSigterm(ctx context.Context, qmpPort int32, wg *sync.WaitGro
 	case <-c:
 	case <-ctx.Done():
 	}
+
 	log.Println("got signal, sending powerdown command to QEMU")
 
-	for {
-		mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("127.0.0.1:%d", qmpPort), 2*time.Second)
-		if err != nil {
-			log.Println(err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		if err := mon.Connect(); err != nil {
-			log.Println(err)
-			time.Sleep(time.Second)
-			continue
-		}
-		defer mon.Disconnect()
-
-		qmpcmd := []byte(`{"execute": "system_powerdown"}`)
-		_, err = mon.Run(qmpcmd)
-		if err != nil {
-			log.Println(err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		log.Println("system_powerdown command sent to QEMU")
-		break
+	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("127.0.0.1:%d", qmpPort), 2*time.Second)
+	if err != nil {
+		log.Println(err)
+		return
 	}
+
+	if err := mon.Connect(); err != nil {
+		log.Println(err)
+		return
+	}
+	defer mon.Disconnect()
+
+	qmpcmd := []byte(`{"execute": "system_powerdown"}`)
+	_, err = mon.Run(qmpcmd)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	log.Println("system_powerdown command sent to QEMU")
 
 	return
 }

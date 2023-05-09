@@ -46,6 +46,7 @@ func (r *VirtualMachine) Default() {
 
 	// TODO(user): fill in your defaulting logic.
 
+	// CPU spec defaulter
 	if r.Spec.Guest.CPUs.Use == nil {
 		r.Spec.Guest.CPUs.Use = new(MilliCPU)
 		*r.Spec.Guest.CPUs.Use = *r.Spec.Guest.CPUs.Min
@@ -53,6 +54,16 @@ func (r *VirtualMachine) Default() {
 	if r.Spec.Guest.CPUs.Max == nil {
 		r.Spec.Guest.CPUs.Max = new(MilliCPU)
 		*r.Spec.Guest.CPUs.Max = *r.Spec.Guest.CPUs.Min
+	}
+
+	// Memory spec defaulter
+	if r.Spec.Guest.MemorySlots.Use == nil {
+		r.Spec.Guest.MemorySlots.Use = new(int32)
+		*r.Spec.Guest.MemorySlots.Use = *r.Spec.Guest.MemorySlots.Min
+	}
+	if r.Spec.Guest.MemorySlots.Max == nil {
+		r.Spec.Guest.MemorySlots.Max = new(int32)
+		*r.Spec.Guest.MemorySlots.Max = *r.Spec.Guest.MemorySlots.Min
 	}
 }
 

@@ -321,6 +321,10 @@ type ExtraNetwork struct {
 	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net-ipam
 	// +optional
 	MultusNetwork string `json:"multusNetwork"`
+	// Multus Network name specified in network-attachments-definition.
+	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net
+	// +optional
+	MultusNetworkNoIP string `json:"multusNetworkNoIP"`
 }
 
 // VirtualMachineStatus defines the observed state of VirtualMachine

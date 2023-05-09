@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
@@ -291,8 +292,13 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 		err = r.Get(ctx, types.NamespacedName{Name: virtualmachinemigration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			// Define a new target pod
-			//tpod, err := r.targetPodForVirtualMachine(sourceRunner, virtualmachinemigration)
-			tpod, err := r.targetPodForVirtualMachine(vm, virtualmachinemigration)
+
+			var networkStatus string
+			if sourceRunner.Annotations != nil {
+				networkStatus = sourceRunner.Annotations[nadapiv1.NetworkStatusAnnot]
+			}
+
+			tpod, err := r.targetPodForVirtualMachine(vm, virtualmachinemigration, networkStatus)
 			if err != nil {
 				log.Error(err, "Failed to define Target Pod for VirtualMachineMigration")
 				return err
@@ -305,7 +311,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			}
 
 			r.Recorder.Event(virtualmachinemigration, "Normal", "Created",
-				fmt.Sprintf("Created Target Pod for VirtualMachine %s",
+				fmt.Sprintf("VirtualMachine %s has target pod for migration",
 					vm.Name))
 			// once more retrieve just created target pod details
 			r.Get(ctx, types.NamespacedName{Name: virtualmachinemigration.Status.TargetPodName, Namespace: virtualmachinemigration.Namespace}, targetRunner)
@@ -524,7 +530,9 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 
 // targetPodForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
-	virtualmachine *vmv1.VirtualMachine, virtualmachinemigration *vmv1.VirtualMachineMigration) (*corev1.Pod, error) {
+	virtualmachine *vmv1.VirtualMachine,
+	virtualmachinemigration *vmv1.VirtualMachineMigration,
+	networkStatus string) (*corev1.Pod, error) {
 
 	pod, err := podSpec(virtualmachine)
 	if err != nil {
@@ -556,6 +564,16 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 			},
 			TopologyKey: "kubernetes.io/hostname",
 		})
+	}
+
+	// use multus network to add extra network interface but without IPAM
+	if virtualmachine.Spec.ExtraNetwork != nil {
+		if virtualmachine.Spec.ExtraNetwork.Enable {
+			pod.ObjectMeta.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetworkNoIP, virtualmachine.Spec.ExtraNetwork.Interface)
+			if len(networkStatus) > 0 {
+				pod.ObjectMeta.Annotations[nadapiv1.NetworkStatusAnnot] = networkStatus
+			}
+		}
 	}
 
 	// Set the ownerRef for the Pod

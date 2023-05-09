@@ -819,6 +819,11 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 						Name:      "virtualmachineimages",
 						MountPath: "/vm/images",
 					}},
+					SecurityContext: &corev1.SecurityContext{
+						// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+						RunAsUser: &[]int64{36}[0],
+						RunAsGroup: &[]int64{34}[0],
+					},
 				},
 				{
 					Image:   image,
@@ -966,7 +971,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	}
 	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "runner"
 
-	// use multus network tp add extra network interface
+	// use multus network to add extra network interface
 	if virtualmachine.Spec.ExtraNetwork != nil {
 		if virtualmachine.Spec.ExtraNetwork.Enable {
 			pod.ObjectMeta.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetwork, virtualmachine.Spec.ExtraNetwork.Interface)

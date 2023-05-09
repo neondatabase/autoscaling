@@ -1082,6 +1082,10 @@ spec:
                     default: neonvm-system/neonvm-overlay-net-ipam
                     description: Multus Network name specified in network-attachments-definition.
                     type: string
+                  multusNetworkNoIP:
+                    default: neonvm-system/neonvm-overlay-net
+                    description: Multus Network name specified in network-attachments-definition.
+                    type: string
                 type: object
               guest:
                 properties:
