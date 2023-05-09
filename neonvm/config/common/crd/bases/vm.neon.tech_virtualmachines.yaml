@@ -1079,7 +1079,7 @@ spec:
                     description: Interface name.
                     type: string
                   multusNetwork:
-                    default: neonvm-system/neonvm-overlay-net
+                    default: neonvm-system/neonvm-overlay-net-ipam
                     description: Multus Network name specified in network-attachments-definition.
                     type: string
                 type: object

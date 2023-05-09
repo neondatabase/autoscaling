@@ -38,6 +38,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -540,19 +541,36 @@ func main() {
 	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
 
 	// overlay (multus) net details
-	if len(vmStatus.ExtraNetIP) != 0 {
-		macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface, vmStatus.ExtraNetIP, vmStatus.ExtraNetMask)
-		if err != nil {
-			log.Fatalf("can not setup overlay network: %s", err)
+	if vmSpec.ExtraNetwork != nil {
+		if vmSpec.ExtraNetwork.Enable {
+			macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface)
+			if err != nil {
+				log.Fatalf("can not setup overlay network: %s", err)
+			}
+			qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
+			qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
 		}
-		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
-		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
+	}
+
+	// get overlay IP address from Network Status (provided by NetworkAttachmentDefinition)
+	networkStatusList := []nadapiv1.NetworkStatus{}
+	if os.Getenv("NETWORK_STATUS") != "" {
+		if err := json.Unmarshal([]byte(os.Getenv("NETWORK_STATUS")), &networkStatusList); err != nil {
+			log.Fatalf("can not retrieve network status: %s", err)
+		}
+	}
+	var overlayIP string
+	for _, networkStatus := range networkStatusList {
+		if networkStatus.Interface == vmSpec.ExtraNetwork.Interface && len(networkStatus.IPs) > 0 {
+			overlayIP = networkStatus.IPs[0]
+			break
+		}
 	}
 
 	// kernel details
 	qemuCmd = append(qemuCmd, "-kernel", kernelPath)
-	if len(vmStatus.ExtraNetIP) != 0 {
-		qemuCmd = append(qemuCmd, "-append", fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName, kernelCmdline))
+	if len(overlayIP) != 0 {
+		qemuCmd = append(qemuCmd, "-append", fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", overlayIP, vmv1.OverlayNetworkMask, vmStatus.PodName, kernelCmdline))
 	} else {
 		qemuCmd = append(qemuCmd, "-append", kernelCmdline)
 	}
@@ -578,7 +596,7 @@ func main() {
 	go listenForCPUChanges(ctx, vmSpec.RunnerPort, cgroupPath, &wg)
 
 	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
-	log.Printf("using cgexec args: %s", args)
+	log.Printf("using cgexec args: %v", args)
 	if err := execFg("cgexec", args...); err != nil {
 		log.Printf("Qemu exited: %s", err)
 	}
@@ -684,7 +702,7 @@ func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	// quota may be greater than period if the cgroup is allowed
 	// to use more than 100% of a CPU.
 	quota := int64(float64(r) / float64(1000) * float64(cgroupPeriod))
-	fmt.Printf("setting cgroup to %v %v\n", quota, period)
+	log.Printf("setting cgroup to %v %v\n", quota, period)
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
@@ -972,7 +990,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	return mac, nil
 }
 
-func overlayNetwork(iface, ip, mask string) (mac.MAC, error) {
+func overlayNetwork(iface string) (mac.MAC, error) {
 	// gerenare random MAC for overlay Guest interface
 	mac, err := mac.GenerateRandMAC()
 	if err != nil {
@@ -1018,6 +1036,20 @@ func overlayNetwork(iface, ip, mask string) (mac.MAC, error) {
 	if err != nil {
 		return nil, err
 	}
+	// firsly delete IP address(es) (it it exist) from overlay interface
+	overlayAddrs, err := netlink.AddrList(overlayLink, netlink.FAMILY_V4)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range overlayAddrs {
+		ip := a.IPNet
+		if ip != nil {
+			if err := netlink.AddrDel(overlayLink, &a); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// and now add overlay link to bridge
 	if err := netlink.LinkSetMaster(overlayLink, bridge); err != nil {
 		return nil, err
 	}

@@ -45,6 +45,15 @@ func (r *VirtualMachine) Default() {
 	virtualmachinelog.Info("default", "name", r.Name)
 
 	// TODO(user): fill in your defaulting logic.
+
+	if r.Spec.Guest.CPUs.Use == nil {
+		r.Spec.Guest.CPUs.Use = new(MilliCPU)
+		*r.Spec.Guest.CPUs.Use = *r.Spec.Guest.CPUs.Min
+	}
+	if r.Spec.Guest.CPUs.Max == nil {
+		r.Spec.Guest.CPUs.Max = new(MilliCPU)
+		*r.Spec.Guest.CPUs.Max = *r.Spec.Guest.CPUs.Min
+	}
 }
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.

@@ -21,22 +21,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
-
-	"github.com/bufbuild/connect-go"
-	goipamapiv1 "github.com/cicdteam/go-ipam/api/v1"
-	"github.com/cicdteam/go-ipam/api/v1/apiv1connect"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -52,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -252,26 +244,6 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 	// to set the ownerRef which means that the Deployment will be deleted by the Kubernetes API.
 	// More info: https://kubernetes.io/docs/tasks/administer-cluster/use-cascading-deletion/
 
-	log := log.FromContext(ctx)
-
-	// release IP for ExtraNetwork interface
-	if virtualmachine.Spec.ExtraNetwork != nil {
-		ipamService := os.Getenv(ipamServerVariableName)
-		if len(ipamService) == 0 {
-			log.Error(fmt.Errorf("IPAM service not found, environment variable %s is empty", ipamServerVariableName), "ipam service not defined")
-		} else if len(virtualmachine.Status.ExtraNetIP) != 0 {
-			log.Info("Going to release IP address used for ExtraNetwork",
-				"virtualmachine", virtualmachine.Name,
-				"extraNetIP", virtualmachine.Status.ExtraNetIP)
-			err := releaseIP(ctx, ipamService, virtualmachine.Status.ExtraNetIP)
-			if err != nil {
-				log.Error(err, "Failed to release IP address for ExtraNetwork",
-					"virtualmachine", virtualmachine.Name,
-					"extraNetIP", virtualmachine.Status.ExtraNetIP)
-			}
-		}
-	}
-
 	// The following implementation will raise an event
 	r.Recorder.Event(virtualmachine, "Warning", "Deleting",
 		fmt.Sprintf("Custom Resource %s is being deleted from the namespace %s",
@@ -313,30 +285,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// VirtualMachine just created, change Phase to "Pending"
 		virtualmachine.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
-		// acquire IP for ExtraNetwork interface
-		if virtualmachine.Spec.ExtraNetwork != nil {
-			ipamService := os.Getenv(ipamServerVariableName)
-			if len(ipamService) == 0 {
-				return fmt.Errorf("IPAM service not found, environment variable %s is empty", ipamServerVariableName)
-			}
-			if len(virtualmachine.Status.ExtraNetIP) == 0 {
-				log.Info("Trying acquire IP address and mask for ExtraNetwork")
-				ip, mask, err := acquireIP(ctx, ipamService)
-				if err != nil {
-					log.Error(err, "Failed to acquire IP address for ExtraNetwork")
-					return err
-				}
-				log.Info("Acquired IP address and mask", "ip", ip.String(), "mask", mask.String())
-				virtualmachine.Status.ExtraNetIP = ip.String()
-				virtualmachine.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", mask[0], mask[1], mask[2], mask[3])
-
-				r.Recorder.Event(virtualmachine, "Normal", "Acquired",
-					fmt.Sprintf("Acquired IP %s for VirtualMachine %s",
-						virtualmachine.Status.ExtraNetIP,
-						virtualmachine.Name))
-			}
-		}
-
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
@@ -355,7 +303,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			r.Recorder.Event(virtualmachine, "Normal", "Created",
-				fmt.Sprintf("Created VirtualMachine %s",
+				fmt.Sprintf("VirtualMachine %s created",
 					virtualmachine.Name))
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")
@@ -371,6 +319,29 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
+			// get overlay IP address from Network Status (provided by NetworkAttachmentDefinition)
+			if virtualmachine.Spec.ExtraNetwork != nil {
+				if virtualmachine.Spec.ExtraNetwork.Enable {
+					networkStatusList := []nadapiv1.NetworkStatus{}
+					if vmRunner.Annotations[nadapiv1.NetworkStatusAnnot] != "" {
+						if err := json.Unmarshal([]byte(vmRunner.Annotations[nadapiv1.NetworkStatusAnnot]), &networkStatusList); err != nil {
+							log.Error(err, "can not retrieve network status")
+							return err
+						}
+					}
+					for _, networkStatus := range networkStatusList {
+						if networkStatus.Interface == virtualmachine.Spec.ExtraNetwork.Interface && len(networkStatus.IPs) > 0 {
+							virtualmachine.Status.ExtraNetIP = networkStatus.IPs[0]
+							virtualmachine.Status.ExtraNetMask = vmv1.OverlayNetworkMask
+							r.Recorder.Event(virtualmachine, "Normal", "OverlayNet",
+								fmt.Sprintf("VirtualMachine %s got IP %s from overlay network",
+									virtualmachine.Name,
+									virtualmachine.Status.ExtraNetIP))
+							break
+						}
+					}
+				}
+			}
 		case corev1.PodSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -883,18 +854,41 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 					"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 					"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 				},
-				VolumeMounts: []corev1.VolumeMount{{
-					Name:      "virtualmachineimages",
-					MountPath: "/vm/images",
-				}},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "virtualmachineimages",
+						MountPath: "/vm/images",
+					},
+					{
+						Name:      "sysfscgroup",
+						MountPath: "/sys/fs/cgroup",
+						// MountPropagationNone means that the volume in a container will
+						// not receive new mounts from the host or other containers, and filesystems
+						// mounted inside the container won't be propagated to the host or other
+						// containers.
+						// Note that this mode corresponds to "private" in Linux terminology.
+						MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
+					},
+				},
 				Resources: virtualmachine.Spec.PodResources,
 			}},
-			Volumes: []corev1.Volume{{
-				Name: "virtualmachineimages",
-				VolumeSource: corev1.VolumeSource{
-					EmptyDir: &corev1.EmptyDirVolumeSource{},
+			Volumes: []corev1.Volume{
+				{
+					Name: "virtualmachineimages",
+					VolumeSource: corev1.VolumeSource{
+						EmptyDir: &corev1.EmptyDirVolumeSource{},
+					},
 				},
-			}},
+				{
+					Name: "sysfscgroup",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/sys/fs/cgroup",
+							Type: &[]corev1.HostPathType{corev1.HostPathDirectory}[0],
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -967,18 +961,25 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		}
 	}
 
-	// use multus network tp add extra network interface
-	if virtualmachine.Spec.ExtraNetwork != nil {
-		if pod.ObjectMeta.Annotations == nil {
-			pod.ObjectMeta.Annotations = map[string]string{}
-		}
-		pod.ObjectMeta.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
-	}
-
 	if pod.ObjectMeta.Annotations == nil {
 		pod.ObjectMeta.Annotations = map[string]string{}
 	}
 	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "runner"
+
+	// use multus network tp add extra network interface
+	if virtualmachine.Spec.ExtraNetwork != nil {
+		if virtualmachine.Spec.ExtraNetwork.Enable {
+			pod.ObjectMeta.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
+			pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{
+				Name: "NETWORK_STATUS",
+				ValueFrom: &corev1.EnvVarSource{
+					FieldRef: &corev1.ObjectFieldSelector{
+						FieldPath: fmt.Sprintf("metadata.annotations['%s']", nadapiv1.NetworkStatusAnnot),
+					},
+				},
+			})
+		}
+	}
 
 	return pod, nil
 }
@@ -991,107 +992,6 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
 		Complete(r)
-}
-
-func waitForGrpc(ctx context.Context, addr string) {
-	log := log.FromContext(ctx)
-
-	dialAddr := strings.TrimPrefix(addr, "http://")
-	dialTimeout := 5 * time.Second
-	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	}
-	log.Info("check grpc connection", "address", dialAddr)
-	for {
-		dialCtx, dialCancel := context.WithTimeout(ctx, dialTimeout)
-		defer dialCancel()
-		check, err := grpc.DialContext(dialCtx, dialAddr, dialOpts...)
-		if err != nil {
-			if err == context.DeadlineExceeded {
-				log.Info("timeout: failed to connect to grpc service", "address", dialAddr)
-			} else {
-				log.Info("failed to connect to grpc service", "address", dialAddr, "error", err)
-			}
-		} else {
-			log.Info("grpc connected", "grpc state", check.GetState())
-			break
-		}
-	}
-}
-
-func acquireIP(ctx context.Context, ipam string) (net.IP, net.IPMask, error) {
-	log := log.FromContext(ctx)
-
-	waitForGrpc(ctx, ipam)
-
-	c := apiv1connect.NewIpamServiceClient(
-		http.DefaultClient,
-		ipam,
-		connect.WithGRPC(),
-	)
-
-	// get prefixes from IPAM service
-	prefixes, err := c.ListPrefixes(ctx, connect.NewRequest(&goipamapiv1.ListPrefixesRequest{}))
-	if err != nil {
-		return net.IP{}, net.IPMask{}, err
-	}
-	p := prefixes.Msg.Prefixes
-	if len(p) == 0 {
-		return net.IP{}, net.IPMask{}, errors.New("IPAM prefix not found")
-	}
-	if len(p) > 1 {
-		return net.IP{}, net.IPMask{}, fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
-	}
-
-	result, err := c.AcquireIP(ctx, connect.NewRequest(&goipamapiv1.AcquireIPRequest{PrefixCidr: p[0].Cidr}))
-	if err != nil {
-		return net.IP{}, net.IPMask{}, err
-	}
-	log.Info("ip acquired", "ip", result.Msg.Ip.Ip)
-
-	// parse overlay cidr for IPMask
-	_, ipv4Net, err := net.ParseCIDR(p[0].Cidr)
-	if err != nil {
-		return net.IP{}, net.IPMask{}, err
-	}
-	ip := net.ParseIP(result.Msg.Ip.Ip)
-	mask := ipv4Net.Mask
-
-	return ip, mask, nil
-}
-
-func releaseIP(ctx context.Context, ipam string, ip string) error {
-	log := log.FromContext(ctx)
-
-	waitForGrpc(ctx, ipam)
-
-	c := apiv1connect.NewIpamServiceClient(
-		http.DefaultClient,
-		ipam,
-		connect.WithGRPC(),
-	)
-
-	// get prefixes from IPAM service
-	prefixes, err := c.ListPrefixes(ctx, connect.NewRequest(&goipamapiv1.ListPrefixesRequest{}))
-	if err != nil {
-		return err
-	}
-	p := prefixes.Msg.Prefixes
-	if len(p) == 0 {
-		return errors.New("IPAM prefix not found")
-	}
-	if len(p) > 1 {
-		return fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
-	}
-
-	result, err := c.ReleaseIP(ctx, connect.NewRequest(&goipamapiv1.ReleaseIPRequest{PrefixCidr: p[0].Cidr, Ip: ip}))
-	if err != nil {
-		return err
-	}
-	log.Info("ip released", "ip", result.Msg.Ip.Ip)
-
-	return nil
 }
 
 func DeepEqual(v1, v2 interface{}) bool {

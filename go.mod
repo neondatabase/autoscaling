@@ -46,6 +46,7 @@ require (
 	github.com/docker/libnetwork v0.8.0-dev.2.0.20210525090646-64b7a4574d14
 	github.com/elastic/go-sysinfo v1.9.0
 	github.com/google/uuid v1.3.0
+	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
 	github.com/kdomanski/iso9660 v0.3.3
 	github.com/lib/pq v1.10.7
 	github.com/onsi/ginkgo/v2 v2.6.0

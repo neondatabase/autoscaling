@@ -120,7 +120,6 @@ test: fmt vet envtest ## Run tests.
 build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
-	go build -o bin/vxlan-ipam       neonvm/tools/vxlan/ipam/main.go
 	go build -o bin/runner           neonvm/runner/main.go
 
 .PHONY: bin/vm-builder
@@ -254,16 +253,13 @@ DEPLOYTS := $(shell date +%s)
 deploy: kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd neonvm/config/common/controller              && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)  && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
-	cd neonvm/config/default-vxlan/vxlan-ipam       && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > neonvm/multus.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan > neonvm/neonvm.yaml
 	cd neonvm/config/common/controller              && $(KUSTOMIZE) edit remove annotation deploytime
 	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit remove annotation deploytime
-	cd neonvm/config/default-vxlan/vxlan-ipam       && $(KUSTOMIZE) edit remove annotation deploytime
 	kubectl apply -f neonvm/multus.yaml
 	kubectl -n kube-system rollout status daemonset kube-multus-ds
 	kubectl apply -f neonvm/neonvm.yaml
-	kubectl -n neonvm-system rollout status  deployment neonvm-vxlan-ipam
 	kubectl -n neonvm-system rollout status  daemonset  neonvm-vxlan-controller
 	kubectl -n neonvm-system rollout status  deployment neonvm-controller
 
