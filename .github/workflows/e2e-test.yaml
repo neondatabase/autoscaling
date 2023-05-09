@@ -42,7 +42,7 @@ jobs:
         env:
           # kubectl is supported within one minor version (older or newer) of k8s
           # https://kubernetes.io/releases/version-skew-policy/#kubectl
-          KUBECTL_VERSION: v1.25.9
+          KUBECTL_VERSION: v1.26.4
           KIND_VERSION: v0.18.0
           KUTTL_VERSION: v0.15.0
 

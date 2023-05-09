@@ -15,7 +15,7 @@ VM_KERNEL_VERSION ?= "5.15.80"
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.24.2
+ENVTEST_K8S_VERSION = 1.25.0
 
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
@@ -23,6 +23,11 @@ GOPATH=$(shell go env GOPATH)
 # Go 1.20 changed the handling of git worktrees:
 # https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
 export GOFLAGS=-buildvcs=false
+
+## Tool Versions
+KUSTOMIZE_VERSION ?= v4.5.7
+CONTROLLER_TOOLS_VERSION ?= v0.10.0
+CODE_GENERATOR_VERSION ?= v0.25.9
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -71,6 +76,8 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	docker build \
 		--build-arg USER_ID=$(shell id -u $(USER)) \
 		--build-arg GROUP_ID=$(shell id -g $(USER)) \
+		--build-arg CONTROLLER_TOOLS_VERSION=$(CONTROLLER_TOOLS_VERSION) \
+		--build-arg CODE_GENERATOR_VERSION=$(CODE_GENERATOR_VERSION) \
 		--file neonvm/hack/Dockerfile.generate \
 		--iidfile $$iidfile . && \
 	docker run --rm \
@@ -322,10 +329,6 @@ $(LOCALBIN):
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-
-## Tool Versions
-KUSTOMIZE_VERSION ?= v4.5.7
-CONTROLLER_TOOLS_VERSION ?= v0.9.2
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize

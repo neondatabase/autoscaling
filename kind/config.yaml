@@ -4,8 +4,8 @@ networking:
   disableDefaultCNI: true
 nodes:
 - role: control-plane
-  image: kindest/node:v1.24.12
+  image: kindest/node:v1.25.8
 - role: worker
-  image: kindest/node:v1.24.12
+  image: kindest/node:v1.25.8
 - role: worker
-  image: kindest/node:v1.24.12
+  image: kindest/node:v1.25.8
