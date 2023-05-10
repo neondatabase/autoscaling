@@ -1,6 +1,9 @@
 # Autoscaling — dev branch
 
-This branch exists only to track what's currently deployed to the dev-us-east-2-beta cluster.
+This branch exists only to track what's currently deployed to these regions:
+
+* dev-us-east-2-beta
+* dev-eu-central-1-alpha
 
 We don't *quite* use the release yaml files directly, because there are some config differences that
 we want to preserve.
@@ -25,5 +28,4 @@ config.billing = {
 
 The other "dev" regions have the following deployed:
 
-* dev-eu-central-1-alpha: `autoscale-scheduler-disabled.yaml`
 * dev-eu-west-1-zeta: `autoscale-scheduler-disabled.yaml`
