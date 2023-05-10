@@ -14,7 +14,14 @@ ADD ca.patch ca.patch
 RUN git -C autoscaler apply ../ca.patch
 
 RUN cd autoscaler/cluster-autoscaler \
-    && go build -o ../../cluster-autoscaler main.go
+    && CGO_ENABLED=0 go build -o ../../cluster-autoscaler main.go
+#      ^^^^^^^^^^^^^
+# Note: If we don't disable cgo, the final binary will be dynamically linked. This doesn't work with
+# the final distroless base image we use, because the binary will require `ld` or some equivalent,
+# which doesn't exist.
+#
+# There are other ways of solving this (see: https://www.arp242.net/static-go.html), but the easiest
+# thing is to just disable cgo.
 
 # We're done buiding. Copy the binary over into the final product.
 #
