@@ -40,7 +40,7 @@ var _ webhook.Defaulter = &VirtualMachineMigration{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *VirtualMachineMigration) Default() {
-	virtualmachinemigrationlog.Info("default", "name", r.Name)
+	//virtualmachinemigrationlog.Info("default", "name", r.Name)
 
 	// TODO(user): fill in your defaulting logic.
 }
@@ -52,7 +52,7 @@ var _ webhook.Validator = &VirtualMachineMigration{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateCreate() error {
-	virtualmachinemigrationlog.Info("validate create", "name", r.Name)
+	//virtualmachinemigrationlog.Info("validate create", "name", r.Name)
 
 	// TODO(user): fill in your validation logic upon object creation.
 	return nil
@@ -60,7 +60,7 @@ func (r *VirtualMachineMigration) ValidateCreate() error {
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) error {
-	virtualmachinemigrationlog.Info("validate update", "name", r.Name)
+	//virtualmachinemigrationlog.Info("validate update", "name", r.Name)
 
 	// TODO(user): fill in your validation logic upon object update.
 	return nil
@@ -68,7 +68,7 @@ func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) error {
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateDelete() error {
-	virtualmachinemigrationlog.Info("validate delete", "name", r.Name)
+	//virtualmachinemigrationlog.Info("validate delete", "name", r.Name)
 
 	// TODO(user): fill in your validation logic upon object deletion.
 	return nil

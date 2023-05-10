@@ -42,7 +42,6 @@ var _ webhook.Defaulter = &VirtualMachine{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *VirtualMachine) Default() {
-	virtualmachinelog.Info("default", "name", r.Name)
 
 	// TODO(user): fill in your defaulting logic.
 
@@ -50,20 +49,24 @@ func (r *VirtualMachine) Default() {
 	if r.Spec.Guest.CPUs.Use == nil {
 		r.Spec.Guest.CPUs.Use = new(MilliCPU)
 		*r.Spec.Guest.CPUs.Use = *r.Spec.Guest.CPUs.Min
+		virtualmachinelog.Info("defaulting guest CPU settings", ".spec.guest.cpus.use", *r.Spec.Guest.CPUs.Use)
 	}
 	if r.Spec.Guest.CPUs.Max == nil {
 		r.Spec.Guest.CPUs.Max = new(MilliCPU)
 		*r.Spec.Guest.CPUs.Max = *r.Spec.Guest.CPUs.Min
+		virtualmachinelog.Info("defaulting guest CPU settings", ".spec.guest.cpus.max", *r.Spec.Guest.CPUs.Max)
 	}
 
 	// Memory spec defaulter
 	if r.Spec.Guest.MemorySlots.Use == nil {
 		r.Spec.Guest.MemorySlots.Use = new(int32)
 		*r.Spec.Guest.MemorySlots.Use = *r.Spec.Guest.MemorySlots.Min
+		virtualmachinelog.Info("defaulting guest memory settings", ".spec.guest.memorySlots.use", *r.Spec.Guest.MemorySlots.Use)
 	}
 	if r.Spec.Guest.MemorySlots.Max == nil {
 		r.Spec.Guest.MemorySlots.Max = new(int32)
 		*r.Spec.Guest.MemorySlots.Max = *r.Spec.Guest.MemorySlots.Min
+		virtualmachinelog.Info("defaulting guest memory settings", ".spec.guest.memorySlots.max", *r.Spec.Guest.MemorySlots.Max)
 	}
 }
 
@@ -74,7 +77,7 @@ var _ webhook.Validator = &VirtualMachine{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachine) ValidateCreate() error {
-	virtualmachinelog.Info("validate create", "name", r.Name)
+	//virtualmachinelog.Info("validate create", "name", r.Name)
 
 	// validate .spec.guest.cpus.use and .spec.guest.cpus.max
 	if r.Spec.Guest.CPUs.Use != nil {
@@ -140,7 +143,7 @@ func (r *VirtualMachine) ValidateCreate() error {
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
-	virtualmachinelog.Info("validate update", "name", r.Name)
+	//virtualmachinelog.Info("validate update", "name", r.Name)
 
 	// process immutable fields
 	before, _ := old.(*VirtualMachine)
@@ -201,7 +204,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachine) ValidateDelete() error {
-	virtualmachinelog.Info("validate delete", "name", r.Name)
+	//virtualmachinelog.Info("validate delete", "name", r.Name)
 
 	// TODO(user): fill in your validation logic upon object deletion.
 	return nil

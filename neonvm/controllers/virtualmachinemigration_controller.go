@@ -85,127 +85,83 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	// Fetch the VirtualMachineMigration instance
 	// The purpose is check if the Custom Resource for the Kind VirtualMachineMigration
 	// is applied on the cluster if not we return nil to stop the reconciliation
-	virtualmachinemigration := &vmv1.VirtualMachineMigration{}
-	err := r.Get(ctx, req.NamespacedName, virtualmachinemigration)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// If the custom resource is not found then, it usually means that it was deleted or not created
-			// In this way, we will stop the reconciliation
-			log.Info("virtualmachinemigration resource not found. Ignoring since object must be deleted")
+	var virtualmachinemigration vmv1.VirtualMachineMigration
+	if err := r.Get(ctx, req.NamespacedName, &virtualmachinemigration); err != nil {
+		// Error reading the object - requeue the request.
+		if notfound := client.IgnoreNotFound(err); notfound == nil {
+			log.Info("VM migration resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		// Error reading the object - requeue the request.
-		log.Error(err, "Failed to get virtualmachinemigration")
-		return ctrl.Result{}, err
+		log.Error(err, "Unable to fetch VirtualMachineMigration")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Let's add a finalizer. Then, we can define some operations which should
-	// occurs before the custom resource to be deleted.
-	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
-	if !controllerutil.ContainsFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer) {
-		log.Info("Adding Finalizer for VirtualMachineMigration")
-
-		/* for k8s 1.25
-		if ok := controllerutil.AddFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer); !ok {
-			log.Error(err, "Failed to add finalizer into the VM migration")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		*/
-		controllerutil.AddFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer)
-		if err = r.Update(ctx, virtualmachinemigration); err != nil {
-			log.Error(err, "Failed to update VM migration to add finalizer")
-			return ctrl.Result{}, err
-		}
-	}
-
-	// Check if the VirtualMachineMigration instance is marked to be deleted, which is
-	// indicated by the deletion timestamp being set.
-	isVirtualMachineMigrationMarkedToBeDeleted := virtualmachinemigration.GetDeletionTimestamp() != nil
-	if isVirtualMachineMigrationMarkedToBeDeleted {
-		if controllerutil.ContainsFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer) {
-			log.Info("Performing Finalizer Operations for VirtualMachineMigration before delete CR")
-
-			// Let's add here an status "Downgrade" to define that this resource begin its process to be terminated.
-			meta.SetStatusCondition(&virtualmachinemigration.Status.Conditions, metav1.Condition{Type: typeDegradedVirtualMachineMigration,
-				Status: metav1.ConditionUnknown, Reason: "Finalizing",
-				Message: fmt.Sprintf("Performing finalizer operations for the VM migration: %s ", virtualmachinemigration.Name)})
-
-			if err := r.Status().Update(ctx, virtualmachinemigration); err != nil {
-				log.Error(err, "Failed to update VirtualMachineMigration status")
-				return ctrl.Result{}, err
-			}
-
-			// Perform all operations required before remove the finalizer and allow
-			// the Kubernetes API to remove the custom custom resource.
-			r.doFinalizerOperationsForVirtualMachineMigration(virtualmachinemigration)
-
-			// TODO(user): If you add operations to the doFinalizerOperationsForVirtualMachineMigration method
-			// then you need to ensure that all worked fine before deleting and updating the Downgrade status
-			// otherwise, you should requeue here.
-
-			// Re-fetch the virtualmachinemigration Custom Resource before update the status
-			// so that we have the latest state of the resource on the cluster and we will avoid
-			// raise the issue "the object has been modified, please apply
-			// your changes to the latest version and try again" which would re-trigger the reconciliation
-			if err := r.Get(ctx, req.NamespacedName, virtualmachinemigration); err != nil {
-				log.Error(err, "Failed to re-fetch virtualmachinemigration")
-				return ctrl.Result{}, err
-			}
-
-			meta.SetStatusCondition(&virtualmachinemigration.Status.Conditions, metav1.Condition{Type: typeDegradedVirtualMachineMigration,
-				Status: metav1.ConditionTrue, Reason: "Finalizing",
-				Message: fmt.Sprintf("Finalizer operations for VM migration %s name were successfully accomplished", virtualmachinemigration.Name)})
-
-			if err := r.Status().Update(ctx, virtualmachinemigration); err != nil {
-				log.Error(err, "Failed to update VirtualMachineMigration status")
-				return ctrl.Result{}, err
-			}
-
-			log.Info("Removing Finalizer for VirtualMachineMigration after successfully perform the operations")
-			/* for k8s 1.25
-			if ok := controllerutil.RemoveFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer); !ok {
-				log.Error(err, "Failed to remove finalizer for VirtualMachineMigration")
+	// examine DeletionTimestamp to determine if object is under deletion
+	if virtualmachinemigration.ObjectMeta.DeletionTimestamp.IsZero() {
+		// The object is not being deleted, so if it does not have our finalizer,
+		// then lets add the finalizer and update the object. This is equivalent
+		// registering our finalizer.
+		if !controllerutil.ContainsFinalizer(&virtualmachinemigration, virtualmachinemigrationFinalizer) {
+			log.Info("Adding Finalizer for VM migration resource")
+			if ok := controllerutil.AddFinalizer(&virtualmachinemigration, virtualmachinemigrationFinalizer); !ok {
+				log.Info("Failed to add finalizer from VM migration resource")
 				return ctrl.Result{Requeue: true}, nil
 			}
-			*/
-			controllerutil.RemoveFinalizer(virtualmachinemigration, virtualmachinemigrationFinalizer)
-			if err := r.Update(ctx, virtualmachinemigration); err != nil {
-				log.Error(err, "Failed to remove finalizer for VirtualMachineMigration")
+			if err := r.Update(ctx, &virtualmachinemigration); err != nil {
+				log.Error(err, "Failed to update status about adding finalizer to VM migration resource")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+	} else {
+		// The object is being deleted
+		if controllerutil.ContainsFinalizer(&virtualmachinemigration, virtualmachinemigrationFinalizer) {
+			// our finalizer is present, so lets handle any external dependency
+			log.Info("Performing Finalizer Operations for VM migration resource before delete it")
+			if err := r.doFinalizerOperationsForVirtualMachineMigration(ctx, &virtualmachinemigration); err != nil {
+				// if fail to delete the external dependency here, return with error
+				// so that it can be retried
+				return ctrl.Result{}, err
+			}
+
+			// remove our finalizer from the list and update it.
+			log.Info("Removing Finalizer for VM migration resource after successfully perform the operations")
+			if ok := controllerutil.RemoveFinalizer(&virtualmachinemigration, virtualmachinemigrationFinalizer); !ok {
+				log.Info("Failed to remove finalizer from VM migration resource")
+				return ctrl.Result{}, nil
+			}
+			if err := r.Update(ctx, &virtualmachinemigration); err != nil {
+				log.Error(err, "Failed to update status about removing finalizer from VM migration resource")
 				return ctrl.Result{}, err
 			}
 		}
+		// Stop reconciliation as the item is being deleted
 		return ctrl.Result{}, nil
 	}
 
-	// Re-fetch the virtualmachinemigration Custom Resource before managing VMM lifecycle
-	if err := r.Get(ctx, req.NamespacedName, virtualmachinemigration); err != nil {
-		log.Error(err, "Failed to re-fetch virtualmachinemigration")
+	statusBefore := virtualmachinemigration.Status.DeepCopy()
+	if err := r.doReconcile(ctx, &virtualmachinemigration); err != nil {
+		r.Recorder.Eventf(&virtualmachinemigration, corev1.EventTypeWarning, "Failed",
+			"Failed to reconcile VM migration (%s): %s", virtualmachinemigration.Name, err)
 		return ctrl.Result{}, err
 	}
-
-	statusBefore := virtualmachinemigration.Status.DeepCopy()
-	rerr := r.doReconcile(ctx, virtualmachinemigration)
 	if !DeepEqual(virtualmachinemigration.Status, statusBefore) {
 		// update VirtualMachineMigration status
-		if err := r.Status().Update(ctx, virtualmachinemigration); err != nil {
+		if err := r.Status().Update(ctx, &virtualmachinemigration); err != nil {
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				log.Info("Failed to update VM migration status after reconcile loop due conflict, will try again")
+				return ctrl.Result{RequeueAfter: time.Second}, nil
 			}
-			log.Error(err, "Failed to update VirtualMachineMigration status after reconcile loop")
+			log.Error(err, "Failed to update VM migration status after reconcile loop")
 			return ctrl.Result{}, err
 		}
 	}
-	if rerr != nil {
-		r.Recorder.Eventf(virtualmachinemigration, corev1.EventTypeWarning, "Failed",
-			"Failed to reconcile (%s): %s", virtualmachinemigration.Name, rerr)
-		return ctrl.Result{}, rerr
-	}
 
-	return ctrl.Result{RequeueAfter: time.Second}, nil
+	return ctrl.Result{}, nil
 }
 
 // finalizeVirtualMachineMigration will perform the required operations before delete the CR.
-func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachineMigration(cr *vmv1.VirtualMachineMigration) {
+func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachineMigration(ctx context.Context, vmm *vmv1.VirtualMachineMigration) error {
 	// TODO(user): Add the cleanup steps that the operator
 	// needs to do before the CR can be deleted. Examples
 	// of finalizers include performing backups and deleting
@@ -223,18 +179,20 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 	// 3) remove target pod (or manage it via ownerRef)
 
 	// The following implementation will raise an event
-	r.Recorder.Event(cr, "Warning", "Deleting",
+	r.Recorder.Event(vmm, "Warning", "Deleting",
 		fmt.Sprintf("VM migration '%s' is being deleted from the namespace %s",
-			cr.Name,
-			cr.Namespace))
+			vmm.Name,
+			vmm.Namespace))
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
-// Note that the Deployment will be also watched in order to ensure its
+// Note that the Pods will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
+		Owns(&corev1.Pod{}).
 		Complete(r)
 }
 
@@ -264,6 +222,8 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 	// target runner pod details - generate name
 	if len(virtualmachinemigration.Status.TargetPodName) == 0 {
 		virtualmachinemigration.Status.TargetPodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
+		// return to Reconcile loop to save state
+		return nil
 	}
 
 	switch virtualmachinemigration.Status.Phase {
@@ -274,31 +234,19 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			return err
 		}
 		if err := r.Update(ctx, virtualmachinemigration); err != nil {
-			log.Error(err, "Failed to update VM migration to add Owner reference")
-			return err
+			log.Info("Failed to update VM migration to add Owner reference", "error", err)
+			return nil
 		}
 		// VirtualMachineMigration just created, change Phase to "Pending"
 		virtualmachinemigration.Status.Phase = vmv1.VmmPending
 	case vmv1.VmmPending:
-		// Get source runner pods details
-		sourceRunner := &corev1.Pod{}
-		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, sourceRunner)
-		if err != nil && apierrors.IsNotFound(err) {
-			log.Error(err, "Failed to get Source Pod")
-			return err
-		}
 		// Check if the target runner pod already exists, if not create a new one using source pod as template
 		targetRunner := &corev1.Pod{}
 		err = r.Get(ctx, types.NamespacedName{Name: virtualmachinemigration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			// Define a new target pod
 
-			var networkStatus string
-			if sourceRunner.Annotations != nil {
-				networkStatus = sourceRunner.Annotations[nadapiv1.NetworkStatusAnnot]
-			}
-
-			tpod, err := r.targetPodForVirtualMachine(vm, virtualmachinemigration, networkStatus)
+			tpod, err := r.targetPodForVirtualMachine(vm, virtualmachinemigration)
 			if err != nil {
 				log.Error(err, "Failed to define Target Pod for VirtualMachineMigration")
 				return err
@@ -311,10 +259,8 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			}
 
 			r.Recorder.Event(virtualmachinemigration, "Normal", "Created",
-				fmt.Sprintf("VirtualMachine %s has target pod for migration",
-					vm.Name))
-			// once more retrieve just created target pod details
-			r.Get(ctx, types.NamespacedName{Name: virtualmachinemigration.Status.TargetPodName, Namespace: virtualmachinemigration.Namespace}, targetRunner)
+				fmt.Sprintf("VirtualMachine %s ready migrate to target pod %s",
+					vm.Name, tpod.Name))
 		} else if err != nil {
 			log.Error(err, "Failed to get Target Pod")
 			return err
@@ -509,8 +455,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 
 			// stop hypervisor in source runner
 			if err := QmpQuit(virtualmachinemigration.Status.SourcePodIP, vm.Spec.QMP); err != nil {
-				log.Error(err, "Failed stop hypervisor in source runner pod")
-				return err
+				log.Info("Failed stop hypervisor in source runner pod, probably hypervisor already stopped", "error", err)
 			}
 
 			// finally update migration phase to Succeeded
@@ -531,8 +476,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 // targetPodForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine,
-	virtualmachinemigration *vmv1.VirtualMachineMigration,
-	networkStatus string) (*corev1.Pod, error) {
+	virtualmachinemigration *vmv1.VirtualMachineMigration) (*corev1.Pod, error) {
 
 	pod, err := podSpec(virtualmachine)
 	if err != nil {
@@ -569,10 +513,7 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	// use multus network to add extra network interface but without IPAM
 	if virtualmachine.Spec.ExtraNetwork != nil {
 		if virtualmachine.Spec.ExtraNetwork.Enable {
-			pod.ObjectMeta.Annotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetworkNoIP, virtualmachine.Spec.ExtraNetwork.Interface)
-			if len(networkStatus) > 0 {
-				pod.ObjectMeta.Annotations[nadapiv1.NetworkStatusAnnot] = networkStatus
-			}
+			pod.ObjectMeta.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetworkNoIP, virtualmachine.Spec.ExtraNetwork.Interface)
 		}
 	}
 
