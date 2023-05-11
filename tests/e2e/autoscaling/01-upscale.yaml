@@ -15,7 +15,7 @@ spec:
     - "-c"
     - |
       set -e
-      until pg_isready --dbname=postgres --host=example --port=5432; do
+      until pg_isready --username=postgres --dbname=postgres --host=example --port=5432; do
         sleep 1
       done
   containers:

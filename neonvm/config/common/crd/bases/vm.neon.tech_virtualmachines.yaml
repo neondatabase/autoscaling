@@ -18,7 +18,7 @@ spec:
   - additionalPrinterColumns:
     - jsonPath: .status.cpus
       name: Cpus
-      type: integer
+      type: string
     - jsonPath: .status.memorySize
       name: Memory
       type: string

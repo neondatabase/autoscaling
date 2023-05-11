@@ -324,7 +324,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 	}
 
 	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
-	if err := execFg("chown", "36", "34", diskPath); err != nil {
+	if err := execFg("chown", "36:34", diskPath); err != nil {
 		return err
 	}
 

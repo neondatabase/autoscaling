@@ -384,7 +384,7 @@ const (
 //+kubebuilder:resource:singular=neonvm
 
 // VirtualMachine is the Schema for the virtualmachines API
-// +kubebuilder:printcolumn:name="Cpus",type=integer,JSONPath=`.status.cpus`
+// +kubebuilder:printcolumn:name="Cpus",type=string,JSONPath=`.status.cpus`
 // +kubebuilder:printcolumn:name="Memory",type=string,JSONPath=`.status.memorySize`
 // +kubebuilder:printcolumn:name="Pod",type=string,JSONPath=`.status.podName`
 // +kubebuilder:printcolumn:name="ExtraIP",type=string,JSONPath=`.status.extraNetIP`

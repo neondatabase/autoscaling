@@ -13,23 +13,20 @@ PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 # kernel for guests
 VM_KERNEL_VERSION ?= "5.15.80"
 
-# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-# List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.24.2
-
+## Golang details
+GOARCH ?= $(shell go env GOARCH)
+GOOS ?= $(shell go env GOOS)
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
-
-# Go 1.20 changed the handling of git worktrees:
-# https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
-export GOFLAGS=-buildvcs=false
-
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(GOPATH)/bin
 else
 GOBIN=$(shell go env GOBIN)
 endif
+# Go 1.20 changed the handling of git worktrees:
+# https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
+export GOFLAGS=-buildvcs=false
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -100,9 +97,12 @@ vet: ## Run go vet against code.
 	# ref https://github.com/golang/go/issues/56755
 	CGO_ENABLED=0 go vet ./...
 
+.PHONE: e2e-tools
+e2e-tools: kind kubectl kuttl
+
 .PHONE: e2e
 e2e: ## Run e2e kuttl tests
-	kubectl kuttl test --config tests/e2e/kuttl-test.yaml
+	$(KUTTL) test --config tests/e2e/kuttl-test.yaml
 
 .PHONY: test
 test: fmt vet envtest ## Run tests.
@@ -314,15 +314,28 @@ LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
-## Tool Binaries
+## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-ENVTEST ?= $(LOCALBIN)/setup-envtest
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-
-## Tool Versions
 KUSTOMIZE_VERSION ?= v4.5.7
+
+ENVTEST ?= $(LOCALBIN)/setup-envtest
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+# List of available versions: https://storage.googleapis.com/kubebuilder-tools
+ENVTEST_K8S_VERSION = 1.24.2
+
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.9.2
 
+KUTTL ?= $(LOCALBIN)/kuttl
+KUTTL_VERSION ?= 0.15.0
+
+KUBECTL ?= $(LOCALBIN)/kubectl
+KUBECTL_VERSION ?= v1.24.12
+
+KIND ?= $(LOCALBIN)/kind
+KIND_VERSION ?= v0.18.0
+
+## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -339,6 +352,20 @@ controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessar
 $(CONTROLLER_GEN): $(LOCALBIN)
 	test -s $(LOCALBIN)/controller-gen || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
 
+.PHONY: kind
+kind: $(KIND)
+$(KIND): $(LOCALBIN)
+	curl -sfSLo $(KIND) https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(GOOS)-$(GOARCH) && chmod +x $(KIND)
+
+.PHONY: kubectl
+kubectl: $(KUBECTL)
+$(KUBECTL): $(LOCALBIN)
+	curl -sfSLo $(KUBECTL) https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(GOOS)/$(GOARCH)/kubectl && chmod +x $(KUBECTL)
+
+.PHONY: kuttl
+kuttl: $(KUTTL)
+$(KUTTL): $(LOCALBIN)
+	curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/v$(KUTTL_VERSION)/kubectl-kuttl_$(KUTTL_VERSION)_$(GOOS)_$(shell uname -m) && chmod +x $(KUTTL)
 
 .PHONY: cert-manager
 cert-manager: ## install cert-manager to cluster
