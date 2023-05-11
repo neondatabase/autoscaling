@@ -9,6 +9,7 @@ kind: Pod
 metadata:
   name: workload
 spec:
+  terminationGracePeriodSeconds: 1
   initContainers:
   - name: wait-for-pg
     image: postgres:15-bullseye

@@ -42,8 +42,11 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
+      - name: check everything builds
+        run: go build ./...
+
       - name: build binaries
-        run:  make VERSION=${{ steps.get_vcs_info.outputs.version }} VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} build
+        run:  make VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} build
 
       - name: docker - install qemu
         uses: docker/setup-qemu-action@v2
@@ -90,60 +93,55 @@ jobs:
           file: neonvm/tools/vxlan/Dockerfile
           tags: ${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
 
+      - name: build and push autoscale-scheduler image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: build/autoscale-scheduler/Dockerfile
+          tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          build-args: |
+            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
+
+      - name: build and push autoscaler-agent image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: build/autoscaler-agent/Dockerfile
+          tags: ${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          build-args: |
+            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
+
+      - name: build and push vm-informant image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: build/vm-informant/Dockerfile
+          tags: ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          build-args: |
+            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
+
       - name: render kubernetes resources
         uses: stefanprodan/kube-tools@v1
         with:
           kustomize: ${{ env.KUSTOMIZE_VERSION }}
           command: |
             kustomize version --short
-            cd ${GITHUB_WORKSPACE}/neonvm/config/common/controller              && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_vcs_info.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/neonvm/config/common/controller && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_vcs_info.outputs.version }}
             cd ${GITHUB_WORKSPACE}/neonvm/config/default-vxlan/vxlan-controller && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
-            cd ${GITHUB_WORKSPACE}/neonvm/config/default-vxlan/vxlan-ipam       && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
-            cd ${GITHUB_WORKSPACE}/neonvm/
-            kustomize build config/default-vxlan/multus     --output multus.yaml
-            kustomize build config/default-vxlan/multus-eks --output multus-eks.yaml
-            kustomize build config/default-vxlan            --output neonvm-vxlan.yaml
-
-      # note: We *could* use something like kustomize for this. But there's extra steps (e.g.,
-      # adding kustomization.yaml) and sed is simple; so we can deal with this for now.
-      - name: modify deploy files to use current image(s)
-        run: |
-          # check that the images are present:
-          grep -q ${{ env.LOCAL_AGENT_IMAGE }} deploy/autoscaler-agent.yaml
-          grep -q ${{ env.LOCAL_SCHED_IMAGE }} deploy/autoscale-scheduler.yaml
-          sed -i -e s^${{ env.LOCAL_AGENT_IMAGE }}^${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}^g deploy/autoscaler-agent.yaml
-          sed -i -e s^${{ env.LOCAL_SCHED_IMAGE }}^${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}^g deploy/autoscale-scheduler.yaml
-
-      - name: check everything builds
-        run: go build ./...
-
-      - name: build and push autoscale-scheduler image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          push: true
-          file: build/autoscale-scheduler/Dockerfile
-          tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args: |
-            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
-      - name: build and push autoscaler-agent image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          push: true
-          file: build/autoscaler-agent/Dockerfile
-          tags: ${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args: |
-            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
-      - name: build and push vm-informant image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          push: true
-          file: build/vm-informant/Dockerfile
-          tags: ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args: |
-            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
+            cd ${GITHUB_WORKSPACE}/deploy && kustomize edit set image autoscale-scheduler=${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/deploy && kustomize edit set image autoscaler-agent=${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+            cd ${GITHUB_WORKSPACE}
+            mkdir -p rendered_manifests
+            kustomize build neonvm/config/default-vxlan/multus-eks > rendered_manifests/multus-eks.yaml
+            kustomize build neonvm/config/default-vxlan/multus > rendered_manifests/multus.yaml
+            kustomize build neonvm/config/default-vxlan > rendered_manifests/neonvm.yaml
+            kustomize build deploy > rendered_manifests/autoscaler.yaml
 
       # Because we want a docker image for the VM informant, the easiest way for us to also provide
       # a binary is by just extracting it from the container image itself.
@@ -161,8 +159,7 @@ jobs:
             bin/vm-builder
             bin/vm-builder-generic
             bin/vm-informant
-            deploy/autoscale-scheduler.yaml
-            deploy/autoscaler-agent.yaml
-            neonvm/multus.yaml
-            neonvm/multus-eks.yaml
-            neonvm/neonvm-vxlan.yaml
+            rendered_manifests/autoscaler.yaml
+            rendered_manifests/neonvm.yaml
+            rendered_manifests/multus.yaml
+            rendered_manifests/multus-eks.yaml

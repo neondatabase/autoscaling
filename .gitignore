@@ -25,7 +25,5 @@ testbin/*
 
 *.qcow2
 neonvm/hack/vmlinuz
-neonvm/neonvm.yaml
-neonvm/neonvm-vxlan.yaml
-neonvm/multus.yaml
-neonvm/multus-eks.yaml
+
+rendered_manifests
