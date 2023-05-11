@@ -30,7 +30,7 @@ jobs:
           # https://kubernetes.io/releases/version-skew-policy/#kubectl
           KUBECTL_VERSION: v1.25.9
           KIND_VERSION: v0.18.0
-          KUTTL_VERSION: 0.15.0
+          KUTTL_VERSION: v0.15.0
 
       - name: Check dependencies
         run: |

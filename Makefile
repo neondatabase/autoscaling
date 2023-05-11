@@ -327,7 +327,7 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.9.2
 
 KUTTL ?= $(LOCALBIN)/kuttl
-KUTTL_VERSION ?= 0.15.0
+KUTTL_VERSION ?= v0.15.0
 
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.24.12
@@ -365,7 +365,7 @@ $(KUBECTL): $(LOCALBIN)
 .PHONY: kuttl
 kuttl: $(KUTTL)
 $(KUTTL): $(LOCALBIN)
-	curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/v$(KUTTL_VERSION)/kubectl-kuttl_$(KUTTL_VERSION)_$(GOOS)_$(shell uname -m) && chmod +x $(KUTTL)
+	curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/$(KUTTL_VERSION)/kubectl-kuttl_$(subst v,,$(KUTTL_VERSION))_$(GOOS)_$(shell uname -m) && chmod +x $(KUTTL)
 
 .PHONY: cert-manager
 cert-manager: ## install cert-manager to cluster
