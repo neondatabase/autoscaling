@@ -9,15 +9,13 @@ we want to preserve.
 Currently these are:
 
 ```js
-// Scheduler:
-config.nodeDefaults.computeUnit = { "vCPUs": 1, "mem": 4 }
 // Agent:
 config.billing = {
       "url": "http://neon-internal-api.aws.neon.tech/billing/api/v1",
       "cpuMetricName": "effective_compute_seconds",
       "activeTimeMetricName": "active_time_seconds",
-      "collectEverySeconds": 5,
-      "pushEverySeconds": 30,
+      "collectEverySeconds": 4,
+      "pushEverySeconds": 24,
       "pushTimeoutSeconds": 2
 }
 ```
