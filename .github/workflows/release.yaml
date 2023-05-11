@@ -153,6 +153,13 @@ jobs:
           docker cp $ID:/usr/bin/vm-informant bin/vm-informant
           docker rm -f $ID
 
+      - name: build and push cluster-autoscaler image
+        uses: docker/build-push-action@v3
+        with:
+          build-args: CA_GIT_TAG=${{ env.CLUSTER_AUTOSCALER_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          context: cluster-autoscaler
+          push: true
+
       - name: github release
         uses: softprops/action-gh-release@v1
         with:
