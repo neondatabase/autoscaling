@@ -21,6 +21,8 @@ env:
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
   VM_KERNEL_VERSION:        "5.15.80"
 
+  CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
+
 jobs:
   release:
     runs-on: ubuntu-latest
