@@ -72,6 +72,7 @@ discussed more in the [high-level consequences] section below.
 ## Repository structure
 
 * `build/` — scripts for building the scheduler (`autoscale-scheduler`) and `autoscaler-agent`
+* `cluster-autoscaler/` — patch and Dockerfile for building a NeonVM-compatible [cluster-autoscaler]
 * `cmd/` — entrypoints for the `autoscaler-agent`, VM informant, and scheduler plugin. Very little
     functionality implemented here. (See: `pkg/agent`, `pkg/informant`, and `pkg/plugin`)
 * `deploy/` — YAML files used during cluster init. Of these, only the following two are manually
@@ -111,6 +112,8 @@ discussed more in the [high-level consequences] section below.
     * `pg14-disk-test/` — VM with Postgres 14 and and ssh access
       * Refer to [`vm-examples/pg14-disk-test/README.md`](./vm-examples/pg14-disk-test)  for more information.
     * `postgres-minimal/` — Minimal postgres 15 VM used in e2e tests
+
+[cluster-autoscaler]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler
 
 ## Agent-Scheduler protocol details
 
