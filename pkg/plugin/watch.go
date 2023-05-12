@@ -19,7 +19,7 @@ import (
 )
 
 // watchPodEvents continuously tracks a handful of Pod-related events that we care about. These
-// events are non-VM pod deletion and VM deletion.
+// events are pod deletion or completion for VM and non-VM pods.
 //
 // This method starts its own goroutine, and guarantees that we have started listening for FUTURE
 // events once it returns (unless it returns error).
@@ -47,13 +47,29 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 		util.InitWatchModeSync, // note: doesn't matter, because AddFunc = nil.
 		metav1.ListOptions{},
 		util.WatchHandlerFuncs[*corev1.Pod]{
+			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
+				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
+					name := util.NamespacedName{Name: newPod.Name, Namespace: newPod.Namespace}
+					klog.Infof("[autoscale-enforcer] watch: Received update event for completion of pod %v", name)
+
+					if _, ok := newPod.Labels[LabelVM]; ok {
+						submitVMDeletion(name)
+					} else {
+						submitPodDeletion(name)
+					}
+				}
+			},
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				name := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-				klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
-				if _, ok := pod.Labels[LabelVM]; ok {
-					submitVMDeletion(name)
+				if util.PodCompleted(pod) {
+					klog.Infof("[autoscale-enforcer] watch: Received delete event for completed pod %v", name)
 				} else {
-					submitPodDeletion(name)
+					klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
+					if _, ok := pod.Labels[LabelVM]; ok {
+						submitVMDeletion(name)
+					} else {
+						submitPodDeletion(name)
+					}
 				}
 			},
 		},
