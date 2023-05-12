@@ -2,25 +2,15 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/bufbuild/connect-go"
-	goipamapiv1 "github.com/cicdteam/go-ipam/api/v1"
-	"github.com/cicdteam/go-ipam/api/v1/apiv1connect"
-
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +26,8 @@ const (
 	ipamServerVariableName = "IPAM_SERVER"
 
 	iptablesChainName = "NEON-EXTRANET"
+
+	extraNetCidr = "10.100.0.0/20"
 )
 
 var (
@@ -69,11 +61,11 @@ func main() {
 			log.Print(err)
 		}
 		log.Printf("deleting bridge interface %s", VXLAN_BRIDGE_NAME)
-		if err := deleteLinkAndAddr(VXLAN_BRIDGE_NAME, ipamService); err != nil {
+		if err := deleteLink(VXLAN_BRIDGE_NAME); err != nil {
 			log.Print(err)
 		}
 		log.Printf("deleting iptables nat rules")
-		if err := deleteIptablesRules(ipamService); err != nil {
+		if err := deleteIptablesRules(); err != nil {
 			log.Print(err)
 		}
 		os.Exit(0)
@@ -84,7 +76,7 @@ func main() {
 
 	// create linux bridge
 	log.Printf("creating linux bridge interface (name: %s)", VXLAN_BRIDGE_NAME)
-	if err := createBrigeInterface(VXLAN_BRIDGE_NAME, ipamService); err != nil {
+	if err := createBrigeInterface(VXLAN_BRIDGE_NAME); err != nil {
 		log.Fatal(err)
 	}
 
@@ -107,13 +99,11 @@ func main() {
 		if err := updateFDB(VXLAN_IF_NAME, nodeIPs, ownNodeIP); err != nil {
 			log.Fatal(err)
 		}
-
-		// upsert tptables nat rules
+		// upsert iptables nat rules
 		log.Printf("upsert iptables nat rules")
 		if err := upsertIptablesRules(ipamService); err != nil {
 			log.Print(err)
 		}
-
 		time.Sleep(30 * time.Second)
 	}
 }
@@ -134,29 +124,11 @@ func getNodesIPs(clientset *kubernetes.Clientset) ([]string, error) {
 	return ips, nil
 }
 
-func createBrigeInterface(name, ipam string) error {
+func createBrigeInterface(name string) error {
 	// check if interface already exists
-	l, err := netlink.LinkByName(name)
+	_, err := netlink.LinkByName(name)
 	if err == nil {
 		log.Printf("link with name %s already found", name)
-		ips, _ := netlink.AddrList(l, netlink.FAMILY_V4)
-		if len(ips) == 0 {
-			log.Printf("no ip address found in %s", name)
-			ip, mask, err := acquireIP(ipam)
-			if err != nil {
-				return err
-			}
-			log.Printf("setup IP %s on %s", ip.String(), name)
-			linkAddr := &netlink.Addr{
-				IPNet: &net.IPNet{
-					IP:   ip,
-					Mask: mask,
-				},
-			}
-			if err := netlink.AddrReplace(l, linkAddr); err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 	_, notFound := err.(netlink.LinkNotFoundError)
@@ -175,21 +147,6 @@ func createBrigeInterface(name, ipam string) error {
 	}
 
 	if err := netlink.LinkSetUp(link); err != nil {
-		return err
-	}
-
-	ip, mask, err := acquireIP(ipam)
-	if err != nil {
-		return err
-	}
-	log.Printf("setup IP %s on %s", ip.String(), name)
-	linkAddr := &netlink.Addr{
-		IPNet: &net.IPNet{
-			IP:   ip,
-			Mask: mask,
-		},
-	}
-	if err := netlink.AddrReplace(link, linkAddr); err != nil {
 		return err
 	}
 
@@ -289,162 +246,7 @@ func deleteLink(name string) error {
 	return nil
 }
 
-func deleteLinkAndAddr(name, ipam string) error {
-	// check if interface already exists
-	link, lerr := netlink.LinkByName(name)
-	if lerr == nil {
-		ips, _ := netlink.AddrList(link, netlink.FAMILY_V4)
-		for _, ip := range ips {
-			log.Printf("releasing ip %s", ip.IP.String())
-			if err := releaseIP(ipam, ip.IP); err != nil {
-				log.Println(err)
-			}
-		}
-		if err := netlink.LinkDel(link); err != nil {
-			return err
-		}
-		log.Printf("link with name %s was deleted", name)
-		return nil
-	}
-	_, notFound := lerr.(netlink.LinkNotFoundError)
-	if !notFound {
-		return lerr
-	}
-	log.Printf("link with name %s not found", name)
-
-	return nil
-}
-
-func waitForGrpc(ctx context.Context, addr string) {
-	dialAddr := strings.TrimPrefix(addr, "http://")
-	dialTimeout := 5 * time.Second
-	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	}
-	log.Printf("check grpc connection to service %s", dialAddr)
-	for {
-		dialCtx, dialCancel := context.WithTimeout(ctx, dialTimeout)
-		defer dialCancel()
-		check, err := grpc.DialContext(dialCtx, dialAddr, dialOpts...)
-		if err != nil {
-			if err == context.DeadlineExceeded {
-				log.Printf("timeout: failed to connect service %s", dialAddr)
-			} else {
-				log.Printf("failed to connect service at %s: %+v", dialAddr, err)
-			}
-		} else {
-			log.Printf("connected, grpc connection state: %v", check.GetState())
-			break
-		}
-	}
-}
-
-func acquireIP(ipam string) (net.IP, net.IPMask, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	waitForGrpc(ctx, ipam)
-
-	c := apiv1connect.NewIpamServiceClient(
-		http.DefaultClient,
-		ipam,
-		connect.WithGRPC(),
-	)
-
-	// get prefixes from IPAM service
-	prefixes, err := c.ListPrefixes(ctx, connect.NewRequest(&goipamapiv1.ListPrefixesRequest{}))
-	if err != nil {
-		return net.IP{}, net.IPMask{}, err
-	}
-	p := prefixes.Msg.Prefixes
-	if len(p) == 0 {
-		return net.IP{}, net.IPMask{}, errors.New("IPAM prefix not found")
-	}
-	if len(p) > 1 {
-		return net.IP{}, net.IPMask{}, fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
-	}
-
-	result, err := c.AcquireIP(ctx, connect.NewRequest(&goipamapiv1.AcquireIPRequest{PrefixCidr: p[0].Cidr}))
-	if err != nil {
-		return net.IP{}, net.IPMask{}, err
-	}
-	log.Printf("ip %s acquired", result.Msg.Ip.Ip)
-
-	// parse overlay cidr for IPMask
-	_, ipv4Net, err := net.ParseCIDR(p[0].Cidr)
-	if err != nil {
-		return net.IP{}, net.IPMask{}, err
-	}
-	ip := net.ParseIP(result.Msg.Ip.Ip)
-	mask := ipv4Net.Mask
-
-	return ip, mask, nil
-}
-
-func releaseIP(ipam string, ip net.IP) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	waitForGrpc(ctx, ipam)
-
-	c := apiv1connect.NewIpamServiceClient(
-		http.DefaultClient,
-		ipam,
-		connect.WithGRPC(),
-	)
-
-	// get prefixes from IPAM service
-	prefixes, err := c.ListPrefixes(ctx, connect.NewRequest(&goipamapiv1.ListPrefixesRequest{}))
-	if err != nil {
-		return err
-	}
-	p := prefixes.Msg.Prefixes
-	if len(p) == 0 {
-		return errors.New("IPAM prefix not found")
-	}
-	if len(p) > 1 {
-		return fmt.Errorf("too many IPAM prefixes found (%d)", len(p))
-	}
-
-	result, err := c.ReleaseIP(ctx, connect.NewRequest(&goipamapiv1.ReleaseIPRequest{PrefixCidr: p[0].Cidr, Ip: ip.String()}))
-	if err != nil {
-		return err
-	}
-	log.Printf("ip %s released", result.Msg.Ip.Ip)
-
-	return nil
-}
-
-func getExtraNetCidr(ipam string) (string, error) {
-	// get extraNet prefix from ipam service
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	waitForGrpc(ctx, ipam)
-	c := apiv1connect.NewIpamServiceClient(
-		http.DefaultClient,
-		ipam,
-		connect.WithGRPC(),
-	)
-
-	prefixes, err := c.ListPrefixes(ctx, connect.NewRequest(&goipamapiv1.ListPrefixesRequest{}))
-	if err != nil {
-		return "", err
-	}
-	p := prefixes.Msg.Prefixes
-	if len(p) == 0 {
-		return "", errors.New("IPAM prefix not found")
-	}
-	return p[0].Cidr, nil
-}
-
 func upsertIptablesRules(ipam string) error {
-
-	cidr, err := getExtraNetCidr(ipam)
-	if err != nil {
-		return err
-	}
 
 	// manage iptables
 	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Timeout(5))
@@ -462,21 +264,20 @@ func upsertIptablesRules(ipam string) error {
 		}
 	}
 
-	if err := insertRule(ipt, "nat", "POSTROUTING", 1, "-d", cidr, "-j", iptablesChainName); err != nil {
+	if err := insertRule(ipt, "nat", "POSTROUTING", 1, "-d", extraNetCidr, "-j", iptablesChainName); err != nil {
 		return err
 	}
-	if err := insertRule(ipt, "nat", iptablesChainName, 1, "-s", cidr, "-j", "ACCEPT"); err != nil {
+	if err := insertRule(ipt, "nat", iptablesChainName, 1, "-s", extraNetCidr, "-j", "ACCEPT"); err != nil {
 		return err
 	}
-	if err := insertRule(ipt, "nat", iptablesChainName, 2, "-d", cidr, "-j", "ACCEPT"); err != nil {
+	if err := insertRule(ipt, "nat", iptablesChainName, 2, "-d", extraNetCidr, "-j", "ACCEPT"); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func deleteIptablesRules(ipam string) error {
-
+func deleteIptablesRules() error {
 	// manage iptables
 	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Timeout(5))
 	if err != nil {

@@ -42,6 +42,12 @@ const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
 // The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
 const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 
+// Overlay netwrok CIDR details
+const (
+	OverlayNetworkIPNet string = "10.100.0.0"
+	OverlayNetworkMask  string = "255.255.240.0" // /20
+)
+
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
 // JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
 type VirtualMachineUsage struct {
@@ -93,6 +99,11 @@ type VirtualMachineSpec struct {
 
 	// +optional
 	ServiceLinks *bool `json:"service_links,omitempty"`
+
+	// Use KVM acceleation
+	// +kubebuilder:default:=true
+	// +optional
+	EnableAcceleration bool `json:"enableAcceleration"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
@@ -312,9 +323,13 @@ type ExtraNetwork struct {
 	// +optional
 	Interface string `json:"interface"`
 	// Multus Network name specified in network-attachments-definition.
-	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net
+	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net-ipam
 	// +optional
 	MultusNetwork string `json:"multusNetwork"`
+	// Multus Network name specified in network-attachments-definition.
+	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net
+	// +optional
+	MultusNetworkNoIP string `json:"multusNetworkNoIP"`
 }
 
 // VirtualMachineStatus defines the observed state of VirtualMachine
@@ -374,7 +389,7 @@ const (
 //+kubebuilder:resource:singular=neonvm
 
 // VirtualMachine is the Schema for the virtualmachines API
-// +kubebuilder:printcolumn:name="Cpus",type=integer,JSONPath=`.status.cpus`
+// +kubebuilder:printcolumn:name="Cpus",type=string,JSONPath=`.status.cpus`
 // +kubebuilder:printcolumn:name="Memory",type=string,JSONPath=`.status.memorySize`
 // +kubebuilder:printcolumn:name="Pod",type=string,JSONPath=`.status.podName`
 // +kubebuilder:printcolumn:name="ExtraIP",type=string,JSONPath=`.status.extraNetIP`

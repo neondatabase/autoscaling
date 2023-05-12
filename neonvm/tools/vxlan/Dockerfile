@@ -13,7 +13,6 @@ RUN go mod download
 
 # Copy the go source
 COPY neonvm/tools/vxlan/controller/ neonvm/tools/vxlan/controller/
-COPY neonvm/tools/vxlan/ipam/       neonvm/tools/vxlan/ipam/
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -21,7 +20,6 @@ COPY neonvm/tools/vxlan/ipam/       neonvm/tools/vxlan/ipam/
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /vxlan-controller neonvm/tools/vxlan/controller/main.go
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /vxlan-ipam       neonvm/tools/vxlan/ipam/main.go
 
 FROM alpine:3.16
 
@@ -43,7 +41,6 @@ RUN set -e \
     && chmod +x /usr/bin/grpc_health_probe
 
 COPY --from=builder /vxlan-controller /usr/bin/vxlan-controller
-COPY --from=builder /vxlan-ipam       /usr/bin/vxlan-ipam
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["vxlan-controller"]

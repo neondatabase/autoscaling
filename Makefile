@@ -13,28 +13,20 @@ PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 # kernel for guests
 VM_KERNEL_VERSION ?= "5.15.80"
 
-# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-# List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.25.0
-
+## Golang details
+GOARCH ?= $(shell go env GOARCH)
+GOOS ?= $(shell go env GOOS)
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
-
-# Go 1.20 changed the handling of git worktrees:
-# https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
-export GOFLAGS=-buildvcs=false
-
-## Tool Versions
-KUSTOMIZE_VERSION ?= v4.5.7
-CONTROLLER_TOOLS_VERSION ?= v0.10.0
-CODE_GENERATOR_VERSION ?= v0.25.9
-
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(GOPATH)/bin
 else
 GOBIN=$(shell go env GOBIN)
 endif
+# Go 1.20 changed the handling of git worktrees:
+# https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
+export GOFLAGS=-buildvcs=false
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -107,9 +99,13 @@ vet: ## Run go vet against code.
 	# ref https://github.com/golang/go/issues/56755
 	CGO_ENABLED=0 go vet ./...
 
+.PHONE: e2e-tools
+e2e-tools: kind kubectl kuttl
+
 .PHONE: e2e
 e2e: ## Run e2e kuttl tests
-	kubectl kuttl test --config tests/e2e/kuttl-test.yaml
+	$(KUTTL) test --config tests/e2e/kuttl-test.yaml
+	rm -f kubeconfig
 
 .PHONY: test
 test: fmt vet envtest ## Run tests.
@@ -127,7 +123,6 @@ test: fmt vet envtest ## Run tests.
 build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
-	go build -o bin/vxlan-ipam       neonvm/tools/vxlan/ipam/main.go
 	go build -o bin/runner           neonvm/runner/main.go
 
 .PHONY: bin/vm-builder
@@ -155,7 +150,16 @@ vm-informant: ## Build vm-informant image
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
+docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler vm-informant ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
+
+.PHONY: docker-push
+docker-push: docker-build
+	docker push -q $(IMG_CONTROLLER)
+	docker push -q $(IMG_RUNNER)
+	docker push -q $(IMG_VXLAN)
+	docker push -q $(AUTOSCALER_SCHEDULER_IMG)
+	docker push -q $(AUTOSCALER_AGENT_IMG)
+	docker push -q $(VM_INFORMANT_IMG)
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
@@ -256,48 +260,65 @@ install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~
 uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build neonvm/config/common/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
-DEPLOYTS := $(shell date +%s)
-.PHONY: deploy
-deploy: kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd neonvm/config/common/controller              && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)  && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
-	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
-	cd neonvm/config/default-vxlan/vxlan-ipam       && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > neonvm/neonvm-multus.yaml
-	$(KUSTOMIZE) build neonvm/config/default-vxlan > neonvm/neonvm-vxlan.yaml
-	cd neonvm/config/common/controller              && $(KUSTOMIZE) edit remove annotation deploytime
-	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit remove annotation deploytime
-	cd neonvm/config/default-vxlan/vxlan-ipam       && $(KUSTOMIZE) edit remove annotation deploytime
-	kubectl apply -f neonvm/neonvm-multus.yaml
-	kubectl -n kube-system rollout status daemonset kube-multus-ds
-	kubectl apply -f neonvm/neonvm-vxlan.yaml
-	kubectl -n neonvm-system rollout status  deployment neonvm-vxlan-ipam
-	kubectl -n neonvm-system rollout status  daemonset  neonvm-vxlan-controller
-	kubectl -n neonvm-system rollout status  deployment neonvm-controller
+BUILDTS := $(shell date +%s)
+RENDERED ?= $(shell pwd)/rendered_manifests
+$(RENDERED):
+	mkdir -p $(RENDERED)
+.PHONY: render-manifests
+render-manifests: $(RENDERED) kustomize
+	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd deploy && $(KUSTOMIZE) edit set image autoscale-scheduler=$(AUTOSCALER_SCHEDULER_IMG) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd deploy && $(KUSTOMIZE) edit set image autoscaler-agent=$(AUTOSCALER_AGENT_IMG) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
+	$(KUSTOMIZE) build deploy > $(RENDERED)/autoscaler.yaml
+	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd deploy && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd deploy && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 
-	kubectl apply -f deploy/autoscale-scheduler.yaml
-	kubectl apply -f deploy/autoscaler-agent.yaml
+render-release: $(RENDERED) kustomize
+	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)
+	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN)
+	cd deploy && $(KUSTOMIZE) edit set image autoscale-scheduler=$(AUTOSCALER_SCHEDULER_IMG)
+	cd deploy && $(KUSTOMIZE) edit set image autoscaler-agent=$(AUTOSCALER_AGENT_IMG)
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
+	$(KUSTOMIZE) build deploy > $(RENDERED)/autoscaler.yaml
+	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=controller:dev
+	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev
+	cd deploy && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev
+	cd deploy && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
+
+.PHONY: deploy
+deploy: kind-load manifests render-manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	kubectl apply -f $(RENDERED)/multus.yaml
+	kubectl -n kube-system rollout status daemonset kube-multus-ds
+	kubectl apply -f $(RENDERED)/neonvm.yaml
+	kubectl -n neonvm-system rollout status daemonset  neonvm-device-plugin
+	kubectl -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
+	kubectl -n neonvm-system rollout status deployment neonvm-controller
+	kubectl apply -f $(RENDERED)/autoscaler.yaml
+	kubectl -n kube-system rollout status daemonset  autoscaler-agent
+	kubectl -n kube-system rollout status deployment autoscale-scheduler
 
 .PHONY: deploy-controller
-deploy-controller: kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation deploytime:$(DEPLOYTS) --force
-	$(KUSTOMIZE) build neonvm/config/default > neonvm/neonvm.yaml
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit remove annotation deploytime
-	kubectl apply -f neonvm/neonvm.yaml
+deploy-controller: $(RENDERED) kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
+	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	kubectl apply -f $(RENDERED)/neonvm.yaml
 	kubectl -n neonvm-system rollout status deployment neonvm-controller
-
-.PHONY: undeploy
-undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build neonvm/config/default-vxlan | kubectl delete --ignore-not-found=$(ignore-not-found) -f - || true
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus | kubectl delete --ignore-not-found=$(ignore-not-found) -f - || true
 
 ##@ Local cluster
 
 .PHONY: local-cluster
 local-cluster:  ## Create local cluster by kind tool and prepared config
 	kind create cluster --config kind/config.yaml
-	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
-	kubectl wait -n kube-system deployment calico-kube-controllers --for condition=Available --timeout -1s
 	kubectl wait -n cert-manager deployment cert-manager --for condition=Available --timeout -1s
 
 .PHONY: kind-load
@@ -325,11 +346,29 @@ LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
-## Tool Binaries
+## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-ENVTEST ?= $(LOCALBIN)/setup-envtest
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+KUSTOMIZE_VERSION ?= v4.5.7
 
+ENVTEST ?= $(LOCALBIN)/setup-envtest
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+# List of available versions: https://storage.googleapis.com/kubebuilder-tools
+ENVTEST_K8S_VERSION = 1.25.0
+
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+CONTROLLER_TOOLS_VERSION ?= v0.10.0
+CODE_GENERATOR_VERSION ?= v0.25.9
+
+KUTTL ?= $(LOCALBIN)/kuttl
+KUTTL_VERSION ?= v0.15.0
+
+KUBECTL ?= $(LOCALBIN)/kubectl
+KUBECTL_VERSION ?= v1.24.12
+
+KIND ?= $(LOCALBIN)/kind
+KIND_VERSION ?= v0.18.0
+
+## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -346,6 +385,20 @@ controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessar
 $(CONTROLLER_GEN): $(LOCALBIN)
 	test -s $(LOCALBIN)/controller-gen || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
 
+.PHONY: kind
+kind: $(KIND)
+$(KIND): $(LOCALBIN)
+	curl -sfSLo $(KIND) https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(GOOS)-$(GOARCH) && chmod +x $(KIND)
+
+.PHONY: kubectl
+kubectl: $(KUBECTL)
+$(KUBECTL): $(LOCALBIN)
+	curl -sfSLo $(KUBECTL) https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(GOOS)/$(GOARCH)/kubectl && chmod +x $(KUBECTL)
+
+.PHONY: kuttl
+kuttl: $(KUTTL)
+$(KUTTL): $(LOCALBIN)
+	curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/$(KUTTL_VERSION)/kubectl-kuttl_$(subst v,,$(KUTTL_VERSION))_$(GOOS)_$(shell uname -m) && chmod +x $(KUTTL)
 
 .PHONY: cert-manager
 cert-manager: ## install cert-manager to cluster

@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 bases:
-- https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/v3.9.3/deployments/multus-daemonset-thick-plugin.yml
+- https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/master/config/multus/v3.9.2-eksbuild.1/aws-k8s-multus.yaml
 
 # whereabouts CNI
 - https://raw.githubusercontent.com/k8snetworkplumbingwg/whereabouts/v0.6.1/doc/crds/whereabouts.cni.cncf.io_ippools.yaml
@@ -10,8 +10,8 @@ bases:
 - https://raw.githubusercontent.com/k8snetworkplumbingwg/whereabouts/v0.6.1/doc/crds/daemonset-install.yaml
 
 images:
+- name: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/multus-cni
+  newName: public.ecr.aws/eks/multus-cni
+
 - name: ghcr.io/k8snetworkplumbingwg/whereabouts
   newTag: v0.6.1-amd64
-
-patchesStrategicMerge:
-- daemonset_patch.yaml

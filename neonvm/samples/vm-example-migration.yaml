@@ -4,3 +4,4 @@ metadata:
   name: example
 spec:
   vmName: example
+  allowPostCopy: false

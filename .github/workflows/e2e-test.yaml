@@ -23,22 +23,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          LOCALBIN=$(pwd)/bin
-          mkdir -p ${LOCALBIN}
-
-          # Install kubectl
-          curl -Lo ${LOCALBIN}/kubectl https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl
-          chmod +x ${LOCALBIN}/kubectl
-
-          # Install kind
-          curl -Lo ${LOCALBIN}/kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
-          chmod +x ${LOCALBIN}/kind
-
-          # Install kuttl
-          curl -Lo ${LOCALBIN}/kubectl-kuttl https://github.com/kudobuilder/kuttl/releases/download/${KUTTL_VERSION}/kubectl-kuttl_${KUTTL_VERSION#v}_linux_x86_64
-          chmod +x ${LOCALBIN}/kubectl-kuttl
-
-          echo ${LOCALBIN} >> $GITHUB_PATH
+          make e2e-tools
+          echo $(pwd)/bin >> $GITHUB_PATH
         env:
           # kubectl is supported within one minor version (older or newer) of k8s
           # https://kubernetes.io/releases/version-skew-policy/#kubectl
@@ -50,7 +36,7 @@ jobs:
         run: |
           kubectl version --client --output=yaml
           kind version
-          kubectl kuttl version
+          kuttl version
           docker version
           docker buildx version
 
