@@ -99,6 +99,11 @@ type VirtualMachineSpec struct {
 
 	// +optional
 	ServiceLinks *bool `json:"service_links,omitempty"`
+
+	// Use KVM acceleation
+	// +kubebuilder:default:=true
+	// +optional
+	EnableAcceleration bool `json:"enableAcceleration"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never

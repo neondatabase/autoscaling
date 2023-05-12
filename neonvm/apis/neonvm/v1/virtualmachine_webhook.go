@@ -42,9 +42,6 @@ var _ webhook.Defaulter = &VirtualMachine{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *VirtualMachine) Default() {
-
-	// TODO(user): fill in your defaulting logic.
-
 	// CPU spec defaulter
 	if r.Spec.Guest.CPUs.Use == nil {
 		r.Spec.Guest.CPUs.Use = new(MilliCPU)
@@ -77,8 +74,6 @@ var _ webhook.Validator = &VirtualMachine{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachine) ValidateCreate() error {
-	//virtualmachinelog.Info("validate create", "name", r.Name)
-
 	// validate .spec.guest.cpus.use and .spec.guest.cpus.max
 	if r.Spec.Guest.CPUs.Use != nil {
 		if r.Spec.Guest.CPUs.Max == nil {
@@ -143,8 +138,6 @@ func (r *VirtualMachine) ValidateCreate() error {
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
-	//virtualmachinelog.Info("validate update", "name", r.Name)
-
 	// process immutable fields
 	before, _ := old.(*VirtualMachine)
 
@@ -163,6 +156,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.guest.env", func(v *VirtualMachine) any { return v.Spec.Guest.Env }},
 		{".spec.disk", func(v *VirtualMachine) any { return v.Spec.Disks }},
 		{".spec.podResources", func(v *VirtualMachine) any { return v.Spec.PodResources }},
+		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},
 	}
 
 	for _, info := range immutableFields {
@@ -204,8 +198,6 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachine) ValidateDelete() error {
-	//virtualmachinelog.Info("validate delete", "name", r.Name)
-
 	// TODO(user): fill in your validation logic upon object deletion.
 	return nil
 }

@@ -1066,6 +1066,10 @@ spec:
                   - name
                   type: object
                 type: array
+              enableAcceleration:
+                default: true
+                description: Use KVM acceleation
+                type: boolean
               extraNetwork:
                 description: Extra network interface attached to network provided
                   by Mutlus CNI.

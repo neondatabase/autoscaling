@@ -859,7 +859,10 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	if pod.Spec.Containers[0].Resources.Limits == nil {
 		pod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{}
 	}
-	pod.Spec.Containers[0].Resources.Limits["neonvm/kvm"] = resource.MustParse("1")
+	pod.Spec.Containers[0].Resources.Limits["neonvm/vhost-net"] = resource.MustParse("1")
+	if virtualmachine.Spec.EnableAcceleration {
+		pod.Spec.Containers[0].Resources.Limits["neonvm/kvm"] = resource.MustParse("1")
+	}
 
 	for _, port := range virtualmachine.Spec.Guest.Ports {
 		cPort := corev1.ContainerPort{

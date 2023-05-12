@@ -34,7 +34,13 @@ spec:
             - count: 1000
               paths:
                 - path: /dev/kvm
-                - path: /dev/vhost-*
+        - --device
+        - |
+          name: vhost-net
+          groups:
+            - count: 1000
+              paths:
+                - path: /dev/vhost-net
         name: generic-device-plugin
         resources:
           requests:

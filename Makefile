@@ -148,16 +148,16 @@ vm-informant: ## Build vm-informant image
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
+docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler vm-informant ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
 
 .PHONY: docker-push
 docker-push: docker-build
-	docker push -q ${IMG_CONTROLLER}
-	docker push -q ${IMG_RUNNER}
-	docker push -q ${IMG_VXLAN}
-	docker push -q ${AUTOSCALER_SCHEDULER_IMG}
-	docker push -q ${AUTOSCALER_AGENT_IMG}
-	docker push -q ${VM_INFORMANT_IMG}
+	docker push -q $(IMG_CONTROLLER)
+	docker push -q $(IMG_RUNNER)
+	docker push -q $(IMG_VXLAN)
+	docker push -q $(AUTOSCALER_SCHEDULER_IMG)
+	docker push -q $(AUTOSCALER_AGENT_IMG)
+	docker push -q $(VM_INFORMANT_IMG)
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
@@ -293,10 +293,10 @@ render-release: $(RENDERED) kustomize
 
 .PHONY: deploy
 deploy: kind-load manifests render-manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	kubectl apply -f $(RENDERED)
 	kubectl apply -f $(RENDERED)/multus.yaml
 	kubectl -n kube-system rollout status daemonset kube-multus-ds
 	kubectl apply -f $(RENDERED)/neonvm.yaml
+	kubectl -n neonvm-system rollout status daemonset  neonvm-device-plugin
 	kubectl -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
 	kubectl -n neonvm-system rollout status deployment neonvm-controller
 	kubectl apply -f $(RENDERED)/autoscaler.yaml
@@ -316,8 +316,6 @@ deploy-controller: $(RENDERED) kind-load manifests kustomize ## Deploy controlle
 .PHONY: local-cluster
 local-cluster:  ## Create local cluster by kind tool and prepared config
 	kind create cluster --config kind/config.yaml
-#	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
-#	kubectl wait -n kube-system deployment calico-kube-controllers --for condition=Available --timeout -1s
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	kubectl wait -n cert-manager deployment cert-manager --for condition=Available --timeout -1s
 

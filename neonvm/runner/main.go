@@ -538,7 +538,7 @@ func main() {
 	}
 
 	// cpu details
-	if checkKVM() {
+	if vmSpec.EnableAcceleration && checkKVM() {
 		log.Println("using KVM acceleration")
 		qemuCmd = append(qemuCmd, "-enable-kvm")
 	}
