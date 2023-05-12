@@ -210,7 +210,7 @@ fi
 if /neonvm/bin/test -f /neonvm/runtime/args.sh; then
     /neonvm/bin/cat /neonvm/runtime/args.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo '{{$first := true}}{{range .Cmd}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
+    /neonvm/bin/echo '{{range .Cmd}} {{.}}{{end}}' >> /neonvm/bin/vmstarter.sh
 fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
