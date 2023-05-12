@@ -125,11 +125,11 @@ build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binarie
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMInformant=${VM_INFORMANT_IMG}" neonvm/tools/vm-builder/main.go
+	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMInformant=${VM_INFORMANT_IMG}" neonvm/tools/vm-builder/main.go
 
 .PHONY: bin/vm-builder-generic
 bin/vm-builder-generic: ## Build vm-builder-generic binary.
-	go build -o bin/vm-builder-generic  neonvm/tools/vm-builder-generic/main.go
+	CGO_ENABLED=0 go build -o bin/vm-builder-generic  neonvm/tools/vm-builder-generic/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
