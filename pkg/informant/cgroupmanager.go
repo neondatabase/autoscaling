@@ -250,8 +250,9 @@ type memoryLimits struct {
 // SetMemLimits sets the cgroup's memory.high and memory.max to the values provided by the
 // memoryLimits.
 func (c *CgroupManager) SetMemLimits(limits memoryLimits) error {
-	// convert uint64 -> int64
-	hb, mb := int64(limits.highBytes), int64(limits.maxBytes)
+	// convert uint64 -> int64 so we can produce pointers
+	hb := int64(limits.highBytes)
+	mb := int64(limits.maxBytes)
 	return c.manager.Update(&cgroup2.Resources{
 		Memory: &cgroup2.Memory{High: &hb, Max: &mb},
 	})
