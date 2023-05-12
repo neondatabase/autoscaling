@@ -128,6 +128,7 @@ fi
 
 	scriptInitTab = `
 ::sysinit:/neonvm/bin/vminit
+::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vmstart
@@ -180,12 +181,7 @@ resize2fs /dev/vda
 
 # networking
 ip link set up dev lo
-ETH_LIST=$(find /sys/class/net -mindepth 1 -maxdepth 1 -name "eth*")
-for i in ${ETH_LIST}; do
-    iface=$(basename $i)
-    ip link set up dev $iface
-    udhcpc -t 1 -T 1 -A 1 -b -q -i $iface -O 121 -O 119 -s /neonvm/bin/udhcpc.script
-done
+ip link set up dev eth0
 `
 )
 

@@ -18,7 +18,7 @@ spec:
   - additionalPrinterColumns:
     - jsonPath: .status.cpus
       name: Cpus
-      type: integer
+      type: string
     - jsonPath: .status.memorySize
       name: Memory
       type: string
@@ -1066,6 +1066,10 @@ spec:
                   - name
                   type: object
                 type: array
+              enableAcceleration:
+                default: true
+                description: Use KVM acceleation
+                type: boolean
               extraNetwork:
                 description: Extra network interface attached to network provided
                   by Mutlus CNI.
@@ -1079,6 +1083,10 @@ spec:
                     description: Interface name.
                     type: string
                   multusNetwork:
+                    default: neonvm-system/neonvm-overlay-net-ipam
+                    description: Multus Network name specified in network-attachments-definition.
+                    type: string
+                  multusNetworkNoIP:
                     default: neonvm-system/neonvm-overlay-net
                     description: Multus Network name specified in network-attachments-definition.
                     type: string

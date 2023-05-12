@@ -38,6 +38,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -54,11 +55,10 @@ const (
 
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
-	defaultNetworkCIDR       = "10.255.255.252/30"
+	defaultNetworkCIDR       = "169.254.254.252/30"
 
 	overlayNetworkBridgeName = "br-overlay"
 	overlayNetworkTapName    = "tap-overlay"
-	overlayNetworkCIDR       = "169.254.254.252/30" // from private link-local special IP range (169.254.0.0/16)
 
 	// defaultPath is the default path to the resolv.conf that contains information to resolve DNS. See Path().
 	resolveDefaultPath = "/etc/resolv.conf"
@@ -233,6 +233,12 @@ func createISO9660runtime(diskPath string, command []string, args []string, env 
 		return err
 	}
 
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	err = outputFile.Chown(36, 34)
+	if err != nil {
+		return err
+	}
+
 	err = writer.WriteTo(outputFile, "vmruntime")
 	if err != nil {
 		return err
@@ -317,6 +323,11 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		return err
 	}
 
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	if err := execFg("chown", "36:34", diskPath); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -377,6 +388,11 @@ func createISO9660FromPath(diskName string, diskPath string, contentPath string)
 	if err != nil {
 		return err
 	}
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	err = outputFile.Chown(36, 34)
+	if err != nil {
+		return err
+	}
 
 	err = writer.WriteTo(outputFile, diskName)
 	if err != nil {
@@ -393,6 +409,16 @@ func createISO9660FromPath(diskName string, diskPath string, contentPath string)
 
 func checkKVM() bool {
 	info, err := os.Stat("/dev/kvm")
+	if err != nil {
+		return false
+	}
+	mode := info.Mode()
+
+	return mode&os.ModeCharDevice == os.ModeCharDevice
+}
+
+func checkDevTun() bool {
+	info, err := os.Stat("/dev/net/tun")
 	if err != nil {
 		return false
 	}
@@ -473,6 +499,7 @@ func main() {
 
 	// prepare qemu command line
 	qemuCmd := []string{
+		"-runas", "qemu",
 		"-machine", "q35",
 		"-nographic",
 		"-no-reboot",
@@ -484,10 +511,6 @@ func main() {
 		"-msg", "timestamp=on",
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
 	}
-
-	// kernel details
-	qemuCmd = append(qemuCmd, "-kernel", kernelPath)
-	qemuCmd = append(qemuCmd, "-append", kernelCmdline)
 
 	// disk details
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
@@ -515,8 +538,8 @@ func main() {
 	}
 
 	// cpu details
-	if checkKVM() {
-		log.Printf("using KVM acceleration\n")
+	if vmSpec.EnableAcceleration && checkKVM() {
+		log.Println("using KVM acceleration")
 		qemuCmd = append(qemuCmd, "-enable-kvm")
 	}
 	qemuCmd = append(qemuCmd, "-cpu", "max")
@@ -534,13 +557,38 @@ func main() {
 	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
 
 	// overlay (multus) net details
-	if len(vmStatus.ExtraNetIP) != 0 {
-		macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface, vmStatus.ExtraNetIP, vmStatus.ExtraNetMask)
-		if err != nil {
-			log.Fatalf("can not setup overlay network: %s", err)
+	if vmSpec.ExtraNetwork != nil {
+		if vmSpec.ExtraNetwork.Enable {
+			macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface)
+			if err != nil {
+				log.Fatalf("can not setup overlay network: %s", err)
+			}
+			qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
+			qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
 		}
-		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
-		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
+	}
+
+	// get overlay IP address from Network Status (provided by NetworkAttachmentDefinition)
+	networkStatusList := []nadapiv1.NetworkStatus{}
+	if os.Getenv("NETWORK_STATUS") != "" {
+		if err := json.Unmarshal([]byte(os.Getenv("NETWORK_STATUS")), &networkStatusList); err != nil {
+			log.Fatalf("can not retrieve network status: %s", err)
+		}
+	}
+	var overlayIP string
+	for _, networkStatus := range networkStatusList {
+		if networkStatus.Interface == vmSpec.ExtraNetwork.Interface && len(networkStatus.IPs) > 0 {
+			overlayIP = networkStatus.IPs[0]
+			break
+		}
+	}
+
+	// kernel details
+	qemuCmd = append(qemuCmd, "-kernel", kernelPath)
+	if len(overlayIP) != 0 {
+		qemuCmd = append(qemuCmd, "-append", fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", overlayIP, vmv1.OverlayNetworkMask, vmStatus.PodName, kernelCmdline))
+	} else {
+		qemuCmd = append(qemuCmd, "-append", kernelCmdline)
 	}
 
 	// should runner receive migration ?
@@ -564,7 +612,7 @@ func main() {
 	go listenForCPUChanges(ctx, vmSpec.RunnerPort, cgroupPath, &wg)
 
 	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
-	log.Printf("using cgexec args: %s", args)
+	log.Printf("using cgexec args: %v", args)
 	if err := execFg("cgexec", args...); err != nil {
 		log.Printf("Qemu exited: %s", err)
 	}
@@ -670,7 +718,7 @@ func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	// quota may be greater than period if the cgroup is allowed
 	// to use more than 100% of a CPU.
 	quota := int64(float64(r) / float64(1000) * float64(cgroupPeriod))
-	fmt.Printf("setting cgroup to %v %v\n", quota, period)
+	log.Printf("setting cgroup to %v %v\n", quota, period)
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
@@ -772,34 +820,29 @@ func terminateQemuOnSigterm(ctx context.Context, qmpPort int32, wg *sync.WaitGro
 	case <-c:
 	case <-ctx.Done():
 	}
+
 	log.Println("got signal, sending powerdown command to QEMU")
 
-	for {
-		mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("127.0.0.1:%d", qmpPort), 2*time.Second)
-		if err != nil {
-			log.Println(err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		if err := mon.Connect(); err != nil {
-			log.Println(err)
-			time.Sleep(time.Second)
-			continue
-		}
-		defer mon.Disconnect()
-
-		qmpcmd := []byte(`{"execute": "system_powerdown"}`)
-		_, err = mon.Run(qmpcmd)
-		if err != nil {
-			log.Println(err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		log.Println("system_powerdown command sent to QEMU")
-		break
+	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("127.0.0.1:%d", qmpPort), 2*time.Second)
+	if err != nil {
+		log.Println(err)
+		return
 	}
+
+	if err := mon.Connect(); err != nil {
+		log.Println(err)
+		return
+	}
+	defer mon.Disconnect()
+
+	qmpcmd := []byte(`{"execute": "system_powerdown"}`)
+	_, err = mon.Run(qmpcmd)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	log.Println("system_powerdown command sent to QEMU")
 
 	return
 }
@@ -850,6 +893,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	}
 
 	// create an configure linux bridge
+	log.Printf("setup bridge interface %s", defaultNetworkBridgeName)
 	bridge := &netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkBridgeName,
@@ -876,6 +920,20 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	}
 
 	// create an configure TAP interface
+	if !checkDevTun() {
+		log.Printf("create /dev/net/tun")
+		if err := execFg("mkdir", "-p", "/dev/net"); err != nil {
+			return nil, err
+		}
+		if err := execFg("mknod", "/dev/net/tun", "c", "10", "200"); err != nil {
+			return nil, err
+		}
+		if err := execFg("chown", "qemu:kvm", "/dev/net/tun"); err != nil {
+			return nil, err
+		}
+	}
+
+	log.Printf("setup tap interface %s", defaultNetworkTapName)
 	tap := &netlink.Tuntap{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkTapName,
@@ -893,18 +951,15 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		return nil, err
 	}
 
-	// enable routing
-	if err := execFg("sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
-		return nil, err
-	}
-
 	// setup masquerading outgoing (from VM) traffic
+	log.Println("setup masquerading for outgoing traffic")
 	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
 		return nil, err
 	}
 
 	// pass incoming traffic to .Guest.Spec.Ports into VM
 	for _, port := range ports {
+		log.Printf("setup DNAT for incoming traffic, port %d", port.Port)
 		iptablesArgs := []string{
 			"-t", "nat", "-A", "PREROUTING",
 			"-i", "eth0", "-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
@@ -924,6 +979,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	dnsSearch := strings.Join(getSearchDomains(resolvConf.Content), ",")
 
 	// prepare dnsmask command line (instead of config file)
+	log.Printf("run dnsmqsq for interface %s", defaultNetworkBridgeName)
 	dnsMaskCmd := []string{
 		"--port=0",
 		"--bind-interfaces",
@@ -945,14 +1001,14 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	return mac, nil
 }
 
-func overlayNetwork(iface, ip, mask string) (mac.MAC, error) {
+func overlayNetwork(iface string) (mac.MAC, error) {
 	// gerenare random MAC for overlay Guest interface
 	mac, err := mac.GenerateRandMAC()
 	if err != nil {
 		return nil, err
 	}
 
-	// create an configure linux bridge
+	// create and configure linux bridge
 	bridge := &netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: overlayNetworkBridgeName,
@@ -962,19 +1018,6 @@ func overlayNetwork(iface, ip, mask string) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.LinkAdd(bridge); err != nil {
-		return nil, err
-	}
-	ipBrige, _, maskBridge, err := calcIPs(overlayNetworkCIDR)
-	if err != nil {
-		return nil, err
-	}
-	bridgeAddr := &netlink.Addr{
-		IPNet: &net.IPNet{
-			IP:   ipBrige,
-			Mask: maskBridge,
-		},
-	}
-	if err := netlink.AddrAdd(bridge, bridgeAddr); err != nil {
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(bridge); err != nil {
@@ -1004,22 +1047,21 @@ func overlayNetwork(iface, ip, mask string) (mac.MAC, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := netlink.LinkSetMaster(overlayLink, bridge); err != nil {
+	// firsly delete IP address(es) (it it exist) from overlay interface
+	overlayAddrs, err := netlink.AddrList(overlayLink, netlink.FAMILY_V4)
+	if err != nil {
 		return nil, err
 	}
-
-	// prepare dnsmask command line (instead of config file)
-	dnsMaskCmd := []string{
-		"--port=0",
-		"--bind-interfaces",
-		"--dhcp-authoritative",
-		fmt.Sprintf("--interface=%s", overlayNetworkBridgeName),
-		fmt.Sprintf("--dhcp-range=%s,static,%s", ip, mask),
-		fmt.Sprintf("--dhcp-host=%s,%s,infinite", mac.String(), ip),
-		fmt.Sprintf("--shared-network=%s,%s", overlayNetworkBridgeName, ip),
+	for _, a := range overlayAddrs {
+		ip := a.IPNet
+		if ip != nil {
+			if err := netlink.AddrDel(overlayLink, &a); err != nil {
+				return nil, err
+			}
+		}
 	}
-	// run dnsmasq for default Guest interface
-	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
+	// and now add overlay link to bridge
+	if err := netlink.LinkSetMaster(overlayLink, bridge); err != nil {
 		return nil, err
 	}
 

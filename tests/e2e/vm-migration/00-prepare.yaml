@@ -9,6 +9,7 @@ kind: Pod
 metadata:
   name: workload
 spec:
+  terminationGracePeriodSeconds: 1
   initContainers:
   - name: wait-for-pg
     image: postgres:15-bullseye
@@ -17,7 +18,7 @@ spec:
     - "-c"
     - |
       set -e
-      until pg_isready --dbname=postgres --host=example --port=5432; do
+      until pg_isready --username=postgres --dbname=postgres --host=example --port=5432; do
         sleep 1
       done
   - name: pgbench-initialize

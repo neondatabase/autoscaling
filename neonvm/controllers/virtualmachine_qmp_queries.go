@@ -535,10 +535,12 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 	if err != nil {
 		return err
 	}
-	qmpcmd = []byte(`{"execute": "migrate-start-postcopy"}`)
-	_, err = smon.Run(qmpcmd)
-	if err != nil {
-		return err
+	if virtualmachinemigration.Spec.AllowPostCopy {
+		qmpcmd = []byte(`{"execute": "migrate-start-postcopy"}`)
+		_, err = smon.Run(qmpcmd)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

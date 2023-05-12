@@ -32,16 +32,12 @@ func (r *VirtualMachineMigration) SetupWebhookWithManager(mgr ctrl.Manager) erro
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-
 //+kubebuilder:webhook:path=/mutate-vm-neon-tech-v1-virtualmachinemigration,mutating=true,failurePolicy=fail,sideEffects=None,groups=vm.neon.tech,resources=virtualmachinemigrations,verbs=create;update,versions=v1,name=mvirtualmachinemigration.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Defaulter = &VirtualMachineMigration{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *VirtualMachineMigration) Default() {
-	virtualmachinemigrationlog.Info("default", "name", r.Name)
-
 	// TODO(user): fill in your defaulting logic.
 }
 
@@ -52,24 +48,18 @@ var _ webhook.Validator = &VirtualMachineMigration{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateCreate() error {
-	virtualmachinemigrationlog.Info("validate create", "name", r.Name)
-
 	// TODO(user): fill in your validation logic upon object creation.
 	return nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) error {
-	virtualmachinemigrationlog.Info("validate update", "name", r.Name)
-
 	// TODO(user): fill in your validation logic upon object update.
 	return nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateDelete() error {
-	virtualmachinemigrationlog.Info("validate delete", "name", r.Name)
-
 	// TODO(user): fill in your validation logic upon object deletion.
 	return nil
 }
