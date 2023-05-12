@@ -19,7 +19,7 @@ import (
 )
 
 // watchPodEvents continuously tracks a handful of Pod-related events that we care about. These
-// events are: non-VM pod deletion, VM deletion, and VMs that disable scaling.
+// events are non-VM pod deletion and VM deletion.
 //
 // This method starts its own goroutine, and guarantees that we have started listening for FUTURE
 // events once it returns (unless it returns error).
