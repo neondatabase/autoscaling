@@ -14,6 +14,5 @@ spec:
         - "--leader-elect"
         - "--zap-devel=false"
         - "--zap-time-encoding=iso8601"
-        env:
-        - name: IPAM_SERVER
-          value: "http://neonvm-vxlan-ipam:9090"
+        - "--zap-log-level=info"
+        - "--zap-stacktrace-level=panic"
