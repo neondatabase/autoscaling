@@ -185,7 +185,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("unable update .status for virtualmachine %s in %d attempts", virtualmachine.Name, try)
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: time.Second}, nil
 }
 
 // finalizeVirtualMachine will perform the required operations before delete the CR.
@@ -353,35 +353,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// update Node name where runner working
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
-			// update Pod "usage" annotation before anything else, so that it will be correctly set,
-			// even if the rest of the reconcile operation fails.
-			if err := updateRunnerUsageAnnotation(ctx, r.Client, virtualmachine, virtualmachine.Status.PodName); err != nil {
-				log.Error(err, "Failed to set Pod usage annotation", "VirtualMachine", virtualmachine.Name)
-				return err
-			}
-
-			// do hotplug/unplug CPU if .spec.guest.cpus.use defined
-			if virtualmachine.Spec.Guest.CPUs.Use != nil {
-				// firstly get current state from QEMU
-				cpusPlugged, _, err := QmpGetCpus(virtualmachine)
-				if err != nil {
-					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
-					return err
-				}
-				// compare guest spec and count of plugged
-				if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() > uint32(len(cpusPlugged)) {
-					// going to plug one CPU
-					if err := QmpPlugCpu(virtualmachine); err != nil {
-						return err
-					}
-				} else if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() < uint32(len(cpusPlugged)) {
-					// going to unplug one CPU
-					if err := QmpUnplugCpu(virtualmachine); err != nil {
-						return err
-					}
-				}
-			}
-
 			// get CPU details from QEMU and update status
 			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
 			if err != nil {
@@ -416,36 +387,15 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				}
 			}
 
-			if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != *virtualmachine.Spec.Guest.CPUs.Use {
-				// update status by count of CPU cores used in VM
-				virtualmachine.Status.CPUs = virtualmachine.Spec.Guest.CPUs.Use
+			//if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != *virtualmachine.Spec.Guest.CPUs.Use {
+			if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != targetCPUUsage {
+				//virtualmachine.Status.CPUs = virtualmachine.Spec.Guest.CPUs.Use
+				virtualmachine.Status.CPUs = &targetCPUUsage
 				// record event about cpus used in VM
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
 					fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
 						virtualmachine.Name,
 						virtualmachine.Status.CPUs))
-			}
-
-			// do hotplug/unplug Memory if .spec.guest.memorySlots.use defined
-			if virtualmachine.Spec.Guest.MemorySlots.Use != nil {
-				// firstly get current state from QEMU
-				memoryDevices, err := QmpQueryMemoryDevices(virtualmachine)
-				if err != nil {
-					log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
-					return err
-				}
-				// compare guest spec and count of plugged
-				if *virtualmachine.Spec.Guest.MemorySlots.Use > *virtualmachine.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
-					// going to plug one Memory Slot
-					if err := QmpPlugMemory(virtualmachine); err != nil {
-						return err
-					}
-				} else if *virtualmachine.Spec.Guest.MemorySlots.Use < *virtualmachine.Spec.Guest.MemorySlots.Min+int32(len(memoryDevices)) {
-					// going to unplug one Memory Slot
-					if err := QmpUnplugMemory(virtualmachine); err != nil {
-						return err
-					}
-				}
 			}
 
 			// get Memory details from hypervisor and update VM status
@@ -474,6 +424,34 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
+
+			// check if need hotplug/unplug CPU or memory
+			if virtualmachine.Spec.Guest.CPUs.Use != nil {
+				// compare guest spec and count of plugged
+				if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() != pluggedCPU {
+					log.Info("VM goes into scaling mode, CPU count needs to be changed",
+						"CPUs on board", pluggedCPU,
+						"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use.RoundedUp())
+					virtualmachine.Status.Phase = vmv1.VmScaling
+				}
+			}
+			if virtualmachine.Spec.Guest.MemorySlots.Use != nil {
+				memorySizeFromSpec := resource.NewQuantity(int64(*virtualmachine.Spec.Guest.MemorySlots.Use)*virtualmachine.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
+				if !memorySize.Equal(*memorySizeFromSpec) {
+					log.Info("VM goes into scale mode, need to resize Memory",
+						"Memory on board", memorySize,
+						"Memory in spec", memorySizeFromSpec)
+					virtualmachine.Status.Phase = vmv1.VmScaling
+				}
+			}
+
+			// update Pod "usage" annotation before anything else, so that it will be correctly set,
+			// even if the rest of the reconcile operation fails.
+			if err := updateRunnerUsageAnnotation(ctx, r.Client, virtualmachine, virtualmachine.Status.PodName); err != nil {
+				log.Error(err, "Failed to set Pod usage annotation", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+
 		case corev1.PodSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -497,6 +475,71 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", virtualmachine.Status.PodName, virtualmachine.Name)})
 		default:
 			// do nothing
+		}
+
+	case vmv1.VmScaling:
+		// do hotplug/unplug CPU if .spec.guest.cpus.use defined
+		if virtualmachine.Spec.Guest.CPUs.Use != nil {
+			// firstly get current state from QEMU
+			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
+			if err != nil {
+				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+			specCPU := virtualmachine.Spec.Guest.CPUs.Use.RoundedUp()
+			pluggedCPU := uint32(len(cpuSlotsPlugged))
+			// compare guest spec and count of plugged
+			if specCPU > pluggedCPU {
+				// going to plug one CPU
+				log.Info("Plug one more CPU into VM")
+				if err := QmpPlugCpu(virtualmachine); err != nil {
+					return err
+				}
+			} else if specCPU < pluggedCPU {
+				// going to unplug one CPU
+				log.Info("Unplug one CPU from VM")
+				if err := QmpUnplugCpu(virtualmachine); err != nil {
+					return err
+				}
+			} else {
+				// seems already plugged correctly
+				virtualmachine.Status.Phase = vmv1.VmRunning
+			}
+		}
+		// do hotplug/unplug Memory if .spec.guest.memorySlots.use defined
+		if virtualmachine.Spec.Guest.MemorySlots.Use != nil {
+			// firstly get current state from QEMU
+			memoryDevices, err := QmpQueryMemoryDevices(virtualmachine)
+			memoryPluggedSlots := *virtualmachine.Spec.Guest.MemorySlots.Min + int32(len(memoryDevices))
+			if err != nil {
+				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+			// compare guest spec and count of plugged
+			if *virtualmachine.Spec.Guest.MemorySlots.Use > memoryPluggedSlots {
+				// going to plug one Memory Slot
+				log.Info("Plug one more Memory module into VM")
+				if err := QmpPlugMemory(virtualmachine); err != nil {
+					return err
+				}
+			} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
+				// going to unplug one Memory Slot
+				log.Info("Unplug one Memory module from VM")
+				if err := QmpUnplugMemory(virtualmachine); err != nil {
+					// special case !
+					// error means VM hadn't memory devices available for unplug
+					// need set .memorySlots.Use back to real value
+					log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
+					virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
+					if err := r.Update(ctx, virtualmachine); err != nil {
+						log.Error(err, "Failed to update .spec.guest.memorySlots.use on VM memory scale down")
+						return err
+					}
+				}
+			} else {
+				// seems already plugged correctly
+				virtualmachine.Status.Phase = vmv1.VmRunning
+			}
 		}
 
 	case vmv1.VmSucceeded, vmv1.VmFailed:

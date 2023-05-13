@@ -390,23 +390,36 @@ func QmpUnplugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	}
 	defer mon.Disconnect()
 
-	// remove latest pc-dimm device
-	cmd := []byte(fmt.Sprintf(`{"execute": "device_del", "arguments": {"id": "%s"}}`, memoryDevices[plugged-1].Data.Id))
-	_, err = mon.Run(cmd)
-	if err != nil {
-		return err
-	}
-	// wait a bit to allow guest kernel remove memory block
-	time.Sleep(time.Second)
+	// run from last to first
+	var i int
+	var merr error
+	for i = plugged - 1; i >= 0; i-- {
+		// remove pc-dimm device
+		cmd := []byte(fmt.Sprintf(`{"execute": "device_del", "arguments": {"id": "%s"}}`, memoryDevices[i].Data.Id))
+		_, err = mon.Run(cmd)
+		if err != nil {
+			merr = errors.Join(merr, err)
+			continue
+		}
+		// wait a bit to allow guest kernel remove memory block
+		time.Sleep(time.Second)
 
-	// remove corresponding (latest) memdev object
-	cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "%s"}}`, strings.ReplaceAll(memoryDevices[plugged-1].Data.Memdev, "/objects/", "")))
-	_, err = mon.Run(cmd)
-	if err != nil {
-		return err
+		// remove corresponding memdev object
+		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "%s"}}`, strings.ReplaceAll(memoryDevices[i].Data.Memdev, "/objects/", "")))
+		_, err = mon.Run(cmd)
+		if err != nil {
+			merr = errors.Join(merr, err)
+			continue
+		}
+		// succesfully deleted memory device
+		break
+	}
+	if i >= 0 {
+		// some memory device was removed
+		return nil
 	}
 
-	return nil
+	return merr
 }
 
 func QmpGetMemorySize(virtualmachine *vmv1.VirtualMachine) (*resource.Quantity, error) {
@@ -564,6 +577,22 @@ func QmpGetMigrationInfo(virtualmachine *vmv1.VirtualMachine) (MigrationInfo, er
 	json.Unmarshal(raw, &result)
 
 	return result.Return, nil
+}
+
+func QmpCancelMigration(virtualmachine *vmv1.VirtualMachine) error {
+	mon, err := QmpConnect(virtualmachine)
+	if err != nil {
+		return err
+	}
+	defer mon.Disconnect()
+
+	qmpcmd := []byte(`{"execute": "migrate_cancel"}`)
+	_, err = mon.Run(qmpcmd)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func QmpQuit(ip string, port int32) error {

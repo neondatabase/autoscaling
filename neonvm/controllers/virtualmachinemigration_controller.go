@@ -128,7 +128,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			log.Info("Removing Finalizer for VM migration resource after successfully perform the operations")
 			if ok := controllerutil.RemoveFinalizer(&virtualmachinemigration, virtualmachinemigrationFinalizer); !ok {
 				log.Info("Failed to remove finalizer from VM migration resource")
-				return ctrl.Result{}, nil
+				return ctrl.Result{Requeue: true}, nil
 			}
 			if err := r.Update(ctx, &virtualmachinemigration); err != nil {
 				log.Error(err, "Failed to update status about removing finalizer from VM migration resource")
@@ -157,7 +157,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 }
 
 // finalizeVirtualMachineMigration will perform the required operations before delete the CR.
@@ -237,8 +237,17 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			log.Info("Failed to update VM migration to add Owner reference", "error", err)
 			return nil
 		}
-		// VirtualMachineMigration just created, change Phase to "Pending"
-		virtualmachinemigration.Status.Phase = vmv1.VmmPending
+		// need change VM status asap to prevent autoscler change CPU/RAM in VM
+		// but only if VM in running mode
+		if vm.Status.Phase == vmv1.VmRunning {
+			vm.Status.Phase = vmv1.VmPreMigrating
+			if err := r.Status().Update(ctx, vm); err != nil {
+				log.Error(err, "Failed to update VirtualMachine status to 'PreMigrating'")
+				return err
+			}
+			// VirtualMachineMigration just created, change Phase to "Pending"
+			virtualmachinemigration.Status.Phase = vmv1.VmmPending
+		}
 	case vmv1.VmmPending:
 		// Check if the target runner pod already exists, if not create a new one using source pod as template
 		targetRunner := &corev1.Pod{}
@@ -335,7 +344,7 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			}
 
 			// Migrate only running VMs to target with plugged devices
-			if vm.Status.Phase == vmv1.VmRunning && readyToMigrateMemory && readyToMigrateCPU {
+			if vm.Status.Phase == vmv1.VmPreMigrating && readyToMigrateMemory && readyToMigrateCPU {
 				// update VM status
 				vm.Status.Phase = vmv1.VmMigrating
 				if err := r.Status().Update(ctx, vm); err != nil {
@@ -413,9 +422,6 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			return err
 		}
 
-		// TODO: delete this log as it used for debug mostly
-		// log.Info("Migration info", "Info", migrationInfo)
-
 		// Store/update migration info in VirtualMachineMigration.Status
 		virtualmachinemigration.Status.Info.Status = migrationInfo.Status
 		virtualmachinemigration.Status.Info.TotalTimeMs = migrationInfo.TotalTimeMs
@@ -461,11 +467,62 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 			// finally update migration phase to Succeeded
 			virtualmachinemigration.Status.Phase = vmv1.VmmSucceeded
 		}
+		// check if migration failed
+		if migrationInfo.Status == "failed" {
+			// oops, migration failed
+			virtualmachinemigration.Status.Phase = vmv1.VmmFailed
+			// try to stop hypervisor in target runner
+			if err := QmpQuit(virtualmachinemigration.Status.TargetPodIP, vm.Spec.QMP); err != nil {
+				log.Info("Failed stop hypervisor in target runner pod, probably hypervisor already stopped", "error", err)
+			}
+			// change VM status to Running
+			vm.Status.Phase = vmv1.VmRunning
+			// update VM status
+			if err := r.Status().Update(ctx, vm); err != nil {
+				log.Error(err, "Failed to update VirtualMachine status")
+				return err
+			}
+		}
 
 	case vmv1.VmmSucceeded:
-		// do nothing
+		// do additional VM status checks
+		if vm.Status.Phase == vmv1.VmMigrating {
+			// migration Succeeded and VM should have status Running
+			vm.Status.Phase = vmv1.VmRunning
+			if err := r.Status().Update(ctx, vm); err != nil {
+				log.Error(err, "Failed to update VirtualMachine status")
+				return err
+			}
+		}
+		if len(virtualmachinemigration.Status.SourcePodName) > 0 {
+			// try to find and remove source runner Pod
+			sourceRunner := &corev1.Pod{}
+			err := r.Get(ctx, types.NamespacedName{Name: virtualmachinemigration.Status.SourcePodName, Namespace: virtualmachinemigration.Namespace}, sourceRunner)
+			if err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "Failed to get source runner Pod")
+				return err
+			}
+			if err := r.Delete(ctx, sourceRunner); err != nil {
+				log.Error(err, "Failed to delete source runner Pod")
+				return err
+			}
+			virtualmachinemigration.Status.SourcePodName = ""
+			virtualmachinemigration.Status.SourcePodIP = ""
+			r.Recorder.Event(virtualmachinemigration, "Normal", "Deleted",
+				fmt.Sprintf("Source runner %s for VM %s was deleted",
+					virtualmachinemigration.Status.SourcePodName, vm.Name))
+		}
+
 	case vmv1.VmmFailed:
-		// do nothing
+		// do additional VM status checks
+		if vm.Status.Phase == vmv1.VmMigrating {
+			// migration Failed but VM should have status Running after all
+			vm.Status.Phase = vmv1.VmRunning
+			if err := r.Status().Update(ctx, vm); err != nil {
+				log.Error(err, "Failed to update VirtualMachine status")
+				return err
+			}
+		}
 	default:
 		// do nothing
 	}
