@@ -492,12 +492,18 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			if specCPU > pluggedCPU {
 				// going to plug one CPU
 				log.Info("Plug one more CPU into VM")
+				r.Recorder.Event(virtualmachine, "Normal", "Scaling",
+					fmt.Sprintf("Plug one more CPU into VM %s",
+						virtualmachine.Name))
 				if err := QmpPlugCpu(virtualmachine); err != nil {
 					return err
 				}
 			} else if specCPU < pluggedCPU {
 				// going to unplug one CPU
 				log.Info("Unplug one CPU from VM")
+				r.Recorder.Event(virtualmachine, "Normal", "Scaling",
+					fmt.Sprintf("Unplug one CPU from VM %s",
+						virtualmachine.Name))
 				if err := QmpUnplugCpu(virtualmachine); err != nil {
 					return err
 				}
@@ -519,17 +525,26 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			if *virtualmachine.Spec.Guest.MemorySlots.Use > memoryPluggedSlots {
 				// going to plug one Memory Slot
 				log.Info("Plug one more Memory module into VM")
+				r.Recorder.Event(virtualmachine, "Normal", "Scaling",
+					fmt.Sprintf("Plug one more Memory module into VM %s",
+						virtualmachine.Name))
 				if err := QmpPlugMemory(virtualmachine); err != nil {
 					return err
 				}
 			} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
 				// going to unplug one Memory Slot
 				log.Info("Unplug one Memory module from VM")
+				r.Recorder.Event(virtualmachine, "Normal", "Scaling",
+					fmt.Sprintf("Unplug one Memory module from VM %s",
+						virtualmachine.Name))
 				if err := QmpUnplugMemory(virtualmachine); err != nil {
 					// special case !
 					// error means VM hadn't memory devices available for unplug
 					// need set .memorySlots.Use back to real value
 					log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
+					r.Recorder.Event(virtualmachine, "Warning", "Scaling",
+						fmt.Sprintf("Unable unplug Memory module from VM %s as all memory devices are busy",
+							virtualmachine.Name))
 					virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
 					if err := r.Update(ctx, virtualmachine); err != nil {
 						log.Error(err, "Failed to update .spec.guest.memorySlots.use on VM memory scale down")

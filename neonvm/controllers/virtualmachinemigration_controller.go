@@ -506,11 +506,12 @@ func (r *VirtualMachineMigrationReconciler) doReconcile(ctx context.Context, vir
 				log.Error(err, "Failed to delete source runner Pod")
 				return err
 			}
+			sourceRunnerPodName := virtualmachinemigration.Status.SourcePodName
 			virtualmachinemigration.Status.SourcePodName = ""
 			virtualmachinemigration.Status.SourcePodIP = ""
 			r.Recorder.Event(virtualmachinemigration, "Normal", "Deleted",
 				fmt.Sprintf("Source runner %s for VM %s was deleted",
-					virtualmachinemigration.Status.SourcePodName, vm.Name))
+					sourceRunnerPodName, vm.Name))
 		}
 
 	case vmv1.VmmFailed:
