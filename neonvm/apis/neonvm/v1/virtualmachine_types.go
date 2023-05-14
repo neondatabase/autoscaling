@@ -182,7 +182,7 @@ func (m MilliCPU) ToResourceQuantity() *resource.Quantity {
 // AsFloat64 converts the MilliCPU value into a float64 of CPU
 //
 // This should be preferred over calling m.ToResourceQuantity().AsApproximateFloat64(), because
-// going through the resource.Quantity can produce less precise floats.
+// going through the resource.Quantity can produce less accurate floats.
 func (m MilliCPU) AsFloat64() float64 {
 	return float64(m) / 1000
 }
