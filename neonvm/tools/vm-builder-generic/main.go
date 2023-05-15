@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"text/template"
 
+	"github.com/alessio/shellescape"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -109,16 +110,35 @@ if /neonvm/bin/test -f /neonvm/runtime/env.sh; then
     /neonvm/bin/cat /neonvm/runtime/env.sh >>/neonvm/bin/vmstarter.sh
 fi
 
+{{if or .Entrypoint .Cmd | not}}
+# If we have no arguments *at all*, then emit an error. This matches docker's behavior.
+if /neonvm/bin/test ( ! -f /neonvm/runtime/command.sh ) -a ( ! -f /neonvm/runtime/args.sh ); then
+	/neonvm/bin/echo 'Error: No command specified' >&2
+	exit 1
+fi
+{{end}}
+
+{{/* command.sh is set by the runner with the contents of the VM's spec.guest.command, if it's set */}}
 if /neonvm/bin/test -f /neonvm/runtime/command.sh; then
     /neonvm/bin/cat /neonvm/runtime/command.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo -n '{{$first := true}}{{range .Entrypoint}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
+    {{/*
+	A couple notes:
+	  - echo automatically puts spaces between arguments
+	  - .Entrypoint is already shell-escaped (everything is quoted)
+	  - the shell-escaping isn't perfect. In particular, it doesn't handle backslashes well.
+	  - It's good enough for now
+	*/}}
+    /neonvm/bin/echo -n {{range .Entrypoint}} {{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
-{{if and .Entrypoint .Cmd}}echo -n ' ' >>/neonvm/bin/vmstarter.sh{{end}}
+
+{{/* args.sh is set by the runner with the contents of the VM's spec.guest.args, if it's set */}}
 if /neonvm/bin/test -f /neonvm/runtime/args.sh; then
+    /neonvm/bin/echo -n ' ' >>/neonvm/bin/vmstarter.sh
     /neonvm/bin/cat /neonvm/runtime/args.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo '{{$first := true}}{{range .Cmd}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
+    {{/* Same as with .Entrypoint; refer there. We don't have '-n' because we want a trailing newline */}}
+    /neonvm/bin/echo -n {{range .Cmd}} {{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
@@ -301,6 +321,15 @@ func main() {
 	imageSpec, _, err := cli.ImageInspectWithRaw(ctx, *srcImage)
 	if err != nil {
 		log.Fatalln(err)
+	}
+
+	// Shell-escape all the command pieces, twice. We need to do it twice because we're generating
+	// a shell script that appends these to a second shell script.
+	for i := range imageSpec.Config.Entrypoint {
+		imageSpec.Config.Entrypoint[i] = shellescape.Quote(shellescape.Quote(imageSpec.Config.Entrypoint[i]))
+	}
+	for i := range imageSpec.Config.Cmd {
+		imageSpec.Config.Cmd[i] = shellescape.Quote(shellescape.Quote(imageSpec.Config.Cmd[i]))
 	}
 
 	tmplArgs := TemplatesContext{
