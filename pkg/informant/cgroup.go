@@ -93,8 +93,8 @@ func (s *CgroupState) setMemoryLimits(availableMemory uint64) error {
 	newMemHigh = s.config.calculateMemoryHighValue(availableMemory)
 
 	klog.Infof(
-		"Total memory available for cgroup is %d bytes (%g MiB). Setting cgroup memory.high to %d bytes (%g MiB)",
-		availableMemory, float64(availableMemory)/mib, newMemHigh, float64(newMemHigh)/mib,
+		"Total memory available for cgroup %q is %d bytes (%g MiB). Setting cgroup memory.high to %d bytes (%g MiB)",
+		s.mgr.name, availableMemory, float64(availableMemory)/mib, newMemHigh, float64(newMemHigh)/mib,
 	)
 
 	s.mgr.MemoryHighEvent.Consume()
@@ -104,10 +104,10 @@ func (s *CgroupState) setMemoryLimits(availableMemory uint64) error {
 		maxBytes:  availableMemory,
 	}
 	if err := s.mgr.SetMemLimits(memLimits); err != nil {
-		return fmt.Errorf("Error setting cgroup memory limits: %w", err)
+		return fmt.Errorf("Error setting cgroup %q memory limits: %w", s.mgr.name, err)
 	}
 
-	klog.Infof("Successfully set cgroup memory limits")
+	klog.Infof("Successfully set cgroup %q memory limits", s.mgr.name)
 	return nil
 }
 
