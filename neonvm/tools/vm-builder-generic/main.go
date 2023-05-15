@@ -125,7 +125,7 @@ else
     {{/*
 	A couple notes:
 	  - echo automatically puts spaces between arguments
-	  - .Entrypoint is already shell-escaped (everything is quoted)
+	  - .Entrypoint is already shell-escaped twice (everything is quoted)
 	  - the shell-escaping isn't perfect. In particular, it doesn't handle backslashes well.
 	  - It's good enough for now
 	*/}}
