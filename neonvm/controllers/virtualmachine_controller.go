@@ -118,7 +118,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				log.Info("Failed to add finalizer from VirtualMachine")
 				return ctrl.Result{Requeue: true}, nil
 			}
-			if err := r.Update(ctx, &virtualmachine); err != nil {
+			if err := r.tryUpdateVM(ctx, &virtualmachine); err != nil {
 				log.Error(err, "Failed to update status about adding finalizer to VirtualMachine")
 				return ctrl.Result{}, err
 			}
@@ -141,7 +141,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				log.Info("Failed to remove finalizer from VirtualMachine")
 				return ctrl.Result{Requeue: true}, nil
 			}
-			if err := r.Update(ctx, &virtualmachine); err != nil {
+			if err := r.tryUpdateVM(ctx, &virtualmachine); err != nil {
 				log.Error(err, "Failed to update status about removing finalizer from VirtualMachine")
 				return ctrl.Result{}, err
 			}
@@ -405,25 +405,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				return err
 			}
 			// update status by Memory sizes used in VM
-			if virtualmachine.Status.MemorySize == nil {
-				virtualmachine.Status.MemorySize = memorySize
-				r.Recorder.Event(virtualmachine, "Normal", "MemoryInfo",
-					fmt.Sprintf("VirtualMachine %s uses %v memory",
-						virtualmachine.Name,
-						virtualmachine.Status.MemorySize))
-			} else if !memorySize.Equal(*virtualmachine.Status.MemorySize) {
+			if virtualmachine.Status.MemorySize == nil || !memorySize.Equal(*virtualmachine.Status.MemorySize) {
 				virtualmachine.Status.MemorySize = memorySize
 				r.Recorder.Event(virtualmachine, "Normal", "MemoryInfo",
 					fmt.Sprintf("VirtualMachine %s uses %v memory",
 						virtualmachine.Name,
 						virtualmachine.Status.MemorySize))
 			}
-
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachine,
-					Status:  metav1.ConditionTrue,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
 
 			// check if need hotplug/unplug CPU or memory
 			if virtualmachine.Spec.Guest.CPUs.Use != nil {
@@ -492,21 +480,21 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			if specCPU > pluggedCPU {
 				// going to plug one CPU
 				log.Info("Plug one more CPU into VM")
-				r.Recorder.Event(virtualmachine, "Normal", "Scaling",
-					fmt.Sprintf("Plug one more CPU into VM %s",
-						virtualmachine.Name))
 				if err := QmpPlugCpu(virtualmachine); err != nil {
 					return err
 				}
+				r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
+					fmt.Sprintf("One more CPU was plugged into VM %s",
+						virtualmachine.Name))
 			} else if specCPU < pluggedCPU {
 				// going to unplug one CPU
 				log.Info("Unplug one CPU from VM")
-				r.Recorder.Event(virtualmachine, "Normal", "Scaling",
-					fmt.Sprintf("Unplug one CPU from VM %s",
-						virtualmachine.Name))
 				if err := QmpUnplugCpu(virtualmachine); err != nil {
 					return err
 				}
+				r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
+					fmt.Sprintf("One CPU was unplugged from VM %s",
+						virtualmachine.Name))
 			} else {
 				// seems already plugged correctly
 				virtualmachine.Status.Phase = vmv1.VmRunning
@@ -525,31 +513,41 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			if *virtualmachine.Spec.Guest.MemorySlots.Use > memoryPluggedSlots {
 				// going to plug one Memory Slot
 				log.Info("Plug one more Memory module into VM")
-				r.Recorder.Event(virtualmachine, "Normal", "Scaling",
-					fmt.Sprintf("Plug one more Memory module into VM %s",
-						virtualmachine.Name))
 				if err := QmpPlugMemory(virtualmachine); err != nil {
 					return err
 				}
+				r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
+					fmt.Sprintf("One more DIMM was plugged into VM %s",
+						virtualmachine.Name))
 			} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
 				// going to unplug one Memory Slot
 				log.Info("Unplug one Memory module from VM")
-				r.Recorder.Event(virtualmachine, "Normal", "Scaling",
-					fmt.Sprintf("Unplug one Memory module from VM %s",
-						virtualmachine.Name))
 				if err := QmpUnplugMemory(virtualmachine); err != nil {
 					// special case !
 					// error means VM hadn't memory devices available for unplug
 					// need set .memorySlots.Use back to real value
 					log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
-					r.Recorder.Event(virtualmachine, "Warning", "Scaling",
-						fmt.Sprintf("Unable unplug Memory module from VM %s as all memory devices are busy",
-							virtualmachine.Name))
-					virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
-					if err := r.Update(ctx, virtualmachine); err != nil {
-						log.Error(err, "Failed to update .spec.guest.memorySlots.use on VM memory scale down")
+					// firstly re-fecth VM
+					if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
+						log.Error(err, "Unable to re-fetch VirtualMachine")
 						return err
 					}
+					memorySlotsUseInSpec := *virtualmachine.Spec.Guest.MemorySlots.Use
+					virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
+					if err := r.tryUpdateVM(ctx, virtualmachine); err != nil {
+						log.Error(err,
+							"Failed to update .spec.guest.memorySlots.use",
+							"old value", memorySlotsUseInSpec,
+							"new value", memoryPluggedSlots)
+						return err
+					}
+					r.Recorder.Event(virtualmachine, "Warning", "ScaleDown",
+						fmt.Sprintf("Unable unplug DIMM from VM %s, all memory devices are busy",
+							virtualmachine.Name))
+				} else {
+					r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
+						fmt.Sprintf("One DIMM was unplugged from VM %s",
+							virtualmachine.Name))
 				}
 			} else {
 				// seems already plugged correctly
@@ -1030,4 +1028,28 @@ func DeepEqual(v1, v2 interface{}) bool {
 	_ = json.Unmarshal(bytesB, &x2)
 
 	return reflect.DeepEqual(x1, x2)
+}
+
+func (r *VirtualMachineReconciler) tryUpdateVM(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
+	// update vm (try 10 times)
+	var try int
+	var err error
+	for try = 1; try <= 10; try++ {
+		if err = r.Update(ctx, virtualmachine); err != nil {
+			if apierrors.IsConflict(err) {
+				time.Sleep(time.Second)
+				continue
+			}
+			return err
+		} else {
+			// vm was updated
+			break
+		}
+	}
+
+	if try > 10 {
+		return err
+	}
+
+	return nil
 }

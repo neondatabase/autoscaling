@@ -311,24 +311,29 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	}
 	defer mon.Disconnect()
 
-	// add memdev object for next slot
-	// firstly check if such object already present to avoid repeats
-	cmd := []byte(fmt.Sprintf(`{"execute": "qom-list", "arguments": {"path": "/objects/memslot%d"}}`, plugged+1))
-	_, err = mon.Run(cmd)
-	if err != nil {
-		// that mean such object wasn't found, let's add it
-		cmd = []byte(fmt.Sprintf(`{"execute": "object-add", "arguments": {"id": "memslot%d", "size": %d, "qom-type": "memory-backend-ram"}}`, plugged+1, virtualmachine.Spec.Guest.MemorySlotSize.Value()))
+	// try to find empty slot
+	var slot int32
+	for slot = 1; slot <= slots; slot++ {
+		cmd := []byte(fmt.Sprintf(`{"execute": "qom-list", "arguments": {"path": "/objects/memslot%d"}}`, slot))
 		_, err = mon.Run(cmd)
 		if err != nil {
-			return err
+			// that mean such object wasn't found, or by other words slot is empty
+			break
 		}
 	}
+
+	// add memdev object
+	cmd := []byte(fmt.Sprintf(`{"execute": "object-add", "arguments": {"id": "memslot%d", "size": %d, "qom-type": "memory-backend-ram"}}`, slot, virtualmachine.Spec.Guest.MemorySlotSize.Value()))
+	_, err = mon.Run(cmd)
+	if err != nil {
+		return err
+	}
 	// now add pc-dimm device
-	cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "dimm%d", "driver": "pc-dimm", "memdev": "memslot%d"}}`, plugged+1, plugged+1))
+	cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "dimm%d", "driver": "pc-dimm", "memdev": "memslot%d"}}`, slot, slot))
 	_, err = mon.Run(cmd)
 	if err != nil {
 		// device_add command failed... so try remove object that we just created
-		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, plugged+1))
+		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, slot))
 		mon.Run(cmd)
 		return err
 	}
