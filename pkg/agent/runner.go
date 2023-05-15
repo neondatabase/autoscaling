@@ -796,10 +796,13 @@ startScheduler:
 
 	// Set the current scheduler
 	fatal = func() util.SignalReceiver {
-		r.logger.Infof(
-			"Updating scheduler to pod %v (UID = %s) with IP %s",
-			currentInfo.PodName, currentInfo.UID, currentInfo.IP,
-		)
+		// Print info about a new scheduler, unless this is the first one.
+		if init != nil || init.UID != currentInfo.UID {
+			r.logger.Infof(
+				"Updating scheduler to pod %v (UID = %s) with IP %s",
+				currentInfo.PodName, currentInfo.UID, currentInfo.IP,
+			)
+		}
 
 		sendFatal, recvFatal := util.NewSingleSignalPair()
 
