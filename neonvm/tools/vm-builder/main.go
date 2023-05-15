@@ -226,8 +226,7 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres'
-#::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
@@ -348,6 +347,7 @@ var (
 	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
 	informant = flag.String("informant", VMInformant, `vm-informant docker image`)
+	fileCache = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 )
 
@@ -394,6 +394,7 @@ type TemplatesContext struct {
 	Env            []string
 	RootDiskImage  string
 	InformantImage string
+	FileCache      bool
 }
 
 func main() {
@@ -471,6 +472,7 @@ func main() {
 		Env:            imageSpec.Config.Env,
 		RootDiskImage:  *srcImage,
 		InformantImage: *informant,
+		FileCache:      *fileCache,
 	}
 
 	if len(imageSpec.Config.User) != 0 {
