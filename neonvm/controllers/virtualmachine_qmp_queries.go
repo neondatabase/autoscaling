@@ -256,6 +256,37 @@ func QmpUnplugCpu(virtualmachine *vmv1.VirtualMachine) error {
 	return nil
 }
 
+func QmpSyncCpuToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineMigration) error {
+	plugged, _, err := QmpGetCpus(vm)
+	if err != nil {
+		return err
+	}
+	pluggedInTarget, _, err := QmpGetCpusFromRunner(migration.Status.TargetPodIP, vm.Spec.QMP)
+	if err != nil {
+		return err
+	}
+	if len(plugged) == len(pluggedInTarget) {
+		// no need plug anything
+		return nil
+	}
+
+	mon, err := QmpConnectByIP(migration.Status.TargetPodIP, vm.Spec.QMP)
+	if err != nil {
+		return err
+	}
+	defer mon.Disconnect()
+
+	for _, slot := range(plugged) {
+		qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
+		_, err = mon.Run(qmpcmd)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func QmpQueryMemoryDevices(virtualmachine *vmv1.VirtualMachine) ([]QmpMemoryDevice, error) {
 	mon, err := QmpConnect(virtualmachine)
 	if err != nil {
@@ -340,6 +371,53 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 
 	return nil
 }
+
+func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineMigration) error {
+	memoryDevices, err := QmpQueryMemoryDevices(vm)
+	if err != nil {
+		return err
+	}
+	memoryDevicesInTarget, err := QmpQueryMemoryDevicesFromRunner(migration.Status.TargetPodIP, vm.Spec.QMP)
+	if err != nil {
+		return err
+	}
+
+	target, err := QmpConnectByIP(migration.Status.TargetPodIP, vm.Spec.QMP)
+	if err != nil {
+		return err
+	}
+	defer target.Disconnect()
+
+	for _, m := range(memoryDevices) {
+		// firsly check if slot occupied already
+		// run over Target memory and compare device id
+		for _, tm := range(memoryDevicesInTarget) {
+			if DeepEqual(m, tm) {
+				// that mean such memory device already present in Target, skip it
+				continue
+			}
+		}
+		// add memdev object
+		memdevId := strings.ReplaceAll(m.Data.Memdev, "/objects/", "")
+		cmd := []byte(fmt.Sprintf(`{"execute": "object-add", "arguments": {"id": "%s", "size": %d, "qom-type": "memory-backend-ram"}}`, memdevId, m.Data.Size))
+		_, err = target.Run(cmd)
+		if err != nil {
+			return err
+		}
+		// now add pc-dimm device
+		cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "%s", "driver": "pc-dimm", "memdev": "%s"}}`, m.Data.Id, memdevId))
+		_, err = target.Run(cmd)
+		if err != nil {
+			// device_add command failed... so try remove object that we just created
+			cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "%s"}}`, m.Data.Memdev))
+			target.Run(cmd)
+			return err
+		}
+	}
+
+	return nil
+}
+
 
 func QmpPlugMemoryToRunner(ip string, port int32, size int64) error {
 	memoryDevices, err := QmpQueryMemoryDevicesFromRunner(ip, port)
