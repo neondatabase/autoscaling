@@ -242,15 +242,48 @@ func cgroupPath(groupName string, file string) string {
 	return filepath.Join("/sys/fs/cgroup", groupName, file) //nolint:gocritic // see comment above.
 }
 
-// SetMemLimit sets the memory.high limit of the cgroup, clearing
-func (c *CgroupManager) SetHighMem(bytes uint64) error {
-	klog.Infof("Updating cgroup memory.high to %v MiB (%d bytes)", float64(bytes)/float64(1<<20), bytes)
+type memoryLimits struct {
+	highBytes uint64
+	maxBytes  uint64
+}
+
+// SetMemLimits sets the cgroup's memory.high and memory.max to the values provided by the
+// memoryLimits.
+func (c *CgroupManager) SetMemLimits(limits memoryLimits) error {
+	// convert uint64 -> int64 so we can produce pointers
+	hb := int64(limits.highBytes)
+	mb := int64(limits.maxBytes)
+	return c.manager.Update(&cgroup2.Resources{
+		Memory: &cgroup2.Memory{High: &hb, Max: &mb},
+	})
+}
+
+func (c *CgroupManager) SetMemHighBytes(bytes uint64) error {
 	high := int64(bytes)
 	return c.manager.Update(&cgroup2.Resources{
 		Memory: &cgroup2.Memory{
 			High: &high,
 		},
 	})
+}
+
+func (c *CgroupManager) FetchMemoryHighBytes() (*uint64, error) {
+	path := cgroupPath(c.name, "memory.high")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading file at %q: %w", path, err)
+	}
+
+	stringContent := strings.TrimSpace(string(content))
+	if stringContent == "max" {
+		return nil, nil
+	}
+
+	amount, err := strconv.ParseUint(stringContent, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("Error parsing as uint64: %w", err)
+	}
+	return &amount, nil
 }
 
 // FetchState returns a cgroup2.State indicating whether the cgroup is currently frozen

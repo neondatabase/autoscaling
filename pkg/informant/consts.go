@@ -28,9 +28,14 @@ var (
 
 	// DefaultCgroupConfig is the default CgroupConfig used for cgroup interaction logic
 	DefaultCgroupConfig CgroupConfig = CgroupConfig{
-		OOMBufferBytes:        200 * (1 << 20), // 200 MiB
+		OOMBufferBytes:        100 * (1 << 20), // 100 MiB
 		MemoryHighBufferBytes: 100 * (1 << 20), // 100 MiB
-		MaxUpscaleWaitMillis:  20,              // 20ms
+		// while waiting for upscale, don't freeze for more than 20ms every 1s
+		MaxUpscaleWaitMillis:           20,   // 20ms
+		DoNotFreezeMoreOftenThanMillis: 1000, // 1s
+		// while waiting for upscale, increase memory.high by 10 MiB every 25ms
+		MemoryHighIncreaseByBytes:     10 * (1 << 20), // 10 MiB
+		MemoryHighIncreaseEveryMillis: 25,             // 25ms
 	}
 
 	// DefaultFileCacheConfig is the default FileCacheConfig used for managing the file cache

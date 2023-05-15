@@ -127,12 +127,12 @@ func WithCgroup(cgm *CgroupManager, config CgroupConfig) NewStateOpts {
 
 			upscaleEventsSendr, upscaleEventsRecvr := util.NewCondChannelPair()
 			s.cgroup = &CgroupState{
-				updateMemHighLock:  sync.Mutex{},
-				mgr:                cgm,
-				config:             config,
-				upscaleEventsSendr: upscaleEventsSendr,
-				upscaleEventsRecvr: upscaleEventsRecvr,
-				requestUpscale:     func() { s.agents.RequestUpscale() },
+				updateMemLimitsLock: sync.Mutex{},
+				mgr:                 cgm,
+				config:              config,
+				upscaleEventsSendr:  upscaleEventsSendr,
+				upscaleEventsRecvr:  upscaleEventsRecvr,
+				requestUpscale:      func() { s.agents.RequestUpscale() },
 			}
 		},
 		post: func(s *State, memTotal uint64) error {
@@ -145,8 +145,8 @@ func WithCgroup(cgm *CgroupManager, config CgroupConfig) NewStateOpts {
 			//  4. Get downscaled (as approved earlier)
 			// A potential way to fix this would be writing to a file to record approved downscale
 			// operations.
-			if err := s.cgroup.setMemoryHigh(available); err != nil {
-				return fmt.Errorf("Error setting initial cgroup memory.high: %w", err)
+			if err := s.cgroup.setMemoryLimits(available); err != nil {
+				return fmt.Errorf("Error setting initial cgroup memory limits: %w", err)
 			}
 			go s.cgroup.handleCgroupSignalsLoop(config)
 			return nil
@@ -274,8 +274,8 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 	// Also, lock changing the cgroup between the initial calculations and later using them.
 	var newCgroupMemHigh uint64
 	if s.cgroup != nil {
-		s.cgroup.updateMemHighLock.Lock()
-		defer s.cgroup.updateMemHighLock.Unlock()
+		s.cgroup.updateMemLimitsLock.Lock()
+		defer s.cgroup.updateMemLimitsLock.Unlock()
 
 		newCgroupMemHigh = s.cgroup.config.calculateMemoryHighValue(usableSystemMemory - expectedFileCacheMemUsage)
 
@@ -325,16 +325,26 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 	}
 
 	if s.cgroup != nil {
+		availableMemory := usableSystemMemory - fileCacheMemUsage
+
 		if fileCacheMemUsage != expectedFileCacheMemUsage {
-			newCgroupMemHigh = s.cgroup.config.calculateMemoryHighValue(usableSystemMemory - fileCacheMemUsage)
+			newCgroupMemHigh = s.cgroup.config.calculateMemoryHighValue(availableMemory)
+		}
+
+		memLimits := memoryLimits{
+			highBytes: newCgroupMemHigh,
+			maxBytes:  availableMemory,
 		}
 
 		// TODO: see similar note above. We shouldn't call methods on s.cgroup.mgr from here.
-		if err := s.cgroup.mgr.SetHighMem(newCgroupMemHigh); err != nil {
+		if err := s.cgroup.mgr.SetMemLimits(memLimits); err != nil {
 			return internalError(fmt.Errorf("Error setting cgroup memory.high: %w", err))
 		}
 
-		status := fmt.Sprintf("Set cgroup memory.high to %g MiB", float64(newCgroupMemHigh)/mib)
+		status := fmt.Sprintf(
+			"Set cgroup memory.high to %g MiB, of new max %g MiB",
+			float64(newCgroupMemHigh)/mib, float64(availableMemory)/mib,
+		)
 		statusParts = append(statusParts, status)
 	}
 
@@ -371,8 +381,8 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 	mib := float64(1 << 20) // 1 MiB = 2^20 bytes. We'll use this for pretty-printing.
 
 	if s.cgroup != nil {
-		s.cgroup.updateMemHighLock.Lock()
-		defer s.cgroup.updateMemHighLock.Unlock()
+		s.cgroup.updateMemLimitsLock.Lock()
+		defer s.cgroup.updateMemLimitsLock.Unlock()
 	}
 
 	s.agents.ReceivedUpscale()
@@ -412,15 +422,24 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 	}
 
 	if s.cgroup != nil {
-		newMemHigh := s.cgroup.config.calculateMemoryHighValue(usableSystemMemory - fileCacheMemUsage)
+		availableMemory := usableSystemMemory - fileCacheMemUsage
+
+		newMemHigh := s.cgroup.config.calculateMemoryHighValue(availableMemory)
 		klog.Infof(
-			"Updating memory.high to %g MiB, of new total %g MiB",
+			"Updating memory.high to %g MiB, of new max %g MiB",
 			float64(newMemHigh)/mib, float64(newMem)/mib,
 		)
 
-		if err := s.cgroup.mgr.SetHighMem(newMemHigh); err != nil {
+		memLimits := memoryLimits{
+			highBytes: newMemHigh,
+			maxBytes:  availableMemory,
+		}
+
+		if err := s.cgroup.mgr.SetMemLimits(memLimits); err != nil {
 			return internalError(fmt.Errorf("Error setting cgroup memory.high: %w", err))
 		}
+
+		s.cgroup.upscaleEventsSendr.Send()
 	}
 
 	return &struct{}{}, 200, nil
