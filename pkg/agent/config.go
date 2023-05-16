@@ -11,6 +11,10 @@ import (
 )
 
 type Config struct {
+	// RestrictNamespace forces the autoscaler-agent to operate only on VMs within a single
+	// namespace, ignoring all VMs outside of it. THIS IS FOR TESTING ONLY.
+	RestrictNamespace string `json:"restrictNamespace"`
+
 	Scaling   ScalingConfig    `json:"scaling"`
 	Informant InformantConfig  `json:"informant"`
 	Metrics   MetricsConfig    `json:"metrics"`
