@@ -189,6 +189,8 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			migration.Status.Phase = vmv1.VmmPending
 			return r.updateMigrationStatus(ctx, migration)
 		}
+		// some other VM status (Scaling may be), requeue after second
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 
 	case vmv1.VmmPending:
 		// Check if the target runner pod already exists,
