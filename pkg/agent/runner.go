@@ -289,22 +289,35 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 
 func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiver) {
 	go func() {
+		// Trigger restart if necessary *after* we've handled any panics.
+		defer r.global.TriggerRestartIfNecessary(ctx, r.vm.NamespacedName(), r.podIP)
 		// Gracefully handle panics:
 		defer func() {
 			if err := recover(); err != nil {
 				r.setStatus(func(stat *podStatus) {
-					stat.panicked = true
-					stat.done = true
-					stat.errored = fmt.Errorf("runner panicked: %v", err)
+					stat.endState = &podStatusEndState{
+						ExitKind: podStatusExitPanicked,
+						Error:    fmt.Errorf("Runner %v panicked: %v", r.vm.NamespacedName(), err),
+						Time:     time.Now(),
+					}
 				})
 			}
 		}()
 
 		err := r.Run(ctx, vmInfoUpdated)
+		endTime := time.Now()
 
+		exitKind := podStatusExitCanceled // normal exit, only by context being canceled.
+		if err != nil {
+			exitKind = podStatusExitErrored
+			r.global.metrics.runnerFatalErrors.Inc()
+		}
 		r.setStatus(func(stat *podStatus) {
-			r.status.done = true
-			r.status.errored = err
+			stat.endState = &podStatusEndState{
+				ExitKind: exitKind,
+				Error:    err,
+				Time:     endTime,
+			}
 		})
 
 		if err != nil {
