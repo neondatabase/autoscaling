@@ -96,8 +96,6 @@ spec:
       serviceAccountName: autoscaler-agent
       containers:
         - name: autoscaler-agent
-          # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
-          # update that as well if you change this line!
           image: autoscaler-agent:dev
           resources:
             limits:

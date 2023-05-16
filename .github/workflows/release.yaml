@@ -9,9 +9,6 @@ env:
   SCHED_IMAGE: "neondatabase/autoscale-scheduler"
   INFORMANT_IMAGE: "neondatabase/vm-informant"
 
-  LOCAL_AGENT_IMAGE: "autoscaler-agent:dev"
-  LOCAL_SCHED_IMAGE: "autoscale-scheduler:dev"
-
   KUSTOMIZE_VERSION:        "4.5.7"
   CONTROLLER_TOOLS_VERSION: "0.9.2"
   CODE_GENERATOR_VERSION:   "0.26.0"
