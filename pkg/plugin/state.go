@@ -724,8 +724,8 @@ func (s *pluginState) startMigration(ctx context.Context, pod *podState, vmClien
 	pod.node.vCPU.PressureAccountedFor += pod.vCPU.Reserved + pod.vCPU.CapacityPressure
 
 	klog.Infof(
-		"[autoscale-enforcer] Migrate pod %v; node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
-		pod.name, oldNodeVCPUPressure, pod.node.vCPU.CapacityPressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.PressureAccountedFor,
+		"[autoscale-enforcer] Migrate pod %v from node %s; node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
+		pod.name, pod.node.name, oldNodeVCPUPressure, pod.node.vCPU.CapacityPressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.PressureAccountedFor,
 	)
 
 	// Unlock to make the API request, then make sure we're locked on return.
