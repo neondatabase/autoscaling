@@ -270,15 +270,27 @@ func QmpSyncCpuToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineM
 		return nil
 	}
 
-	mon, err := QmpConnectByIP(migration.Status.TargetPodIP, vm.Spec.QMP)
+	target, err := QmpConnectByIP(migration.Status.TargetPodIP, vm.Spec.QMP)
 	if err != nil {
 		return err
 	}
-	defer mon.Disconnect()
+	defer target.Disconnect()
 
 	for _, slot := range(plugged) {
+		// firsly check if slot occupied already
+		// run over Target CPUs and compare with source
+		found := false
+		for _, tslot := range(pluggedInTarget) {
+			if DeepEqual(slot, tslot) {
+				found = true
+			}
+		}
+		if found {
+			// that mean such CPU already present in Target, skip it
+			continue
+		}
 		qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
-		_, err = mon.Run(qmpcmd)
+		_, err = target.Run(qmpcmd)
 		if err != nil {
 			return err
 		}
@@ -391,11 +403,15 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 	for _, m := range(memoryDevices) {
 		// firsly check if slot occupied already
 		// run over Target memory and compare device id
+		found := false
 		for _, tm := range(memoryDevicesInTarget) {
 			if DeepEqual(m, tm) {
-				// that mean such memory device already present in Target, skip it
-				continue
+				found = true
 			}
+		}
+		if found {
+			// that mean such memory device 'm' already present in Target, skip it
+			continue
 		}
 		// add memdev object
 		memdevId := strings.ReplaceAll(m.Data.Memdev, "/objects/", "")
