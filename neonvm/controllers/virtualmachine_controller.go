@@ -259,6 +259,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				log.Error(err, "Failed to create new Pod", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 				return err
 			}
+			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
 			r.Recorder.Event(virtualmachine, "Normal", "Created",
 				fmt.Sprintf("VirtualMachine %s created, pod %s",
