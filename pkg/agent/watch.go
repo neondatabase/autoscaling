@@ -137,7 +137,7 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 		if verb != 'v' {
 			state.Write([]byte("%!"))
 			state.Write([]byte(string(verb)))
-			state.Write([]byte("(api.VmInfo="))
+			state.Write([]byte("(agent.vmEvent="))
 		}
 
 		state.Write([]byte(fmt.Sprintf(
