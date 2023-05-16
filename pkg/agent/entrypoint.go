@@ -72,7 +72,7 @@ func (r MainRunner) Run(ctx context.Context) error {
 			vmWatchStore.Stop()
 			schedulerStore.Stop()
 
-			// Remove anything else from podEvents
+			// Remove anything else from vmEvents
 		loop:
 			for {
 				select {
