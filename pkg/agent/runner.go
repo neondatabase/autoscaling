@@ -311,6 +311,7 @@ func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiv
 		exitKind := podStatusExitCanceled // normal exit, only by context being canceled.
 		if err != nil {
 			exitKind = podStatusExitErrored
+			r.global.metrics.runnerFatalErrors.Inc()
 		}
 		r.setStatus(func(stat *podStatus) {
 			stat.endState = &podStatusEndState{
