@@ -183,6 +183,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 			"TriggerRestartIfNecessary called with nil endState for pod %v (should only be called after the pod is finished, when endState != nil)",
 			podName,
 		)
+		s.metrics.runnerFatalErrors.Inc()
 		return
 	}
 
@@ -191,6 +192,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 	if endTime.IsZero() {
 		// If we don't check this, we run the risk of spinning on failures.
 		klog.Errorf("TriggerRestartIfNecessary called with zero'd Time for pod %v", podName)
+		s.metrics.runnerFatalErrors.Inc()
 		// Continue on, but with the time overridden, so we guarantee our minimum wait.
 		endTime = time.Now()
 	}
@@ -205,6 +207,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 		// Should restart; continue.
 	default:
 		klog.Errorf("TriggerRestartIfNecessary called with unexpected ExitKind %q for pod %v", podName)
+		s.metrics.runnerFatalErrors.Inc()
 		return
 	}
 
