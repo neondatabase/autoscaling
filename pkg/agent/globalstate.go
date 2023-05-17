@@ -405,14 +405,17 @@ func (s *podStatus) dump() podStatusDump {
 	defer s.mu.Unlock()
 
 	var endState *podStatusEndState
-
 	if s.endState != nil {
 		es := *s.endState
 		endState = &es
 	}
 
+	previousEndStates := make([]podStatusEndState, len(s.previousEndStates))
+	copy(previousEndStates, s.previousEndStates)
+
 	return podStatusDump{
-		EndState: endState,
+		EndState:          endState,
+		PreviousEndStates: previousEndStates,
 
 		// FIXME: api.VmInfo contains a resource.Quantity - is that safe to copy by value?
 		VMInfo:    s.vmInfo,
