@@ -156,29 +156,35 @@ const (
 	RunnerRestartMaxWaitSeconds = 10
 )
 
+// TriggerRestartIfNecessary restarts the Runner for podName, after a delay if necessary.
+//
+// NB: runnerCtx is the context *passed to the new Runner*. It is only used here to end our restart
+// process early if it's already been canceled.
 func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podName util.NamespacedName, podIP string) {
 	// Three steps:
 	//  1. Check if the Runner needs to restart. If no, we're done.
 	//  2. Wait for a random amount of time (between RunnerRestartMinWaitSeconds and RunnerRestartMaxWaitSeconds)
 	//  3. Restart the Runner (if it still should be restarted)
 
-	pod, ok := func() (*podState, bool) {
-		// note: intentionally release s.lock as soon as we're done with it, so that there's no
-		// possibility of holding onto it longer than we need.
+	status, ok := func() (*podStatus, bool) {
 		s.lock.Lock()
 		defer s.lock.Unlock()
-		pod, ok := s.pods[podName]
-		return pod, ok
+		// note: pod.status has a separate lock, so we're ok to release s.lock
+		if pod, ok := s.pods[podName]; ok {
+			return pod.status, true
+		} else {
+			return nil, false
+		}
 	}()
 
 	if !ok {
 		return
 	}
 
-	pod.status.mu.Lock()
-	defer pod.status.mu.Unlock()
+	status.mu.Lock()
+	defer status.mu.Unlock()
 
-	if pod.status.endState != nil {
+	if status.endState != nil {
 		klog.Errorf(
 			"TriggerRestartIfNecessary called with nil endState for pod %v (should only be called after the pod is finished, when endState != nil)",
 			podName,
@@ -186,7 +192,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 		return
 	}
 
-	endTime := pod.status.endState.Time
+	endTime := status.endState.Time
 
 	if endTime.IsZero() {
 		// If we don't check this, we run the risk of spinning on failures.
@@ -196,7 +202,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 	}
 
 	// keep this for later.
-	exitKind := pod.status.endState.ExitKind
+	exitKind := status.endState.ExitKind
 
 	switch exitKind {
 	case podStatusExitCanceled:
@@ -210,7 +216,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 
 	// Begin steps (2) and (3) -- wait, then restart.
 	var waitDuration time.Duration
-	totalRuntime := endTime.Sub(pod.status.startTime)
+	totalRuntime := endTime.Sub(status.startTime)
 
 	// If the runner was running for a while, restart immediately.
 	//
@@ -239,6 +245,9 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 		s.lock.Lock()
 		defer s.lock.Unlock()
 
+		// Need to update pod itself; can't release s.lock. Also, pod *theoretically* may been
+		// deleted + restarted since we started, so it's incorrect to hold on to the original
+		// podStatus.
 		pod, ok := s.pods[podName]
 		if !ok {
 			klog.Warningf("Canceling restart of Runner %v after %s: no longer present in pod map", podName, time.Since(endTime))
