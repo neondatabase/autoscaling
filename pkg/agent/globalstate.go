@@ -135,7 +135,8 @@ func (s *agentState) handleVMEventAdded(
 		lastSuccessfulInformantComm: nil,
 	}
 
-	runner := s.newRunner(status, event.vmInfo, podName, event.podIP)
+	runner := s.newRunner(event.vmInfo, podName, event.podIP)
+	runner.status = status
 
 	txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
 
@@ -271,7 +272,8 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 		//                     ^^
 		// note: exitKind is one of "panicked" or "errored" - e.g. "Restarting panicked Runner ..."
 
-		runner := s.newRunner(pod.status, pod.status.vmInfo, podName, podIP)
+		runner := s.newRunner(pod.status.vmInfo, podName, podIP)
+		runner.status = pod.status
 
 		txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
 		// note: pod is *podState, so we don't need to re-assign to the map.
@@ -286,10 +288,11 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 	}()
 }
 
-func (s *agentState) newRunner(status *podStatus, vmInfo api.VmInfo, podName util.NamespacedName, podIP string) *Runner {
+// NB: caller must set Runner.status after creation
+func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string) *Runner {
 	return &Runner{
 		global: s,
-		status: status,
+		status: nil, // set by calller
 		logger: RunnerLogger{
 			prefix: fmt.Sprintf("Runner %v: ", podName),
 		},
