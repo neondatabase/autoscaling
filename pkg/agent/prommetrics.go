@@ -33,8 +33,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 
 	// the register() function registers the collector and returns
 	// it so we can set it directly on the output structure.
-	metrics.schedulerRequests = register(reg,
-		prometheus.NewCounterVec(
+	metrics.schedulerRequests = register(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_scheduler_plugin_requests_total",
 				Help: "Number of attempted HTTP requests to the scheduler plugin by autoscaler-agents",
