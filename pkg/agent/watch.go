@@ -123,3 +123,30 @@ func makeVMEvent(vm *vmapi.VirtualMachine, kind vmEventKind) (vmEvent, error) {
 		podIP:   vm.Status.PodIP,
 	}, nil
 }
+
+// custom formatting for vmEvent so that it prints in the same way as VmInfo
+func (e vmEvent) Format(state fmt.State, verb rune) {
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf(
+			// note: intentionally order podName and podIP before vmInfo because vmInfo is large.
+			"agent.vmEvent{kind:%q, podName:%q, podIP:%q, vmInfo:%#v}",
+			e.kind, e.podName, e.podIP, e.vmInfo,
+		)))
+	default:
+		if verb != 'v' {
+			state.Write([]byte("%!"))
+			state.Write([]byte(string(verb)))
+			state.Write([]byte("(agent.vmEvent="))
+		}
+
+		state.Write([]byte(fmt.Sprintf(
+			"{kind:%s podName:%s podIP:%s vmInfo:%s}",
+			e.kind, e.podName, e.podIP, e.vmInfo,
+		)))
+
+		if verb != 'v' {
+			state.Write([]byte{')'})
+		}
+	}
+}
