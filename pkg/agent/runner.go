@@ -289,9 +289,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 
 func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiver) {
 	go func() {
-		// Trigger restart if necessary *after* we've handled any panics.
-		defer r.global.TriggerRestartIfNecessary(ctx, r.vm.NamespacedName(), r.podIP)
-		// Gracefully handle panics:
+		// Gracefully handle panics, plus trigger restart
 		defer func() {
 			if err := recover(); err != nil {
 				r.setStatus(func(stat *podStatus) {
@@ -302,6 +300,8 @@ func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiv
 					}
 				})
 			}
+
+			r.global.TriggerRestartIfNecessary(ctx, r.vm.NamespacedName(), r.podIP)
 		}()
 
 		err := r.Run(ctx, vmInfoUpdated)
