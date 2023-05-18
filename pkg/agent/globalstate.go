@@ -264,6 +264,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 				"Canceling restart of Runner %v after %s: Runner was already restarted (%s)",
 				podName, time.Since(endTime), addedInfo,
 			)
+			return
 		}
 
 		klog.Infof("Restarting %s Runner %v after %s, was running for %s", exitKind, podName, time.Since(endTime), totalRuntime)
