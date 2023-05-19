@@ -390,6 +390,16 @@ const (
 	VmMigrating VmPhase = "Migrating"
 )
 
+// IsAlive returns whether the guest in the VM is expected to be running
+func (p VmPhase) IsAlive() bool {
+	switch p {
+	case VmRunning, VmMigrating:
+		return true
+	default:
+		return false
+	}
+}
+
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
