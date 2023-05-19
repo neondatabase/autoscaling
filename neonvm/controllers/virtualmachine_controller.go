@@ -794,7 +794,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			},
 			Containers: []corev1.Container{{
 				Image:           image,
-				Name:            "runner",
+				Name:            "neonvm-runner",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				// Ensure restrictive context for the container
 				// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
