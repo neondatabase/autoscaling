@@ -112,8 +112,8 @@ fi
 
 {{if or .Entrypoint .Cmd | not}}
 # If we have no arguments *at all*, then emit an error. This matches docker's behavior.
-if /neonvm/bin/test ( ! -f /neonvm/runtime/command.sh ) -a ( ! -f /neonvm/runtime/args.sh ); then
-	/neonvm/bin/echo 'Error: No command specified' >&2
+if /neonvm/bin/test \( ! -f /neonvm/runtime/command.sh \) -a \( ! -f /neonvm/runtime/args.sh \); then
+	/neonvm/bin/echo 'Error: No command specified'
 	exit 1
 fi
 {{end}}
