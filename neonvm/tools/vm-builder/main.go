@@ -507,11 +507,6 @@ func main() {
 		tmplArgs.User = "root"
 	}
 
-	// if no entrypoint and cmd in docker image then use sleep for 10 years as stub
-	if len(tmplArgs.Entrypoint) == 0 && len(tmplArgs.Cmd) == 0 {
-		tmplArgs.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
-	}
-
 	tarBuffer := new(bytes.Buffer)
 	tw := tar.NewWriter(tarBuffer)
 	defer tw.Close()
