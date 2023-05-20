@@ -216,12 +216,11 @@ if /neonvm/bin/test -f /neonvm/runtime/command.sh; then
 else
     {{/*
 	A couple notes:
-	  - echo automatically puts spaces between arguments
 	  - .Entrypoint is already shell-escaped twice (everything is quoted)
 	  - the shell-escaping isn't perfect. In particular, it doesn't handle backslashes well.
 	  - It's good enough for now
 	*/}}
-    /neonvm/bin/echo -n {{range .Entrypoint}} {{.}}{{end}} >> /neonvm/bin/vmstarter.sh
+    /neonvm/bin/echo -n {{range .Entrypoint}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
 
 {{/* args.sh is set by the runner with the contents of the VM's spec.guest.args, if it's set */}}
@@ -230,7 +229,7 @@ if /neonvm/bin/test -f /neonvm/runtime/args.sh; then
     /neonvm/bin/cat /neonvm/runtime/args.sh >>/neonvm/bin/vmstarter.sh
 else
     {{/* Same as with .Entrypoint; refer there. We don't have '-n' because we want a trailing newline */}}
-    /neonvm/bin/echo -n {{range .Cmd}} {{.}}{{end}} >> /neonvm/bin/vmstarter.sh
+    /neonvm/bin/echo -n {{range .Cmd}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
