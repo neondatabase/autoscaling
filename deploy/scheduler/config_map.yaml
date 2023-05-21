@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoscale-scheduler-config
+  namespace: kube-system
+data:
+  scheduler-config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1beta3
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: false
+    profiles:
+      - schedulerName: autoscale-scheduler
+        plugins:
+          multiPoint:
+            enabled:
+              - name: AutoscaleEnforcer
+---
+# TODO: put this in the KubeSchedulerConfiguration's plugin config, rather than a separate configmap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scheduler-plugin-config
+  namespace: kube-system
+data:
+  autoscale-enforcer-config.json: |
+    {
+      "memBlockSize": "1Gi",
+      "nodeDefaults": {
+        "cpu": { "watermark": 0.7, "system": "500m" },
+        "memory": { "watermark": 0.7, "system": "0.5Gi" },
+        "computeUnit": { "vCPUs": 0.25, "mem": 1 }
+      },
+      "nodeOverrides": [],
+      "schedulerName": "autoscale-scheduler",
+      "dumpState": {
+        "port": 10298,
+        "timeoutSeconds": 5
+      },
+      "doMigration": false
+    }

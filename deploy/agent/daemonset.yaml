@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: autoscaler-agent
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: autoscaler-agent
+  template:
+    metadata:
+      labels:
+        name: autoscaler-agent
+    spec:
+      serviceAccountName: autoscaler-agent
+      containers:
+        - name: autoscaler-agent
+          image: autoscaler-agent:dev
+          ports:
+            - name: metrics
+              containerPort: 9100
+              protocol: TCP
+          resources:
+            limits:
+              memory: 100Mi
+              cpu: 100m
+          env:
+          - name: K8S_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: K8S_POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: CONFIG_PATH
+            value: /etc/autoscaler-agent-config/config.json
+          volumeMounts:
+          - name: config
+            mountPath: /etc/autoscaler-agent-config
+      volumes:
+      - name: config
+        configMap:
+          name: autoscaler-agent-config
