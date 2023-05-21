@@ -10,6 +10,8 @@ type PromMetrics struct {
 	informantRequestsOutbound *prometheus.CounterVec
 	informantRequestsInbound  *prometheus.CounterVec
 	runnerThreadPanics        prometheus.Counter
+	runnerStarts              prometheus.Counter
+	runnerRestarts            prometheus.Counter
 }
 
 func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Registry) {
@@ -40,6 +42,18 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 			Help: "Number of panics from autoscaler-agent per-VM runner threads",
 		},
 	)
+	runnerStarts := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "autoscaling_agent_runner_starts",
+			Help: "Number of new per-VM Runners started",
+		},
+	)
+	runnerRestarts := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "autoscaling_agent_runner_restarts",
+			Help: "Number of existing per-VM Runners restarted due to failure",
+		},
+	)
 	totalPanickedVMs := prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Name: "autoscaling_panicked_vm_runners_current",
@@ -56,7 +70,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 					p.status.mu.Lock()
 					defer p.status.mu.Unlock()
 
-					if p.status.panicked {
+					if p.status.endState != nil && p.status.endState.ExitKind == podStatusExitPanicked {
 						count += 1
 					}
 				}()
@@ -116,5 +130,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		informantRequestsOutbound: informantRequestsOutbound,
 		informantRequestsInbound:  informantRequestsInbound,
 		runnerThreadPanics:        runnerThreadPanics,
+		runnerStarts:              runnerStarts,
+		runnerRestarts:            runnerRestarts,
 	}, reg
 }
