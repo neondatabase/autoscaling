@@ -302,7 +302,7 @@ func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiv
 				})
 			}
 
-			r.global.TriggerRestartIfNecessary(ctx, r.vm.NamespacedName(), r.podIP)
+			r.global.TriggerRestartIfNecessary(ctx, r.podName, r.podIP)
 		}()
 
 		err := r.Run(ctx, vmInfoUpdated)

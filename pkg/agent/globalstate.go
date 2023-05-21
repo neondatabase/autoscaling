@@ -135,7 +135,8 @@ func (s *agentState) handleVMEventAdded(
 		lastSuccessfulInformantComm: nil,
 	}
 
-	runner := s.newRunner(event.vmInfo, podName, event.podIP)
+	restartCount := 0
+	runner := s.newRunner(event.vmInfo, podName, event.podIP, restartCount)
 	runner.status = status
 
 	txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
@@ -185,7 +186,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 	status.mu.Lock()
 	defer status.mu.Unlock()
 
-	if status.endState != nil {
+	if status.endState == nil {
 		klog.Errorf(
 			"TriggerRestartIfNecessary called with nil endState for pod %v (should only be called after the pod is finished, when endState != nil)",
 			podName,
@@ -228,7 +229,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 	} else /* Otherwise, randomly pick within RunnerRestartMinWait..RunnerRestartMaxWait */ {
 		r := util.NewTimeRange(time.Second, RunnerRestartMinWaitSeconds, RunnerRestartMaxWaitSeconds)
 		waitDuration = r.Random()
-		klog.Info("Waiting for %s before restarting Runner %v", waitDuration, podName)
+		klog.Infof("Waiting for %s before restarting Runner %v", waitDuration, podName)
 	}
 
 	// Run the waiting (if necessary) and restarting in another goroutine, so we're not blocking the
@@ -272,7 +273,8 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 		//                     ^^
 		// note: exitKind is one of "panicked" or "errored" - e.g. "Restarting panicked Runner ..."
 
-		runner := s.newRunner(pod.status.vmInfo, podName, podIP)
+		restartCount := len(pod.status.previousEndStates) + 1
+		runner := s.newRunner(pod.status.vmInfo, podName, podIP, restartCount)
 		runner.status = pod.status
 
 		txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
@@ -289,12 +291,12 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 }
 
 // NB: caller must set Runner.status after creation
-func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string) *Runner {
+func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string, restartCount int) *Runner {
 	return &Runner{
 		global: s,
 		status: nil, // set by calller
 		logger: RunnerLogger{
-			prefix: fmt.Sprintf("Runner %v: ", podName),
+			prefix: fmt.Sprintf("Runner %v/%d: ", podName, restartCount),
 		},
 		schedulerRespondedWithMigration: false,
 
