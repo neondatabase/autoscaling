@@ -64,7 +64,7 @@ func (r MainRunner) newAgentState(
 
 func vmIsOurResponsibility(vm *vmapi.VirtualMachine, config *Config, nodeName string) bool {
 	return vm.Status.Node == nodeName &&
-		vm.Status.Phase == vmapi.VmRunning &&
+		(vm.Status.Phase.IsAlive() && vm.Status.Phase != vmapi.VmMigrating) &&
 		vm.Status.PodIP != "" &&
 		api.HasAutoscalingEnabled(vm) &&
 		vm.Spec.SchedulerName == config.Scheduler.SchedulerName

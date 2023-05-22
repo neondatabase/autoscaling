@@ -138,6 +138,10 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode)
 			continue
 		}
 
+		if !vm.Status.Phase.IsAlive() {
+			continue
+		}
+
 		key := billingMetricsKey{
 			uid:        vm.UID,
 			endpointID: endpointID,
