@@ -158,11 +158,11 @@ jobs:
       - name: build and push cluster-autoscaler image
         uses: docker/build-push-action@v3
         with:
-          tag: ${{ env.CLUSTER_AUTOSCALER_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          tags: ${{ env.CLUSTER_AUTOSCALER_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           context: cluster-autoscaler
           push: true
           build-args: |
-            CA_GIT_TAG=${{ steps.get_ca_tag.ca_git_tag }}
+            CA_GIT_TAG=${{ steps.get_ca_tag.outputs.ca_git_tag }}
 
       - name: github release
         uses: softprops/action-gh-release@v1
