@@ -84,7 +84,7 @@ type Runner struct {
 	status *podStatus
 
 	// logger is the shared logger for this Runner, giving all log lines a unique, relevant prefix
-	logger RunnerLogger
+	logger util.PrefixLogger
 
 	// shutdown provides a clean way to trigger all background Runner threads to shut down. shutdown
 	// is set exactly once, by (*Runner).Run
@@ -180,7 +180,7 @@ type Scheduler struct {
 	// This field is immutable but the data behind the pointer is not.
 	runner *Runner
 
-	logger RunnerLogger
+	logger util.PrefixLogger
 
 	// info holds the immutable information we use to connect to and describe the scheduler
 	info schedulerInfo
@@ -249,7 +249,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	var scheduler *SchedulerState
 	if r.scheduler != nil {
 		scheduler = &SchedulerState{
-			LogPrefix:  r.scheduler.logger.prefix,
+			LogPrefix:  r.scheduler.logger.Prefix,
 			Info:       r.scheduler.info,
 			Registered: r.scheduler.registered,
 			FatalError: r.scheduler.fatalError,
@@ -280,7 +280,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 		LastInformantError:    r.lastInformantError,
 		VM:                    r.vm,
 		PodIP:                 r.podIP,
-		LogPrefix:             r.logger.prefix,
+		LogPrefix:             r.logger.Prefix,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
 
 		SchedulerRespondedWithMigration: r.schedulerRespondedWithMigration,
@@ -822,8 +822,8 @@ startScheduler:
 
 		sched := &Scheduler{
 			runner: r,
-			logger: RunnerLogger{
-				prefix: fmt.Sprintf("%sScheduler %s: ", r.logger.prefix, currentInfo.UID),
+			logger: util.PrefixLogger{
+				Prefix: fmt.Sprintf("%sScheduler %s: ", r.logger.Prefix, currentInfo.UID),
 			},
 			info:       currentInfo,
 			registered: false,

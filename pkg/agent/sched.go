@@ -87,7 +87,7 @@ const (
 
 func startSchedulerWatcher(
 	ctx context.Context,
-	logger RunnerLogger,
+	logger util.PrefixLogger,
 	kubeClient *kubernetes.Clientset,
 	eventBroker *pubsub.Broker[watchEvent],
 	schedulerName string,
@@ -157,7 +157,7 @@ func startSchedulerWatcher(
 
 func watchSchedulerUpdates(
 	ctx context.Context,
-	logger RunnerLogger,
+	logger util.PrefixLogger,
 	eventBroker *pubsub.Broker[watchEvent],
 	store *util.WatchStore[corev1.Pod],
 ) (schedulerWatch, *schedulerInfo, error) {
@@ -237,7 +237,7 @@ type schedulerWatchState struct {
 	using <-chan schedulerInfo
 
 	stop   util.SignalReceiver
-	logger RunnerLogger
+	logger util.PrefixLogger
 }
 
 func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchStore[corev1.Pod]) {
