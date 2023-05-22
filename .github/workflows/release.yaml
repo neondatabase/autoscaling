@@ -36,6 +36,11 @@ jobs:
           # repository that means that we actually end up checked out with *just* a lightweight tag
           # to the tagged commit.
           git describe --tags --long --dirty >> $GITHUB_OUTPUT
+      - name: get CA base git tag
+        id: get_ca_tag
+        run: |
+          echo -n "ca_git_tag=" >> $GITHUB_OUTPUT
+          cat cluster-autoscaler/ca.tag >> $GITHUB_OUTPUT
       - name: install golang
         uses: actions/setup-go@v4
         with:
@@ -153,9 +158,11 @@ jobs:
       - name: build and push cluster-autoscaler image
         uses: docker/build-push-action@v3
         with:
-          build-args: CA_GIT_TAG=${{ env.CLUSTER_AUTOSCALER_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          tag: ${{ env.CLUSTER_AUTOSCALER_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           context: cluster-autoscaler
           push: true
+          build-args: |
+            CA_GIT_TAG=${{ steps.get_ca_tag.ca_git_tag }}
 
       - name: github release
         uses: softprops/action-gh-release@v1
