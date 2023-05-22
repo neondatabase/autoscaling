@@ -298,8 +298,8 @@ func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, p
 	return &Runner{
 		global: s,
 		status: nil, // set by calller
-		logger: RunnerLogger{
-			prefix: fmt.Sprintf("Runner %v/%d: ", podName, restartCount),
+		logger: util.PrefixLogger{
+			Prefix: fmt.Sprintf("Runner %v/%d: ", podName, restartCount),
 		},
 		schedulerRespondedWithMigration: false,
 

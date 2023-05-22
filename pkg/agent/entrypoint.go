@@ -41,7 +41,8 @@ func (r MainRunner) Run(ctx context.Context) error {
 		return err
 	}
 
-	schedulerStore, err := startSchedulerWatcher(ctx, RunnerLogger{"Scheduler Watcher: "}, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	watcherLogger := util.PrefixLogger{Prefix: "Scheduler Watcher: "}
+	schedulerStore, err := startSchedulerWatcher(ctx, watcherLogger, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}

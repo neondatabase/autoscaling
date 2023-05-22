@@ -169,7 +169,7 @@ func NewInformantServer(
 
 	runner.logger.Infof("Starting Informant server, desc = %+v", server.desc)
 
-	logPrefix := runner.logger.prefix
+	logPrefix := runner.logger.Prefix
 
 	mux := http.NewServeMux()
 	util.AddHandler(logPrefix, mux, "/id", http.MethodGet, "struct{}", server.handleID)
