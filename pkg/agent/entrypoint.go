@@ -12,6 +12,7 @@ import (
 
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -36,13 +37,13 @@ func (r MainRunner) Run(ctx context.Context) error {
 	}
 	klog.Info("VM watcher started")
 
-	broker := pubsub.NewBroker[watchEvent](ctx, pubsub.BrokerOptions{})
+	broker := pubsub.NewBroker[schedwatch.WatchEvent](ctx, pubsub.BrokerOptions{})
 	if err := srv.GetOrchestrator(ctx).Add(srv.Broker(broker)); err != nil {
 		return err
 	}
 
 	watcherLogger := util.PrefixLogger{Prefix: "Scheduler Watcher: "}
-	schedulerStore, err := startSchedulerWatcher(ctx, watcherLogger, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	schedulerStore, err := schedwatch.StartSchedulerWatcher(ctx, watcherLogger, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
