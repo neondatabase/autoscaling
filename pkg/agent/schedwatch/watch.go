@@ -13,6 +13,10 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+func isActivePod(pod *corev1.Pod) bool {
+	return pod.Status.PodIP != "" && util.PodReady(pod)
+}
+
 func StartSchedulerWatcher(
 	ctx context.Context,
 	logger util.PrefixLogger,
@@ -38,44 +42,32 @@ func StartSchedulerWatcher(
 		metav1.ListOptions{LabelSelector: schedulerLabelSelector(schedulerName)},
 		util.WatchHandlerFuncs[*corev1.Pod]{
 			AddFunc: func(pod *corev1.Pod, preexisting bool) {
-				podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-				if util.PodReady(pod) {
-					if pod.Status.PodIP == "" {
-						logger.Errorf("Pod %v is ready but has no IP", podName)
-						return
-					}
-
-					eventBroker.Publish(ctx, WatchEvent{info: newSchedulerInfo(pod), kind: eventKindReady})
+				if isActivePod(pod) {
+					event := WatchEvent{kind: eventKindReady, info: newSchedulerInfo(pod)}
+					logger.Infof("New scheduler, already ready: %+v", event)
+					eventBroker.Publish(ctx, event)
 				}
 			},
 			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
-				oldPodName := util.NamespacedName{Name: oldPod.Name, Namespace: oldPod.Namespace}
-				newPodName := util.NamespacedName{Name: newPod.Name, Namespace: newPod.Namespace}
-
-				if oldPod.Name != newPod.Name || oldPod.Namespace != newPod.Namespace {
-					logger.Errorf(
-						"Unexpected scheduler pod update, old pod name %v != new pod name %v",
-						oldPodName, newPodName,
-					)
-				}
-
-				oldReady := util.PodReady(oldPod)
-				newReady := util.PodReady(newPod)
+				oldReady := isActivePod(oldPod)
+				newReady := isActivePod(newPod)
 
 				if !oldReady && newReady {
-					if newPod.Status.PodIP == "" {
-						logger.Errorf("Pod %v is ready but has no IP", newPodName)
-						return
-					}
-					eventBroker.Publish(ctx, WatchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)})
+					event := WatchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)}
+					logger.Infof("Existing scheduler became ready: %+v", event)
+					eventBroker.Publish(ctx, event)
 				} else if oldReady && !newReady {
-					eventBroker.Publish(ctx, WatchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)})
+					event := WatchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)}
+					logger.Infof("Existing scheduler no longer ready: %+v", event)
+					eventBroker.Publish(ctx, event)
 				}
 			},
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
-				wasReady := util.PodReady(pod)
+				wasReady := isActivePod(pod)
 				if wasReady {
-					eventBroker.Publish(ctx, WatchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)})
+					event := WatchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)}
+					logger.Infof("Previously-ready scheduler deleted: %+v", event)
+					eventBroker.Publish(ctx, event)
 				}
 			},
 		},
