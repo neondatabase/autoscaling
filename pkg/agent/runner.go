@@ -62,6 +62,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -183,7 +184,7 @@ type Scheduler struct {
 	logger util.PrefixLogger
 
 	// info holds the immutable information we use to connect to and describe the scheduler
-	info schedulerInfo
+	info schedwatch.SchedulerInfo
 
 	// registered is true only once a call to this Scheduler's Register() method has been made
 	//
@@ -234,10 +235,10 @@ type RunnerState struct {
 
 // SchedulerState is the state of a Scheduler, constructed as part of a Runner's State Method
 type SchedulerState struct {
-	LogPrefix  string        `json:"logPrefix"`
-	Info       schedulerInfo `json:"info"`
-	Registered bool          `json:"registered"`
-	FatalError error         `json:"fatalError"`
+	LogPrefix  string                   `json:"logPrefix"`
+	Info       schedwatch.SchedulerInfo `json:"info"`
+	Registered bool                     `json:"registered"`
+	FatalError error                    `json:"fatalError"`
 }
 
 func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
@@ -340,7 +341,7 @@ func (r *Runner) Run(ctx context.Context, vmInfoUpdated util.CondChannelReceiver
 	ctx, r.shutdown = context.WithCancel(ctx)
 	defer r.shutdown()
 
-	schedulerWatch, scheduler, err := watchSchedulerUpdates(
+	schedulerWatch, scheduler, err := schedwatch.WatchSchedulerUpdates(
 		ctx, r.logger, r.global.schedulerEventBroker, r.global.schedulerStore,
 	)
 	if err != nil {
@@ -781,8 +782,8 @@ retryServer:
 // on registeredScheduler whenever a new Scheduler is successfully registered
 func (r *Runner) trackSchedulerLoop(
 	ctx context.Context,
-	init *schedulerInfo,
-	schedulerWatch schedulerWatch,
+	init *schedwatch.SchedulerInfo,
+	schedulerWatch schedwatch.SchedulerWatch,
 	registeredScheduler util.CondChannelSender,
 ) {
 	// pre-declare a bunch of variables because we have some gotos here.
@@ -790,7 +791,7 @@ func (r *Runner) trackSchedulerLoop(
 		lastStart   time.Time
 		minWait     time.Duration    = 5 * time.Second // minimum time we have to wait between scheduler starts
 		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
-		currentInfo schedulerInfo
+		currentInfo schedwatch.SchedulerInfo
 		fatal       util.SignalReceiver
 		failed      bool
 	)

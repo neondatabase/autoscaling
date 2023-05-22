@@ -18,6 +18,7 @@ import (
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -34,14 +35,14 @@ type agentState struct {
 	config               *Config
 	kubeClient           *kubernetes.Clientset
 	vmClient             *vmclient.Clientset
-	schedulerEventBroker *pubsub.Broker[watchEvent]
+	schedulerEventBroker *pubsub.Broker[schedwatch.WatchEvent]
 	schedulerStore       *util.WatchStore[corev1.Pod]
 	metrics              PromMetrics
 }
 
 func (r MainRunner) newAgentState(
 	podIP string,
-	broker *pubsub.Broker[watchEvent],
+	broker *pubsub.Broker[schedwatch.WatchEvent],
 	schedulerStore *util.WatchStore[corev1.Pod],
 ) (*agentState, *prometheus.Registry) {
 	state := &agentState{
