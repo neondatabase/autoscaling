@@ -2,13 +2,12 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-- autoscale-scheduler.yaml
-- autoscaler-agent.yaml
+- service_account.yaml
+- role_binding.yaml
+- config_map.yaml
+- daemonset.yaml
 
 images:
-- name: autoscale-scheduler
-  newName: autoscale-scheduler
-  newTag: dev
 - name: autoscaler-agent
   newName: autoscaler-agent
   newTag: dev
