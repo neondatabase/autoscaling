@@ -172,7 +172,8 @@ jobs:
             bin/vm-builder
             bin/vm-builder-generic
             bin/vm-informant
-            rendered_manifests/autoscaler.yaml
+            rendered_manifests/autoscale-scheduler.yaml
+            rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml
             rendered_manifests/multus.yaml
             rendered_manifests/multus-eks.yaml
