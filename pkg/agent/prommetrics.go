@@ -1,9 +1,10 @@
 package agent
 
 import (
-	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type PromMetrics struct {
