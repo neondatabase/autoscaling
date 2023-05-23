@@ -160,6 +160,10 @@ spec:
       containers:
       - image: autoscale-scheduler:dev
         command: ["/usr/bin/kube-scheduler", "--config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml"]
+        ports:
+        - name: metrics
+          containerPort: 9100
+          protocol: TCP
         livenessProbe:
           httpGet:
             path: /healthz

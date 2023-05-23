@@ -309,14 +309,6 @@ deploy: kind-load manifests render-manifests ## Deploy controller to the K8s clu
 	kubectl -n kube-system rollout status daemonset  autoscaler-agent
 	kubectl -n kube-system rollout status deployment autoscale-scheduler
 
-.PHONY: deploy-controller
-deploy-controller: $(RENDERED) kind-load manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
-	kubectl apply -f $(RENDERED)/neonvm.yaml
-	kubectl -n neonvm-system rollout status deployment neonvm-controller
-
 ##@ Local cluster
 
 .PHONY: local-cluster

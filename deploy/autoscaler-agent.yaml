@@ -97,6 +97,10 @@ spec:
       containers:
         - name: autoscaler-agent
           image: autoscaler-agent:dev
+          ports:
+            - name: metrics
+              containerPort: 9100
+              protocol: TCP
           resources:
             limits:
               memory: 100Mi

@@ -18,6 +18,8 @@ env:
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
   VM_KERNEL_VERSION:        "5.15.80"
 
+  CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -34,6 +36,11 @@ jobs:
           # repository that means that we actually end up checked out with *just* a lightweight tag
           # to the tagged commit.
           git describe --tags --long --dirty >> $GITHUB_OUTPUT
+      - name: get CA base git tag
+        id: get_ca_tag
+        run: |
+          echo -n "ca_git_tag=" >> $GITHUB_OUTPUT
+          cat cluster-autoscaler/ca.tag >> $GITHUB_OUTPUT
       - name: install golang
         uses: actions/setup-go@v4
         with:
@@ -147,6 +154,15 @@ jobs:
           ID=$(docker create ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }})
           docker cp $ID:/usr/bin/vm-informant bin/vm-informant
           docker rm -f $ID
+
+      - name: build and push cluster-autoscaler image
+        uses: docker/build-push-action@v3
+        with:
+          tags: ${{ env.CLUSTER_AUTOSCALER_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          context: cluster-autoscaler
+          push: true
+          build-args: |
+            CA_GIT_TAG=${{ steps.get_ca_tag.outputs.ca_git_tag }}
 
       - name: github release
         uses: softprops/action-gh-release@v1
