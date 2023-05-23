@@ -289,22 +289,36 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 
 func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiver) {
 	go func() {
-		// Gracefully handle panics:
+		// Gracefully handle panics, plus trigger restart
 		defer func() {
 			if err := recover(); err != nil {
+				now := time.Now()
 				r.setStatus(func(stat *podStatus) {
-					stat.panicked = true
-					stat.done = true
-					stat.errored = fmt.Errorf("runner panicked: %v", err)
+					stat.endState = &podStatusEndState{
+						ExitKind: podStatusExitPanicked,
+						Error:    fmt.Errorf("Runner %v panicked: %v", r.vm.NamespacedName(), err),
+						Time:     now,
+					}
 				})
 			}
+
+			r.global.TriggerRestartIfNecessary(ctx, r.podName, r.podIP)
 		}()
 
 		err := r.Run(ctx, vmInfoUpdated)
+		endTime := time.Now()
 
+		exitKind := podStatusExitCanceled // normal exit, only by context being canceled.
+		if err != nil {
+			exitKind = podStatusExitErrored
+			r.global.metrics.runnerFatalErrors.Inc()
+		}
 		r.setStatus(func(stat *podStatus) {
-			r.status.done = true
-			r.status.errored = err
+			stat.endState = &podStatusEndState{
+				ExitKind: exitKind,
+				Error:    err,
+				Time:     endTime,
+			}
 		})
 
 		if err != nil {
@@ -796,10 +810,13 @@ startScheduler:
 
 	// Set the current scheduler
 	fatal = func() util.SignalReceiver {
-		r.logger.Infof(
-			"Updating scheduler to pod %v (UID = %s) with IP %s",
-			currentInfo.PodName, currentInfo.UID, currentInfo.IP,
-		)
+		// Print info about a new scheduler, unless this is the first one.
+		if init == nil || init.UID != currentInfo.UID {
+			r.logger.Infof(
+				"Updating scheduler to pod %v (UID = %s) with IP %s",
+				currentInfo.PodName, currentInfo.UID, currentInfo.IP,
+			)
+		}
 
 		sendFatal, recvFatal := util.NewSingleSignalPair()
 

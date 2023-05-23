@@ -173,6 +173,14 @@ func (m MilliCPU) ToResourceQuantity() *resource.Quantity {
 	return resource.NewMilliQuantity(int64(m), resource.BinarySI)
 }
 
+// AsFloat64 converts the MilliCPU value into a float64 of CPU
+//
+// This should be preferred over calling m.ToResourceQuantity().AsApproximateFloat64(), because
+// going through the resource.Quantity can produce less accurate floats.
+func (m MilliCPU) AsFloat64() float64 {
+	return float64(m) / 1000
+}
+
 // this is used to parse scheduler config and communication between components
 // we used resource.Quantity as underlying transport format for MilliCPU
 func (m *MilliCPU) UnmarshalJSON(data []byte) error {
@@ -201,8 +209,7 @@ func (m MilliCPU) Format(state fmt.State, verb rune) {
 	case verb == 'v' && state.Flag('#'):
 		state.Write([]byte(fmt.Sprintf("%v", uint32(m))))
 	default:
-		quantity := m.ToResourceQuantity()
-		state.Write([]byte(fmt.Sprintf("%v", quantity.AsApproximateFloat64())))
+		state.Write([]byte(fmt.Sprintf("%v", m.AsFloat64())))
 	}
 }
 
@@ -375,6 +382,16 @@ const (
 	// VmScaling means that devices are plugging/unplugging to/from the VM
 	VmScaling VmPhase = "Scaling"
 )
+
+// IsAlive returns whether the guest in the VM is expected to be running
+func (p VmPhase) IsAlive() bool {
+	switch p {
+	case VmRunning, VmMigrating:
+		return true
+	default:
+		return false
+	}
+}
 
 //+genclient
 //+kubebuilder:object:root=true

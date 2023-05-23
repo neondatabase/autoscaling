@@ -9,9 +9,6 @@ env:
   SCHED_IMAGE: "neondatabase/autoscale-scheduler"
   INFORMANT_IMAGE: "neondatabase/vm-informant"
 
-  LOCAL_AGENT_IMAGE: "autoscaler-agent:dev"
-  LOCAL_SCHED_IMAGE: "autoscale-scheduler:dev"
-
   KUSTOMIZE_VERSION:        "4.5.7"
   CONTROLLER_TOOLS_VERSION: "0.10.0"
   CODE_GENERATOR_VERSION:   "0.25.9"
@@ -20,6 +17,8 @@ env:
   IMG_RUNNER:               "neondatabase/neonvm-runner"
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
   VM_KERNEL_VERSION:        "5.15.80"
+
+  CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
 
 jobs:
   release:
@@ -37,6 +36,11 @@ jobs:
           # repository that means that we actually end up checked out with *just* a lightweight tag
           # to the tagged commit.
           git describe --tags --long --dirty >> $GITHUB_OUTPUT
+      - name: get CA base git tag
+        id: get_ca_tag
+        run: |
+          echo -n "ca_git_tag=" >> $GITHUB_OUTPUT
+          cat cluster-autoscaler/ca.tag >> $GITHUB_OUTPUT
       - name: install golang
         uses: actions/setup-go@v4
         with:
@@ -151,6 +155,15 @@ jobs:
           docker cp $ID:/usr/bin/vm-informant bin/vm-informant
           docker rm -f $ID
 
+      - name: build and push cluster-autoscaler image
+        uses: docker/build-push-action@v3
+        with:
+          tags: ${{ env.CLUSTER_AUTOSCALER_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          context: cluster-autoscaler
+          push: true
+          build-args: |
+            CA_GIT_TAG=${{ steps.get_ca_tag.outputs.ca_git_tag }}
+
       - name: github release
         uses: softprops/action-gh-release@v1
         with:
@@ -159,7 +172,8 @@ jobs:
             bin/vm-builder
             bin/vm-builder-generic
             bin/vm-informant
-            rendered_manifests/autoscaler.yaml
+            rendered_manifests/autoscale-scheduler.yaml
+            rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml
             rendered_manifests/multus.yaml
             rendered_manifests/multus-eks.yaml

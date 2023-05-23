@@ -138,6 +138,10 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode)
 			continue
 		}
 
+		if !vm.Status.Phase.IsAlive() {
+			continue
+		}
+
 		key := billingMetricsKey{
 			uid:        vm.UID,
 			endpointID: endpointID,
@@ -203,7 +207,7 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 	// TODO: This approach is imperfect. Floating-point math is probably *fine*, but really not
 	// something we want to rely on. A "proper" solution is a lot of work, but long-term valuable.
 	metricsSeconds := vmMetricsSeconds{
-		cpu:        duration.Seconds() * h.lastSlice.metrics.cpu.ToResourceQuantity().AsApproximateFloat64(),
+		cpu:        duration.Seconds() * h.lastSlice.metrics.cpu.AsFloat64(),
 		activeTime: duration,
 	}
 	h.total.cpu += metricsSeconds.cpu

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"text/template"
 
+	"github.com/alessio/shellescape"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -201,16 +202,34 @@ if /neonvm/bin/test -f /neonvm/runtime/env.sh; then
     /neonvm/bin/cat /neonvm/runtime/env.sh >>/neonvm/bin/vmstarter.sh
 fi
 
+{{if or .Entrypoint .Cmd | not}}
+# If we have no arguments *at all*, then emit an error. This matches docker's behavior.
+if /neonvm/bin/test \( ! -f /neonvm/runtime/command.sh \) -a \( ! -f /neonvm/runtime/args.sh \); then
+	/neonvm/bin/echo 'Error: No command specified' >&2
+	exit 1
+fi
+{{end}}
+
+{{/* command.sh is set by the runner with the contents of the VM's spec.guest.command, if it's set */}}
 if /neonvm/bin/test -f /neonvm/runtime/command.sh; then
     /neonvm/bin/cat /neonvm/runtime/command.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo -n '{{$first := true}}{{range .Entrypoint}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
+    {{/*
+	A couple notes:
+	  - .Entrypoint is already shell-escaped twice (everything is quoted)
+	  - the shell-escaping isn't perfect. In particular, it doesn't handle backslashes well.
+	  - It's good enough for now
+	*/}}
+    /neonvm/bin/echo -n {{range .Entrypoint}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
-{{if and .Entrypoint .Cmd}}echo -n ' ' >>/neonvm/bin/vmstarter.sh{{end}}
+
+{{/* args.sh is set by the runner with the contents of the VM's spec.guest.args, if it's set */}}
 if /neonvm/bin/test -f /neonvm/runtime/args.sh; then
+    /neonvm/bin/echo -n ' ' >>/neonvm/bin/vmstarter.sh
     /neonvm/bin/cat /neonvm/runtime/args.sh >>/neonvm/bin/vmstarter.sh
 else
-    /neonvm/bin/echo '{{$first := true}}{{range .Cmd}}{{if $first}}{{$first = false}}{{else}} {{end}}{{.}}{{end}}' >>/neonvm/bin/vmstarter.sh
+    {{/* Same as with .Entrypoint; refer there. We don't have '-n' because we want a trailing newline */}}
+    /neonvm/bin/echo -n {{range .Cmd}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
@@ -226,8 +245,7 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres'
-#::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres --pgconnstr="dbname=neondb user=cloud_admin sslmode=disable"'
+::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
@@ -348,6 +366,7 @@ var (
 	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
 	informant = flag.String("informant", VMInformant, `vm-informant docker image`)
+	fileCache = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 )
 
@@ -394,6 +413,7 @@ type TemplatesContext struct {
 	Env            []string
 	RootDiskImage  string
 	InformantImage string
+	FileCache      bool
 }
 
 func main() {
@@ -465,23 +485,28 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	// Shell-escape all the command pieces, twice. We need to do it twice because we're generating
+	// a shell script that appends these to a second shell script.
+	for i := range imageSpec.Config.Entrypoint {
+		imageSpec.Config.Entrypoint[i] = shellescape.Quote(shellescape.Quote(imageSpec.Config.Entrypoint[i]))
+	}
+	for i := range imageSpec.Config.Cmd {
+		imageSpec.Config.Cmd[i] = shellescape.Quote(shellescape.Quote(imageSpec.Config.Cmd[i]))
+	}
+
 	tmplArgs := TemplatesContext{
 		Entrypoint:     imageSpec.Config.Entrypoint,
 		Cmd:            imageSpec.Config.Cmd,
 		Env:            imageSpec.Config.Env,
 		RootDiskImage:  *srcImage,
 		InformantImage: *informant,
+		FileCache:      *fileCache,
 	}
 
 	if len(imageSpec.Config.User) != 0 {
 		tmplArgs.User = imageSpec.Config.User
 	} else {
 		tmplArgs.User = "root"
-	}
-
-	// if no entrypoint and cmd in docker image then use sleep for 10 years as stub
-	if len(tmplArgs.Entrypoint) == 0 && len(tmplArgs.Cmd) == 0 {
-		tmplArgs.Cmd = []string{"/neonvm/bin/sleep", "3650d"}
 	}
 
 	tarBuffer := new(bytes.Buffer)

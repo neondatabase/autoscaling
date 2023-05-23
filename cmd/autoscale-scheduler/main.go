@@ -54,6 +54,10 @@ func runProgram() (err error) {
 	}
 
 	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, plugin.NewAutoscaleEnforcerPlugin(ctx, conf)))
+	// Don't output the full usage whenever any error occurs (otherwise, startup errors get drowned
+	// out by many pages of scheduler command flags)
+	command.SilenceUsage = true
+
 	if err := command.ExecuteContext(ctx); err != nil {
 		return err
 	}

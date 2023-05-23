@@ -18,6 +18,11 @@ func PodReady(pod *corev1.Pod) bool {
 	return false
 }
 
+// PodCompleted returns true iff all of the Pod's containers have stopped and will not be restarted
+func PodCompleted(pod *corev1.Pod) bool {
+	return pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed
+}
+
 // PodStartedBefore returns true iff Pod p started before Pod q
 func PodStartedBefore(p, q *corev1.Pod) bool {
 	return p.Status.StartTime.Before(q.Status.StartTime)

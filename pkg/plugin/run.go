@@ -231,8 +231,8 @@ func (e *AutoscaleEnforcer) handleResources(
 		if !dividesCleanly && !(atMin || atMax) {
 			contextString := "If the VM's bounds did not just change, then this indicates a bug in the autoscaler-agent."
 			klog.Warningf(
-				"[autoscale-enforcer] requested resources %+v do not divide cleanly by previous compute unit %+v. %s",
-				req, cu, contextString,
+				"[autoscale-enforcer] Pod %v in %s requested resources %+v do not divide cleanly by previous compute unit %+v. %s",
+				pod.name, pod.node.name, req, cu, contextString,
 			)
 		}
 	}
@@ -243,10 +243,10 @@ func (e *AutoscaleEnforcer) handleResources(
 	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration, !supportsFractionalCPU)
 	memVerdict := memTransition.handleRequested(req.Mem, startingMigration, false)
 
-	fmtString := "[autoscale-enforcer] Handled resources from pod %v AgentRequest.\n" +
+	fmtString := "[autoscale-enforcer] Handled resources from pod %v in %s AgentRequest.\n" +
 		"\tvCPU verdict: %s\n" +
 		"\t mem verdict: %s"
-	klog.Infof(fmtString, pod.name, vCPUVerdict, memVerdict)
+	klog.Infof(fmtString, pod.name, pod.node.name, vCPUVerdict, memVerdict)
 
 	return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
 }
@@ -264,7 +264,7 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	shouldMigrate := node.mq.isNextInQueue(pod) && node.tooMuchPressure()
 	forcedMigrate := pod.testingOnlyAlwaysMigrate && pod.metrics != nil
 
-	klog.Infof("[autoscale-enforcer] Updating pod %v metrics %+v -> %+v", pod.name, pod.metrics, metrics)
+	klog.Infof("[autoscale-enforcer] Updating pod %v in %s metrics %+v -> %+v", pod.name, pod.node.name, pod.metrics, metrics)
 	oldMetrics := pod.metrics
 	pod.metrics = metrics
 	if pod.currentlyMigrating() {
@@ -288,12 +288,12 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 
 	if forcedMigrate || stillFirst || veto == nil {
 		if veto != nil {
-			klog.Infof("[autoscale-enforcer] Pod attempted veto of self migration, still highest-priority: %s", veto)
+			klog.Infof("[autoscale-enforcer] Pod %v in %s attempted veto of self migration, still highest-priority: %s", pod.name, pod.node.name, veto)
 		}
 
 		return true
 	} else {
-		klog.Infof("[autoscale-enforcer] Pod vetoed self migration: %s", veto)
+		klog.Infof("[autoscale-enforcer] Pod %v in %s vetoed self migration: %s", pod.name, pod.node.name, veto)
 		return false
 	}
 }
