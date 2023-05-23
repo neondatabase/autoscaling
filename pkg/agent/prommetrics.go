@@ -26,9 +26,9 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
-	// the util.RegisterMetric() function registers the collector and returns
-	// it so we can set it directly on the output structure.
 	metrics := PromMetrics{
+		// the util.RegisterMetric() function registers the collector and returns
+		// it so we can set it directly on the output structure.
 		schedulerRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_scheduler_plugin_requests_total",
@@ -75,8 +75,8 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		)),
 	}
 
-	// the remaining metrics are computed on timers run within
-	// prom: register them directly.
+	// the remaining metrics are computed at scrape time by prom:
+	// register them directly.
 	reg.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Name: "autoscaling_errored_vm_runners_current",

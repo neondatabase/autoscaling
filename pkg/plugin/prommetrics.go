@@ -25,6 +25,8 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
 	p.metrics = PromMetrics{
+		// the util.RegisterMetric() function registers the collector and returns
+		// it so we can set it directly on the output structure.
 		pluginCalls: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_extension_calls_total",
