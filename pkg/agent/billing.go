@@ -228,13 +228,19 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
+func logAddedEvent(event billing.IncrementalEvent) billing.IncrementalEvent {
+	klog.Infof("Adding event for EndpointID %q: MetricName=%q, Value=%d", event.EndpointID, event.MetricName, event.Value)
+	return event
+}
+
 // drainAppendToBatch clears the current history, adding it as events to the batch
 func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *billing.Batch) {
 	now := time.Now()
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
-		batch.AddIncrementalEvent(billing.IncrementalEvent{
+
+		batch.AddIncrementalEvent(logAddedEvent(billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
 			Type:           "", // set in batch method
 			IdempotencyKey: "", // set in batch method
@@ -244,8 +250,8 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			StartTime: s.pushWindowStart,
 			StopTime:  now,
 			Value:     int(math.Round(history.total.cpu)),
-		})
-		batch.AddIncrementalEvent(billing.IncrementalEvent{
+		}))
+		batch.AddIncrementalEvent(logAddedEvent(billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
 			Type:           "", // set in batch method
 			IdempotencyKey: "", // set in batch method
@@ -253,7 +259,7 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
 			Value:          int(math.Round(history.total.activeTime.Seconds())),
-		})
+		}))
 	}
 
 	s.pushWindowStart = now
