@@ -1696,7 +1696,8 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		s.runner.global.metrics.schedulerRequests.WithLabelValues("[error doing request]").Inc()
+		description := fmt.Sprintf("[error doing request: %s]", util.RootError(err))
+		s.runner.global.metrics.schedulerRequests.WithLabelValues(description).Inc()
 		return nil, s.handleRequestError(reqData, fmt.Errorf("Error doing request: %w", err))
 	}
 	defer response.Body.Close()

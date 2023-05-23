@@ -623,7 +623,7 @@ func doInformantRequest[Q any, R any](
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		result = "[error doing request]"
+		result = fmt.Sprintf("[error doing request: %s]", util.RootError(err))
 		return nil, statusCode, fmt.Errorf("Error doing request: %w", err)
 	}
 	defer response.Body.Close()
