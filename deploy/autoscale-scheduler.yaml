@@ -1,24 +1,3 @@
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: vm-patcher
-rules:
-- apiGroups: ["vm.neon.tech"]
-  resources: ["virtualmachines"]
-  verbs: ["create", "delete", "get", "list", "watch", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: autoscale-scheduler-config-reader
-  namespace: kube-system
-rules:
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "watch"]
-  # watching is ok as long as we use ListOptions.FieldSelector to limit it to the appropriate name
-  resourceNames: ["scheduler-plugin-config"]
----
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -28,7 +7,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: autoscale-scheduler-as-vm-patcher
+  name: autoscale-scheduler-virtualmachine-viewer
   namespace: kube-system
 subjects:
 - kind: ServiceAccount
@@ -36,7 +15,21 @@ subjects:
   namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: vm-patcher
+  name: neonvm-virtualmachine-viewer-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: autoscale-scheduler-virtualmachinemigration-editor
+  namespace: kube-system
+subjects:
+- kind: ServiceAccount
+  name: autoscale-scheduler
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: neonvm-virtualmachinemigration-editor-role
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -78,20 +71,6 @@ roleRef:
   kind: Role
   apiGroup: rbac.authorization.k8s.io
   name: extension-apiserver-authentication-reader
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: autoscale-scheduler-config-reader
-  namespace: kube-system
-subjects:
-- kind: ServiceAccount
-  name: autoscale-scheduler
-  namespace: kube-system
-roleRef:
-  kind: Role
-  name: autoscale-scheduler-config-reader
-  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: v1
 kind: ConfigMap
