@@ -81,7 +81,7 @@ type VirtualMachineSpec struct {
 	SchedulerName string                      `json:"schedulerName,omitempty"`
 	PodResources  corev1.ResourceRequirements `json:"podResources,omitempty"`
 
-	// +kubebuilder:default:=Never
+	// +kubebuilder:default:=Always
 	// +optional
 	RestartPolicy RestartPolicy `json:"restartPolicy"`
 
