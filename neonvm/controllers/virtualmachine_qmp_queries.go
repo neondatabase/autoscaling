@@ -276,11 +276,11 @@ func QmpSyncCpuToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineM
 	}
 	defer target.Disconnect()
 
-	for _, slot := range(plugged) {
+	for _, slot := range plugged {
 		// firsly check if slot occupied already
 		// run over Target CPUs and compare with source
 		found := false
-		for _, tslot := range(pluggedInTarget) {
+		for _, tslot := range pluggedInTarget {
 			if DeepEqual(slot, tslot) {
 				found = true
 			}
@@ -400,11 +400,11 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 	}
 	defer target.Disconnect()
 
-	for _, m := range(memoryDevices) {
+	for _, m := range memoryDevices {
 		// firsly check if slot occupied already
 		// run over Target memory and compare device id
 		found := false
-		for _, tm := range(memoryDevicesInTarget) {
+		for _, tm := range memoryDevicesInTarget {
 			if DeepEqual(m, tm) {
 				found = true
 			}
@@ -433,7 +433,6 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 
 	return nil
 }
-
 
 func QmpPlugMemoryToRunner(ip string, port int32, size int64) error {
 	memoryDevices, err := QmpQueryMemoryDevicesFromRunner(ip, port)

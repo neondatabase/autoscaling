@@ -17,6 +17,8 @@ limitations under the License.
 
 package v1
 
+type IPPoolExpansion interface{}
+
 type VirtualMachineExpansion interface{}
 
 type VirtualMachineMigrationExpansion interface{}

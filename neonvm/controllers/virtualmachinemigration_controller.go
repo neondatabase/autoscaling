@@ -36,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
@@ -605,13 +604,6 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 			},
 			TopologyKey: "kubernetes.io/hostname",
 		})
-	}
-
-	// use multus network to add extra network interface but without IPAM
-	if vm.Spec.ExtraNetwork != nil {
-		if vm.Spec.ExtraNetwork.Enable {
-			pod.ObjectMeta.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", vm.Spec.ExtraNetwork.MultusNetworkNoIP, vm.Spec.ExtraNetwork.Interface)
-		}
 	}
 
 	// Set the ownerRef for the Pod

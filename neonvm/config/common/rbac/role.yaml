@@ -33,6 +33,32 @@ rules:
   - list
   - watch
 - apiGroups:
+  - k8s.cni.cncf.io
+  resources:
+  - network-attachment-definitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - ippools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - ippools/finalizers
+  verbs:
+  - update
+- apiGroups:
   - vm.neon.tech
   resources:
   - virtualmachinemigrations

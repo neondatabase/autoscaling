@@ -74,3 +74,36 @@ vars:
     kind: Service
     version: v1
     name: webhook-service
+# overlay networking variables
+- name: NAD_IPAM_NAME
+  objref:
+    kind: NetworkAttachmentDefinition
+    group: k8s.cni.cncf.io
+    version: v1
+    name: overlay-ipam # this name should match the one in overlay-ipam.yaml
+  fieldref:
+    fieldpath: metadata.name
+- name: NAD_IPAM_NAMESPACE
+  objref:
+    kind: NetworkAttachmentDefinition
+    group: k8s.cni.cncf.io
+    version: v1
+    name: overlay-ipam # this name should match the one in overlay-ipam.yaml
+  fieldref:
+    fieldpath: metadata.namespace
+- name: NAD_RUNNER_NAME
+  objref:
+    kind: NetworkAttachmentDefinition
+    group: k8s.cni.cncf.io
+    version: v1
+    name: overlay-for-vms # this name should match the one in overlay-for-vms.yaml
+  fieldref:
+    fieldpath: metadata.name
+- name: NAD_RUNNER_NAMESPACE
+  objref:
+    kind: NetworkAttachmentDefinition
+    group: k8s.cni.cncf.io
+    version: v1
+    name: overlay-for-vms # this name should match the one in overlay-for-vms.yaml
+  fieldref:
+    fieldpath: metadata.namespace
