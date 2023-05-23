@@ -91,9 +91,13 @@ $ grep -E -B 3 -A 3 '[<=>]{7}' $tmpdir/cluster-autoscaler/utils/kubernetes/liste
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
+<<<<<<< Updated upstream
 	policyv1 "k8s.io/api/policy/v1"
+=======
+	policyv1 "k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+>>>>>>> Stashed changes
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
