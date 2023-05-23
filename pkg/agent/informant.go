@@ -196,7 +196,7 @@ func NewInformantServer(
 
 			errDesc := "nil"
 			if status.Err != nil {
-				errDesc = fmt.Sprintf("%s", status.Err)
+				errDesc = fmt.Sprintf("%q", status.Err.Error())
 			}
 			logFunc("Informant server exiting with: retry=%v, err=%s", status.RetryShouldFix, errDesc)
 		}
