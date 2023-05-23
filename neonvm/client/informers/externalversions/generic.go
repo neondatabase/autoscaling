@@ -52,6 +52,8 @@ func (f *genericInformer) Lister() cache.GenericLister {
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
 	// Group=neonvm, Version=v1
+	case v1.SchemeGroupVersion.WithResource("ippools"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Neonvm().V1().IPPools().Informer()}, nil
 	case v1.SchemeGroupVersion.WithResource("virtualmachines"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Neonvm().V1().VirtualMachines().Informer()}, nil
 	case v1.SchemeGroupVersion.WithResource("virtualmachinemigrations"):

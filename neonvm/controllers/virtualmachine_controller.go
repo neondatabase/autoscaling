@@ -45,6 +45,7 @@ import (
 
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/neonvm/pkg/ipam"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -80,6 +81,9 @@ type VirtualMachineReconciler struct {
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;list;watch
+//+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools/finalizers,verbs=update
+//+kubebuilder:rbac:groups=k8s.cni.cncf.io,resources=network-attachment-definitions,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -201,11 +205,47 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 	// to set the ownerRef which means that the Deployment will be deleted by the Kubernetes API.
 	// More info: https://kubernetes.io/docs/tasks/administer-cluster/use-cascading-deletion/
 
+	log := log.FromContext(ctx)
+
 	// The following implementation will raise an event
 	r.Recorder.Event(virtualmachine, "Warning", "Deleting",
 		fmt.Sprintf("Custom Resource %s is being deleted from the namespace %s",
 			virtualmachine.Name,
 			virtualmachine.Namespace))
+
+	// Release overlay IP address
+	if virtualmachine.Spec.ExtraNetwork != nil {
+		// Create IPAM object
+		nadName, err := nadIpamName()
+		if err != nil {
+			// ignore error
+			log.Info("ignored error", err)
+			return nil
+		}
+		nadNamespace, err := nadIpamNamespace()
+		if err != nil {
+			// ignore error
+			log.Info("ignored error", err)
+			return nil
+		}
+		ipam, err := ipam.New(ctx, nadName, nadNamespace)
+		if err != nil {
+			// ignore error
+			log.Info("ignored error", err)
+			return nil
+		}
+		defer ipam.Close()
+		ip, err := ipam.ReleaseIP(ctx, virtualmachine.Name, virtualmachine.Namespace)
+		if err != nil {
+			// ignore error
+			log.Info("fail to release IP", "error", err)
+			return nil
+		}
+		message := fmt.Sprintf("Released IP %s", ip.String())
+		log.Info(message)
+		r.Recorder.Event(virtualmachine, "Normal", "OverlayNet", message)
+	}
+
 	return nil
 }
 
@@ -240,6 +280,36 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 	switch virtualmachine.Status.Phase {
 
 	case "":
+		// Acquire overlay IP address
+		if virtualmachine.Spec.ExtraNetwork != nil &&
+			virtualmachine.Spec.ExtraNetwork.Enable &&
+			len(virtualmachine.Status.ExtraNetIP) == 0 {
+			// Create IPAM object
+			nadName, err := nadIpamName()
+			if err != nil {
+				return err
+			}
+			nadNamespace, err := nadIpamNamespace()
+			if err != nil {
+				return err
+			}
+			ipam, err := ipam.New(ctx, nadName, nadNamespace)
+			if err != nil {
+				log.Error(err, "failed to create IPAM")
+				return err
+			}
+			defer ipam.Close()
+			ip, err := ipam.AcquireIP(ctx, virtualmachine.Name, virtualmachine.Namespace)
+			if err != nil {
+				log.Error(err, "fail to acquire IP")
+				return err
+			}
+			virtualmachine.Status.ExtraNetIP = ip.IP.String()
+			virtualmachine.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
+			message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
+			log.Info(message)
+			r.Recorder.Event(virtualmachine, "Normal", "OverlayNet", message)
+		}
 		// VirtualMachine just created, change Phase to "Pending"
 		virtualmachine.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
@@ -278,29 +348,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
-			// get overlay IP address from Network Status (provided by NetworkAttachmentDefinition)
-			if virtualmachine.Spec.ExtraNetwork != nil {
-				if virtualmachine.Spec.ExtraNetwork.Enable {
-					networkStatusList := []nadapiv1.NetworkStatus{}
-					if vmRunner.Annotations[nadapiv1.NetworkStatusAnnot] != "" {
-						if err := json.Unmarshal([]byte(vmRunner.Annotations[nadapiv1.NetworkStatusAnnot]), &networkStatusList); err != nil {
-							log.Error(err, "can not retrieve network status")
-							return err
-						}
-					}
-					for _, networkStatus := range networkStatusList {
-						if networkStatus.Interface == virtualmachine.Spec.ExtraNetwork.Interface && len(networkStatus.IPs) > 0 {
-							virtualmachine.Status.ExtraNetIP = networkStatus.IPs[0]
-							virtualmachine.Status.ExtraNetMask = vmv1.OverlayNetworkMask
-							r.Recorder.Event(virtualmachine, "Normal", "OverlayNet",
-								fmt.Sprintf("VirtualMachine %s got IP %s from overlay network",
-									virtualmachine.Name,
-									virtualmachine.Status.ExtraNetIP))
-							break
-						}
-					}
-				}
-			}
 		case corev1.PodSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -990,18 +1037,22 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "runner"
 
 	// use multus network to add extra network interface
-	if virtualmachine.Spec.ExtraNetwork != nil {
-		if virtualmachine.Spec.ExtraNetwork.Enable {
-			pod.ObjectMeta.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", virtualmachine.Spec.ExtraNetwork.MultusNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
-			pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{
-				Name: "NETWORK_STATUS",
-				ValueFrom: &corev1.EnvVarSource{
-					FieldRef: &corev1.ObjectFieldSelector{
-						FieldPath: fmt.Sprintf("metadata.annotations['%s']", nadapiv1.NetworkStatusAnnot),
-					},
-				},
-			})
+	if virtualmachine.Spec.ExtraNetwork != nil && virtualmachine.Spec.ExtraNetwork.Enable {
+		var nadNetwork string
+		if len(virtualmachine.Spec.ExtraNetwork.MultusNetwork) > 0 { // network specified in spec
+			nadNetwork = virtualmachine.Spec.ExtraNetwork.MultusNetwork
+		} else { // get network from env variables
+			nadName, err := nadRunnerName()
+			if err != nil {
+				return nil, err
+			}
+			nadNamespace, err := nadRunnerNamespace()
+			if err != nil {
+				return nil, err
+			}
+			nadNetwork = fmt.Sprintf("%s/%s", nadNamespace, nadName)
 		}
+		pod.ObjectMeta.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", nadNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
 	}
 
 	return pod, nil
@@ -1053,4 +1104,33 @@ func (r *VirtualMachineReconciler) tryUpdateVM(ctx context.Context, virtualmachi
 	}
 
 	return nil
+}
+
+// return Netwrok Attachment Definition name with IPAM settings
+func nadIpamName() (string, error) {
+	return getEnvVarValue("NAD_IPAM_NAME")
+}
+
+// return Netwrok Attachment Definition namespace with IPAM settings
+func nadIpamNamespace() (string, error) {
+	return getEnvVarValue("NAD_IPAM_NAMESPACE")
+}
+
+// return Netwrok Attachment Definition name for second interface in Runner
+func nadRunnerName() (string, error) {
+	return getEnvVarValue("NAD_RUNNER_NAME")
+}
+
+// return Netwrok Attachment Definition namespace for second interface in Runner
+func nadRunnerNamespace() (string, error) {
+	return getEnvVarValue("NAD_RUNNER_NAMESPACE")
+}
+
+// return env variable value
+func getEnvVarValue(envVarName string) (string, error) {
+	value, found := os.LookupEnv(envVarName)
+	if !found {
+		return "", fmt.Errorf("unable to find %s environment variable", envVarName)
+	}
+	return value, nil
 }

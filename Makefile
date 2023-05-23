@@ -272,6 +272,7 @@ render-manifests: $(RENDERED) kustomize
 	cd deploy && $(KUSTOMIZE) edit set image autoscale-scheduler=$(AUTOSCALER_SCHEDULER_IMG) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd deploy && $(KUSTOMIZE) edit set image autoscaler-agent=$(AUTOSCALER_AGENT_IMG) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > $(RENDERED)/multus.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
@@ -289,6 +290,7 @@ render-release: $(RENDERED) kustomize
 	cd deploy && $(KUSTOMIZE) edit set image autoscale-scheduler=$(AUTOSCALER_SCHEDULER_IMG)
 	cd deploy && $(KUSTOMIZE) edit set image autoscaler-agent=$(AUTOSCALER_AGENT_IMG)
 	# Build:
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > $(RENDERED)/multus.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
@@ -303,6 +305,8 @@ render-release: $(RENDERED) kustomize
 deploy: kind-load manifests render-manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	kubectl apply -f $(RENDERED)/multus.yaml
 	kubectl -n kube-system rollout status daemonset kube-multus-ds
+	kubectl apply -f $(RENDERED)/whereabouts.yaml
+	kubectl -n kube-system rollout status daemonset whereabouts
 	kubectl apply -f $(RENDERED)/neonvm.yaml
 	kubectl -n neonvm-system rollout status daemonset  neonvm-device-plugin
 	kubectl -n neonvm-system rollout status daemonset  neonvm-vxlan-controller

@@ -42,12 +42,6 @@ const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
 // The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
 const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 
-// Overlay netwrok CIDR details
-const (
-	OverlayNetworkIPNet string = "10.100.0.0"
-	OverlayNetworkMask  string = "255.255.240.0" // /20
-)
-
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
 // JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
 type VirtualMachineUsage struct {
@@ -330,13 +324,8 @@ type ExtraNetwork struct {
 	// +optional
 	Interface string `json:"interface"`
 	// Multus Network name specified in network-attachments-definition.
-	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net-ipam
 	// +optional
-	MultusNetwork string `json:"multusNetwork"`
-	// Multus Network name specified in network-attachments-definition.
-	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net
-	// +optional
-	MultusNetworkNoIP string `json:"multusNetworkNoIP"`
+	MultusNetwork string `json:"multusNetwork,omitempty"`
 }
 
 // VirtualMachineStatus defines the observed state of VirtualMachine

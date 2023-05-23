@@ -27,6 +27,7 @@ import (
 
 type NeonvmV1Interface interface {
 	RESTClient() rest.Interface
+	IPPoolsGetter
 	VirtualMachinesGetter
 	VirtualMachineMigrationsGetter
 }
@@ -34,6 +35,10 @@ type NeonvmV1Interface interface {
 // NeonvmV1Client is used to interact with features provided by the neonvm group.
 type NeonvmV1Client struct {
 	restClient rest.Interface
+}
+
+func (c *NeonvmV1Client) IPPools(namespace string) IPPoolInterface {
+	return newIPPools(c, namespace)
 }
 
 func (c *NeonvmV1Client) VirtualMachines(namespace string) VirtualMachineInterface {
