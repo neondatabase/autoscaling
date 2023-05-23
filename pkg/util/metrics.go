@@ -1,7 +1,5 @@
 package util
 
-// Prometheus metrics server common to >1 component
-
 import (
 	"context"
 	"errors"
@@ -12,8 +10,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 )
+
+func RegisterMetric[P prometheus.Collector](reg *prometheus.Registry, collector P) P {
+	reg.MustRegister(collector)
+	return collector
+}
+
+// Prometheus metrics server common to >1 component
 
 // Starts the prometheus server in a background thread. Returns error if binding on the port fails.
 func StartPrometheusMetricsServer(ctx context.Context, port uint16, reg *prometheus.Registry) error {
