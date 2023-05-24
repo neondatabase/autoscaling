@@ -930,7 +930,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	if pod.ObjectMeta.Annotations == nil {
 		pod.ObjectMeta.Annotations = map[string]string{}
 	}
-	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "runner"
+	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 
 	// use multus network to add extra network interface
 	if virtualmachine.Spec.ExtraNetwork != nil {
