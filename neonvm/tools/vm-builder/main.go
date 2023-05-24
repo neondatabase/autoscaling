@@ -21,7 +21,7 @@ import (
 
 // vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
 
-var entrypointPrefix = []string{"/usr/sbin/cgexec", "-g", "*:neon-postgres"}
+var entrypointPrefix = []string{"/usr/bin/cgexec", "-g", "memory:neon-postgres"}
 
 const (
 	dockerfileVmBuilder = `
