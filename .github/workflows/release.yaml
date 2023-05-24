@@ -138,14 +138,15 @@ jobs:
             kustomize version --short
             cd ${GITHUB_WORKSPACE}/neonvm/config/common/controller && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_vcs_info.outputs.version }}
             cd ${GITHUB_WORKSPACE}/neonvm/config/default-vxlan/vxlan-controller && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
-            cd ${GITHUB_WORKSPACE}/deploy && kustomize edit set image autoscale-scheduler=${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-            cd ${GITHUB_WORKSPACE}/deploy && kustomize edit set image autoscaler-agent=${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/deploy/scheduler && kustomize edit set image autoscale-scheduler=${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+            cd ${GITHUB_WORKSPACE}/deploy/agent && kustomize edit set image autoscaler-agent=${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
             cd ${GITHUB_WORKSPACE}
             mkdir -p rendered_manifests
             kustomize build neonvm/config/default-vxlan/multus-eks > rendered_manifests/multus-eks.yaml
             kustomize build neonvm/config/default-vxlan/multus > rendered_manifests/multus.yaml
             kustomize build neonvm/config/default-vxlan > rendered_manifests/neonvm.yaml
-            kustomize build deploy > rendered_manifests/autoscaler.yaml
+            kustomize build deploy/scheduler > rendered_manifests/autoscale-scheduler.yaml
+            kustomize build deploy/agent > rendered_manifests/autoscaler-agent.yaml
 
       # Because we want a docker image for the VM informant, the easiest way for us to also provide
       # a binary is by just extracting it from the container image itself.
