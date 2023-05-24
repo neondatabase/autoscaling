@@ -22,8 +22,6 @@ config.billing = {
 }
 ```
 
-... and all of `vmscrape.yaml`.
-
 ### Other regions
 
 The other "dev" regions have the following deployed:

@@ -17,5 +17,5 @@ download () {
 
 download 'autoscale-scheduler'
 download 'autoscaler-agent'
-download 'neonvm-multus'
-download 'neonvm-vxlan'
+download 'neonvm'
+download 'multus'

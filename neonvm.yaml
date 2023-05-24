@@ -470,7 +470,7 @@ spec:
   - additionalPrinterColumns:
     - jsonPath: .status.cpus
       name: Cpus
-      type: integer
+      type: string
     - jsonPath: .status.memorySize
       name: Memory
       type: string
@@ -1518,6 +1518,10 @@ spec:
                   - name
                   type: object
                 type: array
+              enableAcceleration:
+                default: true
+                description: Use KVM acceleation
+                type: boolean
               extraNetwork:
                 description: Extra network interface attached to network provided
                   by Mutlus CNI.
@@ -1531,6 +1535,10 @@ spec:
                     description: Interface name.
                     type: string
                   multusNetwork:
+                    default: neonvm-system/neonvm-overlay-net-ipam
+                    description: Multus Network name specified in network-attachments-definition.
+                    type: string
+                  multusNetworkNoIP:
                     default: neonvm-system/neonvm-overlay-net
                     description: Multus Network name specified in network-attachments-definition.
                     type: string
@@ -1713,7 +1721,7 @@ spec:
                 minimum: 1
                 type: integer
               restartPolicy:
-                default: Never
+                default: Always
                 enum:
                 - Always
                 - OnFailure
@@ -1899,12 +1907,6 @@ metadata:
   name: neonvm-vxlan-controller
   namespace: neonvm-system
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: neonvm-vxlan-ipam
-  namespace: neonvm-system
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -1949,22 +1951,6 @@ rules:
   verbs:
   - create
   - patch
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: neonvm-vxlan-ipam
-  namespace: neonvm-system
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - configmaps
-  verbs:
-  - get
-  - create
-  - update
-  - delete
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -2097,6 +2083,122 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: neonvm
+    app.kubernetes.io/instance: virtualmachine-editor-role
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/part-of: neonvm
+  name: neonvm-virtualmachine-editor-role
+rules:
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachines/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: neonvm
+    app.kubernetes.io/instance: virtualmachine-viewer-role
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/part-of: neonvm
+  name: neonvm-virtualmachine-viewer-role
+rules:
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachines/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: neonvm
+    app.kubernetes.io/instance: virtualmachinemigration-editor-role
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/part-of: neonvm
+  name: neonvm-virtualmachinemigration-editor-role
+rules:
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachinemigrations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachinemigrations/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: neonvm
+    app.kubernetes.io/instance: virtualmachinemigration-viewer-role
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/part-of: neonvm
+  name: neonvm-virtualmachinemigration-viewer-role
+rules:
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachinemigrations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - virtualmachinemigrations/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
   name: neonvm-vxlan-controller
 rules:
 - apiGroups:
@@ -2125,20 +2227,6 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: neonvm-controller
-  namespace: neonvm-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: neonvm-vxlan-ipam
-  namespace: neonvm-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: neonvm-vxlan-ipam
-subjects:
-- kind: ServiceAccount
-  name: neonvm-vxlan-ipam
   namespace: neonvm-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2195,16 +2283,6 @@ subjects:
   namespace: neonvm-system
 ---
 apiVersion: v1
-data:
-  GOIPAM_CIDR: 10.100.0.0/20
-  GOIPAM_CONFIGMAP_NAME: neonvm-vxlan-ipam-data
-  GOIPAM_LOG_LEVEL: debug
-kind: ConfigMap
-metadata:
-  name: neonvm-vxlan-ipam
-  namespace: neonvm-system
----
-apiVersion: v1
 kind: Service
 metadata:
   labels:
@@ -2225,28 +2303,6 @@ spec:
     targetPort: https
   selector:
     control-plane: controller
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app.kubernetes.io/component: vxlan-ipam
-    app.kubernetes.io/created-by: neonvm
-    app.kubernetes.io/instance: vxlan-ipam
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: deployment
-    app.kubernetes.io/part-of: neonvm
-    control-plane: vxlan-ipam
-  name: neonvm-vxlan-ipam
-  namespace: neonvm-system
-spec:
-  clusterIP: None
-  ports:
-  - port: 9090
-    protocol: TCP
-    targetPort: grpc
-  selector:
-    app.kubernetes.io/component: vxlan-ipam
 ---
 apiVersion: v1
 kind: Service
@@ -2321,7 +2377,7 @@ spec:
         env:
         - name: IPAM_SERVER
           value: http://neonvm-vxlan-ipam:9090
-        image: neondatabase/neonvm-controller:v0.7.2
+        image: neondatabase/neonvm-controller:v0.8.0
         livenessProbe:
           httpGet:
             path: /healthz
@@ -2389,81 +2445,75 @@ spec:
           secretName: webhook-server-cert
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   labels:
-    app.kubernetes.io/component: vxlan-ipam
-    app.kubernetes.io/created-by: neonvm
-    app.kubernetes.io/instance: vxlan-ipam
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: deployment
-    app.kubernetes.io/part-of: neonvm
-    control-plane: vxlan-ipam
-  name: neonvm-vxlan-ipam
+    app.kubernetes.io/name: device-plugin
+  name: neonvm-device-plugin
   namespace: neonvm-system
 spec:
-  replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/component: vxlan-ipam
-  strategy:
-    type: Recreate
+      app.kubernetes.io/name: device-plugin
   template:
     metadata:
-      annotations:
-        kubectl.kubernetes.io/default-container: vxlan-ipam
       labels:
-        app.kubernetes.io/component: vxlan-ipam
+        app.kubernetes.io/name: device-plugin
     spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: kubernetes.io/arch
-                operator: In
-                values:
-                - amd64
-              - key: kubernetes.io/os
-                operator: In
-                values:
-                - linux
       containers:
       - args:
-        - vxlan-ipam
-        envFrom:
-        - configMapRef:
-            name: neonvm-vxlan-ipam
-        image: neondatabase/neonvm-vxlan-controller:v0.7.2
-        imagePullPolicy: IfNotPresent
-        livenessProbe:
-          exec:
-            command:
-            - /usr/bin/grpc_health_probe
-            - -addr=:9090
-          initialDelaySeconds: 10
-        name: vxlan-ipam
+        - --log-level
+        - info
+        - --domain
+        - neonvm
+        - --device
+        - |
+          name: kvm
+          groups:
+            - count: 1000
+              paths:
+                - path: /dev/kvm
+        - --device
+        - |
+          name: vhost-net
+          groups:
+            - count: 1000
+              paths:
+                - path: /dev/vhost-net
+        image: squat/generic-device-plugin
+        name: generic-device-plugin
         ports:
-        - containerPort: 9090
-          name: grpc
-          protocol: TCP
-        readinessProbe:
-          exec:
-            command:
-            - /usr/bin/grpc_health_probe
-            - -addr=:9090
-          initialDelaySeconds: 5
+        - containerPort: 8080
+          name: http
         resources:
           limits:
-            cpu: 100m
-            memory: 50Mi
+            cpu: 50m
+            memory: 512Mi
           requests:
-            cpu: 100m
-            memory: 50Mi
-      securityContext: {}
-      serviceAccount: vxlan-ipam
-      serviceAccountName: neonvm-vxlan-ipam
-      terminationGracePeriodSeconds: 10
+            cpu: 50m
+            memory: 10Mi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - mountPath: /var/lib/kubelet/device-plugins
+          name: device-plugin
+        - mountPath: /dev
+          name: dev
+      priorityClassName: system-node-critical
+      tolerations:
+      - effect: NoExecute
+        operator: Exists
+      - effect: NoSchedule
+        operator: Exists
+      volumes:
+      - hostPath:
+          path: /var/lib/kubelet/device-plugins
+        name: device-plugin
+      - hostPath:
+          path: /dev
+        name: dev
+  updateStrategy:
+    type: RollingUpdate
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -2511,7 +2561,7 @@ spec:
               fieldPath: status.hostIP
         - name: IPAM_SERVER
           value: http://neonvm-vxlan-ipam:9090
-        image: neondatabase/neonvm-vxlan-controller:v0.7.2
+        image: neondatabase/neonvm-vxlan-controller:v0.8.0
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -2523,7 +2573,7 @@ spec:
         resources:
           limits:
             cpu: 100m
-            memory: 50Mi
+            memory: 512Mi
           requests:
             cpu: 100m
             memory: 50Mi
@@ -2543,7 +2593,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.7.2
+        image: neondatabase/neonvm-vxlan-controller:v0.8.0
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
@@ -2604,6 +2654,16 @@ metadata:
 spec:
   config: '{ "cniVersion": "0.3.1", "name": "neonvm-overlay-net", "type": "bridge",
     "bridge": "neon-br0", "ipam": {} }'
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: neonvm-overlay-net-ipam
+  namespace: neonvm-system
+spec:
+  config: '{ "cniVersion": "0.3.1", "name": "neonvm-overlay-net-ipam", "type": "bridge",
+    "bridge": "neon-br0", "ipam": { "type": "whereabouts", "range": "10.100.0.0/20",
+    "range_start": "10.100.0.100" } }'
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration

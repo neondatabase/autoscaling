@@ -9,41 +9,28 @@ kind: ClusterRoleBinding
 metadata:
   name: autoscaler-view
 roleRef:
+  apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: view
-  apiGroup: rbac.authorization.k8s.io
 subjects:
 - kind: ServiceAccount
   name: autoscaler-agent
   namespace: kube-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: vm-view
-rules:
-- apiGroups: ["vm.neon.tech"]
-  resources: ["virtualmachines"]
-  verbs: ["get", "list", "patch", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: autoscaler-vm-view
+  name: autoscaler-virtualmachine-editor
 roleRef:
-  kind: ClusterRole
-  name: vm-view
   apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: neonvm-virtualmachine-editor-role
 subjects:
 - kind: ServiceAccount
   name: autoscaler-agent
   namespace: kube-system
 ---
 apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: autoscaler-agent-config
-  namespace: kube-system
 data:
   config.json: '{
     "scaling": {
@@ -86,6 +73,10 @@ data:
       "timeoutSeconds": 5
     }
   }'
+kind: ConfigMap
+metadata:
+  name: autoscaler-agent-config
+  namespace: kube-system
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -101,35 +92,33 @@ spec:
       labels:
         name: autoscaler-agent
     spec:
-      serviceAccountName: autoscaler-agent
       containers:
-        - name: autoscaler-agent
-          # hey! This image name is hard-coded in .github/workflows/release.yaml - make sure to
-          # update that as well if you change this line!
-          image: neondatabase/autoscaler-agent:v0.7.2
-          ports:
-            - name: metrics
-              containerPort: 9100
-              protocol: TCP
-          resources:
-            limits:
-              memory: 100Mi
-              cpu: 100m
-          env:
-          - name: K8S_NODE_NAME
-            valueFrom:
-              fieldRef:
-                fieldPath: spec.nodeName
-          - name: K8S_POD_IP
-            valueFrom:
-              fieldRef:
-                fieldPath: status.podIP
-          - name: CONFIG_PATH
-            value: /etc/autoscaler-agent-config/config.json
-          volumeMounts:
-          - name: config
-            mountPath: /etc/autoscaler-agent-config
+      - env:
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: CONFIG_PATH
+          value: /etc/autoscaler-agent-config/config.json
+        image: neondatabase/autoscaler-agent:v0.8.0
+        name: autoscaler-agent
+        ports:
+        - containerPort: 9100
+          name: metrics
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 100m
+            memory: 100Mi
+        volumeMounts:
+        - mountPath: /etc/autoscaler-agent-config
+          name: config
+      serviceAccountName: autoscaler-agent
       volumes:
-      - name: config
-        configMap:
+      - configMap:
           name: autoscaler-agent-config
+        name: config
