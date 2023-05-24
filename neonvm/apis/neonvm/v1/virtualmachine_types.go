@@ -422,6 +422,15 @@ type VirtualMachine struct {
 	Status VirtualMachineStatus `json:"status,omitempty"`
 }
 
+func (vm *VirtualMachine) Cleanup() {
+	vm.Status.PodName = ""
+	vm.Status.PodIP = ""
+	vm.Status.Node = ""
+	vm.Status.CPUs = nil
+	vm.Status.MemorySize = nil
+	vm.Status.Phase = ""
+}
+
 //+kubebuilder:object:root=true
 
 // VirtualMachineList contains a list of VirtualMachine

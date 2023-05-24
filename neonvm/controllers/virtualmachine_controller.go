@@ -500,7 +500,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 	case vmv1.VmSucceeded, vmv1.VmFailed:
-		// TODO: implement RestartPolicy
 		switch virtualmachine.Spec.RestartPolicy {
 		case vmv1.RestartPolicyAlways:
 			log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
@@ -510,60 +509,40 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			if err == nil {
 				// delete current runner
 				if err = r.Delete(ctx, vmRunner); err != nil {
-					log.Error(err, "Failed to delete runner Pod", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
 					return err
 				}
 				r.Recorder.Event(virtualmachine, "Normal", "Deleted",
 					fmt.Sprintf("VM runner pod was deleted: %s", vmRunner.Name))
 				log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
-				// TODO: remove thos hack after redesign reconcile loop
-				time.Sleep(time.Second)
 			} else if !apierrors.IsNotFound(err) {
-				log.Error(err, "Failed to get runner Pod to delete")
 				return err
 			}
 			// do cleanup
-			virtualmachine.Status.PodName = ""
-			virtualmachine.Status.PodIP = ""
-			virtualmachine.Status.Node = ""
-			virtualmachine.Status.CPUs = nil
-			virtualmachine.Status.MemorySize = nil
-			// drop VM phase
-			virtualmachine.Status.Phase = ""
+			virtualmachine.Cleanup()
 		case vmv1.RestartPolicyOnFailure:
 			log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
 			// get runner to delete
 			found := true
 			vmRunner := &corev1.Pod{}
 			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
-			if err != nil && apierrors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				found = false
 			} else if err != nil {
-				log.Error(err, "Failed to get runner Pod to delete")
 				return err
 			}
 			// delete runner only when VM failed
 			if found && virtualmachine.Status.Phase == vmv1.VmFailed {
 				// delete current runner
 				if err = r.Delete(ctx, vmRunner); err != nil {
-					log.Error(err, "Failed to delete runner Pod", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
 					return err
 				}
 				r.Recorder.Event(virtualmachine, "Normal", "Deleted",
 					fmt.Sprintf("VM runner pod was deleted: %s", vmRunner.Name))
 				log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
-				// TODO: remove thos hack after redesign reconcile loop
-				time.Sleep(time.Second)
 			}
 			// do cleanup when VM failed OR pod not found (deleted manually?) when VM succeeded
 			if virtualmachine.Status.Phase == vmv1.VmFailed || (!found && virtualmachine.Status.Phase == vmv1.VmSucceeded) {
-				virtualmachine.Status.PodName = ""
-				virtualmachine.Status.PodIP = ""
-				virtualmachine.Status.Node = ""
-				virtualmachine.Status.CPUs = nil
-				virtualmachine.Status.MemorySize = nil
-				// drop VM phase
-				virtualmachine.Status.Phase = ""
+				virtualmachine.Cleanup()
 			}
 		case vmv1.RestartPolicyNever:
 			// TODO: implement TTL or do nothing
