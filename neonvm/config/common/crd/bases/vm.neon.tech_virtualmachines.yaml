@@ -1269,7 +1269,7 @@ spec:
                 minimum: 1
                 type: integer
               restartPolicy:
-                default: Never
+                default: Always
                 enum:
                 - Always
                 - OnFailure
