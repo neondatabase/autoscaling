@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 func isActivePod(pod *corev1.Pod) bool {
@@ -23,11 +24,11 @@ func StartSchedulerWatcher(
 	kubeClient *kubernetes.Clientset,
 	eventBroker *pubsub.Broker[WatchEvent],
 	schedulerName string,
-) (*util.WatchStore[corev1.Pod], error) {
-	return util.Watch(
+) (*watch.WatchStore[corev1.Pod], error) {
+	return watch.Watch(
 		ctx,
 		kubeClient.CoreV1().Pods(schedulerNamespace),
-		util.WatchConfig{
+		watch.WatchConfig{
 			LogName: "scheduler",
 			// We don't need to be super responsive to scheduler changes.
 			//
@@ -35,12 +36,12 @@ func StartSchedulerWatcher(
 			RetryRelistAfter: util.NewTimeRange(time.Second, 4, 5),
 			RetryWatchAfter:  util.NewTimeRange(time.Second, 4, 5),
 		},
-		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
+		watch.WatchAccessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
-		util.InitWatchModeSync,
+		watch.InitWatchModeSync,
 		metav1.ListOptions{LabelSelector: schedulerLabelSelector(schedulerName)},
-		util.WatchHandlerFuncs[*corev1.Pod]{
+		watch.WatchHandlerFuncs[*corev1.Pod]{
 			AddFunc: func(pod *corev1.Pod, preexisting bool) {
 				if isActivePod(pod) {
 					event := WatchEvent{kind: eventKindReady, info: newSchedulerInfo(pod)}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 type vmEvent struct {
@@ -38,22 +39,22 @@ func startVMWatcher(
 	vmClient *vmclient.Clientset,
 	nodeName string,
 	vmEvents chan<- vmEvent,
-) (*util.WatchStore[vmapi.VirtualMachine], error) {
-	return util.Watch(
+) (*watch.WatchStore[vmapi.VirtualMachine], error) {
+	return watch.Watch(
 		ctx,
 		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
-		util.WatchConfig{
+		watch.WatchConfig{
 			LogName: "VMs",
 			// We want to be relatively snappy; don't wait for too long before retrying.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 500, 1000),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 500, 1000),
 		},
-		util.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
+		watch.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
 			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
 		},
-		util.InitWatchModeDefer,
+		watch.InitWatchModeDefer,
 		metav1.ListOptions{},
-		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{
+		watch.WatchHandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(vm, vmEventAdded)

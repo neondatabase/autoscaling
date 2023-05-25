@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 // SchedulerWatch is the interface returned by WatchSchedulerUpdates
@@ -60,7 +61,7 @@ func WatchSchedulerUpdates(
 	ctx context.Context,
 	logger util.PrefixLogger,
 	eventBroker *pubsub.Broker[WatchEvent],
-	store *util.WatchStore[corev1.Pod],
+	store *watch.WatchStore[corev1.Pod],
 ) (SchedulerWatch, *SchedulerInfo, error) {
 	events := eventBroker.Subscribe(ctx)
 	readyQueue := make(chan SchedulerInfo)
@@ -84,7 +85,7 @@ func WatchSchedulerUpdates(
 		logger:     logger,
 	}
 
-	setStore := make(chan *util.WatchStore[corev1.Pod])
+	setStore := make(chan *watch.WatchStore[corev1.Pod])
 	defer close(setStore)
 
 	watcher := SchedulerWatch{
@@ -129,7 +130,7 @@ type schedulerWatchState struct {
 
 	mode   watchCmd
 	events <-chan WatchEvent
-	store  *util.WatchStore[corev1.Pod]
+	store  *watch.WatchStore[corev1.Pod]
 
 	readyQueue chan<- SchedulerInfo
 	deleted    chan<- SchedulerInfo
@@ -141,8 +142,8 @@ type schedulerWatchState struct {
 	logger util.PrefixLogger
 }
 
-func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchStore[corev1.Pod]) {
-	sndSetStore := make(chan *util.WatchStore[corev1.Pod])
+func (w schedulerWatchState) run(ctx context.Context, setStore chan *watch.WatchStore[corev1.Pod]) {
+	sndSetStore := make(chan *watch.WatchStore[corev1.Pod])
 	defer close(sndSetStore)
 
 	defer w.stop.Close()

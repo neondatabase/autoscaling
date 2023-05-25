@@ -1,4 +1,4 @@
-package util
+package watch
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/klog/v2"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 // WatchClient is implemented by the specific interfaces of kubernetes clients, like
@@ -33,10 +35,10 @@ type WatchConfig struct {
 
 	// RetryRelistAfter gives a retry interval when a re-list fails. If left nil, then Watch will
 	// not retry.
-	RetryRelistAfter *TimeRange
+	RetryRelistAfter *util.TimeRange
 	// RetryWatchAfter gives a retry interval when a non-initial watch fails. If left nil, then
 	// Watch will not retry.
-	RetryWatchAfter *TimeRange
+	RetryWatchAfter *util.TimeRange
 }
 
 // WatchAccessors provides the "glue" functions for Watch to go from a list L (returned by the
@@ -131,7 +133,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	// the initial list
 	opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
 
-	sendStop, stopSignal := NewSingleSignalPair()
+	sendStop, stopSignal := util.NewSingleSignalPair()
 
 	store := WatchStore[T]{
 		objects:       make(map[types.UID]*T),
@@ -409,7 +411,7 @@ func handleEvent[T any, P ~*T](
 	ptr P,
 ) error {
 	uid := meta.GetUID()
-	name := NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
+	name := util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 	obj := (*T)(ptr)
 
 	// Some of the cases below don't actually require locking the store. Most of the events that we
@@ -487,7 +489,7 @@ type WatchStore[T any] struct {
 	nextIndexID uint64
 	indexes     map[uint64]WatchIndex[T]
 
-	stopSignal SignalSender
+	stopSignal util.SignalSender
 	stopped    atomic.Bool
 }
 
@@ -607,20 +609,20 @@ func NewNameIndex[T any]() *NameIndex[T] {
 
 	// This doesn't *need* to be a pointer, but the intent is a little more clear this way.
 	return &NameIndex[T]{
-		namespacedNames: make(map[NamespacedName]*T),
+		namespacedNames: make(map[util.NamespacedName]*T),
 	}
 }
 
 // NameIndex is a WatchIndex that provides efficient lookup for a value with a particular name
 type NameIndex[T any] struct {
-	namespacedNames map[NamespacedName]*T
+	namespacedNames map[util.NamespacedName]*T
 }
 
 // note: requires that *T implements metav1.ObjectMetaAccessor
-func keyForObj[T any](obj *T) NamespacedName {
+func keyForObj[T any](obj *T) util.NamespacedName {
 	meta := any(obj).(metav1.ObjectMetaAccessor).GetObjectMeta()
 
-	return NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
+	return util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 }
 
 func (i *NameIndex[T]) Add(obj *T) {
@@ -635,6 +637,6 @@ func (i *NameIndex[T]) Delete(obj *T) {
 }
 
 func (i *NameIndex[T]) Get(namespace string, name string) (obj *T, ok bool) {
-	obj, ok = i.namespacedNames[NamespacedName{namespace, name}]
+	obj, ok = i.namespacedNames[util.NamespacedName{Namespace: namespace, Name: name}]
 	return
 }

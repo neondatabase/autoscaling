@@ -16,6 +16,7 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 // watchPodEvents continuously tracks a handful of Pod-related events that we care about. These
@@ -30,10 +31,10 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	submitVMDeletion func(util.NamespacedName),
 	submitPodDeletion func(util.NamespacedName),
 ) error {
-	_, err := util.Watch(
+	_, err := watch.Watch(
 		ctx,
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
-		util.WatchConfig{
+		watch.WatchConfig{
 			LogName: "pods",
 			// We want to be up-to-date in tracking deletions, so that our reservations are correct.
 			//
@@ -41,12 +42,12 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
 		},
-		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
+		watch.WatchAccessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
-		util.InitWatchModeSync, // note: doesn't matter, because AddFunc = nil.
+		watch.InitWatchModeSync, // note: doesn't matter, because AddFunc = nil.
 		metav1.ListOptions{},
-		util.WatchHandlerFuncs[*corev1.Pod]{
+		watch.WatchHandlerFuncs[*corev1.Pod]{
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
 				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
 					name := util.NamespacedName{Name: newPod.Name, Namespace: newPod.Namespace}
@@ -113,22 +114,22 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
 	submitVMDisabledScaling func(util.NamespacedName),
 	submitVMBoundsChanged func(_ *api.VmInfo, podName string),
-) (*util.WatchStore[vmapi.VirtualMachine], error) {
-	return util.Watch(
+) (*watch.WatchStore[vmapi.VirtualMachine], error) {
+	return watch.Watch(
 		ctx,
 		e.vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
-		util.WatchConfig{
+		watch.WatchConfig{
 			LogName: "VMs",
 			// FIXME: make these durations configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
 		},
-		util.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
+		watch.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
 			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
 		},
-		util.InitWatchModeSync, // Must sync here so that initial cluster state is read correctly.
+		watch.InitWatchModeSync, // Must sync here so that initial cluster state is read correctly.
 		metav1.ListOptions{},
-		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{
+		watch.WatchHandlerFuncs[*vmapi.VirtualMachine]{
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
 				oldInfo, err := api.ExtractVmInfo(oldVM)
 				if err != nil {

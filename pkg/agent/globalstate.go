@@ -21,6 +21,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 // agentState is the global state for the autoscaler agent
@@ -36,14 +37,14 @@ type agentState struct {
 	kubeClient           *kubernetes.Clientset
 	vmClient             *vmclient.Clientset
 	schedulerEventBroker *pubsub.Broker[schedwatch.WatchEvent]
-	schedulerStore       *util.WatchStore[corev1.Pod]
+	schedulerStore       *watch.WatchStore[corev1.Pod]
 	metrics              PromMetrics
 }
 
 func (r MainRunner) newAgentState(
 	podIP string,
 	broker *pubsub.Broker[schedwatch.WatchEvent],
-	schedulerStore *util.WatchStore[corev1.Pod],
+	schedulerStore *watch.WatchStore[corev1.Pod],
 ) (*agentState, *prometheus.Registry) {
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
