@@ -39,22 +39,22 @@ func startVMWatcher(
 	vmClient *vmclient.Clientset,
 	nodeName string,
 	vmEvents chan<- vmEvent,
-) (*watch.WatchStore[vmapi.VirtualMachine], error) {
+) (*watch.Store[vmapi.VirtualMachine], error) {
 	return watch.Watch(
 		ctx,
 		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
-		watch.WatchConfig{
+		watch.Config{
 			LogName: "VMs",
 			// We want to be relatively snappy; don't wait for too long before retrying.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 500, 1000),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 500, 1000),
 		},
-		watch.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
+		watch.Accessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
 			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
 		},
-		watch.InitWatchModeDefer,
+		watch.InitModeDefer,
 		metav1.ListOptions{},
-		watch.WatchHandlerFuncs[*vmapi.VirtualMachine]{
+		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(vm, vmEventAdded)

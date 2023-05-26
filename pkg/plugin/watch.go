@@ -34,7 +34,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	_, err := watch.Watch(
 		ctx,
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
-		watch.WatchConfig{
+		watch.Config{
 			LogName: "pods",
 			// We want to be up-to-date in tracking deletions, so that our reservations are correct.
 			//
@@ -42,12 +42,12 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
 		},
-		watch.WatchAccessors[*corev1.PodList, corev1.Pod]{
+		watch.Accessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
-		watch.InitWatchModeSync, // note: doesn't matter, because AddFunc = nil.
+		watch.InitModeSync, // note: doesn't matter, because AddFunc = nil.
 		metav1.ListOptions{},
-		watch.WatchHandlerFuncs[*corev1.Pod]{
+		watch.HandlerFuncs[*corev1.Pod]{
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
 				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
 					name := util.NamespacedName{Name: newPod.Name, Namespace: newPod.Namespace}
@@ -114,22 +114,22 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
 	submitVMDisabledScaling func(util.NamespacedName),
 	submitVMBoundsChanged func(_ *api.VmInfo, podName string),
-) (*watch.WatchStore[vmapi.VirtualMachine], error) {
+) (*watch.Store[vmapi.VirtualMachine], error) {
 	return watch.Watch(
 		ctx,
 		e.vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
-		watch.WatchConfig{
+		watch.Config{
 			LogName: "VMs",
 			// FIXME: make these durations configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
 		},
-		watch.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
+		watch.Accessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
 			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
 		},
-		watch.InitWatchModeSync, // Must sync here so that initial cluster state is read correctly.
+		watch.InitModeSync, // Must sync here so that initial cluster state is read correctly.
 		metav1.ListOptions{},
-		watch.WatchHandlerFuncs[*vmapi.VirtualMachine]{
+		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
 				oldInfo, err := api.ExtractVmInfo(oldVM)
 				if err != nil {
@@ -161,7 +161,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 
 				// If the pod changed, then we're going to handle a deletion event for the old pod,
 				// plus creation event for the new pod. Don't worry about it - because all VM
-				// information comes from this WatchStore anyways, there's no possibility of missing
+				// information comes from this watch.Store anyways, there's no possibility of missing
 				// an update.
 				if oldVM.Status.PodName != newVM.Status.PodName {
 					return

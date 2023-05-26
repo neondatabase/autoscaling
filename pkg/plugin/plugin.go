@@ -46,7 +46,7 @@ type AutoscaleEnforcer struct {
 }
 
 // abbreviation, because this type is pretty verbose
-type IndexedVMStore = watch.IndexedWatchStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]
+type IndexedVMStore = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
 var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
@@ -91,8 +91,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 			lock: util.NewChanMutex(),
 			conf: config,
 		},
-		metrics: PromMetrics{},                                                                           //nolint:exhaustruct // set by startPrometheusServer
-		vmStore: watch.IndexedWatchStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]{}, // set below.
+		metrics: PromMetrics{},                                                                      //nolint:exhaustruct // set by startPrometheusServer
+		vmStore: watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]{}, // set below.
 	}
 
 	if p.state.conf.DumpState != nil {
@@ -133,7 +133,7 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
 
-	p.vmStore = watch.NewIndexedWatchStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
+	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
 
 	// ... but before handling the events, read the current cluster state:
 	klog.Infof("[autoscale-enforcer] Reading initial cluster state")

@@ -11,9 +11,9 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
-type VMStoreForNode = watch.IndexedWatchStore[vmapi.VirtualMachine, *VMNodeIndex]
+type VMStoreForNode = watch.IndexedStore[vmapi.VirtualMachine, *VMNodeIndex]
 
-// VMNodeIndex is a watch.WatchIndex that stores all of the VMs for a particular node
+// VMNodeIndex is a watch.Index that stores all of the VMs for a particular node
 //
 // We have to implement this ourselves because K8s does not (as of 2023-04-04) support field
 // selectors on CRDs, so we can't have the API server filter out VMs for us.

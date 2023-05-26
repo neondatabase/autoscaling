@@ -52,7 +52,7 @@ func (r MainRunner) Run(ctx context.Context) error {
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")
 		// TODO: catch panics here, bubble those into a clean-ish shutdown.
-		storeForNode := watch.NewIndexedWatchStore(vmWatchStore, NewVMNodeIndex(r.EnvArgs.K8sNodeName))
+		storeForNode := watch.NewIndexedStore(vmWatchStore, NewVMNodeIndex(r.EnvArgs.K8sNodeName))
 		go RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode)
 	}
 

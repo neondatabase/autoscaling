@@ -61,7 +61,7 @@ func WatchSchedulerUpdates(
 	ctx context.Context,
 	logger util.PrefixLogger,
 	eventBroker *pubsub.Broker[WatchEvent],
-	store *watch.WatchStore[corev1.Pod],
+	store *watch.Store[corev1.Pod],
 ) (SchedulerWatch, *SchedulerInfo, error) {
 	events := eventBroker.Subscribe(ctx)
 	readyQueue := make(chan SchedulerInfo)
@@ -85,7 +85,7 @@ func WatchSchedulerUpdates(
 		logger:     logger,
 	}
 
-	setStore := make(chan *watch.WatchStore[corev1.Pod])
+	setStore := make(chan *watch.Store[corev1.Pod])
 	defer close(setStore)
 
 	watcher := SchedulerWatch{
@@ -130,7 +130,7 @@ type schedulerWatchState struct {
 
 	mode   watchCmd
 	events <-chan WatchEvent
-	store  *watch.WatchStore[corev1.Pod]
+	store  *watch.Store[corev1.Pod]
 
 	readyQueue chan<- SchedulerInfo
 	deleted    chan<- SchedulerInfo
@@ -142,8 +142,8 @@ type schedulerWatchState struct {
 	logger util.PrefixLogger
 }
 
-func (w schedulerWatchState) run(ctx context.Context, setStore chan *watch.WatchStore[corev1.Pod]) {
-	sndSetStore := make(chan *watch.WatchStore[corev1.Pod])
+func (w schedulerWatchState) run(ctx context.Context, setStore chan *watch.Store[corev1.Pod]) {
+	sndSetStore := make(chan *watch.Store[corev1.Pod])
 	defer close(sndSetStore)
 
 	defer w.stop.Close()

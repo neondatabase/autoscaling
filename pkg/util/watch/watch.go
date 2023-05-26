@@ -19,17 +19,17 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-// WatchClient is implemented by the specific interfaces of kubernetes clients, like
+// Client is implemented by the specific interfaces of kubernetes clients, like
 // `Clientset.CoreV1().Pods(namespace)` or `..Nodes()`
 //
 // This interface should be *already implemented* by whatever the correct client is.
-type WatchClient[L any] interface {
+type Client[L any] interface {
 	List(context.Context, metav1.ListOptions) (L, error)
 	Watch(context.Context, metav1.ListOptions) (watch.Interface, error)
 }
 
-// WatchConfig is the miscellaneous configuration used by Watch
-type WatchConfig struct {
+// Config is the miscellaneous configuration used by Watch
+type Config struct {
 	// LogName is the name of the watcher for use in logs
 	LogName string
 
@@ -41,41 +41,41 @@ type WatchConfig struct {
 	RetryWatchAfter *util.TimeRange
 }
 
-// WatchAccessors provides the "glue" functions for Watch to go from a list L (returned by the
+// Accessors provides the "glue" functions for Watch to go from a list L (returned by the
 // client's List) to the underlying slice of items []T
-type WatchAccessors[L any, T any] struct {
+type Accessors[L any, T any] struct {
 	Items func(L) []T
 }
 
-// WatchObject is implemented by pointers to T, where T is typically the resource that we're
+// Object is implemented by pointers to T, where T is typically the resource that we're
 // actually watching.
 //
 // Example implementors: *corev1.Pod, *corev1.Node
-type WatchObject[T any] interface {
+type Object[T any] interface {
 	~*T
 	runtime.Object
 	metav1.ObjectMetaAccessor
 }
 
-// WatchHandlerFuncs provides the set of callbacks to use for events from Watch
-type WatchHandlerFuncs[P any] struct {
+// HandlerFuncs provides the set of callbacks to use for events from Watch
+type HandlerFuncs[P any] struct {
 	AddFunc    func(obj P, preexisting bool)
 	UpdateFunc func(oldObj P, newObj P)
 	DeleteFunc func(obj P, mayBeStale bool)
 }
 
-// WatchIndex represents types that provide some kind of additional index on top of the base listing
+// Index represents types that provide some kind of additional index on top of the base listing
 //
 // Indexing is functionally implemented in the same way that WatchHandlerFuncs is, with the main
 // difference being that more things are done for you with WatchIndexes. In particular, indexes can
 // be added and removed after the Watch has already started, and the locking behavior is explicit.
-type WatchIndex[T any] interface {
+type Index[T any] interface {
 	Add(obj *T)
 	Update(oldObj, newObj *T)
 	Delete(obj *T)
 }
 
-// InitWatchMode dictates the behavior of Watch with respect to any initial calls to
+// InitMode dictates the behavior of Watch with respect to any initial calls to
 // handlers.AddFunc before returning
 //
 // If set to InitWatchModeSync, then AddFunc will be called while processing the initial listing,
@@ -84,11 +84,11 @@ type WatchIndex[T any] interface {
 //
 // Otherwise, if set to InitWatchModeDefer, then AddFunc will not be called until after Watch
 // returns. Correspondingly, the WatchStore will not update until then either.
-type InitWatchMode string
+type InitMode string
 
 const (
-	InitWatchModeSync  InitWatchMode = "sync"
-	InitWatchModeDefer InitWatchMode = "defer"
+	InitModeSync  InitMode = "sync"
+	InitModeDefer InitMode = "defer"
 )
 
 // Watch starts a goroutine for watching events, using the provided WatchHandlerFuncs as the
@@ -96,15 +96,15 @@ const (
 //
 // The type C is the kubernetes client we use to get the objects, L representing a list of these,
 // T representing the object type, and P as a pointer to T.
-func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]](
+func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	ctx context.Context,
 	client C,
-	config WatchConfig,
-	accessors WatchAccessors[L, T],
-	mode InitWatchMode,
+	config Config,
+	accessors Accessors[L, T],
+	mode InitMode,
 	opts metav1.ListOptions,
-	handlers WatchHandlerFuncs[P],
-) (*WatchStore[T], error) {
+	handlers HandlerFuncs[P],
+) (*Store[T], error) {
 	if accessors.Items == nil {
 		panic(errors.New("accessors.Items == nil"))
 	}
@@ -135,12 +135,12 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 	sendStop, stopSignal := util.NewSingleSignalPair()
 
-	store := WatchStore[T]{
+	store := Store[T]{
 		objects:       make(map[types.UID]*T),
 		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
 		nextIndexID:   0,
-		indexes:       make(map[uint64]WatchIndex[T]),
+		indexes:       make(map[uint64]Index[T]),
 		stopSignal:    sendStop,
 	}
 
@@ -148,7 +148,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 	var deferredAdds []T
 
-	if mode == InitWatchModeDefer {
+	if mode == InitModeDefer {
 		deferredAdds = items
 	} else {
 		for i := range items {
@@ -403,9 +403,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 // helper for Watch. Error events are expected to already have been handled by the caller.
 func handleEvent[T any, P ~*T](
-	store *WatchStore[T],
-	config WatchConfig,
-	handlers WatchHandlerFuncs[P],
+	store *Store[T],
+	config Config,
+	handlers HandlerFuncs[P],
 	eventType watch.EventType,
 	meta metav1.Object,
 	ptr P,
@@ -477,9 +477,9 @@ func handleEvent[T any, P ~*T](
 	return nil
 }
 
-// WatchStore provides an interface for getting information about a list of Ts using the event
+// Store provides an interface for getting information about a list of Ts using the event
 // listener from a previous call to Watch
-type WatchStore[T any] struct {
+type Store[T any] struct {
 	objects map[types.UID]*T
 	mutex   sync.Mutex
 
@@ -487,7 +487,7 @@ type WatchStore[T any] struct {
 	relisted      chan struct{}
 
 	nextIndexID uint64
-	indexes     map[uint64]WatchIndex[T]
+	indexes     map[uint64]Index[T]
 
 	stopSignal util.SignalSender
 	stopped    atomic.Bool
@@ -495,7 +495,7 @@ type WatchStore[T any] struct {
 
 // Relist triggers re-listing the WatchStore, returning a channel that will be closed once the
 // re-list is complete
-func (w *WatchStore[T]) Relist() <-chan struct{} {
+func (w *Store[T]) Relist() <-chan struct{} {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
@@ -507,16 +507,16 @@ func (w *WatchStore[T]) Relist() <-chan struct{} {
 	return w.relisted
 }
 
-func (w *WatchStore[T]) Stop() {
+func (w *Store[T]) Stop() {
 	w.stopSignal.Send()
 	w.stopped.Store(true)
 }
 
-func (w *WatchStore[T]) Stopped() bool {
+func (w *Store[T]) Stopped() bool {
 	return w.stopped.Load()
 }
 
-func (w *WatchStore[T]) Items() []*T {
+func (w *Store[T]) Items() []*T {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
@@ -530,13 +530,13 @@ func (w *WatchStore[T]) Items() []*T {
 	return items
 }
 
-// NewIndexedWatchStore creates a new IndexedWatchStore from the WatchStore and the index to use.
+// NewIndexedStore creates a new IndexedWatchStore from the WatchStore and the index to use.
 //
 // Note: the index type is assumed to have reference semantics; i.e. any shallow copy of the value
 // will affect any other shallow copy.
 //
 // For more information, refer to IndexedWatchStore.
-func NewIndexedWatchStore[T any, I WatchIndex[T]](store *WatchStore[T], index I) IndexedWatchStore[T, I] {
+func NewIndexedStore[T any, I Index[T]](store *Store[T], index I) IndexedStore[T, I] {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
@@ -558,13 +558,13 @@ func NewIndexedWatchStore[T any, I WatchIndex[T]](store *WatchStore[T], index I)
 		delete(store.indexes, id)
 	})
 
-	return IndexedWatchStore[T, I]{store, index, id, collector}
+	return IndexedStore[T, I]{store, index, id, collector}
 }
 
-// IndexedWatchStore represents a WatchStore, wrapped with a privileged WatchIndex that can be used
+// IndexedStore represents a WatchStore, wrapped with a privileged WatchIndex that can be used
 // to efficiently answer queries.
-type IndexedWatchStore[T any, I WatchIndex[T]] struct {
-	*WatchStore[T]
+type IndexedStore[T any, I Index[T]] struct {
+	*Store[T]
 
 	index I
 
@@ -578,21 +578,21 @@ type IndexedWatchStore[T any, I WatchIndex[T]] struct {
 // WithIndex calls a function with the current state of the index, locking the WatchStore around it.
 //
 // It is almost guaranteed to be an error to indirectly return the index with this function.
-func (w IndexedWatchStore[T, I]) WithIndex(f func(I)) {
-	w.WatchStore.mutex.Lock()
-	defer w.WatchStore.mutex.Unlock()
+func (w IndexedStore[T, I]) WithIndex(f func(I)) {
+	w.Store.mutex.Lock()
+	defer w.Store.mutex.Unlock()
 
 	f(w.index)
 }
 
-func (w IndexedWatchStore[T, I]) GetIndexed(f func(I) (*T, bool)) (obj *T, ok bool) {
+func (w IndexedStore[T, I]) GetIndexed(f func(I) (*T, bool)) (obj *T, ok bool) {
 	w.WithIndex(func(i I) {
 		obj, ok = f(i)
 	})
 	return
 }
 
-func (w IndexedWatchStore[T, I]) ListIndexed(f func(I) []*T) (list []*T) {
+func (w IndexedStore[T, I]) ListIndexed(f func(I) []*T) (list []*T) {
 	w.WithIndex(func(i I) {
 		list = f(i)
 	})
