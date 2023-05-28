@@ -261,77 +261,12 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 
 					meta := obj.GetObjectMeta()
-					uid := meta.GetUID()
 					// Update ResourceVersion so subsequent calls to client.Watch won't include this
 					// event, which we're currently processing.
 					opts.ResourceVersion = meta.GetResourceVersion()
 
-					name := GetNamespacedName(obj)
-
 					// Wrap the remainder in a function, so we can have deferred unlocks.
-					err := func() error {
-						switch event.Type {
-						case watch.Added:
-							store.mutex.Lock()
-							defer store.mutex.Unlock()
-
-							if _, ok := store.objects[uid]; ok {
-								return fmt.Errorf(
-									"watch %s: received add event for object %v that we already have",
-									config.LogName, name,
-								)
-							}
-							store.objects[uid] = (*T)(obj)
-							for _, index := range store.indexes {
-								index.Add((*T)(obj))
-							}
-							handlers.AddFunc((*T)(obj), false)
-						case watch.Bookmark:
-							// Nothing to do, just serves to give us a new ResourceVersion.
-						case watch.Deleted:
-							// We're given the state of the object immediately before deletion, which
-							// *may* be different to what we currently have stored.
-							store.mutex.Lock()
-							defer store.mutex.Unlock()
-
-							old, ok := store.objects[uid]
-							if !ok {
-								return fmt.Errorf(
-									"watch %s: received delete event for object %v that's not present",
-									config.LogName, name,
-								)
-							}
-							// Update:
-							for _, index := range store.indexes {
-								index.Update(old, (*T)(obj))
-							}
-							handlers.UpdateFunc(old, (*T)(obj))
-							// Delete:
-							delete(store.objects, uid)
-							for _, index := range store.indexes {
-								index.Delete((*T)(obj))
-							}
-							handlers.DeleteFunc((*T)(obj), false)
-						case watch.Modified:
-							old, ok := store.objects[uid]
-							if !ok {
-								return fmt.Errorf(
-									"watch %s: received update event for object %v that's not present",
-									config.LogName, name,
-								)
-							}
-							store.objects[uid] = (*T)(obj)
-							for _, index := range store.indexes {
-								index.Update(old, (*T)(obj))
-							}
-							handlers.UpdateFunc(old, (*T)(obj))
-						case watch.Error:
-							panic(errors.New("unreachable code reached")) // handled above
-						default:
-							panic(errors.New("unknown watch event"))
-						}
-						return nil
-					}()
+					err := handleEvent(&store, config, handlers, event.Type, meta, obj)
 
 					if err != nil {
 						klog.Error(err.Error())
@@ -491,6 +426,82 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	}()
 
 	return &store, nil
+}
+
+// helper for Watch. Error events are expected to already have been handled by the caller.
+func handleEvent[T any, P ~*T](
+	store *WatchStore[T],
+	config WatchConfig,
+	handlers WatchHandlerFuncs[P],
+	eventType watch.EventType,
+	meta metav1.Object,
+	ptr P,
+) error {
+	uid := meta.GetUID()
+	name := NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
+	obj := (*T)(ptr)
+
+	// Some of the cases below don't actually require locking the store. Most of the events that we
+	// recieve *do* though, so we're better off doing it here for simplicity.
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	switch eventType {
+	case watch.Added:
+		if _, ok := store.objects[uid]; ok {
+			return fmt.Errorf(
+				"watch %s: received add event for object %v that we already have",
+				config.LogName, name,
+			)
+		}
+		store.objects[uid] = obj
+		for _, index := range store.indexes {
+			index.Add(obj)
+		}
+		handlers.AddFunc(obj, false)
+	case watch.Deleted:
+		// We're given the state of the object immediately before deletion, which
+		// *may* be different to what we currently have stored.
+		old, ok := store.objects[uid]
+		if !ok {
+			return fmt.Errorf(
+				"watch %s: received delete event for object %v that's not present",
+				config.LogName, name,
+			)
+		}
+		// Update:
+		for _, index := range store.indexes {
+			index.Update(old, obj)
+		}
+		handlers.UpdateFunc(old, obj)
+		// Delete:
+		delete(store.objects, uid)
+		for _, index := range store.indexes {
+			index.Delete(obj)
+		}
+		handlers.DeleteFunc(obj, false)
+	case watch.Modified:
+		old, ok := store.objects[uid]
+		if !ok {
+			return fmt.Errorf(
+				"watch %s: received update event for object %v that's not present",
+				config.LogName, name,
+			)
+		}
+		store.objects[uid] = obj
+		for _, index := range store.indexes {
+			index.Update(old, obj)
+		}
+		handlers.UpdateFunc(old, obj)
+	case watch.Bookmark:
+		// Nothing to do, just serves to give us a new ResourceVersion, which should be handled by
+		// the caller.
+	case watch.Error:
+		panic(errors.New("handleEvent unexpectedly called with eventType Error"))
+	default:
+		panic(errors.New("unknown watch event"))
+	}
+	return nil
 }
 
 // WatchStore provides an interface for getting information about a list of Ts using the event
