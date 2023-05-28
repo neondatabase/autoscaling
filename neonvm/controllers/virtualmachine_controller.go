@@ -798,6 +798,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		},
 		Spec: corev1.PodSpec{
 			EnableServiceLinks:            virtualmachine.Spec.ServiceLinks,
+			AutomountServiceAccountToken:  func() *bool { x := false; return &x }(),
 			RestartPolicy:                 corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: virtualmachine.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  virtualmachine.Spec.NodeSelector,
