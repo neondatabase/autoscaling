@@ -5,35 +5,35 @@ metadata:
   namespace: kube-system
 data:
   config.json: '{
-    "scaling": {
-      "requestTimeoutSeconds": 10,
-      "defaultConfig": {
-        "loadAverageFractionTarget": 0.9
+      "scaling": {
+        "requestTimeoutSeconds": 10,
+        "defaultConfig": {
+          "loadAverageFractionTarget": 0.9
+        }
+      },
+      "informant": {
+        "serverPort": 10301,
+        "retryServerMinWaitSeconds": 5,
+        "retryServerNormalWaitSeconds": 5,
+        "registerRetrySeconds": 5,
+        "requestTimeoutSeconds": 1,
+        "registerTimeoutSeconds": 2,
+        "downscaleTimeoutSeconds": 2,
+        "unhealthyAfterSilenceDurationSeconds": 20,
+        "unhealthyStartupGracePeriodSeconds": 20
+      },
+      "metrics": {
+        "loadMetricPrefix": "host_",
+        "requestTimeoutSeconds": 2,
+        "secondsBetweenRequests": 5
+      },
+      "scheduler": {
+        "schedulerName": "autoscale-scheduler",
+        "requestTimeoutSeconds": 2,
+        "requestPort": 10299
+      },
+      "dumpState": {
+        "port": 10300,
+        "timeoutSeconds": 5
       }
-    },
-    "informant": {
-      "serverPort": 10301,
-      "retryServerMinWaitSeconds": 5,
-      "retryServerNormalWaitSeconds": 5,
-      "registerRetrySeconds": 5,
-      "requestTimeoutSeconds": 1,
-      "registerTimeoutSeconds": 2,
-      "downscaleTimeoutSeconds": 2,
-      "unhealthyAfterSilenceDurationSeconds": 20,
-      "unhealthyStartupGracePeriodSeconds": 20
-    },
-    "metrics": {
-      "loadMetricPrefix": "host_",
-      "requestTimeoutSeconds": 2,
-      "secondsBetweenRequests": 5
-    },
-    "scheduler": {
-      "schedulerName": "autoscale-scheduler",
-      "requestTimeoutSeconds": 2,
-      "requestPort": 10299
-    },
-    "dumpState": {
-      "port": 10300,
-      "timeoutSeconds": 5
-    }
   }'
