@@ -4,7 +4,8 @@ metadata:
   name: autoscaler-agent-config
   namespace: kube-system
 data:
-  config.json: '{
+  config.json: |
+    {
       "scaling": {
         "requestTimeoutSeconds": 10,
         "defaultConfig": {
@@ -36,4 +37,4 @@ data:
         "port": 10300,
         "timeoutSeconds": 5
       }
-  }'
+    }
