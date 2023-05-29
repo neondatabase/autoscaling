@@ -15,3 +15,5 @@ dd2a6ef105f7e66db78b649710fb38ad15124424
 052658ff3a89689c68a91b60c1b4bb1d21e69025
 # "util/watch: Remove redundant 'Watch' from item names (#297)" - just a rename
 3258d5f401f0f3da2e686c922d80d0068b78cbf2
+# "intermediate commit: indent agent config content (#300)" - indenting
+8f5b65c1b966f4ac8da1830896afeffd2e712cc5
