@@ -18,4 +18,4 @@ download () {
 download 'autoscale-scheduler'
 download 'autoscaler-agent'
 download 'neonvm'
-download 'multus'
+download 'multus-eks'
