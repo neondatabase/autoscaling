@@ -25,17 +25,24 @@ type MainRunner struct {
 }
 
 func (r MainRunner) Run(ctx context.Context) error {
-	vmEvents := make(chan vmEvent)
-
 	buildInfo := util.GetBuildInfo()
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
+	vmEventQueue := pubsub.NewUnlimitedQueue[vmEvent]()
+	defer vmEventQueue.Close()
+	pushToQueue := func(ev vmEvent) {
+		if err := vmEventQueue.Add(ev); err != nil {
+			klog.Warningf("error adding vmEvent %+v to queue: %s", ev, err)
+		}
+	}
+
 	klog.Info("Starting VM watcher")
-	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, r.EnvArgs.K8sNodeName, vmEvents)
+	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, r.EnvArgs.K8sNodeName, pushToQueue)
 	if err != nil {
 		return fmt.Errorf("Error starting VM watcher: %w", err)
 	}
+	defer vmWatchStore.Stop()
 	klog.Info("VM watcher started")
 
 	broker := pubsub.NewBroker[schedwatch.WatchEvent](ctx, pubsub.BrokerOptions{})
@@ -48,6 +55,7 @@ func (r MainRunner) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
+	defer schedulerStore.Stop()
 
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")
@@ -70,25 +78,15 @@ func (r MainRunner) Run(ctx context.Context) error {
 
 	klog.Info("Entering main loop")
 	for {
-		select {
-		case <-ctx.Done():
-			vmWatchStore.Stop()
-			schedulerStore.Stop()
-
-			// Remove anything else from vmEvents
-		loop:
-			for {
-				select {
-				case <-vmEvents:
-				default:
-					break loop
-				}
+		event, err := vmEventQueue.Wait(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			} else {
+				klog.Errorf("vmEventQueue returned error: %s", err)
+				return err
 			}
-
-			globalState.Stop()
-			return nil
-		case event := <-vmEvents:
-			globalState.handleEvent(ctx, event)
 		}
+		globalState.handleEvent(ctx, event)
 	}
 }

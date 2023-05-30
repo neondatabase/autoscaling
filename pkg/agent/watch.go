@@ -38,7 +38,7 @@ func startVMWatcher(
 	config *Config,
 	vmClient *vmclient.Clientset,
 	nodeName string,
-	vmEvents chan<- vmEvent,
+	submitEvent func(vmEvent),
 ) (*watch.Store[vmapi.VirtualMachine], error) {
 	return watch.Watch(
 		ctx,
@@ -62,7 +62,7 @@ func startVMWatcher(
 						klog.Errorf("Error handling VM added: %s", err)
 						return
 					}
-					vmEvents <- event
+					submitEvent(event)
 				}
 			},
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
@@ -93,7 +93,7 @@ func startVMWatcher(
 					return
 				}
 
-				vmEvents <- event
+				submitEvent(event)
 			},
 			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
@@ -102,7 +102,7 @@ func startVMWatcher(
 						klog.Errorf("Error handling VM deletion: %s", err)
 						return
 					}
-					vmEvents <- event
+					submitEvent(event)
 				}
 			},
 		},
