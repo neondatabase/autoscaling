@@ -196,9 +196,9 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 
 	// check: min <= using <= max
 	if using.HasFieldLessThan(min) {
-		klog.Warningf("current usage %+v has field less than minimum %+v", using, min)
+		klog.Warningf("VM %v current usage %+v has field less than minimum %+v", info.NamespacedName(), using, min)
 	} else if using.HasFieldGreaterThan(max) {
-		klog.Warningf("current usage %+v has field greater than maximum %+v", using, max)
+		klog.Warningf("VM %v current usage %+v has field greater than maximum %+v", info.NamespacedName(), using, max)
 	}
 
 	return &info, nil
