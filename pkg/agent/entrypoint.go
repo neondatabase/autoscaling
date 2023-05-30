@@ -31,8 +31,10 @@ func (r MainRunner) Run(ctx context.Context) error {
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
+	watchMetrics := watch.NewMetrics("autoscaling_agent_watchers_")
+
 	klog.Info("Starting VM watcher")
-	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, r.EnvArgs.K8sNodeName, vmEvents)
+	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, watchMetrics, r.EnvArgs.K8sNodeName, vmEvents)
 	if err != nil {
 		return fmt.Errorf("Error starting VM watcher: %w", err)
 	}
@@ -44,7 +46,7 @@ func (r MainRunner) Run(ctx context.Context) error {
 	}
 
 	watcherLogger := util.PrefixLogger{Prefix: "Scheduler Watcher: "}
-	schedulerStore, err := schedwatch.StartSchedulerWatcher(ctx, watcherLogger, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	schedulerStore, err := schedwatch.StartSchedulerWatcher(ctx, watcherLogger, r.KubeClient, watchMetrics, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
@@ -57,6 +59,8 @@ func (r MainRunner) Run(ctx context.Context) error {
 	}
 
 	globalState, promReg := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	watchMetrics.MustRegister(promReg)
+
 	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
 		return fmt.Errorf("Error starting prometheus metrics server: %w", err)
 	}

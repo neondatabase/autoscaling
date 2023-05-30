@@ -22,6 +22,7 @@ func StartSchedulerWatcher(
 	ctx context.Context,
 	logger util.PrefixLogger,
 	kubeClient *kubernetes.Clientset,
+	metrics watch.Metrics,
 	eventBroker *pubsub.Broker[WatchEvent],
 	schedulerName string,
 ) (*watch.Store[corev1.Pod], error) {
@@ -30,6 +31,10 @@ func StartSchedulerWatcher(
 		kubeClient.CoreV1().Pods(schedulerNamespace),
 		watch.Config{
 			LogName: "scheduler",
+			Metrics: &watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "Scheduler Pod",
+			},
 			// We don't need to be super responsive to scheduler changes.
 			//
 			// FIXME: make these configurable.
