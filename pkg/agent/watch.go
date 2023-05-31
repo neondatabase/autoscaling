@@ -142,7 +142,7 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 		}
 
 		state.Write([]byte(fmt.Sprintf(
-			"{kind:%s podName:%s podIP:%s vmInfo:%s}",
+			"{kind:%s podName:%s podIP:%s vmInfo:%v}",
 			e.kind, e.podName, e.podIP, e.vmInfo,
 		)))
 
