@@ -136,6 +136,7 @@ func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromM
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
+	defer metricsBatch.finish() // This doesn't *really* need to be deferred, but it's up here so we don't forget
 
 	old := s.present
 	s.present = make(map[metricsKey]vmMetricsInstant)
