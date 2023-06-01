@@ -12,6 +12,7 @@ import (
 
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
@@ -60,8 +61,8 @@ func (r MainRunner) Run(ctx context.Context) error {
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")
 		// TODO: catch panics here, bubble those into a clean-ish shutdown.
-		storeForNode := watch.NewIndexedStore(vmWatchStore, NewVMNodeIndex(r.EnvArgs.K8sNodeName))
-		go RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode)
+		storeForNode := watch.NewIndexedStore(vmWatchStore, billing.NewVMNodeIndex(r.EnvArgs.K8sNodeName))
+		go billing.RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode)
 	}
 
 	globalState, promReg := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)

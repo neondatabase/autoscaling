@@ -7,16 +7,17 @@ import (
 
 	"github.com/tychoish/fun/erc"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 type Config struct {
-	Scaling   ScalingConfig    `json:"scaling"`
-	Informant InformantConfig  `json:"informant"`
-	Metrics   MetricsConfig    `json:"metrics"`
-	Scheduler SchedulerConfig  `json:"scheduler"`
-	Billing   *BillingConfig   `json:"billing,omitempty"`
-	DumpState *DumpStateConfig `json:"dumpState"`
+	Scaling   ScalingConfig          `json:"scaling"`
+	Informant InformantConfig        `json:"informant"`
+	Metrics   MetricsConfig          `json:"metrics"`
+	Scheduler SchedulerConfig        `json:"scheduler"`
+	Billing   *billing.BillingConfig `json:"billing,omitempty"`
+	DumpState *DumpStateConfig       `json:"dumpState"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
