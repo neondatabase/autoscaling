@@ -70,7 +70,7 @@ func main() {
 	}()
 
 	if err := srv.GetOrchestrator(ctx).Add(srv.HTTP("agent-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
-		klog.Fatalf("problem adding pprof service")
+		klog.Fatalf("problem adding pprof service: %s", err)
 	}
 
 	if err = runner.Run(ctx); err != nil {
