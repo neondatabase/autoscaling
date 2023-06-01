@@ -58,14 +58,19 @@ func (r MainRunner) Run(ctx context.Context) error {
 	}
 	defer schedulerStore.Stop()
 
+	globalState, promReg := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")
-		// TODO: catch panics here, bubble those into a clean-ish shutdown.
 		storeForNode := watch.NewIndexedStore(vmWatchStore, billing.NewVMNodeIndex(r.EnvArgs.K8sNodeName))
-		go billing.RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode)
+
+		metrics := billing.NewPromMetrics()
+		metrics.MustRegister(promReg)
+
+		// TODO: catch panics here, bubble those into a clean-ish shutdown.
+		go billing.RunBillingMetricsCollector(ctx, r.Config.Billing, storeForNode, metrics)
 	}
 
-	globalState, promReg := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
 	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
 		return fmt.Errorf("Error starting prometheus metrics server: %w", err)
 	}
