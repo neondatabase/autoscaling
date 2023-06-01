@@ -54,6 +54,8 @@ const metricInstanceLabel = "watcher_instance"
 // All metrics' names will be prefixed with the provided string.
 func NewMetrics(prefix string) Metrics {
 	return Metrics{
+		isFailing: false,
+
 		clientCallsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: fmt.Sprint(prefix, "_client_calls_total"),

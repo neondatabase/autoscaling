@@ -46,7 +46,7 @@ func startVMWatcher(
 		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		watch.Config{
 			LogName: "VMs",
-			Metrics: &watch.MetricsConfig{
+			Metrics: watch.MetricsConfig{
 				Metrics:  metrics,
 				Instance: "VirtualMachines",
 			},

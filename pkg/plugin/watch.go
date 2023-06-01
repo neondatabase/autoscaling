@@ -37,7 +37,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
 		watch.Config{
 			LogName: "pods",
-			Metrics: &watch.MetricsConfig{
+			Metrics: watch.MetricsConfig{
 				Metrics:  metrics,
 				Instance: "Pods",
 			},
@@ -126,7 +126,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 		e.vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		watch.Config{
 			LogName: "VMs",
-			Metrics: &watch.MetricsConfig{
+			Metrics: watch.MetricsConfig{
 				Metrics:  metrics,
 				Instance: "VirtualMachines",
 			},

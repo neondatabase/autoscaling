@@ -31,7 +31,7 @@ func StartSchedulerWatcher(
 		kubeClient.CoreV1().Pods(schedulerNamespace),
 		watch.Config{
 			LogName: "scheduler",
-			Metrics: &watch.MetricsConfig{
+			Metrics: watch.MetricsConfig{
 				Metrics:  metrics,
 				Instance: "Scheduler Pod",
 			},
