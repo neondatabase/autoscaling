@@ -33,11 +33,11 @@ type Config struct {
 	// LogName is the name of the watcher for use in logs
 	LogName string
 
-	// Metrics, if provided, will be used by the Watch call to report some information about its
-	// internal operations
+	// Metrics will be used by the Watch call to report some information about its internal
+	// operations
 	//
 	// Refer to the Metrics and MetricsConfig types for more information.
-	Metrics *MetricsConfig
+	Metrics MetricsConfig
 
 	// RetryRelistAfter gives a retry interval when a re-list fails. If left nil, then Watch will
 	// not retry.
@@ -208,8 +208,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 			}
 		}
 
-		failing := false
-		defer config.Metrics.unfailing(&failing)
+		defer config.Metrics.unfailing()
 
 		for {
 			// this is used exclusively for relisting, but must be defined up here so that our gotos
@@ -317,7 +316,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					retryAfter := config.RetryRelistAfter.Random()
 					klog.Infof("watch %s: retrying re-list after %s", config.LogName, retryAfter)
 
-					config.Metrics.failing(&failing)
+					config.Metrics.failing()
 
 					select {
 					case <-time.After(retryAfter):
@@ -330,7 +329,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					}
 				}
 
-				config.Metrics.unfailing(&failing)
+				config.Metrics.unfailing()
 
 				// err == nil, process relistList
 				relistItems := accessors.Items(relistList)
@@ -411,7 +410,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					retryAfter := config.RetryWatchAfter.Random()
 					klog.Infof("watch %s: retrying re-watch after %s", config.LogName, retryAfter)
 
-					config.Metrics.failing(&failing)
+					config.Metrics.failing()
 
 					select {
 					case <-time.After(retryAfter):
@@ -425,7 +424,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				}
 
 				// err == nil
-				config.Metrics.unfailing(&failing)
+				config.Metrics.unfailing()
 				break newWatcher
 			}
 		}

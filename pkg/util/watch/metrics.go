@@ -34,6 +34,10 @@ type Metrics struct {
 	errorsTotal         *prometheus.CounterVec
 	aliveCurrent        *prometheus.GaugeVec
 	failingCurrent      *prometheus.GaugeVec
+
+	// note: all usage of Metrics is by value, so this field gets copied in on each Watch call.
+	// It gives us a bit of state to use for the failing and unfailing functions.
+	isFailing bool
 }
 
 type MetricsConfig struct {
@@ -110,71 +114,55 @@ func (m *Metrics) MustRegister(reg *prometheus.Registry) {
 ///////////////////////////////////////////////
 
 func (m *MetricsConfig) alive() {
-	if m != nil {
-		m.aliveCurrent.WithLabelValues(m.Instance).Inc()
-	}
+	m.aliveCurrent.WithLabelValues(m.Instance).Inc()
 }
 
 func (m *MetricsConfig) unalive() {
-	if m != nil {
-		m.aliveCurrent.WithLabelValues(m.Instance).Dec()
-	}
+	m.aliveCurrent.WithLabelValues(m.Instance).Dec()
 }
 
-func (m *MetricsConfig) failing(store *bool) {
-	var wasFailing bool
-	wasFailing, *store = *store, true
-
-	if m != nil && !wasFailing {
+func (m *MetricsConfig) failing() {
+	if !m.isFailing {
 		m.failingCurrent.WithLabelValues(m.Instance).Inc()
 	}
+	m.isFailing = true
 }
 
-func (m *MetricsConfig) unfailing(store *bool) {
-	var wasFailing bool
-	wasFailing, *store = *store, false
-
-	if m != nil && wasFailing {
+func (m *MetricsConfig) unfailing() {
+	if m.isFailing {
 		m.failingCurrent.WithLabelValues(m.Instance).Dec()
 	}
+	m.isFailing = false
 }
 
 func (m *MetricsConfig) startList() {
-	if m != nil {
-		m.clientCallsTotal.WithLabelValues(m.Instance, "List").Inc()
-	}
+	m.clientCallsTotal.WithLabelValues(m.Instance, "List").Inc()
 }
 
 func (m *MetricsConfig) startWatch() {
-	if m != nil {
-		m.clientCallsTotal.WithLabelValues(m.Instance, "Watch").Inc()
-	}
+	m.clientCallsTotal.WithLabelValues(m.Instance, "Watch").Inc()
 }
 
 func (m *MetricsConfig) relistRequested() {
-	if m != nil {
-		m.relistRequestsTotal.WithLabelValues(m.Instance).Inc()
-	}
+	m.relistRequestsTotal.WithLabelValues(m.Instance).Inc()
 }
 
 func (m *MetricsConfig) doneList(err error) {
-	if m != nil && err != nil {
+	if err != nil {
 		m.errorsTotal.WithLabelValues(m.Instance, "List").Inc()
 	}
 }
 
 func (m *MetricsConfig) doneWatch(err error) {
-	if m != nil && err != nil {
+	if err != nil {
 		m.errorsTotal.WithLabelValues(m.Instance, "Watch").Inc()
 	}
 }
 
 func (m *MetricsConfig) recordEvent(ty watch.EventType) {
-	if m != nil {
-		m.eventsTotal.WithLabelValues(m.Instance, string(ty)).Inc()
+	m.eventsTotal.WithLabelValues(m.Instance, string(ty)).Inc()
 
-		if ty == watch.Error {
-			m.errorsTotal.WithLabelValues(m.Instance, "Watch.Event").Inc()
-		}
+	if ty == watch.Error {
+		m.errorsTotal.WithLabelValues(m.Instance, "Watch.Event").Inc()
 	}
 }
