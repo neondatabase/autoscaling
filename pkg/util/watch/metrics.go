@@ -21,7 +21,7 @@ import (
 // - alive_current (1 iff the watcher is currently running or failing, else 0)
 // - failing_current (1 iff the watcher's last request failed *and* it's waiting to retry, else 0)
 //
-// Prefixes are typically of the form "COMPONENT_watchers_" (e.g. "autoscaling_agent_watchers_").
+// Prefixes are typically of the form "COMPONENT_watchers" (e.g. "autoscaling_agent_watchers").
 // Separate reporting per call to Watch is automatically done with the "watcher_instance" label
 // attached to the metrics, using MetricsConfig.
 //
@@ -56,42 +56,42 @@ func NewMetrics(prefix string) Metrics {
 	return Metrics{
 		clientCallsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: fmt.Sprint(prefix, "client_calls_total"),
+				Name: fmt.Sprint(prefix, "_client_calls_total"),
 				Help: "Number of calls to k8s client.{Watch,List}, labeled by method",
 			},
 			[]string{metricInstanceLabel, "method"},
 		),
 		relistRequestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: fmt.Sprint(prefix, "relist_requests_total"),
+				Name: fmt.Sprint(prefix, "_relist_requests_total"),
 				Help: "Number of internal manual relisting requests",
 			},
 			[]string{metricInstanceLabel},
 		),
 		eventsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: fmt.Sprint(prefix, "events_total"),
+				Name: fmt.Sprint(prefix, "_events_total"),
 				Help: "Number of k8s watch.Events that have occurred, including errors, labeled by type",
 			},
 			[]string{metricInstanceLabel, "type"},
 		),
 		errorsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: fmt.Sprint(prefix, "errors_total"),
+				Name: fmt.Sprint(prefix, "_errors_total"),
 				Help: "Number of errors, either error events or re-list errors, labeled by source",
 			},
 			[]string{metricInstanceLabel, "source"},
 		),
 		aliveCurrent: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: fmt.Sprint(prefix, "alive_current"),
+				Name: fmt.Sprint(prefix, "_alive_current"),
 				Help: "For each watcher, 1 iff the watcher is currently running or failing, else 0",
 			},
 			[]string{metricInstanceLabel},
 		),
 		failingCurrent: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: fmt.Sprint(prefix, "failing_current"),
+				Name: fmt.Sprint(prefix, "_failing_current"),
 				Help: "For each watcher, 1 iff the watcher's last request failed *and* it's waiting to retry, else 0",
 			},
 			[]string{metricInstanceLabel},

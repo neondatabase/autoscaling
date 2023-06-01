@@ -122,7 +122,7 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		pushToQueue(func() { p.handleUpdatedScalingBounds(vm, podName) })
 	}
 
-	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers_")
+	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
 
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
 	if err := p.watchPodEvents(ctx, watchMetrics, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {

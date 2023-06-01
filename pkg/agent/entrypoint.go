@@ -31,7 +31,7 @@ func (r MainRunner) Run(ctx context.Context) error {
 	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
 	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
-	watchMetrics := watch.NewMetrics("autoscaling_agent_watchers_")
+	watchMetrics := watch.NewMetrics("autoscaling_agent_watchers")
 
 	klog.Info("Starting VM watcher")
 	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, watchMetrics, r.EnvArgs.K8sNodeName, vmEvents)
