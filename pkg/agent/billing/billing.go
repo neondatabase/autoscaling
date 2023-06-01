@@ -16,7 +16,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type BillingConfig struct {
+type Config struct {
 	URL                  string `json:"url"`
 	CPUMetricName        string `json:"cpuMetricName"`
 	ActiveTimeMetricName string `json:"activeTimeMetricName"`
@@ -25,14 +25,14 @@ type BillingConfig struct {
 	PushTimeoutSeconds   uint   `json:"pushTimeoutSeconds"`
 }
 
-type billingMetricsState struct {
-	historical      map[billingMetricsKey]vmMetricsHistory
-	present         map[billingMetricsKey]vmMetricsInstant
+type metricsState struct {
+	historical      map[metricsKey]vmMetricsHistory
+	present         map[metricsKey]vmMetricsInstant
 	lastCollectTime *time.Time
 	pushWindowStart time.Time
 }
 
-type billingMetricsKey struct {
+type metricsKey struct {
 	uid        types.UID
 	endpointID string
 }
@@ -70,7 +70,7 @@ const (
 
 func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
-	conf *BillingConfig,
+	conf *Config,
 	store VMStoreForNode,
 ) {
 	client := billing.NewClient(conf.URL, http.DefaultClient)
@@ -82,9 +82,9 @@ func RunBillingMetricsCollector(
 	pushTicker := time.NewTicker(time.Second * time.Duration(conf.PushEverySeconds))
 	defer pushTicker.Stop()
 
-	state := billingMetricsState{
-		historical:      make(map[billingMetricsKey]vmMetricsHistory),
-		present:         make(map[billingMetricsKey]vmMetricsInstant),
+	state := metricsState{
+		historical:      make(map[metricsKey]vmMetricsHistory),
+		present:         make(map[metricsKey]vmMetricsInstant),
 		lastCollectTime: nil,
 		pushWindowStart: time.Now(),
 	}
@@ -123,11 +123,11 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode) {
+func (s *metricsState) collect(conf *Config, store VMStoreForNode) {
 	now := time.Now()
 
 	old := s.present
-	s.present = make(map[billingMetricsKey]vmMetricsInstant)
+	s.present = make(map[metricsKey]vmMetricsInstant)
 	vmsOnThisNode := store.ListIndexed(func(i *VMNodeIndex) []*vmapi.VirtualMachine {
 		return i.List()
 	})
@@ -142,7 +142,7 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode)
 			continue
 		}
 
-		key := billingMetricsKey{
+		key := metricsKey{
 			uid:        vm.UID,
 			endpointID: endpointID,
 		}
@@ -234,7 +234,7 @@ func logAddedEvent(event billing.IncrementalEvent) billing.IncrementalEvent {
 }
 
 // drainAppendToBatch clears the current history, adding it as events to the batch
-func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *billing.Batch) {
+func (s *metricsState) drainAppendToBatch(conf *Config, batch *billing.Batch) {
 	now := time.Now()
 
 	for key, history := range s.historical {
@@ -263,10 +263,10 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 	}
 
 	s.pushWindowStart = now
-	s.historical = make(map[billingMetricsKey]vmMetricsHistory)
+	s.historical = make(map[metricsKey]vmMetricsHistory)
 }
 
-func pushBillingEvents(conf *BillingConfig, batch *billing.Batch) error {
+func pushBillingEvents(conf *Config, batch *billing.Batch) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*time.Duration(conf.PushTimeoutSeconds))
 	defer cancel()
 
