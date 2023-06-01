@@ -1086,7 +1086,6 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context) error {
 			errDesc += fmt.Sprintf("\n\t%s: %s", nodeName, badNodes[nodeName])
 		}
 		klog.Error(errDesc)
-		return errors.New("Some nodes were over-budget (see logs for a list and reasons)")
 	}
 
 	return nil
