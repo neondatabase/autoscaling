@@ -180,7 +180,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 				break loopThroughAgents
 			}
 
-			// Resume() the Agent if we need to
+			// Do we need to resume the agent? We will use this later
 			shouldResume := func() bool {
 				candidate.lock.Lock()
 				defer candidate.lock.Unlock()
@@ -189,6 +189,35 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 				candidate.suspended = false
 				return !wasSuspended
 			}()
+
+			// Get the current agent, which we would like to replace with the candidate.
+			// We should suspend the old agent.
+			oldCurrent := func() (old *Agent) {
+				s.lock.Lock()
+				defer s.lock.Unlock()
+
+				if s.current != nil {
+					s.current.suspended = true
+				}
+
+				return s.current
+			}()
+
+			if oldCurrent != nil {
+				handleError := func(err error) {
+					if errors.Is(err, context.Canceled) {
+						return
+					}
+
+					klog.Warningf(
+						"Error suspending previous Agent %s/%s: %s",
+						oldCurrent.serverAddr, oldCurrent.id, err,
+					)
+				}
+
+				// Suspend the old agent
+				oldCurrent.Suspend(AgentSuspendTimeout, handleError)
+			}
 
 			if shouldResume {
 				if err := candidate.Resume(AgentResumeTimeout); err != nil {
@@ -215,18 +244,13 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 				}
 			}
 
-			// Replace s.current with candidate, returning the old one. We should suspend it.
-			oldCurrent := func() (old *Agent) {
+			// Set the new agent, and do an upscale if it was requested.
+			func() {
 				s.lock.Lock()
 				defer s.lock.Unlock()
 
-				if s.current != nil {
-					s.current.suspended = true
-				}
+				s.current = candidate
 
-				s.current, old = candidate, s.current
-
-				// If upscale was requested, do that:
 				if s.wantsMemoryUpscale {
 					s.current.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
 						if errors.Is(err, context.Canceled) {
@@ -242,24 +266,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 						)
 					})
 				}
-
-				return
 			}()
-
-			if oldCurrent != nil {
-				handleError := func(err error) {
-					if errors.Is(err, context.Canceled) {
-						return
-					}
-
-					klog.Warningf(
-						"Error suspending previous Agent %s/%s: %s",
-						oldCurrent.serverAddr, oldCurrent.id, err,
-					)
-				}
-
-				oldCurrent.Suspend(AgentSuspendTimeout, handleError)
-			}
 		}
 	}
 }

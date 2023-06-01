@@ -194,7 +194,7 @@ func NewInformantServer(
 				logFunc = runner.logger.Infof
 			}
 
-			logFunc("Informant server exiting with retry: %v, err: %s", status.RetryShouldFix, status.Err)
+			logFunc("Informant server exiting with: retry=%v, err=%v", status.RetryShouldFix, status.Err)
 		}
 
 		shutdownName := fmt.Sprintf("InformantServer shutdown (%s)", server.desc.AgentID)
