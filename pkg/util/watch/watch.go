@@ -172,8 +172,19 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		return nil, fmt.Errorf("Initial watch failed: %w", err)
 	}
 
+	// Lock the store to pass it into the goroutine, so that we don't have to worry about immediate
+	// operations on the store racing with any deferred additions.
+	store.mutex.Lock()
+
 	// With the successful Watch call underway, we hand off responsibility to a new goroutine.
 	go func() {
+		holdingInitialLock := true
+		defer func() {
+			if holdingInitialLock {
+				store.mutex.Unlock()
+			}
+		}()
+
 		// note: instead of deferring watcher.Stop() directly, wrapping it in an outer function
 		// means that we'll always Stop the most recent watcher.
 		defer func() {
@@ -184,6 +195,8 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		defer store.Stop()
 
 		// Handle any deferred calls to AddFunc
+		// NB: This is only sound because we're still holding store.mutex; otherwise we'd have to
+		// deal with possible racy operations (including adding an index).
 		for i := range deferredAdds {
 			obj := &deferredAdds[i]
 			uid := P(obj).GetObjectMeta().GetUID()
@@ -194,6 +207,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				return
 			}
 		}
+
+		holdingInitialLock = false
+		store.mutex.Unlock()
 
 		for {
 			// this is used exclusively for relisting, but must be defined up here so that our gotos
