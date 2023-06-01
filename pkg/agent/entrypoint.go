@@ -81,11 +81,12 @@ func (r MainRunner) Run(ctx context.Context) error {
 		event, err := vmEventQueue.Wait(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
+				// treat context canceled as a "normal" exit (because it is)
 				return nil
-			} else {
-				klog.Errorf("vmEventQueue returned error: %s", err)
-				return err
 			}
+
+			klog.Errorf("vmEventQueue returned error: %s", err)
+			return err
 		}
 		globalState.handleEvent(ctx, event)
 	}
