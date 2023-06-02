@@ -68,6 +68,8 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	docker build \
 		--build-arg USER_ID=$(shell id -u $(USER)) \
 		--build-arg GROUP_ID=$(shell id -g $(USER)) \
+		--build-arg CONTROLLER_TOOLS_VERSION=$(CONTROLLER_TOOLS_VERSION) \
+		--build-arg CODE_GENERATOR_VERSION=$(CODE_GENERATOR_VERSION) \
 		--file neonvm/hack/Dockerfile.generate \
 		--iidfile $$iidfile . && \
 	docker run --rm \
@@ -353,10 +355,11 @@ KUSTOMIZE_VERSION ?= v4.5.7
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.24.2
+ENVTEST_K8S_VERSION = 1.25.0
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-CONTROLLER_TOOLS_VERSION ?= v0.9.2
+CONTROLLER_TOOLS_VERSION ?= v0.10.0
+CODE_GENERATOR_VERSION ?= v0.25.10
 
 KUTTL ?= $(LOCALBIN)/kuttl
 KUTTL_VERSION ?= v0.15.0
