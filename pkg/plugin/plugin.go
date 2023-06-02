@@ -121,6 +121,22 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	submitVMBoundsChanged := func(vm *api.VmInfo, podName string) {
 		pushToQueue(func() { p.handleUpdatedScalingBounds(vm, podName) })
 	}
+	submitNonAutoscalingBoundsChanged := func(oldVM *api.VmInfo, newVM *api.VmInfo, name util.NamespacedName) {
+		pushToQueue(func() {
+			vmname := newVM.Name
+			cpuDiff := newVM.Using().VCPU - oldVM.Using().VCPU
+			memDiff := newVM.Using().Mem - oldVM.Using().Mem
+
+			p.state.lock.Lock()
+			defer p.state.lock.Lock()
+
+			p.state.nodeMap[vmname].memSlots.Reserved += memDiff;
+			p.state.nodeMap[vmname].vCPU.Reserved += cpuDiff;
+
+			p.state.podMap[name].memSlots.Reserved += memDiff;
+			p.state.podMap[name].vCPU.Reserved += cpuDiff;
+		})
+	}
 
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
 	if err := p.watchPodEvents(ctx, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
@@ -128,7 +144,7 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, submitVMDisabledScaling, submitVMBoundsChanged)
+	vmStore, err := p.watchVMEvents(ctx, submitVMDisabledScaling, submitVMBoundsChanged, submitNonAutoscalingBoundsChanged)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
