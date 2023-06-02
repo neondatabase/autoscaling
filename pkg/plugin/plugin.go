@@ -128,7 +128,7 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 			memDiff := newVM.Using().Mem - oldVM.Using().Mem
 
 			p.state.lock.Lock()
-			defer p.state.lock.Lock()
+			defer p.state.lock.Unlock()
 
 			p.state.nodeMap[vmname].memSlots.Reserved += memDiff;
 			p.state.nodeMap[vmname].vCPU.Reserved += cpuDiff;
