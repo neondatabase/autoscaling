@@ -114,7 +114,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
 	submitVMDisabledScaling func(util.NamespacedName),
 	submitVMBoundsChanged func(_ *api.VmInfo, podName string),
-	submitNonAutoscalingBoundsChanged func(oldInfo *api.VmInfo, newInfo *api.VmInfo, _ util.NamespacedName),
+	submitNonAutoscalingVmUsageChanged func(*api.VmInfo, util.NamespacedName),
 ) (*watch.Store[vmapi.VirtualMachine], error) {
 	return watch.Watch(
 		ctx,
@@ -145,19 +145,25 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 				}
 
 				if newVM.Status.PodName == "" {
-					klog.Infof("[autoscale-enforcer] Skipping update for VM %v because .status.podName is empty", util.GetNamespacedName(newVM))
+					klog.Infof(
+						"[autoscale-enforcer] Skipping update for VM %v because .status.podName is empty",
+						util.GetNamespacedName(newVM),
+					)
 					return
 				}
 
 				if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
-					klog.Infof("[autoscale-enforcer] watch: Received update to disable autoscaling for pod %v", name)
+					klog.Infof(
+						"[autoscale-enforcer] watch: Received update to disable autoscaling for pod %v",
+						name,
+					)
 					submitVMDisabledScaling(name)
 				}
 
 				if !oldInfo.ScalingEnabled && !newInfo.ScalingEnabled && oldInfo.Using() != newInfo.Using() {
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
-					submitNonAutoscalingBoundsChanged(oldInfo, newInfo, name)
+					submitNonAutoscalingVmUsageChanged(newInfo, name)
 				}
 
 				// If the pod changed, then we're going to handle a deletion event for the old pod,
@@ -168,6 +174,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
+				// If bounds didn't change, then no need to update
 				if oldInfo.EqualScalingBounds(*newInfo) {
 					return
 				}
