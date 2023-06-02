@@ -130,11 +130,11 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 			p.state.lock.Lock()
 			defer p.state.lock.Unlock()
 
-			p.state.nodeMap[vmname].memSlots.Reserved += memDiff;
-			p.state.nodeMap[vmname].vCPU.Reserved += cpuDiff;
+			p.state.nodeMap[vmname].memSlots.Reserved += memDiff
+			p.state.nodeMap[vmname].vCPU.Reserved += cpuDiff
 
-			p.state.podMap[name].memSlots.Reserved += memDiff;
-			p.state.podMap[name].vCPU.Reserved += cpuDiff;
+			p.state.podMap[name].memSlots.Reserved += memDiff
+			p.state.podMap[name].vCPU.Reserved += cpuDiff
 		})
 	}
 
