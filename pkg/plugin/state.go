@@ -701,23 +701,24 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(vm *api.VmInfo, name
 
 	klog.Info("Handling updated usage information for non-autoscaling VM pod %v", name)
 
-	vmname := vm.Name
-	newCPU := vm.Using().VCPU
-	newMem := vm.Using().Mem
+	pod, ok := e.state.podMap[name]
+	if !ok {
+		klog.Errorf("[autoscale-enforcer] cannot find non-autoscaling VM pod %v to update usage", name)
+		return
+	}
+	node := pod.node
 
-	e.state.nodeMap[vmname].memSlots.Reserved = newMem
-	e.state.nodeMap[vmname].vCPU.Reserved = newCPU
+	newMem, newCPU := vm.Using().Mem, vm.Using().VCPU
+	oldMem, oldCPU := pod.memSlots.Reserved, pod.vCPU.Reserved
 
-	oldMemReserved := e.state.podMap[name].memSlots.Reserved
-	oldCPUReserved := e.state.podMap[name].vCPU.Reserved
-	e.state.podMap[name].memSlots.Reserved = newMem
-	e.state.podMap[name].vCPU.Reserved = newCPU
+	node.memSlots.Reserved, node.vCPU.Reserved = newMem, newCPU
+	pod.memSlots.Reserved, pod.vCPU.Reserved = newMem, newCPU
 
 	klog.Infof(
 		"[autoscale-enforcer]: updated VM pod %v resources: vCPU %v -> %v, updated memory: %v -> %v",
 		name,
-		oldCPUReserved, newCPU,
-		oldMemReserved, newMem,
+		oldCPU, newCPU,
+		oldMem, newMem,
 	)
 }
 
