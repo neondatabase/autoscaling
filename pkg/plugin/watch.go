@@ -137,30 +137,41 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %s", util.GetNamespacedName(oldVM), err)
 					return
 				}
+
 				newInfo, err := api.ExtractVmInfo(newVM)
 				if err != nil {
 					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %s", util.GetNamespacedName(newVM), err)
 					return
 				}
+
 				if newVM.Status.PodName == "" {
 					klog.Infof("[autoscale-enforcer] Skipping update for VM %v because .status.podName is empty", util.GetNamespacedName(newVM))
 					return
 				}
+
 				if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					klog.Infof("[autoscale-enforcer] watch: Received update to disable autoscaling for pod %v", name)
 					submitVMDisabledScaling(name)
 				}
+
 				if !oldInfo.ScalingEnabled && !newInfo.ScalingEnabled && oldInfo.Using() != newInfo.Using() {
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					submitNonAutoscalingBoundsChanged(oldInfo, newInfo, name)
 				}
+
+				// If the pod changed, then we're going to handle a deletion event for the old pod,
+				// plus creation event for the new pod. Don't worry about it - because all VM
+				// information comes from this watch.Store anyways, there's no possibility of missing
+				// an update.
 				if oldVM.Status.PodName != newVM.Status.PodName {
 					return
 				}
+
 				if oldInfo.EqualScalingBounds(*newInfo) {
 					return
 				}
+
 				submitVMBoundsChanged(newInfo, newVM.Status.PodName)
 			},
 		},
