@@ -707,11 +707,15 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(vm *api.VmInfo, name
 	e.state.nodeMap[vmname].memSlots.Reserved = newMem
 	e.state.nodeMap[vmname].vCPU.Reserved = newCPU
 
-	oldMemReserved := e.state.podMap[name].memSlots.Reserved;
-	oldCPUReserved := e.state.podMap[name].vCPU.Reserved;
+	oldMemReserved := e.state.podMap[name].memSlots.Reserved
+	oldCPUReserved := e.state.podMap[name].vCPU.Reserved
 	e.state.podMap[name].memSlots.Reserved = newMem
 	e.state.podMap[name].vCPU.Reserved = newCPU
-	klog.Infof("[autoscale-enforcer]: updated vCPU %v -> %v, updated memory: %v -> %v", oldCPUReserved, newCPU, oldMemReserved, newMem)
+	klog.Infof(
+		"[autoscale-enforcer]: updated vCPU %v -> %v, updated memory: %v -> %v",
+		oldCPUReserved, newCPU,
+		oldMemReserved, newMem,
+	)
 }
 
 func (s *podState) isBetterMigrationTarget(other *podState) bool {

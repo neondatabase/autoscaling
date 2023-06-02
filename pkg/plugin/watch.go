@@ -137,7 +137,6 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %s", util.GetNamespacedName(oldVM), err)
 					return
 				}
-
 				newInfo, err := api.ExtractVmInfo(newVM)
 				if err != nil {
 					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %s", util.GetNamespacedName(newVM), err)
