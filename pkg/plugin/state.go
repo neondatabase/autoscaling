@@ -696,13 +696,14 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, unqualifi
 }
 
 func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(vm *api.VmInfo, name util.NamespacedName) {
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
 	klog.Info("Handling updated usage information for non-autoscaling VM pod %v", name)
+
 	vmname := vm.Name
 	newCPU := vm.Using().VCPU
 	newMem := vm.Using().Mem
-
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
 
 	e.state.nodeMap[vmname].memSlots.Reserved = newMem
 	e.state.nodeMap[vmname].vCPU.Reserved = newCPU
@@ -711,8 +712,10 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(vm *api.VmInfo, name
 	oldCPUReserved := e.state.podMap[name].vCPU.Reserved
 	e.state.podMap[name].memSlots.Reserved = newMem
 	e.state.podMap[name].vCPU.Reserved = newCPU
+
 	klog.Infof(
-		"[autoscale-enforcer]: updated vCPU %v -> %v, updated memory: %v -> %v",
+		"[autoscale-enforcer]: updated VM pod %v resources: vCPU %v -> %v, updated memory: %v -> %v",
+		name,
 		oldCPUReserved, newCPU,
 		oldMemReserved, newMem,
 	)
