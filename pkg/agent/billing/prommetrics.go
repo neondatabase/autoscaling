@@ -79,10 +79,13 @@ func (m PromMetrics) forBatch() batchMetrics {
 	}
 }
 
-func (b batchMetrics) inc(isEndpoint, autoscalingEnabled bool, phase vmapi.VmPhase) {
+type isEndpointFlag bool
+type autoscalingEnabledFlag bool
+
+func (b batchMetrics) inc(isEndpoint isEndpointFlag, autoscalingEnabled autoscalingEnabledFlag, phase vmapi.VmPhase) {
 	key := batchMetricsLabels{
-		isEndpoint:         strconv.FormatBool(isEndpoint),
-		autoscalingEnabled: strconv.FormatBool(autoscalingEnabled),
+		isEndpoint:         strconv.FormatBool(bool(isEndpoint)),
+		autoscalingEnabled: strconv.FormatBool(bool(autoscalingEnabled)),
 		phase:              string(phase),
 	}
 

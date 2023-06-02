@@ -145,7 +145,7 @@ func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromM
 	})
 	for _, vm := range vmsOnThisNode {
 		endpointID, isEndpoint := vm.Labels[EndpointLabel]
-		metricsBatch.inc(isEndpoint, api.HasAutoscalingEnabled(vm), vm.Status.Phase)
+		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
 		if !isEndpoint {
 			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
 			continue
