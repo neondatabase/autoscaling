@@ -12,6 +12,7 @@ import (
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
+	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/billing"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -72,6 +73,7 @@ func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
 	conf *Config,
 	store VMStoreForNode,
+	metrics PromMetrics,
 ) {
 	client := billing.NewClient(conf.URL, http.DefaultClient)
 
@@ -89,7 +91,7 @@ func RunBillingMetricsCollector(
 		pushWindowStart: time.Now(),
 	}
 
-	state.collect(conf, store)
+	state.collect(conf, store, metrics)
 	batch := client.NewBatch()
 
 	for {
@@ -99,23 +101,30 @@ func RunBillingMetricsCollector(
 			if store.Stopped() && backgroundCtx.Err() == nil {
 				panic(errors.New("VM store stopped but background context is still live"))
 			}
-			state.collect(conf, store)
+			state.collect(conf, store, metrics)
 		case <-pushTicker.C:
 			klog.Infof("Creating billing batch")
 			state.drainAppendToBatch(conf, batch)
+			metrics.batchSizeCurrent.Set(float64(batch.Count()))
 			klog.Infof("Pushing billing events (count = %d)", batch.Count())
 			if err := pushBillingEvents(conf, batch); err != nil {
+				metrics.sendErrorsTotal.Inc()
 				klog.Errorf("Error pushing billing events: %s", err)
 				continue
 			}
 			// Sending was successful; clear the batch.
+			//
+			// Don't reset metrics.batchSizeCurrent because it stores the *most recent* batch size.
+			// (The "current" suffix refers to the fact the metric is a gague, not a counter)
 			batch = client.NewBatch()
 		case <-backgroundCtx.Done():
 			// If we're being shut down, push the latests events we have before returning.
 			klog.Infof("Creating final billing batch")
 			state.drainAppendToBatch(conf, batch)
+			metrics.batchSizeCurrent.Set(float64(batch.Count()))
 			klog.Infof("Pushing final billing events (count = %d)", batch.Count())
 			if err := pushBillingEvents(conf, batch); err != nil {
+				metrics.sendErrorsTotal.Inc()
 				klog.Errorf("Error pushing billing events: %s", err)
 			}
 			return
@@ -123,8 +132,11 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *metricsState) collect(conf *Config, store VMStoreForNode) {
+func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromMetrics) {
 	now := time.Now()
+
+	metricsBatch := metrics.forBatch()
+	defer metricsBatch.finish() // This doesn't *really* need to be deferred, but it's up here so we don't forget
 
 	old := s.present
 	s.present = make(map[metricsKey]vmMetricsInstant)
@@ -132,8 +144,9 @@ func (s *metricsState) collect(conf *Config, store VMStoreForNode) {
 		return i.List()
 	})
 	for _, vm := range vmsOnThisNode {
-		endpointID, ok := vm.Labels[EndpointLabel]
-		if !ok {
+		endpointID, isEndpoint := vm.Labels[EndpointLabel]
+		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
+		if !isEndpoint {
 			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
 			continue
 		}
