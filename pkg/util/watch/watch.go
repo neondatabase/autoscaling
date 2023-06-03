@@ -33,6 +33,12 @@ type Config struct {
 	// LogName is the name of the watcher for use in logs
 	LogName string
 
+	// Metrics will be used by the Watch call to report some information about its internal
+	// operations
+	//
+	// Refer to the Metrics and MetricsConfig types for more information.
+	Metrics MetricsConfig
+
 	// RetryRelistAfter gives a retry interval when a re-list fails. If left nil, then Watch will
 	// not retry.
 	RetryRelistAfter *util.TimeRange
@@ -124,7 +130,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	opts.AllowWatchBookmarks = true
 
 	// Perform an initial listing
+	config.Metrics.startList()
 	initialList, err := client.List(ctx, opts)
+	config.Metrics.doneList(err)
 	if err != nil {
 		return nil, fmt.Errorf("Initial list failed: %w", err)
 	}
@@ -167,7 +175,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	items = nil // reset to allow GC
 
 	// Start watching
+	config.Metrics.startWatch()
 	watcher, err := client.Watch(ctx, opts)
+	config.Metrics.doneWatch(err)
 	if err != nil {
 		return nil, fmt.Errorf("Initial watch failed: %w", err)
 	}
@@ -194,6 +204,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		// explicitly stop on exit so that it's possible to know when the store is stopped
 		defer store.Stop()
 
+		config.Metrics.alive()
+		defer config.Metrics.unalive()
+
 		// Handle any deferred calls to AddFunc
 		// NB: This is only sound because we're still holding store.mutex; otherwise we'd have to
 		// deal with possible racy operations (including adding an index).
@@ -211,6 +224,8 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		holdingInitialLock = false
 		store.mutex.Unlock()
 
+		defer config.Metrics.unfailing()
+
 		for {
 			// this is used exclusively for relisting, but must be defined up here so that our gotos
 			// don't jump over variables.
@@ -222,12 +237,17 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				case <-ctx.Done():
 					return
 				case <-store.triggerRelist:
+					config.Metrics.relistRequested()
 					continue
 				case event, ok := <-watcher.ResultChan():
 					if !ok {
 						klog.Infof("watch %s: watcher ended gracefully, restarting", config.LogName)
 						goto newWatcher
-					} else if event.Type == watch.Error {
+					}
+
+					config.Metrics.recordEvent(event.Type)
+
+					if event.Type == watch.Error {
 						err := apierrors.FromObject(event.Object)
 						// note: we can get 'too old resource version' errors when there's been a
 						// lot of resource updates that our ListOptions filtered out.
@@ -290,6 +310,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					select {
 					case <-store.triggerRelist:
 						newRelistTriggered = true
+						config.Metrics.relistRequested()
 					default:
 					}
 
@@ -299,7 +320,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					}
 				}()
 
+				config.Metrics.startList()
 				relistList, err := client.List(ctx, opts)
+				config.Metrics.doneList(err)
 				if err != nil {
 					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
 					if config.RetryRelistAfter == nil {
@@ -308,6 +331,8 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					}
 					retryAfter := config.RetryRelistAfter.Random()
 					klog.Infof("watch %s: retrying re-list after %s", config.LogName, retryAfter)
+
+					config.Metrics.failing()
 
 					select {
 					case <-time.After(retryAfter):
@@ -319,6 +344,8 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						return
 					}
 				}
+
+				config.Metrics.unfailing()
 
 				// err == nil, process relistList
 				relistItems := accessors.Items(relistList)
@@ -387,7 +414,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 		newWatcher:
 			for {
+				config.Metrics.startWatch()
 				watcher, err = client.Watch(ctx, opts)
+				config.Metrics.doneWatch(err)
 				if err != nil {
 					klog.Errorf("watch %s: re-watch failed: %s", config.LogName, err)
 					if config.RetryWatchAfter == nil {
@@ -396,6 +425,8 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					}
 					retryAfter := config.RetryWatchAfter.Random()
 					klog.Infof("watch %s: retrying re-watch after %s", config.LogName, retryAfter)
+
+					config.Metrics.failing()
 
 					select {
 					case <-time.After(retryAfter):
@@ -409,6 +440,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				}
 
 				// err == nil
+				config.Metrics.unfailing()
 				break newWatcher
 			}
 		}

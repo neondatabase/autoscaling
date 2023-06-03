@@ -38,8 +38,10 @@ func (r MainRunner) Run(ctx context.Context) error {
 		}
 	}
 
+	watchMetrics := watch.NewMetrics("autoscaling_agent_watchers")
+
 	klog.Info("Starting VM watcher")
-	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, r.EnvArgs.K8sNodeName, pushToQueue)
+	vmWatchStore, err := startVMWatcher(ctx, r.Config, r.VMClient, watchMetrics, r.EnvArgs.K8sNodeName, pushToQueue)
 	if err != nil {
 		return fmt.Errorf("Error starting VM watcher: %w", err)
 	}
@@ -52,13 +54,14 @@ func (r MainRunner) Run(ctx context.Context) error {
 	}
 
 	watcherLogger := util.PrefixLogger{Prefix: "Scheduler Watcher: "}
-	schedulerStore, err := schedwatch.StartSchedulerWatcher(ctx, watcherLogger, r.KubeClient, broker, r.Config.Scheduler.SchedulerName)
+	schedulerStore, err := schedwatch.StartSchedulerWatcher(ctx, watcherLogger, r.KubeClient, watchMetrics, broker, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
 	defer schedulerStore.Stop()
 
 	globalState, promReg := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	watchMetrics.MustRegister(promReg)
 
 	if r.Config.Billing != nil {
 		klog.Info("Starting billing metrics collector")

@@ -37,6 +37,7 @@ func startVMWatcher(
 	ctx context.Context,
 	config *Config,
 	vmClient *vmclient.Clientset,
+	metrics watch.Metrics,
 	nodeName string,
 	submitEvent func(vmEvent),
 ) (*watch.Store[vmapi.VirtualMachine], error) {
@@ -45,6 +46,10 @@ func startVMWatcher(
 		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		watch.Config{
 			LogName: "VMs",
+			Metrics: watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "VirtualMachines",
+			},
 			// We want to be relatively snappy; don't wait for too long before retrying.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 500, 1000),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 500, 1000),
