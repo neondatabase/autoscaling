@@ -695,6 +695,32 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(vm *api.VmInfo, unqualifi
 	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
 }
 
+func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(vm *api.VmInfo, unqualifiedPodName string) {
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	podName := util.NamespacedName{Namespace: vm.Namespace, Name: unqualifiedPodName}
+
+	klog.Info("Handling updated usage information for non-autoscaling VM pod %v", podName)
+
+	pod, ok := e.state.podMap[podName]
+	if !ok {
+		klog.Errorf("[autoscale-enforcer] cannot find non-autoscaling VM pod %v to update usage", podName)
+		return
+	}
+
+	cpuVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+		handleNonAutoscalingUsageChange(vm.Using().VCPU)
+	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+		handleNonAutoscalingUsageChange(vm.Using().Mem)
+
+	fmtString := "[autoscale-enforcer]: updated VM pod %v resources in node %s:\n" +
+		"\tvCPU verdict: %s\n" +
+		"\t mem verdict: %s"
+
+	klog.Infof(fmtString, podName, pod.node.name, cpuVerdict, memVerdict)
+}
+
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
 	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
 	if s.metrics == nil || other.metrics == nil {

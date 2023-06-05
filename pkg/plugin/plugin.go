@@ -121,6 +121,9 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	submitVMBoundsChanged := func(vm *api.VmInfo, podName string) {
 		pushToQueue(func() { p.handleUpdatedScalingBounds(vm, podName) })
 	}
+	submitNonAutoscalingVmUsageChanged := func(vm *api.VmInfo, podName string) {
+		pushToQueue(func() { p.handleNonAutoscalingUsageChange(vm, podName) })
+	}
 
 	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
 
@@ -130,7 +133,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, watchMetrics, submitVMDisabledScaling, submitVMBoundsChanged)
+	vmStore, err := p.watchVMEvents(ctx, watchMetrics, submitVMDisabledScaling, submitVMBoundsChanged, submitNonAutoscalingVmUsageChanged)
+
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
