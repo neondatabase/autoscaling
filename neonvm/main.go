@@ -71,7 +71,11 @@ func main() {
 	// define klog settings (used in LeaderElector)
 	klog.SetLogger(zap.New(zap.UseFlagOptions(&opts)).V(2))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// tune k8s client for manager
+	cfg := ctrl.GetConfigOrDie()
+	cfg.QPS = 1000
+	cfg.Burst = 2000
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
 		Port:                   9443,
