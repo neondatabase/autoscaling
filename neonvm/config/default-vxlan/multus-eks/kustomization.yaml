@@ -4,14 +4,7 @@ kind: Kustomization
 bases:
 - https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/master/config/multus/v3.9.2-eksbuild.1/aws-k8s-multus.yaml
 
-# whereabouts CNI
-- https://raw.githubusercontent.com/k8snetworkplumbingwg/whereabouts/v0.6.1/doc/crds/whereabouts.cni.cncf.io_ippools.yaml
-- https://raw.githubusercontent.com/k8snetworkplumbingwg/whereabouts/v0.6.1/doc/crds/whereabouts.cni.cncf.io_overlappingrangeipreservations.yaml
-- https://raw.githubusercontent.com/k8snetworkplumbingwg/whereabouts/v0.6.1/doc/crds/daemonset-install.yaml
-
 images:
 - name: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/multus-cni
   newName: public.ecr.aws/eks/multus-cni
 
-- name: ghcr.io/k8snetworkplumbingwg/whereabouts
-  newTag: v0.6.1-amd64

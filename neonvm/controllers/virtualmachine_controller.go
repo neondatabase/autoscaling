@@ -54,7 +54,6 @@ import (
 
 const (
 	virtualmachineFinalizer = "vm.neon.tech/finalizer"
-	ipamServerVariableName  = "IPAM_SERVER"
 )
 
 // Definitions to manage status conditions
