@@ -495,6 +495,13 @@ type RawResources struct {
 	Memory *resource.Quantity `json:"memory"`
 }
 
+// Similar to RawResources, stores raw resource amounts. However, also stores the ID of the agent
+// notifying the VM of the granted resource request
+type SignedRawResources struct {
+	RawResources
+	Id AgentIdentification `json:"id"`
+}
+
 // DownscaleResult is used by the VM informant to return whether it downscaled successfully, and
 // some indication of its status when doing so
 type DownscaleResult struct {

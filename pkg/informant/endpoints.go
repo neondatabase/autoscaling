@@ -242,7 +242,7 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 // amount is ok
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*api.DownscaleResult, int, error) {
+func (s *State) TryDownscale(ctx context.Context, target *api.SignedRawResources) (*api.DownscaleResult, int, error) {
 	// Helper functions for abbreviating returns.
 	resultFromStatus := func(ok bool, status string) (*api.DownscaleResult, int, error) {
 		return &api.DownscaleResult{Ok: ok, Status: status}, 200, nil
@@ -354,7 +354,7 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResources) (*struct{}, int, error) {
+func (s *State) NotifyUpscale(ctx context.Context, newResources *api.SignedRawResources) (*struct{}, int, error) {
 	// FIXME: we shouldn't just trust what the agent says
 	//
 	// Because of race conditions like in <https://github.com/neondatabase/autoscaling/issues/23>,
