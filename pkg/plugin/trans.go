@@ -223,8 +223,8 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 
 func (r resourceTransition[T]) handleNonAutoscalingUsageChange(newUsage T) (verdict string) {
 	diff := newUsage - r.node.Reserved
-	r.pod.Reserved += diff
-	r.node.Reserved = newUsage
+	r.pod.Reserved = newUsage
+	r.node.Reserved += diff
 	verdict = fmt.Sprintf(
 		"pod reserved (%v -> %v), node reserved (%v -> %v)",
 		r.oldPod.reserved, r.pod.Reserved, r.oldNode.reserved, r.node.Reserved,

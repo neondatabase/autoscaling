@@ -133,7 +133,6 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting VM watcher")
-
 	vmStore, err := p.watchVMEvents(ctx, watchMetrics, submitVMDisabledScaling, submitVMBoundsChanged, submitNonAutoscalingVmUsageChanged)
 
 	if err != nil {

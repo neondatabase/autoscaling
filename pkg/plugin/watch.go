@@ -170,7 +170,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					submitVMDisabledScaling(name)
 				}
 
-				if !oldInfo.ScalingEnabled && !newInfo.ScalingEnabled && oldInfo.Using() != newInfo.Using() {
+				if (!oldInfo.ScalingEnabled || !newInfo.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
 					podName := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					klog.Infof(
 						"[autoscale-enforcer] detected change usage for pod %v non-autoscaling VM %v",
