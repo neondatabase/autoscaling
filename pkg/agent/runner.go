@@ -347,6 +347,7 @@ func (r *Runner) Run(ctx context.Context, vmInfoUpdated util.CondChannelReceiver
 	if err != nil {
 		return fmt.Errorf("Error starting scheduler watcher: %w", err)
 	}
+	defer schedulerWatch.Stop()
 
 	if scheduler == nil {
 		r.logger.Warningf("No initial scheduler found")

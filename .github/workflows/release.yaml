@@ -10,8 +10,8 @@ env:
   INFORMANT_IMAGE: "neondatabase/vm-informant"
 
   KUSTOMIZE_VERSION:        "4.5.7"
-  CONTROLLER_TOOLS_VERSION: "0.9.2"
-  CODE_GENERATOR_VERSION:   "0.26.0"
+  CONTROLLER_TOOLS_VERSION: "0.10.0"
+  CODE_GENERATOR_VERSION:   "0.25.10"
   IMG:                      "neondatabase/neonvm-controller"
   IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:               "neondatabase/neonvm-runner"

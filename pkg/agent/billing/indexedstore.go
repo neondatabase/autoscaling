@@ -1,4 +1,4 @@
-package agent
+package billing
 
 // Types and implementation relating to VMNodeIndex, which provides indexing for watch.Watch for
 // efficient lookup of VMs on a particular node.

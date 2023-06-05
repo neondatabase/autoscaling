@@ -7,6 +7,7 @@ import (
 
 	"github.com/tychoish/fun/erc"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -15,7 +16,7 @@ type Config struct {
 	Informant InformantConfig  `json:"informant"`
 	Metrics   MetricsConfig    `json:"metrics"`
 	Scheduler SchedulerConfig  `json:"scheduler"`
-	Billing   *BillingConfig   `json:"billing,omitempty"`
+	Billing   *billing.Config  `json:"billing,omitempty"`
 	DumpState *DumpStateConfig `json:"dumpState"`
 }
 

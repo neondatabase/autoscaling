@@ -28,6 +28,7 @@ import (
 // Events occurring before this method is called will not be sent.
 func (e *AutoscaleEnforcer) watchPodEvents(
 	ctx context.Context,
+	metrics watch.Metrics,
 	submitVMDeletion func(util.NamespacedName),
 	submitPodDeletion func(util.NamespacedName),
 ) error {
@@ -36,6 +37,10 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
 		watch.Config{
 			LogName: "pods",
+			Metrics: watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "Pods",
+			},
 			// We want to be up-to-date in tracking deletions, so that our reservations are correct.
 			//
 			// FIXME: make these configurable.
@@ -112,6 +117,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 // handled by cancelled contexts in *almost all* cases.
 func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
+	metrics watch.Metrics,
 	submitVMDisabledScaling func(util.NamespacedName),
 	submitVMBoundsChanged func(_ *api.VmInfo, podName string),
 	submitNonAutoscalingVmUsageChanged func(_ *api.VmInfo, podname string),
@@ -121,6 +127,10 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 		e.vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		watch.Config{
 			LogName: "VMs",
+			Metrics: watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "VirtualMachines",
+			},
 			// FIXME: make these durations configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),

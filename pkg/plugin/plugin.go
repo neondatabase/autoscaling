@@ -125,13 +125,17 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		pushToQueue(func() { p.handleNonAutoscalingUsageChange(vm, podName) })
 	}
 
+	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
+
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
-	if err := p.watchPodEvents(ctx, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
+	if err := p.watchPodEvents(ctx, watchMetrics, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, submitVMDisabledScaling, submitVMBoundsChanged, submitNonAutoscalingVmUsageChanged)
+
+	vmStore, err := p.watchVMEvents(ctx, watchMetrics, submitVMDisabledScaling, submitVMBoundsChanged, submitNonAutoscalingVmUsageChanged)
+
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
@@ -156,6 +160,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}()
 
 	promReg := p.makePrometheusRegistry()
+	watchMetrics.MustRegister(promReg)
+
 	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
 		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
 	}

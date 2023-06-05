@@ -37,14 +37,19 @@ func startVMWatcher(
 	ctx context.Context,
 	config *Config,
 	vmClient *vmclient.Clientset,
+	metrics watch.Metrics,
 	nodeName string,
-	vmEvents chan<- vmEvent,
+	submitEvent func(vmEvent),
 ) (*watch.Store[vmapi.VirtualMachine], error) {
 	return watch.Watch(
 		ctx,
 		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		watch.Config{
 			LogName: "VMs",
+			Metrics: watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "VirtualMachines",
+			},
 			// We want to be relatively snappy; don't wait for too long before retrying.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 500, 1000),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 500, 1000),
@@ -62,7 +67,7 @@ func startVMWatcher(
 						klog.Errorf("Error handling VM added: %s", err)
 						return
 					}
-					vmEvents <- event
+					submitEvent(event)
 				}
 			},
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
@@ -93,7 +98,7 @@ func startVMWatcher(
 					return
 				}
 
-				vmEvents <- event
+				submitEvent(event)
 			},
 			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
@@ -102,7 +107,7 @@ func startVMWatcher(
 						klog.Errorf("Error handling VM deletion: %s", err)
 						return
 					}
-					vmEvents <- event
+					submitEvent(event)
 				}
 			},
 		},
