@@ -1,6 +1,6 @@
-package agent
+package billing
 
-// Types and implementation relating to VMNodeIndex, which provides indexing for util.Watch for
+// Types and implementation relating to VMNodeIndex, which provides indexing for watch.Watch for
 // efficient lookup of VMs on a particular node.
 
 import (
@@ -8,12 +8,12 @@ import (
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
-	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
-type VMStoreForNode = util.IndexedWatchStore[vmapi.VirtualMachine, *VMNodeIndex]
+type VMStoreForNode = watch.IndexedStore[vmapi.VirtualMachine, *VMNodeIndex]
 
-// VMNodeIndex is a util.WatchIndex that stores all of the VMs for a particular node
+// VMNodeIndex is a watch.Index that stores all of the VMs for a particular node
 //
 // We have to implement this ourselves because K8s does not (as of 2023-04-04) support field
 // selectors on CRDs, so we can't have the API server filter out VMs for us.

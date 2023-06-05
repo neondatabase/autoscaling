@@ -14,6 +14,7 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 type vmEvent struct {
@@ -36,24 +37,29 @@ func startVMWatcher(
 	ctx context.Context,
 	config *Config,
 	vmClient *vmclient.Clientset,
+	metrics watch.Metrics,
 	nodeName string,
-	vmEvents chan<- vmEvent,
-) (*util.WatchStore[vmapi.VirtualMachine], error) {
-	return util.Watch(
+	submitEvent func(vmEvent),
+) (*watch.Store[vmapi.VirtualMachine], error) {
+	return watch.Watch(
 		ctx,
 		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
-		util.WatchConfig{
+		watch.Config{
 			LogName: "VMs",
+			Metrics: watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "VirtualMachines",
+			},
 			// We want to be relatively snappy; don't wait for too long before retrying.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 500, 1000),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 500, 1000),
 		},
-		util.WatchAccessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
+		watch.Accessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
 			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
 		},
-		util.InitWatchModeDefer,
+		watch.InitModeDefer,
 		metav1.ListOptions{},
-		util.WatchHandlerFuncs[*vmapi.VirtualMachine]{
+		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(vm, vmEventAdded)
@@ -61,7 +67,7 @@ func startVMWatcher(
 						klog.Errorf("Error handling VM added: %s", err)
 						return
 					}
-					vmEvents <- event
+					submitEvent(event)
 				}
 			},
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
@@ -92,7 +98,7 @@ func startVMWatcher(
 					return
 				}
 
-				vmEvents <- event
+				submitEvent(event)
 			},
 			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
@@ -101,7 +107,7 @@ func startVMWatcher(
 						klog.Errorf("Error handling VM deletion: %s", err)
 						return
 					}
-					vmEvents <- event
+					submitEvent(event)
 				}
 			},
 		},
@@ -141,7 +147,7 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 		}
 
 		state.Write([]byte(fmt.Sprintf(
-			"{kind:%s podName:%s podIP:%s vmInfo:%s}",
+			"{kind:%s podName:%s podIP:%s vmInfo:%v}",
 			e.kind, e.podName, e.podIP, e.vmInfo,
 		)))
 

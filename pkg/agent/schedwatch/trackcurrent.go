@@ -1,61 +1,45 @@
-package agent
+package schedwatch
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/tychoish/fun/pubsub"
 	"golang.org/x/exp/slices"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
-type schedulerInfo struct {
-	PodName util.NamespacedName
-	UID     types.UID
-	IP      string
-}
-
-func newSchedulerInfo(pod *corev1.Pod) schedulerInfo {
-	return schedulerInfo{
-		PodName: util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace},
-		UID:     pod.UID,
-		IP:      pod.Status.PodIP,
-	}
-}
-
-// schedulerWatch is the interface returned by watchSchedulerUpdates
-type schedulerWatch struct {
-	ReadyQueue <-chan schedulerInfo
-	Deleted    <-chan schedulerInfo
+// SchedulerWatch is the interface returned by WatchSchedulerUpdates
+type SchedulerWatch struct {
+	ReadyQueue <-chan SchedulerInfo
+	Deleted    <-chan SchedulerInfo
 
 	cmd   chan<- watchCmd
-	using chan<- schedulerInfo
+	using chan<- SchedulerInfo
 
 	stop            util.SignalSender
 	stopEventStream func()
 }
 
-func (w schedulerWatch) ExpectingDeleted() {
+func (w SchedulerWatch) ExpectingDeleted() {
 	w.cmd <- watchCmdDeleted
 }
 
-func (w schedulerWatch) ExpectingReady() {
+func (w SchedulerWatch) ExpectingReady() {
 	w.cmd <- watchCmdReady
 }
 
-func (w schedulerWatch) Using(sched schedulerInfo) {
+func (w SchedulerWatch) Using(sched SchedulerInfo) {
 	w.using <- sched
 }
 
-func (w schedulerWatch) Stop() {
+func (w SchedulerWatch) Stop() {
 	w.stopEventStream()
 	w.stop.Send()
 }
@@ -73,103 +57,21 @@ const (
 	watchCmdReady   watchCmd = "expecting ready"
 )
 
-type watchEvent struct {
-	info schedulerInfo
-	kind eventKind
-}
-
-type eventKind string
-
-const (
-	eventKindReady   eventKind = "ready"
-	eventKindDeleted eventKind = "deleted"
-)
-
-func startSchedulerWatcher(
+func WatchSchedulerUpdates(
 	ctx context.Context,
-	logger RunnerLogger,
-	kubeClient *kubernetes.Clientset,
-	eventBroker *pubsub.Broker[watchEvent],
-	schedulerName string,
-) (*util.WatchStore[corev1.Pod], error) {
-	return util.Watch(
-		ctx,
-		kubeClient.CoreV1().Pods(schedulerNamespace),
-		util.WatchConfig{
-			LogName: "scheduler",
-			// We don't need to be super responsive to scheduler changes.
-			//
-			// FIXME: make these configurable.
-			RetryRelistAfter: util.NewTimeRange(time.Second, 4, 5),
-			RetryWatchAfter:  util.NewTimeRange(time.Second, 4, 5),
-		},
-		util.WatchAccessors[*corev1.PodList, corev1.Pod]{
-			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
-		},
-		util.InitWatchModeSync,
-		metav1.ListOptions{LabelSelector: schedulerLabelSelector(schedulerName)},
-		util.WatchHandlerFuncs[*corev1.Pod]{
-			AddFunc: func(pod *corev1.Pod, preexisting bool) {
-				podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-				if util.PodReady(pod) {
-					if pod.Status.PodIP == "" {
-						logger.Errorf("Pod %v is ready but has no IP", podName)
-						return
-					}
-
-					eventBroker.Publish(ctx, watchEvent{info: newSchedulerInfo(pod), kind: eventKindReady})
-				}
-			},
-			UpdateFunc: func(oldPod, newPod *corev1.Pod) {
-				oldPodName := util.NamespacedName{Name: oldPod.Name, Namespace: oldPod.Namespace}
-				newPodName := util.NamespacedName{Name: newPod.Name, Namespace: newPod.Namespace}
-
-				if oldPod.Name != newPod.Name || oldPod.Namespace != newPod.Namespace {
-					logger.Errorf(
-						"Unexpected scheduler pod update, old pod name %v != new pod name %v",
-						oldPodName, newPodName,
-					)
-				}
-
-				oldReady := util.PodReady(oldPod)
-				newReady := util.PodReady(newPod)
-
-				if !oldReady && newReady {
-					if newPod.Status.PodIP == "" {
-						logger.Errorf("Pod %v is ready but has no IP", newPodName)
-						return
-					}
-					eventBroker.Publish(ctx, watchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)})
-				} else if oldReady && !newReady {
-					eventBroker.Publish(ctx, watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)})
-				}
-			},
-			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
-				wasReady := util.PodReady(pod)
-				if wasReady {
-					eventBroker.Publish(ctx, watchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)})
-				}
-			},
-		},
-	)
-
-}
-
-func watchSchedulerUpdates(
-	ctx context.Context,
-	logger RunnerLogger,
-	eventBroker *pubsub.Broker[watchEvent],
-	store *util.WatchStore[corev1.Pod],
-) (schedulerWatch, *schedulerInfo, error) {
+	logger util.PrefixLogger,
+	eventBroker *pubsub.Broker[WatchEvent],
+	store *watch.Store[corev1.Pod],
+) (SchedulerWatch, *SchedulerInfo, error) {
 	events := eventBroker.Subscribe(ctx)
-	readyQueue := make(chan schedulerInfo)
-	deleted := make(chan schedulerInfo)
+	readyQueue := make(chan SchedulerInfo)
+	deleted := make(chan SchedulerInfo)
 	cmd := make(chan watchCmd)
-	using := make(chan schedulerInfo)
+	using := make(chan SchedulerInfo)
 	stopSender, stopListener := util.NewSingleSignalPair()
 
 	state := schedulerWatchState{
-		queue:      make([]watchEvent, 0, 1),
+		queue:      make([]WatchEvent, 0, 1),
 		nextReady:  -1,
 		nextDelete: -1,
 		mode:       watchCmdReady,
@@ -183,10 +85,10 @@ func watchSchedulerUpdates(
 		logger:     logger,
 	}
 
-	setStore := make(chan *util.WatchStore[corev1.Pod])
+	setStore := make(chan *watch.Store[corev1.Pod])
 	defer close(setStore)
 
-	watcher := schedulerWatch{
+	watcher := SchedulerWatch{
 		ReadyQueue:      readyQueue,
 		Deleted:         deleted,
 		cmd:             cmd,
@@ -207,10 +109,10 @@ func watchSchedulerUpdates(
 
 	if len(candidates) > 1 {
 		watcher.Stop()
-		return schedulerWatch{}, nil, errors.New("Multiple initial candidate scheduler pods")
+		return SchedulerWatch{}, nil, errors.New("Multiple initial candidate scheduler pods")
 	} else if len(candidates) == 1 && candidates[0].Status.PodIP == "" {
 		watcher.Stop()
-		return schedulerWatch{}, nil, errors.New("Scheduler pod is ready but IP is not available")
+		return SchedulerWatch{}, nil, errors.New("Scheduler pod is ready but IP is not available")
 	}
 
 	if len(candidates) == 0 {
@@ -222,26 +124,26 @@ func watchSchedulerUpdates(
 }
 
 type schedulerWatchState struct {
-	queue      []watchEvent
+	queue      []WatchEvent
 	nextReady  int
 	nextDelete int
 
 	mode   watchCmd
-	events <-chan watchEvent
-	store  *util.WatchStore[corev1.Pod]
+	events <-chan WatchEvent
+	store  *watch.Store[corev1.Pod]
 
-	readyQueue chan<- schedulerInfo
-	deleted    chan<- schedulerInfo
+	readyQueue chan<- SchedulerInfo
+	deleted    chan<- SchedulerInfo
 
 	cmd   <-chan watchCmd
-	using <-chan schedulerInfo
+	using <-chan SchedulerInfo
 
 	stop   util.SignalReceiver
-	logger RunnerLogger
+	logger util.PrefixLogger
 }
 
-func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchStore[corev1.Pod]) {
-	sndSetStore := make(chan *util.WatchStore[corev1.Pod])
+func (w schedulerWatchState) run(ctx context.Context, setStore chan *watch.Store[corev1.Pod]) {
+	sndSetStore := make(chan *watch.Store[corev1.Pod])
 	defer close(sndSetStore)
 
 	defer w.stop.Close()
@@ -254,7 +156,7 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchS
 	}()
 
 	for {
-		var sendCh chan<- schedulerInfo
+		var sendCh chan<- SchedulerInfo
 		var qIdx int
 		switch w.mode {
 		case watchCmdReady:
@@ -310,19 +212,19 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *util.WatchS
 }
 
 func (w *schedulerWatchState) resetNextReady() {
-	w.nextReady = slices.IndexFunc(w.queue, func(e watchEvent) bool {
+	w.nextReady = slices.IndexFunc(w.queue, func(e WatchEvent) bool {
 		return e.kind == eventKindReady
 	})
 }
 
 func (w *schedulerWatchState) resetNextDelete() {
-	w.nextDelete = slices.IndexFunc(w.queue, func(e watchEvent) bool {
+	w.nextDelete = slices.IndexFunc(w.queue, func(e WatchEvent) bool {
 		return e.kind == eventKindDeleted
 	})
 }
 
-func eventFinder(kind eventKind, uid types.UID) func(watchEvent) bool {
-	return func(e watchEvent) bool { return e.kind == kind && e.info.UID == uid }
+func eventFinder(kind eventKind, uid types.UID) func(WatchEvent) bool {
+	return func(e WatchEvent) bool { return e.kind == kind && e.info.UID == uid }
 }
 
 func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
@@ -347,7 +249,7 @@ func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
 		w.nextDelete = -1
 
 		// Gradually create the new queue, with all of the deletion events removed
-		var newQueue []watchEvent
+		var newQueue []WatchEvent
 
 		for i := range w.queue {
 			switch w.queue[i].kind {
@@ -371,7 +273,7 @@ func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
 	}
 }
 
-func (w *schedulerWatchState) handleEvent(event watchEvent) {
+func (w *schedulerWatchState) handleEvent(event WatchEvent) {
 	w.logger.Infof("Received watch event %+v", event)
 
 	switch event.kind {
@@ -407,7 +309,7 @@ func (w *schedulerWatchState) handleEvent(event watchEvent) {
 	}
 }
 
-func (w *schedulerWatchState) handleUsing(info schedulerInfo) {
+func (w *schedulerWatchState) handleUsing(info SchedulerInfo) {
 	// If there's a "ready" event for the pod, remove it and recalculate nextReady
 	readyIdx := slices.IndexFunc(w.queue, eventFinder(eventKindReady, info.UID))
 	if readyIdx != -1 {

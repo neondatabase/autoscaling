@@ -62,6 +62,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -84,7 +85,7 @@ type Runner struct {
 	status *podStatus
 
 	// logger is the shared logger for this Runner, giving all log lines a unique, relevant prefix
-	logger RunnerLogger
+	logger util.PrefixLogger
 
 	// shutdown provides a clean way to trigger all background Runner threads to shut down. shutdown
 	// is set exactly once, by (*Runner).Run
@@ -180,10 +181,10 @@ type Scheduler struct {
 	// This field is immutable but the data behind the pointer is not.
 	runner *Runner
 
-	logger RunnerLogger
+	logger util.PrefixLogger
 
 	// info holds the immutable information we use to connect to and describe the scheduler
-	info schedulerInfo
+	info schedwatch.SchedulerInfo
 
 	// registered is true only once a call to this Scheduler's Register() method has been made
 	//
@@ -234,10 +235,10 @@ type RunnerState struct {
 
 // SchedulerState is the state of a Scheduler, constructed as part of a Runner's State Method
 type SchedulerState struct {
-	LogPrefix  string        `json:"logPrefix"`
-	Info       schedulerInfo `json:"info"`
-	Registered bool          `json:"registered"`
-	FatalError error         `json:"fatalError"`
+	LogPrefix  string                   `json:"logPrefix"`
+	Info       schedwatch.SchedulerInfo `json:"info"`
+	Registered bool                     `json:"registered"`
+	FatalError error                    `json:"fatalError"`
 }
 
 func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
@@ -249,7 +250,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	var scheduler *SchedulerState
 	if r.scheduler != nil {
 		scheduler = &SchedulerState{
-			LogPrefix:  r.scheduler.logger.prefix,
+			LogPrefix:  r.scheduler.logger.Prefix,
 			Info:       r.scheduler.info,
 			Registered: r.scheduler.registered,
 			FatalError: r.scheduler.fatalError,
@@ -280,7 +281,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 		LastInformantError:    r.lastInformantError,
 		VM:                    r.vm,
 		PodIP:                 r.podIP,
-		LogPrefix:             r.logger.prefix,
+		LogPrefix:             r.logger.Prefix,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
 
 		SchedulerRespondedWithMigration: r.schedulerRespondedWithMigration,
@@ -340,12 +341,13 @@ func (r *Runner) Run(ctx context.Context, vmInfoUpdated util.CondChannelReceiver
 	ctx, r.shutdown = context.WithCancel(ctx)
 	defer r.shutdown()
 
-	schedulerWatch, scheduler, err := watchSchedulerUpdates(
+	schedulerWatch, scheduler, err := schedwatch.WatchSchedulerUpdates(
 		ctx, r.logger, r.global.schedulerEventBroker, r.global.schedulerStore,
 	)
 	if err != nil {
 		return fmt.Errorf("Error starting scheduler watcher: %w", err)
 	}
+	defer schedulerWatch.Stop()
 
 	if scheduler == nil {
 		r.logger.Warningf("No initial scheduler found")
@@ -781,8 +783,8 @@ retryServer:
 // on registeredScheduler whenever a new Scheduler is successfully registered
 func (r *Runner) trackSchedulerLoop(
 	ctx context.Context,
-	init *schedulerInfo,
-	schedulerWatch schedulerWatch,
+	init *schedwatch.SchedulerInfo,
+	schedulerWatch schedwatch.SchedulerWatch,
 	registeredScheduler util.CondChannelSender,
 ) {
 	// pre-declare a bunch of variables because we have some gotos here.
@@ -790,7 +792,7 @@ func (r *Runner) trackSchedulerLoop(
 		lastStart   time.Time
 		minWait     time.Duration    = 5 * time.Second // minimum time we have to wait between scheduler starts
 		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
-		currentInfo schedulerInfo
+		currentInfo schedwatch.SchedulerInfo
 		fatal       util.SignalReceiver
 		failed      bool
 	)
@@ -822,8 +824,8 @@ startScheduler:
 
 		sched := &Scheduler{
 			runner: r,
-			logger: RunnerLogger{
-				prefix: fmt.Sprintf("%sScheduler %s: ", r.logger.prefix, currentInfo.UID),
+			logger: util.PrefixLogger{
+				Prefix: fmt.Sprintf("%sScheduler %s: ", r.logger.Prefix, currentInfo.UID),
 			},
 			info:       currentInfo,
 			registered: false,
@@ -1696,7 +1698,8 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		s.runner.global.metrics.schedulerRequests.WithLabelValues("[error doing request]").Inc()
+		description := fmt.Sprintf("[error doing request: %s]", util.RootError(err))
+		s.runner.global.metrics.schedulerRequests.WithLabelValues(description).Inc()
 		return nil, s.handleRequestError(reqData, fmt.Errorf("Error doing request: %w", err))
 	}
 	defer response.Body.Close()

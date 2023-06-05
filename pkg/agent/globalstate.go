@@ -18,8 +18,10 @@ import (
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 // agentState is the global state for the autoscaler agent
@@ -34,15 +36,15 @@ type agentState struct {
 	config               *Config
 	kubeClient           *kubernetes.Clientset
 	vmClient             *vmclient.Clientset
-	schedulerEventBroker *pubsub.Broker[watchEvent]
-	schedulerStore       *util.WatchStore[corev1.Pod]
+	schedulerEventBroker *pubsub.Broker[schedwatch.WatchEvent]
+	schedulerStore       *watch.Store[corev1.Pod]
 	metrics              PromMetrics
 }
 
 func (r MainRunner) newAgentState(
 	podIP string,
-	broker *pubsub.Broker[watchEvent],
-	schedulerStore *util.WatchStore[corev1.Pod],
+	broker *pubsub.Broker[schedwatch.WatchEvent],
+	schedulerStore *watch.Store[corev1.Pod],
 ) (*agentState, *prometheus.Registry) {
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
@@ -298,8 +300,8 @@ func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, p
 	return &Runner{
 		global: s,
 		status: nil, // set by calller
-		logger: RunnerLogger{
-			prefix: fmt.Sprintf("Runner %v/%d: ", podName, restartCount),
+		logger: util.PrefixLogger{
+			Prefix: fmt.Sprintf("Runner %v/%d: ", podName, restartCount),
 		},
 		schedulerRespondedWithMigration: false,
 

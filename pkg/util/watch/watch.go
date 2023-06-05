@@ -1,10 +1,9 @@
-package util
+package watch
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	stdruntime "runtime"
 	"sync"
 	"sync/atomic"
@@ -16,93 +15,73 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/klog/v2"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-// WatchClient is implemented by the specific interfaces of kubernetes clients, like
+// Client is implemented by the specific interfaces of kubernetes clients, like
 // `Clientset.CoreV1().Pods(namespace)` or `..Nodes()`
 //
 // This interface should be *already implemented* by whatever the correct client is.
-type WatchClient[L any] interface {
+type Client[L any] interface {
 	List(context.Context, metav1.ListOptions) (L, error)
 	Watch(context.Context, metav1.ListOptions) (watch.Interface, error)
 }
 
-// WatchConfig is the miscellaneous configuration used by Watch
-type WatchConfig struct {
+// Config is the miscellaneous configuration used by Watch
+type Config struct {
 	// LogName is the name of the watcher for use in logs
 	LogName string
 
+	// Metrics will be used by the Watch call to report some information about its internal
+	// operations
+	//
+	// Refer to the Metrics and MetricsConfig types for more information.
+	Metrics MetricsConfig
+
 	// RetryRelistAfter gives a retry interval when a re-list fails. If left nil, then Watch will
 	// not retry.
-	RetryRelistAfter *TimeRange
+	RetryRelistAfter *util.TimeRange
 	// RetryWatchAfter gives a retry interval when a non-initial watch fails. If left nil, then
 	// Watch will not retry.
-	RetryWatchAfter *TimeRange
+	RetryWatchAfter *util.TimeRange
 }
 
-type TimeRange struct {
-	min   int
-	max   int
-	units time.Duration
-}
-
-func NewTimeRange(units time.Duration, min, max int) *TimeRange {
-	if min < 0 {
-		panic(errors.New("bad time range: min < 0"))
-	} else if min == 0 && max == 0 {
-		panic(errors.New("bad time range: min and max = 0"))
-	} else if max < min {
-		panic(errors.New("bad time range: max < min"))
-	}
-
-	return &TimeRange{min: min, max: max, units: units}
-}
-
-// Random returns a random time.Duration within the range
-func (r TimeRange) Random() time.Duration {
-	if r.max == r.min {
-		return time.Duration(r.min) * r.units
-	}
-
-	count := rand.Intn(r.max-r.min) + r.min
-	return time.Duration(count) * r.units
-}
-
-// WatchAccessors provides the "glue" functions for Watch to go from a list L (returned by the
+// Accessors provides the "glue" functions for Watch to go from a list L (returned by the
 // client's List) to the underlying slice of items []T
-type WatchAccessors[L any, T any] struct {
+type Accessors[L any, T any] struct {
 	Items func(L) []T
 }
 
-// WatchObject is implemented by pointers to T, where T is typically the resource that we're
+// Object is implemented by pointers to T, where T is typically the resource that we're
 // actually watching.
 //
 // Example implementors: *corev1.Pod, *corev1.Node
-type WatchObject[T any] interface {
+type Object[T any] interface {
 	~*T
 	runtime.Object
 	metav1.ObjectMetaAccessor
 }
 
-// WatchHandlerFuncs provides the set of callbacks to use for events from Watch
-type WatchHandlerFuncs[P any] struct {
+// HandlerFuncs provides the set of callbacks to use for events from Watch
+type HandlerFuncs[P any] struct {
 	AddFunc    func(obj P, preexisting bool)
 	UpdateFunc func(oldObj P, newObj P)
 	DeleteFunc func(obj P, mayBeStale bool)
 }
 
-// WatchIndex represents types that provide some kind of additional index on top of the base listing
+// Index represents types that provide some kind of additional index on top of the base listing
 //
 // Indexing is functionally implemented in the same way that WatchHandlerFuncs is, with the main
 // difference being that more things are done for you with WatchIndexes. In particular, indexes can
 // be added and removed after the Watch has already started, and the locking behavior is explicit.
-type WatchIndex[T any] interface {
+type Index[T any] interface {
 	Add(obj *T)
 	Update(oldObj, newObj *T)
 	Delete(obj *T)
 }
 
-// InitWatchMode dictates the behavior of Watch with respect to any initial calls to
+// InitMode dictates the behavior of Watch with respect to any initial calls to
 // handlers.AddFunc before returning
 //
 // If set to InitWatchModeSync, then AddFunc will be called while processing the initial listing,
@@ -111,11 +90,11 @@ type WatchIndex[T any] interface {
 //
 // Otherwise, if set to InitWatchModeDefer, then AddFunc will not be called until after Watch
 // returns. Correspondingly, the WatchStore will not update until then either.
-type InitWatchMode string
+type InitMode string
 
 const (
-	InitWatchModeSync  InitWatchMode = "sync"
-	InitWatchModeDefer InitWatchMode = "defer"
+	InitModeSync  InitMode = "sync"
+	InitModeDefer InitMode = "defer"
 )
 
 // Watch starts a goroutine for watching events, using the provided WatchHandlerFuncs as the
@@ -123,15 +102,15 @@ const (
 //
 // The type C is the kubernetes client we use to get the objects, L representing a list of these,
 // T representing the object type, and P as a pointer to T.
-func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]](
+func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	ctx context.Context,
 	client C,
-	config WatchConfig,
-	accessors WatchAccessors[L, T],
-	mode InitWatchMode,
+	config Config,
+	accessors Accessors[L, T],
+	mode InitMode,
 	opts metav1.ListOptions,
-	handlers WatchHandlerFuncs[P],
-) (*WatchStore[T], error) {
+	handlers HandlerFuncs[P],
+) (*Store[T], error) {
 	if accessors.Items == nil {
 		panic(errors.New("accessors.Items == nil"))
 	}
@@ -151,7 +130,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	opts.AllowWatchBookmarks = true
 
 	// Perform an initial listing
+	config.Metrics.startList()
 	initialList, err := client.List(ctx, opts)
+	config.Metrics.doneList(err)
 	if err != nil {
 		return nil, fmt.Errorf("Initial list failed: %w", err)
 	}
@@ -160,14 +141,14 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	// the initial list
 	opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
 
-	sendStop, stopSignal := NewSingleSignalPair()
+	sendStop, stopSignal := util.NewSingleSignalPair()
 
-	store := WatchStore[T]{
+	store := Store[T]{
 		objects:       make(map[types.UID]*T),
 		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
 		nextIndexID:   0,
-		indexes:       make(map[uint64]WatchIndex[T]),
+		indexes:       make(map[uint64]Index[T]),
 		stopSignal:    sendStop,
 	}
 
@@ -175,7 +156,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 	var deferredAdds []T
 
-	if mode == InitWatchModeDefer {
+	if mode == InitModeDefer {
 		deferredAdds = items
 	} else {
 		for i := range items {
@@ -194,13 +175,26 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	items = nil // reset to allow GC
 
 	// Start watching
+	config.Metrics.startWatch()
 	watcher, err := client.Watch(ctx, opts)
+	config.Metrics.doneWatch(err)
 	if err != nil {
 		return nil, fmt.Errorf("Initial watch failed: %w", err)
 	}
 
+	// Lock the store to pass it into the goroutine, so that we don't have to worry about immediate
+	// operations on the store racing with any deferred additions.
+	store.mutex.Lock()
+
 	// With the successful Watch call underway, we hand off responsibility to a new goroutine.
 	go func() {
+		holdingInitialLock := true
+		defer func() {
+			if holdingInitialLock {
+				store.mutex.Unlock()
+			}
+		}()
+
 		// note: instead of deferring watcher.Stop() directly, wrapping it in an outer function
 		// means that we'll always Stop the most recent watcher.
 		defer func() {
@@ -210,7 +204,12 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 		// explicitly stop on exit so that it's possible to know when the store is stopped
 		defer store.Stop()
 
+		config.Metrics.alive()
+		defer config.Metrics.unalive()
+
 		// Handle any deferred calls to AddFunc
+		// NB: This is only sound because we're still holding store.mutex; otherwise we'd have to
+		// deal with possible racy operations (including adding an index).
 		for i := range deferredAdds {
 			obj := &deferredAdds[i]
 			uid := P(obj).GetObjectMeta().GetUID()
@@ -221,6 +220,11 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				return
 			}
 		}
+
+		holdingInitialLock = false
+		store.mutex.Unlock()
+
+		defer config.Metrics.unfailing()
 
 		for {
 			// this is used exclusively for relisting, but must be defined up here so that our gotos
@@ -233,12 +237,17 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				case <-ctx.Done():
 					return
 				case <-store.triggerRelist:
+					config.Metrics.relistRequested()
 					continue
 				case event, ok := <-watcher.ResultChan():
 					if !ok {
 						klog.Infof("watch %s: watcher ended gracefully, restarting", config.LogName)
 						goto newWatcher
-					} else if event.Type == watch.Error {
+					}
+
+					config.Metrics.recordEvent(event.Type)
+
+					if event.Type == watch.Error {
 						err := apierrors.FromObject(event.Object)
 						// note: we can get 'too old resource version' errors when there's been a
 						// lot of resource updates that our ListOptions filtered out.
@@ -261,77 +270,12 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 
 					meta := obj.GetObjectMeta()
-					uid := meta.GetUID()
 					// Update ResourceVersion so subsequent calls to client.Watch won't include this
 					// event, which we're currently processing.
 					opts.ResourceVersion = meta.GetResourceVersion()
 
-					name := GetNamespacedName(obj)
-
 					// Wrap the remainder in a function, so we can have deferred unlocks.
-					err := func() error {
-						switch event.Type {
-						case watch.Added:
-							store.mutex.Lock()
-							defer store.mutex.Unlock()
-
-							if _, ok := store.objects[uid]; ok {
-								return fmt.Errorf(
-									"watch %s: received add event for object %v that we already have",
-									config.LogName, name,
-								)
-							}
-							store.objects[uid] = (*T)(obj)
-							for _, index := range store.indexes {
-								index.Add((*T)(obj))
-							}
-							handlers.AddFunc((*T)(obj), false)
-						case watch.Bookmark:
-							// Nothing to do, just serves to give us a new ResourceVersion.
-						case watch.Deleted:
-							// We're given the state of the object immediately before deletion, which
-							// *may* be different to what we currently have stored.
-							store.mutex.Lock()
-							defer store.mutex.Unlock()
-
-							old, ok := store.objects[uid]
-							if !ok {
-								return fmt.Errorf(
-									"watch %s: received delete event for object %v that's not present",
-									config.LogName, name,
-								)
-							}
-							// Update:
-							for _, index := range store.indexes {
-								index.Update(old, (*T)(obj))
-							}
-							handlers.UpdateFunc(old, (*T)(obj))
-							// Delete:
-							delete(store.objects, uid)
-							for _, index := range store.indexes {
-								index.Delete((*T)(obj))
-							}
-							handlers.DeleteFunc((*T)(obj), false)
-						case watch.Modified:
-							old, ok := store.objects[uid]
-							if !ok {
-								return fmt.Errorf(
-									"watch %s: received update event for object %v that's not present",
-									config.LogName, name,
-								)
-							}
-							store.objects[uid] = (*T)(obj)
-							for _, index := range store.indexes {
-								index.Update(old, (*T)(obj))
-							}
-							handlers.UpdateFunc(old, (*T)(obj))
-						case watch.Error:
-							panic(errors.New("unreachable code reached")) // handled above
-						default:
-							panic(errors.New("unknown watch event"))
-						}
-						return nil
-					}()
+					err := handleEvent(&store, config, handlers, event.Type, meta, obj)
 
 					if err != nil {
 						klog.Error(err.Error())
@@ -366,6 +310,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					select {
 					case <-store.triggerRelist:
 						newRelistTriggered = true
+						config.Metrics.relistRequested()
 					default:
 					}
 
@@ -375,7 +320,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 				}()
 
+				config.Metrics.startList()
 				relistList, err := client.List(ctx, opts)
+				config.Metrics.doneList(err)
 				if err != nil {
 					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
 					if config.RetryRelistAfter == nil {
@@ -384,6 +331,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 					retryAfter := config.RetryRelistAfter.Random()
 					klog.Infof("watch %s: retrying re-list after %s", config.LogName, retryAfter)
+
+					config.Metrics.failing()
 
 					select {
 					case <-time.After(retryAfter):
@@ -395,6 +344,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 						return
 					}
 				}
+
+				config.Metrics.unfailing()
 
 				// err == nil, process relistList
 				relistItems := accessors.Items(relistList)
@@ -463,7 +414,9 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 
 		newWatcher:
 			for {
+				config.Metrics.startWatch()
 				watcher, err = client.Watch(ctx, opts)
+				config.Metrics.doneWatch(err)
 				if err != nil {
 					klog.Errorf("watch %s: re-watch failed: %s", config.LogName, err)
 					if config.RetryWatchAfter == nil {
@@ -472,6 +425,8 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 					}
 					retryAfter := config.RetryWatchAfter.Random()
 					klog.Infof("watch %s: retrying re-watch after %s", config.LogName, retryAfter)
+
+					config.Metrics.failing()
 
 					select {
 					case <-time.After(retryAfter):
@@ -485,6 +440,7 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 				}
 
 				// err == nil
+				config.Metrics.unfailing()
 				break newWatcher
 			}
 		}
@@ -493,9 +449,85 @@ func Watch[C WatchClient[L], L metav1.ListMetaAccessor, T any, P WatchObject[T]]
 	return &store, nil
 }
 
-// WatchStore provides an interface for getting information about a list of Ts using the event
+// helper for Watch. Error events are expected to already have been handled by the caller.
+func handleEvent[T any, P ~*T](
+	store *Store[T],
+	config Config,
+	handlers HandlerFuncs[P],
+	eventType watch.EventType,
+	meta metav1.Object,
+	ptr P,
+) error {
+	uid := meta.GetUID()
+	name := util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
+	obj := (*T)(ptr)
+
+	// Some of the cases below don't actually require locking the store. Most of the events that we
+	// recieve *do* though, so we're better off doing it here for simplicity.
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	switch eventType {
+	case watch.Added:
+		if _, ok := store.objects[uid]; ok {
+			return fmt.Errorf(
+				"watch %s: received add event for object %v that we already have",
+				config.LogName, name,
+			)
+		}
+		store.objects[uid] = obj
+		for _, index := range store.indexes {
+			index.Add(obj)
+		}
+		handlers.AddFunc(obj, false)
+	case watch.Deleted:
+		// We're given the state of the object immediately before deletion, which
+		// *may* be different to what we currently have stored.
+		old, ok := store.objects[uid]
+		if !ok {
+			return fmt.Errorf(
+				"watch %s: received delete event for object %v that's not present",
+				config.LogName, name,
+			)
+		}
+		// Update:
+		for _, index := range store.indexes {
+			index.Update(old, obj)
+		}
+		handlers.UpdateFunc(old, obj)
+		// Delete:
+		delete(store.objects, uid)
+		for _, index := range store.indexes {
+			index.Delete(obj)
+		}
+		handlers.DeleteFunc(obj, false)
+	case watch.Modified:
+		old, ok := store.objects[uid]
+		if !ok {
+			return fmt.Errorf(
+				"watch %s: received update event for object %v that's not present",
+				config.LogName, name,
+			)
+		}
+		store.objects[uid] = obj
+		for _, index := range store.indexes {
+			index.Update(old, obj)
+		}
+		handlers.UpdateFunc(old, obj)
+	case watch.Bookmark:
+		// Nothing to do, just serves to give us a new ResourceVersion, which should be handled by
+		// the caller.
+	case watch.Error:
+		panic(errors.New("handleEvent unexpectedly called with eventType Error"))
+	default:
+		panic(errors.New("unknown watch event"))
+	}
+	return nil
+}
+
+// Store provides an interface for getting information about a list of Ts using the event
 // listener from a previous call to Watch
-type WatchStore[T any] struct {
+type Store[T any] struct {
 	objects map[types.UID]*T
 	mutex   sync.Mutex
 
@@ -503,15 +535,15 @@ type WatchStore[T any] struct {
 	relisted      chan struct{}
 
 	nextIndexID uint64
-	indexes     map[uint64]WatchIndex[T]
+	indexes     map[uint64]Index[T]
 
-	stopSignal SignalSender
+	stopSignal util.SignalSender
 	stopped    atomic.Bool
 }
 
 // Relist triggers re-listing the WatchStore, returning a channel that will be closed once the
 // re-list is complete
-func (w *WatchStore[T]) Relist() <-chan struct{} {
+func (w *Store[T]) Relist() <-chan struct{} {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
@@ -523,16 +555,16 @@ func (w *WatchStore[T]) Relist() <-chan struct{} {
 	return w.relisted
 }
 
-func (w *WatchStore[T]) Stop() {
+func (w *Store[T]) Stop() {
 	w.stopSignal.Send()
 	w.stopped.Store(true)
 }
 
-func (w *WatchStore[T]) Stopped() bool {
+func (w *Store[T]) Stopped() bool {
 	return w.stopped.Load()
 }
 
-func (w *WatchStore[T]) Items() []*T {
+func (w *Store[T]) Items() []*T {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
@@ -546,13 +578,13 @@ func (w *WatchStore[T]) Items() []*T {
 	return items
 }
 
-// NewIndexedWatchStore creates a new IndexedWatchStore from the WatchStore and the index to use.
+// NewIndexedStore creates a new IndexedWatchStore from the WatchStore and the index to use.
 //
 // Note: the index type is assumed to have reference semantics; i.e. any shallow copy of the value
 // will affect any other shallow copy.
 //
 // For more information, refer to IndexedWatchStore.
-func NewIndexedWatchStore[T any, I WatchIndex[T]](store *WatchStore[T], index I) IndexedWatchStore[T, I] {
+func NewIndexedStore[T any, I Index[T]](store *Store[T], index I) IndexedStore[T, I] {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
@@ -574,13 +606,13 @@ func NewIndexedWatchStore[T any, I WatchIndex[T]](store *WatchStore[T], index I)
 		delete(store.indexes, id)
 	})
 
-	return IndexedWatchStore[T, I]{store, index, id, collector}
+	return IndexedStore[T, I]{store, index, id, collector}
 }
 
-// IndexedWatchStore represents a WatchStore, wrapped with a privileged WatchIndex that can be used
+// IndexedStore represents a WatchStore, wrapped with a privileged WatchIndex that can be used
 // to efficiently answer queries.
-type IndexedWatchStore[T any, I WatchIndex[T]] struct {
-	*WatchStore[T]
+type IndexedStore[T any, I Index[T]] struct {
+	*Store[T]
 
 	index I
 
@@ -594,21 +626,21 @@ type IndexedWatchStore[T any, I WatchIndex[T]] struct {
 // WithIndex calls a function with the current state of the index, locking the WatchStore around it.
 //
 // It is almost guaranteed to be an error to indirectly return the index with this function.
-func (w IndexedWatchStore[T, I]) WithIndex(f func(I)) {
-	w.WatchStore.mutex.Lock()
-	defer w.WatchStore.mutex.Unlock()
+func (w IndexedStore[T, I]) WithIndex(f func(I)) {
+	w.Store.mutex.Lock()
+	defer w.Store.mutex.Unlock()
 
 	f(w.index)
 }
 
-func (w IndexedWatchStore[T, I]) GetIndexed(f func(I) (*T, bool)) (obj *T, ok bool) {
+func (w IndexedStore[T, I]) GetIndexed(f func(I) (*T, bool)) (obj *T, ok bool) {
 	w.WithIndex(func(i I) {
 		obj, ok = f(i)
 	})
 	return
 }
 
-func (w IndexedWatchStore[T, I]) ListIndexed(f func(I) []*T) (list []*T) {
+func (w IndexedStore[T, I]) ListIndexed(f func(I) []*T) (list []*T) {
 	w.WithIndex(func(i I) {
 		list = f(i)
 	})
@@ -625,20 +657,20 @@ func NewNameIndex[T any]() *NameIndex[T] {
 
 	// This doesn't *need* to be a pointer, but the intent is a little more clear this way.
 	return &NameIndex[T]{
-		namespacedNames: make(map[NamespacedName]*T),
+		namespacedNames: make(map[util.NamespacedName]*T),
 	}
 }
 
 // NameIndex is a WatchIndex that provides efficient lookup for a value with a particular name
 type NameIndex[T any] struct {
-	namespacedNames map[NamespacedName]*T
+	namespacedNames map[util.NamespacedName]*T
 }
 
 // note: requires that *T implements metav1.ObjectMetaAccessor
-func keyForObj[T any](obj *T) NamespacedName {
+func keyForObj[T any](obj *T) util.NamespacedName {
 	meta := any(obj).(metav1.ObjectMetaAccessor).GetObjectMeta()
 
-	return NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
+	return util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 }
 
 func (i *NameIndex[T]) Add(obj *T) {
@@ -653,6 +685,6 @@ func (i *NameIndex[T]) Delete(obj *T) {
 }
 
 func (i *NameIndex[T]) Get(namespace string, name string) (obj *T, ok bool) {
-	obj, ok = i.namespacedNames[NamespacedName{namespace, name}]
+	obj, ok = i.namespacedNames[util.NamespacedName{Namespace: namespace, Name: name}]
 	return
 }

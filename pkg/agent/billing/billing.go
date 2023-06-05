@@ -1,4 +1,4 @@
-package agent
+package billing
 
 import (
 	"context"
@@ -12,11 +12,12 @@ import (
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
+	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/billing"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type BillingConfig struct {
+type Config struct {
 	URL                  string `json:"url"`
 	CPUMetricName        string `json:"cpuMetricName"`
 	ActiveTimeMetricName string `json:"activeTimeMetricName"`
@@ -25,14 +26,14 @@ type BillingConfig struct {
 	PushTimeoutSeconds   uint   `json:"pushTimeoutSeconds"`
 }
 
-type billingMetricsState struct {
-	historical      map[billingMetricsKey]vmMetricsHistory
-	present         map[billingMetricsKey]vmMetricsInstant
+type metricsState struct {
+	historical      map[metricsKey]vmMetricsHistory
+	present         map[metricsKey]vmMetricsInstant
 	lastCollectTime *time.Time
 	pushWindowStart time.Time
 }
 
-type billingMetricsKey struct {
+type metricsKey struct {
 	uid        types.UID
 	endpointID string
 }
@@ -70,8 +71,9 @@ const (
 
 func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
-	conf *BillingConfig,
+	conf *Config,
 	store VMStoreForNode,
+	metrics PromMetrics,
 ) {
 	client := billing.NewClient(conf.URL, http.DefaultClient)
 
@@ -82,14 +84,14 @@ func RunBillingMetricsCollector(
 	pushTicker := time.NewTicker(time.Second * time.Duration(conf.PushEverySeconds))
 	defer pushTicker.Stop()
 
-	state := billingMetricsState{
-		historical:      make(map[billingMetricsKey]vmMetricsHistory),
-		present:         make(map[billingMetricsKey]vmMetricsInstant),
+	state := metricsState{
+		historical:      make(map[metricsKey]vmMetricsHistory),
+		present:         make(map[metricsKey]vmMetricsInstant),
 		lastCollectTime: nil,
 		pushWindowStart: time.Now(),
 	}
 
-	state.collect(conf, store)
+	state.collect(conf, store, metrics)
 	batch := client.NewBatch()
 
 	for {
@@ -99,23 +101,30 @@ func RunBillingMetricsCollector(
 			if store.Stopped() && backgroundCtx.Err() == nil {
 				panic(errors.New("VM store stopped but background context is still live"))
 			}
-			state.collect(conf, store)
+			state.collect(conf, store, metrics)
 		case <-pushTicker.C:
 			klog.Infof("Creating billing batch")
 			state.drainAppendToBatch(conf, batch)
+			metrics.batchSizeCurrent.Set(float64(batch.Count()))
 			klog.Infof("Pushing billing events (count = %d)", batch.Count())
 			if err := pushBillingEvents(conf, batch); err != nil {
+				metrics.sendErrorsTotal.Inc()
 				klog.Errorf("Error pushing billing events: %s", err)
 				continue
 			}
 			// Sending was successful; clear the batch.
+			//
+			// Don't reset metrics.batchSizeCurrent because it stores the *most recent* batch size.
+			// (The "current" suffix refers to the fact the metric is a gague, not a counter)
 			batch = client.NewBatch()
 		case <-backgroundCtx.Done():
 			// If we're being shut down, push the latests events we have before returning.
 			klog.Infof("Creating final billing batch")
 			state.drainAppendToBatch(conf, batch)
+			metrics.batchSizeCurrent.Set(float64(batch.Count()))
 			klog.Infof("Pushing final billing events (count = %d)", batch.Count())
 			if err := pushBillingEvents(conf, batch); err != nil {
+				metrics.sendErrorsTotal.Inc()
 				klog.Errorf("Error pushing billing events: %s", err)
 			}
 			return
@@ -123,17 +132,21 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode) {
+func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromMetrics) {
 	now := time.Now()
 
+	metricsBatch := metrics.forBatch()
+	defer metricsBatch.finish() // This doesn't *really* need to be deferred, but it's up here so we don't forget
+
 	old := s.present
-	s.present = make(map[billingMetricsKey]vmMetricsInstant)
+	s.present = make(map[metricsKey]vmMetricsInstant)
 	vmsOnThisNode := store.ListIndexed(func(i *VMNodeIndex) []*vmapi.VirtualMachine {
 		return i.List()
 	})
 	for _, vm := range vmsOnThisNode {
-		endpointID, ok := vm.Labels[EndpointLabel]
-		if !ok {
+		endpointID, isEndpoint := vm.Labels[EndpointLabel]
+		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
+		if !isEndpoint {
 			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
 			continue
 		}
@@ -142,7 +155,7 @@ func (s *billingMetricsState) collect(conf *BillingConfig, store VMStoreForNode)
 			continue
 		}
 
-		key := billingMetricsKey{
+		key := metricsKey{
 			uid:        vm.UID,
 			endpointID: endpointID,
 		}
@@ -228,13 +241,19 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
+func logAddedEvent(event billing.IncrementalEvent) billing.IncrementalEvent {
+	klog.Infof("Adding event for EndpointID %q: MetricName=%q, Value=%d", event.EndpointID, event.MetricName, event.Value)
+	return event
+}
+
 // drainAppendToBatch clears the current history, adding it as events to the batch
-func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *billing.Batch) {
+func (s *metricsState) drainAppendToBatch(conf *Config, batch *billing.Batch) {
 	now := time.Now()
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
-		batch.AddIncrementalEvent(billing.IncrementalEvent{
+
+		batch.AddIncrementalEvent(logAddedEvent(billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
 			Type:           "", // set in batch method
 			IdempotencyKey: "", // set in batch method
@@ -244,8 +263,8 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			StartTime: s.pushWindowStart,
 			StopTime:  now,
 			Value:     int(math.Round(history.total.cpu)),
-		})
-		batch.AddIncrementalEvent(billing.IncrementalEvent{
+		}))
+		batch.AddIncrementalEvent(logAddedEvent(billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
 			Type:           "", // set in batch method
 			IdempotencyKey: "", // set in batch method
@@ -253,14 +272,14 @@ func (s *billingMetricsState) drainAppendToBatch(conf *BillingConfig, batch *bil
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
 			Value:          int(math.Round(history.total.activeTime.Seconds())),
-		})
+		}))
 	}
 
 	s.pushWindowStart = now
-	s.historical = make(map[billingMetricsKey]vmMetricsHistory)
+	s.historical = make(map[metricsKey]vmMetricsHistory)
 }
 
-func pushBillingEvents(conf *BillingConfig, batch *billing.Batch) error {
+func pushBillingEvents(conf *Config, batch *billing.Batch) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*time.Duration(conf.PushTimeoutSeconds))
 	defer cancel()
 

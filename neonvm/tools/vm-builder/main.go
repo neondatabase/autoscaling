@@ -21,6 +21,8 @@ import (
 
 // vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
 
+var entrypointPrefix = []string{"/usr/bin/cgexec", "-g", "memory:neon-postgres"}
+
 const (
 	dockerfileVmBuilder = `
 FROM {{.InformantImage}} as informant
@@ -111,8 +113,6 @@ COPY --from=libcgroup-builder /libcgroup-install/lib/*  /usr/lib/
 COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
 COPY --from=postgres-exporter /bin/postgres_exporter /bin/postgres_exporter
 COPY --from=pgbouncer         /usr/local/pgbouncer/bin/pgbouncer /usr/local/bin/pgbouncer
-
-ENTRYPOINT ["/usr/sbin/cgexec", "-g", "*:neon-postgres", "/usr/local/bin/compute_ctl"]
 
 FROM alpine:3.16 AS vm-runtime
 # add busybox
@@ -495,7 +495,7 @@ func main() {
 	}
 
 	tmplArgs := TemplatesContext{
-		Entrypoint:     imageSpec.Config.Entrypoint,
+		Entrypoint:     append(entrypointPrefix, imageSpec.Config.Entrypoint...),
 		Cmd:            imageSpec.Config.Cmd,
 		Env:            imageSpec.Config.Env,
 		RootDiskImage:  *srcImage,

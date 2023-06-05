@@ -169,7 +169,7 @@ func NewInformantServer(
 
 	runner.logger.Infof("Starting Informant server, desc = %+v", server.desc)
 
-	logPrefix := runner.logger.prefix
+	logPrefix := runner.logger.Prefix
 
 	mux := http.NewServeMux()
 	util.AddHandler(logPrefix, mux, "/id", http.MethodGet, "struct{}", server.handleID)
@@ -194,7 +194,7 @@ func NewInformantServer(
 				logFunc = runner.logger.Infof
 			}
 
-			logFunc("Informant server exiting with retry: %v, err: %s", status.RetryShouldFix, status.Err)
+			logFunc("Informant server exiting with: retry=%v, err=%v", status.RetryShouldFix, status.Err)
 		}
 
 		shutdownName := fmt.Sprintf("InformantServer shutdown (%s)", server.desc.AgentID)
@@ -623,7 +623,7 @@ func doInformantRequest[Q any, R any](
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		result = "[error doing request]"
+		result = fmt.Sprintf("[error doing request: %s]", util.RootError(err))
 		return nil, statusCode, fmt.Errorf("Error doing request: %w", err)
 	}
 	defer response.Body.Close()

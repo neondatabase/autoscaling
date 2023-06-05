@@ -605,12 +605,50 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 	case vmv1.VmSucceeded, vmv1.VmFailed:
-		// TODO: implement RestartPolicy
 		switch virtualmachine.Spec.RestartPolicy {
 		case vmv1.RestartPolicyAlways:
-			// TODO: restart VirtualMachine
+			log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
+			// get runner to delete
+			vmRunner := &corev1.Pod{}
+			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+			if err == nil {
+				// delete current runner
+				if err = r.Delete(ctx, vmRunner); err != nil {
+					return err
+				}
+				r.Recorder.Event(virtualmachine, "Normal", "Deleted",
+					fmt.Sprintf("VM runner pod was deleted: %s", vmRunner.Name))
+				log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
+			} else if !apierrors.IsNotFound(err) {
+				return err
+			}
+			// do cleanup
+			virtualmachine.Cleanup()
 		case vmv1.RestartPolicyOnFailure:
-			// TODO: restart VirtualMachine
+			log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
+			// get runner to delete
+			found := true
+			vmRunner := &corev1.Pod{}
+			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+			if apierrors.IsNotFound(err) {
+				found = false
+			} else if err != nil {
+				return err
+			}
+			// delete runner only when VM failed
+			if found && virtualmachine.Status.Phase == vmv1.VmFailed {
+				// delete current runner
+				if err = r.Delete(ctx, vmRunner); err != nil {
+					return err
+				}
+				r.Recorder.Event(virtualmachine, "Normal", "Deleted",
+					fmt.Sprintf("VM runner pod was deleted: %s", vmRunner.Name))
+				log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
+			}
+			// do cleanup when VM failed OR pod not found (deleted manually?) when VM succeeded
+			if virtualmachine.Status.Phase == vmv1.VmFailed || (!found && virtualmachine.Status.Phase == vmv1.VmSucceeded) {
+				virtualmachine.Cleanup()
+			}
 		case vmv1.RestartPolicyNever:
 			// TODO: implement TTL or do nothing
 		default:
@@ -865,7 +903,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		},
 		Spec: corev1.PodSpec{
 			EnableServiceLinks:            virtualmachine.Spec.ServiceLinks,
-			RestartPolicy:                 corev1.RestartPolicy(virtualmachine.Spec.RestartPolicy),
+			RestartPolicy:                 corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: virtualmachine.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  virtualmachine.Spec.NodeSelector,
 			ImagePullSecrets:              virtualmachine.Spec.ImagePullSecrets,
@@ -899,7 +937,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			},
 			Containers: []corev1.Container{{
 				Image:           image,
-				Name:            "runner",
+				Name:            "neonvm-runner",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				// Ensure restrictive context for the container
 				// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
@@ -1035,7 +1073,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 	if pod.ObjectMeta.Annotations == nil {
 		pod.ObjectMeta.Annotations = map[string]string{}
 	}
-	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "runner"
+	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 
 	// use multus network to add extra network interface
 	if virtualmachine.Spec.ExtraNetwork != nil && virtualmachine.Spec.ExtraNetwork.Enable {

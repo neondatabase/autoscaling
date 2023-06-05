@@ -75,7 +75,7 @@ type VirtualMachineSpec struct {
 	SchedulerName string                      `json:"schedulerName,omitempty"`
 	PodResources  corev1.ResourceRequirements `json:"podResources,omitempty"`
 
-	// +kubebuilder:default:=Never
+	// +kubebuilder:default:=Always
 	// +optional
 	RestartPolicy RestartPolicy `json:"restartPolicy"`
 
@@ -413,6 +413,15 @@ type VirtualMachine struct {
 
 	Spec   VirtualMachineSpec   `json:"spec,omitempty"`
 	Status VirtualMachineStatus `json:"status,omitempty"`
+}
+
+func (vm *VirtualMachine) Cleanup() {
+	vm.Status.PodName = ""
+	vm.Status.PodIP = ""
+	vm.Status.Node = ""
+	vm.Status.CPUs = nil
+	vm.Status.MemorySize = nil
+	vm.Status.Phase = ""
 }
 
 //+kubebuilder:object:root=true

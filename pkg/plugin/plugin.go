@@ -20,6 +20,7 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 const Name = "AutoscaleEnforcer"
@@ -45,7 +46,7 @@ type AutoscaleEnforcer struct {
 }
 
 // abbreviation, because this type is pretty verbose
-type IndexedVMStore = util.IndexedWatchStore[vmapi.VirtualMachine, *util.NameIndex[vmapi.VirtualMachine]]
+type IndexedVMStore = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
 var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
@@ -90,8 +91,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 			lock: util.NewChanMutex(),
 			conf: config,
 		},
-		metrics: PromMetrics{},                                                                         //nolint:exhaustruct // set by startPrometheusServer
-		vmStore: util.IndexedWatchStore[vmapi.VirtualMachine, *util.NameIndex[vmapi.VirtualMachine]]{}, // set below.
+		metrics: PromMetrics{},                                                                      //nolint:exhaustruct // set by startPrometheusServer
+		vmStore: watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]{}, // set below.
 	}
 
 	if p.state.conf.DumpState != nil {
@@ -121,18 +122,20 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 		pushToQueue(func() { p.handleUpdatedScalingBounds(vm, podName) })
 	}
 
+	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
+
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
-	if err := p.watchPodEvents(ctx, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
+	if err := p.watchPodEvents(ctx, watchMetrics, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, submitVMDisabledScaling, submitVMBoundsChanged)
+	vmStore, err := p.watchVMEvents(ctx, watchMetrics, submitVMDisabledScaling, submitVMBoundsChanged)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
 
-	p.vmStore = util.NewIndexedWatchStore(vmStore, util.NewNameIndex[vmapi.VirtualMachine]())
+	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
 
 	// ... but before handling the events, read the current cluster state:
 	klog.Infof("[autoscale-enforcer] Reading initial cluster state")
@@ -152,6 +155,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}()
 
 	promReg := p.makePrometheusRegistry()
+	watchMetrics.MustRegister(promReg)
+
 	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
 		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
 	}
@@ -196,7 +201,7 @@ func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 		return nil, nil
 	}
 
-	vm, ok := vmStore.GetIndexed(func(index *util.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
+	vm, ok := vmStore.GetIndexed(func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
 		return index.Get(vmName.Namespace, vmName.Name)
 	})
 	if !ok {
@@ -217,7 +222,7 @@ func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 		}
 
 		// retry fetching the VM, now that we know it's been synced.
-		vm, ok = vmStore.GetIndexed(func(index *util.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
+		vm, ok = vmStore.GetIndexed(func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
 			return index.Get(vmName.Namespace, vmName.Name)
 		})
 		if !ok {
