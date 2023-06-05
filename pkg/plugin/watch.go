@@ -114,7 +114,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
 	submitVMDisabledScaling func(util.NamespacedName),
 	submitVMBoundsChanged func(_ *api.VmInfo, podName string),
-	submitNonAutoscalingVmUsageChanged func(*api.VmInfo, util.NamespacedName),
+	submitNonAutoscalingVmUsageChanged func(_ *api.VmInfo, podname string),
 ) (*watch.Store[vmapi.VirtualMachine], error) {
 	return watch.Watch(
 		ctx,
@@ -161,8 +161,12 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 				}
 
 				if !oldInfo.ScalingEnabled && !newInfo.ScalingEnabled && oldInfo.Using() != newInfo.Using() {
-					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
-					submitNonAutoscalingVmUsageChanged(newInfo, name)
+					podName := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
+					klog.Infof(
+						"[autoscale-enforcer] detected change usage for pod %v non-autoscaling VM %v",
+						podName, newInfo.Name,
+					)
+					submitNonAutoscalingVmUsageChanged(newInfo, podName.Name)
 				}
 
 				// If the pod changed, then we're going to handle a deletion event for the old pod,

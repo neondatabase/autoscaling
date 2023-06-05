@@ -121,8 +121,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	submitVMBoundsChanged := func(vm *api.VmInfo, podName string) {
 		pushToQueue(func() { p.handleUpdatedScalingBounds(vm, podName) })
 	}
-	submitNonAutoscalingVmUsageChanged := func(newVM *api.VmInfo, name util.NamespacedName) {
-		pushToQueue(func() { p.handleNonAutoscalingUsageChange(newVM, name) })
+	submitNonAutoscalingVmUsageChanged := func(vm *api.VmInfo, podName string) {
+		pushToQueue(func() { p.handleNonAutoscalingUsageChange(vm, podName) })
 	}
 
 	klog.Infof("[autoscale-enforcer] Starting pod watcher")
