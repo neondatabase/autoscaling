@@ -476,7 +476,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 
 			if oldInformant == nil {
 				s.runner.logger.Infof("Registered with informant, InformantDesc is %+v", *resp)
-			} else if *oldInformant == *resp {
+			} else if *oldInformant != *resp {
 				s.runner.logger.Infof(
 					"Re-registered with informant, InformantDesc changed from %+v to %+v",
 					*oldInformant, *resp,
