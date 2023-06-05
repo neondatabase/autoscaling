@@ -33,6 +33,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -95,14 +96,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, err
 	}
 
-	// Fetch the corresponding VirtualMachine instance
-	vm := new(vmv1.VirtualMachine)
-	err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
-	if err != nil {
-		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
-		return ctrl.Result{}, err
-	}
-
 	// examine DeletionTimestamp to determine if object is under deletion
 	if migration.ObjectMeta.DeletionTimestamp.IsZero() {
 		// The object is not being deleted, so if it does not have our finalizer,
@@ -124,6 +117,11 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for Migration")
+			vm := new(vmv1.VirtualMachine)
+			err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
+			if err != nil {
+				log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+			}
 			if err := r.doFinalizerOperationsForVirtualMachineMigration(ctx, migration, vm); err != nil {
 				// if fail to delete the external dependency here, return with error
 				// so that it can be retried
@@ -140,6 +138,14 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 		// Stop reconciliation as the item is being deleted
 		return ctrl.Result{}, nil
+	}
+
+	// Fetch the corresponding VirtualMachine instance
+	vm := new(vmv1.VirtualMachine)
+	err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
+	if err != nil {
+		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+		return ctrl.Result{}, err
 	}
 
 	// Set owner for VM migration object
@@ -566,6 +572,7 @@ func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) e
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 8}).
 		Complete(r)
 }
 

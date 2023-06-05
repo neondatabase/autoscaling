@@ -6,8 +6,8 @@ metadata:
 spec:
   config: '{
     "ipam": {
-      "range": "10.100.0.0/18",
-      "range_start": "10.100.2.0",
+      "range": "10.100.0.0/16",
+      "range_start": "10.100.128.0",
       "network_name": "neonvm"
     }
   }'

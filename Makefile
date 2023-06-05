@@ -326,6 +326,9 @@ local-cluster:  ## Create local cluster by kind tool and prepared config
 	kind create cluster --config kind/config.yaml
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	kubectl wait -n cert-manager deployment cert-manager --for condition=Available --timeout -1s
+	kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+	kubectl patch -n kube-system deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+	kubectl -n kube-system rollout status deployment metrics-server
 
 .PHONY: kind-load
 kind-load: docker-build  ## Push docker images to the kind cluster.

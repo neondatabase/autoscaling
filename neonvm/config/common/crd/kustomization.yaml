@@ -4,6 +4,7 @@
 resources:
 - bases/vm.neon.tech_virtualmachines.yaml
 - bases/vm.neon.tech_virtualmachinemigrations.yaml
+- bases/vm.neon.tech_ippools.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 patchesStrategicMerge:
