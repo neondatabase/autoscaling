@@ -290,8 +290,18 @@ const (
 	//
 	// * Adds /health-check endpoint to the vm-informant.
 	//
-	// Currently the latest version.
+	// Last used in release version v0.9.0
 	InformantProtoV1_2
+
+	// InformantProtoV1_3 represents v1.3 of the agent<->informant protocol.
+	//
+	// Changes from v1.2:
+	//
+	// * Agents now return their ID along with any resource updates during
+	//   /upscale and /downscale requests
+	//
+	// Currently the latest version.
+	InformantProtoV1_3
 
 	// latestInformantProtoVersion represents the latest version of the agent<->informant protocol
 	//
@@ -313,6 +323,8 @@ func (v InformantProtoVersion) String() string {
 		return "v1.1"
 	case InformantProtoV1_2:
 		return "v1.2"
+	case InformantProtoV1_3:
+		return "v1.3"
 	default:
 		diff := v - latestInformantProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestInformantProtoVersion, diff)
@@ -337,6 +349,13 @@ func (v InformantProtoVersion) HasTryUpscale() bool {
 // This is true for version v1.2 and greater.
 func (v InformantProtoVersion) AllowsHealthCheck() bool {
 	return v >= InformantProtoV1_2
+}
+
+// ResourceUpdatesSigned returns whether agents sign /{up,down}scale requests with their AgentId
+//
+// This is true for version v1.2 and greater
+func (v InformantProtoVersion) ResourceUpdatesSigned() bool {
+	return v >= InformantProtoV1_3
 }
 
 // AgentMessage is used for (almost) every message sent from the autoscaler-agent to the VM

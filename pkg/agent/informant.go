@@ -980,14 +980,22 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
 	id := api.AgentIdentification{AgentID: s.desc.AgentID}
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
-	signedRawResources := api.AgentMessage[api.SignedRawResources]{
-		Data:           api.SignedRawResources{RawResources: rawResources, Id: id},
-		SequenceNumber: s.incrementSequenceNumber(),
+
+	var	statusCode int;
+	var	resp *api.DownscaleResult;
+	if s.protoVersion.ResourceUpdatesSigned() {
+		signedRawResources := api.SignedRawResources{RawResources: rawResources, Id: id}
+		reqData := api.AgentMessage[api.SignedRawResources]{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
+		resp, statusCode, err = doInformantRequest[api.AgentMessage[api.SignedRawResources], api.DownscaleResult](
+			ctx, s, timeout, http.MethodPut, "/downscale", &reqData,
+		)
+	} else {
+		reqData := api.AgentMessage[api.RawResources]{Data: rawResources, SequenceNumber: s.incrementSequenceNumber()}
+		resp, statusCode, err = doInformantRequest[api.AgentMessage[api.RawResources], api.DownscaleResult](
+			ctx, s, timeout, http.MethodPut, "/downscale", &reqData,
+		)
 	}
 
-	resp, statusCode, err := doInformantRequest[api.AgentMessage[api.SignedRawResources], api.DownscaleResult](
-		ctx, s, timeout, http.MethodPut, "/downscale", &signedRawResources,
-	)
 	if err != nil {
 		func() {
 			s.runner.lock.Lock()
@@ -1027,14 +1035,21 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
 	id := api.AgentIdentification{AgentID: s.desc.AgentID}
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
-	signedRawResources := api.AgentMessage[api.SignedRawResources]{
-		Data:           api.SignedRawResources{RawResources: rawResources, Id: id},
-		SequenceNumber: s.incrementSequenceNumber(),
+
+	var	statusCode int;
+	if s.protoVersion.ResourceUpdatesSigned() {
+		signedRawResources := api.SignedRawResources{RawResources: rawResources, Id: id}
+		reqData := api.AgentMessage[api.SignedRawResources]{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
+		_, statusCode, err = doInformantRequest[api.AgentMessage[api.SignedRawResources], struct{}](
+			ctx, s, timeout, http.MethodPut, "/upscale", &reqData,
+		)
+	} else {
+		reqData := api.AgentMessage[api.RawResources]{Data: rawResources, SequenceNumber: s.incrementSequenceNumber()}
+		_, statusCode, err = doInformantRequest[api.AgentMessage[api.RawResources], struct{}](
+			ctx, s, timeout, http.MethodPut, "/upscale", &reqData,
+		)
 	}
 
-	_, statusCode, err := doInformantRequest[api.AgentMessage[api.SignedRawResources], struct{}](
-		ctx, s, timeout, http.MethodPut, "/upscale", &signedRawResources,
-	)
 	if err != nil {
 		func() {
 			s.runner.lock.Lock()

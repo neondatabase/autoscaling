@@ -260,12 +260,17 @@ func (s *State) TryDownscale(ctx context.Context, target *api.AgentMessage[api.S
 
 	currentId := s.agents.current.id
 	incomingId := target.Data.Id.AgentID
+	// This condition deals with two cases:
+	// 1: The agent that responded is legitimately an unknown agent
+	// 2: The agent that responded is using an old protocol, and thus did not respond with an AgentId.
+	//    In this case, due to Go's uninitialized variable semantics, the "AgentID" we read will be
+	//    all 0's, which will never match, since UUID's cannot be all 0's
 	if incomingId != currentId {
 		klog.Errorf(
 			"Got downscale response from agent %v, while current agent is %v",
 			incomingId, currentId,
 		)
-		return nil, 400, fmt.Errorf("Received response from unknown agent %v", incomingId)
+		return nil, 400, fmt.Errorf("Received downscale response from unknown agent %v", incomingId)
 	}
 
 	requestedMem := uint64(target.Data.Memory.Value())
@@ -390,12 +395,17 @@ func (s *State) NotifyUpscale(
 
 	currentId := s.agents.current.id
 	incomingId := newResources.Data.Id.AgentID
+	// This condition deals with two cases:
+	// 1: The agent that responded is legitimately an unknown agent
+	// 2: The agent that responded is using an old protocol, and thus did not respond with an AgentId.
+	//    In this case, due to Go's uninitialized variable semantics, the "AgentID" we read will be
+	//    all 0's, which will never match, since UUID's cannot be all 0's
 	if incomingId != currentId {
 		klog.Errorf(
 			"Got upscale response from agent %v, while current agent is %v",
 			incomingId, currentId,
 		)
-		return nil, 400, fmt.Errorf("Received response from unknown agent %v", incomingId)
+		return nil, 400, fmt.Errorf("Received upscale response from unknown agent %v", incomingId)
 	}
 
 	newMem := uint64(newResources.Data.Memory.Value())
