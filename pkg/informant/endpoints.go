@@ -242,7 +242,7 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 // amount is ok
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) TryDownscale(ctx context.Context, target *api.SignedRawResources) (*api.DownscaleResult, int, error) {
+func (s *State) TryDownscale(ctx context.Context, target *api.AgentMessage[api.SignedRawResources]) (*api.DownscaleResult, int, error) {
 	// Helper functions for abbreviating returns.
 	resultFromStatus := func(ok bool, status string) (*api.DownscaleResult, int, error) {
 		return &api.DownscaleResult{Ok: ok, Status: status}, 200, nil
@@ -258,7 +258,17 @@ func (s *State) TryDownscale(ctx context.Context, target *api.SignedRawResources
 		return resultFromStatus(true, "No action taken (no cgroup or file cache enabled)")
 	}
 
-	requestedMem := uint64(target.Memory.Value())
+	currentId := s.agents.current.id
+	incomingId := target.Data.Id.AgentID
+	if incomingId != currentId {
+		klog.Errorf(
+			"Got downscale response from agent %v, while current agent is %v",
+			incomingId, currentId,
+		)
+		return nil, 400, fmt.Errorf("Received response from unknown agent %v", incomingId)
+	}
+
+	requestedMem := uint64(target.Data.Memory.Value())
 	usableSystemMemory := util.SaturatingSub(requestedMem, s.config.SysBufferBytes)
 
 	// Get the file cache's expected contribution to the memory usage
@@ -354,7 +364,10 @@ func (s *State) TryDownscale(ctx context.Context, target *api.SignedRawResources
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) NotifyUpscale(ctx context.Context, newResources *api.SignedRawResources) (*struct{}, int, error) {
+func (s *State) NotifyUpscale(
+	ctx context.Context,
+	newResources *api.AgentMessage[api.SignedRawResources],
+) (*struct{}, int, error) {
 	// FIXME: we shouldn't just trust what the agent says
 	//
 	// Because of race conditions like in <https://github.com/neondatabase/autoscaling/issues/23>,
@@ -375,7 +388,17 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.SignedRawRe
 		return &struct{}{}, 200, nil
 	}
 
-	newMem := uint64(newResources.Memory.Value())
+	currentId := s.agents.current.id
+	incomingId := newResources.Data.Id.AgentID
+	if incomingId != currentId {
+		klog.Errorf(
+			"Got upscale response from agent %v, while current agent is %v",
+			incomingId, currentId,
+		)
+		return nil, 400, fmt.Errorf("Received response from unknown agent %v", incomingId)
+	}
+
+	newMem := uint64(newResources.Data.Memory.Value())
 	usableSystemMemory := util.SaturatingSub(newMem, s.config.SysBufferBytes)
 
 	mib := float64(1 << 20) // 1 MiB = 2^20 bytes. We'll use this for pretty-printing.

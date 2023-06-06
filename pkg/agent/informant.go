@@ -979,9 +979,13 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
 	id := api.AgentIdentification{AgentID: s.desc.AgentID}
-	signedRawResources := api.SignedRawResources{RawResources: to.ConvertToRaw(s.runner.vm.Mem.SlotSize), Id: id}
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
+	signedRawResources := api.AgentMessage[api.SignedRawResources]{
+		Data:           api.SignedRawResources{RawResources: rawResources, Id: id},
+		SequenceNumber: s.incrementSequenceNumber(),
+	}
 
-	resp, statusCode, err := doInformantRequest[api.SignedRawResources, api.DownscaleResult](
+	resp, statusCode, err := doInformantRequest[api.AgentMessage[api.SignedRawResources], api.DownscaleResult](
 		ctx, s, timeout, http.MethodPut, "/downscale", &signedRawResources,
 	)
 	if err != nil {
@@ -1022,10 +1026,14 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
 	id := api.AgentIdentification{AgentID: s.desc.AgentID}
-	rawResources := api.SignedRawResources{RawResources: to.ConvertToRaw(s.runner.vm.Mem.SlotSize), Id: id}
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
+	signedRawResources := api.AgentMessage[api.SignedRawResources]{
+		Data:           api.SignedRawResources{RawResources: rawResources, Id: id},
+		SequenceNumber: s.incrementSequenceNumber(),
+	}
 
-	_, statusCode, err := doInformantRequest[api.SignedRawResources, struct{}](
-		ctx, s, timeout, http.MethodPut, "/upscale", &rawResources,
+	_, statusCode, err := doInformantRequest[api.AgentMessage[api.SignedRawResources], struct{}](
+		ctx, s, timeout, http.MethodPut, "/upscale", &signedRawResources,
 	)
 	if err != nil {
 		func() {
