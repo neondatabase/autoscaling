@@ -117,6 +117,8 @@ func (m *Metrics) MustRegister(reg *prometheus.Registry) {
 
 func (m *MetricsConfig) alive() {
 	m.aliveCurrent.WithLabelValues(m.Instance).Inc()
+	// Explicitly set the 'failing' count so that it's present (and set to zero)
+	m.failingCurrent.WithLabelValues(m.Instance).Add(0.0)
 }
 
 func (m *MetricsConfig) unalive() {
