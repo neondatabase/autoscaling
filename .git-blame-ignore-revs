@@ -17,3 +17,9 @@ dd2a6ef105f7e66db78b649710fb38ad15124424
 3258d5f401f0f3da2e686c922d80d0068b78cbf2
 # "intermediate commit: indent agent config content (#300)" - indenting
 8f5b65c1b966f4ac8da1830896afeffd2e712cc5
+# "agent: Move {billing,indexedstore}.go into new pkg/agent/billing (#309)" - mv + rename
+14a997854e42473459b1ecceb3853c1afda5e308
+# "agent/billing: Remove redundant 'Billing' from item names (#309)" - rename
+72792b5c1c874b1a80108454afeb3b9f72cd2c37
+# "intermediate commit: indent plugin Unreserve VM pod logic (#317)" - indent
+d7874af75700c1c5ab671eb6b1c7b66a17a07de4
