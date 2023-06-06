@@ -981,8 +981,8 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 	id := api.AgentIdentification{AgentID: s.desc.AgentID}
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
-	var	statusCode int;
-	var	resp *api.DownscaleResult;
+	var statusCode int
+	var resp *api.DownscaleResult
 	if s.protoVersion.ResourceUpdatesSigned() {
 		signedRawResources := api.SignedRawResources{RawResources: rawResources, Id: id}
 		reqData := api.AgentMessage[api.SignedRawResources]{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
@@ -1036,7 +1036,7 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 	id := api.AgentIdentification{AgentID: s.desc.AgentID}
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
-	var	statusCode int;
+	var statusCode int
 	if s.protoVersion.ResourceUpdatesSigned() {
 		signedRawResources := api.SignedRawResources{RawResources: rawResources, Id: id}
 		reqData := api.AgentMessage[api.SignedRawResources]{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
