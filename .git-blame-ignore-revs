@@ -21,3 +21,5 @@ dd2a6ef105f7e66db78b649710fb38ad15124424
 14a997854e42473459b1ecceb3853c1afda5e308
 # "agent/billing: Remove redundant 'Billing' from item names (#309)" - rename
 72792b5c1c874b1a80108454afeb3b9f72cd2c37
+# "intermediate commit: indent plugin Unreserve VM pod logic (#317)" - indent
+d7874af75700c1c5ab671eb6b1c7b66a17a07de4
