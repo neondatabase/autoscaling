@@ -32,47 +32,48 @@ subjects:
 ---
 apiVersion: v1
 data:
-  config.json: '{
-    "scaling": {
-      "requestTimeoutSeconds": 10,
-      "defaultConfig": {
-        "loadAverageFractionTarget": 0.9
+  config.json: |
+    {
+      "scaling": {
+        "requestTimeoutSeconds": 10,
+        "defaultConfig": {
+          "loadAverageFractionTarget": 0.9
+        }
+      },
+      "informant": {
+        "serverPort": 10301,
+        "retryServerMinWaitSeconds": 5,
+        "retryServerNormalWaitSeconds": 5,
+        "registerRetrySeconds": 5,
+        "requestTimeoutSeconds": 1,
+        "registerTimeoutSeconds": 2,
+        "downscaleTimeoutSeconds": 2,
+        "unhealthyAfterSilenceDurationSeconds": 20,
+        "unhealthyStartupGracePeriodSeconds": 20
+      },
+      "metrics": {
+        "loadMetricPrefix": "host_",
+        "requestTimeoutSeconds": 2,
+        "secondsBetweenRequests": 5
+      },
+      "scheduler": {
+        "schedulerName": "autoscale-scheduler",
+        "requestTimeoutSeconds": 2,
+        "requestPort": 10299
+      },
+      "billing": {
+        "url": "http://neon-internal-api.aws.neon.tech/billing/api/v1",
+        "cpuMetricName": "effective_compute_seconds",
+        "activeTimeMetricName": "active_time_seconds",
+        "collectEverySeconds": 4,
+        "pushEverySeconds": 24,
+        "pushTimeoutSeconds": 2
+      },
+      "dumpState": {
+        "port": 10300,
+        "timeoutSeconds": 5
       }
-    },
-    "informant": {
-      "serverPort": 10301,
-      "retryServerMinWaitSeconds": 5,
-      "retryServerNormalWaitSeconds": 5,
-      "registerRetrySeconds": 5,
-      "requestTimeoutSeconds": 1,
-      "registerTimeoutSeconds": 2,
-      "downscaleTimeoutSeconds": 2,
-      "unhealthyAfterSilenceDurationSeconds": 20,
-      "unhealthyStartupGracePeriodSeconds": 20
-    },
-    "metrics": {
-      "loadMetricPrefix": "host_",
-      "requestTimeoutSeconds": 2,
-      "secondsBetweenRequests": 5
-    },
-    "scheduler": {
-      "schedulerName": "autoscale-scheduler",
-      "requestTimeoutSeconds": 2,
-      "requestPort": 10299
-    },
-    "billing": {
-      "url": "http://neon-internal-api.aws.neon.tech/billing/api/v1",
-      "cpuMetricName": "effective_compute_seconds",
-      "activeTimeMetricName": "active_time_seconds",
-      "collectEverySeconds": 4,
-      "pushEverySeconds": 24,
-      "pushTimeoutSeconds": 2
-    },
-    "dumpState": {
-      "port": 10300,
-      "timeoutSeconds": 5
     }
-  }'
 kind: ConfigMap
 metadata:
   name: autoscaler-agent-config
@@ -104,7 +105,7 @@ spec:
               fieldPath: status.podIP
         - name: CONFIG_PATH
           value: /etc/autoscaler-agent-config/config.json
-        image: neondatabase/autoscaler-agent:v0.8.0
+        image: neondatabase/autoscaler-agent:v0.9.0
         name: autoscaler-agent
         ports:
         - containerPort: 9100
