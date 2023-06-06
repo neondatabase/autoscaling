@@ -737,21 +737,21 @@ func (e *AutoscaleEnforcer) Unreserve(
 		return
 	}
 
-	// Mark the resources as no longer reserved
+		// Mark the resources as no longer reserved
 
-	currentlyMigrating := false // Unreserve is never called on bound pods, so it can't be migrating.
-	vCPUVerdict := collectResourceTransition(&ps.node.vCPU, &ps.vCPU).
-		handleDeleted(currentlyMigrating)
-	memVerdict := collectResourceTransition(&ps.node.memSlots, &ps.memSlots).
-		handleDeleted(currentlyMigrating)
+		currentlyMigrating := false // Unreserve is never called on bound pods, so it can't be migrating.
+		vCPUVerdict := collectResourceTransition(&ps.node.vCPU, &ps.vCPU).
+			handleDeleted(currentlyMigrating)
+		memVerdict := collectResourceTransition(&ps.node.memSlots, &ps.memSlots).
+			handleDeleted(currentlyMigrating)
 
-	// Delete our record of the pod
-	delete(e.state.podMap, pName)
-	delete(ps.node.pods, pName)
-	ps.node.mq.removeIfPresent(ps)
+		// Delete our record of the pod
+		delete(e.state.podMap, pName)
+		delete(ps.node.pods, pName)
+		ps.node.mq.removeIfPresent(ps)
 
-	fmtString := "[autoscale-enforcer] Unreserved VM pod %v from node %s:\n" +
-		"\tvCPU verdict: %s\n" +
-		"\t mem verdict: %s"
-	klog.Infof(fmtString, ps.name, ps.node.name, vCPUVerdict, memVerdict)
+		fmtString := "[autoscale-enforcer] Unreserved VM pod %v from node %s:\n" +
+			"\tvCPU verdict: %s\n" +
+			"\t mem verdict: %s"
+		klog.Infof(fmtString, ps.name, ps.node.name, vCPUVerdict, memVerdict)
 }
