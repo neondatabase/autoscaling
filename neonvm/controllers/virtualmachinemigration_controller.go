@@ -383,9 +383,31 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				return ctrl.Result{}, err
 			}
 
-			// stop hypervisor in source runner
-			if err := QmpQuit(migration.Status.SourcePodIP, vm.Spec.QMP); err != nil {
-				log.Info("Failed stop hypervisor in source runner pod, probably hypervisor already stopped", "error", err)
+			// Redefine ownerRef for the source Pod
+			sourceRunner := &corev1.Pod{}
+			err = r.Get(ctx, types.NamespacedName{Name: migration.Status.SourcePodName, Namespace: migration.Namespace}, sourceRunner)
+			if err == nil {
+				sourceRunner.OwnerReferences = []metav1.OwnerReference{}
+				if err := ctrl.SetControllerReference(migration, sourceRunner, r.Scheme); err != nil {
+					return ctrl.Result{}, err
+				}
+				if err := r.Update(ctx, sourceRunner); err != nil {
+					log.Error(err, "Failed to update ownerRef for source runner pod")
+					return ctrl.Result{}, err
+				}
+			} else if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+
+			// try to stop hypervisor in source runner if it running still
+			if sourceRunner.Status.Phase == corev1.PodRunning {
+				if err := QmpQuit(migration.Status.SourcePodIP, vm.Spec.QMP); err != nil {
+					log.Error(err, "Failed stop hypervisor in source runner pod")
+				} else {
+					log.Info("Hypervisor in source runner pod stopped")
+				}
+			} else {
+				log.Info("Skip stopping hypervisor in source runner pod", "pod.Status.Phase", sourceRunner.Status.Phase)
 			}
 
 			// finally update migration phase to Succeeded
@@ -403,8 +425,14 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			r.Recorder.Event(migration, "Warning", "Failed", message)
 
 			// try to stop hypervisor in target runner
-			if err := QmpQuit(migration.Status.TargetPodIP, vm.Spec.QMP); err != nil {
-				log.Info("Failed stop hypervisor in target runner pod, probably hypervisor already stopped", "error", err)
+			if targetRunner.Status.Phase == corev1.PodRunning {
+				if err := QmpQuit(migration.Status.TargetPodIP, vm.Spec.QMP); err != nil {
+					log.Error(err, "Failed stop hypervisor in target runner pod")
+				} else {
+					log.Info("Hypervisor in target runner pod stopped")
+				}
+			} else {
+				log.Info("Skip stopping hypervisor in target runner pod", "pod.Status.Phase", targetRunner.Status.Phase)
 			}
 			// change VM status to Running
 			vm.Status.Phase = vmv1.VmRunning
@@ -453,6 +481,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				return ctrl.Result{}, err
 			}
 		}
+
 		if len(migration.Status.SourcePodName) > 0 {
 			// try to find and remove source runner Pod
 			sourceRunner := &corev1.Pod{}
