@@ -732,11 +732,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 			"\tvCPU verdict: %s\n" +
 			"\t mem verdict: %s"
 		klog.Infof(fmtString, otherPs.name, otherPs.node.name, vCPUVerdict, memVerdict)
-	} else {
-		klog.Warningf("[autoscale-enforcer] Unreserve: Cannot find pod %v in podMap or otherPods (this may be normal behavior)", pName)
-		return
-	}
-
+	} else if ok && !otherOk {
 		// Mark the resources as no longer reserved
 
 		currentlyMigrating := false // Unreserve is never called on bound pods, so it can't be migrating.
@@ -754,4 +750,8 @@ func (e *AutoscaleEnforcer) Unreserve(
 			"\tvCPU verdict: %s\n" +
 			"\t mem verdict: %s"
 		klog.Infof(fmtString, ps.name, ps.node.name, vCPUVerdict, memVerdict)
+	} else {
+		klog.Warningf("[autoscale-enforcer] Unreserve: Cannot find pod %v in podMap or otherPods (this may be normal behavior)", pName)
+		return
+	}
 }
