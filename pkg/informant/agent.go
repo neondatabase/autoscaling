@@ -26,8 +26,8 @@ import (
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
-	MinProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
-	MaxProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_2
+	MinProtocolVersion api.InformantProtoVersion = api.InformantProtoV2_0
+	MaxProtocolVersion api.InformantProtoVersion = api.InformantProtoV2_0
 )
 
 // AgentSet is the global state handling various autoscaler-agents that we could connect to

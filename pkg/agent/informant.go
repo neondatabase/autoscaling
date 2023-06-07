@@ -25,7 +25,7 @@ import (
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_0
-	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_2
+	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV2_0
 )
 
 type InformantServer struct {
@@ -959,7 +959,7 @@ func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealth
 	return resp, nil
 }
 
-// Downscale makes a request to the informant's /downscale endpoit with the api.Resources
+// Downscale makes a request to the informant's /downscale endpoint with the api.Resources
 //
 // This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
 func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api.DownscaleResult, error) {
@@ -990,9 +990,8 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 			ctx, s, timeout, http.MethodPut, "/downscale", &reqData,
 		)
 	} else {
-		reqData := api.AgentMessage[api.RawResources]{Data: rawResources, SequenceNumber: s.incrementSequenceNumber()}
-		resp, statusCode, err = doInformantRequest[api.AgentMessage[api.RawResources], api.DownscaleResult](
-			ctx, s, timeout, http.MethodPut, "/downscale", &reqData,
+		resp, statusCode, err = doInformantRequest[api.RawResources, api.DownscaleResult](
+			ctx, s, timeout, http.MethodPut, "/downscale", &rawResources,
 		)
 	}
 

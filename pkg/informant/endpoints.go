@@ -243,21 +243,6 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) TryDownscale(ctx context.Context, target *api.AgentMessage[api.SignedRawResources]) (*api.DownscaleResult, int, error) {
-	// Helper functions for abbreviating returns.
-	resultFromStatus := func(ok bool, status string) (*api.DownscaleResult, int, error) {
-		return &api.DownscaleResult{Ok: ok, Status: status}, 200, nil
-	}
-	internalError := func(err error) (*api.DownscaleResult, int, error) {
-		klog.Errorf("Internal error handling downscale request: %s", err)
-		return nil, 500, errors.New("Internal error")
-	}
-
-	// If we aren't interacting with something that should be adjusted, then we don't need to do anything.
-	if s.cgroup == nil && s.fileCache == nil {
-		klog.Infof("No action needed for downscale (no cgroup or file cache enabled)")
-		return resultFromStatus(true, "No action taken (no cgroup or file cache enabled)")
-	}
-
 	currentId := s.agents.current.id
 	incomingId := target.Data.Id.AgentID
 	// This condition deals with two cases:
@@ -271,6 +256,21 @@ func (s *State) TryDownscale(ctx context.Context, target *api.AgentMessage[api.S
 			incomingId, currentId,
 		)
 		return nil, 400, fmt.Errorf("Received downscale response from unknown agent %v", incomingId)
+	}
+
+	// Helper functions for abbreviating returns.
+	resultFromStatus := func(ok bool, status string) (*api.DownscaleResult, int, error) {
+		return &api.DownscaleResult{Ok: ok, Status: status}, 200, nil
+	}
+	internalError := func(err error) (*api.DownscaleResult, int, error) {
+		klog.Errorf("Internal error handling downscale request: %s", err)
+		return nil, 500, errors.New("Internal error")
+	}
+
+	// If we aren't interacting with something that should be adjusted, then we don't need to do anything.
+	if s.cgroup == nil && s.fileCache == nil {
+		klog.Infof("No action needed for downscale (no cgroup or file cache enabled)")
+		return resultFromStatus(true, "No action taken (no cgroup or file cache enabled)")
 	}
 
 	requestedMem := uint64(target.Data.Memory.Value())
@@ -382,17 +382,6 @@ func (s *State) NotifyUpscale(
 	// So until the race condition described in #23 is fixed, we have to just trust that the agent
 	// is telling the truth, *especially because it might not be*.
 
-	// Helper function for abbreviating returns.
-	internalError := func(err error) (*struct{}, int, error) {
-		klog.Errorf("Error handling upscale request: %s", err)
-		return nil, 500, errors.New("Internal error")
-	}
-
-	if s.cgroup == nil && s.fileCache == nil {
-		klog.Infof("No action needed for upscale (no cgroup or file cache enabled)")
-		return &struct{}{}, 200, nil
-	}
-
 	currentId := s.agents.current.id
 	incomingId := newResources.Data.Id.AgentID
 	// This condition deals with two cases:
@@ -406,6 +395,17 @@ func (s *State) NotifyUpscale(
 			incomingId, currentId,
 		)
 		return nil, 400, fmt.Errorf("Received upscale response from unknown agent %v", incomingId)
+	}
+
+	// Helper function for abbreviating returns.
+	internalError := func(err error) (*struct{}, int, error) {
+		klog.Errorf("Error handling upscale request: %s", err)
+		return nil, 500, errors.New("Internal error")
+	}
+
+	if s.cgroup == nil && s.fileCache == nil {
+		klog.Infof("No action needed for upscale (no cgroup or file cache enabled)")
+		return &struct{}{}, 200, nil
 	}
 
 	newMem := uint64(newResources.Data.Memory.Value())
