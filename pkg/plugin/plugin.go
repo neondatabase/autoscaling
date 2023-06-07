@@ -541,7 +541,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	e.metrics.pluginCalls.WithLabelValues("reserve").Inc()
 
 	pName := util.GetNamespacedName(pod)
-	logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
+	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Reserve request")
 
 	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
@@ -756,7 +756,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 
 	podName := util.GetNamespacedName(pod)
 
-	logger := e.logger.With(zap.String("method", "Filter"), zap.String("node", nodeName), util.PodNameFields(pod))
+	logger := e.logger.With(zap.String("method", "Unreserve"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Unreserve request")
 
 	e.state.lock.Lock()
