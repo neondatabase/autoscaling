@@ -351,10 +351,11 @@ func (v InformantProtoVersion) AllowsHealthCheck() bool {
 	return v >= InformantProtoV1_2
 }
 
-// ResourceUpdatesSigned returns whether agents sign /{up,down}scale requests with their AgentId
+// SignsResourceUpdates returns whether agents respond to /{up,down}scale with
+// an AgentResourceMessage
 //
 // This is true for version v1.2 and greater
-func (v InformantProtoVersion) ResourceUpdatesSigned() bool {
+func (v InformantProtoVersion) SignsResourceUpdates() bool {
 	return v >= InformantProtoV2_0
 }
 
@@ -514,8 +515,11 @@ type RawResources struct {
 	Memory *resource.Quantity `json:"memory"`
 }
 
+type AgentResourceMessage = AgentMessage[SignedRawResources]
+
 // Similar to RawResources, stores raw resource amounts. However, also stores the ID of the agent
-// notifying the VM of the granted resource request
+// responding to the VM's resource request. In protocol versions 2 and on, agents respond to
+// /{up,down}scale requests with an AgentResourceMessage.
 type SignedRawResources struct {
 	RawResources
 	Id AgentIdentification `json:"id"`

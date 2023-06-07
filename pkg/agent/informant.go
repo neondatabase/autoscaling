@@ -983,10 +983,10 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 
 	var statusCode int
 	var resp *api.DownscaleResult
-	if s.protoVersion.ResourceUpdatesSigned() {
+	if s.protoVersion.SignsResourceUpdates() {
 		signedRawResources := api.SignedRawResources{RawResources: rawResources, Id: id}
-		reqData := api.AgentMessage[api.SignedRawResources]{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
-		resp, statusCode, err = doInformantRequest[api.AgentMessage[api.SignedRawResources], api.DownscaleResult](
+		reqData := api.AgentResourceMessage{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
+		resp, statusCode, err = doInformantRequest[api.AgentResourceMessage, api.DownscaleResult](
 			ctx, s, timeout, http.MethodPut, "/downscale", &reqData,
 		)
 	} else {
@@ -1036,16 +1036,15 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
 	var statusCode int
-	if s.protoVersion.ResourceUpdatesSigned() {
+	if s.protoVersion.SignsResourceUpdates() {
 		signedRawResources := api.SignedRawResources{RawResources: rawResources, Id: id}
-		reqData := api.AgentMessage[api.SignedRawResources]{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
-		_, statusCode, err = doInformantRequest[api.AgentMessage[api.SignedRawResources], struct{}](
+		reqData := api.AgentResourceMessage{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
+		_, statusCode, err = doInformantRequest[api.AgentResourceMessage, struct{}](
 			ctx, s, timeout, http.MethodPut, "/upscale", &reqData,
 		)
 	} else {
-		reqData := api.AgentMessage[api.RawResources]{Data: rawResources, SequenceNumber: s.incrementSequenceNumber()}
-		_, statusCode, err = doInformantRequest[api.AgentMessage[api.RawResources], struct{}](
-			ctx, s, timeout, http.MethodPut, "/upscale", &reqData,
+		_, statusCode, err = doInformantRequest[api.RawResources, struct{}](
+			ctx, s, timeout, http.MethodPut, "/upscale", &rawResources,
 		)
 	}
 

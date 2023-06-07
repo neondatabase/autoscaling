@@ -242,7 +242,7 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 // amount is ok
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) TryDownscale(ctx context.Context, target *api.AgentMessage[api.SignedRawResources]) (*api.DownscaleResult, int, error) {
+func (s *State) TryDownscale(ctx context.Context, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
 	currentId := s.agents.current.id
 	incomingId := target.Data.Id.AgentID
 	// This condition deals with two cases:
@@ -371,7 +371,7 @@ func (s *State) TryDownscale(ctx context.Context, target *api.AgentMessage[api.S
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) NotifyUpscale(
 	ctx context.Context,
-	newResources *api.AgentMessage[api.SignedRawResources],
+	newResources *api.AgentResourceMessage,
 ) (*struct{}, int, error) {
 	// FIXME: we shouldn't just trust what the agent says
 	//
