@@ -984,7 +984,7 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 	var statusCode int
 	var resp *api.DownscaleResult
 	if s.protoVersion.SignsResourceUpdates() {
-		signedRawResources := api.SignedRawResources{RawResources: rawResources, Id: id}
+		signedRawResources := api.ResourceMessage{RawResources: rawResources, Id: id}
 		reqData := api.AgentResourceMessage{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
 		resp, statusCode, err = doInformantRequest[api.AgentResourceMessage, api.DownscaleResult](
 			ctx, s, timeout, http.MethodPut, "/downscale", &reqData,
@@ -1037,7 +1037,7 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 
 	var statusCode int
 	if s.protoVersion.SignsResourceUpdates() {
-		signedRawResources := api.SignedRawResources{RawResources: rawResources, Id: id}
+		signedRawResources := api.ResourceMessage{RawResources: rawResources, Id: id}
 		reqData := api.AgentResourceMessage{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
 		_, statusCode, err = doInformantRequest[api.AgentResourceMessage, struct{}](
 			ctx, s, timeout, http.MethodPut, "/upscale", &reqData,

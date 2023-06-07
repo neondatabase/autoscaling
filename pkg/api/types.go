@@ -293,12 +293,14 @@ const (
 	// Last used in release version v0.9.0
 	InformantProtoV1_2
 
-	// InformantProtoV2_0 represents v1.3 of the agent<->informant protocol.
+	// InformantProtoV2_0 represents v2.0 of the agent<->informant protocol.
 	//
 	// Changes from v1.2:
 	//
-	// * Agents now return their ID along with any resource updates during
-	//   /upscale and /downscale requests
+	// * Agents now return a AgentResourceMessage when delivering responses
+	//   to /upscale and /downscale requests. Since RawResources (the response
+	//	 type in previous protocols) is not deserializable out of an
+	//   AgentResourceMessage, this is a breaking change.
 	//
 	// Currently the latest version.
 	InformantProtoV2_0
@@ -351,8 +353,7 @@ func (v InformantProtoVersion) AllowsHealthCheck() bool {
 	return v >= InformantProtoV1_2
 }
 
-// SignsResourceUpdates returns whether agents respond to /{up,down}scale with
-// an AgentResourceMessage
+// SignsResourceUpdates returns whether agents respond to /{up,down}scale with an AgentResourceMessage
 //
 // This is true for version v1.2 and greater
 func (v InformantProtoVersion) SignsResourceUpdates() bool {
@@ -509,18 +510,21 @@ func (m MoreResources) And(cmp MoreResources) MoreResources {
 }
 
 // RawResources signals raw resource amounts, and is primarily used in communications with the VM
-// informant because it doesn't know about things like memory slots
+// informant because it doesn't know about things like memory slots.
+//
+// This is used in protocol versions <2. In later versions, AgentResourceMessage is used.
 type RawResources struct {
 	Cpu    *resource.Quantity `json:"cpu"`
 	Memory *resource.Quantity `json:"memory"`
 }
 
-type AgentResourceMessage = AgentMessage[SignedRawResources]
+type AgentResourceMessage = AgentMessage[ResourceMessage]
 
 // Similar to RawResources, stores raw resource amounts. However, also stores the ID of the agent
 // responding to the VM's resource request. In protocol versions 2 and on, agents respond to
-// /{up,down}scale requests with an AgentResourceMessage.
-type SignedRawResources struct {
+// /{up,down}scale requests with an AgentResourceMessage. This allows VM informants to verify
+// the authenticity of the agent responding.
+type ResourceMessage struct {
 	RawResources
 	Id AgentIdentification `json:"id"`
 }
