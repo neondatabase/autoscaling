@@ -10,7 +10,7 @@ The following components have been updated to follow this document:
 
 - [x] autoscaler-agent
 - [x] autoscale-scheduler (scheduler plugin)
-- [ ] vm-informant
+- [x] vm-informant
 - [ ] neonvm-controlller
 - [ ] neonvm-runner
 
