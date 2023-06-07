@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net/http"
 
-	klog "k8s.io/klog/v2"
+	"go.uber.org/zap"
 )
 
 // AddHandler is a helper function to wrap the handle function with JSON [de]serialization and check
@@ -18,14 +18,17 @@ import (
 // The provided logPrefix is prepended to every log line emitted by the wrapped handler function, to
 // offer distinction where that's useful.
 func AddHandler[T any, R any](
-	logPrefix string,
+	logger *zap.Logger,
 	mux *http.ServeMux,
 	endpoint string,
 	method string,
 	reqTypeName string,
-	handle func(context.Context, *T) (_ *R, statusCode int, _ error),
+	handle func(context.Context, *zap.Logger, *T) (_ *R, statusCode int, _ error),
 ) {
 	errBadMethod := []byte("request method must be " + method)
+
+	logger = logger.With(zap.String("endpoint", endpoint))
+	hlogger := logger.Named("http")
 
 	mux.HandleFunc(endpoint, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != method {
@@ -37,15 +40,20 @@ func AddHandler[T any, R any](
 		defer r.Body.Close()
 		var req T
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			klog.Errorf("%sError reading request body as JSON %s: %s", logPrefix, reqTypeName, err)
+			hlogger.Error("Failed to read request body as JSON", zap.String("type", reqTypeName), zap.Error(err))
 			w.WriteHeader(400)
 			_, _ = w.Write([]byte("bad JSON"))
 			return
 		}
 
-		klog.Infof("%sReceived request on %s (client = %s) %+v", logPrefix, endpoint, r.RemoteAddr, req)
+		hlogger.Info(
+			"Received request",
+			zap.String("endpoint", endpoint),
+			zap.String("client", r.RemoteAddr),
+			zap.Any("request", req),
+		)
 
-		resp, status, err := handle(r.Context(), &req)
+		resp, status, err := handle(r.Context(), logger.With(zap.Any("request", req)), &req)
 
 		if err == nil && status != http.StatusOK {
 			err = errors.New("HTTP handler error: status != 200 OK, but no error message")
@@ -53,42 +61,40 @@ func AddHandler[T any, R any](
 		}
 
 		var respBody []byte
-		var respBodyFormatted string
-		var logFunc func(string, ...any)
+		var respBodyFormatted zap.Field
+		var logFunc func(string, ...zap.Field)
 
 		if err != nil {
 			if 500 <= status && status < 600 {
-				logFunc = klog.Errorf
+				logFunc = hlogger.Error
 			} else if 400 <= status && status < 500 {
-				logFunc = klog.Warningf
+				logFunc = hlogger.Warn
 			} else /* unexpected status */ {
-				err = fmt.Errorf(
-					"%sHTTP handler error: invalid status %d for error response: %w",
-					logPrefix, status, err,
-				)
-				logFunc = klog.Errorf
+				err = fmt.Errorf("HTTP handler error: invalid status %d for error response: %w", status, err)
+				logFunc = hlogger.Error
 			}
-			respBodyFormatted = err.Error()
-			respBody = []byte(respBodyFormatted)
+			respBodyFormatted = zap.NamedError("response", err)
+			respBody = []byte(err.Error())
 		} else {
 			if status == 0 {
-				klog.Warningf("%sHTTP handler: non-error response with status = 0", logPrefix)
+				hlogger.Warn("non-error response with status = 0")
 			}
+
+			respBodyFormatted = zap.Any("response", resp)
 
 			respBody, err = json.Marshal(resp)
 			if err != nil {
-				klog.Errorf("%sError encoding JSON response: %s", logPrefix, err)
+				hlogger.Error("Failed to encode JSON response", respBodyFormatted)
 				w.WriteHeader(500)
 				_, _ = w.Write([]byte("Error encoding JSON response"))
 				return
 			}
-			respBodyFormatted = string(respBody)
-			logFunc = klog.Infof
+			logFunc = hlogger.Info
 		}
 
 		logFunc(
-			"%sResponding to request on %s with status code %d: %s",
-			logPrefix, endpoint, status, respBodyFormatted,
+			"Responding to request",
+			zap.String("endpoint", endpoint), zap.Int("status", status), respBodyFormatted,
 		)
 
 		w.WriteHeader(status)

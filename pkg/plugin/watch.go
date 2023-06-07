@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	klog "k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
@@ -28,15 +29,19 @@ import (
 // Events occurring before this method is called will not be sent.
 func (e *AutoscaleEnforcer) watchPodEvents(
 	ctx context.Context,
+	parentLogger *zap.Logger,
 	metrics watch.Metrics,
-	submitVMDeletion func(util.NamespacedName),
-	submitPodDeletion func(util.NamespacedName),
+	submitVMDeletion func(*zap.Logger, util.NamespacedName),
+	submitPodDeletion func(*zap.Logger, util.NamespacedName),
 ) error {
+	logger := parentLogger.Named("pod-watch")
+
 	_, err := watch.Watch(
 		ctx,
+		logger.Named("watch"),
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
 		watch.Config{
-			LogName: "pods",
+			ObjectNameLogField: "pod",
 			Metrics: watch.MetricsConfig{
 				Metrics:  metrics,
 				Instance: "Pods",
@@ -55,26 +60,27 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 		watch.HandlerFuncs[*corev1.Pod]{
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
 				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
-					name := util.NamespacedName{Name: newPod.Name, Namespace: newPod.Namespace}
-					klog.Infof("[autoscale-enforcer] watch: Received update event for completion of pod %v", name)
+					name := util.GetNamespacedName(newPod)
+					logger.Info("Received update event for completion of pod", zap.Object("pod", name))
 
 					if _, ok := newPod.Labels[LabelVM]; ok {
-						submitVMDeletion(name)
+						submitVMDeletion(logger, name)
 					} else {
-						submitPodDeletion(name)
+						submitPodDeletion(logger, name)
 					}
 				}
 			},
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
-				name := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
+				name := util.GetNamespacedName(pod)
+
 				if util.PodCompleted(pod) {
-					klog.Infof("[autoscale-enforcer] watch: Received delete event for completed pod %v", name)
+					logger.Info("Received delete event for completed pod", zap.Object("pod", name))
 				} else {
-					klog.Infof("[autoscale-enforcer] watch: Received delete event for pod %v", name)
+					logger.Info("Received delete event for pod", zap.Object("pod", name))
 					if _, ok := pod.Labels[LabelVM]; ok {
-						submitVMDeletion(name)
+						submitVMDeletion(logger, name)
 					} else {
-						submitPodDeletion(name)
+						submitPodDeletion(logger, name)
 					}
 				}
 			},
@@ -117,16 +123,20 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 // handled by cancelled contexts in *almost all* cases.
 func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
+	parentLogger *zap.Logger,
 	metrics watch.Metrics,
-	submitVMDisabledScaling func(util.NamespacedName),
-	submitVMBoundsChanged func(_ *api.VmInfo, podName string),
-	submitNonAutoscalingVmUsageChanged func(_ *api.VmInfo, podname string),
+	submitVMDisabledScaling func(*zap.Logger, util.NamespacedName),
+	submitVMBoundsChanged func(_ *zap.Logger, _ *api.VmInfo, podName string),
+	submitNonAutoscalingVmUsageChanged func(_ *zap.Logger, _ *api.VmInfo, podname string),
 ) (*watch.Store[vmapi.VirtualMachine], error) {
+	logger := parentLogger.Named("vm-watch")
+
 	return watch.Watch(
 		ctx,
+		logger.Named("watch"),
 		e.vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		watch.Config{
-			LogName: "VMs",
+			ObjectNameLogField: "virtualmachine",
 			Metrics: watch.MetricsConfig{
 				Metrics:  metrics,
 				Instance: "VirtualMachines",
@@ -142,41 +152,32 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
-				oldInfo, err := api.ExtractVmInfo(oldVM)
+				oldInfo, err := api.ExtractVmInfo(logger, oldVM)
 				if err != nil {
-					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %s", util.GetNamespacedName(oldVM), err)
+					logger.Error("Failed to extract VM info in update for old VM", util.VMNameFields(oldVM), zap.Error(err))
 					return
 				}
-				newInfo, err := api.ExtractVmInfo(newVM)
+				newInfo, err := api.ExtractVmInfo(logger, newVM)
 				if err != nil {
-					klog.Errorf("[autoscale-enforcer] Error extracting VM info for %v: %s", util.GetNamespacedName(newVM), err)
+					logger.Error("Failed to extract VM info in update for new VM", util.VMNameFields(newVM), zap.Error(err))
 					return
 				}
 
 				if newVM.Status.PodName == "" {
-					klog.Infof(
-						"[autoscale-enforcer] Skipping update for VM %v because .status.podName is empty",
-						util.GetNamespacedName(newVM),
-					)
+					logger.Info("Skipping update for VM because .status.podName is empty", util.VMNameFields(newVM))
 					return
 				}
 
 				if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
+					logger.Info("Received update to disable autoscaling for VM", util.VMNameFields(newVM))
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
-					klog.Infof(
-						"[autoscale-enforcer] watch: Received update to disable autoscaling for pod %v",
-						name,
-					)
-					submitVMDisabledScaling(name)
+					submitVMDisabledScaling(logger, name)
 				}
 
 				if (!oldInfo.ScalingEnabled || !newInfo.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
 					podName := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
-					klog.Infof(
-						"[autoscale-enforcer] detected change usage for pod %v non-autoscaling VM %v",
-						podName, newInfo.Name,
-					)
-					submitNonAutoscalingVmUsageChanged(newInfo, podName.Name)
+					logger.Info("Received update changing usage for VM", zap.Object("old", oldInfo.Using()), zap.Object("new", newInfo.Using()))
+					submitNonAutoscalingVmUsageChanged(logger, newInfo, podName.Name)
 				}
 
 				// If the pod changed, then we're going to handle a deletion event for the old pod,
@@ -192,7 +193,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
-				submitVMBoundsChanged(newInfo, newVM.Status.PodName)
+				submitVMBoundsChanged(logger, newInfo, newVM.Status.PodName)
 			},
 		},
 	)

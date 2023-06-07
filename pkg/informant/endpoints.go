@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	klog "k8s.io/klog/v2"
+	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -54,7 +54,7 @@ type StateConfig struct {
 type NewStateOpts struct {
 	kind      newStateOptKind
 	setFields func(*State)
-	post      func(s *State, memTotal uint64) error
+	post      func(_ *zap.Logger, s *State, memTotal uint64) error
 }
 
 type newStateOptKind int
@@ -69,7 +69,7 @@ const (
 //
 // Optional configuration may be provided by NewStateOpts - see WithCgroup and
 // WithPostgresFileCache.
-func NewState(agents *AgentSet, config StateConfig, opts ...NewStateOpts) (*State, error) {
+func NewState(logger *zap.Logger, agents *AgentSet, config StateConfig, opts ...NewStateOpts) (*State, error) {
 	if config.SysBufferBytes == 0 {
 		panic("invalid StateConfig: SysBufferBytes cannot be zero")
 	}
@@ -98,7 +98,7 @@ func NewState(agents *AgentSet, config StateConfig, opts ...NewStateOpts) (*Stat
 	for _, kind := range []newStateOptKind{optFileCache, optCgroup} {
 		for _, opt := range opts {
 			if opt.kind == kind {
-				if err := opt.post(s, memInfo.Total); err != nil {
+				if err := opt.post(logger, s, memInfo.Total); err != nil {
 					return nil, err
 				}
 			}
@@ -132,10 +132,12 @@ func WithCgroup(cgm *CgroupManager, config CgroupConfig) NewStateOpts {
 				config:              config,
 				upscaleEventsSendr:  upscaleEventsSendr,
 				upscaleEventsRecvr:  upscaleEventsRecvr,
-				requestUpscale:      func() { s.agents.RequestUpscale() },
+				requestUpscale:      func(l *zap.Logger) { s.agents.RequestUpscale(l) },
 			}
 		},
-		post: func(s *State, memTotal uint64) error {
+		post: func(logger *zap.Logger, s *State, memTotal uint64) error {
+			logger = logger.With(zap.String("cgroup", s.cgroup.mgr.name))
+
 			available := memTotal - s.memReservedForFileCache
 
 			// FIXME: This is technically racy across restarts. The sequence would be:
@@ -145,10 +147,10 @@ func WithCgroup(cgm *CgroupManager, config CgroupConfig) NewStateOpts {
 			//  4. Get downscaled (as approved earlier)
 			// A potential way to fix this would be writing to a file to record approved downscale
 			// operations.
-			if err := s.cgroup.setMemoryLimits(available); err != nil {
+			if err := s.cgroup.setMemoryLimits(logger, available); err != nil {
 				return fmt.Errorf("Error setting initial cgroup memory limits: %w", err)
 			}
-			go s.cgroup.handleCgroupSignalsLoop(config)
+			go s.cgroup.handleCgroupSignalsLoop(logger.Named("signal-handler"), config)
 			return nil
 		},
 	}
@@ -172,7 +174,7 @@ func WithPostgresFileCache(connStr string, config FileCacheConfig) NewStateOpts 
 				config:  config,
 			}
 		},
-		post: func(s *State, memTotal uint64) error {
+		post: func(logger *zap.Logger, s *State, memTotal uint64) error {
 			if !config.InMemory {
 				panic("file cache not in-memory unimplemented")
 			}
@@ -188,12 +190,12 @@ func WithPostgresFileCache(connStr string, config FileCacheConfig) NewStateOpts 
 			}
 
 			newSize := s.fileCache.config.CalculateCacheSize(memTotal)
-			klog.Infof("Current file cache size is %d MiB, setting to %d MiB", size/(1<<20), newSize/(1<<20))
+			logger.Info("Setting initial file cache size", zap.String("current", mib(size)), zap.String("target", mib(newSize)))
 
 			// note: Even if newSize == size, we want to explicitly set it *anwyays*, just to verify
 			// that we have the necessary permissions to do so.
 
-			actualSize, err := s.fileCache.SetFileCacheSize(ctx, newSize)
+			actualSize, err := s.fileCache.SetFileCacheSize(ctx, logger, newSize)
 			if err != nil {
 				return fmt.Errorf("Error setting file cache size: %w", err)
 			}
@@ -207,8 +209,10 @@ func WithPostgresFileCache(connStr string, config FileCacheConfig) NewStateOpts 
 // RegisterAgent registers a new or updated autoscaler-agent
 //
 // Returns: body (if successful), status code, error (if unsuccessful)
-func (s *State) RegisterAgent(ctx context.Context, info *api.AgentDesc) (*api.InformantDesc, int, error) {
-	protoVersion, status, err := s.agents.RegisterNewAgent(info)
+func (s *State) RegisterAgent(ctx context.Context, logger *zap.Logger, info *api.AgentDesc) (*api.InformantDesc, int, error) {
+	logger = logger.With(agentZapField(info.AgentID, info.ServerAddr))
+
+	protoVersion, status, err := s.agents.RegisterNewAgent(logger, info)
 	if err != nil {
 		return nil, status, err
 	}
@@ -227,7 +231,7 @@ func (s *State) RegisterAgent(ctx context.Context, info *api.AgentDesc) (*api.In
 // is up and running, and (b) the agent is still registered.
 //
 // Returns: body (if successful), status code, error (if unsuccessful)
-func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) (*api.InformantHealthCheckResp, int, error) {
+func (s *State) HealthCheck(ctx context.Context, logger *zap.Logger, info *api.AgentIdentification) (*api.InformantHealthCheckResp, int, error) {
 	agent, ok := s.agents.Get(info.AgentID)
 	if !ok {
 		return nil, 404, fmt.Errorf("No Agent with ID %s registered", info.AgentID)
@@ -242,19 +246,19 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 // amount is ok
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*api.DownscaleResult, int, error) {
+func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *api.RawResources) (*api.DownscaleResult, int, error) {
 	// Helper functions for abbreviating returns.
 	resultFromStatus := func(ok bool, status string) (*api.DownscaleResult, int, error) {
 		return &api.DownscaleResult{Ok: ok, Status: status}, 200, nil
 	}
 	internalError := func(err error) (*api.DownscaleResult, int, error) {
-		klog.Errorf("Internal error handling downscale request: %s", err)
+		logger.Error("Internal error handling downscale request", zap.Error(err))
 		return nil, 500, errors.New("Internal error")
 	}
 
 	// If we aren't interacting with something that should be adjusted, then we don't need to do anything.
 	if s.cgroup == nil && s.fileCache == nil {
-		klog.Infof("No action needed for downscale (no cgroup or file cache enabled)")
+		logger.Info("No action needed for downscale (no cgroup or file cache enabled)")
 		return resultFromStatus(true, "No action taken (no cgroup or file cache enabled)")
 	}
 
@@ -314,7 +318,7 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 		dbCtx, cancel := context.WithTimeout(ctx, time.Second) // for talking to the DB
 		defer cancel()
 
-		actualUsage, err := s.fileCache.SetFileCacheSize(dbCtx, expectedFileCacheMemUsage)
+		actualUsage, err := s.fileCache.SetFileCacheSize(dbCtx, logger, expectedFileCacheMemUsage)
 		if err != nil {
 			return internalError(fmt.Errorf("Error setting file cache size: %w", err))
 		}
@@ -354,7 +358,7 @@ func (s *State) TryDownscale(ctx context.Context, target *api.RawResources) (*ap
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResources) (*struct{}, int, error) {
+func (s *State) NotifyUpscale(ctx context.Context, logger *zap.Logger, newResources *api.RawResources) (*struct{}, int, error) {
 	// FIXME: we shouldn't just trust what the agent says
 	//
 	// Because of race conditions like in <https://github.com/neondatabase/autoscaling/issues/23>,
@@ -366,19 +370,17 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 
 	// Helper function for abbreviating returns.
 	internalError := func(err error) (*struct{}, int, error) {
-		klog.Errorf("Error handling upscale request: %s", err)
+		logger.Error("Error handling upscale request", zap.Error(err))
 		return nil, 500, errors.New("Internal error")
 	}
 
 	if s.cgroup == nil && s.fileCache == nil {
-		klog.Infof("No action needed for upscale (no cgroup or file cache enabled)")
+		logger.Info("No action needed for upscale (no cgroup or file cache enabled)")
 		return &struct{}{}, 200, nil
 	}
 
 	newMem := uint64(newResources.Memory.Value())
 	usableSystemMemory := util.SaturatingSub(newMem, s.config.SysBufferBytes)
-
-	mib := float64(1 << 20) // 1 MiB = 2^20 bytes. We'll use this for pretty-printing.
 
 	if s.cgroup != nil {
 		s.cgroup.updateMemLimitsLock.Lock()
@@ -390,6 +392,8 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 	// Get the file cache's expected contribution to the memory usage
 	var fileCacheMemUsage uint64
 	if s.fileCache != nil {
+		logger := logger.With(zap.String("fileCacheConnstr", s.fileCache.connStr))
+
 		if !s.fileCache.config.InMemory {
 			panic("file cache not in-memory unimplemented")
 		}
@@ -401,20 +405,18 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 		// Update the size of the file cache
 		expectedUsage := s.fileCache.config.CalculateCacheSize(usableSystemMemory)
 
-		klog.Infof(
-			"Updating file cache size to %g MiB of new total %g MiB",
-			float64(expectedUsage)/mib, float64(newMem)/mib,
-		)
+		logger.Info("Updating file cache size", zap.String("target", mib(expectedUsage)), zap.String("totalMemory", mib(newMem)))
 
-		actualUsage, err := s.fileCache.SetFileCacheSize(dbCtx, expectedUsage)
+		actualUsage, err := s.fileCache.SetFileCacheSize(dbCtx, logger, expectedUsage)
 		if err != nil {
 			return internalError(fmt.Errorf("Error setting file cache size: %w", err))
 		}
 
 		if actualUsage != expectedUsage {
-			klog.Warningf(
-				"File cache size was actually set to %g MiB not %g MiB",
-				float64(actualUsage)/mib, float64(expectedUsage)/mib,
+			logger.Warn(
+				"File cache size was set to a different value than we wanted",
+				zap.String("target", mib(expectedUsage)),
+				zap.String("actual", mib(actualUsage)),
 			)
 		}
 
@@ -422,13 +424,12 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 	}
 
 	if s.cgroup != nil {
+		logger := logger.With(zap.String("cgroup", s.cgroup.mgr.name))
+
 		availableMemory := usableSystemMemory - fileCacheMemUsage
 
 		newMemHigh := s.cgroup.config.calculateMemoryHighValue(availableMemory)
-		klog.Infof(
-			"Updating memory.high to %g MiB, of new max %g MiB",
-			float64(newMemHigh)/mib, float64(newMem)/mib,
-		)
+		logger.Info("Updating cgroup memory.high", zap.String("target", mib(newMemHigh)), zap.String("totalMemory", mib(newMem)))
 
 		memLimits := memoryLimits{
 			highBytes: newMemHigh,
@@ -450,19 +451,19 @@ func (s *State) NotifyUpscale(ctx context.Context, newResources *api.RawResource
 // If a different autoscaler-agent is currently registered, this method will do nothing.
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) UnregisterAgent(ctx context.Context, info *api.AgentDesc) (*api.UnregisterAgent, int, error) {
+func (s *State) UnregisterAgent(ctx context.Context, logger *zap.Logger, info *api.AgentDesc) (*api.UnregisterAgent, int, error) {
 	agent, ok := s.agents.Get(info.AgentID)
 	if !ok {
 		return nil, 404, fmt.Errorf("No agent with ID %q", info.AgentID)
 	} else if agent.serverAddr != info.ServerAddr {
 		// On our side, log the address we're expecting, but don't give that to the client
-		klog.Warningf(
+		logger.Warn(fmt.Sprintf(
 			"Agent serverAddr is incorrect, got %q but expected %q",
 			info.ServerAddr, agent.serverAddr,
-		)
+		))
 		return nil, 400, fmt.Errorf("Agent serverAddr is incorrect, got %q", info.ServerAddr)
 	}
 
-	wasActive := agent.EnsureUnregistered()
+	wasActive := agent.EnsureUnregistered(logger)
 	return &api.UnregisterAgent{WasActive: wasActive}, 200, nil
 }

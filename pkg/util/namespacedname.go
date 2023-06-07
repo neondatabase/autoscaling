@@ -5,6 +5,8 @@ package util
 import (
 	"fmt"
 
+	"go.uber.org/zap/zapcore"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -42,4 +44,11 @@ func (n NamespacedName) Format(state fmt.State, verb rune) {
 		_, _ = state.Write([]byte(string(Separator)))
 		_, _ = state.Write([]byte(n.Name))
 	}
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that NamespacedName can be used with zap.Object
+func (n NamespacedName) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("namespace", n.Namespace)
+	enc.AddString("name", n.Name)
+	return nil
 }

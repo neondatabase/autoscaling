@@ -10,10 +10,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tychoish/fun/pubsub"
+	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
@@ -81,11 +81,12 @@ func (s *agentState) Stop() {
 	}
 }
 
-func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
-	klog.Infof("Handling VM event %+v", event)
+func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event vmEvent) {
+	baseLogger := logger
+	logger = logger.With(zap.Object("event", event))
 
 	if err := s.lock.TryLock(ctx); err != nil {
-		klog.Warningf("context canceled while starting to handle event: %s", err)
+		logger.Warn("Context canceled while starting to handle event", zap.Error(err))
 		return
 	}
 	defer s.lock.Unlock()
@@ -93,8 +94,12 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 	podName := util.NamespacedName{Namespace: event.vmInfo.Namespace, Name: event.podName}
 	state, hasPod := s.pods[podName]
 
+	// nb: we add the "pod" key for uniformity, even though it's derived from the event
 	if event.kind != vmEventAdded && !hasPod {
-		klog.Errorf("Received %s event for pod %v that isn't present", event.kind, podName)
+		logger.Error("Received event for pod that isn't present", zap.Object("pod", podName))
+		return
+	} else if event.kind == vmEventAdded && hasPod {
+		logger.Error("Received add event for pod that's already present", zap.Object("pod", podName))
 		return
 	}
 
@@ -109,7 +114,7 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 		state.status.vmInfo = event.vmInfo
 		state.vmInfoUpdated.Send()
 	case vmEventAdded:
-		s.handleVMEventAdded(ctx, event, podName)
+		s.handleVMEventAdded(ctx, baseLogger, event, podName)
 	default:
 		panic(errors.New("bad event: unexpected event kind"))
 	}
@@ -117,14 +122,10 @@ func (s *agentState) handleEvent(ctx context.Context, event vmEvent) {
 
 func (s *agentState) handleVMEventAdded(
 	ctx context.Context,
+	logger *zap.Logger,
 	event vmEvent,
 	podName util.NamespacedName,
 ) {
-	if _, ok := s.pods[podName]; ok {
-		klog.Errorf("Received add event for pod %v while already present", podName)
-		return
-	}
-
 	runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
 
 	status := &podStatus{
@@ -151,7 +152,7 @@ func (s *agentState) handleVMEventAdded(
 		vmInfoUpdated: txVMUpdate,
 	}
 	s.metrics.runnerStarts.Inc()
-	runner.Spawn(runnerCtx, rxVMUpdate)
+	runner.Spawn(runnerCtx, logger.Named("runner"), rxVMUpdate)
 }
 
 // FIXME: make these timings configurable.
@@ -164,7 +165,7 @@ const (
 //
 // NB: runnerCtx is the context *passed to the new Runner*. It is only used here to end our restart
 // process early if it's already been canceled.
-func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podName util.NamespacedName, podIP string) {
+func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger *zap.Logger, podName util.NamespacedName, podIP string) {
 	// Three steps:
 	//  1. Check if the Runner needs to restart. If no, we're done.
 	//  2. Wait for a random amount of time (between RunnerRestartMinWaitSeconds and RunnerRestartMaxWaitSeconds)
@@ -189,10 +190,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 	defer status.mu.Unlock()
 
 	if status.endState == nil {
-		klog.Errorf(
-			"TriggerRestartIfNecessary called with nil endState for pod %v (should only be called after the pod is finished, when endState != nil)",
-			podName,
-		)
+		logger.Error("TriggerRestartIfNecessary called with nil endState (should only be called after the pod is finished, when endState != nil)")
 		s.metrics.runnerFatalErrors.Inc()
 		return
 	}
@@ -201,7 +199,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 
 	if endTime.IsZero() {
 		// If we don't check this, we run the risk of spinning on failures.
-		klog.Errorf("TriggerRestartIfNecessary called with zero'd Time for pod %v", podName)
+		logger.Error("TriggerRestartIfNecessary called with zero'd Time for pod")
 		s.metrics.runnerFatalErrors.Inc()
 		// Continue on, but with the time overridden, so we guarantee our minimum wait.
 		endTime = time.Now()
@@ -212,11 +210,13 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 
 	switch exitKind {
 	case podStatusExitCanceled:
+		logger.Info("Runner's context was canceled; no need to restart")
 		return // successful exit, no need to restart.
 	case podStatusExitPanicked, podStatusExitErrored:
 		// Should restart; continue.
+		logger.Info("Runner had abnormal exit kind; it will restart", zap.String("exitKind", string(exitKind)))
 	default:
-		klog.Errorf("TriggerRestartIfNecessary called with unexpected ExitKind %q for pod %v", podName)
+		logger.Error("TriggerRestartIfNecessary called with unexpected ExitKind", zap.String("exitKind", string(exitKind)))
 		s.metrics.runnerFatalErrors.Inc()
 		return
 	}
@@ -230,21 +230,35 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 	// NOTE: this will have incorrect behavior when the system clock is behaving weirdly, but that's
 	// mostly ok. It's ok to e.g. restart an extra time at the switchover to daylight saving time.
 	if totalRuntime > time.Second*time.Duration(RunnerRestartMaxWaitSeconds) {
+		logger.Info("Runner was running for a long time, restarting immediately", zap.Duration("totalRuntime", totalRuntime))
 		waitDuration = 0
 	} else /* Otherwise, randomly pick within RunnerRestartMinWait..RunnerRestartMaxWait */ {
 		r := util.NewTimeRange(time.Second, RunnerRestartMinWaitSeconds, RunnerRestartMaxWaitSeconds)
 		waitDuration = r.Random()
-		klog.Infof("Waiting for %s before restarting Runner %v", waitDuration, podName)
+		logger.Info(
+			"Runner was not runnign for long, restarting after delay",
+			zap.Duration("totalRuntime", totalRuntime),
+			zap.Duration("delay", waitDuration),
+		)
 	}
 
 	// Run the waiting (if necessary) and restarting in another goroutine, so we're not blocking the
 	// caller of this function.
 	go func() {
+		logCancel := func(logFunc func(string, ...zap.Field), err error) {
+			logFunc(
+				"Canceling restart of Runner",
+				zap.Duration("delay", waitDuration),
+				zap.Duration("waitTime", time.Since(endTime)),
+				zap.Error(err),
+			)
+		}
+
 		if waitDuration != 0 {
 			select {
 			case <-time.After(waitDuration):
 			case <-runnerCtx.Done():
-				klog.Infof("Canceling restart of Runner %v after %s: %s", podName, time.Since(endTime), runnerCtx.Err())
+				logCancel(logger.Info, runnerCtx.Err())
 				return
 			}
 		}
@@ -257,7 +271,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 		// podStatus.
 		pod, ok := s.pods[podName]
 		if !ok {
-			klog.Warningf("Canceling restart of Runner %v after %s: no longer present in pod map", podName, time.Since(endTime))
+			logCancel(logger.Warn, errors.New("no longer present in pod map"))
 			return
 		}
 
@@ -267,16 +281,12 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 		// Runner was already restarted
 		if pod.status.endState == nil {
 			addedInfo := "this generally shouldn't happen, but could if there's a new pod with the same name"
-			klog.Warningf(
-				"Canceling restart of Runner %v after %s: Runner was already restarted (%s)",
-				podName, time.Since(endTime), addedInfo,
-			)
+			logCancel(logger.Warn, fmt.Errorf("Runner was already restarted (%s)", addedInfo))
 			return
 		}
 
-		klog.Infof("Restarting %s Runner %v after %s, was running for %s", exitKind, podName, time.Since(endTime), totalRuntime)
-		//                     ^^
-		// note: exitKind is one of "panicked" or "errored" - e.g. "Restarting panicked Runner ..."
+		logger.Info("Restarting runner", zap.String("exitKind", string(exitKind)), zap.Duration("delay", time.Since(endTime)))
+		s.metrics.runnerRestarts.Inc()
 
 		restartCount := len(pod.status.previousEndStates) + 1
 		runner := s.newRunner(pod.status.vmInfo, podName, podIP, restartCount)
@@ -290,19 +300,15 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, podNam
 		pod.status.previousEndStates = append(pod.status.previousEndStates, *pod.status.endState)
 		pod.status.startTime = time.Now()
 
-		s.metrics.runnerRestarts.Inc()
-		runner.Spawn(runnerCtx, rxVMUpdate)
+		runner.Spawn(runnerCtx, logger, rxVMUpdate)
 	}()
 }
 
 // NB: caller must set Runner.status after creation
 func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string, restartCount int) *Runner {
 	return &Runner{
-		global: s,
-		status: nil, // set by calller
-		logger: util.PrefixLogger{
-			Prefix: fmt.Sprintf("Runner %v/%d: ", podName, restartCount),
-		},
+		global:                          s,
+		status:                          nil, // set by calller
 		schedulerRespondedWithMigration: false,
 
 		shutdown:         nil, // set by (*Runner).Run

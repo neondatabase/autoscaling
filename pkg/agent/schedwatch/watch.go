@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tychoish/fun/pubsub"
+	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,17 +21,20 @@ func isActivePod(pod *corev1.Pod) bool {
 
 func StartSchedulerWatcher(
 	ctx context.Context,
-	logger util.PrefixLogger,
+	parentLogger *zap.Logger,
 	kubeClient *kubernetes.Clientset,
 	metrics watch.Metrics,
 	eventBroker *pubsub.Broker[WatchEvent],
 	schedulerName string,
 ) (*watch.Store[corev1.Pod], error) {
+	logger := parentLogger.Named("watch-schedulers")
+
 	return watch.Watch(
 		ctx,
+		logger.Named("watch"),
 		kubeClient.CoreV1().Pods(schedulerNamespace),
 		watch.Config{
-			LogName: "scheduler",
+			ObjectNameLogField: "pod",
 			Metrics: watch.MetricsConfig{
 				Metrics:  metrics,
 				Instance: "Scheduler Pod",
@@ -50,7 +54,7 @@ func StartSchedulerWatcher(
 			AddFunc: func(pod *corev1.Pod, preexisting bool) {
 				if isActivePod(pod) {
 					event := WatchEvent{kind: eventKindReady, info: newSchedulerInfo(pod)}
-					logger.Infof("New scheduler, already ready: %+v", event)
+					logger.Info("new scheduler, already ready", zap.Object("event", event))
 					eventBroker.Publish(ctx, event)
 				}
 			},
@@ -60,11 +64,11 @@ func StartSchedulerWatcher(
 
 				if !oldReady && newReady {
 					event := WatchEvent{kind: eventKindReady, info: newSchedulerInfo(newPod)}
-					logger.Infof("Existing scheduler became ready: %+v", event)
+					logger.Info("existing scheduler became ready", zap.Object("event", event))
 					eventBroker.Publish(ctx, event)
 				} else if oldReady && !newReady {
 					event := WatchEvent{kind: eventKindDeleted, info: newSchedulerInfo(oldPod)}
-					logger.Infof("Existing scheduler no longer ready: %+v", event)
+					logger.Info("existing scheduler no longer ready", zap.Object("event", event))
 					eventBroker.Publish(ctx, event)
 				}
 			},
@@ -72,7 +76,7 @@ func StartSchedulerWatcher(
 				wasReady := isActivePod(pod)
 				if wasReady {
 					event := WatchEvent{kind: eventKindDeleted, info: newSchedulerInfo(pod)}
-					logger.Infof("Previously-ready scheduler deleted: %+v", event)
+					logger.Info("Previously-ready scheduler deleted", zap.Object("event", event))
 					eventBroker.Publish(ctx, event)
 				}
 			},

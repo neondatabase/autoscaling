@@ -8,8 +8,7 @@ import (
 	"fmt"
 
 	_ "github.com/lib/pq"
-
-	klog "k8s.io/klog/v2"
+	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -140,13 +139,13 @@ func (s *FileCacheState) GetFileCacheSize(ctx context.Context) (uint64, error) {
 }
 
 // SetFileCacheSize sets the size of the file cache, returning the actual size it was set to
-func (s *FileCacheState) SetFileCacheSize(ctx context.Context, sizeInBytes uint64) (uint64, error) {
+func (s *FileCacheState) SetFileCacheSize(ctx context.Context, logger *zap.Logger, sizeInBytes uint64) (uint64, error) {
 	db, err := sql.Open("postgres", s.connStr)
 	if err != nil {
 		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
 	}
 
-	klog.Infof("Fetching maximum file cache size")
+	logger.Info("Fetching maximum file cache size")
 
 	var maxSizeInBytes uint64
 	err = db.QueryRowContext(ctx, `SELECT pg_size_bytes(current_setting('neon.max_file_cache_size'));`).
@@ -161,14 +160,17 @@ func (s *FileCacheState) SetFileCacheSize(ctx context.Context, sizeInBytes uint6
 		maybeCapped = " (capped by maximum size)"
 	}
 
-	sizeInMB := sizeInBytes / (1 << 20)
-	maxSizeInMB := maxSizeInBytes / (1 << 20)
-	klog.Infof("Updating file cache size to %d MiB%s, max size = %d", sizeInMB, maxSizeInMB, maybeCapped)
+	logger.Info(
+		fmt.Sprintf("Updating file cache size %s", maybeCapped),
+		zap.String("size", mib(sizeInBytes)),
+		zap.String("max", mib(maxSizeInBytes)),
+	)
 
 	// note: even though the normal ways to get the cache size produce values with trailing "MB"
 	// (hence why we call pg_size_bytes in GetFileCacheSize's query), the format it expects to set
 	// the value is "integer number of MB" without trailing units. For some reason, this *really*
 	// wasn't working with normal arguments, so that's why we're constructing the query here.
+	sizeInMB := sizeInBytes / (1 << 20)
 	setQuery := fmt.Sprintf(`ALTER SYSTEM SET neon.file_cache_size_limit = %d;`, sizeInMB)
 	if _, err := db.ExecContext(ctx, setQuery); err != nil {
 		return 0, fmt.Errorf("Error changing cache setting: %w", err)

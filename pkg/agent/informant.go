@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tychoish/fun/srv"
+	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -127,6 +128,7 @@ type InformantServerExitStatus struct {
 // signalled when it exits.
 func NewInformantServer(
 	ctx context.Context,
+	logger *zap.Logger,
 	runner *Runner,
 	updatedInformant util.CondChannelSender,
 	upscaleRequested util.CondChannelSender,
@@ -167,15 +169,14 @@ func NewInformantServer(
 		exit:             nil, // see below.
 	}
 
-	runner.logger.Infof("Starting Informant server, desc = %+v", server.desc)
-
-	logPrefix := runner.logger.Prefix
+	logger = logger.With(zap.Object("server", server.desc))
+	logger.Info("Starting Informant server")
 
 	mux := http.NewServeMux()
-	util.AddHandler(logPrefix, mux, "/id", http.MethodGet, "struct{}", server.handleID)
-	util.AddHandler(logPrefix, mux, "/resume", http.MethodPost, "ResumeAgent", server.handleResume)
-	util.AddHandler(logPrefix, mux, "/suspend", http.MethodPost, "SuspendAgent", server.handleSuspend)
-	util.AddHandler(logPrefix, mux, "/try-upscale", http.MethodPost, "MoreResourcesRequest", server.handleTryUpscale)
+	util.AddHandler(logger, mux, "/id", http.MethodGet, "struct{}", server.handleID)
+	util.AddHandler(logger, mux, "/resume", http.MethodPost, "ResumeAgent", server.handleResume)
+	util.AddHandler(logger, mux, "/suspend", http.MethodPost, "SuspendAgent", server.handleSuspend)
+	util.AddHandler(logger, mux, "/try-upscale", http.MethodPost, "MoreResourcesRequest", server.handleTryUpscale)
 	httpServer := &http.Server{Handler: mux}
 
 	sendFinished, recvFinished := util.NewSingleSignalPair()
@@ -189,39 +190,36 @@ func NewInformantServer(
 		// Set server.exitStatus if isn't already
 		if server.exitStatus == nil {
 			server.exitStatus = &status
-			logFunc := runner.logger.Warningf
+			logFunc := logger.Warn
 			if status.RetryShouldFix {
-				logFunc = runner.logger.Infof
+				logFunc = logger.Info
 			}
 
-			logFunc("Informant server exiting with: retry=%v, err=%v", status.RetryShouldFix, status.Err)
+			logFunc("Informant server exiting", zap.Bool("retry", status.RetryShouldFix), zap.Error(status.Err))
 		}
-
-		shutdownName := fmt.Sprintf("InformantServer shutdown (%s)", server.desc.AgentID)
 
 		// we need to spawn these in separate threads so the caller doesn't block while holding
 		// runner.lock
-		runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), shutdownName, func(context.Context) {
+		runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), logger, "InformantServer shutdown", func(_ context.Context, logger *zap.Logger) {
 			// we want shutdown to (potentially) live longer than the request which
 			// made it, but having a timeout is still good.
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
 			if err := httpServer.Shutdown(ctx); err != nil {
-				runner.logger.Warningf("Error shutting down InformantServer: %s", err)
+				logger.Warn("Error shutting down InformantServer", zap.Error(err))
 			}
 		})
 		if server.madeContact {
 			// only unregister the server if we could have plausibly contacted the informant
-			unregisterName := fmt.Sprintf("InformantServer unregister (%s)", server.desc.AgentID)
-			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), unregisterName, func(context.Context) {
+			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), logger, "InformantServer unregister", func(_ context.Context, logger *zap.Logger) {
 				// we want shutdown to (potentially) live longer than the request which
 				// made it, but having a timeout is still good.
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				if err := server.unregisterFromInformant(ctx); err != nil {
-					runner.logger.Warningf("Error unregistering %s: %s", server.desc.AgentID, err)
+				if err := server.unregisterFromInformant(ctx, logger); err != nil {
+					logger.Warn("Error unregistering", zap.Error(err))
 				}
 			})
 		}
@@ -231,15 +229,13 @@ func NewInformantServer(
 	//
 	// FIXME: make these timeouts/delays separately defined constants, or configurable
 	deadlockChecker := server.requestLock.DeadlockChecker(5*time.Second, time.Second)
-	deadlockWorkerName := fmt.Sprintf("InformantServer deadlock checker (%s)", server.desc.AgentID)
-	runner.spawnBackgroundWorker(backgroundCtx, deadlockWorkerName, deadlockChecker)
+	runner.spawnBackgroundWorker(backgroundCtx, logger, "InformantServer deadlock checker", ignoreLogger(deadlockChecker))
 
 	// Main thread running the server. After httpServer.Serve() completes, we do some error
 	// handling, but that's about it.
-	serverName := fmt.Sprintf("InformantServer (%s)", server.desc.AgentID)
-	runner.spawnBackgroundWorker(ctx, serverName, func(c context.Context) {
+	runner.spawnBackgroundWorker(ctx, logger, "InformantServer", func(c context.Context, logger *zap.Logger) {
 		if err := httpServer.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
-			runner.logger.Errorf("InformantServer exited with unexpected error: %s", err)
+			logger.Error("InformantServer exited with unexpected error", zap.Error(err))
 		}
 
 		// set server.exitStatus if it isn't already -- generally this should only occur if err
@@ -256,15 +252,13 @@ func NewInformantServer(
 	})
 
 	// Thread waiting for the context to be canceled so we can use it to shut down the server
-	shutdownWaiterName := fmt.Sprintf("InformantServer shutdown waiter (%s)", server.desc.AgentID)
-	runner.spawnBackgroundWorker(ctx, shutdownWaiterName, func(context.Context) {
+	runner.spawnBackgroundWorker(ctx, logger, "InformantServer shutdown waiter", func(context.Context, *zap.Logger) {
 		// Wait until parent context OR server's context is done.
 		<-backgroundCtx.Done()
 		server.exit(InformantServerExitStatus{Err: nil, RetryShouldFix: false})
 	})
 
-	healthCheckerName := fmt.Sprintf("InformantServer health-checker (%s)", server.desc.AgentID)
-	runner.spawnBackgroundWorker(backgroundCtx, healthCheckerName, func(c context.Context) {
+	runner.spawnBackgroundWorker(backgroundCtx, logger, "InformantServer health-checker", func(c context.Context, logger *zap.Logger) {
 		// FIXME: make this duration configurable
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
@@ -283,13 +277,13 @@ func NewInformantServer(
 				// If we've already registered with the informant, and it doesn't support health
 				// checks, exit.
 				if server.protoVersion != nil && !server.protoVersion.AllowsHealthCheck() {
-					runner.logger.Infof("Aborting future informant health checks because it does not support them")
+					logger.Info("Aborting future informant health checks because it does not support them")
 					done = true
 					return
 				}
 
-				if _, err := server.HealthCheck(c); err != nil {
-					runner.logger.Warningf("Informant health check failed: %s", err)
+				if _, err := server.HealthCheck(c, logger); err != nil {
+					logger.Warn("Informant health check failed", zap.Error(err))
 				}
 			}()
 			if done {
@@ -382,7 +376,9 @@ func (s *InformantServer) setLastInformantError(err error, runnerLocked bool) {
 // s.ExitStatus() and checking for a non-nil result.
 //
 // This method MUST NOT be called while holding s.requestLock OR s.runner.lock.
-func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
+func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap.Logger) error {
+	logger = logger.With(zap.Object("server", s.desc))
+
 	s.requestLock.Lock()
 	defer s.requestLock.Unlock()
 
@@ -415,7 +411,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 	// Make the request:
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.RegisterTimeoutSeconds)
 	resp, statusCode, err := doInformantRequest[api.AgentDesc, api.InformantDesc](
-		ctx, s, timeout, http.MethodPost, "/register", &s.desc,
+		ctx, logger, s, timeout, http.MethodPost, "/register", &s.desc,
 	)
 	// Do some stuff with the lock acquired:
 	func() {
@@ -462,8 +458,11 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
 
-		s.runner.logger.Infof(
-			"Informant server registered, mode: %q -> %q", s.mode, InformantServerSuspended,
+		logger.Info(
+			"Informant server mode updated",
+			zap.String("action", "register"),
+			zap.String("oldMode", string(s.mode)),
+			zap.String("newMode", string(InformantServerSuspended)),
 		)
 
 		s.mode = InformantServerSuspended
@@ -475,27 +474,26 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context) error {
 			s.updatedInformant.Send() // signal we've changed the informant
 
 			if oldInformant == nil {
-				s.runner.logger.Infof("Registered with informant, InformantDesc is %+v", *resp)
+				logger.Info("Registered with informant", zap.Any("informant", *resp))
 			} else if *oldInformant != *resp {
-				s.runner.logger.Infof(
-					"Re-registered with informant, InformantDesc changed from %+v to %+v",
-					*oldInformant, *resp,
+				logger.Info(
+					"Re-registered with informant, InformantDesc changed",
+					zap.Any("oldInformant", *oldInformant),
+					zap.Any("informant", *resp),
 				)
 			} else {
-				s.runner.logger.Infof("Re-registered with informant; InformantDesc unchanged")
+				logger.Info("Re-registered with informant; InformantDesc unchanged", zap.Any("informant", *oldInformant))
 			}
 		} else {
-			s.runner.logger.Warningf(
-				"Registering server %s completed but there is a new server now", s.desc.AgentID,
-			)
+			logger.Warn("Registering with informant completed but the server has already been replaced")
 		}
 
 		// we also want to do a quick protocol check here as well
 		if !s.receivedIDCheck {
 			// protocol violation
-			err := errors.New("Protocol violation: Informant responded to /register with 200 without requesting /id")
-			s.setLastInformantError(err, true)
-			s.runner.logger.Errorf("%s", err)
+			err := errors.New("Informant responded to /register with 200 without requesting /id")
+			s.setLastInformantError(fmt.Errorf("Protocol violation: %w", err), true)
+			logger.Error("Protocol violation", zap.Error(err))
 			s.exit(InformantServerExitStatus{
 				Err:            err,
 				RetryShouldFix: false,
@@ -559,25 +557,27 @@ func validateInformantDesc(server *api.AgentDesc, informant *api.InformantDesc) 
 // been set will likely cause the server to restart.
 //
 // This method MUST NOT be called while holding s.requestLock OR s.runner.lock.
-func (s *InformantServer) unregisterFromInformant(ctx context.Context) error {
+func (s *InformantServer) unregisterFromInformant(ctx context.Context, logger *zap.Logger) error {
 	// note: Because this method is typically called during shutdown, we don't set
 	// s.runner.lastInformantError or call s.exit, even though other request helpers do.
+
+	logger = logger.With(zap.Object("server", s.desc))
 
 	s.requestLock.Lock()
 	defer s.requestLock.Unlock()
 
-	s.runner.logger.Infof("Sending unregister %s request to informant", s.desc.AgentID)
+	logger.Info("Sending unregister request to informant")
 
 	// Make the request:
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.RegisterTimeoutSeconds)
 	resp, _, err := doInformantRequest[api.AgentDesc, api.UnregisterAgent](
-		ctx, s, timeout, http.MethodDelete, "/unregister", &s.desc,
+		ctx, logger, s, timeout, http.MethodDelete, "/unregister", &s.desc,
 	)
 	if err != nil {
 		return err // the errors returned by doInformantRequest are descriptive enough.
 	}
 
-	s.runner.logger.Infof("Unregister %s request successful: %+v", s.desc.AgentID, *resp)
+	logger.Info("Unregister request successful", zap.Any("response", *resp))
 	return nil
 }
 
@@ -593,6 +593,7 @@ func (s *InformantServer) unregisterFromInformant(ctx context.Context) error {
 // the protocol guarantees.
 func doInformantRequest[Q any, R any](
 	ctx context.Context,
+	logger *zap.Logger,
 	s *InformantServer,
 	timeout time.Duration,
 	method string,
@@ -619,7 +620,7 @@ func doInformantRequest[Q any, R any](
 	}
 	request.Header.Set("content-type", "application/json")
 
-	s.runner.logger.Infof("Sending informant %q request: %s", path, string(reqBody))
+	logger.Info("Sending informant request", zap.String("url", url), zap.Any("request", reqData))
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -647,7 +648,7 @@ func doInformantRequest[Q any, R any](
 		return nil, statusCode, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
-	s.runner.logger.Infof("Got informant %q response: %s", path, string(respBody))
+	logger.Info("Got informant response", zap.String("url", url), zap.Any("response", respData))
 
 	return &respData, statusCode, nil
 }
@@ -676,7 +677,7 @@ func (s *InformantServer) informantURL(path string) string {
 // of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (_ *api.AgentIdentificationMessage, code int, _ error) {
+func (s *InformantServer) handleID(ctx context.Context, _ *zap.Logger, body *struct{}) (_ *api.AgentIdentificationMessage, code int, _ error) {
 	defer func() {
 		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/id", strconv.Itoa(code)).Inc()
 	}()
@@ -710,13 +711,15 @@ func (s *InformantServer) handleID(ctx context.Context, body *struct{}) (_ *api.
 // outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgent) (_ *api.AgentIdentificationMessage, code int, _ error) {
+func (s *InformantServer) handleResume(
+	ctx context.Context, logger *zap.Logger, body *api.ResumeAgent,
+) (_ *api.AgentIdentificationMessage, code int, _ error) {
 	defer func() {
 		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/resume", strconv.Itoa(code)).Inc()
 	}()
 
 	if body.ExpectedID != s.desc.AgentID {
-		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
+		logger.Warn("Request AgentID not found, server has a different one")
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
 	}
 
@@ -734,12 +737,15 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 	switch s.mode {
 	case InformantServerSuspended:
 		s.mode = InformantServerRunning
-		s.runner.logger.Infof(
-			"Informant server mode: %q -> %q", InformantServerSuspended, InformantServerRunning,
+		logger.Info(
+			"Informant server mode updated",
+			zap.String("action", "resume"),
+			zap.String("oldMode", string(InformantServerSuspended)),
+			zap.String("newMode", string(InformantServerRunning)),
 		)
 	case InformantServerRunning:
 		internalErr := errors.New("Got /resume request for server, but it is already running")
-		s.runner.logger.Warningf("%s", internalErr)
+		logger.Warn("Protocol violation", zap.Error(internalErr))
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
 		s.exit(InformantServerExitStatus{
@@ -750,7 +756,7 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 		return nil, 400, errors.New("Cannot resume agent that is already running")
 	case InformantServerUnconfirmed:
 		internalErr := errors.New("Got /resume request for server, but it is unconfirmed")
-		s.runner.logger.Warningf("%s", internalErr)
+		logger.Warn("Protocol violation", zap.Error(internalErr))
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
 		s.exit(InformantServerExitStatus{
@@ -773,13 +779,16 @@ func (s *InformantServer) handleResume(ctx context.Context, body *api.ResumeAgen
 // called outside of that context.
 //
 // Returns: response body (if successful), status code, error (if unsuccessful)
-func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAgent) (_ *api.AgentIdentificationMessage, code int, _ error) {
+func (s *InformantServer) handleSuspend(
+	ctx context.Context, logger *zap.Logger, body *api.SuspendAgent,
+) (_ *api.AgentIdentificationMessage, code int, _ error) {
 	defer func() {
 		s.runner.global.metrics.informantRequestsInbound.WithLabelValues("/suspend", strconv.Itoa(code)).Inc()
 	}()
 
 	if body.ExpectedID != s.desc.AgentID {
-		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
+		logger.Warn("Request AgentID not found, server has a different one")
+		// logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
 	}
 
@@ -798,12 +807,15 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 	switch s.mode {
 	case InformantServerRunning:
 		s.mode = InformantServerSuspended
-		s.runner.logger.Infof(
-			"Informant server mode: %q -> %q", InformantServerRunning, InformantServerSuspended,
+		logger.Info(
+			"Informant server mode updated",
+			zap.String("action", "suspend"),
+			zap.String("oldMode", string(InformantServerRunning)),
+			zap.String("newMode", string(InformantServerSuspended)),
 		)
 	case InformantServerSuspended:
 		internalErr := errors.New("Got /suspend request for server, but it is already suspended")
-		s.runner.logger.Warningf("%s", internalErr)
+		logger.Warn("Protocol violation", zap.Error(internalErr))
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
 		s.exit(InformantServerExitStatus{
@@ -814,7 +826,7 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 		return nil, 400, errors.New("Cannot suspend agent that is already suspended")
 	case InformantServerUnconfirmed:
 		internalErr := errors.New("Got /suspend request for server, but it is unconfirmed")
-		s.runner.logger.Warningf("%s", internalErr)
+		logger.Warn("Protocol violation", zap.Error(internalErr))
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
 		s.exit(InformantServerExitStatus{
@@ -833,7 +845,7 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 	// exit early, before actually making the request.
 	if err := s.runner.requestLock.TryLock(ctx); err != nil {
 		err = fmt.Errorf("Context expired while trying to acquire requestLock: %w", err)
-		s.runner.logger.Errorf("%s", err)
+		logger.Error("Failed to synchronize on requestLock", zap.Error(err))
 		return nil, 500, err
 	}
 	s.runner.requestLock.Unlock() // don't actually hold the lock, we're just using it as a barrier.
@@ -850,6 +862,7 @@ func (s *InformantServer) handleSuspend(ctx context.Context, body *api.SuspendAg
 // Returns: response body (if successful), status code, error (if unsuccessful)
 func (s *InformantServer) handleTryUpscale(
 	ctx context.Context,
+	logger *zap.Logger,
 	body *api.MoreResourcesRequest,
 ) (_ *api.AgentIdentificationMessage, code int, _ error) {
 	defer func() {
@@ -857,7 +870,7 @@ func (s *InformantServer) handleTryUpscale(
 	}()
 
 	if body.ExpectedID != s.desc.AgentID {
-		s.runner.logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
+		logger.Warn("Request AgentID not found, server has a different one")
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
 	}
 
@@ -878,12 +891,13 @@ func (s *InformantServer) handleTryUpscale(
 		if body.MoreResources.Cpu || body.MoreResources.Memory {
 			s.upscaleRequested.Send()
 		} else {
-			s.runner.logger.Warningf("Received try-upscale request that does not increase")
+			logger.Warn("Received try-upscale request that has no resources selected")
 		}
 
-		s.runner.logger.Infof(
-			"Updating requested upscale from %+v to %+v",
-			s.runner.requestedUpscale, body.MoreResources,
+		logger.Info(
+			"Updating requested upscale",
+			zap.Any("oldRequested", s.runner.requestedUpscale),
+			zap.Any("newRequested", body.MoreResources),
 		)
 		s.runner.requestedUpscale = body.MoreResources
 
@@ -893,7 +907,7 @@ func (s *InformantServer) handleTryUpscale(
 		}, 200, nil
 	case InformantServerSuspended:
 		internalErr := errors.New("Got /try-upscale request for server, but server is suspended")
-		s.runner.logger.Warningf("%s", internalErr)
+		logger.Warn("Protocol violation", zap.Error(internalErr))
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
 		s.exit(InformantServerExitStatus{
@@ -904,7 +918,7 @@ func (s *InformantServer) handleTryUpscale(
 		return nil, 400, errors.New("Cannot process upscale while suspended")
 	case InformantServerUnconfirmed:
 		internalErr := errors.New("Got /try-upscale request for server, but server is suspended")
-		s.runner.logger.Warningf("%s", internalErr)
+		logger.Warn("Protocol violation", zap.Error(internalErr))
 
 		// To be nice, we'll restart the server. We don't want to make a temporary error permanent.
 		s.exit(InformantServerExitStatus{
@@ -921,7 +935,7 @@ func (s *InformantServer) handleTryUpscale(
 // HealthCheck makes a request to the informant's /health-check endpoint, using the server's ID.
 //
 // This method MUST be called while holding i.server.requestLock AND NOT i.server.runner.lock.
-func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealthCheckResp, error) {
+func (s *InformantServer) HealthCheck(ctx context.Context, logger *zap.Logger) (*api.InformantHealthCheckResp, error) {
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
@@ -931,12 +945,14 @@ func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealth
 		return nil, err
 	}
 
+	logger = logger.With(zap.Object("server", s.desc))
+
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.RequestTimeoutSeconds)
 	id := api.AgentIdentification{AgentID: s.desc.AgentID}
 
-	s.runner.logger.Infof("Sending health-check %+v", id)
+	logger.Info("Sending health-check", zap.Any("id", id))
 	resp, statusCode, err := doInformantRequest[api.AgentIdentification, api.InformantHealthCheckResp](
-		ctx, s, timeout, http.MethodPut, "/health-check", &id,
+		ctx, logger, s, timeout, http.MethodPut, "/health-check", &id,
 	)
 	if err != nil {
 		func() {
@@ -955,14 +971,14 @@ func (s *InformantServer) HealthCheck(ctx context.Context) (*api.InformantHealth
 		return nil, err
 	}
 
-	s.runner.logger.Infof("Received health-check result %+v", *resp)
+	logger.Info("Received OK health-check result")
 	return resp, nil
 }
 
 // Downscale makes a request to the informant's /downscale endpoit with the api.Resources
 //
 // This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
-func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api.DownscaleResult, error) {
+func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
 	s.requestLock.Lock()
 	defer s.requestLock.Unlock()
 
@@ -975,13 +991,15 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 		return nil, err
 	}
 
-	s.runner.logger.Infof("Sending downscale %+v", to)
+	logger = logger.With(zap.Object("server", s.desc))
+
+	logger.Info("Sending downscale", zap.Object("target", to))
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
 	resp, statusCode, err := doInformantRequest[api.RawResources, api.DownscaleResult](
-		ctx, s, timeout, http.MethodPut, "/downscale", &rawResources,
+		ctx, logger, s, timeout, http.MethodPut, "/downscale", &rawResources,
 	)
 	if err != nil {
 		func() {
@@ -1000,11 +1018,11 @@ func (s *InformantServer) Downscale(ctx context.Context, to api.Resources) (*api
 		return nil, err
 	}
 
-	s.runner.logger.Infof("Received downscale result %+v", *resp)
+	logger.Info("Received downscale result") // already logged by doInformantRequest
 	return resp, nil
 }
 
-func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
+func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
 	s.requestLock.Lock()
 	defer s.requestLock.Unlock()
 
@@ -1017,13 +1035,15 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 		return err
 	}
 
-	s.runner.logger.Infof("Sending upscale %+v", to)
+	logger = logger.With(zap.Object("server", s.desc))
+
+	logger.Info("Sending upscale", zap.Object("target", to))
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
 	_, statusCode, err := doInformantRequest[api.RawResources, struct{}](
-		ctx, s, timeout, http.MethodPut, "/upscale", &rawResources,
+		ctx, logger, s, timeout, http.MethodPut, "/upscale", &rawResources,
 	)
 	if err != nil {
 		func() {
@@ -1042,6 +1062,6 @@ func (s *InformantServer) Upscale(ctx context.Context, to api.Resources) error {
 		return err
 	}
 
-	s.runner.logger.Infof("Received successful upscale result")
+	logger.Info("Received successful upscale result")
 	return nil
 }

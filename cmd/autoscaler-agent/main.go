@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/tychoish/fun/srv"
+	"go.uber.org/zap"
 
 	"k8s.io/client-go/kubernetes"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	klog "k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
@@ -21,32 +21,37 @@ import (
 )
 
 func main() {
+	logger := zap.Must(zap.NewProduction()).Named("autoscaler-agent")
+	defer logger.Sync()
+
+	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
+
 	envArgs, err := agent.ArgsFromEnv()
 	if err != nil {
-		klog.Fatalf("Error getting args from environment: %s", err)
+		logger.Panic("Failed to get args from environment", zap.Error(err))
 	}
 
 	config, err := agent.ReadConfig(envArgs.ConfigPath)
 	if err != nil {
-		klog.Fatalf("Error reading config: %s", err)
+		logger.Panic("Failed to read config", zap.Error(err))
 	}
-	klog.Infof("Got environment args: %+v", envArgs)
+	logger.Info("Got environment args", zap.Any("args", envArgs))
 
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
-		klog.Fatalf("Error getting in-cluster K8S config: %s", err)
+		logger.Panic("Failed to get in-cluster K8s config", zap.Error(err))
 	}
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	if err != nil {
-		klog.Fatalf("Failed to make K8S client: %s", err)
+		logger.Panic("Failed to make K8S client", zap.Error(err))
 	}
 	if err = vmapi.AddToScheme(scheme.Scheme); err != nil {
-		klog.Fatalf("Failed to add NeonVM scheme: %s", err)
+		logger.Panic("Failed to add NeonVM scheme", zap.Error(err))
 	}
 
 	vmClient, err := vmclient.NewForConfig(kubeConfig)
 	if err != nil {
-		klog.Fatalf("Failed to make VM client: %s", err)
+		logger.Panic("Failed to make VM client", zap.Error(err))
 	}
 
 	runner := agent.MainRunner{
@@ -63,17 +68,17 @@ func main() {
 	ctx = srv.WithOrchestrator(ctx)
 	defer func() {
 		if err := srv.GetOrchestrator(ctx).Wait(); err != nil {
-			klog.Fatalf("problem shutting down orchestrator: %s", err)
+			logger.Panic("Failed to shut down orchestrator", zap.Error(err))
 		}
 
-		klog.Info("Main loop returned without issue. Exiting.")
+		logger.Info("Main loop returned without issue. Exiting.")
 	}()
 
 	if err := srv.GetOrchestrator(ctx).Add(srv.HTTP("agent-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
-		klog.Fatalf("problem adding pprof service: %s", err)
+		logger.Panic("Failed to add pprof service", zap.Error(err))
 	}
 
-	if err = runner.Run(ctx); err != nil {
-		klog.Fatalf("Main loop failed: %s", err)
+	if err = runner.Run(logger, ctx); err != nil {
+		logger.Panic("Main loop failed", zap.Error(err))
 	}
 }

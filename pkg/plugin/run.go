@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tychoish/fun/srv"
+	"go.uber.org/zap"
 
-	klog "k8s.io/klog/v2"
+	"github.com/tychoish/fun/srv"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -32,7 +32,7 @@ const (
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
-func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
+func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.Logger) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		var finalStatus int
@@ -51,7 +51,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 		var req api.AgentRequest
 		jsonDecoder := json.NewDecoder(io.LimitReader(r.Body, MaxHTTPBodySize))
 		if err := jsonDecoder.Decode(&req); err != nil {
-			klog.Warningf("[autoscale-enforcer] Received bad JSON request: %s", err)
+			logger.Warn("Received bad JSON in request", zap.Error(err))
 			w.Header().Add("Content-Type", ContentTypeError)
 			finalStatus = 400
 			w.WriteHeader(400)
@@ -59,23 +59,27 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 			return
 		}
 
-		klog.Infof(
-			"[autoscale-enforcer] Received autoscaler-agent request (client = %s) %+v",
-			r.RemoteAddr, req,
+		logger = logger.With(zap.Object("pod", req.Pod))
+		logger.Info(
+			"Received autoscaler-agent request",
+			zap.String("client", r.RemoteAddr), zap.Any("request", req),
 		)
-		resp, statusCode, err := e.handleAgentRequest(req)
+
+		resp, statusCode, err := e.handleAgentRequest(logger, req)
 		finalStatus = statusCode
 
 		if err != nil {
-			msg := fmt.Sprintf(
-				"[autoscale-enforcer] Responding with status code %d to pod %v: %s",
-				statusCode, req.Pod, err,
-			)
+			logFunc := logger.Warn
 			if 500 <= statusCode && statusCode < 600 {
-				klog.Errorf("%s", msg)
-			} else {
-				klog.Warningf("%s", msg)
+				logFunc = logger.Error
 			}
+
+			logFunc(
+				"Responding to autoscaler-agent request with error",
+				zap.Int("status", statusCode),
+				zap.Error(err),
+			)
+
 			w.Header().Add("Content-Type", ContentTypeError)
 			w.WriteHeader(statusCode)
 			_, _ = w.Write([]byte(err.Error()))
@@ -84,8 +88,14 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 
 		responseBody, err := json.Marshal(&resp)
 		if err != nil {
-			klog.Fatalf("Error encoding response JSON: %s", err)
+			logger.Panic("Failed to encode repsonse JSON", zap.Error(err))
 		}
+
+		logger.Info(
+			"Responding to autoscaler-agent request",
+			zap.Int("status", statusCode),
+			zap.Any("response", resp),
+		)
 
 		w.Header().Add("Content-Type", ContentTypeJSON)
 		w.WriteHeader(statusCode)
@@ -94,7 +104,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 
 	orca := srv.GetOrchestrator(ctx)
 
-	klog.Info("[autoscale-enforcer] Starting resource request server")
+	logger.Info("Starting resource request server")
 	hs := srv.HTTP("resource-request", 5*time.Second, &http.Server{Addr: "0.0.0.0:10299", Handler: mux})
 	if err := hs.Start(ctx); err != nil {
 		return fmt.Errorf("Error starting resource request server: %w", err)
@@ -108,6 +118,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context) error {
 
 // Returns body (if successful), status code, error (if unsuccessful)
 func (e *AutoscaleEnforcer) handleAgentRequest(
+	logger *zap.Logger,
 	req api.AgentRequest,
 ) (_ *api.PluginResponse, status int, _ error) {
 	nodeName := "<none>" // override this later if we have a node name
@@ -144,23 +155,26 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 
 	pod, ok := e.state.podMap[req.Pod]
 	if !ok {
-		klog.Warningf("[autoscale-enforcer] Received request for pod we don't know: %+v", req)
+		logger.Warn("Received request for pod we don't know") // pod already in the logger's context
 		return nil, 404, errors.New("pod not found")
 	}
 
 	node := pod.node
 	nodeName = node.name // set nodeName for deferred metrics
 
+	// Also, now that we know which VM this refers to (and which node it's on), add that to the logger for later.
+	logger = logger.With(zap.Object("virtualmachine", pod.vmName), zap.String("node", nodeName))
+
 	mustMigrate := pod.migrationState == nil &&
 		// Check whether the pod *will* migrate, then update its resources, and THEN start its
 		// migration, using the possibly-changed resources.
-		e.updateMetricsAndCheckMustMigrate(pod, node, req.Metrics) &&
+		e.updateMetricsAndCheckMustMigrate(logger, pod, node, req.Metrics) &&
 		// Don't migrate if it's disabled
 		e.state.conf.migrationEnabled()
 
 	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
 
-	permit, status, err := e.handleResources(pod, node, req.Resources, mustMigrate, supportsFractionalCPU)
+	permit, status, err := e.handleResources(logger, pod, node, req.Resources, mustMigrate, supportsFractionalCPU)
 	if err != nil {
 		return nil, status, err
 	}
@@ -168,7 +182,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	var migrateDecision *api.MigrateResponse
 	if mustMigrate {
 		migrateDecision = &api.MigrateResponse{}
-		err = e.state.startMigration(context.Background(), pod, e.vmClient)
+		err = e.state.startMigration(context.Background(), logger, pod, e.vmClient)
 		if err != nil {
 			return nil, 500, fmt.Errorf("Error starting migration for pod %v: %w", pod.name, err)
 		}
@@ -198,6 +212,7 @@ func getComputeUnitForResponse(node *nodeState, supportsFractional bool) api.Res
 }
 
 func (e *AutoscaleEnforcer) handleResources(
+	logger *zap.Logger,
 	pod *podState,
 	node *nodeState,
 	req api.Resources,
@@ -230,9 +245,9 @@ func (e *AutoscaleEnforcer) handleResources(
 		atMax := req.VCPU == pod.vCPU.Max || req.Mem == pod.memSlots.Max
 		if !dividesCleanly && !(atMin || atMax) {
 			contextString := "If the VM's bounds did not just change, then this indicates a bug in the autoscaler-agent."
-			klog.Warningf(
-				"[autoscale-enforcer] Pod %v in %s requested resources %+v do not divide cleanly by previous compute unit %+v. %s",
-				pod.name, pod.node.name, req, cu, contextString,
+			logger.Warn(
+				"Pod requested resources do not divide cleanly by previous compute unit",
+				zap.Object("requested", req), zap.Object("computeUnit", cu), zap.String("context", contextString),
 			)
 		}
 	}
@@ -243,15 +258,19 @@ func (e *AutoscaleEnforcer) handleResources(
 	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration, !supportsFractionalCPU)
 	memVerdict := memTransition.handleRequested(req.Mem, startingMigration, false)
 
-	fmtString := "[autoscale-enforcer] Handled resources from pod %v in %s AgentRequest.\n" +
-		"\tvCPU verdict: %s\n" +
-		"\t mem verdict: %s"
-	klog.Infof(fmtString, pod.name, pod.node.name, vCPUVerdict, memVerdict)
+	logger.Info(
+		"Handled resources from pod",
+		zap.Object("verdict", verdictSet{
+			cpu: vCPUVerdict,
+			mem: memVerdict,
+		}),
+	)
 
 	return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
 }
 
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
+	logger *zap.Logger,
 	pod *podState,
 	node *nodeState,
 	metrics *api.Metrics,
@@ -261,10 +280,10 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	//
 	// A third condition, "the pod is marked to always migrate" causes it to migrate even if neither
 	// of the above conditions are met, so long as it has *previously* provided metrics.
-	shouldMigrate := node.mq.isNextInQueue(pod) && node.tooMuchPressure()
+	shouldMigrate := node.mq.isNextInQueue(pod) && node.tooMuchPressure(logger)
 	forcedMigrate := pod.testingOnlyAlwaysMigrate && pod.metrics != nil
 
-	klog.Infof("[autoscale-enforcer] Updating pod %v in %s metrics %+v -> %+v", pod.name, pod.node.name, pod.metrics, metrics)
+	logger.Info("Updating pod metrics", zap.Any("metrics", metrics))
 	oldMetrics := pod.metrics
 	pod.metrics = metrics
 	if pod.currentlyMigrating() {
@@ -288,12 +307,12 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 
 	if forcedMigrate || stillFirst || veto == nil {
 		if veto != nil {
-			klog.Infof("[autoscale-enforcer] Pod %v in %s attempted veto of self migration, still highest-priority: %s", pod.name, pod.node.name, veto)
+			logger.Info("Pod attempted veto of self migration, still highest priority", zap.NamedError("veto", veto))
 		}
 
 		return true
 	} else {
-		klog.Infof("[autoscale-enforcer] Pod %v in %s vetoed self migration: %s", pod.name, pod.node.name, veto)
+		logger.Warn("Pod vetoed self migration", zap.NamedError("veto", veto))
 		return false
 	}
 }

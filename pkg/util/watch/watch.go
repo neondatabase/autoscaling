@@ -9,12 +9,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -30,8 +31,11 @@ type Client[L any] interface {
 
 // Config is the miscellaneous configuration used by Watch
 type Config struct {
-	// LogName is the name of the watcher for use in logs
-	LogName string
+	// ObjectNameLogField determines the key given to the logger to use when describing the type
+	// being watched -- for example, "pod" or "virtualmachine"
+	//
+	// This can help with standardizing keys between the watcher and everything else using it.
+	ObjectNameLogField string
 
 	// Metrics will be used by the Watch call to report some information about its internal
 	// operations
@@ -104,6 +108,7 @@ const (
 // T representing the object type, and P as a pointer to T.
 func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	ctx context.Context,
+	logger *zap.Logger,
 	client C,
 	config Config,
 	accessors Accessors[L, T],
@@ -241,7 +246,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					continue
 				case event, ok := <-watcher.ResultChan():
 					if !ok {
-						klog.Infof("watch %s: watcher ended gracefully, restarting", config.LogName)
+						logger.Info("Watcher ended gracefully, restarting")
 						goto newWatcher
 					}
 
@@ -252,9 +257,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						// note: we can get 'too old resource version' errors when there's been a
 						// lot of resource updates that our ListOptions filtered out.
 						if apierrors.IsResourceExpired(err) {
-							klog.Warningf("watch %s: received error: %s", config.LogName, err)
+							logger.Warn("Received error event", zap.Error(err))
 						} else {
-							klog.Errorf("watch %s: received error: %s", config.LogName, err)
+							logger.Error("Received error event", zap.Error(err))
 						}
 						goto relist
 					}
@@ -262,9 +267,11 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					obj, ok := event.Object.(P)
 					if !ok {
 						var p P
-						klog.Errorf(
-							"watch %s: error casting event type %s object as type %T, got type %T",
-							config.LogName, event.Type, p, event.Object,
+						logger.Error(
+							"Error casting event object to desired type",
+							zap.String("eventType", string(event.Type)),
+							zap.String("eventObjectType", fmt.Sprintf("%T", event.Object)),
+							zap.String("desiredObjectType", fmt.Sprintf("%T", p)),
 						)
 						continue
 					}
@@ -275,10 +282,16 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					opts.ResourceVersion = meta.GetResourceVersion()
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
-					err := handleEvent(&store, config, handlers, event.Type, meta, obj)
-
+					uid := meta.GetUID()
+					err := handleEvent(&store, config, handlers, event.Type, uid, obj)
 					if err != nil {
-						klog.Error(err.Error())
+						name := util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
+						logger.Error(
+							"failed to handle event",
+							zap.Error(err),
+							zap.String("UID", string(uid)),
+							zap.Object(config.ObjectNameLogField, name),
+						)
 						goto relist
 					}
 				}
@@ -298,7 +311,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 			// This can amplify request failures - particularly if the K8s API server is overloaded.
 			signalRelistComplete = make([]chan struct{}, 0, 1)
 
-			klog.Infof("watch %s: re-listing", config.LogName)
+			logger.Info("Relisting")
 			for first := true; ; first = false {
 				func() {
 					store.mutex.Lock()
@@ -324,19 +337,19 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				relistList, err := client.List(ctx, opts)
 				config.Metrics.doneList(err)
 				if err != nil {
-					klog.Errorf("watch %s: re-list failed: %s", config.LogName, err)
+					logger.Error("Relist failed", zap.Error(err))
 					if config.RetryRelistAfter == nil {
-						klog.Infof("watch %s: ending, re-list failed and RetryWatchAfter is nil", config.LogName)
+						logger.Info("Ending: because relist failed and RetryWatchAfter is nil")
 						return
 					}
 					retryAfter := config.RetryRelistAfter.Random()
-					klog.Infof("watch %s: retrying re-list after %s", config.LogName, retryAfter)
+					logger.Info("Retrying relist after delay", zap.Duration("delay", retryAfter))
 
 					config.Metrics.failing()
 
 					select {
 					case <-time.After(retryAfter):
-						klog.Infof("watch %s: retrying re-list", config.LogName)
+						logger.Info("Relist delay reached, retrying", zap.Duration("delay", retryAfter))
 						continue
 					case <-ctx.Done():
 						return
@@ -405,7 +418,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 				// Update ResourceVersion, recreate watcher.
 				opts.ResourceVersion = relistList.GetListMeta().GetResourceVersion()
-				klog.Infof("watch %s: re-list complete, restarting watcher", config.LogName)
+				logger.Info("Relist complete, restarting watcher")
 				for _, ch := range signalRelistComplete {
 					close(ch)
 				}
@@ -418,19 +431,19 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				watcher, err = client.Watch(ctx, opts)
 				config.Metrics.doneWatch(err)
 				if err != nil {
-					klog.Errorf("watch %s: re-watch failed: %s", config.LogName, err)
+					logger.Error("Re-watch failed", zap.Error(err))
 					if config.RetryWatchAfter == nil {
-						klog.Infof("watch %s: ending, re-watch failed and RetryWatchAfter is nil", config.LogName)
+						logger.Info("Ending: because re-watch failed and RetryWatchAfter is nil")
 						return
 					}
 					retryAfter := config.RetryWatchAfter.Random()
-					klog.Infof("watch %s: retrying re-watch after %s", config.LogName, retryAfter)
+					logger.Info("Retrying re-watch after delay", zap.Duration("delay", retryAfter))
 
 					config.Metrics.failing()
 
 					select {
 					case <-time.After(retryAfter):
-						klog.Infof("watch %s: retrying re-watch after %s", config.LogName, retryAfter)
+						logger.Info("Re-watch delay reached, retrying", zap.Duration("delay", retryAfter))
 						continue
 					case <-ctx.Done():
 						return
@@ -455,11 +468,9 @@ func handleEvent[T any, P ~*T](
 	config Config,
 	handlers HandlerFuncs[P],
 	eventType watch.EventType,
-	meta metav1.Object,
+	uid types.UID,
 	ptr P,
 ) error {
-	uid := meta.GetUID()
-	name := util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 	obj := (*T)(ptr)
 
 	// Some of the cases below don't actually require locking the store. Most of the events that we
@@ -470,10 +481,7 @@ func handleEvent[T any, P ~*T](
 	switch eventType {
 	case watch.Added:
 		if _, ok := store.objects[uid]; ok {
-			return fmt.Errorf(
-				"watch %s: received add event for object %v that we already have",
-				config.LogName, name,
-			)
+			return fmt.Errorf("received add event for object we already have")
 		}
 		store.objects[uid] = obj
 		for _, index := range store.indexes {
@@ -485,10 +493,7 @@ func handleEvent[T any, P ~*T](
 		// *may* be different to what we currently have stored.
 		old, ok := store.objects[uid]
 		if !ok {
-			return fmt.Errorf(
-				"watch %s: received delete event for object %v that's not present",
-				config.LogName, name,
-			)
+			return errors.New("received delete event for object that's not present")
 		}
 		// Update:
 		for _, index := range store.indexes {
@@ -504,10 +509,7 @@ func handleEvent[T any, P ~*T](
 	case watch.Modified:
 		old, ok := store.objects[uid]
 		if !ok {
-			return fmt.Errorf(
-				"watch %s: received update event for object %v that's not present",
-				config.LogName, name,
-			)
+			return errors.New("received update event for object that's not present")
 		}
 		store.objects[uid] = obj
 		for _, index := range store.indexes {

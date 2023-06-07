@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
@@ -24,6 +26,15 @@ type vmEvent struct {
 	podIP   string
 }
 
+// MarshalLogObject implements zapcore.ObjectMarshaler
+func (ev vmEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("kind", string(ev.kind))
+	enc.AddString("podName", ev.podName)
+	enc.AddString("podIP", ev.podIP)
+	enc.AddReflected("vmInfo", ev.vmInfo)
+	return nil
+}
+
 type vmEventKind string
 
 const (
@@ -35,17 +46,21 @@ const (
 // note: unlike startPodWatcher, we aren't able to use a field selector on VM status.node (currently; NeonVM v0.4.6)
 func startVMWatcher(
 	ctx context.Context,
+	parentLogger *zap.Logger,
 	config *Config,
 	vmClient *vmclient.Clientset,
 	metrics watch.Metrics,
 	nodeName string,
 	submitEvent func(vmEvent),
 ) (*watch.Store[vmapi.VirtualMachine], error) {
+	logger := parentLogger.Named("vm-watch")
+
 	return watch.Watch(
 		ctx,
+		logger.Named("watch"),
 		vmClient.NeonvmV1().VirtualMachines(corev1.NamespaceAll),
 		watch.Config{
-			LogName: "VMs",
+			ObjectNameLogField: "virtualmachine",
 			Metrics: watch.MetricsConfig{
 				Metrics:  metrics,
 				Instance: "VirtualMachines",
@@ -62,9 +77,12 @@ func startVMWatcher(
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
-					event, err := makeVMEvent(vm, vmEventAdded)
+					event, err := makeVMEvent(logger, vm, vmEventAdded)
 					if err != nil {
-						klog.Errorf("Error handling VM added: %s", err)
+						logger.Error(
+							"Failed to create vmEvent for added VM",
+							util.VMNameFields(vm), zap.Error(err),
+						)
 						return
 					}
 					submitEvent(event)
@@ -92,9 +110,12 @@ func startVMWatcher(
 					eventKind = vmEventUpdated
 				}
 
-				event, err := makeVMEvent(vmForEvent, eventKind)
+				event, err := makeVMEvent(logger, vmForEvent, eventKind)
 				if err != nil {
-					klog.Errorf("Error handling VM update: %s", err)
+					logger.Error(
+						"Failed to create vmEvent for updated VM",
+						util.VMNameFields(vmForEvent), zap.Error(err),
+					)
 					return
 				}
 
@@ -102,9 +123,12 @@ func startVMWatcher(
 			},
 			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
 				if vmIsOurResponsibility(vm, config, nodeName) {
-					event, err := makeVMEvent(vm, vmEventDeleted)
+					event, err := makeVMEvent(logger, vm, vmEventDeleted)
 					if err != nil {
-						klog.Errorf("Error handling VM deletion: %s", err)
+						logger.Error(
+							"Failed to create vmEvent for deleted VM",
+							util.VMNameFields(vm), zap.Error(err),
+						)
 						return
 					}
 					submitEvent(event)
@@ -114,12 +138,10 @@ func startVMWatcher(
 	)
 }
 
-func makeVMEvent(vm *vmapi.VirtualMachine, kind vmEventKind) (vmEvent, error) {
-	vmName := util.NamespacedName{Namespace: vm.Namespace, Name: vm.Name}
-
-	info, err := api.ExtractVmInfo(vm)
+func makeVMEvent(logger *zap.Logger, vm *vmapi.VirtualMachine, kind vmEventKind) (vmEvent, error) {
+	info, err := api.ExtractVmInfo(logger, vm)
 	if err != nil {
-		return vmEvent{}, fmt.Errorf("Error extracting VM info from %v: %w", vmName, err)
+		return vmEvent{}, fmt.Errorf("Error extracting VM info: %w", err)
 	}
 
 	return vmEvent{

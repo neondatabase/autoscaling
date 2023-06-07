@@ -13,8 +13,7 @@ import (
 
 	"github.com/containerd/cgroups/v3/cgroup2"
 	"github.com/tychoish/fun/srv"
-
-	klog "k8s.io/klog/v2"
+	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/informant"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -23,6 +22,11 @@ import (
 const minSubProcessRestartInterval = 5 * time.Second
 
 func main() {
+	logger := zap.Must(zap.NewProduction()).Named("vm-informant")
+	defer logger.Sync()
+
+	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer cancel()
 	ctx = srv.SetShutdownSignal(ctx) // allows workers to cause a shutdown
@@ -33,13 +37,9 @@ func main() {
 
 	defer func() {
 		if err := orca.Service().Wait(); err != nil {
-			klog.Fatal("failed to shut down service", err)
+			logger.Panic("Failed to shut down service", zap.Error(err))
 		}
 	}()
-
-	buildInfo := util.GetBuildInfo()
-	klog.Infof("buildInfo.GitInfo:   %s", buildInfo.GitInfo)
-	klog.Infof("buildInfo.GoVersion: %s", buildInfo.GoVersion)
 
 	// Below, we want to be able to distinguish between absence of flags and presence of empty
 	// flags. The only way we can reliably do this is by setting defaults to a sentinel value that
@@ -58,6 +58,8 @@ func main() {
 
 	// If we were asked to restart on failure, handle that separately:
 	if autoRestart {
+		logger = logger.Named("parent")
+
 		var args []string
 		var cleanupHooks []func()
 
@@ -67,19 +69,19 @@ func main() {
 		if cgroupName != invalidArgValue {
 			args = append(args, "-cgroup", cgroupName)
 			cleanupHooks = append(cleanupHooks, func() {
-				klog.Infof("vm-informant cleanup hook: making sure cgroup %q is thawed", cgroupName)
+				logger.Info("cleanup hook: making sure cgroup is thawed", zap.String("cgroup", cgroupName))
 				manager, err := cgroup2.Load(fmt.Sprint("/", cgroupName))
 				if err != nil {
-					klog.Warningf("Error making cgroup handler: %s", err)
+					logger.Error("Error making cgroup handler", zap.Error(err))
 					return
 				}
 				if err := manager.Thaw(); err != nil {
-					klog.Warningf("Error thawing cgroup: %s", err)
+					logger.Error("Error thawing cgroup", zap.Error(err))
 				}
 			})
 		}
 
-		runRestartOnFailure(ctx, args, cleanupHooks)
+		runRestartOnFailure(ctx, logger, args, cleanupHooks)
 		closer := srv.GetShutdownSignal(ctx)
 		// this cancels the process' underlying context
 		closer()
@@ -91,47 +93,52 @@ func main() {
 	var stateOpts []informant.NewStateOpts
 
 	if cgroupName != invalidArgValue {
+		logger := logger.With(zap.String("cgroup", cgroupName))
+
 		cgroupConfig := informant.DefaultCgroupConfig
-		klog.Infof("Selected cgroup %q, starting handler with config %+v", cgroupName, cgroupConfig)
-		cgroup, err := informant.NewCgroupManager(cgroupName)
+		logger.Info("Selected cgroup, starting handler", zap.Any("config", cgroupConfig))
+		cgroup, err := informant.NewCgroupManager(logger.Named("cgroup").Named("manager"), cgroupName)
 		if err != nil {
-			klog.Fatalf("Error starting cgroup handler for cgroup name %q: %s", cgroupName, err)
+			logger.Fatal("Error starting cgroup handler", zap.Error(err))
 		}
 
 		stateOpts = append(stateOpts, informant.WithCgroup(cgroup, cgroupConfig))
 	} else {
-		klog.Infof("No cgroup selected")
+		logger.Info("No cgroup selected")
 	}
 
 	if pgConnStr != invalidArgValue {
+		logger := logger.With(zap.String("fileCacheConnstr", pgConnStr))
+
 		fileCacheConfig := informant.DefaultFileCacheConfig
-		klog.Infof("Selected postgres file cache, connstr = %q and config = %+v", pgConnStr, fileCacheConfig)
+		logger.Info("Selected postgres file cache", zap.Any("config", fileCacheConfig))
 		stateOpts = append(stateOpts, informant.WithPostgresFileCache(pgConnStr, fileCacheConfig))
 	} else {
-		klog.Infof("No postgres file cache selected")
+		logger.Info("No postgres file cache selected")
 	}
 
-	agents := informant.NewAgentSet()
-	state, err := informant.NewState(agents, informant.DefaultStateConfig, stateOpts...)
+	agents := informant.NewAgentSet(logger)
+	state, err := informant.NewState(logger, agents, informant.DefaultStateConfig, stateOpts...)
 	if err != nil {
-		klog.Fatalf("Error starting informant.NewState: %s", err)
+		logger.Fatal("Error starting informant.NewState", zap.Error(err))
 	}
 
 	mux := http.NewServeMux()
-	util.AddHandler("", mux, "/register", http.MethodPost, "AgentDesc", state.RegisterAgent)
-	util.AddHandler("", mux, "/health-check", http.MethodPut, "AgentIdentification", state.HealthCheck)
+	hl := logger.Named("handle")
+	util.AddHandler(hl, mux, "/register", http.MethodPost, "AgentDesc", state.RegisterAgent)
+	util.AddHandler(hl, mux, "/health-check", http.MethodPut, "AgentIdentification", state.HealthCheck)
 	// FIXME: /downscale and /upscale should have the AgentID in the request body
-	util.AddHandler("", mux, "/downscale", http.MethodPut, "RawResources", state.TryDownscale)
-	util.AddHandler("", mux, "/upscale", http.MethodPut, "RawResources", state.NotifyUpscale)
-	util.AddHandler("", mux, "/unregister", http.MethodDelete, "AgentDesc", state.UnregisterAgent)
+	util.AddHandler(hl, mux, "/downscale", http.MethodPut, "RawResources", state.TryDownscale)
+	util.AddHandler(hl, mux, "/upscale", http.MethodPut, "RawResources", state.NotifyUpscale)
+	util.AddHandler(hl, mux, "/unregister", http.MethodDelete, "AgentDesc", state.UnregisterAgent)
 
 	addr := "0.0.0.0:10301"
-	klog.Infof("Starting server at %s", addr)
+	hl.Info("Starting server", zap.String("addr", addr))
 
 	// we create an http service and add it to the orchestrator,
 	// which will start it and manage its lifecycle.
 	if err := orca.Add(srv.HTTP("vm-informant-api", 5*time.Second, &http.Server{Addr: addr, Handler: mux})); err != nil {
-		klog.Fatalf("failed to add informant api server: %s", err)
+		logger.Fatal("Failed to add API server", zap.Error(err))
 	}
 
 	// we drop to the defers now, which will block until the signal
@@ -144,7 +151,7 @@ func main() {
 // We execute ourselves as a subprocess so that it's possible to appropriately cleanup after
 // termination by various signals (or an unhandled panic!). This is worthwhile because we *really*
 // don't want to leave the cgroup frozen while waiting to restart.
-func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func()) {
+func runRestartOnFailure(ctx context.Context, logger *zap.Logger, args []string, cleanupHooks []func()) {
 	selfPath := os.Args[0]
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -152,7 +159,6 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 	for {
 		startTime := time.Now()
 		sig := make(chan struct{})
-		var exitMode string
 
 		func() {
 			pctx, pcancel := context.WithCancel(context.Background())
@@ -162,7 +168,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 
-			klog.Infof("Running vm-informant with args %+v", args)
+			logger.Info("Starting child vm-informant", zap.Any("args", args))
 			err := cmd.Start()
 			if err == nil {
 				go func() {
@@ -178,7 +184,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 							return
 						}
 						if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-							klog.Warningf("could not signal vm-informant process: %v", err)
+							logger.Warn("Could not signal child vm-informant process", zap.Error(err))
 						}
 					}
 				}()
@@ -194,9 +200,9 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 			}
 
 			if err != nil {
-				klog.Errorf("vm-informant exited with error: %v", err)
+				logger.Error("Child vm-informrant exited with error", zap.Error(err))
 			} else {
-				klog.Warningf("vm-informant exited without error. This should not happen.")
+				logger.Warn("Child vm-informant exited without error. This should not happen")
 			}
 
 			for _, h := range cleanupHooks {
@@ -206,7 +212,7 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 
 		select {
 		case <-ctx.Done():
-			klog.Infof("vm-informant: received signal")
+			logger.Info("Received shutdown signal")
 			return
 		case <-sig:
 			dur := time.Since(startTime)
@@ -217,17 +223,20 @@ func runRestartOnFailure(ctx context.Context, args []string, cleanupHooks []func
 				}
 				timer.Reset(minSubProcessRestartInterval - dur)
 
-				klog.Infof("vm-informant %s. respecting minimum wait of %s", exitMode, minSubProcessRestartInterval)
+				logger.Info(
+					"Child vm-informant failed, respecting minimum delay before restart",
+					zap.Duration("delay", minSubProcessRestartInterval),
+				)
 				select {
 				case <-ctx.Done():
-					klog.Infof("vm-informant restart loop: received termination signal")
+					logger.Info("Received shutdown signal while delaying before restart", zap.Duration("delay", minSubProcessRestartInterval))
 					return
 				case <-timer.C:
 					continue
 				}
 			}
 
-			klog.Infof("vm-informant restarting immediately")
+			logger.Info("Restarting child vm-informant immediately")
 			continue
 		}
 	}

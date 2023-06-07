@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/slices"
-
-	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -33,6 +33,8 @@ const (
 // AgentSet is the global state handling various autoscaler-agents that we could connect to
 type AgentSet struct {
 	lock util.ChanMutex
+
+	baseLogger *zap.Logger
 
 	// current is the agent we're currently communciating with. If there is none, then this value is
 	// nil
@@ -58,6 +60,8 @@ type AgentSet struct {
 type Agent struct {
 	// lock is required for accessing the mutable fields of this struct: parent and lastSeqNumber.
 	lock sync.Mutex
+
+	baseLogger *zap.Logger
 
 	// parent is the AgentSet containing this Agent. It is always non-nil, up until this Agent is
 	// unregistered with EnsureUnregistered()
@@ -92,11 +96,12 @@ type agentRequest struct {
 // NewAgentSet creates a new AgentSet and starts the necessary background tasks
 //
 // On completion, the background tasks should be ended with the Stop method.
-func NewAgentSet() *AgentSet {
+func NewAgentSet(logger *zap.Logger) *AgentSet {
 	tryNewAgent := make(chan struct{})
 
 	agents := &AgentSet{
 		lock:               util.NewChanMutex(),
+		baseLogger:         logger.Named("agent-set"),
 		current:            nil,
 		wantsMemoryUpscale: false,
 		byIDs:              make(map[uuid.UUID]*Agent),
@@ -105,11 +110,26 @@ func NewAgentSet() *AgentSet {
 	}
 
 	go agents.lock.DeadlockChecker(CheckDeadlockTimeout, CheckDeadlockDelay)(context.TODO())
-	go agents.tryNewAgents(tryNewAgent)
+	go agents.tryNewAgents(agents.baseLogger.Named("try-new-agents"), tryNewAgent)
 	return agents
 }
 
-func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
+// Helper function to construct a zap.Field giving the necessary context for a particular
+// autoscaler-agent
+func agentZapField(id uuid.UUID, addr string) zap.Field {
+	return zap.Object("agent", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
+		enc.AddString("id", id.String())
+		enc.AddString("addr", addr)
+		return nil
+	}))
+}
+
+// abbreviation for agentZapField(a.id, a.serveAddr) for when you're working with an Agent object directly
+func (a *Agent) zapField() zap.Field {
+	return agentZapField(a.id, a.serverAddr)
+}
+
+func (s *AgentSet) tryNewAgents(logger *zap.Logger, signal <-chan struct{}) {
 	// note: we don't close this. Sending stops when the context is done, and every read from this
 	// channel also handles the context being cancelled.
 	aggregate := make(chan struct{})
@@ -186,18 +206,15 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 						return
 					}
 
-					klog.Warningf(
-						"Error suspending previous Agent %s/%s: %s",
-						oldCurrent.serverAddr, oldCurrent.id, err,
-					)
+					logger.Warn("Error suspending previous Agent", oldCurrent.zapField(), zap.Error(err))
 				}
 
 				// Suspend the old agent
-				oldCurrent.Suspend(AgentSuspendTimeout, handleError)
+				oldCurrent.Suspend(logger, AgentSuspendTimeout, handleError)
 			}
 
 			if shouldResume {
-				if err := candidate.Resume(AgentResumeTimeout); err != nil {
+				if err := candidate.Resume(logger, AgentResumeTimeout); err != nil {
 					// From Resume():
 					//
 					// > If the Agent becomes unregistered [ ... ] this method will return
@@ -212,10 +229,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 					//
 					// We don't have to worry about anything extra here; just keep trying.
 					if err != nil {
-						klog.Warningf(
-							"Error on Resume for agent %s/%s: %s",
-							candidate.serverAddr, candidate.id, err,
-						)
+						logger.Warn("Error on Agent resume", candidate.zapField(), zap.Error(err))
 						continue loopThroughAgents
 					}
 				}
@@ -229,7 +243,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 				s.current = candidate
 
 				if s.wantsMemoryUpscale {
-					s.current.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+					s.current.SpawnRequestUpscale(logger, AgentUpscaleTimeout, func(err error) {
 						if errors.Is(err, context.Canceled) {
 							return
 						}
@@ -237,10 +251,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 						// note: explicitly refer to candidate here instead of s.current, because
 						// the value of s.current could have changed by the time this function is
 						// called.
-						klog.Errorf(
-							"Error requesting upscale from Agent %s/%s: %s",
-							candidate.serverAddr, candidate.id, err,
-						)
+						logger.Error("Error requesting upscale from Agent", candidate.zapField(), zap.Error(err))
 					})
 				}
 			}()
@@ -251,7 +262,7 @@ func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
 // RegisterNewAgent instantiates our local information about the autsocaler-agent
 //
 // Returns: protocol version, status code, error (if unsuccessful)
-func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVersion, int, error) {
+func (s *AgentSet) RegisterNewAgent(logger *zap.Logger, info *api.AgentDesc) (api.InformantProtoVersion, int, error) {
 	expectedRange := api.VersionRange[api.InformantProtoVersion]{
 		Min: MinProtocolVersion,
 		Max: MaxProtocolVersion,
@@ -271,7 +282,8 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 	agent := &Agent{
 		lock: sync.Mutex{},
 
-		parent: s,
+		baseLogger: s.baseLogger.Named("agent").With(agentZapField(info.AgentID, info.ServerAddr)),
+		parent:     s,
 
 		suspended:          false,
 		unregistered:       unregisterRecv,
@@ -306,7 +318,7 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 	go agent.runHandler()
 	go agent.runBackgroundChecker()
 
-	if err := agent.CheckID(AgentBackgroundCheckTimeout); err != nil {
+	if err := agent.CheckID(logger, AgentBackgroundCheckTimeout); err != nil {
 		return 0, 400, fmt.Errorf(
 			"Error checking ID for agent %s/%s: %w", agent.serverAddr, agent.id, err,
 		)
@@ -325,10 +337,7 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 			// fault of this request. Because there's no strict happens-before relation here, we can
 			// pretend like the error happened after the request was fully handled, and return a
 			// success.
-			klog.Warningf(
-				"Agent %s/%s was unregistered before register was completed",
-				agent.serverAddr, agent.id,
-			)
+			logger.Warn("Agent was unregistered before register completed", agent.zapField())
 			return
 		}
 
@@ -347,7 +356,7 @@ func (s *AgentSet) RegisterNewAgent(info *api.AgentDesc) (api.InformantProtoVers
 //
 // If there's no current agent, then RequestUpscale marks the upscale as desired, and will request
 // upscaling from the next agent we connect to.
-func (s *AgentSet) RequestUpscale() {
+func (s *AgentSet) RequestUpscale(logger *zap.Logger) {
 	// FIXME: we should assign a timeout to these upscale requests, so that we don't continue trying
 	// to upscale after the demand has gone away.
 
@@ -371,15 +380,12 @@ func (s *AgentSet) RequestUpscale() {
 	// FIXME: it's possible to block for an unbounded amount of time waiting for the request to get
 	// picked up by the message queue. We *do* want backpressure here, but we should ideally have a
 	// way to cancel an attempted request if it's taking too long.
-	agent.SpawnRequestUpscale(AgentUpscaleTimeout, func(err error) {
+	agent.SpawnRequestUpscale(logger, AgentUpscaleTimeout, func(err error) {
 		if errors.Is(err, context.Canceled) {
 			return
 		}
 
-		klog.Errorf(
-			"Error requesting upscale from Agent %s/%s: %s",
-			agent.serverAddr, agent.id, err,
-		)
+		s.baseLogger.Error("Error requesting upscale from current Agent", agent.zapField(), zap.Error(err))
 	})
 }
 
@@ -404,10 +410,12 @@ func (s *AgentSet) Get(id uuid.UUID) (_ *Agent, ok bool) {
 
 // runHandler receives inputs from the requestSet and dispatches them
 func (a *Agent) runHandler() {
+	logger := a.baseLogger.Named("request-dispatcher")
+
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			err := fmt.Errorf("Unexpected redirect getting %s", req.URL)
-			klog.Warningf("%s", err)
+			logger.Warn(err.Error())
 			return err
 		},
 	}
@@ -452,6 +460,8 @@ func (a *Agent) runHandler() {
 
 // runBackgroundChecker performs periodic checks that the Agent is still available
 func (a *Agent) runBackgroundChecker() {
+	logger := a.baseLogger.Named("background-checker")
+
 	for {
 		select {
 		case <-a.unregistered.Recv():
@@ -461,7 +471,7 @@ func (a *Agent) runBackgroundChecker() {
 		}
 
 		done := func() bool {
-			if err := a.CheckID(AgentBackgroundCheckTimeout); err != nil {
+			if err := a.CheckID(logger, AgentBackgroundCheckTimeout); err != nil {
 				// If this request was cancelled (because the agent was unregistered), we're done.
 				// We can't check a.unregistered because CheckID will already unregister on failure
 				// anyways.
@@ -469,7 +479,7 @@ func (a *Agent) runBackgroundChecker() {
 					return true
 				}
 
-				klog.Warningf("Agent ID background check failed for %s/%s: %s", a.serverAddr, a.id, err)
+				logger.Warn("Agent background check failed", zap.Error(err))
 				return true
 			}
 
@@ -509,6 +519,8 @@ func doRequestWithStartSignal[B any, R any](
 	path string,
 	body *B,
 ) (_ *R, old bool, _ error) {
+	logger := agent.baseLogger.Named("http")
+
 	outerContext, cancel := context.WithTimeout(context.TODO(), timeout)
 	defer cancel()
 
@@ -538,7 +550,7 @@ func doRequestWithStartSignal[B any, R any](
 				return
 			}
 
-			klog.Infof("Sending agent %s %q request: %s", agent.id, path, string(bodyBytes))
+			logger.Info("Sending request to agent", zap.String("path", path), zap.Any("request", body))
 
 			resp, err := client.Do(req)
 			if err != nil {
@@ -565,7 +577,7 @@ func doRequestWithStartSignal[B any, R any](
 				return
 			}
 
-			klog.Infof("Got agent %s response: %s", agent.id, string(respBodyBytes))
+			logger.Info("Received response from agent", zap.String("path", path), zap.Any("response", responseBody))
 
 			if responseBody.SequenceNumber == 0 {
 				requestErr = errors.New("Got invalid sequence number 0")
@@ -615,7 +627,9 @@ func doRequestWithStartSignal[B any, R any](
 // to use a new Agent if it isn't already
 //
 // Returns whether the agent was the current Agent in use.
-func (a *Agent) EnsureUnregistered() (wasCurrent bool) {
+func (a *Agent) EnsureUnregistered(logger *zap.Logger) (wasCurrent bool) {
+	logger = logger.With(a.zapField())
+
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
@@ -623,7 +637,7 @@ func (a *Agent) EnsureUnregistered() (wasCurrent bool) {
 		return
 	}
 
-	klog.Infof("Unregistering agent %s/%s", a.serverAddr, a.id)
+	logger.Info("Unregistering agent")
 
 	a.signalUnregistered.Send()
 
@@ -633,10 +647,7 @@ func (a *Agent) EnsureUnregistered() (wasCurrent bool) {
 	if _, ok := a.parent.byIDs[a.id]; ok {
 		delete(a.parent.byIDs, a.id)
 	} else {
-		klog.Errorf(
-			"Invalid state: agent %s/%s is registered but not in parent's agents map. Ignoring and continuing.",
-			a.serverAddr, a.id,
-		)
+		logger.DPanic("Invalid state. Ignoring and continuing.", zap.String("error", "agent is registered but not in parent's agents map"))
 	}
 
 	if idx := slices.Index(a.parent.byTime, a); idx >= 0 {
@@ -661,14 +672,11 @@ func (a *Agent) EnsureUnregistered() (wasCurrent bool) {
 //
 // If the Agent is unregistered before the call to CheckID() completes, the request will be cancelled
 // and this method will return context.Canceled.
-func (a *Agent) CheckID(timeout time.Duration) error {
+func (a *Agent) CheckID(logger *zap.Logger, timeout time.Duration) error {
 	// Quick unregistered check:
 	select {
 	case <-a.unregistered.Recv():
-		klog.Warningf(
-			"CheckID called for Agent %s/%s that is already unregistered (probably *not* a race?)",
-			a.serverAddr, a.id,
-		)
+		logger.Warn("CheckID called for Agent that is already unregistered (probably *not* a race?)", a.zapField())
 		return context.Canceled
 	default:
 	}
@@ -683,12 +691,12 @@ func (a *Agent) CheckID(timeout time.Duration) error {
 	}
 
 	if err != nil {
-		a.EnsureUnregistered()
+		a.EnsureUnregistered(logger)
 		return err
 	}
 
 	if id.AgentID != a.id {
-		a.EnsureUnregistered()
+		a.EnsureUnregistered(logger)
 		return fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID)
 	}
 
@@ -702,14 +710,11 @@ func (a *Agent) CheckID(timeout time.Duration) error {
 // cancelled and this method will return context.Canceled.
 //
 // If the request fails, the Agent will be unregistered.
-func (a *Agent) Suspend(timeout time.Duration, handleError func(error)) {
+func (a *Agent) Suspend(logger *zap.Logger, timeout time.Duration, handleError func(error)) {
 	// Quick unregistered check:
 	select {
 	case <-a.unregistered.Recv():
-		klog.Warningf(
-			"Suspend called for Agent %s/%s that is already unregistered (probably *not* a race?)",
-			a.serverAddr, a.id,
-		)
+		logger.Warn("Suspend called for Agent that is already unregistered (probably *not* a race?)", a.zapField())
 		handleError(context.Canceled)
 		return
 	default:
@@ -728,13 +733,13 @@ func (a *Agent) Suspend(timeout time.Duration, handleError func(error)) {
 	}
 
 	if err != nil {
-		a.EnsureUnregistered()
+		a.EnsureUnregistered(logger)
 		handleError(err)
 		return
 	}
 
 	if id.AgentID != a.id {
-		a.EnsureUnregistered()
+		a.EnsureUnregistered(logger)
 		handleError(fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID))
 		return
 	}
@@ -749,14 +754,11 @@ func (a *Agent) Suspend(timeout time.Duration, handleError func(error)) {
 // and this method will return context.Canceled.
 //
 // If the request fails, the Agent will be unregistered.
-func (a *Agent) Resume(timeout time.Duration) error {
+func (a *Agent) Resume(logger *zap.Logger, timeout time.Duration) error {
 	// Quick unregistered check:
 	select {
 	case <-a.unregistered.Recv():
-		klog.Warningf(
-			"Resume called for Agent %s/%s that is already unregistered (probably *not* a race?)",
-			a.serverAddr, a.id,
-		)
+		logger.Warn("Resume called for Agent that is already unregistered (probably *not* a race?)", a.zapField())
 		return context.Canceled
 	default:
 	}
@@ -773,12 +775,12 @@ func (a *Agent) Resume(timeout time.Duration) error {
 	}
 
 	if err != nil {
-		a.EnsureUnregistered()
+		a.EnsureUnregistered(logger)
 		return err
 	}
 
 	if id.AgentID != a.id {
-		a.EnsureUnregistered()
+		a.EnsureUnregistered(logger)
 		return fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID)
 	}
 
@@ -793,14 +795,11 @@ func (a *Agent) Resume(timeout time.Duration) error {
 // The timeout applies only once the request is in-flight.
 //
 // This method MUST NOT be called while holding a.parent.lock; if that happens, it may deadlock.
-func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(error)) {
+func (a *Agent) SpawnRequestUpscale(logger *zap.Logger, timeout time.Duration, handleError func(error)) {
 	// Quick unregistered check
 	select {
 	case <-a.unregistered.Recv():
-		klog.Warningf(
-			"RequestUpscale called for Agent %s/%s that is already unregistered (probably *not* a race?)",
-			a.serverAddr, a.id,
-		)
+		logger.Warn("RequestUpscale called for Agent that is already unregistered (probably *not* a race?)", a.zapField())
 		handleError(context.Canceled)
 		return
 	default:
@@ -842,14 +841,14 @@ func (a *Agent) SpawnRequestUpscale(timeout time.Duration, handleError func(erro
 
 		if err != nil {
 			unsetWantsUpscale()
-			a.EnsureUnregistered()
+			a.EnsureUnregistered(logger)
 			handleError(err)
 			return
 		}
 
 		if id.AgentID != a.id {
 			unsetWantsUpscale()
-			a.EnsureUnregistered()
+			a.EnsureUnregistered(logger)
 			handleError(fmt.Errorf("Bad agent identification: expected %q but got %q", a.id, id.AgentID))
 			return
 		}

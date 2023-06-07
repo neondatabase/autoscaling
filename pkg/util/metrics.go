@@ -9,8 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	klog "k8s.io/klog/v2"
+	"go.uber.org/zap"
 )
 
 func RegisterMetric[P prometheus.Collector](reg *prometheus.Registry, collector P) P {
@@ -21,7 +20,7 @@ func RegisterMetric[P prometheus.Collector](reg *prometheus.Registry, collector 
 // Prometheus metrics server common to >1 component
 
 // Starts the prometheus server in a background thread. Returns error if binding on the port fails.
-func StartPrometheusMetricsServer(ctx context.Context, port uint16, reg *prometheus.Registry) error {
+func StartPrometheusMetricsServer(ctx context.Context, logger *zap.Logger, port uint16, reg *prometheus.Registry) error {
 	// Separate binding from serving, so that we can catch any error in this thread, rather than the
 	// server's.
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: int(port)})
@@ -39,7 +38,7 @@ func StartPrometheusMetricsServer(ctx context.Context, port uint16, reg *prometh
 	go func() {
 		<-shutdownCtx.Done()
 		if err := srv.Shutdown(context.Background()); err != nil {
-			klog.Errorf("Error shutting down prometheus server: %s", err)
+			logger.Error("Error shutting down prometheus server", zap.Error(err))
 		}
 	}()
 
@@ -47,7 +46,7 @@ func StartPrometheusMetricsServer(ctx context.Context, port uint16, reg *prometh
 		// shutdown the shutdown watcher if we exit before it
 		defer shutdown()
 		if err := srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
-			klog.Errorf("Prometheus server exited with unexpected error: %s", err)
+			logger.Error("Prometheus server exited with unexpected error", zap.Error(err))
 		}
 	}()
 
