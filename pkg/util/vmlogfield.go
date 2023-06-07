@@ -18,8 +18,12 @@ type nameFields struct {
 
 // MarshalLogObject implements zapcore.ObjectMarshaler
 func (f nameFields) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddObject("virtualmachine", f.virtualmachine)
-	enc.AddObject("pod", f.pod)
+	if err := enc.AddObject("virtualmachine", f.virtualmachine); err != nil {
+		return err
+	}
+	if err := enc.AddObject("pod", f.pod); err != nil {
+		return err
+	}
 	return nil
 }
 

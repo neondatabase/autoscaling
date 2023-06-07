@@ -19,7 +19,9 @@ type WatchEvent struct {
 // MarshalLogObject implements zapcore.ObjectMarshaler
 func (ev WatchEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("kind", string(ev.kind))
-	enc.AddObject("info", ev.info)
+	if err := enc.AddObject("info", ev.info); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -63,7 +65,9 @@ type SchedulerInfo struct {
 
 // MarshalLogObject implements zapcore.ObjectMarshaler
 func (s SchedulerInfo) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddObject("pod", s.PodName)
+	if err := enc.AddObject("pod", s.PodName); err != nil {
+		return err
+	}
 	enc.AddString("UID", string(s.UID))
 	enc.AddString("IP", string(s.IP))
 	return nil

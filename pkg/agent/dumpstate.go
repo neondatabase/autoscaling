@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
 	"golang.org/x/exp/slices"
 
 	"github.com/neondatabase/autoscaling/pkg/util"

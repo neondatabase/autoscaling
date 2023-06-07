@@ -92,9 +92,7 @@ func mib(bytes uint64) string {
 //
 // This method MUST be called while holding s.updateMemLimitsLock.
 func (s *CgroupState) setMemoryLimits(logger *zap.Logger, availableMemory uint64) error {
-	var newMemHigh uint64
-
-	newMemHigh = s.config.calculateMemoryHighValue(availableMemory)
+	newMemHigh := s.config.calculateMemoryHighValue(availableMemory)
 
 	logger.Info("Setting cgroup memory.high",
 		zap.String("availableMemory", mib(availableMemory)),

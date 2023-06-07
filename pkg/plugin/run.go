@@ -10,9 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/tychoish/fun/srv"
+	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )

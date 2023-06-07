@@ -788,7 +788,6 @@ func (s *InformantServer) handleSuspend(
 
 	if body.ExpectedID != s.desc.AgentID {
 		logger.Warn("Request AgentID not found, server has a different one")
-		// logger.Warningf("AgentID %q not found, server has %q", body.ExpectedID, s.desc.AgentID)
 		return nil, 404, fmt.Errorf("AgentID %q not found", body.ExpectedID)
 	}
 

@@ -23,7 +23,7 @@ const minSubProcessRestartInterval = 5 * time.Second
 
 func main() {
 	logger := zap.Must(zap.NewProduction()).Named("vm-informant")
-	defer logger.Sync()
+	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
 
 	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
 

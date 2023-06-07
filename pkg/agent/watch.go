@@ -31,7 +31,9 @@ func (ev vmEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("kind", string(ev.kind))
 	enc.AddString("podName", ev.podName)
 	enc.AddString("podIP", ev.podIP)
-	enc.AddReflected("vmInfo", ev.vmInfo)
+	if err := enc.AddReflected("vmInfo", ev.vmInfo); err != nil {
+		return err
+	}
 	return nil
 }
 

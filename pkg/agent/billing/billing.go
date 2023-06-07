@@ -112,7 +112,7 @@ func RunBillingMetricsCollector(
 			state.drainAppendToBatch(logger, conf, batch)
 			metrics.batchSizeCurrent.Set(float64(batch.Count()))
 			logger.Info("Pushing billing events", zap.Int("count", batch.Count()))
-			logger.Sync() // Sync before making the network request, so we guarantee logs for the action
+			_ = logger.Sync() // Sync before making the network request, so we guarantee logs for the action
 			if err := pushBillingEvents(conf, batch); err != nil {
 				metrics.sendErrorsTotal.Inc()
 				logger.Error("Failed to push billing events", zap.Error(err))
@@ -129,7 +129,7 @@ func RunBillingMetricsCollector(
 			state.drainAppendToBatch(logger, conf, batch)
 			metrics.batchSizeCurrent.Set(float64(batch.Count()))
 			logger.Info("Pushing final billing events", zap.Int("count", batch.Count()))
-			logger.Sync() // Sync before making the network request, so we guarantee logs for the action
+			_ = logger.Sync() // Sync before making the network request, so we guarantee logs for the action
 			if err := pushBillingEvents(conf, batch); err != nil {
 				metrics.sendErrorsTotal.Inc()
 				logger.Error("Failed to push billing events", zap.Error(err))
