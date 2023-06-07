@@ -299,7 +299,7 @@ const (
 	//
 	// * Agents now return a AgentResourceMessage when delivering responses
 	//   to /upscale and /downscale requests. Since RawResources (the response
-	//	 type in previous protocols) is not deserializable out of an
+	//   type in previous protocols) is not deserializable out of an
 	//   AgentResourceMessage, this is a breaking change.
 	//
 	// Currently the latest version.
@@ -326,7 +326,7 @@ func (v InformantProtoVersion) String() string {
 	case InformantProtoV1_2:
 		return "v1.2"
 	case InformantProtoV2_0:
-		return "v1.3"
+		return "v2.0"
 	default:
 		diff := v - latestInformantProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestInformantProtoVersion, diff)
@@ -355,7 +355,7 @@ func (v InformantProtoVersion) AllowsHealthCheck() bool {
 
 // SignsResourceUpdates returns whether agents respond to /{up,down}scale with an AgentResourceMessage
 //
-// This is true for version v1.2 and greater
+// This is true for version v2.0 and greater
 func (v InformantProtoVersion) SignsResourceUpdates() bool {
 	return v >= InformantProtoV2_0
 }
@@ -513,6 +513,9 @@ func (m MoreResources) And(cmp MoreResources) MoreResources {
 // informant because it doesn't know about things like memory slots.
 //
 // This is used in protocol versions <2. In later versions, AgentResourceMessage is used.
+//
+// TODO: once we are fully migrated to protocol version >=2, inline this type into
+// ResourceMessage and delete it.
 type RawResources struct {
 	Cpu    *resource.Quantity `json:"cpu"`
 	Memory *resource.Quantity `json:"memory"`
@@ -520,7 +523,7 @@ type RawResources struct {
 
 type AgentResourceMessage = AgentMessage[ResourceMessage]
 
-// Similar to RawResources, stores raw resource amounts. However, also stores the ID of the agent
+// Similar to RawResources, stores raw resource amounts. However, it also stores the ID of the agent
 // responding to the VM's resource request. In protocol versions 2 and on, agents respond to
 // /{up,down}scale requests with an AgentResourceMessage. This allows VM informants to verify
 // the authenticity of the agent responding.

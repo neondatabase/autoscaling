@@ -20,7 +20,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-// The autoscaler-agent currently supports v1.0 to v1.1 of the agent<->informant protocol.
+// The autoscaler-agent currently supports v1.0 to v2.0 of the agent<->informant protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (

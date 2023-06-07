@@ -246,11 +246,7 @@ func (s *State) TryDownscale(ctx context.Context, target *api.AgentResourceMessa
 	currentId := s.agents.current.id
 	incomingId := target.Data.Id.AgentID
 
-	// This condition verifies the authenticity of the agent, dealing with two cases
-	// 1: The agent that responded is legitimately an unknown agent
-	// 2: The agent that responded is using an old protocol, and thus did not respond with an AgentId.
-	//    In this case, due to Go's uninitialized variable semantics, the "AgentID" we read will be
-	//    all 0's, which will never match, since UUID's cannot be all 0's
+	// First verify agent's authenticity before doing anything
 	if incomingId != currentId {
 		klog.Errorf(
 			"Got downscale response from agent %v, while current agent is %v",
@@ -386,11 +382,7 @@ func (s *State) NotifyUpscale(
 	currentId := s.agents.current.id
 	incomingId := newResources.Data.Id.AgentID
 
-	// This condition verifies the authenticity of the agent, dealing with two cases
-	// 1: The agent that responded is legitimately an unknown agent
-	// 2: The agent that responded is using an old protocol, and thus did not respond with an AgentId.
-	//    In this case, due to Go's uninitialized variable semantics, the "AgentID" we read will be
-	//    all 0's, which will never match, since UUID's cannot be all 0's
+	// First verify agent's authenticity before doing anything
 	if incomingId != currentId {
 		klog.Errorf(
 			"Got upscale response from agent %v, while current agent is %v",
