@@ -32,7 +32,7 @@ const (
 
 // AgentSet is the global state handling various autoscaler-agents that we could connect to
 type AgentSet struct {
-	lock sync.Mutex
+	lock util.ChanMutex
 
 	// current is the agent we're currently communciating with. If there is none, then this value is
 	// nil
@@ -96,7 +96,7 @@ func NewAgentSet() *AgentSet {
 	tryNewAgent := make(chan struct{})
 
 	agents := &AgentSet{
-		lock:               sync.Mutex{},
+		lock:               util.NewChanMutex(),
 		current:            nil,
 		wantsMemoryUpscale: false,
 		byIDs:              make(map[uuid.UUID]*Agent),
@@ -104,32 +104,9 @@ func NewAgentSet() *AgentSet {
 		tryNewAgent:        tryNewAgent,
 	}
 
-	go agents.runDeadlockChecker()
+	go agents.lock.DeadlockChecker(CheckDeadlockTimeout, CheckDeadlockDelay)(context.TODO())
 	go agents.tryNewAgents(tryNewAgent)
 	return agents
-}
-
-// runDeadlockChecker periodically tries to acquire the AgentSet's lock, killing the process if it
-// was unable to do so
-func (s *AgentSet) runDeadlockChecker() {
-	for {
-		success := make(chan struct{})
-
-		go func() {
-			s.lock.Lock()
-			defer s.lock.Unlock()
-			close(success)
-		}()
-
-		select {
-		case <-success:
-			// all good
-		case <-time.After(CheckDeadlockTimeout):
-			klog.Fatalf("deadlock detected, could not get lock after %s", CheckDeadlockTimeout)
-		}
-
-		time.Sleep(CheckDeadlockDelay)
-	}
 }
 
 func (s *AgentSet) tryNewAgents(signal <-chan struct{}) {
