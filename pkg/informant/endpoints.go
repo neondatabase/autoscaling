@@ -243,14 +243,16 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) TryDownscale(ctx context.Context, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
-	currentAgent := s.agents.Current()
-	incomingId := target.Data.Id.AgentID
+	currentId := CurrentIdStr(s.agents)
+	incomingId := target.Data.Id.AgentID.String()
 
-	// First verify agent's authenticity before doing anything
-	if currentAgent == nil || incomingId != currentAgent.id {
+	// First verify agent's authenticity before doing anything.
+	// Note: if the current agent is nil, its id string will be "<nil>", which
+	// does not match any valid UUID
+	if incomingId != currentId {
 		klog.Errorf(
 			"Got downscale response from agent %v, while current agent is %v",
-			incomingId, currentAgent.id,
+			incomingId, currentId,
 		)
 		return nil, 400, fmt.Errorf("Received downscale response from inactive agent %v", incomingId)
 	}
@@ -379,14 +381,16 @@ func (s *State) NotifyUpscale(
 	// So until the race condition described in #23 is fixed, we have to just trust that the agent
 	// is telling the truth, *especially because it might not be*.
 
-	currentAgent := s.agents.Current()
-	incomingId := newResources.Data.Id.AgentID
+	currentId := CurrentIdStr(s.agents)
+	incomingId := newResources.Data.Id.AgentID.String()
 
-	// First verify agent's authenticity before doing anything
-	if currentAgent == nil || incomingId != currentAgent.id {
+	// First verify agent's authenticity before doing anything.
+	// Note: if the current agent is nil, its id string will be "<nil>", which
+	// does not match any valid UUID
+	if incomingId != currentId {
 		klog.Errorf(
 			"Got upscale response from agent %v, while current agent is %v",
-			incomingId, currentAgent.id,
+			incomingId, currentId,
 		)
 		return nil, 400, fmt.Errorf("Received upscale response from inactive agent %v", incomingId)
 	}
