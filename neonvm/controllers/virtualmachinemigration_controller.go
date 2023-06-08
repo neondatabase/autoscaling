@@ -597,7 +597,6 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 // Note that the Pods will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	//		Owns(&corev1.Pod{}).
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).
