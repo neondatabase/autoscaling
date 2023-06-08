@@ -219,26 +219,26 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 		nadName, err := nadIpamName()
 		if err != nil {
 			// ignore error
-			log.Info("ignored error", err)
+			log.Error(err, "ignored error")
 			return nil
 		}
 		nadNamespace, err := nadIpamNamespace()
 		if err != nil {
 			// ignore error
-			log.Info("ignored error", err)
+			log.Error(err, "ignored error")
 			return nil
 		}
 		ipam, err := ipam.New(ctx, nadName, nadNamespace)
 		if err != nil {
 			// ignore error
-			log.Info("ignored error", err)
+			log.Error(err, "ignored error")
 			return nil
 		}
 		defer ipam.Close()
 		ip, err := ipam.ReleaseIP(ctx, virtualmachine.Name, virtualmachine.Namespace)
 		if err != nil {
 			// ignore error
-			log.Info("fail to release IP", "error", err)
+			log.Error(err, "fail to release IP, error ignored")
 			return nil
 		}
 		message := fmt.Sprintf("Released IP %s", ip.String())
