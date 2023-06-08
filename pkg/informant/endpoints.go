@@ -252,7 +252,7 @@ func (s *State) TryDownscale(ctx context.Context, target *api.AgentResourceMessa
 			"Got downscale response from agent %v, while current agent is %v",
 			incomingId, currentId,
 		)
-		return nil, 400, fmt.Errorf("Received downscale response from unknown agent %v", incomingId)
+		return nil, 400, fmt.Errorf("Received downscale response from inactive agent %v", incomingId)
 	}
 
 	// Helper functions for abbreviating returns.
@@ -388,7 +388,7 @@ func (s *State) NotifyUpscale(
 			"Got upscale response from agent %v, while current agent is %v",
 			incomingId, currentId,
 		)
-		return nil, 400, fmt.Errorf("Received upscale response from unknown agent %v", incomingId)
+		return nil, 400, fmt.Errorf("Received upscale response from inactive agent %v", incomingId)
 	}
 
 	// Helper function for abbreviating returns.

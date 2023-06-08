@@ -297,10 +297,11 @@ const (
 	//
 	// Changes from v1.2:
 	//
-	// * Agents now return a AgentResourceMessage when delivering responses
-	//   to /upscale and /downscale requests. Since RawResources (the response
-	//   type in previous protocols) is not deserializable out of an
-	//   AgentResourceMessage, this is a breaking change.
+	// * Agents now return a AgentResourceMessage when notifying VM's of changes
+	//   in resources on their /upscale and /downscale endpoints. Since
+	//   RawResources (the response type in previous protocols) is not
+	//   deserializable out of an AgentResourceMessage, this is a breaking
+	//   change.
 	//
 	// Currently the latest version.
 	InformantProtoV2_0
@@ -353,7 +354,8 @@ func (v InformantProtoVersion) AllowsHealthCheck() bool {
 	return v >= InformantProtoV1_2
 }
 
-// SignsResourceUpdates returns whether agents respond to /{up,down}scale with an AgentResourceMessage
+// SignsResourceUpdates returns whether agents inform VMs of resource updates with an
+// AgentResourceMessage in this version of the protocol
 //
 // This is true for version v2.0 and greater
 func (v InformantProtoVersion) SignsResourceUpdates() bool {
@@ -513,9 +515,6 @@ func (m MoreResources) And(cmp MoreResources) MoreResources {
 // informant because it doesn't know about things like memory slots.
 //
 // This is used in protocol versions <2. In later versions, AgentResourceMessage is used.
-//
-// TODO: once we are fully migrated to protocol version >=2, inline this type into
-// ResourceMessage and delete it.
 type RawResources struct {
 	Cpu    *resource.Quantity `json:"cpu"`
 	Memory *resource.Quantity `json:"memory"`
@@ -524,8 +523,8 @@ type RawResources struct {
 type AgentResourceMessage = AgentMessage[ResourceMessage]
 
 // Similar to RawResources, stores raw resource amounts. However, it also stores the ID of the agent
-// responding to the VM's resource request. In protocol versions 2 and on, agents respond to
-// /{up,down}scale requests with an AgentResourceMessage. This allows VM informants to verify
+// notifying the VM of a change in resources. In protocol versions 2 and on, agents notify VM's of
+// changes to their available resources with an AgentResourceMessage. This allows VM informants to verify
 // the authenticity of the agent responding.
 type ResourceMessage struct {
 	RawResources
