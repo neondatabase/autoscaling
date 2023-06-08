@@ -10,9 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	klog "k8s.io/klog/v2"
 
-	"github.com/google/uuid"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
