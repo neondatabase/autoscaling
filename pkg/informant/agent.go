@@ -418,14 +418,14 @@ func (s *AgentSet) ReceivedUpscale() {
 
 // Returns the current agent, which can be nil
 func (s *AgentSet) Current() *Agent {
-	s.lock.Lock()		
+	s.lock.Lock()
 	defer s.lock.Unlock()
 	return s.current
 }
 
 // Returns the id of the AgentSet's current agent as a string. If the current agent is nil,
 // returns "<nil>"
-func CurrentIdStr(s *AgentSet) string {
+func (s *AgentSet) CurrentIdStr() string {
 	if current := s.Current(); current == nil {
 		return "<nil>"
 	} else {

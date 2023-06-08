@@ -243,7 +243,7 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) TryDownscale(ctx context.Context, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
-	currentId := CurrentIdStr(s.agents)
+	currentId := s.agents.CurrentIdStr()
 	incomingId := target.Data.Id.AgentID.String()
 
 	// First verify agent's authenticity before doing anything.
@@ -381,7 +381,7 @@ func (s *State) NotifyUpscale(
 	// So until the race condition described in #23 is fixed, we have to just trust that the agent
 	// is telling the truth, *especially because it might not be*.
 
-	currentId := CurrentIdStr(s.agents)
+	currentId := s.agents.CurrentIdStr()
 	incomingId := newResources.Data.Id.AgentID.String()
 
 	// First verify agent's authenticity before doing anything.
