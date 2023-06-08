@@ -435,9 +435,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				}
 			}
 
-			//if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != *virtualmachine.Spec.Guest.CPUs.Use {
 			if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != targetCPUUsage {
-				//virtualmachine.Status.CPUs = virtualmachine.Spec.Guest.CPUs.Use
 				virtualmachine.Status.CPUs = &targetCPUUsage
 				// record event about cpus used in VM
 				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
