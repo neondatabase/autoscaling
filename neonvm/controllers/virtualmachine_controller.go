@@ -573,7 +573,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					// error means VM hadn't memory devices available for unplug
 					// need set .memorySlots.Use back to real value
 					log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
-					// firstly re-fecth VM
+					// firstly re-fetch VM
 					if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
 						log.Error(err, "Unable to re-fetch VirtualMachine")
 						return err
