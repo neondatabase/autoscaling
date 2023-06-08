@@ -10,7 +10,11 @@ import (
 	whereaboutstypes "github.com/k8snetworkplumbingwg/whereabouts/pkg/types"
 )
 
-func doAcquire(ctx context.Context, ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation, vmName string, vmNamespace string) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+func doAcquire(ctx context.Context,
+	ipRange RangeConfiguration,
+	reservation []whereaboutstypes.IPReservation,
+	vmName string, vmNamespace string) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 
@@ -24,7 +28,9 @@ func doAcquire(ctx context.Context, ipRange RangeConfiguration, reservation []wh
 	}
 
 	// try to reserve new IP gor given VM
-	ip, newReservation, err := whereaboutsallocate.IterateForAssignment(*ipnet, ipRange.RangeStart, ipRange.RangeEnd, reservation, ipRange.OmitRanges, vmID, "")
+	ip, newReservation, err := whereaboutsallocate.IterateForAssignment(*ipnet,
+		ipRange.RangeStart, ipRange.RangeEnd,
+		reservation, ipRange.OmitRanges, vmID, "")
 	if err != nil {
 		return net.IPNet{}, nil, err
 	}
@@ -32,7 +38,10 @@ func doAcquire(ctx context.Context, ipRange RangeConfiguration, reservation []wh
 	return net.IPNet{IP: ip, Mask: ipnet.Mask}, newReservation, nil
 }
 
-func doRelease(ctx context.Context, ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation, vmName string, vmNamespace string) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+func doRelease(ctx context.Context,
+	ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation,
+	vmName string, vmNamespace string) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 
