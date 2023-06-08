@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	klog "k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -245,18 +243,14 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) TryDownscale(ctx context.Context, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
-	currentId := func() uuid.UUID {
-		s.agents.lock.Lock()
-		defer s.agents.lock.Unlock()
-		return s.agents.current.id
-	}()
+	currentAgent := s.agents.Current()
 	incomingId := target.Data.Id.AgentID
 
 	// First verify agent's authenticity before doing anything
-	if incomingId != currentId {
+	if currentAgent == nil || incomingId != currentAgent.id {
 		klog.Errorf(
 			"Got downscale response from agent %v, while current agent is %v",
-			incomingId, currentId,
+			incomingId, currentAgent.id,
 		)
 		return nil, 400, fmt.Errorf("Received downscale response from inactive agent %v", incomingId)
 	}
@@ -385,18 +379,14 @@ func (s *State) NotifyUpscale(
 	// So until the race condition described in #23 is fixed, we have to just trust that the agent
 	// is telling the truth, *especially because it might not be*.
 
-	currentId := func() uuid.UUID {
-		s.agents.lock.Lock()
-		defer s.agents.lock.Unlock()
-		return s.agents.current.id
-	}()
+	currentAgent := s.agents.Current()
 	incomingId := newResources.Data.Id.AgentID
 
 	// First verify agent's authenticity before doing anything
-	if incomingId != currentId {
+	if currentAgent == nil || incomingId != currentAgent.id {
 		klog.Errorf(
 			"Got upscale response from agent %v, while current agent is %v",
-			incomingId, currentId,
+			incomingId, currentAgent.id,
 		)
 		return nil, 400, fmt.Errorf("Received upscale response from inactive agent %v", incomingId)
 	}

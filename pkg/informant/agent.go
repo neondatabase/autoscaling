@@ -416,6 +416,13 @@ func (s *AgentSet) ReceivedUpscale() {
 	s.wantsMemoryUpscale = false
 }
 
+// Returns the current agent, which can be nil
+func (s *AgentSet) Current() (_ *Agent) {
+	s.lock.Lock()		
+	defer s.lock.Unlock()
+	return s.current
+}
+
 // Get returns the requested Agent, if it exists
 func (s *AgentSet) Get(id uuid.UUID) (_ *Agent, ok bool) {
 	s.lock.Lock()
