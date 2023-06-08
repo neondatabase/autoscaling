@@ -386,7 +386,7 @@ const (
 // IsAlive returns whether the guest in the VM is expected to be running
 func (p VmPhase) IsAlive() bool {
 	switch p {
-	case VmRunning, VmMigrating:
+	case VmRunning, VmPreMigrating, VmMigrating, VmScaling:
 		return true
 	default:
 		return false
