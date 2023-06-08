@@ -12,6 +12,7 @@ import (
 
 	klog "k8s.io/klog/v2"
 
+	"github.com/google/uuid"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -243,7 +244,11 @@ func (s *State) HealthCheck(ctx context.Context, info *api.AgentIdentification) 
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) TryDownscale(ctx context.Context, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
-	currentId := s.agents.current.id
+	currentId := func() uuid.UUID {
+		s.agents.lock.Lock()
+		defer s.agents.lock.Unlock()
+		return s.agents.current.id
+	}()
 	incomingId := target.Data.Id.AgentID
 
 	// First verify agent's authenticity before doing anything
@@ -379,7 +384,11 @@ func (s *State) NotifyUpscale(
 	// So until the race condition described in #23 is fixed, we have to just trust that the agent
 	// is telling the truth, *especially because it might not be*.
 
-	currentId := s.agents.current.id
+	currentId := func() uuid.UUID {
+		s.agents.lock.Lock()
+		defer s.agents.lock.Unlock()
+		return s.agents.current.id
+	}()
 	incomingId := newResources.Data.Id.AgentID
 
 	// First verify agent's authenticity before doing anything
