@@ -246,7 +246,17 @@ func (s *State) HealthCheck(ctx context.Context, logger *zap.Logger, info *api.A
 // amount is ok
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *api.RawResources) (*api.DownscaleResult, int, error) {
+func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
+	currentId := s.agents.CurrentIdStr()
+	incomingId := target.Data.Id.AgentID.String()
+
+	// First verify agent's authenticity before doing anything.
+	// Note: if the current agent is nil, its id string will be "<nil>", which
+	// does not match any valid UUID
+	if incomingId != currentId {
+		return nil, 400, fmt.Errorf("Agent ID %s is not the active Agent", incomingId)
+	}
+
 	// Helper functions for abbreviating returns.
 	resultFromStatus := func(ok bool, status string) (*api.DownscaleResult, int, error) {
 		return &api.DownscaleResult{Ok: ok, Status: status}, 200, nil
@@ -262,7 +272,7 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 		return resultFromStatus(true, "No action taken (no cgroup or file cache enabled)")
 	}
 
-	requestedMem := uint64(target.Memory.Value())
+	requestedMem := uint64(target.Data.Memory.Value())
 	usableSystemMemory := util.SaturatingSub(requestedMem, s.config.SysBufferBytes)
 
 	// Get the file cache's expected contribution to the memory usage
@@ -358,7 +368,11 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
-func (s *State) NotifyUpscale(ctx context.Context, logger *zap.Logger, newResources *api.RawResources) (*struct{}, int, error) {
+func (s *State) NotifyUpscale(
+	ctx context.Context,
+	logger *zap.Logger,
+	newResources *api.AgentResourceMessage,
+) (*struct{}, int, error) {
 	// FIXME: we shouldn't just trust what the agent says
 	//
 	// Because of race conditions like in <https://github.com/neondatabase/autoscaling/issues/23>,
@@ -367,6 +381,16 @@ func (s *State) NotifyUpscale(ctx context.Context, logger *zap.Logger, newResour
 	//
 	// So until the race condition described in #23 is fixed, we have to just trust that the agent
 	// is telling the truth, *especially because it might not be*.
+
+	currentId := s.agents.CurrentIdStr()
+	incomingId := newResources.Data.Id.AgentID.String()
+
+	// First verify agent's authenticity before doing anything.
+	// Note: if the current agent is nil, its id string will be "<nil>", which
+	// does not match any valid UUID
+	if incomingId != currentId {
+		return nil, 400, fmt.Errorf("Agent ID %s is not the active Agent", incomingId)
+	}
 
 	// Helper function for abbreviating returns.
 	internalError := func(err error) (*struct{}, int, error) {
@@ -379,7 +403,7 @@ func (s *State) NotifyUpscale(ctx context.Context, logger *zap.Logger, newResour
 		return &struct{}{}, 200, nil
 	}
 
-	newMem := uint64(newResources.Memory.Value())
+	newMem := uint64(newResources.Data.Memory.Value())
 	usableSystemMemory := util.SaturatingSub(newMem, s.config.SysBufferBytes)
 
 	if s.cgroup != nil {

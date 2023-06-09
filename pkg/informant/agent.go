@@ -26,8 +26,8 @@ import (
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
-	MinProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_1
-	MaxProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_2
+	MinProtocolVersion api.InformantProtoVersion = api.InformantProtoV2_0
+	MaxProtocolVersion api.InformantProtoVersion = api.InformantProtoV2_0
 )
 
 // AgentSet is the global state handling various autoscaler-agents that we could connect to
@@ -397,6 +397,23 @@ func (s *AgentSet) ReceivedUpscale() {
 	defer s.lock.Unlock()
 
 	s.wantsMemoryUpscale = false
+}
+
+// Returns the current agent, which can be nil
+func (s *AgentSet) Current() *Agent {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return s.current
+}
+
+// Returns the id of the AgentSet's current agent as a string. If the current agent is nil,
+// returns "<nil>"
+func (s *AgentSet) CurrentIdStr() string {
+	if current := s.Current(); current == nil {
+		return "<nil>"
+	} else {
+		return current.id.String()
+	}
 }
 
 // Get returns the requested Agent, if it exists

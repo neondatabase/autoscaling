@@ -127,9 +127,8 @@ func main() {
 	hl := logger.Named("handle")
 	util.AddHandler(hl, mux, "/register", http.MethodPost, "AgentDesc", state.RegisterAgent)
 	util.AddHandler(hl, mux, "/health-check", http.MethodPut, "AgentIdentification", state.HealthCheck)
-	// FIXME: /downscale and /upscale should have the AgentID in the request body
-	util.AddHandler(hl, mux, "/downscale", http.MethodPut, "RawResources", state.TryDownscale)
-	util.AddHandler(hl, mux, "/upscale", http.MethodPut, "RawResources", state.NotifyUpscale)
+	util.AddHandler(hl, mux, "/downscale", http.MethodPut, "AgentResourceMessage", state.TryDownscale)
+	util.AddHandler(hl, mux, "/upscale", http.MethodPut, "AgentResourceMessage", state.NotifyUpscale)
 	util.AddHandler(hl, mux, "/unregister", http.MethodDelete, "AgentDesc", state.UnregisterAgent)
 
 	addr := "0.0.0.0:10301"

@@ -21,12 +21,12 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-// The autoscaler-agent currently supports v1.0 to v1.1 of the agent<->informant protocol.
+// The autoscaler-agent currently supports v1.0 to v2.0 of the agent<->informant protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_0
-	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV1_2
+	MaxInformantProtocolVersion api.InformantProtoVersion = api.InformantProtoV2_0
 )
 
 type InformantServer struct {
@@ -974,7 +974,7 @@ func (s *InformantServer) HealthCheck(ctx context.Context, logger *zap.Logger) (
 	return resp, nil
 }
 
-// Downscale makes a request to the informant's /downscale endpoit with the api.Resources
+// Downscale makes a request to the informant's /downscale endpoint with the api.Resources
 //
 // This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
 func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
@@ -995,11 +995,22 @@ func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to 
 	logger.Info("Sending downscale", zap.Object("target", to))
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
+	id := api.AgentIdentification{AgentID: s.desc.AgentID}
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
-	resp, statusCode, err := doInformantRequest[api.RawResources, api.DownscaleResult](
-		ctx, logger, s, timeout, http.MethodPut, "/downscale", &rawResources,
-	)
+	var statusCode int
+	var resp *api.DownscaleResult
+	if s.protoVersion.SignsResourceUpdates() {
+		signedRawResources := api.ResourceMessage{RawResources: rawResources, Id: id}
+		reqData := api.AgentResourceMessage{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
+		resp, statusCode, err = doInformantRequest[api.AgentResourceMessage, api.DownscaleResult](
+			ctx, logger, s, timeout, http.MethodPut, "/downscale", &reqData,
+		)
+	} else {
+		resp, statusCode, err = doInformantRequest[api.RawResources, api.DownscaleResult](
+			ctx, logger, s, timeout, http.MethodPut, "/downscale", &rawResources,
+		)
+	}
 	if err != nil {
 		func() {
 			s.runner.lock.Lock()
@@ -1039,11 +1050,21 @@ func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to ap
 	logger.Info("Sending upscale", zap.Object("target", to))
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Informant.DownscaleTimeoutSeconds)
+	id := api.AgentIdentification{AgentID: s.desc.AgentID}
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 
-	_, statusCode, err := doInformantRequest[api.RawResources, struct{}](
-		ctx, logger, s, timeout, http.MethodPut, "/upscale", &rawResources,
-	)
+	var statusCode int
+	if s.protoVersion.SignsResourceUpdates() {
+		signedRawResources := api.ResourceMessage{RawResources: rawResources, Id: id}
+		reqData := api.AgentResourceMessage{Data: signedRawResources, SequenceNumber: s.incrementSequenceNumber()}
+		_, statusCode, err = doInformantRequest[api.AgentResourceMessage, struct{}](
+			ctx, logger, s, timeout, http.MethodPut, "/upscale", &reqData,
+		)
+	} else {
+		_, statusCode, err = doInformantRequest[api.RawResources, struct{}](
+			ctx, logger, s, timeout, http.MethodPut, "/upscale", &rawResources,
+		)
+	}
 	if err != nil {
 		func() {
 			s.runner.lock.Lock()

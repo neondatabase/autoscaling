@@ -232,11 +232,11 @@ The protocol is as follows:
     1. The informant's `/health-check` endpoint (via PUT), with `AgentIdentification`. This allows
        the autoscaler-agent to check that the informant is up and running, and that it still
        recognizes the agent.
-    2. The informant's `/downscale` endpoint (via PUT), with `RawResources`. This serves as the
+    2. The informant's `/downscale` endpoint (via PUT), with `AgentResourceMessage`. This serves as the
        agent _politely asking_ the informant to decrease resource usage to the specified amount.
        The informant returns a `DownscaleResult` indicating whether it was able to downscale (it may
        not, if e.g. memory usage is too high).
-    3. The informant's `/upscale` endpoint (via PUT), with `RawResources`. This serves as the agent
+    3. The informant's `/upscale` endpoint (via PUT), with `AgentResourceMessage`. This serves as the agent
        _notifying_ the informant that its resources have increased to the provided amount.
     4. The agent's `/suspend` endpoint (via POST), with `SuspendAgent`. This allows the informant to
        inform the agent that it is no longer in use for the VM. While suspended, the agent **must
