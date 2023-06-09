@@ -151,7 +151,7 @@ func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromM
 			continue
 		}
 
-		if !vm.Status.Phase.IsAlive() {
+		if !vm.Status.Phase.IsAlive() || vm.Status.CPUs == nil {
 			continue
 		}
 
@@ -160,7 +160,7 @@ func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromM
 			endpointID: endpointID,
 		}
 		presentMetrics := vmMetricsInstant{
-			cpu: *vm.Spec.Guest.CPUs.Use,
+			cpu: *vm.Status.CPUs,
 		}
 		if oldMetrics, ok := old[key]; ok {
 			// The VM was present from s.lastTime to now. Add a time slice to its metrics history.
