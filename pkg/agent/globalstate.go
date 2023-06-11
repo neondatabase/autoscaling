@@ -32,6 +32,10 @@ type agentState struct {
 	lock util.ChanMutex
 	pods map[util.NamespacedName]*podState
 
+	// A base logger to pass around, so we can recreate the logger for a Runner on restart, without
+	// running the risk of leaking keys.
+	baseLogger *zap.Logger
+
 	podIP                string
 	config               *Config
 	kubeClient           *kubernetes.Clientset
@@ -42,6 +46,7 @@ type agentState struct {
 }
 
 func (r MainRunner) newAgentState(
+	baseLogger *zap.Logger,
 	podIP string,
 	broker *pubsub.Broker[schedwatch.WatchEvent],
 	schedulerStore *watch.Store[corev1.Pod],
@@ -49,6 +54,7 @@ func (r MainRunner) newAgentState(
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
+		baseLogger:           baseLogger,
 		config:               r.Config,
 		kubeClient:           r.KubeClient,
 		vmClient:             r.VMClient,
@@ -82,8 +88,11 @@ func (s *agentState) Stop() {
 }
 
 func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event vmEvent) {
-	baseLogger := logger
-	logger = logger.With(zap.Object("event", event))
+	logger = logger.With(
+		zap.Object("event", event),
+		zap.Object("virtualmachine", event.vmInfo.NamespacedName()),
+		zap.Object("pod", util.NamespacedName{Namespace: event.vmInfo.Namespace, Name: event.podName}),
+	)
 
 	if err := s.lock.TryLock(ctx); err != nil {
 		logger.Warn("Context canceled while starting to handle event", zap.Error(err))
@@ -114,7 +123,7 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 		state.status.vmInfo = event.vmInfo
 		state.vmInfoUpdated.Send()
 	case vmEventAdded:
-		s.handleVMEventAdded(ctx, baseLogger, event, podName)
+		s.handleVMEventAdded(ctx, event, podName)
 	default:
 		panic(errors.New("bad event: unexpected event kind"))
 	}
@@ -122,7 +131,6 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 
 func (s *agentState) handleVMEventAdded(
 	ctx context.Context,
-	logger *zap.Logger,
 	event vmEvent,
 	podName util.NamespacedName,
 ) {
@@ -152,7 +160,8 @@ func (s *agentState) handleVMEventAdded(
 		vmInfoUpdated: txVMUpdate,
 	}
 	s.metrics.runnerStarts.Inc()
-	runner.Spawn(runnerCtx, logger.Named("runner"), rxVMUpdate)
+	logger := s.loggerForRunner(event.vmInfo.NamespacedName(), podName)
+	runner.Spawn(runnerCtx, logger, rxVMUpdate)
 }
 
 // FIXME: make these timings configurable.
@@ -164,7 +173,8 @@ const (
 // TriggerRestartIfNecessary restarts the Runner for podName, after a delay if necessary.
 //
 // NB: runnerCtx is the context *passed to the new Runner*. It is only used here to end our restart
-// process early if it's already been canceled.
+// process early if it's already been canceled. logger is not passed, and so can be handled a bit
+// more freely.
 func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger *zap.Logger, podName util.NamespacedName, podIP string) {
 	// Three steps:
 	//  1. Check if the Runner needs to restart. If no, we're done.
@@ -300,8 +310,13 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 		pod.status.previousEndStates = append(pod.status.previousEndStates, *pod.status.endState)
 		pod.status.startTime = time.Now()
 
-		runner.Spawn(runnerCtx, logger, rxVMUpdate)
+		runnerLogger := s.loggerForRunner(pod.status.vmInfo.NamespacedName(), podName)
+		runner.Spawn(runnerCtx, runnerLogger, rxVMUpdate)
 	}()
+}
+
+func (s *agentState) loggerForRunner(vmName, podName util.NamespacedName) *zap.Logger {
+	return s.baseLogger.Named("runner").With(zap.Object("virtualmachine", vmName), zap.Object("pod", podName))
 }
 
 // NB: caller must set Runner.status after creation

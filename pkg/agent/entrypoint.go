@@ -55,7 +55,7 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	}
 	defer schedulerStore.Stop()
 
-	globalState, promReg := r.newAgentState(r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	globalState, promReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, broker, schedulerStore)
 	watchMetrics.MustRegister(promReg)
 
 	if r.Config.Billing != nil {
