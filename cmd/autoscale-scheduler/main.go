@@ -93,4 +93,8 @@ func redirectKlog(to *zap.Logger) {
 			Level: pair.zapLevel,
 		})
 	}
+
+	// By default, we'll get LogToStderr(true), which completely bypasses any redirecting with
+	// SetOutput or SetOutputBySeverity. So... we'd like to avoid that, which thankfully we can do.
+	klog.LogToStderr(false)
 }
