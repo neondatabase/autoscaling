@@ -529,15 +529,11 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 }
 
 // finalizeVirtualMachineMigration will perform the required operations before delete the CR.
-func (r *VirtualMachineMigrationReconciler) updateMigrationStatus(ctx context.Context, migration *vmv1.VirtualMachineMigration, requeue ...bool) (ctrl.Result, error) {
+func (r *VirtualMachineMigrationReconciler) updateMigrationStatus(ctx context.Context, migration *vmv1.VirtualMachineMigration) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	if err := r.Status().Update(ctx, migration); err != nil {
 		log.Error(err, "Failed update Migration status")
 		return ctrl.Result{}, err
-	}
-	// if requeuing asked then requeue in 1 sec
-	if len(requeue) > 0 && requeue[0] {
-		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 	return ctrl.Result{}, nil
 }
