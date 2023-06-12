@@ -401,6 +401,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// update Node name where runner working
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
+			// update Pod "usage" annotation before anything else, so that it will be correctly set,
+			// even if the rest of the reconcile operation fails.
+			if err := updateRunnerUsageAnnotation(ctx, r.Client, virtualmachine, virtualmachine.Status.PodName); err != nil {
+				log.Error(err, "Failed to set Pod usage annotation", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+
 			// get CPU details from QEMU and update status
 			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
 			if err != nil {
@@ -479,12 +486,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				}
 			}
 
-			// update Pod "usage" annotation before anything else, so that it will be correctly set,
-			// even if the rest of the reconcile operation fails.
-			if err := updateRunnerUsageAnnotation(ctx, r.Client, virtualmachine, virtualmachine.Status.PodName); err != nil {
-				log.Error(err, "Failed to set Pod usage annotation", "VirtualMachine", virtualmachine.Name)
-				return err
-			}
 
 		case corev1.PodSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
