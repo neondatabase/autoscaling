@@ -426,15 +426,15 @@ func (e *AutoscaleEnforcer) Filter(
 		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, memIncr, nodeTotalReservableMemSots)
 	}
 
-	var resultString string
+	var message string
 	if allowing {
-		resultString = "Allowing"
+		message = "Allowing Pod"
 	} else {
-		resultString = "Rejecting"
+		message = "Rejecting Pod"
 	}
 
 	logger.Info(
-		fmt.Sprintf("%s Pod", resultString),
+		message,
 		zap.Object("verdict", verdictSet{
 			cpu: cpuMsg,
 			mem: memMsg,
