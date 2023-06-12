@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -370,10 +371,21 @@ var (
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 )
 
+type dockerMessage struct {
+	Stream string `json:"stream"`
+}
+
 func printReader(reader io.ReadCloser) error {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
-		log.Println(scanner.Text())
+		candidateJSON := scanner.Bytes()
+		var msg dockerMessage
+		if err := json.Unmarshal(candidateJSON, &msg); err != nil || msg.Stream == "" {
+			log.Println(string(candidateJSON))
+			continue
+		}
+
+		log.Print(msg.Stream)
 	}
 	if err := scanner.Err(); err != nil {
 		return err
