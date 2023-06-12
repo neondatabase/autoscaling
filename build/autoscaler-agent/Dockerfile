@@ -7,10 +7,13 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 RUN go mod download
 
-COPY pkg/ pkg/
-COPY cmd/ cmd/
-COPY neonvm/apis neonvm/apis
-COPY neonvm/client neonvm/client
+COPY neonvm/apis          neonvm/apis
+COPY neonvm/client        neonvm/client
+COPY pkg/agent            pkg/agent
+COPY pkg/api              pkg/api
+COPY pkg/billing          pkg/billing
+COPY pkg/util             pkg/util
+COPY cmd/autoscaler-agent cmd/autoscaler-agent
 
 ARG GIT_INFO
 

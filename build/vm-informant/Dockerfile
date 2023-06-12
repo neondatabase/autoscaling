@@ -7,10 +7,11 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 RUN go mod download
 
-COPY pkg/ pkg/
-COPY cmd/ cmd/
-COPY neonvm/apis neonvm/apis
-COPY neonvm/client neonvm/client
+COPY neonvm/apis      neonvm/apis
+COPY pkg/api          pkg/api
+COPY pkg/informant    pkg/informant
+COPY pkg/util         pkg/util
+COPY cmd/vm-informant cmd/vm-informant
 
 ARG GIT_INFO
 
