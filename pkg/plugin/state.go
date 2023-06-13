@@ -964,6 +964,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		} else if pod.Spec.NodeName == "" {
 			logSkip("VM pod Spec.NodeName = \"\" (maybe it hasn't been scheduled yet?)")
 			continue
+		} else if util.PodCompleted(pod) {
+			logSkip("Pod is in its final, complete state (phase = %q), so will not use any resources", pod.Status.Phase)
 		}
 
 		vmInfo, err := api.ExtractVmInfo(logger, vm)
@@ -1067,6 +1069,10 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		logSkip := func(format string, args ...any) {
 			logger.Warn("Skipping non-VM pod", zap.Error(fmt.Errorf(format, args...)))
 			skippedOtherPods += 1
+		}
+
+		if util.PodCompleted(pod) {
+			logSkip("Pod is in its final, complete state (phase = %q), so will not use any resources", pod.Status.Phase)
 		}
 
 		if _, ok := p.state.podMap[podName]; ok {
