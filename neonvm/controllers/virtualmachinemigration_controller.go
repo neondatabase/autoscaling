@@ -233,9 +233,24 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			log.Error(err, "Failed to get migration source pod")
 			return ctrl.Result{}, err
 		}
-		if err = controllerutil.SetOwnerReference(migration, sourceRunner, r.Scheme); err != nil {
-			log.Error(err, "Failed to set owner reference for source pod")
-			return ctrl.Result{}, err
+		ownedByMigration := false
+		gvk := vmv1.SchemeGroupVersion.String()
+		for _, ref := range sourceRunner.OwnerReferences {
+			if ref.APIVersion == gvk && ref.Kind == "VirtualMachineMigration" && ref.Name == migration.Name {
+				ownedByMigration = true
+				break
+			}
+		}
+		if !ownedByMigration {
+			if err = controllerutil.SetOwnerReference(migration, sourceRunner, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference for source pod")
+				return ctrl.Result{}, err
+			}
+			if err = r.Update(ctx, sourceRunner); err != nil {
+				log.Error(err, "Failed to update owner of source runner")
+				// Requeue so that we try again, even though we're not an owner of the source runner
+				return ctrl.Result{RequeueAfter: time.Second}, err
+			}
 		}
 
 		// now inspect target pod status and update migration
