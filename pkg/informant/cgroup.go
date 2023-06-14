@@ -9,8 +9,7 @@ import (
 
 	sysinfo "github.com/elastic/go-sysinfo"
 	sysinfotypes "github.com/elastic/go-sysinfo/types"
-
-	klog "k8s.io/klog/v2"
+	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -27,7 +26,7 @@ type CgroupState struct {
 	upscaleEventsSendr util.CondChannelSender
 	upscaleEventsRecvr util.CondChannelReceiver
 
-	requestUpscale func()
+	requestUpscale func(*zap.Logger)
 }
 
 // CgroupConfig provides some configuration options for State cgroup handling
@@ -83,19 +82,21 @@ func (s *CgroupState) ReceivedUpscale() {
 	s.upscaleEventsSendr.Send()
 }
 
+// mib is a helper function to format a quantity of bytes as a string
+func mib(bytes uint64) string {
+	return fmt.Sprintf("%g MiB", float64(bytes)/float64(1<<20))
+}
+
 // setMemoryLimits updates the cgroup's value of memory.high and memory.max, according to the memory
 // made available to the cgroup.
 //
 // This method MUST be called while holding s.updateMemLimitsLock.
-func (s *CgroupState) setMemoryLimits(availableMemory uint64) error {
-	var newMemHigh uint64
-	mib := float64(1 << 20) // Size of 1 MiB = 2^20 = 1 << 20
+func (s *CgroupState) setMemoryLimits(logger *zap.Logger, availableMemory uint64) error {
+	newMemHigh := s.config.calculateMemoryHighValue(availableMemory)
 
-	newMemHigh = s.config.calculateMemoryHighValue(availableMemory)
-
-	klog.Infof(
-		"Total memory available for cgroup %q is %d bytes (%g MiB). Setting cgroup memory.high to %d bytes (%g MiB)",
-		s.mgr.name, availableMemory, float64(availableMemory)/mib, newMemHigh, float64(newMemHigh)/mib,
+	logger.Info("Setting cgroup memory.high",
+		zap.String("availableMemory", mib(availableMemory)),
+		zap.String("target", mib(newMemHigh)),
 	)
 
 	s.mgr.MemoryHighEvent.Consume()
@@ -108,12 +109,12 @@ func (s *CgroupState) setMemoryLimits(availableMemory uint64) error {
 		return fmt.Errorf("Error setting cgroup %q memory limits: %w", s.mgr.name, err)
 	}
 
-	klog.Infof("Successfully set cgroup %q memory limits", s.mgr.name)
+	logger.Info("Successfully set cgroup memory limits")
 	return nil
 }
 
 // handleCgroupSignals is an internal function that handles "memory high" signals from the cgroup
-func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
+func (s *CgroupState) handleCgroupSignalsLoop(logger *zap.Logger, config CgroupConfig) {
 	// FIXME: we should have "proper" error handling instead of just panicking. It's hard to
 	// determine what the correct behavior should be if a cgroup operation fails, though.
 
@@ -130,7 +131,7 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 		case err := <-s.mgr.ErrCh:
 			panic(fmt.Errorf("Error listening for cgroup signals: %w", err))
 		case <-s.upscaleEventsRecvr.Recv():
-			klog.Infof("Received upscale event")
+			logger.Info("Received upscale event")
 			s.mgr.MemoryHighEvent.Consume()
 
 			// note: Don't reset the timers. We still want to be precise about our rate limit, if
@@ -143,14 +144,14 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 
 				// Freeze the cgroup and request more memory (maybe duplicate - that'll be handled
 				// internally so we're not spamming the agent)
-				waitingOnUpscale, err = s.handleMemoryHighEvent(config)
+				waitingOnUpscale, err = s.handleMemoryHighEvent(logger, config)
 				if err != nil {
 					panic(fmt.Errorf("Error handling memory high event: %w", err))
 				}
 				waitToFreeze.Reset(time.Duration(config.DoNotFreezeMoreOftenThanMillis) * time.Millisecond)
 			default:
 				if !waitingOnUpscale {
-					klog.Infof("Received memory.high event, but too soon to re-freeze. Requesting upscaling")
+					logger.Info("Received memory.high event, but too soon to re-freeze. Requesting upscaling")
 
 					// Too soon after the last freeze, but there's currently no unsatisfied
 					// upscaling requests. We should send a new one:
@@ -162,17 +163,17 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 						// independently decides to upscale us again)
 						select {
 						case <-s.upscaleEventsRecvr.Recv():
-							klog.Infof("No need to request upscaling because we were already upscaled")
+							logger.Info("No need to request upscaling because we were already upscaled")
 							return
 						default:
-							s.requestUpscale()
+							s.requestUpscale(logger)
 						}
 					}()
 				} else {
 					// Maybe increase memory.high to reduce throttling:
 					select {
 					case <-waitToIncreaseMemoryHigh.C:
-						klog.Infof("Received memory.high event, too soon to re-freeze, but increasing memory.high")
+						logger.Info("Received memory.high event, too soon to re-freeze, but increasing memory.high")
 
 						func() {
 							s.updateMemLimitsLock.Lock()
@@ -182,10 +183,10 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 							// agent independently decides to upscale us again)
 							select {
 							case <-s.upscaleEventsRecvr.Recv():
-								klog.Infof("No need to update memory.high because we were already upscaled")
+								logger.Info("No need to update memory.high because we were already upscaled")
 								return
 							default:
-								s.requestUpscale()
+								s.requestUpscale(logger)
 							}
 
 							memHigh, err := s.mgr.FetchMemoryHighBytes()
@@ -196,9 +197,10 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 							}
 
 							newMemHigh := *memHigh + config.MemoryHighIncreaseByBytes
-							klog.Infof(
-								"Updating memory.high from %g MiB -> %g MiB",
-								float64(*memHigh)/float64(1<<20), float64(newMemHigh)/float64(1<<20),
+							logger.Info(
+								"Updating memory.high",
+								zap.String("current", mib(*memHigh)),
+								zap.String("target", mib(newMemHigh)),
 							)
 
 							if err := s.mgr.SetMemHighBytes(newMemHigh); err != nil {
@@ -222,7 +224,7 @@ func (s *CgroupState) handleCgroupSignalsLoop(config CgroupConfig) {
 // This method waits on s.agents.UpscaleEvents(), so incorrect behavior will occur if it's called at
 // the same time as anything else that waits on the upscale events. For that reason, both this
 // function and s.setMemoryHigh() are dispatched from within s.handleCgroupSignalsLoop().
-func (s *CgroupState) handleMemoryHighEvent(config CgroupConfig) (waitingOnUpscale bool, _ error) {
+func (s *CgroupState) handleMemoryHighEvent(logger *zap.Logger, config CgroupConfig) (waitingOnUpscale bool, _ error) {
 	locked := true
 	s.updateMemLimitsLock.Lock()
 	defer func() {
@@ -235,12 +237,12 @@ func (s *CgroupState) handleMemoryHighEvent(config CgroupConfig) (waitingOnUpsca
 	// event for the time being:
 	select {
 	case <-s.upscaleEventsRecvr.Recv():
-		klog.Infof("Skipping memory.high event because there was an upscale event")
+		logger.Info("Skipping memory.high event because there was an upscale event")
 		return false, nil
 	default:
 	}
 
-	klog.Infof("Received memory high event. Freezing cgroup")
+	logger.Info("Received memory high event. Freezing cgroup")
 
 	// Immediately freeze the cgroup before doing anything else.
 	if err := s.mgr.Freeze(); err != nil {
@@ -253,9 +255,9 @@ func (s *CgroupState) handleMemoryHighEvent(config CgroupConfig) (waitingOnUpsca
 	maxWaitBeforeThaw := time.Millisecond * time.Duration(config.MaxUpscaleWaitMillis)
 	mustThaw := time.After(maxWaitBeforeThaw)
 
-	klog.Infof("Sending request for immediate upscaling, waiting for at most %s", maxWaitBeforeThaw)
+	logger.Info(fmt.Sprintf("Sending request for immediate upscaling, waiting for at most %s", maxWaitBeforeThaw))
 
-	s.requestUpscale()
+	s.requestUpscale(logger)
 
 	// Unlock before waiting:
 	locked = false
@@ -266,13 +268,14 @@ func (s *CgroupState) handleMemoryHighEvent(config CgroupConfig) (waitingOnUpsca
 	select {
 	case <-s.upscaleEventsRecvr.Recv():
 		totalWait := time.Since(startTime)
-		klog.Infof("Received notification that upscale occurred after %s. Thawing cgroup", totalWait)
+		logger.Info("Received notification that upscale occurred", zap.Duration("totalWait", totalWait))
 		upscaled = true
 	case <-mustThaw:
 		totalWait := time.Since(startTime)
-		klog.Warningf("Timed out after %s waiting for upscale. Thawing cgroup", totalWait)
+		logger.Info("Timed out waiting for upscale", zap.Duration("totalWait", totalWait))
 	}
 
+	logger.Info("Thawing cgroup")
 	if err := s.mgr.Thaw(); err != nil {
 		return false, fmt.Errorf("Error thawing cgroup: %w", err)
 	}

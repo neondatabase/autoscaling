@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/tychoish/fun/pubsub"
+	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
-	klog "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -32,6 +32,8 @@ const InitConfigMapTimeoutSeconds = 5
 
 // AutoscaleEnforcer is the scheduler plugin to coordinate autoscaling
 type AutoscaleEnforcer struct {
+	logger *zap.Logger
+
 	handle   framework.Handle
 	vmClient *vmclient.Clientset
 	state    pluginState
@@ -54,21 +56,24 @@ var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ReservePlugin = (*AutoscaleEnforcer)(nil)
 
-func NewAutoscaleEnforcerPlugin(ctx context.Context, config *Config) func(runtime.Object, framework.Handle) (framework.Plugin, error) {
+func NewAutoscaleEnforcerPlugin(ctx context.Context, logger *zap.Logger, config *Config) func(runtime.Object, framework.Handle) (framework.Plugin, error) {
 	return func(obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
-		return makeAutoscaleEnforcerPlugin(ctx, obj, h, config)
+		return makeAutoscaleEnforcerPlugin(ctx, logger, obj, h, config)
 	}
 }
 
 // NewAutoscaleEnforcerPlugin produces the initial AutoscaleEnforcer plugin to be used by the
 // scheduler
-func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h framework.Handle, config *Config) (framework.Plugin, error) {
-	// ^ obj can be used for taking in configuration. it's a bit tricky to figure out, and we don't
+func makeAutoscaleEnforcerPlugin(
+	ctx context.Context,
+	logger *zap.Logger,
+	obj runtime.Object,
+	h framework.Handle,
+	config *Config,
+) (framework.Plugin, error) {
+	// obj can be used for taking in configuration. it's a bit tricky to figure out, and we don't
 	// quite need it yet.
-	klog.Info("[autoscale-enforcer] Initializing plugin")
-	buildInfo := util.GetBuildInfo()
-	klog.Infof("[autoscale-enforcer] buildInfo.GitInfo:   %s", buildInfo.GitInfo)
-	klog.Infof("[autoscale-enforcer] buildInfo.GoVersion: %s", buildInfo.GoVersion)
+	logger.Info("Initializing plugin")
 
 	// create the NeonVM client
 	if err := vmapi.AddToScheme(scheme.Scheme); err != nil {
@@ -84,6 +89,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}
 
 	p := AutoscaleEnforcer{
+		logger: logger.Named("plugin"),
+
 		handle:   h,
 		vmClient: vmClient,
 		// remaining fields are set by p.readClusterState and p.startPrometheusServer
@@ -96,45 +103,45 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	}
 
 	if p.state.conf.DumpState != nil {
-		klog.Infof("[autoscale-enforcer] Starting 'dump state' server")
-		if err := p.startDumpStateServer(ctx); err != nil {
+		logger.Info("Starting 'dump state' server")
+		if err := p.startDumpStateServer(ctx, logger.Named("dump-state")); err != nil {
 			return nil, fmt.Errorf("Error starting 'dump state' server: %w", err)
 		}
 	}
 
 	// Start watching Pod/VM events, adding them to a shared queue to process them in order
 	queue := pubsub.NewUnlimitedQueue[func()]()
-	pushToQueue := func(f func()) {
+	pushToQueue := func(logger *zap.Logger, f func()) {
 		if err := queue.Add(f); err != nil {
-			klog.Warningf("[autoscale-enforcer] error adding to pod/VM event queue: %s", err)
+			logger.Warn("Error adding to pod/VM event queue", zap.Error(err))
 		}
 	}
-	submitVMPodDeletion := func(pod util.NamespacedName) {
-		pushToQueue(func() { p.handleVMDeletion(pod) })
+	hlogger := logger.Named("handlers")
+	submitVMPodDeletion := func(logger *zap.Logger, pod util.NamespacedName) {
+		pushToQueue(logger, func() { p.handleVMDeletion(hlogger, pod) })
 	}
-	submitNonVMPodDeletion := func(name util.NamespacedName) {
-		pushToQueue(func() { p.handlePodDeletion(name) })
+	submitNonVMPodDeletion := func(logger *zap.Logger, name util.NamespacedName) {
+		pushToQueue(logger, func() { p.handlePodDeletion(hlogger, name) })
 	}
-	submitVMDisabledScaling := func(pod util.NamespacedName) {
-		pushToQueue(func() { p.handleVMDisabledScaling(pod) })
+	submitVMDisabledScaling := func(logger *zap.Logger, pod util.NamespacedName) {
+		pushToQueue(logger, func() { p.handleVMDisabledScaling(hlogger, pod) })
 	}
-	submitVMBoundsChanged := func(vm *api.VmInfo, podName string) {
-		pushToQueue(func() { p.handleUpdatedScalingBounds(vm, podName) })
+	submitVMBoundsChanged := func(logger *zap.Logger, vm *api.VmInfo, podName string) {
+		pushToQueue(logger, func() { p.handleUpdatedScalingBounds(hlogger, vm, podName) })
 	}
-	submitNonAutoscalingVmUsageChanged := func(vm *api.VmInfo, podName string) {
-		pushToQueue(func() { p.handleNonAutoscalingUsageChange(vm, podName) })
+	submitNonAutoscalingVmUsageChanged := func(logger *zap.Logger, vm *api.VmInfo, podName string) {
+		pushToQueue(logger, func() { p.handleNonAutoscalingUsageChange(hlogger, vm, podName) })
 	}
 
 	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
 
-	klog.Infof("[autoscale-enforcer] Starting pod watcher")
-	if err := p.watchPodEvents(ctx, watchMetrics, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
+	logger.Info("Starting pod watcher")
+	if err := p.watchPodEvents(ctx, logger, watchMetrics, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
-	klog.Infof("[autoscale-enforcer] Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, watchMetrics, submitVMDisabledScaling, submitVMBoundsChanged, submitNonAutoscalingVmUsageChanged)
-
+	logger.Info("Starting VM watcher")
+	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, submitVMDisabledScaling, submitVMBoundsChanged, submitNonAutoscalingVmUsageChanged)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
@@ -142,8 +149,8 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
 
 	// ... but before handling the events, read the current cluster state:
-	klog.Infof("[autoscale-enforcer] Reading initial cluster state")
-	if err = p.readClusterState(ctx); err != nil {
+	logger.Info("Reading initial cluster state")
+	if err = p.readClusterState(ctx, logger); err != nil {
 		return nil, fmt.Errorf("Error reading cluster state: %w", err)
 	}
 
@@ -154,18 +161,18 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 			callback()
 		}
 		if err := iter.Close(); err != nil {
-			klog.Infof("[autoscale-enforcer] stopped waiting on pod/VM queue: %s", err)
+			logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
 		}
 	}()
 
 	promReg := p.makePrometheusRegistry()
 	watchMetrics.MustRegister(promReg)
 
-	if err := util.StartPrometheusMetricsServer(ctx, 9100, promReg); err != nil {
+	if err := util.StartPrometheusMetricsServer(ctx, logger.Named("prometheus"), 9100, promReg); err != nil {
 		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
 	}
 
-	if err := p.startPermitHandler(ctx); err != nil {
+	if err := p.startPermitHandler(ctx, logger.Named("agent-handler")); err != nil {
 		return nil, fmt.Errorf("permit handler: %w", err)
 	}
 
@@ -173,15 +180,14 @@ func makeAutoscaleEnforcerPlugin(ctx context.Context, obj runtime.Object, h fram
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				klog.Errorf("deadlock checker for AutoscaleEnforcer.state.lock panicked")
-				panic(err)
+				logger.Panic("deadlock checker for AutoscaleEnforcer.state.lock panicked", zap.String("error", fmt.Sprint(err)))
 			}
 		}()
 
 		p.state.lock.DeadlockChecker(time.Second, 5*time.Second)(ctx)
 	}()
 
-	klog.Info("[autoscale-enforcer] Plugin initialization complete")
+	logger.Info("Plugin initialization complete")
 	return &p, nil
 }
 
@@ -195,7 +201,7 @@ func (e *AutoscaleEnforcer) Name() string {
 // getVmInfo is a helper for the plugin-related functions
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
-func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
+func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 	var vmName util.NamespacedName
 	vmName.Namespace = pod.Namespace
 
@@ -209,7 +215,11 @@ func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 		return index.Get(vmName.Namespace, vmName.Name)
 	})
 	if !ok {
-		klog.Warningf("VM %v missing from local store. Relisting.", vmName)
+		logger.Warn(
+			"VM is missing from local store. Relisting",
+			zap.Object("pod", util.GetNamespacedName(pod)),
+			zap.Object("virtualmachine", vmName),
+		)
 
 		// Use a reasonable timeout on the relist request, so that if the VM store is broken, we
 		// won't block forever.
@@ -236,7 +246,7 @@ func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 		}
 	}
 
-	vmInfo, err := api.ExtractVmInfo(vm)
+	vmInfo, err := api.ExtractVmInfo(logger, vm)
 	if err != nil {
 		return nil, fmt.Errorf("Error extracting VM info: %w", err)
 	}
@@ -248,15 +258,14 @@ func getVmInfo(vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
 // otherwise returns a non-nil framework.Status to return (and also logs the error)
 //
 // This method expects e.state.lock to be held when it is called. It will not release the lock.
-func (e *AutoscaleEnforcer) checkSchedulerName(pod *corev1.Pod) *framework.Status {
+func (e *AutoscaleEnforcer) checkSchedulerName(logger *zap.Logger, pod *corev1.Pod) *framework.Status {
 	if e.state.conf.SchedulerName != pod.Spec.SchedulerName {
-		podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-		err := fmt.Sprintf(
-			"Mismatched SchedulerName for pod %v: our config has %q, but the pod has %q",
-			podName, e.state.conf.SchedulerName, pod.Spec.SchedulerName,
+		err := fmt.Errorf(
+			"Mismatched SchedulerName for pod: our config has %q, but the pod has %q",
+			e.state.conf.SchedulerName, pod.Spec.SchedulerName,
 		)
-		klog.Errorf("[autoscale-enforcer] %s", err)
-		return framework.NewStatus(framework.Error, err)
+		logger.Error("Pod failed scheduler name check", zap.Error(err))
+		return framework.NewStatus(framework.Error, err.Error())
 	}
 	return nil
 }
@@ -274,12 +283,12 @@ func (e *AutoscaleEnforcer) Filter(
 
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
 
-	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-	klog.Infof("[autoscale-enforcer] Filter: Handling request for pod %v, node %s", pName, nodeName)
+	logger := e.logger.With(zap.String("method", "Filter"), zap.String("node", nodeName), util.PodNameFields(pod))
+	logger.Info("Handling Filter request")
 
-	vmInfo, err := getVmInfo(e.vmStore, pod)
+	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Filter: Error getting VM pod %v info: %s", pName, err)
+		logger.Error("Error getting VM info for Pod", zap.Error(err))
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
 			fmt.Sprintf("Error getting pod vmInfo: %s", err),
@@ -290,7 +299,7 @@ func (e *AutoscaleEnforcer) Filter(
 	if vmInfo == nil {
 		otherPodInfo, err = extractPodOtherPodResourceState(pod)
 		if err != nil {
-			klog.Errorf("[autoscale-enforcer] Filter: Error getting non-VM pod %v info: %s", pName, err)
+			logger.Error("Error extracing resource state for non-VM pod", zap.Error(err))
 			return framework.NewStatus(
 				framework.UnschedulableAndUnresolvable,
 				fmt.Sprintf("Error getting pod info: %s", err),
@@ -302,23 +311,23 @@ func (e *AutoscaleEnforcer) Filter(
 	defer e.state.lock.Unlock()
 
 	// Check that the SchedulerName matches what we're expecting
-	if status := e.checkSchedulerName(pod); status != nil {
+	if status := e.checkSchedulerName(logger, pod); status != nil {
 		return status
 	}
 
 	// Check whether the pod's memory slot size matches the scheduler's. If it doesn't, reject it.
 	if vmInfo != nil && !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
 		err := fmt.Errorf("expected %v, found %v", e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize)
-		klog.Warningf("[autoscale-enforcer] Filter: VM for pod %v has bad MemSlotSize: %s", pName, err)
+		logger.Error("VM for Pod has a bad MemSlotSize", zap.Error(err))
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
 			fmt.Sprintf("VM for pod has bad MemSlotSize: %v", err),
 		)
 	}
 
-	node, err := e.state.getOrFetchNodeState(ctx, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Filter: Error getting node %s state: %s", nodeName, err)
+		logger.Error("Error getting node state", zap.Error(err))
 		return framework.NewStatus(
 			framework.Error,
 			fmt.Sprintf("Error getting node state: %s", err),
@@ -417,16 +426,19 @@ func (e *AutoscaleEnforcer) Filter(
 		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, memIncr, nodeTotalReservableMemSots)
 	}
 
-	var resultString string
+	var message string
 	if allowing {
-		resultString = "allowing"
+		message = "Allowing Pod"
 	} else {
-		resultString = "rejecting"
+		message = "Rejecting Pod"
 	}
 
-	klog.Infof(
-		"[autoscale-enforcer] Filter: %s %s pod %v in node %s: %s; %s",
-		resultString, kind, pName, nodeName, cpuMsg, memMsg,
+	logger.Info(
+		message,
+		zap.Object("verdict", verdictSet{
+			cpu: cpuMsg,
+			mem: memMsg,
+		}),
 	)
 
 	if !allowing {
@@ -456,12 +468,14 @@ func (e *AutoscaleEnforcer) Score(
 ) (int64, *framework.Status) {
 	e.metrics.pluginCalls.WithLabelValues("score").Inc()
 
+	logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
+	logger.Info("Handling Score request")
+
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
-	podName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-	vmInfo, err := getVmInfo(e.vmStore, pod)
+	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Score: Error getting info for pod %v: %s", podName, err)
+		logger.Error("Error getting VM info for Pod", zap.Error(err))
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
 	}
 
@@ -471,14 +485,14 @@ func (e *AutoscaleEnforcer) Score(
 	defer e.state.lock.Unlock()
 
 	// Double-check that the SchedulerName matches what we're expecting
-	if status := e.checkSchedulerName(pod); status != nil {
+	if status := e.checkSchedulerName(logger, pod); status != nil {
 		return framework.MinNodeScore, status
 	}
 
 	// Score by total resources available:
-	node, err := e.state.getOrFetchNodeState(ctx, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Score: Error fetching state for node %s: %s", nodeName, err)
+		logger.Error("Error getting node state", zap.Error(err))
 		return 0, framework.NewStatus(framework.Error, "Error fetching state for node")
 	}
 
@@ -526,15 +540,16 @@ func (e *AutoscaleEnforcer) Reserve(
 ) *framework.Status {
 	e.metrics.pluginCalls.WithLabelValues("reserve").Inc()
 
-	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-	klog.Infof("[autoscale-enforcer] Reserve: Handling request for pod %v, node %s", pName, nodeName)
+	pName := util.GetNamespacedName(pod)
+	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
+	logger.Info("Handling Reserve request")
 
-	vmInfo, err := getVmInfo(e.vmStore, pod)
+	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Error getting pod %v info: %s", pName, err)
+		logger.Error("Error getting VM info for pod", zap.Error(err))
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
-			fmt.Sprintf("Error getting pod info: %s", err),
+			fmt.Sprintf("Error getting pod vmInfo: %s", err),
 		)
 	}
 
@@ -542,7 +557,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	defer e.state.lock.Unlock()
 
 	// Double-check that the SchedulerName matches what we're expecting
-	if status := e.checkSchedulerName(pod); status != nil {
+	if status := e.checkSchedulerName(logger, pod); status != nil {
 		return status
 	}
 
@@ -553,16 +568,16 @@ func (e *AutoscaleEnforcer) Reserve(
 			"expected %v, found %v (this should have been caught during Filter)",
 			e.state.conf.MemSlotSize, vmInfo.Mem.SlotSize,
 		)
-		klog.Errorf("[autoscale-enforcer] Reserve: VM for pod %v has bad MemSlotSize: %s", pName, err)
+		logger.Error("VM for Pod has a bad MemSlotSize", zap.Error(err))
 		return framework.NewStatus(
 			framework.UnschedulableAndUnresolvable,
 			fmt.Sprintf("VM for pod has bad MemSlotSize: %v", err),
 		)
 	}
 
-	node, err := e.state.getOrFetchNodeState(ctx, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
 	if err != nil {
-		klog.Errorf("[autoscale-enforcer] Error getting node %s state: %s", nodeName, err)
+		logger.Error("Error getting node state", zap.Error(err))
 		return framework.NewStatus(
 			framework.Error,
 			fmt.Sprintf("Error getting node state: %s", err),
@@ -573,7 +588,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	if vmInfo == nil {
 		podResources, err := extractPodOtherPodResourceState(pod)
 		if err != nil {
-			klog.Errorf("[autoscale-enforcer] Error getting non-VM pod %v state: %v", pName, err)
+			logger.Error("Error extracing resource state for non-VM pod", zap.Error(err))
 			return framework.NewStatus(
 				framework.UnschedulableAndUnresolvable,
 				fmt.Sprintf("Error getting non-VM pod info: %v", err),
@@ -602,33 +617,51 @@ func (e *AutoscaleEnforcer) Reserve(
 			node.otherPods[pName] = ps
 			e.state.otherPods[pName] = ps
 
-			fmtString := "[autoscale-enforcer] Allowing non-VM pod %v (%v raw cpu, %v raw mem) in node %s:\n" +
-				"\tvCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw, %v margin)\n" +
-				"\t mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw, %v margin)"
-			klog.Infof(
-				fmtString,
-				// allowing non-VM pod %v (%v raw cpu, %v raw mem) in node %s
-				pName, &podResources.RawCPU, &podResources.RawMemory, nodeName,
-				// vCPU: node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw, %v margin)
+			cpuVerdict := fmt.Sprintf(
+				"node reserved %d -> %d, node other resources %d -> %d rounded (%v -> %v raw, %v margin)",
 				oldNodeCpuReserved, node.vCPU.Reserved, oldNodeRes.ReservedCPU, newNodeRes.ReservedCPU, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, newNodeRes.MarginCPU,
-				// mem: node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw, %v margin)
+			)
+			memVerdict := fmt.Sprintf(
+				"node reserved %d -> %d, node other resources %d -> %d slots (%v -> %v raw, %v margin)",
 				oldNodeMemReserved, node.memSlots.Reserved, oldNodeRes.ReservedMemSlots, newNodeRes.ReservedMemSlots, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, newNodeRes.MarginMemory,
+			)
+
+			logger.Info(
+				"Allowing reserve non-VM pod",
+				zap.Object("verdict", verdictSet{
+					cpu: cpuVerdict,
+					mem: memVerdict,
+				}),
 			)
 
 			return nil // nil is success
 		} else {
-			fmtString := "Not enough resources to reserve for non-VM pod: " +
-				"need %d vCPU (%v -> %v raw), %d mem slots (%v -> %v raw) but " +
-				"have %d vCPu, %d mem slots remaining"
-			err := fmt.Errorf(
-				fmtString,
-				// need %d vCPU (%v -> %v raw), %d mem slots (%v -> %v raw) but
-				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory,
-				// have %d vCPU, %d mem slots remaining
-				node.remainingReservableCPU(), node.remainingReservableMemSlots(),
+			cpuShortVerdict := "NOT ENOUGH"
+			if addCpu <= node.remainingReservableCPU() {
+				cpuShortVerdict = "OK"
+			}
+			memShortVerdict := "NOT ENOUGH"
+			if addMem <= node.remainingReservableMemSlots() {
+				memShortVerdict = "OK"
+			}
+
+			cpuVerdict := fmt.Sprintf(
+				"need %v vCPU (%v -> %v raw), have %v available (%s)",
+				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.remainingReservableCPU(), cpuShortVerdict,
 			)
-			klog.Errorf("[autoscale-enforcer] Can't schedule non-VM pod %v: %s", pName, err)
-			return framework.NewStatus(framework.Unschedulable, err.Error())
+			memVerdict := fmt.Sprintf(
+				"need %v mem slots (%v -> %v raw), have %d available (%s)",
+				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.remainingReservableMemSlots(), memShortVerdict,
+			)
+
+			logger.Error(
+				"Can't reserve non-VM pod (not enough resources)",
+				zap.Object("verdict", verdictSet{
+					cpu: cpuVerdict,
+					mem: memVerdict,
+				}),
+			)
+			return framework.NewStatus(framework.Unschedulable, "Not enough resources to reserve non-VM pod")
 		}
 	}
 
@@ -642,14 +675,15 @@ func (e *AutoscaleEnforcer) Reserve(
 		newNodeReservedCPU := node.vCPU.Reserved + vmInfo.Cpu.Use
 		newNodeReservedMemSlots := node.memSlots.Reserved + vmInfo.Mem.Use
 
-		fmtString := "[autoscale-enforcer] Allowing VM pod %v (%d vCPU, %d mem slots) in node %s: " +
-			"node.vCPU.reserved %d -> %d, node.memSlots.reserved %d -> %d"
-		klog.Infof(
-			fmtString,
-			// allowing pod %v (%d vCpu, %d mem slots) in node %s
-			pName, vmInfo.Cpu.Use, vmInfo.Mem.Use, nodeName,
-			// node vcpu reserved %d -> %d, node mem slots reserved %d -> %d
-			node.vCPU.Reserved, newNodeReservedCPU, node.memSlots.Reserved, newNodeReservedMemSlots,
+		cpuVerdict := fmt.Sprintf("node reserved %v + %v -> %v", node.vCPU.Reserved, vmInfo.Cpu.Use, newNodeReservedCPU)
+		memVerdict := fmt.Sprintf("node reserved %v + %v -> %v", node.memSlots.Reserved, vmInfo.Mem.Use, newNodeReservedMemSlots)
+
+		e.logger.Info(
+			"Allowing reserve VM pod",
+			zap.Object("verdict", verdictSet{
+				cpu: cpuVerdict,
+				mem: memVerdict,
+			}),
 		)
 
 		node.vCPU.Reserved = newNodeReservedCPU
@@ -682,19 +716,26 @@ func (e *AutoscaleEnforcer) Reserve(
 		e.state.podMap[pName] = ps
 		return nil // nil is success
 	} else {
-		fmtString := "Not enough resources to reserve for VM: " +
-			"need %d vCPU, %d mem slots but " +
-			"have %d vCPU, %d mem slots remaining"
-		err := fmt.Errorf(
-			fmtString,
-			// need %d vCPU, %d mem slots
-			vmInfo.Cpu.Use, vmInfo.Mem.Use,
-			// have %d vCPU, %d mem slots
-			node.remainingReservableCPU(), node.remainingReservableMemSlots(),
-		)
+		cpuShortVerdict := "NOT ENOUGH"
+		if vmInfo.Cpu.Use <= node.remainingReservableCPU() {
+			cpuShortVerdict = "OK"
+		}
+		memShortVerdict := "NOT ENOUGH"
+		if vmInfo.Mem.Use <= node.remainingReservableMemSlots() {
+			memShortVerdict = "OK"
+		}
 
-		klog.Errorf("[autoscale-enforcer] Can't schedule VM pod %v: %s", pName, err)
-		return framework.NewStatus(framework.Unschedulable, err.Error())
+		cpuVerdict := fmt.Sprintf("need %v vCPU, have %v available (%s)", vmInfo.Cpu.Use, node.remainingReservableCPU(), cpuShortVerdict)
+		memVerdict := fmt.Sprintf("need %v mem slots, have %v available (%s)", vmInfo.Mem.Use, node.remainingReservableMemSlots(), memShortVerdict)
+
+		logger.Error(
+			"Can't reserve VM pod (not enough resources)",
+			zap.Object("verdict", verdictSet{
+				cpu: cpuVerdict,
+				mem: memVerdict,
+			}),
+		)
+		return framework.NewStatus(framework.Unschedulable, "Not enough resources to reserve VM pod")
 	}
 }
 
@@ -713,25 +754,30 @@ func (e *AutoscaleEnforcer) Unreserve(
 ) {
 	e.metrics.pluginCalls.WithLabelValues("unreserve").Inc()
 
-	pName := util.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-	klog.Infof("[autoscale-enforcer] Unreserve: Handling request for pod %v, node %s", pName, nodeName)
+	podName := util.GetNamespacedName(pod)
+
+	logger := e.logger.With(zap.String("method", "Unreserve"), zap.String("node", nodeName), util.PodNameFields(pod))
+	logger.Info("Handling Unreserve request")
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	ps, ok := e.state.podMap[pName]
-	otherPs, otherOk := e.state.otherPods[pName]
+	ps, ok := e.state.podMap[podName]
+	otherPs, otherOk := e.state.otherPods[podName]
 	// FIXME: we should guarantee that we can never have an entry in both maps with the same name.
 	// This needs to be handled in Reserve, not here.
 	if !ok && otherOk {
 		vCPUVerdict, memVerdict := handleDeletedPod(otherPs.node, otherPs.resources, &e.state.conf.MemSlotSize)
-		delete(e.state.otherPods, pName)
-		delete(otherPs.node.otherPods, pName)
+		delete(e.state.otherPods, podName)
+		delete(otherPs.node.otherPods, podName)
 
-		fmtString := "[autoscale-enforcer] Unreserved non-VM pod %v from node %s:\n" +
-			"\tvCPU verdict: %s\n" +
-			"\t mem verdict: %s"
-		klog.Infof(fmtString, otherPs.name, otherPs.node.name, vCPUVerdict, memVerdict)
+		logger.Info(
+			"Unreserved non-VM pod",
+			zap.Object("verdict", verdictSet{
+				cpu: vCPUVerdict,
+				mem: memVerdict,
+			}),
+		)
 	} else if ok && !otherOk {
 		// Mark the resources as no longer reserved
 
@@ -742,16 +788,19 @@ func (e *AutoscaleEnforcer) Unreserve(
 			handleDeleted(currentlyMigrating)
 
 		// Delete our record of the pod
-		delete(e.state.podMap, pName)
-		delete(ps.node.pods, pName)
+		delete(e.state.podMap, podName)
+		delete(ps.node.pods, podName)
 		ps.node.mq.removeIfPresent(ps)
 
-		fmtString := "[autoscale-enforcer] Unreserved VM pod %v from node %s:\n" +
-			"\tvCPU verdict: %s\n" +
-			"\t mem verdict: %s"
-		klog.Infof(fmtString, ps.name, ps.node.name, vCPUVerdict, memVerdict)
+		logger.Info(
+			"Unreserved Pod",
+			zap.Object("verdict", verdictSet{
+				cpu: vCPUVerdict,
+				mem: memVerdict,
+			}),
+		)
 	} else {
-		klog.Warningf("[autoscale-enforcer] Unreserve: Cannot find pod %v in podMap or otherPods (this may be normal behavior)", pName)
+		logger.Warn("Cannot find pod in podMap in otherPods")
 		return
 	}
 }

@@ -9,7 +9,11 @@ import (
 	"time"
 
 	"github.com/tychoish/fun/srv"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zapio"
 
+	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
 
 	"github.com/neondatabase/autoscaling/pkg/plugin"
@@ -19,14 +23,17 @@ import (
 // all of the juicy bits are defined in pkg/plugin/
 
 func main() {
-	if err := runProgram(); err != nil {
+	logger := zap.Must(zap.NewProduction()).Named("autoscale-scheduler")
+	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
+
+	if err := runProgram(logger); err != nil {
 		log.Fatal(err)
 	}
 }
 
 // runProgram is the "real" main, but returning an error means that
 // the shutdown handling code doesn't have to call os.Exit, even indirectly.
-func runProgram() (err error) {
+func runProgram(logger *zap.Logger) (err error) {
 	conf, err := plugin.ReadConfig(plugin.DefaultConfigPath)
 	if err != nil {
 		return fmt.Errorf("Error reading config at %q: %w", plugin.DefaultConfigPath, err)
@@ -53,7 +60,12 @@ func runProgram() (err error) {
 		return err
 	}
 
-	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, plugin.NewAutoscaleEnforcerPlugin(ctx, conf)))
+	// The normal scheduler outputs to klog, and there isn't *really* a way to stop that. So to make
+	// everything fit nicely, we'll redirect it to zap as well.
+	redirectKlog(logger.Named("klog"))
+
+	constructor := plugin.NewAutoscaleEnforcerPlugin(ctx, logger, conf)
+	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, constructor))
 	// Don't output the full usage whenever any error occurs (otherwise, startup errors get drowned
 	// out by many pages of scheduler command flags)
 	command.SilenceUsage = true
@@ -62,4 +74,27 @@ func runProgram() (err error) {
 		return err
 	}
 	return
+}
+
+func redirectKlog(to *zap.Logger) {
+	severityPairs := []struct {
+		klogLevel string
+		zapLevel  zapcore.Level
+	}{
+		{"info", zapcore.InfoLevel},
+		{"warning", zapcore.WarnLevel},
+		{"error", zapcore.ErrorLevel},
+		{"fatal", zapcore.FatalLevel},
+	}
+
+	for _, pair := range severityPairs {
+		klog.SetOutputBySeverity(pair.klogLevel, &zapio.Writer{
+			Log:   to,
+			Level: pair.zapLevel,
+		})
+	}
+
+	// By default, we'll get LogToStderr(true), which completely bypasses any redirecting with
+	// SetOutput or SetOutputBySeverity. So... we'd like to avoid that, which thankfully we can do.
+	klog.LogToStderr(false)
 }

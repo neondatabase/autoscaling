@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/tychoish/fun/pubsub"
+	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -59,7 +60,7 @@ const (
 
 func WatchSchedulerUpdates(
 	ctx context.Context,
-	logger util.PrefixLogger,
+	logger *zap.Logger,
 	eventBroker *pubsub.Broker[WatchEvent],
 	store *watch.Store[corev1.Pod],
 ) (SchedulerWatch, *SchedulerInfo, error) {
@@ -139,7 +140,7 @@ type schedulerWatchState struct {
 	using <-chan SchedulerInfo
 
 	stop   util.SignalReceiver
-	logger util.PrefixLogger
+	logger *zap.Logger
 }
 
 func (w schedulerWatchState) run(ctx context.Context, setStore chan *watch.Store[corev1.Pod]) {
@@ -274,7 +275,7 @@ func (w *schedulerWatchState) handleNewMode(newMode watchCmd) {
 }
 
 func (w *schedulerWatchState) handleEvent(event WatchEvent) {
-	w.logger.Infof("Received watch event %+v", event)
+	w.logger.Info("Received watch event", zap.Object("event", event))
 
 	switch event.kind {
 	case eventKindReady:

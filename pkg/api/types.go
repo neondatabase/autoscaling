@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap/zapcore"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -148,6 +149,13 @@ type Resources struct {
 	// Mem gives the number of slots of memory (typically 1G ea.) requested. The slot size is set by
 	// the value of the VM's VirtualMachineSpec.Guest.MemorySlotSize.
 	Mem uint16 `json:"mem"`
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that Resources can be used with zap.Object
+func (r Resources) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("vCPU", fmt.Sprintf("%v", r.VCPU))
+	enc.AddUint16("mem", r.Mem)
+	return nil
 }
 
 // ValidateNonZero checks that neither of the Resources fields are equal to zero, returning an error
@@ -410,6 +418,15 @@ type AgentDesc struct {
 	//
 	// AgentDesc must always have MinProtoVersion <= MaxProtoVersion.
 	MaxProtoVersion InformantProtoVersion `json:"maxProtoVersion"`
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that Resources can be used with zap.Object
+func (d AgentDesc) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("agentID", d.AgentID.String())
+	enc.AddString("agentServeAddr", string(d.ServerAddr))
+	enc.AddString("minProtoVersion", d.MinProtoVersion.String())
+	enc.AddString("maxProtoVersion", d.MaxProtoVersion.String())
+	return nil
 }
 
 // ProtocolRange returns a VersionRange from d.MinProtoVersion to d.MaxProtoVersion.

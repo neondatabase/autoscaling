@@ -12,9 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
-
-	"k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -25,7 +24,7 @@ type StateDump struct {
 	Pods      []podStateDump `json:"pods"`
 }
 
-func (s *agentState) StartDumpStateServer(shutdownCtx context.Context, config *DumpStateConfig) error {
+func (s *agentState) StartDumpStateServer(shutdownCtx context.Context, logger *zap.Logger, config *DumpStateConfig) error {
 	// Manually start the TCP listener so we can minimize errors in the background thread.
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: int(config.Port)}
 	listener, err := net.ListenTCP("tcp", &addr)
@@ -35,7 +34,7 @@ func (s *agentState) StartDumpStateServer(shutdownCtx context.Context, config *D
 
 	go func() {
 		mux := http.NewServeMux()
-		util.AddHandler("dump-state: ", mux, "/", http.MethodGet, "<empty>", func(ctx context.Context, body *struct{}) (*StateDump, int, error) {
+		util.AddHandler(logger, mux, "/", http.MethodGet, "<empty>", func(ctx context.Context, logger *zap.Logger, body *struct{}) (*StateDump, int, error) {
 			timeout := time.Duration(config.TimeoutSeconds) * time.Second
 
 			startTime := time.Now()
@@ -60,7 +59,7 @@ func (s *agentState) StartDumpStateServer(shutdownCtx context.Context, config *D
 		// internal state after shutdown has started.
 		server := &http.Server{Handler: mux}
 		if err := server.Serve(listener); err != nil {
-			klog.Errorf("dump-state server exited: %s", err)
+			logger.Error("dump-state server exited", zap.Error(err))
 		}
 	}()
 

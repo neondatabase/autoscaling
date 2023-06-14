@@ -14,8 +14,8 @@ import (
 
 	cgroups "github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup2"
-
-	klog "k8s.io/klog/v2"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -28,7 +28,7 @@ type CgroupManager struct {
 	manager *cgroup2.Manager
 }
 
-func NewCgroupManager(groupName string) (*CgroupManager, error) {
+func NewCgroupManager(logger *zap.Logger, groupName string) (*CgroupManager, error) {
 	mode := cgroups.Mode()
 	if mode != cgroups.Unified && mode != cgroups.Hybrid {
 		var modeString string
@@ -78,13 +78,13 @@ func NewCgroupManager(groupName string) (*CgroupManager, error) {
 				select {
 				case <-minWait:
 				default:
-					klog.Warningf(
-						"Respecting minimum wait of %s before restarting memory.events listener",
-						minWaitDuration,
+					logger.Warn(
+						"Respecting minimum wait delay before restarting memory.events listener",
+						zap.Duration("delay", minWaitDuration),
 					)
 					<-minWait
 				}
-				klog.Infof("Restarting memory.events listener")
+				logger.Info("Restarting memory.events listener")
 			}
 
 			minWait = time.After(minWaitDuration)
@@ -97,7 +97,10 @@ func NewCgroupManager(groupName string) (*CgroupManager, error) {
 
 			select {
 			case event := <-memEvents:
-				klog.Infof("New memory.events: %+v", event)
+				// This is *kind of* on the hot path — we actually do want this to be pretty quick.
+				// So it makes reasonable sense to use zap.Object instead of zap.Any, event though
+				// there's some boilerplate required for it.
+				logger.Info("New memory.events", zap.Object("events", marshalMemoryEvents(event)))
 				highCount := event.High
 				oldHighCount := util.AtomicMax(highEventCount, highCount)
 
@@ -116,12 +119,12 @@ func NewCgroupManager(groupName string) (*CgroupManager, error) {
 	}()
 
 	// Fetch the current "memory high" count
-	current, err := parseMemoryEvents(groupName)
+	current, err := parseMemoryEvents(logger, groupName)
 	if err != nil {
 		return nil, fmt.Errorf("Error getting current memory events: %w", err)
 	}
 
-	klog.Infof("Initial memory.events: %+v", *current)
+	logger.Info("Initial memory.events", zap.Object("events", marshalMemoryEvents(*current)))
 
 	util.AtomicMax(highEventCount, current.High)
 	recvEvent.Consume() // Clear events
@@ -129,9 +132,22 @@ func NewCgroupManager(groupName string) (*CgroupManager, error) {
 	return cgm, nil
 }
 
+func marshalMemoryEvents(events cgroup2.Event) zapcore.ObjectMarshalerFunc {
+	return zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
+		// NB: we're using lower snake-case names that are present in the actual
+		// memory.events file, instead of the field names from cgroup2.Event
+		enc.AddUint64("low", events.Low)
+		enc.AddUint64("high", events.High)
+		enc.AddUint64("max", events.Max)
+		enc.AddUint64("oom", events.OOM)
+		enc.AddUint64("oom_kill", events.OOMKill)
+		return nil
+	})
+}
+
 // TODO: no way to do this with github.com/containerd/cgroups ? Seems like that should be
 // exposed to the user... We *can* just parse it directly, but it's a bit annoying.
-func parseMemoryEvents(groupName string) (*cgroup2.Event, error) {
+func parseMemoryEvents(logger *zap.Logger, groupName string) (*cgroup2.Event, error) {
 	path := cgroupPath(groupName, "memory.events")
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -185,7 +201,7 @@ func parseMemoryEvents(groupName string) (*cgroup2.Event, error) {
 
 		pair, ok := valueMap[name]
 		if !ok {
-			klog.Warningf("Unrecognized memory.events field %q (is the kernel new?)", name)
+			logger.Warn("Unrecognized memory.events field (is the kernel new?)", zap.String("field", name))
 			continue
 		} else if pair.set {
 			return nil, fmt.Errorf("Duplicate field %q", name)

@@ -3,6 +3,8 @@ package schedwatch
 import (
 	"fmt"
 
+	"go.uber.org/zap/zapcore"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -12,6 +14,15 @@ import (
 type WatchEvent struct {
 	info SchedulerInfo
 	kind eventKind
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler
+func (ev WatchEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("kind", string(ev.kind))
+	if err := enc.AddObject("info", ev.info); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ev WatchEvent) Format(state fmt.State, verb rune) {
@@ -50,6 +61,16 @@ type SchedulerInfo struct {
 	PodName util.NamespacedName
 	UID     types.UID
 	IP      string
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler
+func (s SchedulerInfo) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	if err := enc.AddObject("pod", s.PodName); err != nil {
+		return err
+	}
+	enc.AddString("UID", string(s.UID))
+	enc.AddString("IP", string(s.IP))
+	return nil
 }
 
 func newSchedulerInfo(pod *corev1.Pod) SchedulerInfo {

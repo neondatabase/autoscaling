@@ -8,9 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
-
-	"k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
@@ -39,7 +38,7 @@ type stateDump struct {
 	State     pluginStateDump `json:"state"`
 }
 
-func (p *AutoscaleEnforcer) startDumpStateServer(shutdownCtx context.Context) error {
+func (p *AutoscaleEnforcer) startDumpStateServer(shutdownCtx context.Context, logger *zap.Logger) error {
 	// Manually start the TCP listener so we can minimize errors in the background thread.
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: int(p.state.conf.DumpState.Port)}
 	listener, err := net.ListenTCP("tcp", &addr)
@@ -49,7 +48,7 @@ func (p *AutoscaleEnforcer) startDumpStateServer(shutdownCtx context.Context) er
 
 	go func() {
 		mux := http.NewServeMux()
-		util.AddHandler("dump-state: ", mux, "/", http.MethodGet, "<empty>", func(ctx context.Context, body *struct{}) (*stateDump, int, error) {
+		util.AddHandler(logger, mux, "/", http.MethodGet, "<empty>", func(ctx context.Context, _ *zap.Logger, body *struct{}) (*stateDump, int, error) {
 			timeout := time.Duration(p.state.conf.DumpState.TimeoutSeconds) * time.Second
 
 			startTime := time.Now()
@@ -74,7 +73,7 @@ func (p *AutoscaleEnforcer) startDumpStateServer(shutdownCtx context.Context) er
 		// internal state after shutdown has started.
 		server := &http.Server{Handler: mux}
 		if err := server.Serve(listener); err != nil {
-			klog.Errorf("dump-state server exited: %s", err)
+			logger.Error("dump-state server exited", zap.Error(err))
 		}
 	}()
 

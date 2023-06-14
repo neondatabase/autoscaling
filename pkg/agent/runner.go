@@ -59,6 +59,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
@@ -83,9 +85,6 @@ type Runner struct {
 	// status provides the high-level status of the Runner. Reading or updating the status requires
 	// holding podStatus.lock. Updates are typically done handled by the setStatus method.
 	status *podStatus
-
-	// logger is the shared logger for this Runner, giving all log lines a unique, relevant prefix
-	logger util.PrefixLogger
 
 	// shutdown provides a clean way to trigger all background Runner threads to shut down. shutdown
 	// is set exactly once, by (*Runner).Run
@@ -181,8 +180,6 @@ type Scheduler struct {
 	// This field is immutable but the data behind the pointer is not.
 	runner *Runner
 
-	logger util.PrefixLogger
-
 	// info holds the immutable information we use to connect to and describe the scheduler
 	info schedwatch.SchedulerInfo
 
@@ -217,7 +214,6 @@ type Scheduler struct {
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
 type RunnerState struct {
-	LogPrefix             string                `json:"logPrefix"`
 	PodIP                 string                `json:"podIP"`
 	VM                    api.VmInfo            `json:"vm"`
 	LastMetrics           *api.Metrics          `json:"lastMetrics"`
@@ -235,7 +231,6 @@ type RunnerState struct {
 
 // SchedulerState is the state of a Scheduler, constructed as part of a Runner's State Method
 type SchedulerState struct {
-	LogPrefix  string                   `json:"logPrefix"`
 	Info       schedwatch.SchedulerInfo `json:"info"`
 	Registered bool                     `json:"registered"`
 	FatalError error                    `json:"fatalError"`
@@ -250,7 +245,6 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	var scheduler *SchedulerState
 	if r.scheduler != nil {
 		scheduler = &SchedulerState{
-			LogPrefix:  r.scheduler.logger.Prefix,
 			Info:       r.scheduler.info,
 			Registered: r.scheduler.registered,
 			FatalError: r.scheduler.fatalError,
@@ -281,14 +275,13 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 		LastInformantError:    r.lastInformantError,
 		VM:                    r.vm,
 		PodIP:                 r.podIP,
-		LogPrefix:             r.logger.Prefix,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
 
 		SchedulerRespondedWithMigration: r.schedulerRespondedWithMigration,
 	}, nil
 }
 
-func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiver) {
+func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated util.CondChannelReceiver) {
 	go func() {
 		// Gracefully handle panics, plus trigger restart
 		defer func() {
@@ -303,10 +296,10 @@ func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiv
 				})
 			}
 
-			r.global.TriggerRestartIfNecessary(ctx, r.podName, r.podIP)
+			r.global.TriggerRestartIfNecessary(ctx, logger, r.podName, r.podIP)
 		}()
 
-		err := r.Run(ctx, vmInfoUpdated)
+		err := r.Run(ctx, logger, vmInfoUpdated)
 		endTime := time.Now()
 
 		exitKind := podStatusExitCanceled // normal exit, only by context being canceled.
@@ -323,9 +316,9 @@ func (r *Runner) Spawn(ctx context.Context, vmInfoUpdated util.CondChannelReceiv
 		})
 
 		if err != nil {
-			r.logger.Errorf("Ended with error: %s", err)
+			logger.Error("Ended with error", zap.Error(err))
 		} else {
-			r.logger.Infof("Ended without error")
+			logger.Info("Ended without error")
 		}
 	}()
 }
@@ -337,12 +330,12 @@ func (r *Runner) setStatus(with func(*podStatus)) {
 }
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
-func (r *Runner) Run(ctx context.Context, vmInfoUpdated util.CondChannelReceiver) error {
+func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util.CondChannelReceiver) error {
 	ctx, r.shutdown = context.WithCancel(ctx)
 	defer r.shutdown()
 
 	schedulerWatch, scheduler, err := schedwatch.WatchSchedulerUpdates(
-		ctx, r.logger, r.global.schedulerEventBroker, r.global.schedulerStore,
+		ctx, logger.Named("sched-watch"), r.global.schedulerEventBroker, r.global.schedulerStore,
 	)
 	if err != nil {
 		return fmt.Errorf("Error starting scheduler watcher: %w", err)
@@ -350,12 +343,9 @@ func (r *Runner) Run(ctx context.Context, vmInfoUpdated util.CondChannelReceiver
 	defer schedulerWatch.Stop()
 
 	if scheduler == nil {
-		r.logger.Warningf("No initial scheduler found")
+		logger.Warn("No initial scheduler found")
 	} else {
-		r.logger.Infof(
-			"Got initial scheduler pod %v (UID = %v) with IP %v",
-			scheduler.PodName, scheduler.UID, scheduler.IP,
-		)
+		logger.Info("Got initial scheduler pod", zap.Object("scheduler", scheduler))
 		schedulerWatch.Using(*scheduler)
 	}
 
@@ -368,25 +358,25 @@ func (r *Runner) Run(ctx context.Context, vmInfoUpdated util.CondChannelReceiver
 	// signal when the informant requests upscaling
 	sendUpscaleRequested, recvUpscaleRequested := util.NewCondChannelPair()
 
-	r.logger.Infof("Starting background workers")
+	logger.Info("Starting background workers")
 
 	// FIXME: make these timeouts/delays separately defined constants, or configurable
 	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
 	reqDeadlockChecker := r.requestLock.DeadlockChecker(5*time.Second, time.Second)
 
-	r.spawnBackgroundWorker(ctx, "deadlock checker (main)", mainDeadlockChecker)
-	r.spawnBackgroundWorker(ctx, "deadlock checker (request lock)", reqDeadlockChecker)
-	r.spawnBackgroundWorker(ctx, "track scheduler", func(c context.Context) {
-		r.trackSchedulerLoop(c, scheduler, schedulerWatch, sendSchedSignal)
+	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (main)", ignoreLogger(mainDeadlockChecker))
+	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (request lock)", ignoreLogger(reqDeadlockChecker))
+	r.spawnBackgroundWorker(ctx, logger, "track scheduler", func(c context.Context, l *zap.Logger) {
+		r.trackSchedulerLoop(c, l, scheduler, schedulerWatch, sendSchedSignal)
 	})
-	r.spawnBackgroundWorker(ctx, "get metrics", func(c context.Context) {
-		r.getMetricsLoop(c, sendMetricsSignal, recvInformantUpd)
+	r.spawnBackgroundWorker(ctx, logger, "get metrics", func(c context.Context, l *zap.Logger) {
+		r.getMetricsLoop(c, l, sendMetricsSignal, recvInformantUpd)
 	})
-	r.spawnBackgroundWorker(ctx, "handle VM resources", func(c context.Context) {
-		r.handleVMResources(c, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal, vmInfoUpdated)
+	r.spawnBackgroundWorker(ctx, logger, "handle VM resources", func(c context.Context, l *zap.Logger) {
+		r.handleVMResources(c, l, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal, vmInfoUpdated)
 	})
-	r.spawnBackgroundWorker(ctx, "informant server loop", func(c context.Context) {
-		r.serveInformantLoop(c, sendInformantUpd, sendUpscaleRequested)
+	r.spawnBackgroundWorker(ctx, logger, "informant server loop", func(c context.Context, l *zap.Logger) {
+		r.serveInformantLoop(c, l, sendInformantUpd, sendUpscaleRequested)
 	})
 
 	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
@@ -403,14 +393,22 @@ func (r *Runner) Run(ctx context.Context, vmInfoUpdated util.CondChannelReceiver
 // Background tasks //
 //////////////////////
 
+func ignoreLogger(f func(context.Context)) func(context.Context, *zap.Logger) {
+	return func(c context.Context, _ *zap.Logger) {
+		f(c)
+	}
+}
+
 // spawnBackgroundWorker is a helper function to appropriately handle panics in the various goroutines
 // spawned by `(Runner) Run`, sending them back on r.backgroundPanic
 //
 // This method is essentially equivalent to 'go f(ctx)' but with appropriate panic handling,
 // start/stop logging, and updating of r.backgroundWorkerCount
-func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(context.Context)) {
+func (r *Runner) spawnBackgroundWorker(ctx context.Context, logger *zap.Logger, name string, f func(context.Context, *zap.Logger)) {
 	// Increment the background worker count
 	r.backgroundWorkerCount.Add(1)
+
+	logger = logger.With(zap.String("taskName", name))
 
 	go func() {
 		defer func() {
@@ -421,7 +419,6 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(
 				r.global.metrics.runnerThreadPanics.Inc()
 
 				err := fmt.Errorf("background worker %q panicked: %v", name, v)
-				r.logger.Errorf("%s", err)
 				// note: In Go, the stack doesn't "unwind" on panic. Instead, a panic will traverse up
 				// the callstack, and each deferred function, when called, will be *added* to the stack
 				// as if the original panic() is calling them. So the output of runtime/debug.Stack()
@@ -430,20 +427,24 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(
 				//
 				// FIXME: we should handle the stack ourselves to remove the stack frames from
 				// debug.Stack() and co. -- it's ok to have nice things!
-				r.logger.Errorf("background worker %q panic stack: %s", name, string(debug.Stack()))
+				logger.Error(
+					"background worker panicked",
+					zap.String("error", fmt.Sprint(v)),
+					zap.String("stack", string(debug.Stack())),
+				)
 				// send to r.backgroundPanic if we can; otherwise, don't worry about it.
 				select {
 				case r.backgroundPanic <- err:
 				default:
 				}
 			} else {
-				r.logger.Infof("background worker %q ended normally", name)
+				logger.Info("background worker ended normally")
 			}
 		}()
 
-		r.logger.Infof("background worker %q started", name)
+		logger.Info("background worker started")
 
-		f(ctx)
+		f(ctx, logger)
 	}()
 }
 
@@ -454,6 +455,7 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, name string, f func(
 // in between.
 func (r *Runner) getMetricsLoop(
 	ctx context.Context,
+	logger *zap.Logger,
 	newMetrics util.CondChannelSender,
 	updatedInformant util.CondChannelReceiver,
 ) {
@@ -464,15 +466,15 @@ func (r *Runner) getMetricsLoop(
 	minWaitDuration := time.Second
 
 	for {
-		metrics, err := r.doMetricsRequestIfEnabled(ctx, timeout, updatedInformant.Consume)
+		metrics, err := r.doMetricsRequestIfEnabled(ctx, logger, timeout, updatedInformant.Consume)
 		if err != nil {
-			r.logger.Errorf("Error making metrics request: %s", err)
+			logger.Error("Error making metrics request", zap.Error(err))
 			goto next
 		} else if metrics == nil {
 			goto next
 		}
 
-		r.logger.Infof("Got metrics %+v", *metrics)
+		logger.Info("Got metrics", zap.Any("metrics", *metrics))
 
 		func() {
 			r.lock.Lock()
@@ -497,7 +499,7 @@ func (r *Runner) getMetricsLoop(
 		case <-ctx.Done():
 			return
 		case <-updatedInformant.Recv():
-			r.logger.Infof("Shortcutting normal metrics wait because informant was updated")
+			logger.Info("Shortcutting normal metrics wait because informant was updated")
 		case <-waitBetween:
 		}
 
@@ -515,6 +517,7 @@ func (r *Runner) getMetricsLoop(
 // possible, without the metrics being updated.
 func (r *Runner) handleVMResources(
 	ctx context.Context,
+	logger *zap.Logger,
 	updatedMetrics util.CondChannelReceiver,
 	upscaleRequested util.CondChannelReceiver,
 	registeredScheduler util.CondChannelReceiver,
@@ -624,15 +627,15 @@ func (r *Runner) handleVMResources(
 		}
 
 		err := r.updateVMResources(
-			ctx, reason, updatedMetrics.Consume, registeredScheduler.Consume,
+			ctx, logger, reason, updatedMetrics.Consume, registeredScheduler.Consume,
 		)
 		if err != nil {
 			if ctx.Err() != nil {
-				r.logger.Warningf("Error updating VM resources: %s", err)
+				logger.Warn("Error updating VM resources (but context already expired)", zap.Error(err))
 				return
 			}
 
-			r.logger.Errorf("Error updating VM resources: %s", err)
+			logger.Error("Error updating VM resources", zap.Error(err))
 		}
 	}
 }
@@ -643,6 +646,7 @@ func (r *Runner) handleVMResources(
 // This function directly sets the value of r.server and indirectly sets r.informant.
 func (r *Runner) serveInformantLoop(
 	ctx context.Context,
+	logger *zap.Logger,
 	updatedInformant util.CondChannelSender,
 	upscaleRequested util.CondChannelSender,
 ) {
@@ -664,11 +668,11 @@ retryServer:
 		// starting the server, because otherwise it's possible for a racy /try-upscale request to
 		// sneak in before we reset it, which would cause us to incorrectly ignore the request.
 		if upscaleRequested.Unsend() {
-			r.logger.Infof("Cancelled existing 'upscale requested' signal due to informant server restart")
+			logger.Info("Cancelled existing 'upscale requested' signal due to informant server restart")
 		}
 
 		if normalRetryWait != nil {
-			r.logger.Infof("Retrying informant server in %s", normalWait)
+			logger.Info("Retrying informant server after delay", zap.Duration("delay", normalWait))
 			select {
 			case <-ctx.Done():
 				return
@@ -679,11 +683,11 @@ retryServer:
 		if minRetryWait != nil {
 			select {
 			case <-minRetryWait:
-				r.logger.Infof("Retrying informant server")
+				logger.Info("Retrying informant server")
 			default:
-				r.logger.Infof(
-					"Informant server ended quickly, only %s ago. Respecting minimum wait of %s",
-					time.Since(lastStart), minWait,
+				logger.Info(
+					"Informant server ended quickly. Respecting minimum delay before restart",
+					zap.Duration("activeTime", time.Since(lastStart)), zap.Duration("delay", minWait),
 				)
 				select {
 				case <-ctx.Done():
@@ -697,15 +701,15 @@ retryServer:
 		minRetryWait = time.After(minWait)
 		lastStart = time.Now()
 
-		server, exited, err := NewInformantServer(ctx, r, updatedInformant, upscaleRequested)
+		server, exited, err := NewInformantServer(ctx, logger, r, updatedInformant, upscaleRequested)
 		if ctx.Err() != nil {
 			if err != nil {
-				r.logger.Warningf("Error starting informant server, context cancelled: %s", err)
+				logger.Warn("Error starting informant server (but context canceled)", zap.Error(err))
 			}
 			return
 		} else if err != nil {
 			normalRetryWait = time.After(normalWait)
-			r.logger.Errorf("Error starting informant server: %s", err)
+			logger.Error("Error starting informant server", zap.Error(err))
 			continue retryServer
 		}
 
@@ -721,26 +725,26 @@ retryServer:
 				kind = "Updating"
 			}
 
-			r.logger.Infof("%s initial informant server, desc = %+v", kind, server.desc)
+			logger.Info(fmt.Sprintf("%s initial informant server", kind), zap.Object("server", server.desc))
 			r.server = server
 		}()
 
-		r.logger.Infof("Registering with informant")
+		logger.Info("Registering with informant")
 
 		// Try to register with the informant:
 	retryRegister:
 		for {
-			err := server.RegisterWithInformant(ctx)
+			err := server.RegisterWithInformant(ctx, logger)
 			if err == nil {
 				break // all good; wait for the server to finish.
 			} else if ctx.Err() != nil {
 				if err != nil {
-					r.logger.Warningf("Error registering with informant, context cancelled: %s", err)
+					logger.Warn("Error registering with informant (but context cancelled)", zap.Error(err))
 				}
 				return
 			}
 
-			r.logger.Warningf("Error registering with informant: %s", err)
+			logger.Warn("Error registering with informant", zap.Error(err))
 
 			// Server exited; can't just retry registering.
 			if server.ExitStatus() != nil {
@@ -749,7 +753,7 @@ retryServer:
 			}
 
 			// Wait before retrying registering
-			r.logger.Infof("Retrying registering with informant after %s", retryRegister)
+			logger.Info("Retrying registering with informant after delay", zap.Duration("delay", retryRegister))
 			select {
 			case <-time.After(retryRegister):
 				continue retryRegister
@@ -783,6 +787,7 @@ retryServer:
 // on registeredScheduler whenever a new Scheduler is successfully registered
 func (r *Runner) trackSchedulerLoop(
 	ctx context.Context,
+	logger *zap.Logger,
 	init *schedwatch.SchedulerInfo,
 	schedulerWatch schedwatch.SchedulerWatch,
 	registeredScheduler util.CondChannelSender,
@@ -812,21 +817,17 @@ startScheduler:
 
 	// Set the current scheduler
 	fatal = func() util.SignalReceiver {
+		logger := logger.With(zap.Object("scheduler", currentInfo))
+
 		// Print info about a new scheduler, unless this is the first one.
 		if init == nil || init.UID != currentInfo.UID {
-			r.logger.Infof(
-				"Updating scheduler to pod %v (UID = %s) with IP %s",
-				currentInfo.PodName, currentInfo.UID, currentInfo.IP,
-			)
+			logger.Info("Updating scheduler pod")
 		}
 
 		sendFatal, recvFatal := util.NewSingleSignalPair()
 
 		sched := &Scheduler{
-			runner: r,
-			logger: util.PrefixLogger{
-				Prefix: fmt.Sprintf("%sScheduler %s: ", r.logger.Prefix, currentInfo.UID),
-			},
+			runner:     r,
 			info:       currentInfo,
 			registered: false,
 			fatalError: nil,
@@ -841,7 +842,7 @@ startScheduler:
 			r.lastSchedulerError = nil
 		}()
 
-		r.spawnBackgroundWorker(ctx, fmt.Sprintf("Scheduler(%s).Register()", currentInfo.UID), func(c context.Context) {
+		r.spawnBackgroundWorker(ctx, logger, "Scheduler.Register()", func(c context.Context, logger *zap.Logger) {
 			r.requestLock.Lock()
 			defer r.requestLock.Unlock()
 
@@ -851,11 +852,11 @@ startScheduler:
 				return
 			}
 
-			if err := sched.Register(c, registeredScheduler.Send); err != nil {
+			if err := sched.Register(c, logger, registeredScheduler.Send); err != nil {
 				if c.Err() != nil {
-					r.logger.Warningf("Error registering with scheduler (but context is done): %s", err)
+					logger.Warn("Error registering with scheduler (but context is done)", zap.Error(err))
 				} else {
-					r.logger.Errorf("Error registering with scheduler: %s", err)
+					logger.Error("Error registering with scheduler", zap.Error(err))
 				}
 			}
 		})
@@ -869,7 +870,10 @@ startScheduler:
 		case <-ctx.Done():
 			return
 		case <-fatal.Recv():
-			r.logger.Infof("Waiting for new scheduler because current fatally errored")
+			logger.Info(
+				"Waiting for new scheduler because current fatally errored",
+				zap.Object("scheduler", currentInfo),
+			)
 			failed = true
 			goto waitForNewScheduler
 		case info := <-schedulerWatch.Deleted:
@@ -878,16 +882,16 @@ startScheduler:
 				defer r.lock.Unlock()
 
 				if r.scheduler.info.UID != info.UID {
-					r.logger.Infof(
-						"Scheduler candidate pod %v was deleted, but we aren't using it (its UID = %v, ours = %v)",
-						info.PodName, info.UID, r.scheduler.info.UID,
+					logger.Info(
+						"Scheduler candidate pod was deleted, but we aren't using it yet",
+						zap.Object("scheduler", r.scheduler.info), zap.Object("candidate", info),
 					)
 					return false
 				}
 
-				r.logger.Infof(
-					"Scheduler pod %v (UID = %v) was deleted, ending further communication",
-					r.scheduler.info.PodName, r.scheduler.info.UID,
+				logger.Info(
+					"Scheduler pod was deleted. Aborting further communication",
+					zap.Object("scheduler", r.scheduler.info),
 				)
 
 				r.scheduler = nil
@@ -917,9 +921,9 @@ waitForNewScheduler:
 			}
 
 			// Not ready yet; let's log something about it:
-			r.logger.Infof(
-				"Scheduler %s quickly, only %s ago. Respecting minimum wait of %s",
-				endingMode, time.Since(lastStart), minWait,
+			logger.Info(
+				fmt.Sprintf("Scheduler %s quickly. Respecting minimum delay before switching to a new one", endingMode),
+				zap.Duration("activeTime", time.Since(lastStart)), zap.Duration("delay", minWait),
 			)
 			select {
 			case <-ctx.Done():
@@ -948,10 +952,11 @@ waitForNewScheduler:
 // This method expects that the Runner is not locked.
 func (r *Runner) doMetricsRequestIfEnabled(
 	ctx context.Context,
+	logger *zap.Logger,
 	timeout time.Duration,
 	clearNewInformantSignal func(),
 ) (*api.Metrics, error) {
-	r.logger.Infof("Attempting metrics request")
+	logger.Info("Attempting metrics request")
 
 	// FIXME: the region where the lock is held should be extracted into a separate method, called
 	// something like buildMetricsRequest().
@@ -976,7 +981,7 @@ func (r *Runner) doMetricsRequestIfEnabled(
 			state = string(r.server.mode)
 		}
 
-		r.logger.Infof("Cannot make metrics request because informant server is %s", state)
+		logger.Info(fmt.Sprintf("Cannot make metrics request because informant server is %s", state))
 		return nil, nil
 	}
 
@@ -1014,7 +1019,7 @@ func (r *Runner) doMetricsRequestIfEnabled(
 	locked = false
 	r.lock.Unlock()
 
-	r.logger.Infof("Making metrics request to %q", url)
+	logger.Info("Making metrics request to VM", zap.String("url", url))
 
 	resp, err := http.DefaultClient.Do(req)
 	if ctx.Err() != nil {
@@ -1069,6 +1074,7 @@ type atomicUpdateState struct {
 // appropriate message is logged.
 func (r *Runner) updateVMResources(
 	ctx context.Context,
+	logger *zap.Logger,
 	reason VMUpdateReason,
 	clearUpdatedMetricsSignal func(),
 	clearNewSchedulerSignal func(),
@@ -1082,7 +1088,7 @@ func (r *Runner) updateVMResources(
 	}
 	defer r.requestLock.Unlock()
 
-	r.logger.Infof("Updating VM resources: reason = %q", reason)
+	logger.Info("Updating VM resources", zap.String("reason", string(reason)))
 
 	// A /suspend request from a VM informant will wait until requestLock returns. So we're good to
 	// make whatever requests we need as long as the informant is here at the start.
@@ -1090,7 +1096,7 @@ func (r *Runner) updateVMResources(
 	// The reason we care about the informant server being "enabled" is that the VM informant uses
 	// it to ensure that there's at most one autoscaler-agent that's making requests on its behalf.
 	if err := r.validateInformant(); err != nil {
-		r.logger.Warningf("Unable to update VM resources because informant server is disabled: %s", err)
+		logger.Warn("Unable to update VM resources because informant server is disabled", zap.Error(err))
 		return nil
 	}
 
@@ -1101,7 +1107,7 @@ func (r *Runner) updateVMResources(
 	)
 
 	if r.schedulerRespondedWithMigration {
-		r.logger.Infof("Aborting VM resource update because scheduler previously said VM is migrating")
+		logger.Info("Aborting VM resource update because scheduler previously said VM is migrating")
 		return nil
 	}
 
@@ -1111,12 +1117,12 @@ func (r *Runner) updateVMResources(
 
 		clearUpdatedMetricsSignal()
 
-		state := r.getStateForVMUpdate(reason)
+		state := r.getStateForVMUpdate(logger, reason)
 		if state == nil {
 			// if state == nil, the reason why we can't do the operation was already logged.
 			return nil, nil
 		} else if r.scheduler != nil && r.scheduler.fatalError != nil {
-			r.logger.Warningf("Unable to update VM resources because scheduler had a prior fatal error")
+			logger.Warn("Unable to update VM resources because scheduler had a prior fatal error")
 			return nil, nil
 		}
 
@@ -1125,11 +1131,11 @@ func (r *Runner) updateVMResources(
 
 		current := state.vm.Using()
 
+		msg := "Target VM state is equal to current"
 		if target != current {
-			r.logger.Infof("Target VM state %+v different from current %+v", target, current)
-		} else {
-			r.logger.Infof("Target VM state is current %+v", target)
+			msg = "Target VM state different from current"
 		}
+		logger.Info(msg, zap.Object("current", current), zap.Object("target", target))
 
 		// Check if there's resources that can (or must) be updated before talking to the scheduler.
 		//
@@ -1164,7 +1170,7 @@ func (r *Runner) updateVMResources(
 			return target.Min(state.lastApproved), nil
 		}
 
-		nowUsing, err := r.doVMUpdate(ctx, state.vm.Using(), capped, rejectedDownscale)
+		nowUsing, err := r.doVMUpdate(ctx, logger, state.vm.Using(), capped, rejectedDownscale)
 		if err != nil {
 			return fmt.Errorf("Error doing VM update 1: %w", err)
 		} else if nowUsing == nil {
@@ -1195,16 +1201,16 @@ func (r *Runner) updateVMResources(
 	// If we can't reach the scheduler, then we've already done everything we can. Emit a
 	// warning and exit. We'll get notified to retry when a new one comes online.
 	if sched == nil {
-		r.logger.Warningf("Unable to complete updating VM resources: no scheduler registered")
+		logger.Warn("Unable to complete updating VM resources", zap.Error(errors.New("no scheduler registered")))
 		return nil
 	}
 
 	// If the scheduler isn't registered yet, then either the initial register request failed, or it
 	// hasn't gotten a chance to send it yet.
 	if !sched.registered {
-		if err := sched.Register(ctx, func() {}); err != nil {
-			sched.logger.Errorf("Error attempting register: %s", err)
-			r.logger.Warningf("Unable to complete updating VM resources: scheduler Register failed")
+		if err := sched.Register(ctx, logger, func() {}); err != nil {
+			logger.Error("Error registering with scheduler", zap.Object("scheduler", sched.info), zap.Error(err))
+			logger.Warn("Unable to complete updating VM resources", zap.Error(errors.New("scheduler Register request failed")))
 			return nil
 		}
 	}
@@ -1215,10 +1221,10 @@ func (r *Runner) updateVMResources(
 		Resources:    target,
 		Metrics:      &state.metrics, // FIXME: the metrics here *might* be a little out of date.
 	}
-	response, err := sched.DoRequest(ctx, &request)
+	response, err := sched.DoRequest(ctx, logger, &request)
 	if err != nil {
-		sched.logger.Errorf("Request failed: %s", err)
-		r.logger.Warningf("Unable to complete updating VM resources: scheduler request failed")
+		logger.Error("Scheduler request failed", zap.Object("scheduler", sched.info), zap.Error(err))
+		logger.Warn("Unable to complete updating VM resources", zap.Error(errors.New("scheduler request failed")))
 		return nil
 	} else if response.Migrate != nil {
 		// info about migration has already been logged by DoRequest
@@ -1238,22 +1244,22 @@ func (r *Runner) updateVMResources(
 
 	if permit == vmUsing {
 		if vmUsing != target {
-			r.logger.Infof("Scheduler denied increase, staying at %+v", vmUsing)
+			logger.Info("Scheduler denied increase, staying at current", zap.Object("current", vmUsing))
 		}
 
 		// nothing to do
 		return nil
 	} else /* permit > vmUsing */ {
 		if permit != target {
-			r.logger.Infof("Scheduler capped increase to %+v", permit)
+			logger.Warn("Scheduler capped increase to permit", zap.Object("permit", permit))
 		} else {
-			r.logger.Infof("Scheduler allowed increase to %+v", permit)
+			logger.Info("Scheduler allowed increase to permit", zap.Object("permit", permit))
 		}
 
 		rejectedDownscale := func() (newTarget api.Resources, _ error) {
 			panic(errors.New("rejectedDownscale called but request should be increasing, not decreasing"))
 		}
-		if _, err := r.doVMUpdate(ctx, vmUsing, permit, rejectedDownscale); err != nil {
+		if _, err := r.doVMUpdate(ctx, logger, vmUsing, permit, rejectedDownscale); err != nil {
 			return fmt.Errorf("Error doing VM update 2: %w", err)
 		}
 
@@ -1264,13 +1270,13 @@ func (r *Runner) updateVMResources(
 // getStateForVMUpdate produces the atomicUpdateState for updateVMResources
 //
 // This method MUST be called while holding r.lock.
-func (r *Runner) getStateForVMUpdate(updateReason VMUpdateReason) *atomicUpdateState {
+func (r *Runner) getStateForVMUpdate(logger *zap.Logger, updateReason VMUpdateReason) *atomicUpdateState {
 	if r.lastMetrics == nil {
 		if updateReason == UpdatedMetrics {
 			panic(errors.New("invalid state: metrics signalled but r.lastMetrics == nil"))
 		}
 
-		r.logger.Warningf("Unable to update VM resources because we haven't received metrics yet")
+		logger.Warn("Unable to update VM resources because we haven't received metrics yet")
 		return nil
 	} else if r.computeUnit == nil {
 		if updateReason == RegisteredScheduler {
@@ -1282,7 +1288,7 @@ func (r *Runner) getStateForVMUpdate(updateReason VMUpdateReason) *atomicUpdateS
 
 		// note: as per the docs on r.computeUnit, this should only occur when we haven't yet talked
 		// to a scheduler.
-		r.logger.Warningf("Unable to update VM resources because r.computeUnit hasn't been set yet")
+		logger.Warn("Unable to update VM resources because r.computeUnit hasn't been set yet")
 		return nil
 	} else if r.lastApproved == nil {
 		panic(errors.New("invalid state: r.computeUnit != nil but r.lastApproved == nil"))
@@ -1421,11 +1427,12 @@ func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint32 {
 // This method MUST be called while holding r.requestLock AND NOT r.lock.
 func (r *Runner) doVMUpdate(
 	ctx context.Context,
+	logger *zap.Logger,
 	current api.Resources,
 	target api.Resources,
 	rejectedDownscale func() (newTarget api.Resources, _ error),
 ) (*api.Resources, error) {
-	r.logger.Infof("Attempting VM update %+v -> %+v", current, target)
+	logger.Info("Attempting VM update", zap.Object("current", current), zap.Object("target", target))
 
 	// helper handling function to reset r.vm to reflect the actual current state. Must not be
 	// called while holding r.lock.
@@ -1437,7 +1444,7 @@ func (r *Runner) doVMUpdate(
 	}
 
 	if err := r.validateInformant(); err != nil {
-		r.logger.Warningf("Aborting VM update because informant server is not valid: %s", err)
+		logger.Warn("Aborting VM update because informant server is not valid", zap.Error(err))
 		resetVMTo(current)
 		return nil, nil
 	}
@@ -1445,7 +1452,7 @@ func (r *Runner) doVMUpdate(
 	// If there's any fields that are being downscaled, request that from the VM informant.
 	downscaled := current.Min(target)
 	if downscaled != current {
-		resp, err := r.doInformantDownscale(ctx, downscaled)
+		resp, err := r.doInformantDownscale(ctx, logger, downscaled)
 		if err != nil || resp == nil /* resp = nil && err = nil when the error has been handled */ {
 			return nil, err
 		}
@@ -1463,7 +1470,7 @@ func (r *Runner) doVMUpdate(
 			}
 
 			if newTarget != target {
-				r.logger.Infof("VM update: rejected downscale changed target to %+v", newTarget)
+				logger.Info("VM update: rejected downscale changed target", zap.Object("target", newTarget))
 			}
 
 			target = newTarget
@@ -1471,7 +1478,6 @@ func (r *Runner) doVMUpdate(
 	}
 
 	// Make the NeonVM request
-	r.logger.Infof("Making NeonVM request for %+v", target)
 	patches := []util.JSONPatch{{
 		Op:    util.PatchReplace,
 		Path:  "/spec/guest/cpus/use",
@@ -1481,6 +1487,8 @@ func (r *Runner) doVMUpdate(
 		Path:  "/spec/guest/memorySlots/use",
 		Value: target.Mem,
 	}}
+
+	logger.Info("Making NeonVM request for resources", zap.Object("target", target), zap.Any("patches", patches))
 
 	patchPayload, err := json.Marshal(patches)
 	if err != nil {
@@ -1532,12 +1540,12 @@ func (r *Runner) doVMUpdate(
 			r.requestedUpscale = r.requestedUpscale.And(upscaled.IncreaseFrom(current).Not())
 		}()
 
-		if ok, err := r.doInformantUpscale(ctx, upscaled); err != nil || !ok {
+		if ok, err := r.doInformantUpscale(ctx, logger, upscaled); err != nil || !ok {
 			return nil, err
 		}
 	}
 
-	r.logger.Infof("Updated VM %+v -> %+v", current, target)
+	logger.Info("Updated VM resources", zap.Object("current", current), zap.Object("target", target))
 
 	// Everything successful.
 	return &target, nil
@@ -1568,7 +1576,7 @@ func (r *Runner) validateInformant() error {
 // returns nil, nil.
 //
 // This method MUST NOT be called while holding r.lock.
-func (r *Runner) doInformantDownscale(ctx context.Context, to api.Resources) (*api.DownscaleResult, error) {
+func (r *Runner) doInformantDownscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
 	msg := "Error requesting informant downscale"
 
 	server := func() *InformantServer {
@@ -1580,10 +1588,10 @@ func (r *Runner) doInformantDownscale(ctx context.Context, to api.Resources) (*a
 		return nil, fmt.Errorf("%s: InformantServer is not set (this should not occur after startup)", msg)
 	}
 
-	resp, err := server.Downscale(ctx, to)
+	resp, err := server.Downscale(ctx, logger, to)
 	if err != nil {
 		if IsNormalInformantError(err) {
-			r.logger.Warningf("%s: %s", msg, err)
+			logger.Warn(msg, zap.Object("server", server.desc), zap.Error(err))
 			return nil, nil
 		} else {
 			return nil, fmt.Errorf("%s: %w", msg, err)
@@ -1600,7 +1608,7 @@ func (r *Runner) doInformantDownscale(ctx context.Context, to api.Resources) (*a
 // returns false, nil.
 //
 // This method MUST NOT be called while holding r.lock.
-func (r *Runner) doInformantUpscale(ctx context.Context, to api.Resources) (ok bool, _ error) {
+func (r *Runner) doInformantUpscale(ctx context.Context, logger *zap.Logger, to api.Resources) (ok bool, _ error) {
 	msg := "Error notifying informant of upscale"
 
 	server := func() *InformantServer {
@@ -1612,9 +1620,9 @@ func (r *Runner) doInformantUpscale(ctx context.Context, to api.Resources) (ok b
 		return false, fmt.Errorf("%s: InformantServer is not set (this should not occur after startup)", msg)
 	}
 
-	if err := server.Upscale(ctx, to); err != nil {
+	if err := server.Upscale(ctx, logger, to); err != nil {
 		if IsNormalInformantError(err) {
-			r.logger.Warningf("%s: %s", msg, err)
+			logger.Warn(msg, zap.Error(err))
 			return false, nil
 		} else {
 			return false, fmt.Errorf("%s: %w", msg, err)
@@ -1633,7 +1641,7 @@ func (r *Runner) doInformantUpscale(ctx context.Context, to api.Resources) (ok b
 // s.runner.scheduler == s.
 //
 // This method MUST be called while holding s.runner.requestLock AND NOT s.runner.lock
-func (s *Scheduler) Register(ctx context.Context, signalOk func()) error {
+func (s *Scheduler) Register(ctx context.Context, logger *zap.Logger, signalOk func()) error {
 	metrics, resources := func() (*api.Metrics, api.Resources) {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
@@ -1647,7 +1655,7 @@ func (s *Scheduler) Register(ctx context.Context, signalOk func()) error {
 		Resources:    resources,
 		Metrics:      metrics,
 	}
-	if _, err := s.DoRequest(ctx, &req); err != nil {
+	if _, err := s.DoRequest(ctx, logger, &req); err != nil {
 		return err
 	}
 
@@ -1676,7 +1684,9 @@ func (s *Scheduler) Register(ctx context.Context, signalOk func()) error {
 // This method MAY ALSO call s.runner.shutdown(), if s.runner.scheduler == s.
 //
 // This method MUST be called while holding s.runner.requestLock AND NOT s.runner.lock.
-func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*api.PluginResponse, error) {
+func (s *Scheduler) DoRequest(ctx context.Context, logger *zap.Logger, reqData *api.AgentRequest) (*api.PluginResponse, error) {
+	logger = logger.With(zap.Object("scheduler", s.info))
+
 	reqBody, err := json.Marshal(reqData)
 	if err != nil {
 		return nil, s.handlePreRequestError(fmt.Errorf("Error encoding request JSON: %w", err))
@@ -1694,7 +1704,7 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 	}
 	request.Header.Set("content-type", "application/json")
 
-	s.logger.Infof("Sending AgentRequest: %s", string(reqBody))
+	logger.Info("Sending AgentRequest", zap.Any("request", reqData))
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -1734,7 +1744,7 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 		return nil, s.handleRequestError(reqData, fmt.Errorf("Bad JSON response: %w", err))
 	}
 
-	s.logger.Infof("Received PluginResponse: %s", string(respBody))
+	logger.Info("Received PluginResponse", zap.Any("response", respData))
 
 	s.runner.lock.Lock()
 	locked := true
@@ -1744,7 +1754,7 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 		}
 	}()
 
-	if err := s.validatePluginResponse(reqData, &respData); err != nil {
+	if err := s.validatePluginResponse(logger, reqData, &respData); err != nil {
 		// Must unlock before handling because it's required by validatePluginResponse, but
 		// handleFatalError is required not to have it.
 		locked = false
@@ -1761,7 +1771,7 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 		s.runner.lastApproved = &respData.Permit
 		s.runner.lastSchedulerError = nil
 		if respData.Migrate != nil {
-			s.logger.Infof("Shutting down Runner because scheduler response indicated migration started")
+			logger.Info("Shutting down Runner because scheduler response indicated migration started")
 			s.runner.schedulerRespondedWithMigration = true
 			s.runner.shutdown()
 		}
@@ -1777,6 +1787,7 @@ func (s *Scheduler) DoRequest(ctx context.Context, reqData *api.AgentRequest) (*
 //
 // This method MUST be called while holding s.runner.requestLock AND s.runner.lock.
 func (s *Scheduler) validatePluginResponse(
+	logger *zap.Logger,
 	req *api.AgentRequest,
 	resp *api.PluginResponse,
 ) error {
@@ -1810,7 +1821,7 @@ func (s *Scheduler) validatePluginResponse(
 	}
 
 	if !isCurrent && resp.Migrate != nil {
-		s.logger.Warningf("scheduler is no longer current, but its response signalled migration")
+		logger.Warn("scheduler is no longer current, but its response signalled migration")
 	}
 
 	return nil

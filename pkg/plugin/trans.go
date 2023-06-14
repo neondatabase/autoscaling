@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/constraints"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -64,6 +65,19 @@ func collectResourceTransition[T constraints.Unsigned](
 			capacityPressure: pod.CapacityPressure,
 		},
 	}
+}
+
+// verdictSet represents a set of verdicts from some operation, for ease of logging
+type verdictSet struct {
+	cpu string
+	mem string
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler
+func (s verdictSet) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("cpu", s.cpu)
+	enc.AddString("mem", s.mem)
+	return nil
 }
 
 // handleRequested updates r.pod and r.node with changes to match the requested resources, within

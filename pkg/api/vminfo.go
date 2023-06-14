@@ -8,10 +8,10 @@ import (
 	"fmt"
 
 	"github.com/tychoish/fun/erc"
+	"go.uber.org/zap"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
@@ -99,7 +99,7 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 	return util.NamespacedName{Namespace: vm.Namespace, Name: vm.Name}
 }
 
-func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
+func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	var err error
 
 	getNonNilInt := func(err *error, ptr *int32, name string) (val int32) {
@@ -196,9 +196,17 @@ func ExtractVmInfo(vm *vmapi.VirtualMachine) (*VmInfo, error) {
 
 	// check: min <= using <= max
 	if using.HasFieldLessThan(min) {
-		klog.Warningf("VM %v current usage %+v has field less than minimum %+v", info.NamespacedName(), using, min)
+		logger.Warn(
+			"Current usage has field less than minimum",
+			util.VMNameFields(vm),
+			zap.Object("using", using), zap.Object("min", min),
+		)
 	} else if using.HasFieldGreaterThan(max) {
-		klog.Warningf("VM %v current usage %+v has field greater than maximum %+v", info.NamespacedName(), using, max)
+		logger.Warn(
+			"Current usage has field greater than maximum",
+			util.VMNameFields(vm),
+			zap.Object("using", using), zap.Object("max", max),
+		)
 	}
 
 	return &info, nil

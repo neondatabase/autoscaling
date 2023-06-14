@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"time"
 
+	"go.uber.org/zap"
+
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog/v2"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
@@ -71,11 +72,14 @@ const (
 
 func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
+	parentLogger *zap.Logger,
 	conf *Config,
 	store VMStoreForNode,
 	metrics PromMetrics,
 ) {
 	client := billing.NewClient(conf.URL, http.DefaultClient)
+
+	logger := parentLogger.Named("billing")
 
 	collectTicker := time.NewTicker(time.Second * time.Duration(conf.CollectEverySeconds))
 	defer collectTicker.Stop()
@@ -97,19 +101,21 @@ func RunBillingMetricsCollector(
 	for {
 		select {
 		case <-collectTicker.C:
-			klog.Infof("Collecting billing state")
+			logger.Info("Collecting billing state")
 			if store.Stopped() && backgroundCtx.Err() == nil {
-				panic(errors.New("VM store stopped but background context is still live"))
+				err := errors.New("VM store stopped but background context is still live")
+				logger.Panic("Validation check failed", zap.Error(err))
 			}
 			state.collect(conf, store, metrics)
 		case <-pushTicker.C:
-			klog.Infof("Creating billing batch")
-			state.drainAppendToBatch(conf, batch)
+			logger.Info("Creating billing batch")
+			state.drainAppendToBatch(logger, conf, batch)
 			metrics.batchSizeCurrent.Set(float64(batch.Count()))
-			klog.Infof("Pushing billing events (count = %d)", batch.Count())
+			logger.Info("Pushing billing events", zap.Int("count", batch.Count()))
+			_ = logger.Sync() // Sync before making the network request, so we guarantee logs for the action
 			if err := pushBillingEvents(conf, batch); err != nil {
 				metrics.sendErrorsTotal.Inc()
-				klog.Errorf("Error pushing billing events: %s", err)
+				logger.Error("Failed to push billing events", zap.Error(err))
 				continue
 			}
 			// Sending was successful; clear the batch.
@@ -119,13 +125,14 @@ func RunBillingMetricsCollector(
 			batch = client.NewBatch()
 		case <-backgroundCtx.Done():
 			// If we're being shut down, push the latests events we have before returning.
-			klog.Infof("Creating final billing batch")
-			state.drainAppendToBatch(conf, batch)
+			logger.Info("Creating final billing batch")
+			state.drainAppendToBatch(logger, conf, batch)
 			metrics.batchSizeCurrent.Set(float64(batch.Count()))
-			klog.Infof("Pushing final billing events (count = %d)", batch.Count())
+			logger.Info("Pushing final billing events", zap.Int("count", batch.Count()))
+			_ = logger.Sync() // Sync before making the network request, so we guarantee logs for the action
 			if err := pushBillingEvents(conf, batch); err != nil {
 				metrics.sendErrorsTotal.Inc()
-				klog.Errorf("Error pushing billing events: %s", err)
+				logger.Error("Failed to push billing events", zap.Error(err))
 			}
 			return
 		}
@@ -241,19 +248,24 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
-func logAddedEvent(event billing.IncrementalEvent) billing.IncrementalEvent {
-	klog.Infof("Adding event for EndpointID %q: MetricName=%q, Value=%d", event.EndpointID, event.MetricName, event.Value)
+func logAddedEvent(logger *zap.Logger, event billing.IncrementalEvent) billing.IncrementalEvent {
+	logger.Info(
+		"Adding event to batch",
+		zap.String("EndpointID", event.EndpointID),
+		zap.String("MetricName", event.MetricName),
+		zap.Int("Value", event.Value),
+	)
 	return event
 }
 
 // drainAppendToBatch clears the current history, adding it as events to the batch
-func (s *metricsState) drainAppendToBatch(conf *Config, batch *billing.Batch) {
+func (s *metricsState) drainAppendToBatch(logger *zap.Logger, conf *Config, batch *billing.Batch) {
 	now := time.Now()
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
 
-		batch.AddIncrementalEvent(logAddedEvent(billing.IncrementalEvent{
+		batch.AddIncrementalEvent(logAddedEvent(logger, billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
 			Type:           "", // set in batch method
 			IdempotencyKey: "", // set in batch method
@@ -264,7 +276,7 @@ func (s *metricsState) drainAppendToBatch(conf *Config, batch *billing.Batch) {
 			StopTime:  now,
 			Value:     int(math.Round(history.total.cpu)),
 		}))
-		batch.AddIncrementalEvent(logAddedEvent(billing.IncrementalEvent{
+		batch.AddIncrementalEvent(logAddedEvent(logger, billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
 			Type:           "", // set in batch method
 			IdempotencyKey: "", // set in batch method
