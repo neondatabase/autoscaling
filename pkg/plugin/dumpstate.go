@@ -141,7 +141,9 @@ type podStateDump struct {
 	MigrationState           *podMigrationStateDump           `json:"migrationState"`
 }
 
-type podMigrationStateDump struct{}
+type podMigrationStateDump struct {
+	MigrationName util.NamespacedName `json:"migrationName"`
+}
 
 type otherPodStateDump struct {
 	Obj       pointerString         `json:"obj"`
@@ -245,7 +247,9 @@ func (s *podState) dump() podStateDump {
 	}
 	var migrationState *podMigrationStateDump
 	if s.migrationState != nil {
-		migrationState = &podMigrationStateDump{}
+		migrationState = &podMigrationStateDump{
+			MigrationName: s.migrationState.name,
+		}
 	}
 
 	return podStateDump{

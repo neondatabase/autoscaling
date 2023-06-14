@@ -273,6 +273,37 @@ func (r resourceTransition[T]) handleAutoscalingDisabled() (verdict string) {
 	return verdict
 }
 
+// handleStartMigration updates r.node with changes to clear any buffer and capacityPressure from
+// r.pod.
+//
+// If the pod is the migration source, this method *also* increases the node's PressureAccountedFor
+// to match the pod's resource usage.
+func (r resourceTransition[T]) handleStartMigration(source bool) (verdict string) {
+	// The first bit of this is _mostly_ the same as handleAutoscalingDisabled.
+
+	buffer := r.pod.Buffer
+	valuesToReduce := []*T{&r.node.Reserved, &r.node.Buffer, &r.pod.Reserved, &r.pod.Buffer}
+	for _, v := range valuesToReduce {
+		*v -= buffer
+	}
+
+	r.node.CapacityPressure -= r.pod.CapacityPressure
+	r.pod.CapacityPressure = 0
+
+	r.node.PressureAccountedFor += r.pod.Reserved
+
+	fmtString := "pod had buffer %d, capacityPressure %d; " +
+		"node reserved %d -> %d, capacityPressure %d -> %d, pressureAccountedFor %d -> %d"
+	verdict = fmt.Sprintf(
+		fmtString,
+		// pod had buffer %d, capacityPressure %d;
+		r.oldPod.buffer, r.oldPod.capacityPressure,
+		// node reserved %d -> %d, capacityPressure %d -> %d
+		r.oldNode.reserved, r.node.Reserved, r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
+	)
+	return verdict
+}
+
 func handleUpdatedLimits[T constraints.Unsigned](
 	node *nodeResourceState[T],
 	pod *podResourceState[T],
