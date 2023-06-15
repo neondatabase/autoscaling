@@ -738,6 +738,8 @@ func (e *AutoscaleEnforcer) handlePodEndMigration(logger *zap.Logger, podName, m
 	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
 
 	pod.migrationState = nil
+
+	logger.Info("Recorded end of migration for VM pod")
 }
 
 func (e *AutoscaleEnforcer) handlePodDeletion(logger *zap.Logger, podName util.NamespacedName) {
