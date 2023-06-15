@@ -20,6 +20,11 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
+type podWatchCallbacks struct {
+	submitVMDeletion  func(*zap.Logger, util.NamespacedName)
+	submitPodDeletion func(*zap.Logger, util.NamespacedName)
+}
+
 // watchPodEvents continuously tracks a handful of Pod-related events that we care about. These
 // events are pod deletion or completion for VM and non-VM pods.
 //
@@ -31,8 +36,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	ctx context.Context,
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
-	submitVMDeletion func(*zap.Logger, util.NamespacedName),
-	submitPodDeletion func(*zap.Logger, util.NamespacedName),
+	callbacks podWatchCallbacks,
 ) error {
 	logger := parentLogger.Named("pod-watch")
 
@@ -64,9 +68,9 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					logger.Info("Received update event for completion of pod", zap.Object("pod", name))
 
 					if _, ok := newPod.Labels[LabelVM]; ok {
-						submitVMDeletion(logger, name)
+						callbacks.submitVMDeletion(logger, name)
 					} else {
-						submitPodDeletion(logger, name)
+						callbacks.submitPodDeletion(logger, name)
 					}
 				}
 			},
@@ -78,9 +82,9 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 				} else {
 					logger.Info("Received delete event for pod", zap.Object("pod", name))
 					if _, ok := pod.Labels[LabelVM]; ok {
-						submitVMDeletion(logger, name)
+						callbacks.submitVMDeletion(logger, name)
 					} else {
-						submitPodDeletion(logger, name)
+						callbacks.submitPodDeletion(logger, name)
 					}
 				}
 			},
@@ -91,6 +95,12 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	}
 
 	return nil
+}
+
+type vmWatchCallbacks struct {
+	submitVMDisabledScaling            func(_ *zap.Logger, podName util.NamespacedName)
+	submitVMBoundsChanged              func(_ *zap.Logger, _ *api.VmInfo, podName string)
+	submitNonAutoscalingVmUsageChanged func(_ *zap.Logger, _ *api.VmInfo, podName string)
 }
 
 // watchVMEvents watches for changes in VMs: signaling when scaling becomes disabled and updating
@@ -125,9 +135,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	ctx context.Context,
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
-	submitVMDisabledScaling func(*zap.Logger, util.NamespacedName),
-	submitVMBoundsChanged func(_ *zap.Logger, _ *api.VmInfo, podName string),
-	submitNonAutoscalingVmUsageChanged func(_ *zap.Logger, _ *api.VmInfo, podname string),
+	callbacks vmWatchCallbacks,
 ) (*watch.Store[vmapi.VirtualMachine], error) {
 	logger := parentLogger.Named("vm-watch")
 
@@ -171,13 +179,13 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 				if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
 					logger.Info("Received update to disable autoscaling for VM", util.VMNameFields(newVM))
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
-					submitVMDisabledScaling(logger, name)
+					callbacks.submitVMDisabledScaling(logger, name)
 				}
 
 				if (!oldInfo.ScalingEnabled || !newInfo.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
 					podName := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					logger.Info("Received update changing usage for VM", zap.Object("old", oldInfo.Using()), zap.Object("new", newInfo.Using()))
-					submitNonAutoscalingVmUsageChanged(logger, newInfo, podName.Name)
+					callbacks.submitNonAutoscalingVmUsageChanged(logger, newInfo, podName.Name)
 				}
 
 				// If the pod changed, then we're going to handle a deletion event for the old pod,
@@ -193,7 +201,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
-				submitVMBoundsChanged(logger, newInfo, newVM.Status.PodName)
+				callbacks.submitVMBoundsChanged(logger, newInfo, newVM.Status.PodName)
 			},
 		},
 	)

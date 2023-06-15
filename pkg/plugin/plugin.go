@@ -116,32 +116,37 @@ func makeAutoscaleEnforcerPlugin(
 			logger.Warn("Error adding to pod/VM event queue", zap.Error(err))
 		}
 	}
+
 	hlogger := logger.Named("handlers")
-	submitVMPodDeletion := func(logger *zap.Logger, pod util.NamespacedName) {
-		pushToQueue(logger, func() { p.handleVMDeletion(hlogger, pod) })
+	pwc := podWatchCallbacks{
+		submitVMDeletion: func(logger *zap.Logger, pod util.NamespacedName) {
+			pushToQueue(logger, func() { p.handleVMDeletion(hlogger, pod) })
+		},
+		submitPodDeletion: func(logger *zap.Logger, name util.NamespacedName) {
+			pushToQueue(logger, func() { p.handlePodDeletion(hlogger, name) })
+		},
 	}
-	submitNonVMPodDeletion := func(logger *zap.Logger, name util.NamespacedName) {
-		pushToQueue(logger, func() { p.handlePodDeletion(hlogger, name) })
-	}
-	submitVMDisabledScaling := func(logger *zap.Logger, pod util.NamespacedName) {
-		pushToQueue(logger, func() { p.handleVMDisabledScaling(hlogger, pod) })
-	}
-	submitVMBoundsChanged := func(logger *zap.Logger, vm *api.VmInfo, podName string) {
-		pushToQueue(logger, func() { p.handleUpdatedScalingBounds(hlogger, vm, podName) })
-	}
-	submitNonAutoscalingVmUsageChanged := func(logger *zap.Logger, vm *api.VmInfo, podName string) {
-		pushToQueue(logger, func() { p.handleNonAutoscalingUsageChange(hlogger, vm, podName) })
+	vwc := vmWatchCallbacks{
+		submitVMDisabledScaling: func(logger *zap.Logger, pod util.NamespacedName) {
+			pushToQueue(logger, func() { p.handleVMDisabledScaling(hlogger, pod) })
+		},
+		submitVMBoundsChanged: func(logger *zap.Logger, vm *api.VmInfo, podName string) {
+			pushToQueue(logger, func() { p.handleUpdatedScalingBounds(hlogger, vm, podName) })
+		},
+		submitNonAutoscalingVmUsageChanged: func(logger *zap.Logger, vm *api.VmInfo, podName string) {
+			pushToQueue(logger, func() { p.handleNonAutoscalingUsageChange(hlogger, vm, podName) })
+		},
 	}
 
 	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
 
 	logger.Info("Starting pod watcher")
-	if err := p.watchPodEvents(ctx, logger, watchMetrics, submitVMPodDeletion, submitNonVMPodDeletion); err != nil {
+	if err := p.watchPodEvents(ctx, logger, watchMetrics, pwc); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
 	logger.Info("Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, submitVMDisabledScaling, submitVMBoundsChanged, submitNonAutoscalingVmUsageChanged)
+	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, vwc)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
