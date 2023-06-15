@@ -215,6 +215,15 @@ func (r Resources) Mul(factor uint16) Resources {
 	}
 }
 
+// AbsDiff returns a new Resources with each field F as the absolute value of the difference between
+// r.F and cmp.F
+func (r Resources) AbsDiff(cmp Resources) Resources {
+	return Resources{
+		VCPU: util.AbsDiff(r.VCPU, cmp.VCPU),
+		Mem:  util.AbsDiff(r.Mem, cmp.Mem),
+	}
+}
+
 // Increase returns a MoreResources with each field F true when r.F > old.F.
 func (r Resources) IncreaseFrom(old Resources) MoreResources {
 	return MoreResources{

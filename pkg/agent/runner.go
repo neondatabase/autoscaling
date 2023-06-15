@@ -59,8 +59,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
@@ -1102,6 +1104,7 @@ func (r *Runner) updateVMResources(
 
 	// state variables
 	var (
+		start  api.Resources // r.vm.Using(), at the time of the start of this function - for metrics.
 		target api.Resources
 		capped api.Resources // target, but capped by r.lastApproved
 	)
@@ -1130,6 +1133,7 @@ func (r *Runner) updateVMResources(
 		target = state.desiredVMState(true) // note: this sets the state value in the loop body
 
 		current := state.vm.Using()
+		start = current
 
 		msg := "Target VM state is equal to current"
 		if target != current {
@@ -1215,6 +1219,8 @@ func (r *Runner) updateVMResources(
 		}
 	}
 
+	r.recordResourceChange(start, target, r.global.metrics.schedulerRequestedChange)
+
 	request := api.AgentRequest{
 		ProtoVersion: PluginProtocolVersion,
 		Pod:          r.podName,
@@ -1232,6 +1238,7 @@ func (r *Runner) updateVMResources(
 	}
 
 	permit := response.Permit
+	r.recordResourceChange(start, permit, r.global.metrics.schedulerApprovedChange)
 
 	// sched.DoRequest should have validated the permit, meaning that it's not less than the
 	// current resource usage.
@@ -1452,12 +1459,16 @@ func (r *Runner) doVMUpdate(
 	// If there's any fields that are being downscaled, request that from the VM informant.
 	downscaled := current.Min(target)
 	if downscaled != current {
+		r.recordResourceChange(current, downscaled, r.global.metrics.informantRequestedChange)
+
 		resp, err := r.doInformantDownscale(ctx, logger, downscaled)
 		if err != nil || resp == nil /* resp = nil && err = nil when the error has been handled */ {
 			return nil, err
 		}
 
-		if !resp.Ok {
+		if resp.Ok {
+			r.recordResourceChange(current, downscaled, r.global.metrics.informantApprovedChange)
+		} else {
 			newTarget, err := rejectedDownscale()
 			if err != nil {
 				resetVMTo(current)
@@ -1476,6 +1487,8 @@ func (r *Runner) doVMUpdate(
 			target = newTarget
 		}
 	}
+
+	r.recordResourceChange(downscaled, target, r.global.metrics.neonvmRequestedChange)
 
 	// Make the NeonVM request
 	patches := []util.JSONPatch{{
@@ -1507,6 +1520,8 @@ func (r *Runner) doVMUpdate(
 
 	// We couldn't update the VM
 	if err != nil {
+		r.global.metrics.neonvmRequestsOutbound.WithLabelValues(fmt.Sprintf("[error: %s]", util.RootError(err))).Inc()
+
 		// If the context was cancelled, we generally don't need to worry about whether setting r.vm
 		// back to current is sound. All operations on this VM are done anyways.
 		if ctx.Err() != nil {
@@ -1520,6 +1535,8 @@ func (r *Runner) doVMUpdate(
 		// runners.
 		panic(fmt.Errorf("Unexpected VM patch request failure: %w", err))
 	}
+
+	r.global.metrics.neonvmRequestsOutbound.WithLabelValues("ok").Inc()
 
 	// We scaled. If we run into an issue around further communications with the informant, then
 	// it'll be left with an inconsistent state - there's not really anything we can do about that,
@@ -1540,15 +1557,48 @@ func (r *Runner) doVMUpdate(
 			r.requestedUpscale = r.requestedUpscale.And(upscaled.IncreaseFrom(current).Not())
 		}()
 
+		r.recordResourceChange(downscaled, upscaled, r.global.metrics.informantRequestedChange)
+
 		if ok, err := r.doInformantUpscale(ctx, logger, upscaled); err != nil || !ok {
 			return nil, err
 		}
+
+		r.recordResourceChange(downscaled, upscaled, r.global.metrics.informantApprovedChange)
 	}
 
 	logger.Info("Updated VM resources", zap.Object("current", current), zap.Object("target", target))
 
 	// Everything successful.
 	return &target, nil
+}
+
+func (r *Runner) recordResourceChange(current, target api.Resources, metrics resourceChangePair) {
+	abs := current.AbsDiff(target)
+
+	// Add CPU
+	if abs.VCPU != 0 {
+		direction := "up"
+		if target.VCPU < current.VCPU {
+			direction = "down"
+		}
+
+		metrics.cpu.WithLabelValues(direction).Add(abs.VCPU.AsFloat64())
+	}
+
+	// Add memory
+	if abs.Mem != 0 {
+		direction := "up"
+		if target.Mem < current.Mem {
+			direction = "down"
+		}
+
+		// Avoid floating-point inaccuracy.
+		byteTotal := r.vm.Mem.SlotSize.Value() * int64(abs.Mem)
+		mib := int64(1 << 20)
+		floatMB := float64(byteTotal/mib) + float64(byteTotal%mib)/float64(mib)
+
+		metrics.mem.WithLabelValues(direction).Add(floatMB)
+	}
 }
 
 // validateInformant checks that the Runner's informant server is present AND active (i.e. not
