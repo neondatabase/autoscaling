@@ -241,23 +241,19 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				return ctrl.Result{}, err
 			}
 
-			// do hotplugCPU in targetRunner before migration if .spec.guest.cpus.use defined
-			if vm.Spec.Guest.CPUs.Use != nil {
-				log.Info("Syncing CPUs in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
-				if err := QmpSyncCpuToTarget(vm, migration); err != nil {
-					return ctrl.Result{}, err
-				}
-				log.Info("CPUs in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
+			// do hotplugCPU in targetRunner before migration
+			log.Info("Syncing CPUs in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
+			if err := QmpSyncCpuToTarget(vm, migration); err != nil {
+				return ctrl.Result{}, err
 			}
+			log.Info("CPUs in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 
-			// do hotplug Memory in targetRunner if .spec.guest.memorySlots.use defined
-			if vm.Spec.Guest.MemorySlots.Use != nil {
-				log.Info("Syncing Memory in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
-				if err := QmpSyncMemoryToTarget(vm, migration); err != nil {
-					return ctrl.Result{}, err
-				}
-				log.Info("Memory in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
+			// do hotplug Memory in targetRunner
+			log.Info("Syncing Memory in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
+			if err := QmpSyncMemoryToTarget(vm, migration); err != nil {
+				return ctrl.Result{}, err
 			}
+			log.Info("Memory in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 
 			// Migrate only running VMs to target with plugged devices
 			if vm.Status.Phase == vmv1.VmPreMigrating {

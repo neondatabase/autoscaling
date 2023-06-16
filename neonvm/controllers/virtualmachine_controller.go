@@ -430,7 +430,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// if we're done scaling (plugged all CPU) then apply cgroup
 			// else just use all
 			var targetCPUUsage vmv1.MilliCPU
-			if specCPU != nil && specCPU.RoundedUp() == pluggedCPU {
+			if specCPU.RoundedUp() == pluggedCPU {
 				targetCPUUsage = *specCPU
 			} else {
 				targetCPUUsage = vmv1.MilliCPU(1000 * pluggedCPU)
@@ -467,23 +467,19 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// check if need hotplug/unplug CPU or memory
-			if virtualmachine.Spec.Guest.CPUs.Use != nil {
-				// compare guest spec and count of plugged
-				if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() != pluggedCPU {
-					log.Info("VM goes into scaling mode, CPU count needs to be changed",
-						"CPUs on board", pluggedCPU,
-						"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use.RoundedUp())
-					virtualmachine.Status.Phase = vmv1.VmScaling
-				}
+			// compare guest spec and count of plugged
+			if virtualmachine.Spec.Guest.CPUs.Use.RoundedUp() != pluggedCPU {
+				log.Info("VM goes into scaling mode, CPU count needs to be changed",
+					"CPUs on board", pluggedCPU,
+					"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use.RoundedUp())
+				virtualmachine.Status.Phase = vmv1.VmScaling
 			}
-			if virtualmachine.Spec.Guest.MemorySlots.Use != nil {
-				memorySizeFromSpec := resource.NewQuantity(int64(*virtualmachine.Spec.Guest.MemorySlots.Use)*virtualmachine.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
-				if !memorySize.Equal(*memorySizeFromSpec) {
-					log.Info("VM goes into scale mode, need to resize Memory",
-						"Memory on board", memorySize,
-						"Memory in spec", memorySizeFromSpec)
-					virtualmachine.Status.Phase = vmv1.VmScaling
-				}
+			memorySizeFromSpec := resource.NewQuantity(int64(*virtualmachine.Spec.Guest.MemorySlots.Use)*virtualmachine.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
+			if !memorySize.Equal(*memorySizeFromSpec) {
+				log.Info("VM goes into scale mode, need to resize Memory",
+					"Memory on board", memorySize,
+					"Memory in spec", memorySizeFromSpec)
+				virtualmachine.Status.Phase = vmv1.VmScaling
 			}
 
 		case corev1.PodSucceeded:
@@ -702,15 +698,9 @@ func updateRunnerUsageAnnotation(ctx context.Context, c client.Client, vm *vmv1.
 }
 
 func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
-	cpu := *spec.Guest.CPUs.Min
-	if spec.Guest.CPUs.Use != nil {
-		cpu = *spec.Guest.CPUs.Use
-	}
+	cpu := *spec.Guest.CPUs.Use
 
-	memorySlots := *spec.Guest.MemorySlots.Min
-	if spec.Guest.MemorySlots.Use != nil {
-		memorySlots = *spec.Guest.MemorySlots.Use
-	}
+	memorySlots := *spec.Guest.MemorySlots.Use
 
 	usage := vmv1.VirtualMachineUsage{
 		CPU:    cpu.ToResourceQuantity(),
