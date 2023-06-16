@@ -2377,7 +2377,7 @@ spec:
         env:
         - name: IPAM_SERVER
           value: http://neonvm-vxlan-ipam:9090
-        image: neondatabase/neonvm-controller:v0.9.0
+        image: neondatabase/neonvm-controller:v0.10.0
         livenessProbe:
           httpGet:
             path: /healthz
@@ -2561,7 +2561,7 @@ spec:
               fieldPath: status.hostIP
         - name: IPAM_SERVER
           value: http://neonvm-vxlan-ipam:9090
-        image: neondatabase/neonvm-vxlan-controller:v0.9.0
+        image: neondatabase/neonvm-vxlan-controller:v0.10.0
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -2593,7 +2593,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.9.0
+        image: neondatabase/neonvm-vxlan-controller:v0.10.0
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
