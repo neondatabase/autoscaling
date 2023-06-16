@@ -1124,28 +1124,9 @@ func DeepEqual(v1, v2 interface{}) bool {
 	return reflect.DeepEqual(x1, x2)
 }
 
+// TODO: reimplement to r.Patch()
 func (r *VirtualMachineReconciler) tryUpdateVM(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
-	// update vm (try 10 times)
-	var try int
-	var err error
-	for try = 1; try <= 10; try++ {
-		if err = r.Update(ctx, virtualmachine); err != nil {
-			if apierrors.IsConflict(err) {
-				time.Sleep(time.Second)
-				continue
-			}
-			return err
-		} else {
-			// vm was updated
-			break
-		}
-	}
-
-	if try > 10 {
-		return err
-	}
-
-	return nil
+	return r.Update(ctx, virtualmachine)
 }
 
 // return Netwrok Attachment Definition name with IPAM settings
