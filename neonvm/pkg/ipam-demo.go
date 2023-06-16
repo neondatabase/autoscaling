@@ -5,8 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +17,6 @@ import (
 )
 
 var (
-	kconfig = flag.String("kube-config", "~/.kube/config", "Path to kuberenetes config. Only required if out-of-cluster.")
 	nadName = flag.String("nad-name", "ipam-demo", "Network Attachment Definition name")
 	nadNs   = flag.String("nad-namespace", "default", "Network Attachment Definition namespace")
 
@@ -47,15 +44,8 @@ func main() {
 	// define context with logger
 	ctx := log.IntoContext(context.Background(), logger)
 
-	// resolve tilda in kubeconfig path
-	kcfg := *kconfig
-	if strings.HasPrefix(kcfg, "~/") {
-		dirname, _ := os.UserHomeDir()
-		kcfg = filepath.Join(dirname, kcfg[2:])
-	}
-
 	// Create IPAM object
-	ipam, err := ipam.New(ctx, *nadName, *nadNs, kcfg)
+	ipam, err := ipam.New(ctx, *nadName, *nadNs)
 	if err != nil {
 		logger.Error(err, "failed to create IPAM")
 		os.Exit(1)

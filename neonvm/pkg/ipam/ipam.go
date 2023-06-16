@@ -12,9 +12,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	neonvmapiv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -66,16 +66,14 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName string, vmNamespace string)
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
-func New(ctx context.Context, nadName string, nadNamespace string, kubeConfigPath ...string) (*IPAM, error) {
+func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error) {
 
-	kubeconfig := ""
-	if len(kubeConfigPath) > 0 {
-		kubeconfig = kubeConfigPath[0]
-	}
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	// get Kubernetes client config
+	cfg, err := config.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("error building kubernetes configuration: %v", err)
 	}
+
 	// tune Kubernetes client perfomance
 	cfg.QPS = KubernetesClientQPS
 	cfg.Burst = KubernetesClientBurst
