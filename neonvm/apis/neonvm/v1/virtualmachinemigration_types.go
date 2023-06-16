@@ -54,7 +54,7 @@ type VirtualMachineMigrationSpec struct {
 
 	// Use PostCopy migration by default
 	// +optional
-	// +kubebuilder:default:=true
+	// +kubebuilder:default:=false
 	AllowPostCopy bool `json:"allowPostCopy"`
 
 	// Use Auto converge by default
