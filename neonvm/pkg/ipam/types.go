@@ -34,8 +34,6 @@ type IPAMConfig struct {
 	Range            string               `json:"range"`
 	RangeStart       net.IP               `json:"range_start,omitempty"`
 	RangeEnd         net.IP               `json:"range_end,omitempty"`
-	GatewayStr       string               `json:"gateway"`
-	Gateway          net.IP
 	NetworkNamespace string
 	NetworkName      string `json:"network_name,omitempty"`
 }

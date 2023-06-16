@@ -154,15 +154,6 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 	n.IPAM.RangeStart = nil
 	n.IPAM.RangeEnd = nil
 
-	// parse gateway IP string
-	if n.IPAM.GatewayStr != "" {
-		gwip := net.ParseIP(n.IPAM.GatewayStr)
-		if gwip == nil {
-			return nil, fmt.Errorf("invalid gateway IP %s", n.IPAM.GatewayStr)
-		}
-		n.IPAM.Gateway = gwip
-	}
-
 	// check Excluded IP ranges
 	for idx := range n.IPAM.OmitRanges {
 		_, _, err := net.ParseCIDR(n.IPAM.OmitRanges[idx])
