@@ -38,7 +38,6 @@ import (
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -557,36 +556,19 @@ func main() {
 	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
 
 	// overlay (multus) net details
-	if vmSpec.ExtraNetwork != nil {
-		if vmSpec.ExtraNetwork.Enable {
-			macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface)
-			if err != nil {
-				log.Fatalf("can not setup overlay network: %s", err)
-			}
-			qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
-			qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
+	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
+		macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface)
+		if err != nil {
+			log.Fatalf("can not setup overlay network: %s", err)
 		}
-	}
-
-	// get overlay IP address from Network Status (provided by NetworkAttachmentDefinition)
-	networkStatusList := []nadapiv1.NetworkStatus{}
-	if os.Getenv("NETWORK_STATUS") != "" {
-		if err := json.Unmarshal([]byte(os.Getenv("NETWORK_STATUS")), &networkStatusList); err != nil {
-			log.Fatalf("can not retrieve network status: %s", err)
-		}
-	}
-	var overlayIP string
-	for _, networkStatus := range networkStatusList {
-		if networkStatus.Interface == vmSpec.ExtraNetwork.Interface && len(networkStatus.IPs) > 0 {
-			overlayIP = networkStatus.IPs[0]
-			break
-		}
+		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
+		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
 	}
 
 	// kernel details
 	qemuCmd = append(qemuCmd, "-kernel", kernelPath)
-	if len(overlayIP) != 0 {
-		qemuCmd = append(qemuCmd, "-append", fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", overlayIP, vmv1.OverlayNetworkMask, vmStatus.PodName, kernelCmdline))
+	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
+		qemuCmd = append(qemuCmd, "-append", fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName, kernelCmdline))
 	} else {
 		qemuCmd = append(qemuCmd, "-append", kernelCmdline)
 	}

@@ -19,15 +19,14 @@ import (
 )
 
 const (
+	// vxlan interface details
 	VXLAN_IF_NAME     = "neon-vxlan0"
 	VXLAN_BRIDGE_NAME = "neon-br0"
 	VXLAN_ID          = 100
 
-	ipamServerVariableName = "IPAM_SERVER"
-
+	// iptables settings details
 	iptablesChainName = "NEON-EXTRANET"
-
-	extraNetCidr = "10.100.0.0/20"
+	extraNetCidr      = "10.100.0.0/16"
 )
 
 var (
@@ -36,11 +35,6 @@ var (
 
 func main() {
 	flag.Parse()
-
-	ipamService := os.Getenv(ipamServerVariableName)
-	if len(ipamService) == 0 {
-		log.Fatalf("IPAM service not found, environment variable %s is empty", ipamServerVariableName)
-	}
 
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
@@ -101,7 +95,7 @@ func main() {
 		}
 		// upsert iptables nat rules
 		log.Printf("upsert iptables nat rules")
-		if err := upsertIptablesRules(ipamService); err != nil {
+		if err := upsertIptablesRules(); err != nil {
 			log.Print(err)
 		}
 		time.Sleep(30 * time.Second)
@@ -246,7 +240,7 @@ func deleteLink(name string) error {
 	return nil
 }
 
-func upsertIptablesRules(ipam string) error {
+func upsertIptablesRules() error {
 
 	// manage iptables
 	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Timeout(5))

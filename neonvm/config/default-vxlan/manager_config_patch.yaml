@@ -14,6 +14,14 @@ spec:
         - "--leader-elect"
         - "--zap-devel=false"
         - "--zap-time-encoding=iso8601"
+        - "--zap-log-level=info"
+        - "--zap-stacktrace-level=panic"
         env:
-        - name: IPAM_SERVER
-          value: "http://neonvm-vxlan-ipam:9090"
+        - name: NAD_IPAM_NAME
+          value: $(NAD_IPAM_NAME)
+        - name: NAD_IPAM_NAMESPACE
+          value: $(NAD_IPAM_NAMESPACE)
+        - name: NAD_RUNNER_NAME
+          value: $(NAD_RUNNER_NAME)
+        - name: NAD_RUNNER_NAMESPACE
+          value: $(NAD_RUNNER_NAMESPACE)

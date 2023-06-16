@@ -272,6 +272,7 @@ render-manifests: $(RENDERED) kustomize
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(AUTOSCALER_SCHEDULER_IMG) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(AUTOSCALER_AGENT_IMG) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > $(RENDERED)/multus.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
@@ -290,6 +291,7 @@ render-release: $(RENDERED) kustomize
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(AUTOSCALER_SCHEDULER_IMG)
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(AUTOSCALER_AGENT_IMG)
 	# Build:
+	$(KUSTOMIZE) build neonvm/config/default-vxlan/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > $(RENDERED)/multus.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
@@ -305,6 +307,8 @@ render-release: $(RENDERED) kustomize
 deploy: kind-load manifests render-manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	kubectl apply -f $(RENDERED)/multus.yaml
 	kubectl -n kube-system rollout status daemonset kube-multus-ds
+	kubectl apply -f $(RENDERED)/whereabouts.yaml
+	kubectl -n kube-system rollout status daemonset whereabouts
 	kubectl apply -f $(RENDERED)/neonvm.yaml
 	kubectl -n neonvm-system rollout status daemonset  neonvm-device-plugin
 	kubectl -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
@@ -322,6 +326,9 @@ local-cluster:  ## Create local cluster by kind tool and prepared config
 	kind create cluster --config kind/config.yaml
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	kubectl wait -n cert-manager deployment cert-manager --for condition=Available --timeout -1s
+	kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+	kubectl patch -n kube-system deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+	kubectl -n kube-system rollout status deployment metrics-server
 
 .PHONY: kind-load
 kind-load: docker-build  ## Push docker images to the kind cluster.

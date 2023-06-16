@@ -16,6 +16,8 @@ COPY pkg/util            pkg/util
 COPY neonvm/main.go      neonvm/main.go
 COPY neonvm/apis/        neonvm/apis/
 COPY neonvm/controllers/ neonvm/controllers/
+COPY neonvm/pkg/         neonvm/pkg/
+COPY neonvm/client/      neonvm/client/
 COPY pkg/api/ pkg/api
 COPY pkg/util pkg/util
 

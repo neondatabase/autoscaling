@@ -42,12 +42,6 @@ const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
 // The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
 const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 
-// Overlay netwrok CIDR details
-const (
-	OverlayNetworkIPNet string = "10.100.0.0"
-	OverlayNetworkMask  string = "255.255.240.0" // /20
-)
-
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
 // JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
 type VirtualMachineUsage struct {
@@ -330,13 +324,8 @@ type ExtraNetwork struct {
 	// +optional
 	Interface string `json:"interface"`
 	// Multus Network name specified in network-attachments-definition.
-	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net-ipam
 	// +optional
-	MultusNetwork string `json:"multusNetwork"`
-	// Multus Network name specified in network-attachments-definition.
-	// +kubebuilder:default:=neonvm-system/neonvm-overlay-net
-	// +optional
-	MultusNetworkNoIP string `json:"multusNetworkNoIP"`
+	MultusNetwork string `json:"multusNetwork,omitempty"`
 }
 
 // VirtualMachineStatus defines the observed state of VirtualMachine
@@ -386,14 +375,18 @@ const (
 	// VmFailed means that all containers in the vm-runner pod have terminated, and at least one container has
 	// terminated in a failure (exited with a non-zero exit code or was stopped by the system).
 	VmFailed VmPhase = "Failed"
+	// VmPreMigrating means that VM in preparation to start migration
+	VmPreMigrating VmPhase = "PreMigrating"
 	// VmMigrating means that VM in migration to another node
 	VmMigrating VmPhase = "Migrating"
+	// VmScaling means that devices are plugging/unplugging to/from the VM
+	VmScaling VmPhase = "Scaling"
 )
 
 // IsAlive returns whether the guest in the VM is expected to be running
 func (p VmPhase) IsAlive() bool {
 	switch p {
-	case VmRunning, VmMigrating:
+	case VmRunning, VmPreMigrating, VmMigrating, VmScaling:
 		return true
 	default:
 		return false

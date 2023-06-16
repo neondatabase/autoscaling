@@ -1,13 +1,13 @@
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
 metadata:
-  name: overlay-net
+  name: overlay-for-vms
   namespace: system
 spec:
   config: '{
     "cniVersion": "0.3.1",
-    "name": "neonvm-overlay-net",
+    "name": "overlay-for-vms",
     "type": "bridge",
     "bridge": "neon-br0",
     "ipam": {}
-    }'
+  }'

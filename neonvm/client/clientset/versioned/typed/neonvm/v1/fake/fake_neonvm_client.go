@@ -27,6 +27,10 @@ type FakeNeonvmV1 struct {
 	*testing.Fake
 }
 
+func (c *FakeNeonvmV1) IPPools(namespace string) v1.IPPoolInterface {
+	return &FakeIPPools{c, namespace}
+}
+
 func (c *FakeNeonvmV1) VirtualMachines(namespace string) v1.VirtualMachineInterface {
 	return &FakeVirtualMachines{c, namespace}
 }

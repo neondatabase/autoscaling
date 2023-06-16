@@ -62,8 +62,6 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: status.hostIP
-          - name: IPAM_SERVER
-            value: "http://neonvm-vxlan-ipam:9090"
         lifecycle:
           preStop:
             exec:

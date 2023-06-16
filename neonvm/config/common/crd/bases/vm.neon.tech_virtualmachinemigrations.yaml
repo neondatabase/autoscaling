@@ -62,7 +62,7 @@ spec:
               VirtualMachineMigration
             properties:
               allowPostCopy:
-                default: true
+                default: false
                 description: Use PostCopy migration by default
                 type: boolean
               autoConverge:

@@ -1,0 +1,13 @@
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: overlay-ipam
+  namespace: system
+spec:
+  config: '{
+    "ipam": {
+      "range": "10.100.0.0/16",
+      "range_start": "10.100.128.0",
+      "network_name": "neonvm"
+    }
+  }'
