@@ -234,9 +234,8 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			return ctrl.Result{}, err
 		}
 		ownedByMigration := false
-		gvk := vmv1.SchemeGroupVersion.String()
 		for _, ref := range sourceRunner.OwnerReferences {
-			if ref.APIVersion == gvk && ref.Kind == "VirtualMachineMigration" && ref.Name == migration.Name {
+			if ref.UID == migration.UID {
 				ownedByMigration = true
 				break
 			}
