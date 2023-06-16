@@ -486,7 +486,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				}
 			}
 
-
 		case corev1.PodSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -513,93 +512,98 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 	case vmv1.VmScaling:
-		// do hotplug/unplug CPU if .spec.guest.cpus.use defined
-		if virtualmachine.Spec.Guest.CPUs.Use != nil {
-			// firstly get current state from QEMU
-			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
-			if err != nil {
-				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
-				return err
-			}
-			specCPU := virtualmachine.Spec.Guest.CPUs.Use.RoundedUp()
-			pluggedCPU := uint32(len(cpuSlotsPlugged))
-			// compare guest spec and count of plugged
-			if specCPU > pluggedCPU {
-				// going to plug one CPU
-				log.Info("Plug one more CPU into VM")
-				if err := QmpPlugCpu(virtualmachine); err != nil {
-					return err
-				}
-				r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
-					fmt.Sprintf("One more CPU was plugged into VM %s",
-						virtualmachine.Name))
-			} else if specCPU < pluggedCPU {
-				// going to unplug one CPU
-				log.Info("Unplug one CPU from VM")
-				if err := QmpUnplugCpu(virtualmachine); err != nil {
-					return err
-				}
-				r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
-					fmt.Sprintf("One CPU was unplugged from VM %s",
-						virtualmachine.Name))
-			} else {
-				// seems already plugged correctly
-				virtualmachine.Status.Phase = vmv1.VmRunning
-			}
+		cpuScaled := false
+		ramScaled := false
+
+		// do hotplug/unplug CPU
+		// firstly get current state from QEMU
+		cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
+		if err != nil {
+			log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+			return err
 		}
-		// do hotplug/unplug Memory if .spec.guest.memorySlots.use defined
-		if virtualmachine.Spec.Guest.MemorySlots.Use != nil {
-			// firstly get current state from QEMU
-			memoryDevices, err := QmpQueryMemoryDevices(virtualmachine)
-			memoryPluggedSlots := *virtualmachine.Spec.Guest.MemorySlots.Min + int32(len(memoryDevices))
-			if err != nil {
-				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+		specCPU := virtualmachine.Spec.Guest.CPUs.Use.RoundedUp()
+		pluggedCPU := uint32(len(cpuSlotsPlugged))
+		// compare guest spec and count of plugged
+		if specCPU > pluggedCPU {
+			// going to plug one CPU
+			log.Info("Plug one more CPU into VM")
+			if err := QmpPlugCpu(virtualmachine); err != nil {
 				return err
 			}
-			// compare guest spec and count of plugged
-			if *virtualmachine.Spec.Guest.MemorySlots.Use > memoryPluggedSlots {
-				// going to plug one Memory Slot
-				log.Info("Plug one more Memory module into VM")
-				if err := QmpPlugMemory(virtualmachine); err != nil {
+			r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
+				fmt.Sprintf("One more CPU was plugged into VM %s",
+					virtualmachine.Name))
+		} else if specCPU < pluggedCPU {
+			// going to unplug one CPU
+			log.Info("Unplug one CPU from VM")
+			if err := QmpUnplugCpu(virtualmachine); err != nil {
+				return err
+			}
+			r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
+				fmt.Sprintf("One CPU was unplugged from VM %s",
+					virtualmachine.Name))
+		} else {
+			// seems already plugged correctly
+			cpuScaled = true
+		}
+
+		// do hotplug/unplug Memory
+		// firstly get current state from QEMU
+		memoryDevices, err := QmpQueryMemoryDevices(virtualmachine)
+		memoryPluggedSlots := *virtualmachine.Spec.Guest.MemorySlots.Min + int32(len(memoryDevices))
+		if err != nil {
+			log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+			return err
+		}
+		// compare guest spec and count of plugged
+		if *virtualmachine.Spec.Guest.MemorySlots.Use > memoryPluggedSlots {
+			// going to plug one Memory Slot
+			log.Info("Plug one more Memory module into VM")
+			if err := QmpPlugMemory(virtualmachine); err != nil {
+				return err
+			}
+			r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
+				fmt.Sprintf("One more DIMM was plugged into VM %s",
+					virtualmachine.Name))
+		} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
+			// going to unplug one Memory Slot
+			log.Info("Unplug one Memory module from VM")
+			if err := QmpUnplugMemory(virtualmachine); err != nil {
+				// special case !
+				// error means VM hadn't memory devices available for unplug
+				// need set .memorySlots.Use back to real value
+				log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
+				// firstly re-fetch VM
+				if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
+					log.Error(err, "Unable to re-fetch VirtualMachine")
 					return err
 				}
-				r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
-					fmt.Sprintf("One more DIMM was plugged into VM %s",
-						virtualmachine.Name))
-			} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
-				// going to unplug one Memory Slot
-				log.Info("Unplug one Memory module from VM")
-				if err := QmpUnplugMemory(virtualmachine); err != nil {
-					// special case !
-					// error means VM hadn't memory devices available for unplug
-					// need set .memorySlots.Use back to real value
-					log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
-					// firstly re-fetch VM
-					if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
-						log.Error(err, "Unable to re-fetch VirtualMachine")
-						return err
-					}
-					memorySlotsUseInSpec := *virtualmachine.Spec.Guest.MemorySlots.Use
-					virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
-					if err := r.tryUpdateVM(ctx, virtualmachine); err != nil {
-						log.Error(err,
-							"Failed to update .spec.guest.memorySlots.use",
-							"old value", memorySlotsUseInSpec,
-							"new value", memoryPluggedSlots)
-						return err
-					}
-					r.Recorder.Event(virtualmachine, "Warning", "ScaleDown",
-						fmt.Sprintf("Unable unplug DIMM from VM %s, all memory devices are busy",
-							virtualmachine.Name))
-				} else {
-					r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
-						fmt.Sprintf("One DIMM was unplugged from VM %s",
-							virtualmachine.Name))
+				memorySlotsUseInSpec := *virtualmachine.Spec.Guest.MemorySlots.Use
+				virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
+				if err := r.tryUpdateVM(ctx, virtualmachine); err != nil {
+					log.Error(err,
+						"Failed to update .spec.guest.memorySlots.use",
+						"old value", memorySlotsUseInSpec,
+						"new value", memoryPluggedSlots)
+					return err
 				}
+				r.Recorder.Event(virtualmachine, "Warning", "ScaleDown",
+					fmt.Sprintf("Unable unplug DIMM from VM %s, all memory devices are busy",
+						virtualmachine.Name))
 			} else {
-				// seems already plugged correctly
-				virtualmachine.Status.Phase = vmv1.VmRunning
+				r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
+					fmt.Sprintf("One DIMM was unplugged from VM %s",
+						virtualmachine.Name))
 			}
+		} else {
+			// seems already plugged correctly
+			ramScaled = true
+		}
+
+		// set VM phase to running if everything scaled
+		if cpuScaled && ramScaled {
+			virtualmachine.Status.Phase = vmv1.VmRunning
 		}
 
 	case vmv1.VmSucceeded, vmv1.VmFailed:
