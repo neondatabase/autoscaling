@@ -58,7 +58,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.
 			return
 		}
 
-		logger = logger.With(zap.Object("pod", req.Pod))
+		logger := logger.With(zap.Object("pod", req.Pod))
 		logger.Info(
 			"Received autoscaler-agent request",
 			zap.String("client", r.RemoteAddr), zap.Any("request", req),
