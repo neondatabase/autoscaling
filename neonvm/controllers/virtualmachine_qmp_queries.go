@@ -276,18 +276,15 @@ func QmpSyncCpuToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineM
 	}
 	defer target.Disconnect()
 
+searchForEmpty:
 	for _, slot := range plugged {
 		// firsly check if slot occupied already
 		// run over Target CPUs and compare with source
-		found := false
 		for _, tslot := range pluggedInTarget {
-			if DeepEqual(slot, tslot) {
-				found = true
+			if slot == tslot {
+				// that mean such CPU already present in Target, skip it
+				continue searchForEmpty
 			}
-		}
-		if found {
-			// that mean such CPU already present in Target, skip it
-			continue
 		}
 		qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
 		_, err = target.Run(qmpcmd)
