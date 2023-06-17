@@ -372,10 +372,10 @@ KUTTL ?= $(LOCALBIN)/kuttl
 KUTTL_VERSION ?= v0.15.0
 
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.24.12
+KUBECTL_VERSION ?= v1.25.11
 
 KIND ?= $(LOCALBIN)/kind
-KIND_VERSION ?= v0.18.0
+KIND_VERSION ?= v0.20.0
 
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
