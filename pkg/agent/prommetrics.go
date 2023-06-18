@@ -31,6 +31,12 @@ type resourceChangePair struct {
 	mem *prometheus.CounterVec
 }
 
+const (
+	directionLabel     = "direction"
+	directionValueUp   = "up"
+	directionValueDown = "down"
+)
+
 func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
 
@@ -59,14 +65,14 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 					Name: "autoscaling_agent_scheduler_plugin_requested_cpu_change_total",
 					Help: "Total change in CPU requested from the scheduler",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
 					Name: "autoscaling_agent_scheduler_plugin_requested_mem_change_total",
 					Help: "Total change in memory (in MiB) requested from the scheduler",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 		},
 		schedulerApprovedChange: resourceChangePair{
@@ -75,14 +81,14 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 					Name: "autoscaling_agent_scheduler_plugin_accepted_cpu_change_total",
 					Help: "Total change in CPU approved by the scheduler",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
 					Name: "autoscaling_agent_scheduler_plugin_accepted_mem_change_total",
 					Help: "Total change in memory (in MiB) approved by the scheduler",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 		},
 
@@ -107,14 +113,14 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 					Name: "autoscaling_agent_informant_requested_cpu_change_total",
 					Help: "Total change in CPU requested from the informant(s)",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
 					Name: "autoscaling_agent_informant_requested_mem_change_total",
 					Help: "Total change in memory (in MiB) requested from the informant(s)",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 		},
 		informantApprovedChange: resourceChangePair{
@@ -123,14 +129,14 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 					Name: "autoscaling_agent_informant_approved_cpu_change_total",
 					Help: "Total change in CPU approved by the informant(s)",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
 					Name: "autoscaling_agent_informant_approved_mem_change_total",
 					Help: "Total change in memory (in MiB) approved by the informant(s)",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 		},
 
@@ -150,14 +156,14 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 					Name: "autoscaling_agent_neonvm_requested_cpu_change_total",
 					Help: "Total change in CPU requested for VMs",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
 					Name: "autoscaling_agent_neonvm_requested_mem_changed_total",
 					Help: "Total change in memory (in MiB) requested for VMs",
 				},
-				[]string{"direction"},
+				[]string{directionLabel},
 			)),
 		},
 
@@ -201,8 +207,8 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 	}
 	for _, p := range metricsWithDirection {
 		for _, m := range []*prometheus.CounterVec{p.cpu, p.mem} {
-			m.WithLabelValues("up").Add(0.0)
-			m.WithLabelValues("down").Add(0.0)
+			m.WithLabelValues(directionValueUp).Add(0.0)
+			m.WithLabelValues(directionValueDown).Add(0.0)
 		}
 	}
 
