@@ -773,6 +773,8 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 		log.Info(msg, "VirtualMachine", vm.Name, "Pod", runnerPod.Name)
 	}
 
+	// NOTE: We don't need to update the data in runnerPod ourselves because c.Patch will update it
+	// with what we get back from the k8s API after the patch completes.
 	return c.Patch(ctx, runnerPod, client.RawPatch(types.JSONPatchType, patchData))
 }
 
