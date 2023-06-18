@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
@@ -181,7 +182,10 @@ type podState struct {
 }
 
 // podMigrationState tracks the information about an ongoing pod's migration
-type podMigrationState struct{}
+type podMigrationState struct {
+	// name gives the name of the VirtualMachineMigration that this pod is involved in
+	name util.NamespacedName
+}
 
 type podResourceState[T any] struct {
 	// Reserved is the amount of T that this pod has reserved. It is guaranteed that the pod is
@@ -678,6 +682,66 @@ func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName 
 	)
 }
 
+func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName, migrationName util.NamespacedName, source bool) {
+	logger = logger.With(
+		zap.String("action", "VM pod start migration"),
+		zap.Object("pod", podName),
+		zap.Object("virtualmachinemigration", migrationName),
+	)
+
+	logger.Info("Handling VM pod migration start")
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	pod, ok := e.state.podMap[podName]
+	if !ok {
+		logger.Warn("Cannot find pod in podMap")
+		return
+	}
+	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
+
+	// Reset buffer to zero, remove from migration queue (if in it), and set pod's migrationState
+	cpuVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+		handleStartMigration(source)
+	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+		handleStartMigration(source)
+
+	pod.node.mq.removeIfPresent(pod)
+	pod.migrationState = &podMigrationState{name: migrationName}
+
+	logger.Info(
+		"Handled start of migration involving pod",
+		zap.Object("verdict", verdictSet{
+			cpu: cpuVerdict,
+			mem: memVerdict,
+		}),
+	)
+}
+
+func (e *AutoscaleEnforcer) handlePodEndMigration(logger *zap.Logger, podName, migrationName util.NamespacedName) {
+	logger = logger.With(
+		zap.String("action", "VM pod end migration"),
+		zap.Object("virtualmachinemigration", migrationName),
+	)
+
+	logger.Info("Handling VM pod migration end")
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	pod, ok := e.state.podMap[podName]
+	if !ok {
+		logger.Warn("Cannot find pod in podMap")
+		return
+	}
+	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
+
+	pod.migrationState = nil
+
+	logger.Info("Recorded end of migration for VM pod")
+}
+
 func (e *AutoscaleEnforcer) handlePodDeletion(logger *zap.Logger, podName util.NamespacedName) {
 	logger = logger.With(
 		zap.String("action", "non-VM Pod deletion"),
@@ -796,43 +860,68 @@ func (s *podState) isBetterMigrationTarget(other *podState) bool {
 // A lock will ALWAYS be held on return from this function.
 func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, pod *podState, vmClient *vmclient.Clientset) error {
 	if pod.currentlyMigrating() {
-		return fmt.Errorf("Pod is already migrating: state = %+v", pod.migrationState)
+		return fmt.Errorf("Pod is already migrating")
 	}
 
-	// Remove the pod from the migration queue.
-	pod.node.mq.removeIfPresent(pod)
-	// Mark the pod as migrating
-	pod.migrationState = &podMigrationState{}
-	// Update resource trackers
-	// oldNodeVCPUPressure := pod.node.vCPU.CapacityPressure
-	// oldNodeVCPUPressureAccountedFor := pod.node.vCPU.PressureAccountedFor
-	pod.node.vCPU.PressureAccountedFor += pod.vCPU.Reserved + pod.vCPU.CapacityPressure
-
-	// FIXME: this is incorrect, needs fixing by another PR
-	// klog.Infof(
-	// 	"[autoscale-enforcer] Migrate pod %v from node %s; node.vCPU.capacityPressure %d -> %d (%d -> %d spoken for)",
-	// 	pod.name, pod.node.name, oldNodeVCPUPressure, pod.node.vCPU.CapacityPressure, oldNodeVCPUPressureAccountedFor, pod.node.vCPU.PressureAccountedFor,
-	// )
-
-	// Unlock to make the API request, then make sure we're locked on return.
+	// Unlock to make the API request(s), then make sure we're locked on return.
 	s.lock.Unlock()
 	defer s.lock.Lock()
 
+	vmmName := util.NamespacedName{
+		Name:      fmt.Sprintf("schedplugin-%s", pod.vmName.Name),
+		Namespace: pod.name.Namespace,
+	}
+
+	logger = logger.With(zap.Object("virtualmachinemigration", vmmName))
+
+	logger.Info("Starting VirtualMachineMigration for VM")
+
+	// Check that the migration doesn't already exist. If it does, then there's no need to recreate
+	// it.
+	//
+	// We technically don't *need* this additional request here (because we can check the return
+	// from the Create request with apierrors.IsAlreadyExists). However: the benefit we get from
+	// this is that the logs are significantly clearer.
+	_, err := vmClient.NeonvmV1().
+		VirtualMachineMigrations(pod.name.Namespace).
+		Get(ctx, vmmName.Name, metav1.GetOptions{})
+	if err == nil {
+		logger.Warn("VirtualMachineMigration already exists, nothing to do")
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		// We're *expecting* to get IsNotFound = true; if err != nil and isn't NotFound, then
+		// there's some unexpected error.
+		logger.Error("Unexpected error doing Get request to check if migration already exists", zap.Error(err))
+		return fmt.Errorf("Error checking if migration exists: %w", err)
+	}
+
 	vmm := &vmapi.VirtualMachineMigration{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-pluginvmm", pod.vmName.Name),
-			Namespace:    pod.name.Namespace,
+			// TODO: it's maybe possible for this to run into name length limits? Unclear what we
+			// should do if that happens.
+			Name:      vmmName.Name,
+			Namespace: pod.name.Namespace,
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
 			VmName: pod.vmName.Name,
+
+			// FIXME: NeonVM's VirtualMachineMigrationSpec has a bunch of boolean fields that aren't
+			// pointers, which means we need to explicitly set them when using the Go API.
+			PreventMigrationToSameHost: true,
+			CompletionTimeout:          3600,
+			Incremental:                true,
+			AutoConverge:               true,
+			MaxBandwidth:               resource.MustParse("1Gi"),
+			AllowPostCopy:              false,
 		},
 	}
-	logger.Info("Making VM migration request for VM")
-	_, err := vmClient.NeonvmV1().
-		VirtualMachineMigrations(pod.name.Namespace).
-		Create(ctx, vmm, metav1.CreateOptions{})
+
+	logger.Info("Migration doesn't already exist, creating one for VM", zap.Any("spec", vmm.Spec))
+	_, err = vmClient.NeonvmV1().VirtualMachineMigrations(pod.name.Namespace).Create(ctx, vmm, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("Error executing VM Migration create request: %w", err)
+		// log here, while the logger's fields are in scope
+		logger.Error("Unexpected error doing Create request for new migration", zap.Error(err))
+		return fmt.Errorf("Error creating migration: %w", err)
 	}
 	logger.Info("VM migration request successful")
 
@@ -915,26 +1004,34 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		p.state.nodeMap[n.Name] = node
 	}
 
-	// Store the PodSpecs by name, so we can access them as we're going through VMs
-	logger.Info("Building initial PodSpecs map")
-	podSpecs := make(map[util.NamespacedName]*corev1.Pod)
-	for i := range pods.Items {
-		p := &pods.Items[i]
-		name := util.NamespacedName{Name: p.Name, Namespace: p.Namespace}
-		podSpecs[name] = p
+	// Store the VMs by name, so that we can access them as we're going through pods
+	logger.Info("Building initial vmSpecs map")
+	vmSpecs := make(map[util.NamespacedName]*vmapi.VirtualMachine)
+	for _, vm := range vms {
+		vmSpecs[util.GetNamespacedName(vm)] = vm
 	}
 
-	// Add all VM pods to the map, by going through the VM list.
+	// Add all VM pods to the map, by filtering out from the pod list. We'll take care of the non-VM
+	// pods in a separate pass after this.
 	logger.Info("Adding VM pods to podMap")
 	skippedVms := 0
-	for i := range vms {
-		vm := vms[i]
-		vmName := util.GetNamespacedName(vm)
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		podName := util.GetNamespacedName(pod)
 
-		// new logger just for this loop iteration, with info about the VM
-		logger := logger.With(util.VMNameFields(vm))
-		if vm.Status.Node != "" {
-			logger = logger.With(zap.String("node", vm.Status.Node))
+		if _, isVM := pod.Labels[LabelVM]; !isVM {
+			continue
+		}
+
+		// new logger just for this loop iteration, with info about the Pod
+		logger := logger.With(util.PodNameFields(pod))
+		if pod.Spec.NodeName != "" {
+			logger = logger.With(zap.String("node", pod.Spec.NodeName))
+		}
+
+		migrationName := tryMigrationOwnerReference(pod)
+		if migrationName != nil {
+			logger = logger.With(zap.Object("virtualmachinemigration", *migrationName))
 		}
 
 		logSkip := func(format string, args ...any) {
@@ -942,27 +1039,19 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			skippedVms += 1
 		}
 
-		if vm.Spec.SchedulerName != p.state.conf.SchedulerName {
-			logSkip("Spec.SchedulerName %q != our config.SchedulerName %q", vm.Spec.SchedulerName, p.state.conf.SchedulerName)
+		if pod.Spec.SchedulerName != p.state.conf.SchedulerName {
+			logSkip("Spec.SchedulerName %q != our config.SchedulerName %q", pod.Spec.SchedulerName, p.state.conf.SchedulerName)
 			continue
-		} else if vm.Status.PodName == "" {
-			logSkip("Status.PodName = \"\" (maybe it hasn't been assigned yet?)")
+		} else if pod.Spec.NodeName == "" {
+			logSkip("VM pod's Spec.NodeName = \"\" (maybe it hasn't been scheduled yet?)")
 			continue
 		}
 
-		podName := util.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}
-		pod, ok := podSpecs[podName]
+		// Check if the VM exists
+		vmName := util.NamespacedName{Namespace: pod.Namespace, Name: pod.Labels[LabelVM]}
+		vm, ok := vmSpecs[vmName]
 		if !ok {
-			logSkip("VM's pod is missing from our map (maybe it was removed between listing VMs and Pods?)")
-			continue
-		} else if podsVm, exist := pod.Labels[LabelVM]; !exist || podsVm != vm.Name {
-			if ok {
-				return fmt.Errorf("Pod %v label %q doesn't match VM name %v", podName, LabelVM, vmName)
-			} else {
-				return fmt.Errorf("Pod %v missing label %q for VM %v", podName, LabelVM, vmName)
-			}
-		} else if pod.Spec.NodeName == "" {
-			logSkip("VM pod Spec.NodeName = \"\" (maybe it hasn't been scheduled yet?)")
+			logSkip("VM Pod's corresponding VM object is missing from our map (maybe it was removed between listing VMs and Pods?)")
 			continue
 		} else if util.PodCompleted(pod) {
 			logSkip("Pod is in its final, complete state (phase = %q), so will not use any resources", pod.Status.Phase)
@@ -1015,8 +1104,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 		}
 
-		// If scaling isn't enabled, then we can be more precise about usage.
-		if !vmInfo.ScalingEnabled {
+		// If scaling isn't enabled *or* the pod is invovled in an ongoing migration, then we can be
+		// more precise about usage (because scaling is forbidden while migrating).
+		if !vmInfo.ScalingEnabled || migrationName != nil {
 			ps.vCPU.Buffer = 0
 			ps.vCPU.Reserved = vmInfo.Cpu.Use
 
@@ -1060,6 +1150,10 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		pod := &pods.Items[i]
 		podName := util.GetNamespacedName(pod)
 
+		if _, isVM := pod.Labels[LabelVM]; isVM {
+			continue
+		}
+
 		// new logger just for this loop iteration, with info about the Pod
 		logger := logger.With(util.PodNameFields(pod))
 		if pod.Spec.NodeName != "" {
@@ -1079,9 +1173,6 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			continue
 		} else if pod.Spec.SchedulerName != p.state.conf.SchedulerName {
 			logSkip("Spec.SchedulerName %q != our config.SchedulerName %q", pod.Spec.SchedulerName, p.state.conf.SchedulerName)
-			continue
-		} else if _, ok := pod.Labels[LabelVM]; ok {
-			logSkip("Pod has VM name label %q but isn't already processed (maybe the Pod was created between listing VMs and Pods?)", LabelVM)
 			continue
 		}
 

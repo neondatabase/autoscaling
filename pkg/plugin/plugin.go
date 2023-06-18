@@ -125,6 +125,12 @@ func makeAutoscaleEnforcerPlugin(
 		submitPodDeletion: func(logger *zap.Logger, name util.NamespacedName) {
 			pushToQueue(logger, func() { p.handlePodDeletion(hlogger, name) })
 		},
+		submitPodStartMigration: func(logger *zap.Logger, podName, migrationName util.NamespacedName, source bool) {
+			pushToQueue(logger, func() { p.handlePodStartMigration(logger, podName, migrationName, source) })
+		},
+		submitPodEndMigration: func(logger *zap.Logger, podName, migrationName util.NamespacedName) {
+			pushToQueue(logger, func() { p.handlePodEndMigration(logger, podName, migrationName) })
+		},
 	}
 	vwc := vmWatchCallbacks{
 		submitVMDisabledScaling: func(logger *zap.Logger, pod util.NamespacedName) {
@@ -547,6 +553,10 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	pName := util.GetNamespacedName(pod)
 	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
+	if migrationName := tryMigrationOwnerReference(pod); migrationName != nil {
+		logger = logger.With(zap.Object("virtualmachinemigration", *migrationName))
+	}
+
 	logger.Info("Handling Reserve request")
 
 	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
@@ -683,7 +693,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		cpuVerdict := fmt.Sprintf("node reserved %v + %v -> %v", node.vCPU.Reserved, vmInfo.Cpu.Use, newNodeReservedCPU)
 		memVerdict := fmt.Sprintf("node reserved %v + %v -> %v", node.memSlots.Reserved, vmInfo.Mem.Use, newNodeReservedMemSlots)
 
-		e.logger.Info(
+		logger.Info(
 			"Allowing reserve VM pod",
 			zap.Object("verdict", verdictSet{
 				cpu: cpuVerdict,
