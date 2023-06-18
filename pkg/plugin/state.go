@@ -906,7 +906,7 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 			VmName: pod.vmName.Name,
 
 			// FIXME: NeonVM's VirtualMachineMigrationSpec has a bunch of boolean fields that aren't
-			// pointers, which means we need to explicitly set them when
+			// pointers, which means we need to explicitly set them when using the Go API.
 			PreventMigrationToSameHost: true,
 			CompletionTimeout:          3600,
 			Incremental:                true,
