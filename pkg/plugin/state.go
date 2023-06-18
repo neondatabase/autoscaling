@@ -912,9 +912,7 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 			Incremental:                true,
 			AutoConverge:               true,
 			MaxBandwidth:               resource.MustParse("1Gi"),
-			// NB: THis is different from the NeonVM default, because cancelling a post-copy
-			// migration will break the VM.
-			AllowPostCopy: false,
+			AllowPostCopy:              false,
 		},
 	}
 
