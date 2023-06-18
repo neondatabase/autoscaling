@@ -140,6 +140,8 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 				Name: "autoscaling_agent_neonvm_outbound_requests_total",
 				Help: "Number of k8s patch requests to NeonVM objects",
 			},
+			// NOTE: "result" is either "ok" or "[error: $CAUSE]", with $CAUSE as the root cause of
+			// the request error.
 			[]string{"result"},
 		)),
 		neonvmRequestedChange: resourceChangePair{
