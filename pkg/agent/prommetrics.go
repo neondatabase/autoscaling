@@ -32,9 +32,9 @@ type resourceChangePair struct {
 }
 
 const (
-	directionLabel     = "direction"
-	directionValueUp   = "up"
-	directionValueDown = "down"
+	directionLabel    = "direction"
+	directionValueInc = "inc"
+	directionValueDec = "dec"
 )
 
 func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Registry) {
@@ -207,8 +207,8 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 	}
 	for _, p := range metricsWithDirection {
 		for _, m := range []*prometheus.CounterVec{p.cpu, p.mem} {
-			m.WithLabelValues(directionValueUp).Add(0.0)
-			m.WithLabelValues(directionValueDown).Add(0.0)
+			m.WithLabelValues(directionValueInc).Add(0.0)
+			m.WithLabelValues(directionValueDec).Add(0.0)
 		}
 	}
 

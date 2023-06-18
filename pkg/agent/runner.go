@@ -1575,9 +1575,9 @@ func (r *Runner) recordResourceChange(current, target api.Resources, metrics res
 
 	// Add CPU
 	if abs.VCPU != 0 {
-		direction := directionValueUp
+		direction := directionValueInc
 		if target.VCPU < current.VCPU {
-			direction = directionValueDown
+			direction = directionValueDec
 		}
 
 		metrics.cpu.WithLabelValues(direction).Add(abs.VCPU.AsFloat64())
@@ -1585,9 +1585,9 @@ func (r *Runner) recordResourceChange(current, target api.Resources, metrics res
 
 	// Add memory
 	if abs.Mem != 0 {
-		direction := directionValueUp
+		direction := directionValueInc
 		if target.Mem < current.Mem {
-			direction = directionValueDown
+			direction = directionValueDec
 		}
 
 		// Avoid floating-point inaccuracy.
