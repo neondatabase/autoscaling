@@ -1571,24 +1571,26 @@ func (r *Runner) doVMUpdate(
 }
 
 func (r *Runner) recordResourceChange(current, target api.Resources, metrics resourceChangePair) {
+	getDirection := func(targetIsGreater bool) string {
+		if targetIsGreater {
+			return directionValueInc
+		} else {
+			return directionValueDec
+		}
+	}
+
 	abs := current.AbsDiff(target)
 
 	// Add CPU
 	if abs.VCPU != 0 {
-		direction := directionValueInc
-		if target.VCPU < current.VCPU {
-			direction = directionValueDec
-		}
+		direction := getDirection(target.VCPU > current.VCPU)
 
 		metrics.cpu.WithLabelValues(direction).Add(abs.VCPU.AsFloat64())
 	}
 
 	// Add memory
 	if abs.Mem != 0 {
-		direction := directionValueInc
-		if target.Mem < current.Mem {
-			direction = directionValueDec
-		}
+		direction := getDirection(target.Mem > current.Mem)
 
 		// Avoid floating-point inaccuracy.
 		byteTotal := r.vm.Mem.SlotSize.Value() * int64(abs.Mem)
