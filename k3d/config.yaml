@@ -1,0 +1,32 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: neonvm # name that you want to give to your cluster (will still be prefixed with `k3d-`)
+servers: 1
+agents:  2
+image: rancher/k3s:v1.25.10-k3s1
+
+options:
+  k3d: # k3d runtime settings
+    disableLoadbalancer: true # not needed for neonvm/autoscaling
+  k3s: # options passed on to K3s itself
+    extraArgs: # additional arguments passed to the `k3s server|agent` command; same as `--k3s-arg`
+      - arg: "--flannel-backend=none" # built-in flannel doesn't work well with other CNI (multus as example)
+        nodeFilters:
+          - server:*
+      - arg: "--disable-network-policy"
+        nodeFilters:
+          - server:*
+      - arg: "--disable=traefik" # not needed for neonvm/autoscaling
+        nodeFilters:
+          - server:*
+      - arg: "--disable=servicelb" # not needed for neonvm/autoscaling
+        nodeFilters:
+          - server:*
+    nodeLabels:
+      - label: node=neon1
+        nodeFilters:
+          - agent:0
+      - label: node=neon2
+        nodeFilters:
+          - agent:1

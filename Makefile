@@ -99,13 +99,6 @@ vet: ## Run go vet against code.
 	# ref https://github.com/golang/go/issues/56755
 	CGO_ENABLED=0 go vet ./...
 
-.PHONE: e2e-tools
-e2e-tools: kind kubectl kuttl
-
-.PHONE: e2e
-e2e: ## Run e2e kuttl tests
-	$(KUTTL) test --config tests/e2e/kuttl-test.yaml
-	rm -f kubeconfig
 
 .PHONY: test
 test: fmt vet envtest ## Run tests.
@@ -153,7 +146,7 @@ vm-informant: ## Build vm-informant image
 docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler vm-informant ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
 
 .PHONY: docker-push
-docker-push: docker-build
+docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_CONTROLLER)
 	docker push -q $(IMG_RUNNER)
 	docker push -q $(IMG_VXLAN)
@@ -257,7 +250,7 @@ install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~
 	$(KUSTOMIZE) build neonvm/config/common/crd | kubectl apply -f -
 
 .PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build neonvm/config/common/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 BUILDTS := $(shell date +%s)
@@ -304,49 +297,97 @@ render-release: $(RENDERED) kustomize
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
 .PHONY: deploy
-deploy: kind-load manifests render-manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	kubectl apply -f $(RENDERED)/multus.yaml
-	kubectl -n kube-system rollout status daemonset kube-multus-ds
-	kubectl apply -f $(RENDERED)/whereabouts.yaml
-	kubectl -n kube-system rollout status daemonset whereabouts
-	kubectl apply -f $(RENDERED)/neonvm.yaml
-	kubectl -n neonvm-system rollout status daemonset  neonvm-device-plugin
-	kubectl -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
-	kubectl -n neonvm-system rollout status deployment neonvm-controller
+deploy: load-images manifests render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
+	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
+	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
+	$(KUBECTL) -n kube-system rollout status daemonset whereabouts
+	$(KUBECTL) apply -f $(RENDERED)/neonvm.yaml
+	$(KUBECTL) -n neonvm-system rollout status daemonset  neonvm-device-plugin
+	$(KUBECTL) -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
+	$(KUBECTL) -n neonvm-system rollout status deployment neonvm-controller
 	# NB: typical upgrade path requires updated scheduler before autoscaler-agents.
-	kubectl apply -f $(RENDERED)/autoscale-scheduler.yaml
-	kubectl -n kube-system rollout status deployment autoscale-scheduler
-	kubectl apply -f $(RENDERED)/autoscaler-agent.yaml
-	kubectl -n kube-system rollout status daemonset autoscaler-agent
+	$(KUBECTL) apply -f $(RENDERED)/autoscale-scheduler.yaml
+	$(KUBECTL) -n kube-system rollout status deployment autoscale-scheduler
+	$(KUBECTL) apply -f $(RENDERED)/autoscaler-agent.yaml
+	$(KUBECTL) -n kube-system rollout status daemonset autoscaler-agent
 
-##@ Local cluster
-
-.PHONY: local-cluster
-local-cluster:  ## Create local cluster by kind tool and prepared config
-	kind create cluster --config kind/config.yaml
-	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
-	kubectl wait -n cert-manager deployment cert-manager --for condition=Available --timeout -1s
-	kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-	kubectl patch -n kube-system deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
-	kubectl -n kube-system rollout status deployment metrics-server
-
-.PHONY: kind-load
-kind-load: docker-build  ## Push docker images to the kind cluster.
-	kind load docker-image $(IMG_CONTROLLER)
-	kind load docker-image $(IMG_RUNNER)
-	kind load docker-image $(IMG_VXLAN)
-
-	kind load docker-image $(AUTOSCALER_SCHEDULER_IMG)
-	kind load docker-image $(AUTOSCALER_AGENT_IMG)
+.PHONY: load-images
+load-images: kubectl kind k3d docker-build ## Push docker images to the local kind/k3d cluster
+	@if [ $$($(KUBECTL) config current-context) = k3d-neonvm ]; then make k3d-load;  fi
+	@if [ $$($(KUBECTL) config current-context) = kind-kind ];  then make kind-load; fi
 
 .PHONY: example-vms
-example-vms: docker-build-examples ## Build and push the testing VM images to the kind cluster.
-	kind load docker-image $(E2E_TESTS_VM_IMG)
+example-vms: docker-build-examples kind k3d kubectl ## Build and push the testing VM images to the kind/k3d cluster.
+	@if [ $$($(KUBECTL) config current-context) = k3d-neonvm ]; then $(K3D) image import $(E2E_TESTS_VM_IMG) --cluster neonvm --mode direct; fi
+	@if [ $$($(KUBECTL) config current-context) = kind-kind ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name kind; fi
 
 .PHONY: pg14-disk-test
-pg14-disk-test: docker-build-pg14-disk-test ## Build and push the pg14-disk-test VM test image to the kind cluster.
-	kubectl create secret generic vm-ssh --from-file=private-key=vm-examples/pg14-disk-test/ssh_id_rsa || true
-	kind load docker-image $(PG14_DISK_TEST_IMG)
+pg14-disk-test: docker-build-pg14-disk-test kind k3d kubectl ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
+	$(KUBECTL) create secret generic vm-ssh --from-file=private-key=vm-examples/pg14-disk-test/ssh_id_rsa || true
+	@if [ $$($(KUBECTL) config current-context) = k3d-neonvm ]; then $(K3D) image import $(PG14_DISK_TEST_IMG) --cluster neonvm --mode direct; fi
+	@if [ $$($(KUBECTL) config current-context) = kind-kind ]; then $(KIND) load docker-image $(PG14_DISK_TEST_IMG) --name kind; fi
+
+.PHONY: kind-load
+kind-load: kind # Push docker images to the kind cluster.
+	$(KIND) load docker-image \
+		$(IMG_CONTROLLER) \
+		$(IMG_RUNNER) \
+		$(IMG_VXLAN) \
+		$(AUTOSCALER_SCHEDULER_IMG) \
+		$(AUTOSCALER_AGENT_IMG) \
+		--name kind
+
+.PHONY: k3d-load
+k3d-load: k3d # Push docker images to the k3d cluster.
+	$(K3D) image import \
+		$(IMG_CONTROLLER) \
+		$(IMG_RUNNER) \
+		$(IMG_VXLAN) \
+		$(AUTOSCALER_SCHEDULER_IMG) \
+		$(AUTOSCALER_AGENT_IMG) \
+		--cluster neonvm --mode direct
+
+##@ End-to-End tests
+
+.PHONE: e2e-tools
+e2e-tools: k3d kind kubectl kuttl ## Donwnload tools for e2e tests locally if necessary.
+
+.PHONE: e2e
+e2e: e2e-tools ## Run e2e kuttl tests
+	$(KUTTL) test --config tests/e2e/kuttl-test.yaml
+	rm -f kubeconfig
+
+##@ Local kind cluster
+
+.PHONY: kind-setup
+kind-setup: kind kubectl ## Create local cluster by kind tool and prepared config
+	$(KIND) create cluster --config kind/config.yaml
+	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+	$(KUBECTL) -n cert-manager rollout status deployment cert-manager
+	$(KUBECTL) apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+	$(KUBECTL) patch -n kube-system deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+	$(KUBECTL) -n kube-system rollout status deployment metrics-server
+
+.PHONY: kind-destroy
+kind-destroy: kind ## Destroy local kind cluster
+	$(KIND) delete cluster --name kind
+
+##@ Local k3d cluster
+
+# K3D_FIX_MOUNTS=1 used to allow foreign CNI (cilium, multus and so on), https://github.com/k3d-io/k3d/pull/1268
+.PHONY: k3d-setup
+k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
+	K3D_FIX_MOUNTS=1 $(K3D) cluster create --config k3d/config.yaml
+	$(KUBECTL) apply -f k3d/cilium.yaml
+	$(KUBECTL) -n kube-system rollout status daemonset  cilium
+	$(KUBECTL) -n kube-system rollout status deployment cilium-operator
+	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+	$(KUBECTL) -n cert-manager rollout status deployment cert-manager
+
+.PHONY: k3d-destroy
+k3d-destroy: k3d ## Destroy local k3d cluster
+	$(K3D) cluster delete --config k3d/config.yaml
 
 ##@ Build Dependencies
 
@@ -377,38 +418,46 @@ KUBECTL_VERSION ?= v1.25.11
 KIND ?= $(LOCALBIN)/kind
 KIND_VERSION ?= v0.20.0
 
+K3D ?= $(LOCALBIN)/k3d
+K3D_VERSION ?= v5.5.1
+
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
-	test -s $(LOCALBIN)/kustomize || { curl -Ss $(KUSTOMIZE_INSTALL_SCRIPT) | bash -s -- $(subst v,,$(KUSTOMIZE_VERSION)) $(LOCALBIN); }
+	@test -s $(LOCALBIN)/kustomize || { curl -Ss $(KUSTOMIZE_INSTALL_SCRIPT) | bash -s -- $(subst v,,$(KUSTOMIZE_VERSION)) $(LOCALBIN); }
 
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+	@test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
 $(CONTROLLER_GEN): $(LOCALBIN)
-	test -s $(LOCALBIN)/controller-gen || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
+	@test -s $(LOCALBIN)/controller-gen || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
 
 .PHONY: kind
-kind: $(KIND)
+kind: $(KIND) ## Download kind locally if necessary.
 $(KIND): $(LOCALBIN)
-	curl -sfSLo $(KIND) https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(GOOS)-$(GOARCH) && chmod +x $(KIND)
+	@test -s $(LOCALBIN)/kind || { curl -sfSLo $(KIND) https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(GOOS)-$(GOARCH) && chmod +x $(KIND); }
 
 .PHONY: kubectl
-kubectl: $(KUBECTL)
+kubectl: $(KUBECTL) ## Download kubectl locally if necessary.
 $(KUBECTL): $(LOCALBIN)
-	curl -sfSLo $(KUBECTL) https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(GOOS)/$(GOARCH)/kubectl && chmod +x $(KUBECTL)
+	@test -s $(LOCALBIN)/kubectl || { curl -sfSLo $(KUBECTL) https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(GOOS)/$(GOARCH)/kubectl && chmod +x $(KUBECTL); }
 
 .PHONY: kuttl
-kuttl: $(KUTTL)
+kuttl: $(KUTTL) ## Download kuttl locally if necessary.
 $(KUTTL): $(LOCALBIN)
-	curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/$(KUTTL_VERSION)/kubectl-kuttl_$(subst v,,$(KUTTL_VERSION))_$(GOOS)_$(shell uname -m) && chmod +x $(KUTTL)
+	@test -s $(LOCALBIN)/kuttl || { curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/$(KUTTL_VERSION)/kubectl-kuttl_$(subst v,,$(KUTTL_VERSION))_$(GOOS)_$(shell uname -m) && chmod +x $(KUTTL); }
+
+.PHONY: k3d
+k3d: $(K3D) ## Download k3d locally if necessary.
+$(K3D): $(LOCALBIN)
+	@test -s $(LOCALBIN)/k3d || { curl -sfSLo $(K3D)  https://github.com/k3d-io/k3d/releases/download/$(K3D_VERSION)/k3d-$(GOOS)-$(GOARCH) && chmod +x $(K3D); }
 
 .PHONY: cert-manager
-cert-manager: ## install cert-manager to cluster
-	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+cert-manager: kubectl ## install cert-manager to cluster
+	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
