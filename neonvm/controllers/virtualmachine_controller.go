@@ -674,18 +674,23 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 		metaField   string
 		expected    map[string]string
 		actual      map[string]string
+		noPropagate map[string]bool
 		ignoreExtra map[string]bool // use bool here so `if ignoreExtra[key] { ... }` works
 	}{
 		{
 			metaField:   "labels",
 			expected:    labelsForVirtualMachine(vm),
 			actual:      runnerPod.Labels,
+			noPropagate: map[string]bool{},
 			ignoreExtra: map[string]bool{},
 		},
 		{
 			metaField: "annotations",
 			expected:  annotationsForVirtualMachine(vm),
 			actual:    runnerPod.Annotations,
+			noPropagate: map[string]bool{
+				"kubectl.kubernetes.io/last-applied-configuration": true,
+			},
 			ignoreExtra: map[string]bool{
 				"kubectl.kubernetes.io/default-container": true,
 				"k8s.v1.cni.cncf.io/networks":             true,
@@ -700,6 +705,10 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 	for _, spec := range metaSpecs {
 		// Add/update the entries we're expecting to be there
 		for k, e := range spec.expected {
+			if spec.noPropagate[k] {
+				continue
+			}
+
 			if a, ok := spec.actual[k]; !ok || e != a {
 				patches = append(patches, util.JSONPatch{
 					// From RFC 6902 (JSON patch):
