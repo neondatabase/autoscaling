@@ -966,6 +966,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			continue
 		} else if util.PodCompleted(pod) {
 			logSkip("Pod is in its final, complete state (phase = %q), so will not use any resources", pod.Status.Phase)
+			continue
 		}
 
 		vmInfo, err := api.ExtractVmInfo(logger, vm)
@@ -1073,6 +1074,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 		if util.PodCompleted(pod) {
 			logSkip("Pod is in its final, complete state (phase = %q), so will not use any resources", pod.Status.Phase)
+			continue
 		}
 
 		if _, ok := p.state.podMap[podName]; ok {
