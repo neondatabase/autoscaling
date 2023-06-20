@@ -1145,7 +1145,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 	}
 
 	// Add the non-VM pods to the map
-	logger.Info("[autoscale-enforcer] load state: Adding non-VM pods to otherPods map")
+	logger.Info("Adding non-VM pods to otherPods map")
 	skippedOtherPods := 0
 	for i := range pods.Items {
 		pod := &pods.Items[i]
