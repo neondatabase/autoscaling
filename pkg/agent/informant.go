@@ -940,7 +940,13 @@ func (s *InformantServer) HealthCheck(ctx context.Context, logger *zap.Logger) (
 		defer s.runner.lock.Unlock()
 		return s.valid()
 	}()
-	if err != nil {
+	// NB: we want to continue to perform health checks even if the informant server is not properly
+	// available for *normal* use.
+	//
+	// We only need to check for InformantServerSuspendedError because
+	// InformantServerUnconfirmedError will be handled by the retryRegister loop in
+	// serveInformantLoop.
+	if err != nil && !errors.Is(err, InformantServerSuspendedError) {
 		return nil, err
 	}
 
