@@ -178,3 +178,4 @@ jobs:
             rendered_manifests/neonvm.yaml
             rendered_manifests/multus.yaml
             rendered_manifests/multus-eks.yaml
+            rendered_manifests/whereabouts.yaml
