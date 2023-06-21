@@ -291,8 +291,11 @@ func (e *AutoscaleEnforcer) PostFilter(
 	state *framework.CycleState,
 	pod *corev1.Pod,
 	filteredNodeStatusMap framework.NodeToStatusMap,
-) (*framework.PostFilterResult, *framework.Status) {
+) (_ *framework.PostFilterResult, status *framework.Status) {
 	e.metrics.pluginCalls.WithLabelValues("PostFilter").Inc()
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("PostFilter", status)
+	}()
 
 	// FIXME: what to do here? Can this happen?
 	if len(filteredNodeStatusMap) == 0 {
@@ -325,8 +328,11 @@ func (e *AutoscaleEnforcer) Filter(
 	state *framework.CycleState,
 	pod *corev1.Pod,
 	nodeInfo *framework.NodeInfo,
-) *framework.Status {
+) (status *framework.Status) {
 	e.metrics.pluginCalls.WithLabelValues("Filter").Inc()
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("Filter", status)
+	}()
 
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
 
@@ -512,8 +518,11 @@ func (e *AutoscaleEnforcer) Score(
 	state *framework.CycleState,
 	pod *corev1.Pod,
 	nodeName string,
-) (int64, *framework.Status) {
+) (_ int64, status *framework.Status) {
 	e.metrics.pluginCalls.WithLabelValues("Score").Inc()
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("Score", status)
+	}()
 
 	logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Score request")
@@ -584,8 +593,11 @@ func (e *AutoscaleEnforcer) Reserve(
 	state *framework.CycleState,
 	pod *corev1.Pod,
 	nodeName string,
-) *framework.Status {
+) (status *framework.Status) {
 	e.metrics.pluginCalls.WithLabelValues("Reserve").Inc()
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("Reserve", status)
+	}()
 
 	pName := util.GetNamespacedName(pod)
 	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
