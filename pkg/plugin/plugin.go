@@ -52,6 +52,7 @@ type IndexedVMStore = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
 var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
+var _ framework.PostFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ReservePlugin = (*AutoscaleEnforcer)(nil)
@@ -279,6 +280,41 @@ func (e *AutoscaleEnforcer) checkSchedulerName(logger *zap.Logger, pod *corev1.P
 		return framework.NewStatus(framework.Error, err.Error())
 	}
 	return nil
+}
+
+// PostFilter is used by us to check the status of the filtered pods, so that we can have metrics
+// that are a strong indicator of pods stuck in pending because of an error in the plugin
+//
+// Required for framework.PostFilterPlugin
+func (e *AutoscaleEnforcer) PostFilter(
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+	filteredNodeStatusMap framework.NodeToStatusMap,
+) (*framework.PostFilterResult, *framework.Status) {
+	e.metrics.pluginCalls.WithLabelValues("PostFilter").Inc()
+
+	// FIXME: what to do here? Can this happen?
+	if len(filteredNodeStatusMap) == 0 {
+		return nil, nil
+	}
+
+	allNotSuccessful := true
+	for _, status := range filteredNodeStatusMap {
+		if !status.IsSuccess() {
+			allNotSuccessful = false
+			break
+		}
+	}
+
+	if allNotSuccessful {
+		podName := fmt.Sprint(util.GetNamespacedName(pod))
+		e.metrics.fullFilterRejections.WithLabelValues(podName).Inc()
+	} else {
+		e.metrics.fullFilterSuccesses.Inc()
+	}
+
+	return nil, nil // PostFilterResult is optional, nil Status is success.
 }
 
 // Filter gives our plugin a chance to signal that a pod shouldn't be put onto a particular node
