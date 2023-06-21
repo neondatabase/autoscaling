@@ -6,11 +6,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	"k8s.io/kubernetes/pkg/scheduler/framework"
+
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type PromMetrics struct {
 	pluginCalls           *prometheus.CounterVec
+	pluginCallFails       *prometheus.CounterVec
 	filterCycleSuccesses  prometheus.Counter
 	filterCycleRejections *prometheus.CounterVec
 	resourceRequests      *prometheus.CounterVec
@@ -36,6 +39,13 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Help: "Number of calls to scheduler plugin extension points",
 			},
 			[]string{"method"},
+		)),
+		pluginCallFails: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_extension_call_fails_total",
+				Help: "Number of unsuccessful calls to scheduler plugin extension points",
+			},
+			[]string{"method", "status"},
 		)),
 		filterCycleSuccesses: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
@@ -67,4 +77,12 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 	}
 
 	return reg
+}
+
+func (m *PromMetrics) IncFailIfNotSuccess(method string, status *framework.Status) {
+	if !status.IsSuccess() {
+		return
+	}
+
+	m.pluginCallFails.WithLabelValues(method, status.Code().String())
 }
