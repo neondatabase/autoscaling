@@ -308,6 +308,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 		pod.runner = runner
 
 		pod.status.previousEndStates = append(pod.status.previousEndStates, *pod.status.endState)
+		pod.status.endState = nil
 		pod.status.startTime = time.Now()
 
 		runnerLogger := s.loggerForRunner(pod.status.vmInfo.NamespacedName(), podName)
