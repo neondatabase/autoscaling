@@ -290,7 +290,7 @@ func (e *AutoscaleEnforcer) Filter(
 	pod *corev1.Pod,
 	nodeInfo *framework.NodeInfo,
 ) *framework.Status {
-	e.metrics.pluginCalls.WithLabelValues("filter").Inc()
+	e.metrics.pluginCalls.WithLabelValues("Filter").Inc()
 
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
 
@@ -477,7 +477,7 @@ func (e *AutoscaleEnforcer) Score(
 	pod *corev1.Pod,
 	nodeName string,
 ) (int64, *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("score").Inc()
+	e.metrics.pluginCalls.WithLabelValues("Score").Inc()
 
 	logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Score request")
@@ -549,7 +549,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) *framework.Status {
-	e.metrics.pluginCalls.WithLabelValues("reserve").Inc()
+	e.metrics.pluginCalls.WithLabelValues("Reserve").Inc()
 
 	pName := util.GetNamespacedName(pod)
 	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
@@ -767,7 +767,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) {
-	e.metrics.pluginCalls.WithLabelValues("unreserve").Inc()
+	e.metrics.pluginCalls.WithLabelValues("Unreserve").Inc()
 
 	podName := util.GetNamespacedName(pod)
 
