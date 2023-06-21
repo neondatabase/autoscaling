@@ -301,7 +301,7 @@ func (e *AutoscaleEnforcer) PostFilter(
 
 	allNotSuccessful := true
 	for _, status := range filteredNodeStatusMap {
-		if !status.IsSuccess() {
+		if status.IsSuccess() {
 			allNotSuccessful = false
 			break
 		}
