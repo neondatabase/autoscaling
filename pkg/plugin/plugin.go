@@ -309,9 +309,9 @@ func (e *AutoscaleEnforcer) PostFilter(
 
 	if !hasSuccess {
 		podName := fmt.Sprint(util.GetNamespacedName(pod))
-		e.metrics.fullFilterRejections.WithLabelValues(podName).Inc()
+		e.metrics.filterCycleRejections.WithLabelValues(podName).Inc()
 	} else {
-		e.metrics.fullFilterSuccesses.Inc()
+		e.metrics.filterCycleSuccesses.Inc()
 	}
 
 	return nil, nil // PostFilterResult is optional, nil Status is success.
