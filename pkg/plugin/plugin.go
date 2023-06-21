@@ -299,15 +299,15 @@ func (e *AutoscaleEnforcer) PostFilter(
 		return nil, nil
 	}
 
-	allNotSuccessful := true
+	hasSuccess := false
 	for _, status := range filteredNodeStatusMap {
 		if status.IsSuccess() {
-			allNotSuccessful = false
+			hasSuccess = true
 			break
 		}
 	}
 
-	if allNotSuccessful {
+	if !hasSuccess {
 		podName := fmt.Sprint(util.GetNamespacedName(pod))
 		e.metrics.fullFilterRejections.WithLabelValues(podName).Inc()
 	} else {
