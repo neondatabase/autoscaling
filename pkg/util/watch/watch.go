@@ -361,7 +361,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						logger.Info("Relist delay reached, retrying", zap.Duration("delay", retryAfter))
 						continue
 					case <-ctx.Done():
-						logger.Info("Ending: because Context expired", zap.Error(err))
+						logger.Info("Ending: because Context expired", zap.Error(ctx.Err()))
 						return
 					case <-stopSignal.Recv():
 						logger.Info("Ending: because we got a stop signal")
