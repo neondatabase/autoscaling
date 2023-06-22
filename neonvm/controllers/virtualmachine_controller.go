@@ -736,7 +736,7 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
 func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
-	l := map[string]string{}
+	l := make(map[string]string, len(virtualmachine.Labels)+3)
 	for k, v := range virtualmachine.Labels {
 		l[k] = v
 	}
@@ -753,7 +753,7 @@ func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[strin
 		"kubectl.kubernetes.io/last-applied-configuration": true,
 	}
 
-	a := map[string]string{}
+	a := make(map[string]string, len(virtualmachine.Annotations)+1)
 	for k, v := range virtualmachine.Annotations {
 		if !ignored[k] {
 			a[k] = v
