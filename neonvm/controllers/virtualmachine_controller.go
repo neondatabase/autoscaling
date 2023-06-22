@@ -817,10 +817,11 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
 func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
-	l := virtualmachine.Labels
-	if l == nil {
-		l = map[string]string{}
+	l := make(map[string]string, len(virtualmachine.Labels)+3)
+	for k, v := range virtualmachine.Labels {
+		l[k] = v
 	}
+
 	l["app.kubernetes.io/name"] = "NeonVM"
 	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
 	l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", api.RunnerProtoV1)
@@ -828,10 +829,18 @@ func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]str
 }
 
 func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
-	a := virtualmachine.Annotations
-	if a == nil {
-		a = map[string]string{}
+	// use bool here so `if ignored[key] { ... }` works
+	ignored := map[string]bool{
+		"kubectl.kubernetes.io/last-applied-configuration": true,
 	}
+
+	a := make(map[string]string, len(virtualmachine.Annotations)+1)
+	for k, v := range virtualmachine.Annotations {
+		if !ignored[k] {
+			a[k] = v
+		}
+	}
+
 	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
 	return a
 }
