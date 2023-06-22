@@ -13,12 +13,12 @@ Currently these are:
 ```js
 // Agent:
 config.billing = {
-      "url": "http://neon-internal-api.aws.neon.build/billing/api/v1",
+      "url": "http://vector-usage-tracking.beta.us-east-2.internal.aws.neon.build/v1",
       "cpuMetricName": "effective_compute_seconds",
       "activeTimeMetricName": "active_time_seconds",
       "collectEverySeconds": 4,
       "pushEverySeconds": 24,
-      "pushTimeoutSeconds": 2
+      "pushTimeoutSeconds": 30
 }
 ```
 
