@@ -198,11 +198,13 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 	// unil the value is non-zero (because something's happened), which makes it harder to
 	// distinguish between "valid signal of nothing" vs "no signal".
 	metricsWithDirection := []resourceChangePair{
-		// sched requested/approved
-		metrics.schedulerRequestedChange, metrics.schedulerApprovedChange,
-		// informant requested/approved
-		metrics.informantRequestedChange, metrics.informantApprovedChange,
-		// neonvm requested
+		// scheduler:
+		metrics.schedulerRequestedChange,
+		metrics.schedulerApprovedChange,
+		// informant:
+		metrics.informantRequestedChange,
+		metrics.informantApprovedChange,
+		// neonvm:
 		metrics.neonvmRequestedChange,
 	}
 	for _, p := range metricsWithDirection {
