@@ -226,6 +226,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			return ctrl.Result{}, err
 		}
 
+		// Update the metadata (including "usage" annotation) before anything else, so that it
+		// will be correctly set even if the rest of the reconcile operation fails.
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, vm, targetRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "TargetPod.Name", targetRunner.Name)
+		}
+
 		// If not already, set an additional (non-controller) owner reference for the source pod:
 		sourceRunner := &corev1.Pod{}
 		err = r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, sourceRunner)
@@ -259,13 +265,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			migration.Status.SourcePodName = vm.Status.PodName
 			migration.Status.SourcePodIP = vm.Status.PodIP
 			migration.Status.TargetPodIP = targetRunner.Status.PodIP
-
-			// Set the target runner's "usage" annotation before anything else, so that it will be
-			// correct even if the rest of the reconcile operation fails
-			if err := updateRunnerUsageAnnotation(ctx, r.Client, vm, targetRunner.Name); err != nil {
-				log.Error(err, "Failed to set target Pod usage annotation", "TargetPod.Name", targetRunner.Name)
-				return ctrl.Result{}, err
-			}
 
 			// do hotplugCPU in targetRunner before migration
 			log.Info("Syncing CPUs in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
@@ -363,6 +362,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		} else if err != nil {
 			log.Error(err, "Failed to get target runner Pod")
 			return ctrl.Result{}, err
+		}
+
+		// Update the metadata (including "usage" annotation) before anything else, so that it
+		// will be correctly set even if the rest of the reconcile operation fails.
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, vm, targetRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "TargetPod.Name", targetRunner.Name)
 		}
 
 		// retrieve migration statistics

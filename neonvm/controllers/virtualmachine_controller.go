@@ -391,6 +391,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			log.Error(err, "Failed to get runner Pod")
 			return err
 		}
+
+		// Update the metadata (including "usage" annotation) before anything else, so that it
+		// will be correctly set even if the rest of the reconcile operation fails.
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, virtualmachine, vmRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", virtualmachine.Name)
+		}
+
 		// runner pod found, check/update phase now
 		switch vmRunner.Status.Phase {
 		case corev1.PodRunning:
@@ -400,13 +407,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			virtualmachine.Status.Phase = vmv1.VmRunning
 			// update Node name where runner working
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
-
-			// update Pod "usage" annotation before anything else, so that it will be correctly set,
-			// even if the rest of the reconcile operation fails.
-			if err := updateRunnerUsageAnnotation(ctx, r.Client, virtualmachine, virtualmachine.Status.PodName); err != nil {
-				log.Error(err, "Failed to set Pod usage annotation", "VirtualMachine", virtualmachine.Name)
-				return err
-			}
 
 			// get CPU details from QEMU and update status
 			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
@@ -660,41 +660,122 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 	return nil
 }
 
-var usageAnnotationJSONPointer = fmt.Sprintf("/metadata/annotations/%s", util.PatchPathEscape(vmv1.VirtualMachineUsageAnnotation))
+// updates the values of the runner pod's labels and annotations so that they are exactly equal to
+// the set of labels/annotations we expect - minus some that are ignored.
+//
+// The reason we also need to delete unrecongized labels/annotations is so that if a
+// label/annotation on the VM itself is deleted, we can accurately reflect that in the pod.
+func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1.VirtualMachine, runnerPod *corev1.Pod) error {
+	log := log.FromContext(ctx)
 
-func updateRunnerUsageAnnotation(ctx context.Context, c client.Client, vm *vmv1.VirtualMachine, podName string) error {
-	patches := []util.JSONPatch{{
-		// From RFC 6902 (JSON patch):
-		//
-		// > The "add" operation performs one of the following functions, depending upon what the
-		// > target location references:
-		// >
-		// > [ ... ]
-		// >
-		// > * If the target location specifies an object member that does not already exist, a new
-		// >   member is added to the object.
-		// > * If the target location specifies an object member that does exist, that member's
-		// >   value is replaced.
-		//
-		// So: if the annotation isn't already there, we'll add it. And if it *is* there, we'll
-		// replace it.
-		Op:    util.PatchAdd,
-		Path:  usageAnnotationJSONPointer, // these are *technically* called "JSON pointers" (from RFC 6901)
-		Value: extractVirtualMachineUsageJSON(vm.Spec),
-	}}
+	var patches []util.JSONPatch
+
+	metaSpecs := []struct {
+		metaField   string
+		expected    map[string]string
+		actual      map[string]string
+		ignoreExtra map[string]bool // use bool here so `if ignoreExtra[key] { ... }` works
+	}{
+		{
+			metaField:   "labels",
+			expected:    labelsForVirtualMachine(vm),
+			actual:      runnerPod.Labels,
+			ignoreExtra: map[string]bool{},
+		},
+		{
+			metaField: "annotations",
+			expected:  annotationsForVirtualMachine(vm),
+			actual:    runnerPod.Annotations,
+			ignoreExtra: map[string]bool{
+				"kubectl.kubernetes.io/default-container": true,
+				"k8s.v1.cni.cncf.io/networks":             true,
+				"k8s.v1.cni.cncf.io/network-status":       true,
+				"k8s.v1.cni.cncf.io/networks-status":      true,
+			},
+		},
+	}
+
+	var removedMessageParts []string
+
+	for _, spec := range metaSpecs {
+		// Add/update the entries we're expecting to be there
+		for k, e := range spec.expected {
+			if a, ok := spec.actual[k]; !ok || e != a {
+				patches = append(patches, util.JSONPatch{
+					// From RFC 6902 (JSON patch):
+					//
+					// > The "add" operation performs one of the following functions, depending upon
+					// > what the target location references:
+					// >
+					// > [ ... ]
+					// >
+					// > * If the target location specifies an object member that does not already
+					// >   exist, a new member is added to the object.
+					// > * If the target location specifies an object member that does exist, that
+					// >   member's value is replaced.
+					//
+					// So: if the value is missing we'll add it. And if it's different, we'll replace it.
+					Op:    util.PatchAdd,
+					Path:  fmt.Sprintf("/metadata/%s/%s", spec.metaField, util.PatchPathEscape(k)),
+					Value: e,
+				})
+			}
+		}
+
+		// Remove the entries we aren't expecting to be there
+		var removed []string
+		for k := range spec.actual {
+			if _, expected := spec.expected[k]; !expected && !spec.ignoreExtra[k] {
+				removed = append(removed, k)
+				patches = append(patches, util.JSONPatch{
+					Op:   util.PatchRemove,
+					Path: fmt.Sprintf("/metadata/%s/%s", spec.metaField, util.PatchPathEscape(k)),
+				})
+			}
+		}
+
+		if len(removed) != 0 {
+			// note: formatting with %q for a []string will print the array normally, but escape the
+			// strings inside. For example:
+			//
+			//   fmt.Printf("%q\n", []string{"foo", "bar", "escaped\nstring"})
+			//
+			// outputs:
+			//
+			//   ["foo" "bar" "escaped\nstring"]
+			//
+			// So the "message part" might look like `labels ["foo" "test-label"]`
+			removedMessageParts = append(removedMessageParts, fmt.Sprintf("%s %q", spec.metaField, removed))
+		}
+	}
+
+	if len(patches) == 0 {
+		return nil
+	}
 
 	patchData, err := json.Marshal(patches)
 	if err != nil {
 		panic(fmt.Errorf("error marshalling JSON patch: %w", err))
 	}
 
-	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: vm.Namespace,
-			Name:      podName,
-		},
+	if len(removedMessageParts) != 0 {
+		var msg string
+
+		if len(removedMessageParts) == 1 {
+			msg = fmt.Sprintf("removing runner pod %s", removedMessageParts[0])
+		} else /* len = 2 */ {
+			msg = fmt.Sprintf("removing runner pod %s and %s", removedMessageParts[0], removedMessageParts[1])
+		}
+
+		// We want to log something when labels/annotations are removed, because the ignoreExtra
+		// values above might be incomplete, and it'd be hard to debug without an logs for the
+		// change.
+		log.Info(msg, "VirtualMachine", vm.Name, "Pod", runnerPod.Name)
 	}
-	return c.Patch(ctx, &pod, client.RawPatch(types.JSONPatchType, patchData))
+
+	// NOTE: We don't need to update the data in runnerPod ourselves because c.Patch will update it
+	// with what we get back from the k8s API after the patch completes.
+	return c.Patch(ctx, runnerPod, client.RawPatch(types.JSONPatchType, patchData))
 }
 
 func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
