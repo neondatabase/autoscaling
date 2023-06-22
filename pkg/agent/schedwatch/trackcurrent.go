@@ -77,7 +77,6 @@ func WatchSchedulerUpdates(
 		nextDelete: -1,
 		mode:       watchCmdReady,
 		events:     events,
-		store:      nil,
 		readyQueue: readyQueue,
 		deleted:    deleted,
 		cmd:        cmd,
@@ -85,9 +84,6 @@ func WatchSchedulerUpdates(
 		stop:       stopListener,
 		logger:     logger,
 	}
-
-	setStore := make(chan *watch.Store[corev1.Pod])
-	defer close(setStore)
 
 	watcher := SchedulerWatch{
 		ReadyQueue:      readyQueue,
@@ -97,9 +93,7 @@ func WatchSchedulerUpdates(
 		stop:            stopSender,
 		stopEventStream: func() { eventBroker.Unsubscribe(ctx, events) },
 	}
-	go state.run(ctx, setStore)
-
-	setStore <- store
+	go state.run(ctx)
 
 	var candidates []*corev1.Pod
 	for _, pod := range store.Items() {
@@ -131,7 +125,6 @@ type schedulerWatchState struct {
 
 	mode   watchCmd
 	events <-chan WatchEvent
-	store  *watch.Store[corev1.Pod]
 
 	readyQueue chan<- SchedulerInfo
 	deleted    chan<- SchedulerInfo
@@ -143,18 +136,8 @@ type schedulerWatchState struct {
 	logger *zap.Logger
 }
 
-func (w schedulerWatchState) run(ctx context.Context, setStore chan *watch.Store[corev1.Pod]) {
-	sndSetStore := make(chan *watch.Store[corev1.Pod])
-	defer close(sndSetStore)
-
+func (w schedulerWatchState) run(ctx context.Context) {
 	defer w.stop.Close()
-	defer func() {
-		if w.store != nil {
-			w.store.Stop()
-		} else if store, ok := <-setStore; ok {
-			store.Stop()
-		}
-	}()
 
 	for {
 		var sendCh chan<- SchedulerInfo
@@ -175,11 +158,6 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *watch.Store
 				return
 			case <-w.stop.Recv():
 				return
-			case store, ok := <-setStore:
-				if ok {
-					w.store = store
-				}
-				setStore = sndSetStore
 			case newMode := <-w.cmd:
 				w.handleNewMode(newMode)
 			case e := <-w.events:
@@ -194,11 +172,6 @@ func (w schedulerWatchState) run(ctx context.Context, setStore chan *watch.Store
 				return
 			case <-w.stop.Recv():
 				return
-			case store, ok := <-setStore:
-				if ok {
-					w.store = store
-				}
-				setStore = sndSetStore
 			case newMode := <-w.cmd:
 				w.handleNewMode(newMode)
 			case e := <-w.events:
