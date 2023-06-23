@@ -212,6 +212,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		config.Metrics.alive()
 		defer config.Metrics.unalive()
 
+		if len(deferredAdds) != 0 {
+			logger.Info("Handling deferred adds")
+		}
+
 		// Handle any deferred calls to AddFunc
 		// NB: This is only sound because we're still holding store.mutex; otherwise we'd have to
 		// deal with possible racy operations (including adding an index).
@@ -222,6 +226,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 			handlers.AddFunc(obj, true)
 
 			if err := ctx.Err(); err != nil {
+				logger.Warn("Ending: because Context expired", zap.Error(ctx.Err()))
 				return
 			}
 		}
@@ -231,6 +236,8 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 		defer config.Metrics.unfailing()
 
+		logger.Info("All setup complete, entering event loop")
+
 		for {
 			// this is used exclusively for relisting, but must be defined up here so that our gotos
 			// don't jump over variables.
@@ -238,8 +245,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 			for {
 				select {
 				case <-stopSignal.Recv():
+					logger.Info("Ending: because we got a stop signal")
 					return
 				case <-ctx.Done():
+					logger.Info("Ending: because Context expired", zap.Error(ctx.Err()))
 					return
 				case <-store.triggerRelist:
 					config.Metrics.relistRequested()
@@ -352,8 +361,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						logger.Info("Relist delay reached, retrying", zap.Duration("delay", retryAfter))
 						continue
 					case <-ctx.Done():
+						logger.Info("Ending: because Context expired", zap.Error(ctx.Err()))
 						return
 					case <-stopSignal.Recv():
+						logger.Info("Ending: because we got a stop signal")
 						return
 					}
 				}
@@ -446,8 +457,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						logger.Info("Re-watch delay reached, retrying", zap.Duration("delay", retryAfter))
 						continue
 					case <-ctx.Done():
+						logger.Info("Ending: because Context expired", zap.Error(ctx.Err()))
 						return
 					case <-stopSignal.Recv():
+						logger.Info("Ending: because we got a stop signal")
 						return
 					}
 				}
