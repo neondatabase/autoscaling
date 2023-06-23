@@ -7,6 +7,71 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    controller-gen.kubebuilder.io/version: v0.10.0
+  creationTimestamp: null
+  name: ippools.vm.neon.tech
+spec:
+  group: vm.neon.tech
+  names:
+    kind: IPPool
+    listKind: IPPoolList
+    plural: ippools
+    singular: ippool
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: IPPool is the Schema for the ippools API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: IPPoolSpec defines the desired state of IPPool
+            properties:
+              allocations:
+                additionalProperties:
+                  description: IPAllocation represents metadata about the pod/container
+                    owner of a specific IP coped from Whereabout CNI as their allocation
+                    functions used
+                  properties:
+                    id:
+                      type: string
+                    podref:
+                      type: string
+                  required:
+                  - id
+                  type: object
+                description: Allocations is the set of allocated IPs for the given
+                  range. Its` indices are a direct mapping to the IP with the same
+                  index/offset for the pool's range.
+                type: object
+              range:
+                description: Range is a RFC 4632/4291-style string that represents
+                  an IP address and prefix length in CIDR notation
+                type: string
+            required:
+            - allocations
+            - range
+            type: object
+        type: object
+    served: true
+    storage: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
     cert-manager.io/inject-ca-from: neonvm-system/neonvm-serving-cert
     controller-gen.kubebuilder.io/version: v0.10.0
   name: virtualmachinemigrations.vm.neon.tech
@@ -76,7 +141,7 @@ spec:
               VirtualMachineMigration
             properties:
               allowPostCopy:
-                default: true
+                default: false
                 description: Use PostCopy migration by default
                 type: boolean
               autoConverge:
@@ -1535,11 +1600,6 @@ spec:
                     description: Interface name.
                     type: string
                   multusNetwork:
-                    default: neonvm-system/neonvm-overlay-net-ipam
-                    description: Multus Network name specified in network-attachments-definition.
-                    type: string
-                  multusNetworkNoIP:
-                    default: neonvm-system/neonvm-overlay-net
                     description: Multus Network name specified in network-attachments-definition.
                     type: string
                 type: object
@@ -1986,6 +2046,32 @@ rules:
   - list
   - watch
 - apiGroups:
+  - k8s.cni.cncf.io
+  resources:
+  - network-attachment-definitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - ippools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vm.neon.tech
+  resources:
+  - ippools/finalizers
+  verbs:
+  - update
+- apiGroups:
   - vm.neon.tech
   resources:
   - virtualmachinemigrations
@@ -2372,12 +2458,20 @@ spec:
         - --leader-elect
         - --zap-devel=false
         - --zap-time-encoding=iso8601
+        - --zap-log-level=info
+        - --zap-stacktrace-level=panic
         command:
         - /manager
         env:
-        - name: IPAM_SERVER
-          value: http://neonvm-vxlan-ipam:9090
-        image: neondatabase/neonvm-controller:v0.10.0
+        - name: NAD_IPAM_NAME
+          value: neonvm-overlay-ipam
+        - name: NAD_IPAM_NAMESPACE
+          value: neonvm-system
+        - name: NAD_RUNNER_NAME
+          value: neonvm-overlay-for-vms
+        - name: NAD_RUNNER_NAMESPACE
+          value: neonvm-system
+        image: neondatabase/neonvm-controller:v0.11.0
         livenessProbe:
           httpGet:
             path: /healthz
@@ -2397,11 +2491,11 @@ spec:
           periodSeconds: 10
         resources:
           limits:
-            cpu: 500m
-            memory: 128Mi
+            cpu: 2000m
+            memory: 1024Mi
           requests:
-            cpu: 10m
-            memory: 64Mi
+            cpu: 500m
+            memory: 512Mi
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -2559,9 +2653,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        - name: IPAM_SERVER
-          value: http://neonvm-vxlan-ipam:9090
-        image: neondatabase/neonvm-vxlan-controller:v0.10.0
+        image: neondatabase/neonvm-vxlan-controller:v0.11.0
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -2593,7 +2685,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.10.0
+        image: neondatabase/neonvm-vxlan-controller:v0.11.0
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
@@ -2649,21 +2741,30 @@ spec:
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
-  name: neonvm-overlay-net
+  name: neonvm-overlay-for-pods
   namespace: neonvm-system
 spec:
-  config: '{ "cniVersion": "0.3.1", "name": "neonvm-overlay-net", "type": "bridge",
-    "bridge": "neon-br0", "ipam": {} }'
+  config: '{ "cniVersion": "0.3.1", "name": "overlay-for-pods", "type": "bridge",
+    "bridge": "neon-br0", "ipam": { "type": "whereabouts", "range": "10.100.0.0/16",
+    "range_start": "10.100.1.0", "range_end": "10.100.127.255" } }'
 ---
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
-  name: neonvm-overlay-net-ipam
+  name: neonvm-overlay-for-vms
   namespace: neonvm-system
 spec:
-  config: '{ "cniVersion": "0.3.1", "name": "neonvm-overlay-net-ipam", "type": "bridge",
-    "bridge": "neon-br0", "ipam": { "type": "whereabouts", "range": "10.100.0.0/20",
-    "range_start": "10.100.0.100" } }'
+  config: '{ "cniVersion": "0.3.1", "name": "overlay-for-vms", "type": "bridge", "bridge":
+    "neon-br0", "ipam": {} }'
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: neonvm-overlay-ipam
+  namespace: neonvm-system
+spec:
+  config: '{ "ipam": { "range": "10.100.0.0/16", "range_start": "10.100.128.0", "network_name":
+    "neonvm" } }'
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
