@@ -164,5 +164,26 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		},
 	))
 
+	reg.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Name: "autoscaling_billed_vms_unsuccessful_communication_with_informant_current",
+			Help: "Number of VMs *getting billed* whose vm-informants aren't successfully communicating with the autoscaler-agent",
+		},
+		func() float64 {
+			globalstate.lock.Lock()
+			defer globalstate.lock.Unlock()
+
+			count := 0
+
+			for _, p := range globalstate.pods {
+				if p.status.endpointID != "" && p.status.informantIsUnhealthy(globalstate.config) {
+					count++
+				}
+			}
+
+			return float64(count)
+		},
+	))
+
 	return metrics, reg
 }

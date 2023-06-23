@@ -14,6 +14,7 @@ import (
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
@@ -24,6 +25,8 @@ type vmEvent struct {
 	vmInfo  api.VmInfo
 	podName string
 	podIP   string
+	// if present, the ID of the endpoint associated with the VM. May be empty.
+	endpointID string
 }
 
 // MarshalLogObject implements zapcore.ObjectMarshaler
@@ -31,6 +34,7 @@ func (ev vmEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("kind", string(ev.kind))
 	enc.AddString("podName", ev.podName)
 	enc.AddString("podIP", ev.podIP)
+	enc.AddString("endpointID", ev.endpointID)
 	if err := enc.AddReflected("vmInfo", ev.vmInfo); err != nil {
 		return err
 	}
@@ -146,11 +150,17 @@ func makeVMEvent(logger *zap.Logger, vm *vmapi.VirtualMachine, kind vmEventKind)
 		return vmEvent{}, fmt.Errorf("Error extracting VM info: %w", err)
 	}
 
+	endpointID := ""
+	if vm.Labels != nil {
+		endpointID = vm.Labels[billing.EndpointLabel] // billing needs endpoint IDs anyways, just grab the label name from there
+	}
+
 	return vmEvent{
-		kind:    kind,
-		vmInfo:  *info,
-		podName: vm.Status.PodName,
-		podIP:   vm.Status.PodIP,
+		kind:       kind,
+		vmInfo:     *info,
+		podName:    vm.Status.PodName,
+		podIP:      vm.Status.PodIP,
+		endpointID: endpointID,
 	}, nil
 }
 
@@ -160,8 +170,8 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 	case verb == 'v' && state.Flag('#'):
 		state.Write([]byte(fmt.Sprintf(
 			// note: intentionally order podName and podIP before vmInfo because vmInfo is large.
-			"agent.vmEvent{kind:%q, podName:%q, podIP:%q, vmInfo:%#v}",
-			e.kind, e.podName, e.podIP, e.vmInfo,
+			"agent.vmEvent{kind:%q, podName:%q, podIP:%q, vmInfo:%#v, endpointID:%q}",
+			e.kind, e.podName, e.podIP, e.vmInfo, e.endpointID,
 		)))
 	default:
 		if verb != 'v' {
@@ -171,8 +181,8 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 		}
 
 		state.Write([]byte(fmt.Sprintf(
-			"{kind:%s podName:%s podIP:%s vmInfo:%v}",
-			e.kind, e.podName, e.podIP, e.vmInfo,
+			"{kind:%s podName:%s podIP:%s vmInfo:%v endpointID:%s}",
+			e.kind, e.podName, e.podIP, e.vmInfo, e.endpointID,
 		)))
 
 		if verb != 'v' {
