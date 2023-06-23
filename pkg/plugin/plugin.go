@@ -52,6 +52,7 @@ type IndexedVMStore = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
 var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
+var _ framework.PreFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.PostFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
@@ -282,8 +283,29 @@ func (e *AutoscaleEnforcer) checkSchedulerName(logger *zap.Logger, pod *corev1.P
 	return nil
 }
 
-// PostFilter is used by us to check the status of the filtered pods, so that we can have metrics
-// that are a strong indicator of pods stuck in pending because of an error in the plugin
+// PreFilter is called at the start of any Pod's filter cycle. We use it in combination with
+// PostFilter (which is only called on failure) to provide metrics for pods that are rejected by
+// this process.
+func (e *AutoscaleEnforcer) PreFilter(
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+) (*framework.PreFilterResult, *framework.Status) {
+	return nil, nil
+}
+
+// PreFilterExtensions is required for framework.PreFilterPlugin, and can return nil if it's not used
+func (e *AutoscaleEnforcer) PreFilterExtensions() framework.PreFilterExtensions {
+	return nil
+}
+
+// PostFilter is used by us for metrics on filter cycles that reject a Pod by filtering out all
+// applicable nodes.
+//
+// Quoting the docs for PostFilter:
+//
+// > These plugins are called after Filter phase, but only when no feasible nodes were found for the
+// > pod.
 //
 // Required for framework.PostFilterPlugin
 func (e *AutoscaleEnforcer) PostFilter(
@@ -297,26 +319,7 @@ func (e *AutoscaleEnforcer) PostFilter(
 		e.metrics.IncFailIfNotSuccess("PostFilter", status)
 	}()
 
-	// FIXME: what to do here? Can this happen?
-	if len(filteredNodeStatusMap) == 0 {
-		return nil, nil
-	}
-
-	hasSuccess := false
-	for _, status := range filteredNodeStatusMap {
-		if status.IsSuccess() {
-			hasSuccess = true
-			break
-		}
-	}
-
-	if !hasSuccess {
-		podName := fmt.Sprint(util.GetNamespacedName(pod))
-		e.metrics.filterCycleRejections.WithLabelValues(podName).Inc()
-	} else {
-		e.metrics.filterCycleSuccesses.Inc()
-	}
-
+	e.metrics.filterCycleRejections.Inc()
 	return nil, nil // PostFilterResult is optional, nil Status is success.
 }
 

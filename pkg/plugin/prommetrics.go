@@ -14,8 +14,8 @@ import (
 type PromMetrics struct {
 	pluginCalls           *prometheus.CounterVec
 	pluginCallFails       *prometheus.CounterVec
-	filterCycleSuccesses  prometheus.Counter
-	filterCycleRejections *prometheus.CounterVec
+	filterCycleAttempts   prometheus.Counter
+	filterCycleRejections prometheus.Counter
 	resourceRequests      *prometheus.CounterVec
 	validResourceRequests *prometheus.CounterVec
 }
@@ -47,18 +47,17 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 			},
 			[]string{"method", "status"},
 		)),
-		filterCycleSuccesses: util.RegisterMetric(reg, prometheus.NewCounter(
+		filterCycleAttempts: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
-				Name: "autoscaling_plugin_filter_cycle_successes_total",
-				Help: "Number of successful Filter stages for any pod",
+				Name: "autoscaling_plugin_filter_cycle_attempts_total",
+				Help: "Number of filter cycles started",
 			},
 		)),
-		filterCycleRejections: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		filterCycleRejections: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_filter_cycle_rejections_total",
-				Help: "For each pod, number of times rejected by *all* Filter evaluations",
+				Help: "Number of filter cycles resulting in the Pod being rejected by *all* Filter evaluations",
 			},
-			[]string{"pod_name"},
 		)),
 		resourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
