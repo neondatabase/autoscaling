@@ -8,14 +8,34 @@ import (
 )
 
 type PromMetrics struct {
-	schedulerRequests         *prometheus.CounterVec
+	schedulerRequests        *prometheus.CounterVec
+	schedulerRequestedChange resourceChangePair
+	schedulerApprovedChange  resourceChangePair
+
 	informantRequestsOutbound *prometheus.CounterVec
 	informantRequestsInbound  *prometheus.CounterVec
-	runnerFatalErrors         prometheus.Counter
-	runnerThreadPanics        prometheus.Counter
-	runnerStarts              prometheus.Counter
-	runnerRestarts            prometheus.Counter
+	informantRequestedChange  resourceChangePair
+	informantApprovedChange   resourceChangePair
+
+	neonvmRequestsOutbound *prometheus.CounterVec
+	neonvmRequestedChange  resourceChangePair
+
+	runnerFatalErrors  prometheus.Counter
+	runnerThreadPanics prometheus.Counter
+	runnerStarts       prometheus.Counter
+	runnerRestarts     prometheus.Counter
 }
+
+type resourceChangePair struct {
+	cpu *prometheus.CounterVec
+	mem *prometheus.CounterVec
+}
+
+const (
+	directionLabel    = "direction"
+	directionValueInc = "inc"
+	directionValueDec = "dec"
+)
 
 func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
@@ -30,6 +50,8 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 	metrics := PromMetrics{
 		// the util.RegisterMetric() function registers the collector and returns
 		// it so we can set it directly on the output structure.
+
+		// ---- SCHEDULER ----
 		schedulerRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_scheduler_plugin_requests_total",
@@ -37,6 +59,40 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 			},
 			[]string{"code"},
 		)),
+		schedulerRequestedChange: resourceChangePair{
+			cpu: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_scheduler_plugin_requested_cpu_change_total",
+					Help: "Total change in CPU requested from the scheduler",
+				},
+				[]string{directionLabel},
+			)),
+			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_scheduler_plugin_requested_mem_change_total",
+					Help: "Total change in memory (in MiB) requested from the scheduler",
+				},
+				[]string{directionLabel},
+			)),
+		},
+		schedulerApprovedChange: resourceChangePair{
+			cpu: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_scheduler_plugin_accepted_cpu_change_total",
+					Help: "Total change in CPU approved by the scheduler",
+				},
+				[]string{directionLabel},
+			)),
+			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_scheduler_plugin_accepted_mem_change_total",
+					Help: "Total change in memory (in MiB) approved by the scheduler",
+				},
+				[]string{directionLabel},
+			)),
+		},
+
+		// ---- INFORMANT ----
 		informantRequestsOutbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_informant_outbound_requests_total",
@@ -45,11 +101,73 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 			[]string{"code"},
 		)),
 		informantRequestsInbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
-			prometheus.CounterOpts{Name: "autoscaling_agent_informant_inbound_requests_total",
+			prometheus.CounterOpts{
+				Name: "autoscaling_agent_informant_inbound_requests_total",
 				Help: "Number of HTTP requests from vm-informants received by autoscaler-agents",
 			},
 			[]string{"endpoint", "code"},
 		)),
+		informantRequestedChange: resourceChangePair{
+			cpu: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_informant_requested_cpu_change_total",
+					Help: "Total change in CPU requested from the informant(s)",
+				},
+				[]string{directionLabel},
+			)),
+			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_informant_requested_mem_change_total",
+					Help: "Total change in memory (in MiB) requested from the informant(s)",
+				},
+				[]string{directionLabel},
+			)),
+		},
+		informantApprovedChange: resourceChangePair{
+			cpu: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_informant_approved_cpu_change_total",
+					Help: "Total change in CPU approved by the informant(s)",
+				},
+				[]string{directionLabel},
+			)),
+			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_informant_approved_mem_change_total",
+					Help: "Total change in memory (in MiB) approved by the informant(s)",
+				},
+				[]string{directionLabel},
+			)),
+		},
+
+		// ---- NEONVM ----
+		neonvmRequestsOutbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_agent_neonvm_outbound_requests_total",
+				Help: "Number of k8s patch requests to NeonVM objects",
+			},
+			// NOTE: "result" is either "ok" or "[error: $CAUSE]", with $CAUSE as the root cause of
+			// the request error.
+			[]string{"result"},
+		)),
+		neonvmRequestedChange: resourceChangePair{
+			cpu: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_neonvm_requested_cpu_change_total",
+					Help: "Total change in CPU requested for VMs",
+				},
+				[]string{directionLabel},
+			)),
+			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "autoscaling_agent_neonvm_requested_mem_changed_total",
+					Help: "Total change in memory (in MiB) requested for VMs",
+				},
+				[]string{directionLabel},
+			)),
+		},
+
+		// ---- RUNNER LIFECYCLE ----
 		runnerFatalErrors: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_runner_fatal_errors_total",
@@ -74,6 +192,26 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 				Help: "Number of existing per-VM Runners restarted due to failure",
 			},
 		)),
+	}
+
+	// Some of of the metrics should have default keys set to zero. Otherwise, these won't be filled
+	// unil the value is non-zero (because something's happened), which makes it harder to
+	// distinguish between "valid signal of nothing" vs "no signal".
+	metricsWithDirection := []resourceChangePair{
+		// scheduler:
+		metrics.schedulerRequestedChange,
+		metrics.schedulerApprovedChange,
+		// informant:
+		metrics.informantRequestedChange,
+		metrics.informantApprovedChange,
+		// neonvm:
+		metrics.neonvmRequestedChange,
+	}
+	for _, p := range metricsWithDirection {
+		for _, m := range []*prometheus.CounterVec{p.cpu, p.mem} {
+			m.WithLabelValues(directionValueInc).Add(0.0)
+			m.WithLabelValues(directionValueDec).Add(0.0)
+		}
 	}
 
 	// the remaining metrics are computed at scrape time by prom:
