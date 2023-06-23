@@ -271,7 +271,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 	reg.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Name: "autoscaling_agent_tracked_vms_current",
-			Help: "Number of VMs on the autoscaler-agent's node that it's tracking",
+			Help: "Number of autoscaling-enabled non-migrating VMs on the autoscaler-agent's node",
 		},
 		func() float64 {
 			globalstate.lock.Lock()
