@@ -100,7 +100,7 @@ func makeAutoscaleEnforcerPlugin(
 			conf: config,
 		},
 		metrics: PromMetrics{},    //nolint:exhaustruct // set by startPrometheusServer
-		vmStore: IndexedVMStore{}, // set below.
+		vmStore: IndexedVMStore{}, //nolint:exhaustruct // set below
 	}
 
 	if p.state.conf.DumpState != nil {
