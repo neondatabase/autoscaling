@@ -27,6 +27,9 @@ func NewState(logger *zap.Logger) (state State, _ error) {
         return state, err
     }
 
+    // Start the dispatcher
+    go disp.run()
+
     // Listen for upscale notifications
     go func() {
         for {
