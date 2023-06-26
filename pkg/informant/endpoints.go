@@ -94,8 +94,8 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 	}
 
 	tx, rx := util.Oneshot[MonitorResult]()
-	s.dispatcher.Call(Stage{
-		Request: &Request{
+	s.dispatcher.Call(
+		Request{
 			RequestUpscale: nil,
 			NotifyUpscale:  nil,
 			TryDownscale: &Resources{
@@ -103,9 +103,7 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 				Mem: uint64(target.Data.Cpu.Value()),
 			},
 		},
-		Response: nil,
-		Done:     nil,
-	}, tx)
+		tx)
 	res := rx.Recv().Result
 
 	return res.Into(), 200, nil
@@ -140,18 +138,15 @@ func (s *State) NotifyUpscale(
 	}
 
 	tx, rx := util.Oneshot[MonitorResult]()
-	s.dispatcher.Call(Stage{
-		Request: &Request{
+	s.dispatcher.Call(
+		Request{
 			RequestUpscale: nil,
 			NotifyUpscale:  nil,
 			TryDownscale: &Resources{
 				Cpu: uint64(newResources.Data.Cpu.Value()),
 				Mem: uint64(newResources.Data.Cpu.Value()),
 			},
-		},
-		Response: nil,
-		Done:     nil,
-	}, tx)
+		}, tx)
 	res := rx.Recv().Confirmation
 
 	return &res, 200, nil
