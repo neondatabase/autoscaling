@@ -41,18 +41,8 @@ func main() {
 		}
 	}()
 
-	// Below, we want to be able to distinguish between absence of flags and presence of empty
-	// flags. The only way we can reliably do this is by setting defaults to a sentinel value that
-	// isn't possible to create otherwise. In this case, it's a string containing a null byte, which
-	// cannot be provided (due to C's null-terminated strings).
-	invalidArgValue := "\x00"
-
-	var cgroupName string
 	var autoRestart bool
-	var pgConnStr string
-	flag.StringVar(&cgroupName, "cgroup", invalidArgValue, "Sets the cgroup to monitor (optional)")
 	flag.BoolVar(&autoRestart, "auto-restart", false, "Automatically cleanup and restart on failure or exit")
-	flag.StringVar(&pgConnStr, "pgconnstr", invalidArgValue, "Sets the postgres connection string to enable file cache (optional)")
 
 	flag.Parse()
 
@@ -62,25 +52,6 @@ func main() {
 
 		var args []string
 		var cleanupHooks []func()
-
-		if pgConnStr != invalidArgValue {
-			args = append(args, "-pgconnstr", pgConnStr)
-		}
-		if cgroupName != invalidArgValue {
-			args = append(args, "-cgroup", cgroupName)
-			cleanupHooks = append(cleanupHooks, func() {
-				logger.Info("cleanup hook: making sure cgroup is thawed", zap.String("cgroup", cgroupName))
-				manager, err := cgroup2.Load(fmt.Sprint("/", cgroupName))
-				if err != nil {
-					logger.Error("Error making cgroup handler", zap.Error(err))
-					return
-				}
-				if err := manager.Thaw(); err != nil {
-					logger.Error("Error thawing cgroup", zap.Error(err))
-				}
-			})
-		}
-
 		runRestartOnFailure(ctx, logger, args, cleanupHooks)
 		closer := srv.GetShutdownSignal(ctx)
 		// this cancels the process' underlying context
@@ -92,7 +63,7 @@ func main() {
 
 	state, err := informant.NewState(logger)
 	if err != nil {
-		panic(fmt.Sprintf("Error creating informant state %v", err))
+		logger.Fatal("Error creating informant state", zap.Error(err))
 	}
 
 	mux := http.NewServeMux()
