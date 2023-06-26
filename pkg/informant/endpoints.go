@@ -16,29 +16,29 @@ import (
 type State struct {
 	agents     *AgentSet
 	dispatcher *Dispatcher
-    requests   <-chan struct{}
+	requests   <-chan struct{}
 }
 
 func NewState(logger *zap.Logger) (state State, _ error) {
-    agents := NewAgentSet(logger)
-    requests := make(chan struct {})
-    disp, err := NewDispatcher("127.0.0.1:10369", logger, requests)
-    if err != nil {
-        return state, err
-    }
+	agents := NewAgentSet(logger)
+	requests := make(chan struct{})
+	disp, err := NewDispatcher("127.0.0.1:10369", logger, requests)
+	if err != nil {
+		return state, err
+	}
 
-    // Start the dispatcher
-    go disp.run()
+	// Start the dispatcher
+	go disp.run()
 
-    // Listen for upscale notifications
-    go func() {
-        for {
-            <-requests
-            agents.RequestUpscale(agents.baseLogger)
-        }
-    }()
+	// Listen for upscale notifications
+	go func() {
+		for {
+			<-requests
+			agents.RequestUpscale(agents.baseLogger)
+		}
+	}()
 
-    return State{agents: agents, dispatcher: &disp, requests: requests}, nil
+	return State{agents: agents, dispatcher: &disp, requests: requests}, nil
 }
 
 // RegisterAgent registers a new or updated autoscaler-agent

@@ -1,6 +1,10 @@
 package informant
 
-import "github.com/neondatabase/autoscaling/pkg/api"
+import (
+	"github.com/neondatabase/autoscaling/pkg/api"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
 
 // Defines types that are used to communicate with the monitor over websocket
 // connection
@@ -27,9 +31,33 @@ type Response struct {
 	DownscaleResult      *DownscaleResult `json:"downscaleResult,omitempty"`
 }
 
+func (res Response) zapField() zap.Field {
+	return zap.Object("Resources", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
+        switch {
+            case res.UpscaleResult != nil: {
+                // ERROR
+                enc.AddObject("UpscaleResult", res.UpscaleResult.zapField())
+            }
+            case res.ResourceConfirmation != nil: {
+            }
+            case res.DownscaleResult != nil: {
+            }
+        }
+		return nil
+	}))
+}
+
 type Resources struct {
 	Cpu uint64 `json:"cpu"`
 	Mem uint64 `json:"mem"`
+}
+
+func (resources Resources) zapField() zap.Field {
+	return zap.Object("Resources", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
+		enc.AddUint64("cpu", resources.Cpu)
+        enc.AddUint64("mem", resources.Mem)
+		return nil
+	}))
 }
 
 type DownscaleResult struct {
@@ -37,24 +65,32 @@ type DownscaleResult struct {
 	Status string `json:"status"`
 }
 
+func (res DownscaleResult) zapField() zap.Field {
+	return zap.Object("DownscaleResult", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
+		enc.AddString("status", res.Status)
+        enc.AddBool("ok", res.Ok)
+		return nil
+	}))
+}
+
 // Convert into api.DownscaleResult.
 //
 // The reason for having two types is to prevent us from having to keep track/control
 // how api.DownscaleResult is serialized
-func (res *DownscaleResult) Into() (*api.DownscaleResult) {
-    return &api.DownscaleResult{
-        Ok: res.Ok,
-        Status: res.Status,
-    }
+func (res *DownscaleResult) Into() *api.DownscaleResult {
+	return &api.DownscaleResult{
+		Ok:     res.Ok,
+		Status: res.Status,
+	}
 }
 
 func Done() Packet {
-    return Packet{
-    	Stage:  Stage{
-    		Request:  nil,
-    		Response: nil,
-    		Done:     &struct{}{},
-    	},
-    	SeqNum: 0, // FIXME
-    }
+	return Packet{
+		Stage: Stage{
+			Request:  nil,
+			Response: nil,
+			Done:     &struct{}{},
+		},
+		SeqNum: 0, // FIXME
+	}
 }
