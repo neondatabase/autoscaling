@@ -5,7 +5,6 @@ package plugin
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -108,11 +107,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			},
 		},
 	)
-	if err != nil {
-		return fmt.Errorf("Error watching pod deletions: %w", err)
-	}
-
-	return nil
+	return err
 }
 
 // tryMigrationOwnerReference returns the name of the owning migration, if this pod *is* owned by a
