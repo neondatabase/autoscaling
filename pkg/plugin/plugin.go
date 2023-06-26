@@ -290,7 +290,12 @@ func (e *AutoscaleEnforcer) PreFilter(
 	ctx context.Context,
 	state *framework.CycleState,
 	pod *corev1.Pod,
-) (*framework.PreFilterResult, *framework.Status) {
+) (_ *framework.PreFilterResult, status *framework.Status) {
+	e.metrics.pluginCalls.WithLabelValues("PreFilter").Inc()
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("PreFilter", status)
+	}()
+
 	return nil, nil
 }
 
@@ -319,7 +324,6 @@ func (e *AutoscaleEnforcer) PostFilter(
 		e.metrics.IncFailIfNotSuccess("PostFilter", status)
 	}()
 
-	e.metrics.filterCycleRejections.Inc()
 	return nil, nil // PostFilterResult is optional, nil Status is success.
 }
 
