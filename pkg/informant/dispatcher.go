@@ -77,7 +77,7 @@ func (disp *Dispatcher) recv() (*Packet, error) {
 	var p Packet
 	err := wsjson.Read(disp.ctx, disp.Conn, &p)
 	if err != nil {
-		return &p, nil
+		return nil, err
 	}
 	return &p, nil
 }
