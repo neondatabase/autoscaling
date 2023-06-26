@@ -137,6 +137,8 @@ func (s *State) NotifyUpscale(
 		return nil, 400, fmt.Errorf("Agent ID %s is not the active Agent", incomingId)
 	}
 
+    logger.Info("Notifying monitor of upscale", zap.Any("resources", newResources))
+
 	tx, rx := util.Oneshot[MonitorResult]()
 	s.dispatcher.Call(
 		Request{

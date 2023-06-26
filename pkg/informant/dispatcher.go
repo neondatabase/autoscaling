@@ -69,6 +69,7 @@ func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (d
 
 // Send a packet down the connection.
 func (disp *Dispatcher) send(p Packet) error {
+	disp.logger.Debug("Sending packet", zap.Any("packet", p))
 	return wsjson.Write(disp.ctx, disp.Conn, p)
 }
 
@@ -79,6 +80,7 @@ func (disp *Dispatcher) recv() (*Packet, error) {
 	if err != nil {
 		return nil, err
 	}
+	disp.logger.Debug("Received packet", zap.Any("packet", p))
 	return &p, nil
 }
 
@@ -116,6 +118,7 @@ func (disp *Dispatcher) run() {
 				switch {
 				case req.RequestUpscale != nil:
 					{
+						disp.logger.Info("Received request for upscale")
 						// The goroutine listening on the other side will make the
 						// request
 						disp.notifier <- struct{}{}
@@ -143,6 +146,7 @@ func (disp *Dispatcher) run() {
 						// Loop up the waiter and send back the result
 						sender, ok := disp.waiters[id]
 						if ok {
+							disp.logger.Debug("Received DownscaleResult. Notifying receiver.", zap.Uint64("id", id))
 							sender.Send(MonitorResult{Result: *res.DownscaleResult})
 							// Don't forget to delete the waiter
 							delete(disp.waiters, id)
@@ -156,6 +160,7 @@ func (disp *Dispatcher) run() {
 						// Loop up the waiter and send back the result
 						sender, ok := disp.waiters[id]
 						if ok {
+							disp.logger.Debug("Received ResourceConfirmation. Notifying receiver.", zap.Uint64("id", id))
 							sender.Send(MonitorResult{Result: *res.DownscaleResult})
 							// Don't forget to delete the waiter
 							delete(disp.waiters, id)
@@ -177,6 +182,7 @@ func (disp *Dispatcher) run() {
 			}
 		case stage.Done != nil:
 			{
+				disp.logger.Debug("Transaction finished.", zap.Uint64("id", id))
 				// yay! :)
 			}
 		}

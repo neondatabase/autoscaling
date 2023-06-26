@@ -31,22 +31,6 @@ type Response struct {
 	DownscaleResult      *DownscaleResult `json:"downscaleResult,omitempty"`
 }
 
-func (res Response) zapField() zap.Field {
-	return zap.Object("Resources", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
-        switch {
-            case res.UpscaleResult != nil: {
-                // ERROR
-                enc.AddObject("UpscaleResult", res.UpscaleResult.zapField())
-            }
-            case res.ResourceConfirmation != nil: {
-            }
-            case res.DownscaleResult != nil: {
-            }
-        }
-		return nil
-	}))
-}
-
 type Resources struct {
 	Cpu uint64 `json:"cpu"`
 	Mem uint64 `json:"mem"`
@@ -63,14 +47,6 @@ func (resources Resources) zapField() zap.Field {
 type DownscaleResult struct {
 	Ok     bool   `json:"ok"`
 	Status string `json:"status"`
-}
-
-func (res DownscaleResult) zapField() zap.Field {
-	return zap.Object("DownscaleResult", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
-		enc.AddString("status", res.Status)
-        enc.AddBool("ok", res.Ok)
-		return nil
-	}))
 }
 
 // Convert into api.DownscaleResult.
