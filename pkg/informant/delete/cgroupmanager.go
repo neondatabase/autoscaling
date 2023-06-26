@@ -2,6 +2,8 @@ package informant
 
 // A lightweight wrapper around cgroup2.Manager, with a mix of convenience and extra functionality.
 
+/*
+
 import (
 	"errors"
 	"fmt"
@@ -329,3 +331,5 @@ func (c *CgroupManager) Freeze() error {
 func (c *CgroupManager) Thaw() error {
 	return c.manager.Thaw()
 }
+
+*/

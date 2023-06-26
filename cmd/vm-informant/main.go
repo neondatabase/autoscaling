@@ -90,37 +90,9 @@ func main() {
 		return
 	}
 
-	var stateOpts []informant.NewStateOpts
-
-	if cgroupName != invalidArgValue {
-		logger := logger.With(zap.String("cgroup", cgroupName))
-
-		cgroupConfig := informant.DefaultCgroupConfig
-		logger.Info("Selected cgroup, starting handler", zap.Any("config", cgroupConfig))
-		cgroup, err := informant.NewCgroupManager(logger.Named("cgroup").Named("manager"), cgroupName)
-		if err != nil {
-			logger.Fatal("Error starting cgroup handler", zap.Error(err))
-		}
-
-		stateOpts = append(stateOpts, informant.WithCgroup(cgroup, cgroupConfig))
-	} else {
-		logger.Info("No cgroup selected")
-	}
-
-	if pgConnStr != invalidArgValue {
-		logger := logger.With(zap.String("fileCacheConnstr", pgConnStr))
-
-		fileCacheConfig := informant.DefaultFileCacheConfig
-		logger.Info("Selected postgres file cache", zap.Any("config", fileCacheConfig))
-		stateOpts = append(stateOpts, informant.WithPostgresFileCache(pgConnStr, fileCacheConfig))
-	} else {
-		logger.Info("No postgres file cache selected")
-	}
-
-	agents := informant.NewAgentSet(logger)
-	state, err := informant.NewState(logger, agents, informant.DefaultStateConfig, stateOpts...)
+	state, err := informant.NewState(logger)
 	if err != nil {
-		logger.Fatal("Error starting informant.NewState", zap.Error(err))
+		panic(fmt.Sprintf("Error creating informant state %v", err))
 	}
 
 	mux := http.NewServeMux()

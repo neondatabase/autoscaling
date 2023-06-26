@@ -2,6 +2,8 @@ package informant
 
 // Informant-specific usage and logic around cgroups, using CgroupManager.
 
+/*
+
 import (
 	"fmt"
 	"sync"
@@ -310,3 +312,5 @@ func getTotalSystemMemory() (*sysinfotypes.HostMemoryInfo, error) {
 
 	return mem, nil
 }
+
+*/
