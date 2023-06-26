@@ -99,8 +99,8 @@ func makeAutoscaleEnforcerPlugin(
 			lock: util.NewChanMutex(),
 			conf: config,
 		},
-		metrics: PromMetrics{},                                                                      //nolint:exhaustruct // set by startPrometheusServer
-		vmStore: watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]{}, // set below.
+		metrics: PromMetrics{},    //nolint:exhaustruct // set by startPrometheusServer
+		vmStore: IndexedVMStore{}, // set below.
 	}
 
 	if p.state.conf.DumpState != nil {
@@ -223,9 +223,11 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 		return nil, nil
 	}
 
-	vm, ok := vmStore.GetIndexed(func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
+	accessor := func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
 		return index.Get(vmName.Namespace, vmName.Name)
-	})
+	}
+
+	vm, ok := vmStore.GetIndexed(accessor)
 	if !ok {
 		logger.Warn(
 			"VM is missing from local store. Relisting",
@@ -248,9 +250,7 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 		}
 
 		// retry fetching the VM, now that we know it's been synced.
-		vm, ok = vmStore.GetIndexed(func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
-			return index.Get(vmName.Namespace, vmName.Name)
-		})
+		vm, ok = vmStore.GetIndexed(accessor)
 		if !ok {
 			// if the VM is still not present after relisting, then either it's already been deleted
 			// or there's a deeper problem.
