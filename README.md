@@ -117,10 +117,10 @@ cgexec -g memory:neon-test allocate-loop 256 2280
 
 To run e2e tests you need to install dependencies:
 - [`kubectl`]
-- [`kind`]
+- [`kind`]/[`k3d`]
 - [`kuttl`]
 
-You can either download them from their websites or install using Homebrew: `brew install kubectl kind kuttl`
+You can either download them from their websites or install using Homebrew: `brew install kubectl kind k3d kuttl`
 
 ```sh
 make kind-setup # or make k3d-setup, if you'd like to use k3d
