@@ -63,7 +63,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Error creating informant state", zap.Error(err))
 	}
-    logger.Info("Created informant state.", zap.Any("state", state))
+	logger.Info("Created informant state.", zap.Any("state", state))
 
 	mux := http.NewServeMux()
 	hl := logger.Named("handle")

@@ -177,7 +177,7 @@ func (disp *Dispatcher) run() {
 						sender, ok := disp.waiters[id]
 						if ok {
 							disp.logger.Info("Received ResourceConfirmation. Notifying receiver.", zap.Uint64("id", id))
-                            //
+							//
 							sender.Send(MonitorResult{Result: nil, Confirmation: struct{}{}})
 							// Don't forget to delete the waiter
 							delete(disp.waiters, id)
