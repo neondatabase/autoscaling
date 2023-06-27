@@ -7,6 +7,7 @@ IMG_VXLAN ?= vxlan-controller:dev
 AUTOSCALER_SCHEDULER_IMG ?= autoscale-scheduler:dev
 AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
 VM_INFORMANT_IMG ?= vm-informant:dev
+VM_MONITOR_IMG ?= vm-monitor:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
@@ -139,11 +140,19 @@ vm-informant: ## Build vm-informant image
 		--file build/vm-informant/Dockerfile \
 		.
 
+.PHONY: vm-monitor
+vm-monitor: ## Build vm-monitor image
+	docker buildx build \
+		--tag $(VM_MONITOR_IMG) \
+		--load \
+		--file build/vm-monitor/Dockerfile \
+		.
+
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler vm-informant ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, and scheduler
+docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler vm-informant vm-monitor ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler, vm-informant, vm-monitor
 
 .PHONY: docker-push
 docker-push: docker-build ## Push docker images to docker registry
@@ -153,6 +162,7 @@ docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(AUTOSCALER_SCHEDULER_IMG)
 	docker push -q $(AUTOSCALER_AGENT_IMG)
 	docker push -q $(VM_INFORMANT_IMG)
+	docker push -q $(VM_MONITOR_IMG)
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller

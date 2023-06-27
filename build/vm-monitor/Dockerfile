@@ -5,9 +5,13 @@ RUN apk add musl-dev git
 
 # Ensures we reclone upon new commits
 # https://stackoverflow.com/questions/35134713
-ADD "https://api.github.com/repos/neondatabase/vm-monitor/commits?per_page=1" latest_commit
+#
+# Note: unlike in the stackoverflow post we access the branches endpoint so that
+# `latest_commit` will change upon a commit in any branch
+ADD "https://api.github.com/repos/neondatabase/vm-monitor/branches" latest_commit
 
-RUN git clone https://github.com/neondatabase/vm-monitor.git 
+# FIXME RELEASE: don't clone testing
+RUN git clone --branch testing https://github.com/neondatabase/vm-monitor.git 
 RUN cargo build --release --manifest-path vm-monitor/Cargo.toml
 
 FROM builder
