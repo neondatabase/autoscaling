@@ -49,11 +49,11 @@ type Dispatcher struct {
 // Create a new Dispatcher. Note that this does not immediately start the Dispatcher.
 // Call Run() to start it.
 func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (disp Dispatcher, _ error) {
-    // TODO: have this context actually do something. As of now it's just being
-    // passed around to satisfy typing
-	ctx := context.Background();
+	// TODO: have this context actually do something. As of now it's just being
+	// passed around to satisfy typing
+	ctx := context.Background()
 
-    logger.Info("Connecting via websocket.", zap.String("address:", addr))
+	logger.Info("Connecting via websocket.", zap.String("addr", addr))
 	c, _, err := websocket.Dial(ctx, addr, nil)
 	if err != nil {
 		return disp, fmt.Errorf("Error creating dispatcher: %v", err)
@@ -79,6 +79,7 @@ func (disp *Dispatcher) send(p Packet) error {
 // Try to receive a packet off the connection.
 func (disp *Dispatcher) recv() (*Packet, error) {
 	var p Packet
+	disp.logger.Debug("Reading packet off connection.")
 	err := wsjson.Read(disp.ctx, disp.Conn, &p)
 	if err != nil {
 		return nil, err
@@ -96,16 +97,21 @@ func (disp *Dispatcher) recv() (*Packet, error) {
 func (disp *Dispatcher) Call(req Request, sender util.OneshotSender[MonitorResult]) {
 	id := disp.counter
 	disp.counter += 1
-	disp.send(Packet{Stage: Stage{
-		Request:  &req,
-		Response: nil,
-		Done:     nil,
-	}, Id: id})
+	packet := Packet{
+		Stage: Stage{
+			Request:  &req,
+			Response: nil,
+			Done:     nil,
+		},
+		Id: id,
+	}
+	disp.send(packet)
 	disp.waiters[id] = sender
 }
 
 // Long running function that performs all orchestrates all requests/responses.
 func (disp *Dispatcher) run() {
+    disp.logger.Info("Starting.")
 	for {
 		packet, err := disp.recv()
 		if err != nil {
@@ -149,7 +155,7 @@ func (disp *Dispatcher) run() {
 						// Loop up the waiter and send back the result
 						sender, ok := disp.waiters[id]
 						if ok {
-							disp.logger.Debug("Received DownscaleResult. Notifying receiver.", zap.Uint64("id", id))
+							disp.logger.Info("Received DownscaleResult. Notifying receiver.", zap.Uint64("id", id))
 							sender.Send(MonitorResult{Result: *res.DownscaleResult})
 							// Don't forget to delete the waiter
 							delete(disp.waiters, id)
@@ -163,7 +169,7 @@ func (disp *Dispatcher) run() {
 						// Loop up the waiter and send back the result
 						sender, ok := disp.waiters[id]
 						if ok {
-							disp.logger.Debug("Received ResourceConfirmation. Notifying receiver.", zap.Uint64("id", id))
+							disp.logger.Info("Received ResourceConfirmation. Notifying receiver.", zap.Uint64("id", id))
 							sender.Send(MonitorResult{Result: *res.DownscaleResult})
 							// Don't forget to delete the waiter
 							delete(disp.waiters, id)

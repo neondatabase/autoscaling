@@ -20,17 +20,21 @@ type State struct {
 }
 
 func NewState(logger *zap.Logger) (state State, _ error) {
+    logger.Info("Creating new agent-set.")
 	agents := NewAgentSet(logger)
 	requests := make(chan struct{})
+    logger.Info("Creating new dispatcher.")
 	disp, err := NewDispatcher("ws://127.0.0.1:10369", logger, requests)
 	if err != nil {
 		return state, err
 	}
 
+    logger.Info("Spawning goroutine to run dispatcher.")
 	// Start the dispatcher
 	go disp.run()
 
 	// Listen for upscale notifications
+    logger.Info("Spawning goroutine to listen for upscale requests.")
 	go func() {
 		for {
 			<-requests
