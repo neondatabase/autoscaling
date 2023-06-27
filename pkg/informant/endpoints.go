@@ -22,7 +22,7 @@ type State struct {
 func NewState(logger *zap.Logger) (state State, _ error) {
 	agents := NewAgentSet(logger)
 	requests := make(chan struct{})
-	disp, err := NewDispatcher("127.0.0.1:10369", logger, requests)
+	disp, err := NewDispatcher("ws://127.0.0.1:10369", logger, requests)
 	if err != nil {
 		return state, err
 	}
@@ -83,6 +83,13 @@ func (s *State) HealthCheck(ctx context.Context, logger *zap.Logger, info *api.A
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
+	cpu := uint64(target.Data.Cpu.Value())
+	mem := uint64(target.Data.Memory.Value())
+
+	logger.Info("Sending try downscale.",
+		zap.Uint64("cpu", cpu),
+		zap.Uint64("mem", mem),
+	)
 	currentId := s.agents.CurrentIdStr()
 	incomingId := target.Data.Id.AgentID.String()
 
@@ -94,13 +101,15 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 	}
 
 	tx, rx := util.Oneshot[MonitorResult]()
+
+    logger.
 	s.dispatcher.Call(
 		Request{
 			RequestUpscale: nil,
 			NotifyUpscale:  nil,
 			TryDownscale: &Resources{
-				Cpu: uint64(target.Data.Cpu.Value()),
-				Mem: uint64(target.Data.Cpu.Value()),
+				Cpu: cpu,
+				Mem: mem,
 			},
 		},
 		tx)
@@ -126,6 +135,13 @@ func (s *State) NotifyUpscale(
 	//
 	// So until the race condition described in #23 is fixed, we have to just trust that the agent
 	// is telling the truth, *especially because it might not be*.
+	cpu := uint64(newResources.Data.Cpu.Value())
+	mem := uint64(newResources.Data.Memory.Value())
+
+	logger.Info("Sending NotifyUpscale to monitor",
+		zap.Uint64("cpu", cpu),
+		zap.Uint64("mem", mem),
+	)
 
 	currentId := s.agents.CurrentIdStr()
 	incomingId := newResources.Data.Id.AgentID.String()
@@ -137,17 +153,15 @@ func (s *State) NotifyUpscale(
 		return nil, 400, fmt.Errorf("Agent ID %s is not the active Agent", incomingId)
 	}
 
-    logger.Info("Notifying monitor of upscale", zap.Any("resources", newResources))
-
 	tx, rx := util.Oneshot[MonitorResult]()
 	s.dispatcher.Call(
 		Request{
 			RequestUpscale: nil,
-			NotifyUpscale:  nil,
-			TryDownscale: &Resources{
-				Cpu: uint64(newResources.Data.Cpu.Value()),
-				Mem: uint64(newResources.Data.Cpu.Value()),
+			NotifyUpscale: &Resources{
+				Cpu: cpu,
+				Mem: mem,
 			},
+			TryDownscale: nil,
 		}, tx)
 	res := rx.Recv().Confirmation
 
