@@ -3,7 +3,7 @@ package informant
 import (
 	"context"
 	"fmt"
-	"time"
+	// "time"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"go.uber.org/zap"
@@ -49,13 +49,16 @@ type Dispatcher struct {
 // Create a new Dispatcher. Note that this does not immediately start the Dispatcher.
 // Call Run() to start it.
 func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (disp Dispatcher, _ error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
+    // TODO: have this context actually do something. As of now it's just being
+    // passed around to satisfy typing
+	ctx := context.Background();
 
+    logger.Info("Connecting via websocket.", zap.String("address:", addr))
 	c, _, err := websocket.Dial(ctx, addr, nil)
 	if err != nil {
 		return disp, fmt.Errorf("Error creating dispatcher: %v", err)
 	}
+
 	disp = Dispatcher{
 		Conn:     c,
 		ctx:      ctx,

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/containerd/cgroups/v3/cgroup2"
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
 
@@ -65,6 +63,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Error creating informant state", zap.Error(err))
 	}
+    logger.Info("Created informant state.", zap.Any("state", state))
 
 	mux := http.NewServeMux()
 	hl := logger.Named("handle")
