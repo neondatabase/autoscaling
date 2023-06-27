@@ -12,8 +12,10 @@ ADD "https://api.github.com/repos/neondatabase/vm-monitor/branches" latest_commi
 
 # FIXME RELEASE: don't clone testing
 RUN git clone --branch fprasx/testing https://github.com/neondatabase/vm-monitor.git 
-RUN cargo build --release --manifest-path vm-monitor/Cargo.toml
+# FIXME RELEASE: compile in release mode, currently not doing so for pretty log output
+# TODO: don't forget to fix the copy statement a few lines down
+RUN cargo build --manifest-path vm-monitor/Cargo.toml
 
 FROM builder
-COPY --from=builder /workspace/vm-monitor/target/release/vm-monitor /usr/bin/vm-monitor
+COPY --from=builder /workspace/vm-monitor/target/debug/vm-monitor /usr/bin/vm-monitor
 ENTRYPOINT [ "/usr/bin/vm-monitor" ]
