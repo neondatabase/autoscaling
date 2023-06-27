@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/neondatabase/autoscaling/pkg/util"
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type MonitorResult struct {
