@@ -9,6 +9,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -50,6 +51,10 @@ type pluginState struct {
 	conf *Config
 }
 
+func (s *pluginState) memSlotSizeBytes() uint64 {
+	return uint64(s.conf.MemSlotSize.Value())
+}
+
 // nodeState is the information that we track for a particular
 type nodeState struct {
 	// name is the name of the node, guaranteed by kubernetes to be unique
@@ -75,6 +80,43 @@ type nodeState struct {
 
 	// mq is the priority queue tracking which pods should be chosen first for migration
 	mq migrationQueue
+}
+
+func (s *nodeState) updateMetrics(metrics PromMetrics, memSlotSizeBytes uint64) {
+	s.vCPU.updateMetrics(metrics.nodeCPUResources, s.name, vmapi.MilliCPU.AsFloat64)
+	s.memSlots.updateMetrics(metrics.nodeMemResources, s.name, func(memSlots uint16) float64 {
+		return float64(uint64(memSlots) * memSlotSizeBytes) // convert memSlots -> bytes
+	})
+}
+
+func (s *nodeResourceState[T]) updateMetrics(metric *prometheus.GaugeVec, nodeName string, convert func(T) float64) {
+	pairs := []struct {
+		valueName string
+		value     T
+	}{
+		{"total", s.Total},
+		{"system", s.System},
+		{"watermark", s.Watermark},
+		{"reserved", s.Reserved},
+		{"buffer", s.Buffer},
+		{"capacityPressure", s.CapacityPressure},
+		{"pressureAccountedFor", s.PressureAccountedFor},
+	}
+
+	for _, p := range pairs {
+		metric.WithLabelValues(nodeName, p.valueName).Set(convert(p.value))
+	}
+}
+
+func (s *nodeState) removeMetrics(metrics PromMetrics) {
+	gauges := []*prometheus.GaugeVec{metrics.nodeCPUResources, metrics.nodeMemResources}
+	valueNames := []string{"total", "system", "watermark", "reserved", "buffer", "capacityPressure", "pressureAccountedFor"}
+
+	for _, g := range gauges {
+		for _, valueName := range valueNames {
+			g.DeleteLabelValues(s.name, valueName)
+		}
+	}
 }
 
 // nodeResourceState describes the state of a resource allocated to a node
@@ -425,6 +467,7 @@ func (s *podState) currentlyMigrating() bool {
 func (s *pluginState) getOrFetchNodeState(
 	ctx context.Context,
 	logger *zap.Logger,
+	metrics PromMetrics,
 	store IndexedNodeStore,
 	nodeName string,
 ) (*nodeState, error) {
@@ -512,6 +555,8 @@ func (s *pluginState) getOrFetchNodeState(
 	if totalReservableMemSlots > s.maxTotalReservableMemSlots {
 		s.maxTotalReservableMemSlots = totalReservableMemSlots
 	}
+
+	n.updateMetrics(metrics, s.memSlotSizeBytes())
 
 	s.nodeMap[nodeName] = n
 	return n, nil
@@ -678,6 +723,8 @@ func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName stri
 		delete(e.state.otherPods, name)
 	}
 
+	node.removeMetrics(e.metrics)
+
 	delete(e.state.nodeMap, nodeName)
 	logger.Info("Deleted node")
 }
@@ -715,6 +762,8 @@ func (e *AutoscaleEnforcer) handleVMDeletion(logger *zap.Logger, podName util.Na
 	delete(pod.node.pods, podName)
 	pod.node.mq.removeIfPresent(pod)
 
+	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+
 	logger.Info(
 		"Deleted VM pod",
 		zap.Bool("migrating", currentlyMigrating),
@@ -748,6 +797,8 @@ func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName 
 		handleAutoscalingDisabled()
 	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
 		handleAutoscalingDisabled()
+
+	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 
 	logger.Info(
 		"Disabled autoscaling for VM pod",
@@ -786,6 +837,8 @@ func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName,
 	pod.node.mq.removeIfPresent(pod)
 	pod.migrationState = &podMigrationState{name: migrationName}
 
+	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+
 	logger.Info(
 		"Handled start of migration involving pod",
 		zap.Object("verdict", verdictSet{
@@ -815,6 +868,9 @@ func (e *AutoscaleEnforcer) handlePodEndMigration(logger *zap.Logger, podName, m
 
 	pod.migrationState = nil
 
+	//nolint:gocritic // NOTE: not *currently* needed, but this should be kept here as a reminder, in case that changes.
+	// pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+
 	logger.Info("Recorded end of migration for VM pod")
 }
 
@@ -841,6 +897,8 @@ func (e *AutoscaleEnforcer) handlePodDeletion(logger *zap.Logger, podName util.N
 
 	delete(e.state.otherPods, podName)
 	delete(pod.node.otherPods, podName)
+
+	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 
 	logger.Info(
 		"Deleted non-VM pod",
@@ -879,6 +937,8 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(logger *zap.Logger, vm *a
 	cpuVerdict := handleUpdatedLimits(n, &pod.vCPU, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
 	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, receivedContact, vm.Mem.Min, vm.Mem.Max)
 
+	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+
 	logger.Info(
 		"Updated scaling bounds for VM pod",
 		zap.Object("verdict", verdictSet{
@@ -910,6 +970,8 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(logger *zap.Logger, 
 		handleNonAutoscalingUsageChange(vm.Using().VCPU)
 	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
 		handleNonAutoscalingUsageChange(vm.Using().Mem)
+
+	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 
 	logger.Info(
 		"Updated non-autoscaling VM usage",
@@ -1120,7 +1182,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			)
 		}
 
-		ns, err := p.state.getOrFetchNodeState(ctx, logger, p.nodeStore, pod.Spec.NodeName)
+		ns, err := p.state.getOrFetchNodeState(ctx, logger, p.metrics, p.nodeStore, pod.Spec.NodeName)
 		if err != nil {
 			logSkip("Couldn't find Node that VM pod is on (maybe it has since been removed?): %w", err)
 			continue
@@ -1232,7 +1294,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			continue
 		}
 
-		ns, err := p.state.getOrFetchNodeState(ctx, logger, p.nodeStore, pod.Spec.NodeName)
+		ns, err := p.state.getOrFetchNodeState(ctx, logger, p.metrics, p.nodeStore, pod.Spec.NodeName)
 		if err != nil {
 			logSkip("Couldn't find Node that non-VM Pod is on (maybe it has since been removed?): %w", err)
 			continue

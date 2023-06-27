@@ -16,6 +16,8 @@ type PromMetrics struct {
 	pluginCallFails       *prometheus.CounterVec
 	resourceRequests      *prometheus.CounterVec
 	validResourceRequests *prometheus.CounterVec
+	nodeCPUResources      *prometheus.GaugeVec
+	nodeMemResources      *prometheus.GaugeVec
 }
 
 func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
@@ -58,6 +60,20 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Help: "Number of resource requests to the scheduler plugin with various results",
 			},
 			[]string{"code", "node", "has_metrics"},
+		)),
+		nodeCPUResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_node_cpu_resources_current",
+				Help: "Current amount of CPU for 'nodeResourceState' fields",
+			},
+			[]string{"node", "field"},
+		)),
+		nodeMemResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_node_mem_resources_current",
+				Help: "Current amount of memory (in bytes) for 'nodeResourceState' fields",
+			},
+			[]string{"node", "field"},
 		)),
 	}
 
