@@ -703,3 +703,42 @@ func (i *NameIndex[T]) Get(namespace string, name string) (obj *T, ok bool) {
 	obj, ok = i.namespacedNames[util.NamespacedName{Namespace: namespace, Name: name}]
 	return
 }
+
+func NewFlatNameIndex[T any]() *FlatNameIndex[T] {
+	// check that *T implements metav1.ObjectMetaAccessor
+	var zero T
+	ptrToZero := any(&zero)
+	if _, ok := ptrToZero.(metav1.ObjectMetaAccessor); !ok {
+		panic("type *T must implement metav1.ObjectMetaAccessor")
+	}
+
+	return &FlatNameIndex[T]{
+		names: make(map[string]*T),
+	}
+}
+
+type FlatNameIndex[T any] struct {
+	names map[string]*T
+}
+
+// note: requires that *T implements metav1.ObjectMetaAccessor
+func getName[T any](obj *T) string {
+	meta := any(obj).(metav1.ObjectMetaAccessor).GetObjectMeta()
+	return meta.GetName()
+}
+
+func (i *FlatNameIndex[T]) Add(obj *T) {
+	i.names[getName(obj)] = obj
+}
+func (i *FlatNameIndex[T]) Update(oldObj, newObj *T) {
+	i.Delete(oldObj)
+	i.Add(newObj)
+}
+func (i *FlatNameIndex[T]) Delete(obj *T) {
+	delete(i.names, getName(obj))
+}
+
+func (i *FlatNameIndex[T]) Get(name string) (obj *T, ok bool) {
+	obj, ok = i.names[name]
+	return
+}
