@@ -11,7 +11,7 @@ RUN apk add musl-dev git
 ADD "https://api.github.com/repos/neondatabase/vm-monitor/branches" latest_commit
 
 # FIXME RELEASE: don't clone testing
-RUN git clone --branch testing https://github.com/neondatabase/vm-monitor.git 
+RUN git clone --branch fprasx/testing https://github.com/neondatabase/vm-monitor.git 
 RUN cargo build --release --manifest-path vm-monitor/Cargo.toml
 
 FROM builder
