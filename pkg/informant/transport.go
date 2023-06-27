@@ -10,7 +10,7 @@ import (
 // connection
 type Packet struct {
 	Stage  Stage  `json:"stage"`
-	SeqNum uint64 `json:"seqnum"`
+	Id uint64 `json:"id"`
 }
 
 type Stage struct {
@@ -67,6 +67,6 @@ func Done() Packet {
 			Response: nil,
 			Done:     &struct{}{},
 		},
-		SeqNum: 0, // FIXME
+		Id: 0, // FIXME
 	}
 }

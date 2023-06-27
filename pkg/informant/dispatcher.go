@@ -100,7 +100,7 @@ func (disp *Dispatcher) Call(req Request, sender util.OneshotSender[MonitorResul
 		Request:  &req,
 		Response: nil,
 		Done:     nil,
-	}, SeqNum: id})
+	}, Id: id})
 	disp.waiters[id] = sender
 }
 
@@ -113,7 +113,7 @@ func (disp *Dispatcher) run() {
 			continue
 		}
 		stage := packet.Stage
-		id := packet.SeqNum
+		id := packet.Id
 		switch {
 		case stage.Request != nil:
 			{
