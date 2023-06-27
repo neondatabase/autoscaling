@@ -95,12 +95,12 @@ func makeAutoscaleEnforcerPlugin(
 
 		handle:   h,
 		vmClient: vmClient,
-		// remaining fields are set by p.readClusterState and p.startPrometheusServer
+		// remaining fields are set by p.readClusterState and p.makePrometheusRegistry
 		state: pluginState{ //nolint:exhaustruct // see above.
 			lock: util.NewChanMutex(),
 			conf: config,
 		},
-		metrics: PromMetrics{},    //nolint:exhaustruct // set by startPrometheusServer
+		metrics: PromMetrics{},    //nolint:exhaustruct // set by makePrometheusRegistry
 		vmStore: IndexedVMStore{}, //nolint:exhaustruct // set below
 	}
 
