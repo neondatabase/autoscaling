@@ -2,15 +2,13 @@ package informant
 
 import (
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // Defines types that are used to communicate with the monitor over websocket
 // connection
 type Packet struct {
-	Stage  Stage  `json:"stage"`
-	Id uint64 `json:"id"`
+	Stage Stage  `json:"stage"`
+	Id    uint64 `json:"id"`
 }
 
 type Stage struct {
@@ -34,14 +32,6 @@ type Response struct {
 type Resources struct {
 	Cpu uint64 `json:"cpu"`
 	Mem uint64 `json:"mem"`
-}
-
-func (resources Resources) zapField() zap.Field {
-	return zap.Object("Resources", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
-		enc.AddUint64("cpu", resources.Cpu)
-        enc.AddUint64("mem", resources.Mem)
-		return nil
-	}))
 }
 
 type DownscaleResult struct {

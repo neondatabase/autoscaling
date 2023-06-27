@@ -3,7 +3,6 @@ package informant
 import (
 	"context"
 	"fmt"
-	// "time"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"go.uber.org/zap"
@@ -12,7 +11,7 @@ import (
 )
 
 type MonitorResult struct {
-	Result       DownscaleResult
+	Result       *DownscaleResult
 	Confirmation struct{}
 }
 
@@ -54,9 +53,11 @@ func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (d
 	ctx := context.Background()
 
 	logger.Info("Connecting via websocket.", zap.String("addr", addr))
-	c, _, err := websocket.Dial(ctx, addr, nil)
+
+	c, resp, err := websocket.Dial(ctx, addr, nil)
+	defer resp.Body.Close()
 	if err != nil {
-		return disp, fmt.Errorf("Error creating dispatcher: %v", err)
+		return disp, fmt.Errorf("Error creating dispatcher: %w", err)
 	}
 
 	disp = Dispatcher{
@@ -105,13 +106,16 @@ func (disp *Dispatcher) Call(req Request, sender util.OneshotSender[MonitorResul
 		},
 		Id: id,
 	}
-	disp.send(packet)
+	err := disp.send(packet)
+	if err != nil {
+		disp.logger.Warn("Failed to send packet.", zap.Any("packet", packet))
+	}
 	disp.waiters[id] = sender
 }
 
 // Long running function that performs all orchestrates all requests/responses.
 func (disp *Dispatcher) run() {
-    disp.logger.Info("Starting.")
+	disp.logger.Info("Starting.")
 	for {
 		packet, err := disp.recv()
 		if err != nil {
@@ -156,10 +160,13 @@ func (disp *Dispatcher) run() {
 						sender, ok := disp.waiters[id]
 						if ok {
 							disp.logger.Info("Received DownscaleResult. Notifying receiver.", zap.Uint64("id", id))
-							sender.Send(MonitorResult{Result: *res.DownscaleResult})
+							sender.Send(MonitorResult{Result: res.DownscaleResult, Confirmation: struct{}{}})
 							// Don't forget to delete the waiter
 							delete(disp.waiters, id)
-							disp.send(Done())
+							err := disp.send(Done())
+							if err != nil {
+								disp.logger.Warn("Failed to send Done packet.")
+							}
 						} else {
 							panic("Received response for id without a registered sender")
 						}
@@ -170,10 +177,14 @@ func (disp *Dispatcher) run() {
 						sender, ok := disp.waiters[id]
 						if ok {
 							disp.logger.Info("Received ResourceConfirmation. Notifying receiver.", zap.Uint64("id", id))
-							sender.Send(MonitorResult{Result: *res.DownscaleResult})
+                            //
+							sender.Send(MonitorResult{Result: nil, Confirmation: struct{}{}})
 							// Don't forget to delete the waiter
 							delete(disp.waiters, id)
-							disp.send(Done())
+							err := disp.send(Done())
+							if err != nil {
+								disp.logger.Warn("Failed to send Done packet.")
+							}
 						} else {
 							panic("Received response for id without a registered sender")
 						}
