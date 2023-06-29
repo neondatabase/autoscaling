@@ -90,13 +90,13 @@ func (s *nodeResourceState[T]) fields() []struct {
 		valueName string
 		value     T
 	}{
-		{"total", s.Total},
-		{"system", s.System},
-		{"watermark", s.Watermark},
-		{"reserved", s.Reserved},
-		{"buffer", s.Buffer},
-		{"capacityPressure", s.CapacityPressure},
-		{"pressureAccountedFor", s.PressureAccountedFor},
+		{"Total", s.Total},
+		{"System", s.System},
+		{"Watermark", s.Watermark},
+		{"Reserved", s.Reserved},
+		{"Buffer", s.Buffer},
+		{"CapacityPressure", s.CapacityPressure},
+		{"PressureAccountedFor", s.PressureAccountedFor},
 	}
 }
 
