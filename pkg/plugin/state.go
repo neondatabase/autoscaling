@@ -82,14 +82,13 @@ type nodeState struct {
 	mq migrationQueue
 }
 
-func (s *nodeResourceState[T]) fields() []struct {
+type nodeResourceStateField[T any] struct {
 	valueName string
 	value     T
-} {
-	return []struct {
-		valueName string
-		value     T
-	}{
+}
+
+func (s *nodeResourceState[T]) fields() []nodeResourceStateField[T] {
+	return []nodeResourceStateField[T]{
 		{"Total", s.Total},
 		{"System", s.System},
 		{"Watermark", s.Watermark},
