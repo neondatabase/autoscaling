@@ -50,13 +50,13 @@ func (res *DownscaleResult) Into() *api.DownscaleResult {
 	}
 }
 
-func Done() Packet {
+func Done(id uint64) Packet {
 	return Packet{
 		Stage: Stage{
 			Request:  nil,
 			Response: nil,
 			Done:     &struct{}{},
 		},
-		Id: 0, // FIXME
+		Id: id,
 	}
 }
