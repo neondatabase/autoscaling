@@ -1,10 +1,35 @@
 package billing
 
 import (
-	"fmt"
 	"time"
+)
 
-	"github.com/google/uuid"
+type Event[Self any] interface {
+	AbsoluteEvent | IncrementalEvent
+
+	eventMethods[Self]
+}
+
+// eventMethods exists because Go does not let you assume that a value of generic type "Foo | Bar"
+// has the fields common to both Foo and Bar. So we still have to thread through these fields.
+//
+// The methods in this interface *could* have directly been a part of Event, but then we couldn't do
+// the "implements eventMethods" assertions below (because you aren't allowed to store a value of
+// type "Foo | Bar"; it can only be used as a constraint for generics).
+//
+// eventMethods also takes Self as a parameter because we want Event[...] to be implemented for the
+// raw AbsoluteEvent and IncrementalEvent types, not pointers to them, because that would make
+// things just a bit more annoying. But we still need to set field values, which we can ONLY do by
+// taking the address of the field *somehow*, so we use this interface to return functions to do
+// all that stuff for us.
+type eventMethods[Self any] interface {
+	typeSetter() func(*Self)
+	idempotencyKeyGetter() func(*Self) *string
+}
+
+var (
+	_ eventMethods[AbsoluteEvent]    = AbsoluteEvent{}
+	_ eventMethods[IncrementalEvent] = IncrementalEvent{}
 )
 
 type AbsoluteEvent struct {
@@ -27,43 +52,22 @@ type IncrementalEvent struct {
 	Value          int       `json:"value"`
 }
 
-type enrichable interface {
-	setEventType()
-	idempotencyKey() *string
+// typeSetter implements eventMethods
+func (AbsoluteEvent) typeSetter() func(*AbsoluteEvent) {
+	return func(e *AbsoluteEvent) { e.Type = "absolute" }
 }
 
-// Enrich sets the event's Type and IdempotencyKey fields, so that users of this API don't need to
-// manually set them
-//
-// Enrich is already called by (*Batch).Add, but this is used in the autoscaler-agent's billing
-// implementation, which manually calls Enrich in order to log the IdempotencyKey for each event.
-func Enrich[E enrichable](batch *Batch, event E) E {
-	event.setEventType()
-
-	key := event.idempotencyKey()
-	if *key == "" {
-		*key = fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", batch.c.hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
-	}
-
-	return event
+// idempotencyKeyGetter implements eventMethods
+func (AbsoluteEvent) idempotencyKeyGetter() func(*AbsoluteEvent) *string {
+	return func(e *AbsoluteEvent) *string { return &e.IdempotencyKey }
 }
 
-// setEventType implements enrichable
-func (e *AbsoluteEvent) setEventType() {
-	e.Type = "absolute"
+// typeSetter implements eventMethods
+func (IncrementalEvent) typeSetter() func(*IncrementalEvent) {
+	return func(e *IncrementalEvent) { e.Type = "incremental" }
 }
 
-// idempotencyKey implements enrichable
-func (e *AbsoluteEvent) idempotencyKey() *string {
-	return &e.IdempotencyKey
-}
-
-// setEventType implements enrichable
-func (e *IncrementalEvent) setEventType() {
-	e.Type = "incremental"
-}
-
-// idempotencyKey implements enrichable
-func (e *IncrementalEvent) idempotencyKey() *string {
-	return &e.IdempotencyKey
+// idempotencyKeyGetter implements eventMethods
+func (IncrementalEvent) idempotencyKeyGetter() func(*IncrementalEvent) *string {
+	return func(e *IncrementalEvent) *string { return &e.IdempotencyKey }
 }

@@ -96,7 +96,7 @@ func RunBillingMetricsCollector(
 	}
 
 	state.collect(conf, store, metrics)
-	batch := client.NewBatch()
+	batch := billing.NewBatch[billing.IncrementalEvent](client)
 
 	for {
 		select {
@@ -122,7 +122,7 @@ func RunBillingMetricsCollector(
 			//
 			// Don't reset metrics.batchSizeCurrent because it stores the *most recent* batch size.
 			// (The "current" suffix refers to the fact the metric is a gague, not a counter)
-			batch = client.NewBatch()
+			batch = billing.NewBatch[billing.IncrementalEvent](client)
 		case <-backgroundCtx.Done():
 			// If we're being shut down, push the latests events we have before returning.
 			logger.Info("Creating final billing batch")
@@ -248,7 +248,7 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
-func logAddedEvent(logger *zap.Logger, event *billing.IncrementalEvent) *billing.IncrementalEvent {
+func logAddedEvent(logger *zap.Logger, event billing.IncrementalEvent) billing.IncrementalEvent {
 	logger.Info(
 		"Adding event to batch",
 		zap.String("IdempotencyKey", event.IdempotencyKey),
@@ -260,13 +260,13 @@ func logAddedEvent(logger *zap.Logger, event *billing.IncrementalEvent) *billing
 }
 
 // drainAppendToBatch clears the current history, adding it as events to the batch
-func (s *metricsState) drainAppendToBatch(logger *zap.Logger, conf *Config, batch *billing.Batch) {
+func (s *metricsState) drainAppendToBatch(logger *zap.Logger, conf *Config, batch *billing.Batch[billing.IncrementalEvent]) {
 	now := time.Now()
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
 
-		batch.Add(logAddedEvent(logger, billing.Enrich(batch, &billing.IncrementalEvent{
+		batch.Add(logAddedEvent(logger, batch.Enrich(billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
 			Type:           "", // set by billing.Enrich
 			IdempotencyKey: "", // set by billing.Enrich
@@ -277,7 +277,7 @@ func (s *metricsState) drainAppendToBatch(logger *zap.Logger, conf *Config, batc
 			StopTime:  now,
 			Value:     int(math.Round(history.total.cpu)),
 		})))
-		batch.Add(logAddedEvent(logger, billing.Enrich(batch, &billing.IncrementalEvent{
+		batch.Add(logAddedEvent(logger, batch.Enrich(billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
 			Type:           "", // set by billing.Enrich
 			IdempotencyKey: "", // set by billing.Enrich
@@ -292,7 +292,7 @@ func (s *metricsState) drainAppendToBatch(logger *zap.Logger, conf *Config, batc
 	s.historical = make(map[metricsKey]vmMetricsHistory)
 }
 
-func pushBillingEvents(conf *Config, batch *billing.Batch) error {
+func pushBillingEvents(conf *Config, batch *billing.Batch[billing.IncrementalEvent]) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*time.Duration(conf.PushTimeoutSeconds))
 	defer cancel()
 
