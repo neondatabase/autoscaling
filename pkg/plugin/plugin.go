@@ -178,6 +178,11 @@ func makeAutoscaleEnforcerPlugin(
 
 	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
 
+	// makePrometheusRegistry sets p.metrics, which we need to do before calling readClusterState,
+	// because we set metrics for each node while we build the state.
+	promReg := p.makePrometheusRegistry()
+	watchMetrics.MustRegister(promReg)
+
 	// ... but before handling the events, read the current cluster state:
 	logger.Info("Reading initial cluster state")
 	if err = p.readClusterState(ctx, logger); err != nil {
@@ -194,9 +199,6 @@ func makeAutoscaleEnforcerPlugin(
 			logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
 		}
 	}()
-
-	promReg := p.makePrometheusRegistry()
-	watchMetrics.MustRegister(promReg)
 
 	if err := util.StartPrometheusMetricsServer(ctx, logger.Named("prometheus"), 9100, promReg); err != nil {
 		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
@@ -402,7 +404,7 @@ func (e *AutoscaleEnforcer) Filter(
 		)
 	}
 
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.nodeStore, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return framework.NewStatus(
@@ -570,7 +572,7 @@ func (e *AutoscaleEnforcer) Score(
 	}
 
 	// Score by total resources available:
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.nodeStore, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return 0, framework.NewStatus(framework.Error, "Error fetching state for node")
@@ -662,7 +664,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		)
 	}
 
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.nodeStore, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return framework.NewStatus(
@@ -720,6 +722,8 @@ func (e *AutoscaleEnforcer) Reserve(
 					mem: memVerdict,
 				}),
 			)
+
+			node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 
 			return nil // nil is success
 		} else {
@@ -801,6 +805,9 @@ func (e *AutoscaleEnforcer) Reserve(
 		}
 		node.pods[pName] = ps
 		e.state.podMap[pName] = ps
+
+		node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+
 		return nil // nil is success
 	} else {
 		cpuShortVerdict := "NOT ENOUGH"
@@ -865,6 +872,8 @@ func (e *AutoscaleEnforcer) Unreserve(
 				mem: memVerdict,
 			}),
 		)
+
+		otherPs.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 	} else if ok && !otherOk {
 		// Mark the resources as no longer reserved
 
@@ -886,6 +895,8 @@ func (e *AutoscaleEnforcer) Unreserve(
 				mem: memVerdict,
 			}),
 		)
+
+		ps.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 	} else {
 		logger.Warn("Cannot find pod in podMap in otherPods")
 		return
