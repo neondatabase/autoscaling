@@ -55,11 +55,14 @@ func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (d
 
 	logger.Info("Connecting via websocket.", zap.String("addr", addr))
 
-	c, resp, err := websocket.Dial(ctx, addr, nil)
-	defer resp.Body.Close()
+    // We do not need to close the response body according to docs.
+    // Doing so causes memory bugs.
+	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
 	if err != nil {
 		return disp, fmt.Errorf("Error creating dispatcher: %w", err)
 	}
+	// See docs: apparently we don't need to close this
+	// defer resp.Body.Close()
 
 	disp = Dispatcher{
 		Conn:     c,
