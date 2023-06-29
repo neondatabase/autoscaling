@@ -28,8 +28,8 @@ type eventMethods[Self any] interface {
 }
 
 var (
-	_ eventMethods[AbsoluteEvent]    = AbsoluteEvent{}
-	_ eventMethods[IncrementalEvent] = IncrementalEvent{}
+	_ eventMethods[AbsoluteEvent]    = AbsoluteEvent{}    //nolint:exhaustruct // just checking they impl the interface
+	_ eventMethods[IncrementalEvent] = IncrementalEvent{} //nolint:exhaustruct // just checking they impl the interface
 )
 
 type AbsoluteEvent struct {
@@ -53,21 +53,21 @@ type IncrementalEvent struct {
 }
 
 // typeSetter implements eventMethods
-func (AbsoluteEvent) typeSetter() func(*AbsoluteEvent) {
+func (AbsoluteEvent) typeSetter() func(*AbsoluteEvent) { //nolint:unused // linter is incorrect
 	return func(e *AbsoluteEvent) { e.Type = "absolute" }
 }
 
 // idempotencyKeyGetter implements eventMethods
-func (AbsoluteEvent) idempotencyKeyGetter() func(*AbsoluteEvent) *string {
+func (AbsoluteEvent) idempotencyKeyGetter() func(*AbsoluteEvent) *string { //nolint:unused // linter is incorrect
 	return func(e *AbsoluteEvent) *string { return &e.IdempotencyKey }
 }
 
 // typeSetter implements eventMethods
-func (IncrementalEvent) typeSetter() func(*IncrementalEvent) {
+func (IncrementalEvent) typeSetter() func(*IncrementalEvent) { //nolint:unused // linter is incorrect
 	return func(e *IncrementalEvent) { e.Type = "incremental" }
 }
 
 // idempotencyKeyGetter implements eventMethods
-func (IncrementalEvent) idempotencyKeyGetter() func(*IncrementalEvent) *string {
+func (IncrementalEvent) idempotencyKeyGetter() func(*IncrementalEvent) *string { //nolint:unused // linter is incorrect
 	return func(e *IncrementalEvent) *string { return &e.IdempotencyKey }
 }
