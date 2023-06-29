@@ -82,15 +82,11 @@ type nodeState struct {
 	mq migrationQueue
 }
 
-func (s *nodeState) updateMetrics(metrics PromMetrics, memSlotSizeBytes uint64) {
-	s.vCPU.updateMetrics(metrics.nodeCPUResources, s.name, vmapi.MilliCPU.AsFloat64)
-	s.memSlots.updateMetrics(metrics.nodeMemResources, s.name, func(memSlots uint16) float64 {
-		return float64(uint64(memSlots) * memSlotSizeBytes) // convert memSlots -> bytes
-	})
-}
-
-func (s *nodeResourceState[T]) updateMetrics(metric *prometheus.GaugeVec, nodeName string, convert func(T) float64) {
-	pairs := []struct {
+func (s *nodeResourceState[T]) fields() []struct {
+	valueName string
+	value     T
+} {
+	return []struct {
 		valueName string
 		value     T
 	}{
@@ -102,19 +98,28 @@ func (s *nodeResourceState[T]) updateMetrics(metric *prometheus.GaugeVec, nodeNa
 		{"capacityPressure", s.CapacityPressure},
 		{"pressureAccountedFor", s.PressureAccountedFor},
 	}
+}
 
-	for _, p := range pairs {
-		metric.WithLabelValues(nodeName, p.valueName).Set(convert(p.value))
+func (s *nodeState) updateMetrics(metrics PromMetrics, memSlotSizeBytes uint64) {
+	s.vCPU.updateMetrics(metrics.nodeCPUResources, s.name, vmapi.MilliCPU.AsFloat64)
+	s.memSlots.updateMetrics(metrics.nodeMemResources, s.name, func(memSlots uint16) float64 {
+		return float64(uint64(memSlots) * memSlotSizeBytes) // convert memSlots -> bytes
+	})
+}
+
+func (s *nodeResourceState[T]) updateMetrics(metric *prometheus.GaugeVec, nodeName string, convert func(T) float64) {
+	for _, f := range s.fields() {
+		metric.WithLabelValues(nodeName, f.valueName).Set(convert(f.value))
 	}
 }
 
 func (s *nodeState) removeMetrics(metrics PromMetrics) {
 	gauges := []*prometheus.GaugeVec{metrics.nodeCPUResources, metrics.nodeMemResources}
-	valueNames := []string{"total", "system", "watermark", "reserved", "buffer", "capacityPressure", "pressureAccountedFor"}
+	fields := s.vCPU.fields() // No particular reason to be CPU, we just want the valueNames, and CPU vs memory valueNames are the same
 
 	for _, g := range gauges {
-		for _, valueName := range valueNames {
-			g.DeleteLabelValues(s.name, valueName)
+		for _, f := range fields {
+			g.DeleteLabelValues(s.name, f.valueName)
 		}
 	}
 }
