@@ -7,20 +7,22 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 // pluginState stores the private state for the plugin, used both within and outside of the
@@ -423,7 +425,7 @@ func (s *podState) currentlyMigrating() bool {
 func (s *pluginState) getOrFetchNodeState(
 	ctx context.Context,
 	logger *zap.Logger,
-	handle framework.Handle,
+	store IndexedNodeStore,
 	nodeName string,
 ) (*nodeState, error) {
 	logger = logger.With(zap.String("node", nodeName))
@@ -433,31 +435,67 @@ func (s *pluginState) getOrFetchNodeState(
 		return n, nil
 	}
 
-	// Fetch from the API server. Log is not Debug because its context may be valuable.
-	logger.Info("No local information for node, fetching from k8s API")
-	s.lock.Unlock() // Unlock to let other goroutines progress while we get the data we need
+	logger.Info("Node has not yet been processed, fetching from store")
 
-	var locked bool // In order to prevent double-unlock panics, we always lock on return.
-	defer func() {
-		if !locked {
-			s.lock.Lock()
-		}
-	}()
-
-	node, err := handle.ClientSet().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("Error querying node information: %w", err)
+	accessor := func(index *watch.FlatNameIndex[corev1.Node]) (*corev1.Node, bool) {
+		return index.Get(nodeName)
 	}
 
-	// Re-lock and process API result
-	locked = true
-	s.lock.Lock()
+	// Before unlocking, try to get the node from the store.
+	node, ok := store.GetIndexed(accessor)
+	if !ok {
+		logger.Warn("Node is missing from local store. Relisting to try getting it from API server")
 
-	// It's possible that the node was already added. Don't double-process nodes if we don't have
-	// to.
-	if n, ok := s.nodeMap[nodeName]; ok {
-		logger.Warn("Local information for node became available during API call, using it")
-		return n, nil
+		s.lock.Unlock() // Unlock to let other goroutines progress while we get the data we need
+
+		var locked bool // In order to prevent double-unlock panics, we always lock on return.
+		defer func() {
+			if !locked {
+				s.lock.Lock()
+			}
+		}()
+
+		// Use a reasonable timeout on the relist request, so that if the store is broken, we won't
+		// block forever.
+		//
+		// FIXME: make this configurable
+		timeout := 5 * time.Second
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case <-store.Relist():
+		case <-timer.C:
+			message := "Timed out waiting on Node store relist"
+			logger.Error(message, zap.Duration("timeout", timeout))
+			return nil, errors.New(message)
+		case <-ctx.Done():
+			err := ctx.Err()
+			message := "Context expired while waiting on Node store relist"
+			logger.Error(message, zap.Error(err))
+			return nil, errors.New(message)
+		}
+
+		node, ok = store.GetIndexed(accessor)
+		if !ok {
+			// Either the node is already gone, or there's a deeper problem.
+			message := "Could not find Node, even after relist"
+			logger.Error(message)
+			return nil, errors.New(message)
+		}
+
+		logger.Info("Found node after relisting")
+
+		// Re-lock and process API result
+		locked = true
+		s.lock.Lock()
+
+		// It's possible that the node was already added. Don't double-process nodes if we don't have
+		// to.
+		if n, ok := s.nodeMap[nodeName]; ok {
+			logger.Warn("Local information for node became available while waiting on relist, using it instead")
+			return n, nil
+		}
 	}
 
 	n, err := buildInitialNodeState(logger, node, s.conf)
@@ -604,6 +642,44 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 	}
 
 	return podOtherResourceState{RawCPU: cpu, RawMemory: mem}, nil
+}
+
+func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName string) {
+	logger = logger.With(
+		zap.String("action", "Node deletion"),
+		zap.String("node", nodeName),
+	)
+
+	logger.Info("Handling deletion of Node")
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	node, ok := e.state.nodeMap[nodeName]
+	if !ok {
+		logger.Warn("Cannot find node in nodeMap")
+	}
+
+	if logger.Core().Enabled(zapcore.DebugLevel) {
+		logger.Debug("Dump final node state", zap.Any("state", node.dump()))
+	}
+
+	// For any pods still on the node, remove them from the global state:
+	for name, pod := range node.pods {
+		logger.Warn(
+			"Found VM pod still on node at time of deletion",
+			zap.Object("pod", name),
+			zap.Object("virtualmachine", pod.vmName),
+		)
+		delete(e.state.podMap, name)
+	}
+	for name := range node.otherPods {
+		logger.Warn("Found non-VM pod still on node at time of deletion", zap.Object("pod", name))
+		delete(e.state.otherPods, name)
+	}
+
+	delete(e.state.nodeMap, nodeName)
+	logger.Info("Deleted node")
 }
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
@@ -973,36 +1049,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		return fmt.Errorf("Error listing Pods: %w", err)
 	}
 
-	logger.Info("Listing Nodes")
-	nodes, err := p.handle.ClientSet().CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("Error listing nodes: %w", err)
-	}
-
 	p.state.nodeMap = make(map[string]*nodeState)
 	p.state.podMap = make(map[util.NamespacedName]*podState)
 	p.state.otherPods = make(map[util.NamespacedName]*otherPodState)
-
-	// Build the node map
-	logger.Info("Building node map")
-	for i := range nodes.Items {
-		n := &nodes.Items[i]
-		node, err := buildInitialNodeState(logger.With(zap.String("node", n.Name)), n, p.state.conf)
-		if err != nil {
-			return fmt.Errorf("Error building state for node %s: %w", n.Name, err)
-		}
-
-		trCpu := node.totalReservableCPU()
-		trMem := node.totalReservableMemSlots()
-		if trCpu > p.state.maxTotalReservableCPU {
-			p.state.maxTotalReservableCPU = trCpu
-		}
-		if trMem > p.state.maxTotalReservableMemSlots {
-			p.state.maxTotalReservableMemSlots = trMem
-		}
-
-		p.state.nodeMap[n.Name] = node
-	}
 
 	// Store the VMs by name, so that we can access them as we're going through pods
 	logger.Info("Building initial vmSpecs map")
@@ -1071,9 +1120,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			)
 		}
 
-		ns, ok := p.state.nodeMap[pod.Spec.NodeName]
-		if !ok {
-			logSkip("VM pod is missing on its node (maybe it was removed between listing Pods and Nodes?)")
+		ns, err := p.state.getOrFetchNodeState(ctx, logger, p.nodeStore, pod.Spec.NodeName)
+		if err != nil {
+			logSkip("Couldn't find Node that VM pod is on (maybe it has since been removed?): %w", err)
 			continue
 		}
 
@@ -1183,9 +1232,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			continue
 		}
 
-		ns, ok := p.state.nodeMap[pod.Spec.NodeName]
-		if !ok {
-			logSkip("Pod is missing on its node (maybe it was removed between listing Pods and Nodes?)")
+		ns, err := p.state.getOrFetchNodeState(ctx, logger, p.nodeStore, pod.Spec.NodeName)
+		if err != nil {
+			logSkip("Couldn't find Node that non-VM Pod is on (maybe it has since been removed?): %w", err)
 			continue
 		}
 

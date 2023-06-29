@@ -20,6 +20,48 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
+type nodeWatchCallbacks struct {
+	submitNodeDeletion func(*zap.Logger, string)
+}
+
+// watchNodeEvents watches for any deleted Nodes, so that we can clean up the resources that were
+// associated with them.
+func (e *AutoscaleEnforcer) watchNodeEvents(
+	ctx context.Context,
+	parentLogger *zap.Logger,
+	metrics watch.Metrics,
+	callbacks nodeWatchCallbacks,
+) (*watch.Store[corev1.Node], error) {
+	logger := parentLogger.Named("node-watch")
+
+	return watch.Watch(
+		ctx,
+		logger.Named("watch"),
+		e.handle.ClientSet().CoreV1().Nodes(),
+		watch.Config{
+			ObjectNameLogField: "node",
+			Metrics: watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "Nodes",
+			},
+			// FIXME: make these configurable.
+			RetryRelistAfter: util.NewTimeRange(time.Second, 3, 5),
+			RetryWatchAfter:  util.NewTimeRange(time.Second, 3, 5),
+		},
+		watch.Accessors[*corev1.NodeList, corev1.Node]{
+			Items: func(list *corev1.NodeList) []corev1.Node { return list.Items },
+		},
+		watch.InitModeSync,
+		metav1.ListOptions{},
+		watch.HandlerFuncs[*corev1.Node]{
+			DeleteFunc: func(node *corev1.Node, mayBeStale bool) {
+				logger.Info("Received delete event for node", zap.String("node", node.Name))
+				callbacks.submitNodeDeletion(logger, node.Name)
+			},
+		},
+	)
+}
+
 type podWatchCallbacks struct {
 	submitVMDeletion        func(*zap.Logger, util.NamespacedName)
 	submitPodDeletion       func(*zap.Logger, util.NamespacedName)

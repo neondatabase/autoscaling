@@ -45,10 +45,13 @@ type AutoscaleEnforcer struct {
 	// Keeping this store allows us to make sure that our event handling is never out-of-sync
 	// because all the information is coming from the same source.
 	vmStore IndexedVMStore
+	// nodeStore is doing roughly the same thing as with vmStore, but for Nodes.
+	nodeStore IndexedNodeStore
 }
 
-// abbreviation, because this type is pretty verbose
+// abbreviations, because these types are pretty verbose
 type IndexedVMStore = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]
+type IndexedNodeStore = watch.IndexedStore[corev1.Node, *watch.FlatNameIndex[corev1.Node]]
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
 var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
@@ -100,8 +103,9 @@ func makeAutoscaleEnforcerPlugin(
 			lock: util.NewChanMutex(),
 			conf: config,
 		},
-		metrics: PromMetrics{},    //nolint:exhaustruct // set by makePrometheusRegistry
-		vmStore: IndexedVMStore{}, //nolint:exhaustruct // set below
+		metrics:   PromMetrics{},      //nolint:exhaustruct // set by makePrometheusRegistry
+		vmStore:   IndexedVMStore{},   //nolint:exhaustruct // set below
+		nodeStore: IndexedNodeStore{}, //nolint:exhaustruct // set below
 	}
 
 	if p.state.conf.DumpState != nil {
@@ -120,6 +124,11 @@ func makeAutoscaleEnforcerPlugin(
 	}
 
 	hlogger := logger.Named("handlers")
+	nwc := nodeWatchCallbacks{
+		submitNodeDeletion: func(logger *zap.Logger, nodeName string) {
+			pushToQueue(logger, func() { p.handleNodeDeletion(hlogger, nodeName) })
+		},
+	}
 	pwc := podWatchCallbacks{
 		submitVMDeletion: func(logger *zap.Logger, pod util.NamespacedName) {
 			pushToQueue(logger, func() { p.handleVMDeletion(hlogger, pod) })
@@ -147,6 +156,14 @@ func makeAutoscaleEnforcerPlugin(
 	}
 
 	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
+
+	logger.Info("Starting node watcher")
+	nodeStore, err := p.watchNodeEvents(ctx, logger, watchMetrics, nwc)
+	if err != nil {
+		return nil, fmt.Errorf("Error starting node watcher: %w", err)
+	}
+
+	p.nodeStore = watch.NewIndexedStore(nodeStore, watch.NewFlatNameIndex[corev1.Node]())
 
 	logger.Info("Starting pod watcher")
 	if err := p.watchPodEvents(ctx, logger, watchMetrics, pwc); err != nil {
@@ -385,7 +402,7 @@ func (e *AutoscaleEnforcer) Filter(
 		)
 	}
 
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return framework.NewStatus(
@@ -553,7 +570,7 @@ func (e *AutoscaleEnforcer) Score(
 	}
 
 	// Score by total resources available:
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return 0, framework.NewStatus(framework.Error, "Error fetching state for node")
@@ -645,7 +662,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		)
 	}
 
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return framework.NewStatus(
