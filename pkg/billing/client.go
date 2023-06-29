@@ -8,9 +8,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"time"
-
-	"github.com/google/uuid"
 )
 
 type Client struct {
@@ -40,24 +37,9 @@ func (b *Batch) Count() int {
 	return len(b.events)
 }
 
-func (b *Batch) idempotenize(key string) string {
-	if key != "" {
-		return key
-	}
-
-	return fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", b.c.hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
-}
-
-func (b *Batch) AddAbsoluteEvent(e AbsoluteEvent) {
-	e.Type = "absolute"
-	e.IdempotencyKey = b.idempotenize(e.IdempotencyKey)
-	b.events = append(b.events, &e)
-}
-
-func (b *Batch) AddIncrementalEvent(e IncrementalEvent) {
-	e.Type = "incremental"
-	e.IdempotencyKey = b.idempotenize(e.IdempotencyKey)
-	b.events = append(b.events, &e)
+func (b *Batch) Add(e enrichable) {
+	Enrich(b, e) // Realistically, we're already calling Enrich before Add, but this is a good safety mechanism.
+	b.events = append(b.events, e)
 }
 
 func (b *Batch) Send(ctx context.Context) error {
