@@ -42,16 +42,6 @@ type AbsoluteEvent struct {
 	Value          int       `json:"value"`
 }
 
-type IncrementalEvent struct {
-	IdempotencyKey string    `json:"idempotency_key"`
-	MetricName     string    `json:"metric"`
-	Type           string    `json:"type"`
-	EndpointID     string    `json:"endpoint_id"`
-	StartTime      time.Time `json:"start_time"`
-	StopTime       time.Time `json:"stop_time"`
-	Value          int       `json:"value"`
-}
-
 // typeSetter implements eventMethods
 func (AbsoluteEvent) typeSetter() func(*AbsoluteEvent) { //nolint:unused // linter is incorrect
 	return func(e *AbsoluteEvent) { e.Type = "absolute" }
@@ -60,6 +50,16 @@ func (AbsoluteEvent) typeSetter() func(*AbsoluteEvent) { //nolint:unused // lint
 // idempotencyKeyGetter implements eventMethods
 func (AbsoluteEvent) idempotencyKeyGetter() func(*AbsoluteEvent) *string { //nolint:unused // linter is incorrect
 	return func(e *AbsoluteEvent) *string { return &e.IdempotencyKey }
+}
+
+type IncrementalEvent struct {
+	IdempotencyKey string    `json:"idempotency_key"`
+	MetricName     string    `json:"metric"`
+	Type           string    `json:"type"`
+	EndpointID     string    `json:"endpoint_id"`
+	StartTime      time.Time `json:"start_time"`
+	StopTime       time.Time `json:"stop_time"`
+	Value          int       `json:"value"`
 }
 
 // typeSetter implements eventMethods
