@@ -18,4 +18,4 @@ RUN cargo build --manifest-path vm-monitor/Cargo.toml
 
 FROM builder
 COPY --from=builder /workspace/vm-monitor/target/debug/vm-monitor /usr/bin/vm-monitor
-ENTRYPOINT [ "/usr/bin/vm-monitor" ]
+ENTRYPOINT [ "RUST_LOG=trace", "/usr/bin/vm-monitor" ]

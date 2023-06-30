@@ -121,7 +121,7 @@ build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binarie
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMInformant=${VM_INFORMANT_IMG}" neonvm/tools/vm-builder/main.go
+	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMInformant=${VM_INFORMANT_IMG} -X main.VMMonitor=${VM_MONITOR_IMG}" neonvm/tools/vm-builder/main.go
 
 .PHONY: bin/vm-builder-generic
 bin/vm-builder-generic: ## Build vm-builder-generic binary.
