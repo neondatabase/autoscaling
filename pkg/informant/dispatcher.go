@@ -167,7 +167,7 @@ func (disp *Dispatcher) run() {
 							sender.Send(MonitorResult{Result: res.DownscaleResult, Confirmation: struct{}{}})
 							// Don't forget to delete the waiter
 							delete(disp.waiters, id)
-							err := disp.send(Done())
+							err := disp.send(Done(id))
 							if err != nil {
 								disp.logger.Warn("Failed to send Done packet.")
 							}
