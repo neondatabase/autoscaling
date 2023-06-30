@@ -127,6 +127,7 @@ func (s *FileCacheState) GetFileCacheSize(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
 	}
+	defer db.Close()
 
 	// The file cache GUC variable is in MiB, but the conversion with pg_size_bytes means that the
 	// end result we get is in bytes.
@@ -144,6 +145,7 @@ func (s *FileCacheState) SetFileCacheSize(ctx context.Context, logger *zap.Logge
 	if err != nil {
 		return 0, fmt.Errorf("Error connecting to postgres: %w", err)
 	}
+	defer db.Close()
 
 	logger.Info("Fetching maximum file cache size")
 
