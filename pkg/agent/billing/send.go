@@ -4,6 +4,7 @@ package billing
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -125,7 +126,18 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 				zap.Duration("totalTime", time.Since(startTime)),
 				zap.Error(err),
 			)
-			s.metrics.sendErrorsTotal.Inc()
+
+			var rootErr string
+			switch e := err.(type) {
+			case billing.JSONError:
+				rootErr = "JSON marshaling"
+			case billing.UnexpectedStatusCodeError:
+				rootErr = fmt.Sprintf("HTTP code %d", e.StatusCode)
+			default:
+				rootErr = util.RootError(err).Error()
+			}
+			s.metrics.sendErrorsTotal.WithLabelValues(rootErr).Inc()
+
 			s.lastSendDuration = 0
 			s.metrics.lastSendDuration.Set(0.0) // use 0 as a flag that something went wrong; there's no valid time here.
 			return
