@@ -80,7 +80,11 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 
 	// while there's still events in the queue, send them
 	//
-	// If events are being added to the queue faster than we cna
+	// If events are being added to the queue faster than we can send them, this loop will not
+	// terminate. For the most part, that's ok: worst-case, we miss the collectorFinished
+	// notification, which isn't the end of the world. Any long-running call to this function will
+	// be reported by s.metrics.lastSendDuration as we go (provided the request timeout isn't too
+	// long).
 	for {
 		chunk := s.queue.get(int(s.config.MaxBatchSize))
 		count := len(chunk)
