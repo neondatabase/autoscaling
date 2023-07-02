@@ -20,7 +20,9 @@ import (
 const minSubProcessRestartInterval = 5 * time.Second
 
 func main() {
-	logger := zap.Must(zap.NewProduction()).Named("vm-informant")
+    cfg := zap.NewProductionConfig()
+    cfg.Level.SetLevel(zap.DebugLevel)
+	logger := zap.Must(cfg.Build()).Named("vm-informant")
 	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
 
 	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
@@ -141,7 +143,7 @@ func runRestartOnFailure(ctx context.Context, logger *zap.Logger, args []string,
 			}
 
 			if err != nil {
-				logger.Error("Child vm-informrant exited with error", zap.Error(err))
+				logger.Error("Child vm-informant exited with error", zap.Error(err))
 			} else {
 				logger.Warn("Child vm-informant exited without error. This should not happen")
 			}
