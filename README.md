@@ -13,7 +13,7 @@ Currently these are:
 ```js
 // Agent:
 config.billing = {
-      "url": "http://vector-usage-tracking.beta.us-east-2.internal.aws.neon.build/v1",
+      "url": "https://vector-usage-tracking.beta.us-east-2.internal.aws.neon.build/v1",
       "cpuMetricName": "effective_compute_seconds",
       "activeTimeMetricName": "active_time_seconds",
       "collectEverySeconds": 4,
