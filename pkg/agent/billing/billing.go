@@ -268,8 +268,8 @@ func (s *metricsState) drainAppendToBatch(logger *zap.Logger, conf *Config, batc
 
 		batch.Add(logAddedEvent(logger, batch.Enrich(billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
-			Type:           "", // set by billing.Enrich
-			IdempotencyKey: "", // set by billing.Enrich
+			Type:           "", // set by batch.Enrich
+			IdempotencyKey: "", // set by batch.Enrich
 			EndpointID:     key.endpointID,
 			// TODO: maybe we should store start/stop time in the vmMetricsHistory object itself?
 			// That way we can be aligned to collection, rather than pushing.
@@ -279,8 +279,8 @@ func (s *metricsState) drainAppendToBatch(logger *zap.Logger, conf *Config, batc
 		})))
 		batch.Add(logAddedEvent(logger, batch.Enrich(billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
-			Type:           "", // set by billing.Enrich
-			IdempotencyKey: "", // set by billing.Enrich
+			Type:           "", // set by batch.Enrich
+			IdempotencyKey: "", // set by batch.Enrich
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
