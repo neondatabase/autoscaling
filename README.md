@@ -20,6 +20,9 @@ config.billing = {
       "pushEverySeconds": 24,
       "pushTimeoutSeconds": 30
 }
+
+// Scheduler:
+config.doMigration = true
 ```
 
 ### Other regions
