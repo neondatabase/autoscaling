@@ -4,33 +4,30 @@ import (
 	"time"
 )
 
-type Event[Self any] interface {
-	AbsoluteEvent | IncrementalEvent
+type Event interface {
+	*AbsoluteEvent | *IncrementalEvent
 
-	// yeah this is weird; the comment on eventMethods explains what's going on.
-	eventMethods[Self]
+	// eventMethods must be separate from Event so that we can assert that *AbsoluteEvent and
+	// *IncrementalEvent both implement it - Go does not allow converting to a value of type Event
+	// because it contains "*AbsoluteEvent | *IncrementalEvent", and such constraints can only be
+	// used inside of generics.
+	eventMethods
 }
 
-// eventMethods exists because Go does not let you assume that a value of generic type "Foo | Bar"
-// has the fields common to both Foo and Bar. So we still have to thread through these fields.
+// eventMethods is a requirement for Event, but exists separately so that we can assert that the
+// event types implement it.
 //
-// The methods in this interface *could* have directly been a part of Event, but then we couldn't do
-// the "implements eventMethods" assertions below (because you aren't allowed to store a value of
-// type "Foo | Bar"; it can only be used as a constraint for generics).
-//
-// eventMethods also takes Self as a parameter because we want Event[...] to be implemented for the
-// raw AbsoluteEvent and IncrementalEvent types, not pointers to them, because that would make
-// things just a bit more annoying. But we still need to set field values, which we can ONLY do by
-// taking the address of the field *somehow*, so we use this interface to return functions to do
-// all that stuff for us.
-type eventMethods[Self any] interface {
-	typeSetter() func(*Self)
-	idempotencyKeyGetter() func(*Self) *string
+// The reason this interface even exists in the first place is because we're not allowed to assume
+// that a type E implementing Event actually has the common fields from AbsoluteEvent and
+// IncrementalEvent, even though it's constrained to either of those types.
+type eventMethods interface {
+	setType()
+	getIdempotencyKey() *string
 }
 
 var (
-	_ eventMethods[AbsoluteEvent]    = AbsoluteEvent{}    //nolint:exhaustruct // just checking they impl the interface
-	_ eventMethods[IncrementalEvent] = IncrementalEvent{} //nolint:exhaustruct // just checking they impl the interface
+	_ eventMethods = (*AbsoluteEvent)(nil)
+	_ eventMethods = (*IncrementalEvent)(nil)
 )
 
 type AbsoluteEvent struct {
@@ -43,14 +40,14 @@ type AbsoluteEvent struct {
 	Value          int       `json:"value"`
 }
 
-// typeSetter implements eventMethods
-func (AbsoluteEvent) typeSetter() func(*AbsoluteEvent) { //nolint:unused // linter is incorrect
-	return func(e *AbsoluteEvent) { e.Type = "absolute" }
+// setType implements eventMethods
+func (e *AbsoluteEvent) setType() {
+	e.Type = "absolute"
 }
 
-// idempotencyKeyGetter implements eventMethods
-func (AbsoluteEvent) idempotencyKeyGetter() func(*AbsoluteEvent) *string { //nolint:unused // linter is incorrect
-	return func(e *AbsoluteEvent) *string { return &e.IdempotencyKey }
+// getIdempotencyKey implements eventMethods
+func (e *AbsoluteEvent) getIdempotencyKey() *string {
+	return &e.IdempotencyKey
 }
 
 type IncrementalEvent struct {
@@ -63,12 +60,12 @@ type IncrementalEvent struct {
 	Value          int       `json:"value"`
 }
 
-// typeSetter implements eventMethods
-func (IncrementalEvent) typeSetter() func(*IncrementalEvent) { //nolint:unused // linter is incorrect
-	return func(e *IncrementalEvent) { e.Type = "incremental" }
+// setType implements eventMethods
+func (e *IncrementalEvent) setType() {
+	e.Type = "incremental"
 }
 
-// idempotencyKeyGetter implements eventMethods
-func (IncrementalEvent) idempotencyKeyGetter() func(*IncrementalEvent) *string { //nolint:unused // linter is incorrect
-	return func(e *IncrementalEvent) *string { return &e.IdempotencyKey }
+// getIdempotencyKey implements eventMethods
+func (e *IncrementalEvent) getIdempotencyKey() *string {
+	return &e.IdempotencyKey
 }

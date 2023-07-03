@@ -27,11 +27,11 @@ func NewClient(url string, c *http.Client) Client {
 	return Client{BaseURL: url, httpc: c, hostname: hostname}
 }
 
-func NewBatch[E Event[E]](client Client) *Batch[E] {
+func NewBatch[E Event](client Client) *Batch[E] {
 	return &Batch[E]{c: client, events: nil}
 }
 
-type Batch[E Event[E]] struct {
+type Batch[E Event] struct {
 	// Q: does this need a mutex?
 	c      Client
 	events []E
@@ -48,9 +48,9 @@ func (b *Batch[E]) Count() int {
 // Enrich is already called by (*Batch).Add, but this is used in the autoscaler-agent's billing
 // implementation, which manually calls Enrich in order to log the IdempotencyKey for each event.
 func (b *Batch[E]) Enrich(event E) E {
-	event.typeSetter()(&event)
+	event.setType()
 
-	key := event.idempotencyKeyGetter()(&event)
+	key := event.getIdempotencyKey()
 	if *key == "" {
 		*key = fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", b.c.hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
 	}
