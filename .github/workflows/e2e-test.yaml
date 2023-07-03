@@ -8,6 +8,7 @@ on:
 jobs:
   e2e-tests:
     strategy:
+      fail-fast: false
       matrix:
         cluster:
           - k3d
