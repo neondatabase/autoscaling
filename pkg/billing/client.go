@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lithammer/shortuuid"
 )
 
 type Client struct {
@@ -34,7 +35,7 @@ func (c Client) Hostname() string {
 type TraceID string
 
 func (c Client) GenerateTraceID() TraceID {
-	return TraceID(uuid.NewString())
+	return TraceID(shortuuid.New())
 }
 
 // Enrich sets the event's Type and IdempotencyKey fields, so that users of this API don't need to
