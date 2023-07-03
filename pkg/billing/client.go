@@ -31,6 +31,12 @@ func (c Client) Hostname() string {
 	return c.hostname
 }
 
+type TraceID string
+
+func (c Client) GenerateTraceID() TraceID {
+	return TraceID(uuid.NewString())
+}
+
 // Enrich sets the event's Type and IdempotencyKey fields, so that users of this API don't need to
 // manually set them
 func Enrich[E Event](hostname string, event E) E {
@@ -48,7 +54,7 @@ func Enrich[E Event](hostname string, event E) E {
 //
 // On failure, the error is guaranteed to be one of: JSONError, RequestError, or
 // UnexpectedStatusCodeError.
-func Send[E Event](ctx context.Context, client Client, events []E) error {
+func Send[E Event](ctx context.Context, client Client, traceID TraceID, events []E) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -65,6 +71,7 @@ func Send[E Event](ctx context.Context, client Client, events []E) error {
 		return err
 	}
 	r.Header.Set("content-type", "application/json")
+	r.Header.Set("x-trace-id", string(traceID))
 
 	resp, err := client.httpc.Do(r)
 	if err != nil {
