@@ -7,6 +7,7 @@ import (
 type Event[Self any] interface {
 	AbsoluteEvent | IncrementalEvent
 
+	// yeah this is weird; the comment on eventMethods explains what's going on.
 	eventMethods[Self]
 }
 
