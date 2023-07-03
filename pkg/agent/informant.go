@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -70,13 +71,8 @@ type InformantServer struct {
 	// This field MAY be read while holding EITHER runner.lock OR requestLock.
 	mode InformantServerMode
 
-	// updatedInformant is signalled once, when the InformantServer's register request completes,
-	// and the value of runner.informant is updated.
-	updatedInformant util.CondChannelSender
-
-	// upscaleRequested is signalled whenever a valid request on /try-upscale is received, with at
-	// least one field set to true (i.e., at least one resource is being requested).
-	upscaleRequested util.CondChannelSender
+	// callbacks provide an abstraction for
+	callbacks informantStateCallbacks
 
 	// requestLock guards requests to the VM informant to make sure that only one request is being
 	// made at a time.
@@ -86,7 +82,7 @@ type InformantServer struct {
 	requestLock util.ChanMutex
 
 	// exitStatus holds some information about why the server exited
-	exitStatus *InformantServerExitStatus
+	exitStatus atomic.Pointer[InformantServerExitStatus]
 
 	// exit signals that the server should shut down, and sets exitStatus to status.
 	//
@@ -130,8 +126,7 @@ func NewInformantServer(
 	ctx context.Context,
 	logger *zap.Logger,
 	runner *Runner,
-	updatedInformant util.CondChannelSender,
-	upscaleRequested util.CondChannelSender,
+	callbacks informantStateCallbacks,
 ) (*InformantServer, util.SignalReceiver, error) {
 	// Manually start the TCP listener so that we can see the port it's assigned
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: 0 /* 0 means it'll be assigned any(-ish) port */}
@@ -157,16 +152,15 @@ func NewInformantServer(
 			MinProtoVersion: MinInformantProtocolVersion,
 			MaxProtoVersion: MaxInformantProtocolVersion,
 		},
-		seqNum:           0,
-		receivedIDCheck:  false,
-		madeContact:      false,
-		protoVersion:     nil,
-		mode:             InformantServerUnconfirmed,
-		updatedInformant: updatedInformant,
-		upscaleRequested: upscaleRequested,
-		requestLock:      util.NewChanMutex(),
-		exitStatus:       nil,
-		exit:             nil, // see below.
+		seqNum:          0,
+		receivedIDCheck: false,
+		madeContact:     false,
+		protoVersion:    nil,
+		mode:            InformantServerUnconfirmed,
+		callbacks:       callbacks,
+		requestLock:     util.NewChanMutex(),
+		exitStatus:      atomic.Pointer[InformantServerExitStatus]{},
+		exit:            nil, // see below.
 	}
 
 	logger = logger.With(zap.Object("server", server.desc))
@@ -188,8 +182,7 @@ func NewInformantServer(
 		cancelBackground()
 
 		// Set server.exitStatus if isn't already
-		if server.exitStatus == nil {
-			server.exitStatus = &status
+		if swapped := server.exitStatus.CompareAndSwap(nil, &status); swapped {
 			logFunc := logger.Warn
 			if status.RetryShouldFix {
 				logFunc = logger.Info
@@ -240,15 +233,10 @@ func NewInformantServer(
 
 		// set server.exitStatus if it isn't already -- generally this should only occur if err
 		// isn't http.ErrServerClosed, because other server exits should be controlled by
-		runner.lock.Lock()
-		defer runner.lock.Unlock()
-
-		if server.exitStatus == nil {
-			server.exitStatus = &InformantServerExitStatus{
-				Err:            fmt.Errorf("Unexpected exit: %w", err),
-				RetryShouldFix: false,
-			}
-		}
+		server.exitStatus.CompareAndSwap(nil, &InformantServerExitStatus{
+			Err:            fmt.Errorf("Unexpected exit: %w", err),
+			RetryShouldFix: false,
+		})
 	})
 
 	// Thread waiting for the context to be canceled so we can use it to shut down the server
@@ -319,7 +307,7 @@ func IsNormalInformantError(err error) bool {
 //
 // This method MUST be called while holding s.runner.lock.
 func (s *InformantServer) valid() error {
-	if s.exitStatus != nil {
+	if s.exitStatus.Load() != nil {
 		return InformantServerAlreadyExitedError
 	}
 
@@ -334,7 +322,7 @@ func (s *InformantServer) valid() error {
 		panic(fmt.Errorf("Unexpected InformantServerMode %q", s.mode))
 	}
 
-	if s.runner.server != s {
+	if s.runner.server.Load() != s {
 		return InformantServerNotCurrentError
 	}
 	return nil
@@ -342,13 +330,8 @@ func (s *InformantServer) valid() error {
 
 // ExitStatus returns the InformantServerExitStatus associated with the server, if it has been
 // instructed to exit
-//
-// This method MUST NOT be called while holding s.runner.lock.
 func (s *InformantServer) ExitStatus() *InformantServerExitStatus {
-	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
-
-	return s.exitStatus
+	return s.exitStatus.Load()
 }
 
 // setLastInformantError is a helper method to abbreviate setting the Runner's lastInformantError
@@ -362,7 +345,7 @@ func (s *InformantServer) setLastInformantError(err error, runnerLocked bool) {
 		defer s.runner.lock.Unlock()
 	}
 
-	if s.runner.server == s {
+	if s.runner.server.Load() == s {
 		s.runner.lastInformantError = err
 	}
 }
@@ -396,7 +379,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 			panic(fmt.Errorf("Unexpected InformantServerMode %q", s.mode))
 		}
 
-		if s.exitStatus != nil {
+		if s.ExitStatus() != nil {
 			err := InformantServerAlreadyExitedError
 			s.setLastInformantError(err, true)
 			return err
@@ -468,22 +451,25 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 		s.mode = InformantServerSuspended
 		s.protoVersion = &resp.ProtoVersion
 
-		if s.runner.server == s {
-			oldInformant := s.runner.informant
-			s.runner.informant = resp
-			s.updatedInformant.Send() // signal we've changed the informant
+		if s.runner.server.Load() == s {
+			// signal we've changed the informant, and do the logging while we're at it, so there's
+			// a synchronous record of what happened.
+			s.callbacks.registered(false, func() {
+				oldInformant := s.runner.informant
+				s.runner.informant = resp
 
-			if oldInformant == nil {
-				logger.Info("Registered with informant", zap.Any("informant", *resp))
-			} else if *oldInformant != *resp {
-				logger.Info(
-					"Re-registered with informant, InformantDesc changed",
-					zap.Any("oldInformant", *oldInformant),
-					zap.Any("informant", *resp),
-				)
-			} else {
-				logger.Info("Re-registered with informant; InformantDesc unchanged", zap.Any("informant", *oldInformant))
-			}
+				if oldInformant == nil {
+					logger.Info("Registered with informant", zap.Any("informant", *resp))
+				} else if *oldInformant != *resp {
+					logger.Info(
+						"Re-registered with informant, InformantDesc changed",
+						zap.Any("oldInformant", *oldInformant),
+						zap.Any("informant", *resp),
+					)
+				} else {
+					logger.Info("Re-registered with informant; InformantDesc unchanged", zap.Any("informant", *oldInformant))
+				}
+			})
 		} else {
 			logger.Warn("Registering with informant completed but the server has already been replaced")
 		}
@@ -687,7 +673,7 @@ func (s *InformantServer) handleID(ctx context.Context, _ *zap.Logger, body *str
 
 	s.receivedIDCheck = true
 
-	if s.exitStatus != nil {
+	if s.ExitStatus() != nil {
 		return nil, 404, errors.New("Server has already exited")
 	}
 
@@ -726,7 +712,7 @@ func (s *InformantServer) handleResume(
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
 
-	if s.exitStatus != nil {
+	if s.ExitStatus() != nil {
 		return nil, 404, errors.New("Server has already exited")
 	}
 
@@ -737,12 +723,14 @@ func (s *InformantServer) handleResume(
 	switch s.mode {
 	case InformantServerSuspended:
 		s.mode = InformantServerRunning
-		logger.Info(
-			"Informant server mode updated",
-			zap.String("action", "resume"),
-			zap.String("oldMode", string(InformantServerSuspended)),
-			zap.String("newMode", string(InformantServerRunning)),
-		)
+		s.callbacks.setActive(true, func() {
+			logger.Info(
+				"Informant server mode updated",
+				zap.String("action", "resume"),
+				zap.String("oldMode", string(InformantServerSuspended)),
+				zap.String("newMode", string(InformantServerRunning)),
+			)
+		})
 	case InformantServerRunning:
 		internalErr := errors.New("Got /resume request for server, but it is already running")
 		logger.Warn("Protocol violation", zap.Error(internalErr))
@@ -799,19 +787,21 @@ func (s *InformantServer) handleSuspend(
 		}
 	}()
 
-	if s.exitStatus != nil {
+	if s.ExitStatus() != nil {
 		return nil, 404, errors.New("Server has already exited")
 	}
 
 	switch s.mode {
 	case InformantServerRunning:
 		s.mode = InformantServerSuspended
-		logger.Info(
-			"Informant server mode updated",
-			zap.String("action", "suspend"),
-			zap.String("oldMode", string(InformantServerRunning)),
-			zap.String("newMode", string(InformantServerSuspended)),
-		)
+		s.callbacks.setActive(false, func() {
+			logger.Info(
+				"Informant server mode updated",
+				zap.String("action", "suspend"),
+				zap.String("oldMode", string(InformantServerRunning)),
+				zap.String("newMode", string(InformantServerSuspended)),
+			)
+		})
 	case InformantServerSuspended:
 		internalErr := errors.New("Got /suspend request for server, but it is already suspended")
 		logger.Warn("Protocol violation", zap.Error(internalErr))
@@ -876,7 +866,7 @@ func (s *InformantServer) handleTryUpscale(
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
 
-	if s.exitStatus != nil {
+	if s.ExitStatus() != nil {
 		return nil, 404, errors.New("Server has already exited")
 	}
 
@@ -887,18 +877,16 @@ func (s *InformantServer) handleTryUpscale(
 			return nil, 400, err
 		}
 
-		if body.MoreResources.Cpu || body.MoreResources.Memory {
-			s.upscaleRequested.Send()
-		} else {
-			logger.Warn("Received try-upscale request that has no resources selected")
-		}
+		s.callbacks.upscaleRequested(body.MoreResources, func() {
+			if !body.MoreResources.Cpu && !body.MoreResources.Memory {
+				logger.Warn("Received try-upscale request that has no resources selected")
+			}
 
-		logger.Info(
-			"Updating requested upscale",
-			zap.Any("oldRequested", s.runner.requestedUpscale),
-			zap.Any("newRequested", body.MoreResources),
-		)
-		s.runner.requestedUpscale = body.MoreResources
+			logger.Info(
+				"Updating requested upscale",
+				zap.Any("requested", body.MoreResources),
+			)
+		})
 
 		return &api.AgentIdentificationMessage{
 			Data:           api.AgentIdentification{AgentID: s.desc.AgentID},
@@ -982,11 +970,8 @@ func (s *InformantServer) HealthCheck(ctx context.Context, logger *zap.Logger) (
 
 // Downscale makes a request to the informant's /downscale endpoint with the api.Resources
 //
-// This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
+// This method MUST NOT be called while holding i.server.runner.lock.
 func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
@@ -1039,9 +1024,6 @@ func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to 
 }
 
 func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()

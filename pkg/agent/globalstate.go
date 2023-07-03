@@ -329,17 +329,16 @@ func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, p
 		status:                          nil, // set by calller
 		schedulerRespondedWithMigration: false,
 
-		shutdown:         nil, // set by (*Runner).Run
-		vm:               vmInfo,
-		podName:          podName,
-		podIP:            podIP,
-		lock:             util.NewChanMutex(),
-		requestLock:      util.NewChanMutex(),
-		requestedUpscale: api.MoreResources{Cpu: false, Memory: false},
+		shutdown:    nil, // set by (*Runner).Run
+		vm:          vmInfo,
+		podName:     podName,
+		podIP:       podIP,
+		lock:        util.NewChanMutex(),
+		requestLock: util.NewChanMutex(),
 
 		lastMetrics:        nil,
-		scheduler:          nil,
-		server:             nil,
+		scheduler:          atomic.Pointer[Scheduler]{},
+		server:             atomic.Pointer[InformantServer]{},
 		informant:          nil,
 		computeUnit:        nil,
 		lastApproved:       nil,

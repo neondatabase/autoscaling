@@ -16,6 +16,8 @@ data:
         "serverPort": 10301,
         "retryServerMinWaitSeconds": 5,
         "retryServerNormalWaitSeconds": 5,
+        "retryDeniedDownscaleSeconds": 5,
+        "retryFailedRequestSeconds": 3,
         "registerRetrySeconds": 5,
         "requestTimeoutSeconds": 1,
         "registerTimeoutSeconds": 2,
@@ -31,6 +33,7 @@ data:
       "scheduler": {
         "schedulerName": "autoscale-scheduler",
         "requestTimeoutSeconds": 2,
+        "requestAtLeastEverySeconds": 5,
         "requestPort": 10299
       },
       "dumpState": {
