@@ -53,8 +53,6 @@ spec:
         port: 9100
       - name: informant
         port: 10301
-      - name: monitor
-        port: 10369
   extraNetwork:
       enable: true
   disks:
