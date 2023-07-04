@@ -128,6 +128,7 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 			)
 
 			var rootErr string
+			//nolint:errorlint // The type switch (instead of errors.As) is ok; billing.Send() guarantees the error types.
 			switch e := err.(type) {
 			case billing.JSONError:
 				rootErr = "JSON marshaling"
