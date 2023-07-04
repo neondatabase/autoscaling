@@ -15,6 +15,7 @@ download () {
     curl -fL "https://github.com/neondatabase/autoscaling/releases/download/$VERSION/$1.yaml" -o "$1-$VERSION.yaml"
 }
 
+download 'whereabouts'
 download 'autoscale-scheduler'
 download 'autoscaler-agent'
 download 'neonvm'
