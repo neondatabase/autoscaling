@@ -47,6 +47,7 @@ require (
 	github.com/k8snetworkplumbingwg/whereabouts v0.6.1
 	github.com/kdomanski/iso9660 v0.3.3
 	github.com/lib/pq v1.10.7
+	github.com/lithammer/shortuuid v3.0.0+incompatible
 	github.com/onsi/ginkgo/v2 v2.6.1
 	github.com/onsi/gomega v1.24.2
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
