@@ -137,6 +137,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Billing != nil && c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
 	erc.Whenf(ec, c.Billing != nil && c.Billing.PushEverySeconds == 0, zeroTmpl, ".billing.pushEverySeconds")
 	erc.Whenf(ec, c.Billing != nil && c.Billing.PushRequestTimeoutSeconds == 0, zeroTmpl, ".billing.pushRequestTimeoutSeconds")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.MaxBatchSize == 0, zeroTmpl, ".billing.maxBatchSize")
 	erc.Whenf(ec, c.Billing != nil && c.Billing.URL == "", emptyTmpl, ".billing.url")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
