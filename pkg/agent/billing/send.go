@@ -54,7 +54,6 @@ func (s eventSender) senderLoop(logger *zap.Logger) {
 			logger.Info("Received notification that collector finished")
 			final = true
 		case <-ticker.C:
-			logger.Info("Starting periodic push")
 		}
 
 		s.sendAllCurrentEvents(logger)
@@ -67,6 +66,8 @@ func (s eventSender) senderLoop(logger *zap.Logger) {
 }
 
 func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
+	logger.Info("Pushing all available events")
+
 	if s.queue.size() == 0 {
 		logger.Info("No billing events to push")
 		s.lastSendDuration = 0
@@ -74,7 +75,6 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 		return
 	}
 
-	logger.Info("Pushing all available events")
 	total := 0
 	startTime := time.Now()
 
@@ -86,6 +86,10 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 	// be reported by s.metrics.lastSendDuration as we go (provided the request timeout isn't too
 	// long).
 	for {
+		if size := s.queue.size(); size != 0 {
+			logger.Info("Current queue size is non-zero", zap.Int("queueSize", size))
+		}
+
 		chunk := s.queue.get(int(s.config.MaxBatchSize))
 		count := len(chunk)
 		if count == 0 {
