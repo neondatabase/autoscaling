@@ -27,46 +27,50 @@ func NewClient(url string, c *http.Client) Client {
 	return Client{BaseURL: url, httpc: c, hostname: hostname}
 }
 
-func (c Client) NewBatch() *Batch { return &Batch{c: c, events: nil} }
+func NewBatch[E Event](client Client) *Batch[E] {
+	return &Batch[E]{c: client, events: nil}
+}
 
-type Batch struct {
+type Batch[E Event] struct {
 	// Q: does this need a mutex?
 	c      Client
-	events []any
+	events []E
 }
 
 // Count returns the number of events in the batch
-func (b *Batch) Count() int {
+func (b *Batch[E]) Count() int {
 	return len(b.events)
 }
 
-func (b *Batch) idempotenize(key string) string {
-	if key != "" {
-		return key
+// Enrich sets the event's Type and IdempotencyKey fields, so that users of this API don't need to
+// manually set them
+//
+// Enrich is already called by (*Batch).Add, but this is used in the autoscaler-agent's billing
+// implementation, which manually calls Enrich in order to log the IdempotencyKey for each event.
+func (b *Batch[E]) Enrich(event E) E {
+	event.setType()
+
+	key := event.getIdempotencyKey()
+	if *key == "" {
+		*key = fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", b.c.hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
 	}
 
-	return fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", b.c.hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
+	return event
 }
 
-func (b *Batch) AddAbsoluteEvent(e AbsoluteEvent) {
-	e.Type = "absolute"
-	e.IdempotencyKey = b.idempotenize(e.IdempotencyKey)
-	b.events = append(b.events, &e)
+// Add enriches an event and adds it to the batch
+func (b *Batch[E]) Add(event E) {
+	b.Enrich(event) // Realistically, we're already calling Enrich before Add, but this is a good safety mechanism.
+	b.events = append(b.events, event)
 }
 
-func (b *Batch) AddIncrementalEvent(e IncrementalEvent) {
-	e.Type = "incremental"
-	e.IdempotencyKey = b.idempotenize(e.IdempotencyKey)
-	b.events = append(b.events, &e)
-}
-
-func (b *Batch) Send(ctx context.Context) error {
+func (b *Batch[E]) Send(ctx context.Context) error {
 	if len(b.events) == 0 {
 		return nil
 	}
 
 	payload, err := json.Marshal(struct {
-		Events []any `json:"events"`
+		Events []E `json:"events"`
 	}{Events: b.events})
 	if err != nil {
 		return err
