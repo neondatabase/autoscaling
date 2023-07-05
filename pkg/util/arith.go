@@ -34,6 +34,15 @@ func Min[T constraints.Ordered](x, y T) T {
 	}
 }
 
+// AbsDiff returns the absolute value of the difference between x and y
+func AbsDiff[T constraints.Unsigned](x, y T) T {
+	if x > y {
+		return x - y
+	} else {
+		return y - x
+	}
+}
+
 // AtomicInt represents the shared interface provided by various atomic.<NAME> integers
 //
 // This interface type is primarily used by AtomicMax.

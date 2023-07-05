@@ -142,6 +142,7 @@ jobs:
             cd ${GITHUB_WORKSPACE}/deploy/agent && kustomize edit set image autoscaler-agent=${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
             cd ${GITHUB_WORKSPACE}
             mkdir -p rendered_manifests
+            kustomize build neonvm/config/default-vxlan/whereabouts > rendered_manifests/whereabouts.yaml
             kustomize build neonvm/config/default-vxlan/multus-eks > rendered_manifests/multus-eks.yaml
             kustomize build neonvm/config/default-vxlan/multus > rendered_manifests/multus.yaml
             kustomize build neonvm/config/default-vxlan > rendered_manifests/neonvm.yaml
@@ -178,3 +179,4 @@ jobs:
             rendered_manifests/neonvm.yaml
             rendered_manifests/multus.yaml
             rendered_manifests/multus-eks.yaml
+            rendered_manifests/whereabouts.yaml

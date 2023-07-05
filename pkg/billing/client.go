@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lithammer/shortuuid"
 )
 
 type Client struct {
@@ -27,58 +28,53 @@ func NewClient(url string, c *http.Client) Client {
 	return Client{BaseURL: url, httpc: c, hostname: hostname}
 }
 
-func (c Client) NewBatch() *Batch { return &Batch{c: c, events: nil} }
-
-type Batch struct {
-	// Q: does this need a mutex?
-	c      Client
-	events []any
+func (c Client) Hostname() string {
+	return c.hostname
 }
 
-// Count returns the number of events in the batch
-func (b *Batch) Count() int {
-	return len(b.events)
+type TraceID string
+
+func (c Client) GenerateTraceID() TraceID {
+	return TraceID(shortuuid.New())
 }
 
-func (b *Batch) idempotenize(key string) string {
-	if key != "" {
-		return key
+// Enrich sets the event's Type and IdempotencyKey fields, so that users of this API don't need to
+// manually set them
+func Enrich[E Event](hostname string, event E) E {
+	event.setType()
+
+	key := event.getIdempotencyKey()
+	if *key == "" {
+		*key = fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
 	}
 
-	return fmt.Sprintf("Host<%s>:ID<%s>:T<%s>", b.c.hostname, uuid.NewString(), time.Now().Format(time.RFC3339))
+	return event
 }
 
-func (b *Batch) AddAbsoluteEvent(e AbsoluteEvent) {
-	e.Type = "absolute"
-	e.IdempotencyKey = b.idempotenize(e.IdempotencyKey)
-	b.events = append(b.events, &e)
-}
-
-func (b *Batch) AddIncrementalEvent(e IncrementalEvent) {
-	e.Type = "incremental"
-	e.IdempotencyKey = b.idempotenize(e.IdempotencyKey)
-	b.events = append(b.events, &e)
-}
-
-func (b *Batch) Send(ctx context.Context) error {
-	if len(b.events) == 0 {
+// Send attempts to push the events to the remote endpoint.
+//
+// On failure, the error is guaranteed to be one of: JSONError, RequestError, or
+// UnexpectedStatusCodeError.
+func Send[E Event](ctx context.Context, client Client, traceID TraceID, events []E) error {
+	if len(events) == 0 {
 		return nil
 	}
 
 	payload, err := json.Marshal(struct {
-		Events []any `json:"events"`
-	}{Events: b.events})
+		Events []E `json:"events"`
+	}{Events: events})
 	if err != nil {
 		return err
 	}
 
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/usage_events", b.c.BaseURL), bytes.NewReader(payload))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/usage_events", client.BaseURL), bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	r.Header.Set("content-type", "application/json")
+	r.Header.Set("x-trace-id", string(traceID))
 
-	resp, err := b.c.httpc.Do(r)
+	resp, err := client.httpc.Do(r)
 	if err != nil {
 		return err
 	}
@@ -87,9 +83,8 @@ func (b *Batch) Send(ctx context.Context) error {
 	// theoretically if wanted/needed, we should use an http handler that
 	// does the retrying, to avoid writing that logic here.
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("got code %d, posting %d events", resp.StatusCode, len(b.events))
+		return fmt.Errorf("got code %d, posting %d events", resp.StatusCode, len(events))
 	}
 
-	b.events = nil
 	return nil
 }

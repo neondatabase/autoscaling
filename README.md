@@ -64,10 +64,10 @@ Build docker images:
 make docker-build
 ```
 
-Start local [`kind`] cluster:
+Start local cluster with [`kind`] or [`k3d`]:
 
 ```sh
-make local-cluster
+make kind-setup # or make k3d-setup
 ```
 
 Deploy NeonVM and Autoscaling components
@@ -117,13 +117,13 @@ cgexec -g memory:neon-test allocate-loop 256 2280
 
 To run e2e tests you need to install dependencies:
 - [`kubectl`]
-- [`kind`]
+- [`kind`]/[`k3d`]
 - [`kuttl`]
 
-You can either download them from their websites or install using Homebrew: `brew install kubectl kind kuttl`
+You can either download them from their websites or install using Homebrew: `brew install kubectl kind k3d kuttl`
 
 ```sh
-make local-cluster
+make kind-setup # or make k3d-setup, if you'd like to use k3d
 make kernel
 make deploy
 make example-vms
@@ -133,3 +133,4 @@ make e2e
 [`kubectl`]: https://kubernetes.io/docs/tasks/tools/#kubectl
 [`kind`]: https://kubernetes.io/docs/tasks/tools/#kind
 [`kuttl`]: https://kuttl.dev/
+[`k3d`]: https://k3d.io

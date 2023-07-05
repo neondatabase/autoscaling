@@ -121,6 +121,7 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 		defer state.status.mu.Unlock()
 
 		state.status.vmInfo = event.vmInfo
+		state.status.endpointID = event.endpointID
 		state.vmInfoUpdated.Send()
 	case vmEventAdded:
 		s.handleVMEventAdded(ctx, event, podName)
@@ -141,6 +142,7 @@ func (s *agentState) handleVMEventAdded(
 		endState:          nil,
 		previousEndStates: nil,
 		vmInfo:            event.vmInfo,
+		endpointID:        event.endpointID,
 
 		startTime:                   time.Now(),
 		lastSuccessfulInformantComm: nil,
@@ -308,6 +310,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 		pod.runner = runner
 
 		pod.status.previousEndStates = append(pod.status.previousEndStates, *pod.status.endState)
+		pod.status.endState = nil
 		pod.status.startTime = time.Now()
 
 		runnerLogger := s.loggerForRunner(pod.status.vmInfo.NamespacedName(), podName)
@@ -395,6 +398,9 @@ type podStatus struct {
 	// There is also a similar field inside the Runner itself, but it's better to store this out
 	// here, where we don't have to rely on the Runner being well-behaved w.r.t. locking.
 	vmInfo api.VmInfo
+
+	// endpointID, if non-empty, stores the ID of the endpoint associated with the VM
+	endpointID string
 }
 
 type podStatusDump struct {
@@ -406,6 +412,8 @@ type podStatusDump struct {
 	LastSuccessfulInformantComm *time.Time `json:"lastSuccessfulInformantComm"`
 
 	VMInfo api.VmInfo `json:"vmInfo"`
+
+	EndpointID string `json:"endpointID"`
 }
 
 type podStatusEndState struct {
@@ -456,8 +464,9 @@ func (s *podStatus) dump() podStatusDump {
 		PreviousEndStates: previousEndStates,
 
 		// FIXME: api.VmInfo contains a resource.Quantity - is that safe to copy by value?
-		VMInfo:    s.vmInfo,
-		StartTime: s.startTime,
+		VMInfo:     s.vmInfo,
+		EndpointID: s.endpointID,
+		StartTime:  s.startTime,
 
 		LastSuccessfulInformantComm: s.lastSuccessfulInformantComm,
 	}

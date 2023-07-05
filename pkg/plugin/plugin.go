@@ -45,13 +45,17 @@ type AutoscaleEnforcer struct {
 	// Keeping this store allows us to make sure that our event handling is never out-of-sync
 	// because all the information is coming from the same source.
 	vmStore IndexedVMStore
+	// nodeStore is doing roughly the same thing as with vmStore, but for Nodes.
+	nodeStore IndexedNodeStore
 }
 
-// abbreviation, because this type is pretty verbose
+// abbreviations, because these types are pretty verbose
 type IndexedVMStore = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]
+type IndexedNodeStore = watch.IndexedStore[corev1.Node, *watch.FlatNameIndex[corev1.Node]]
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
 var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
+var _ framework.PreFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.PostFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
@@ -94,13 +98,14 @@ func makeAutoscaleEnforcerPlugin(
 
 		handle:   h,
 		vmClient: vmClient,
-		// remaining fields are set by p.readClusterState and p.startPrometheusServer
+		// remaining fields are set by p.readClusterState and p.makePrometheusRegistry
 		state: pluginState{ //nolint:exhaustruct // see above.
 			lock: util.NewChanMutex(),
 			conf: config,
 		},
-		metrics: PromMetrics{},                                                                      //nolint:exhaustruct // set by startPrometheusServer
-		vmStore: watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]{}, // set below.
+		metrics:   PromMetrics{},      //nolint:exhaustruct // set by makePrometheusRegistry
+		vmStore:   IndexedVMStore{},   //nolint:exhaustruct // set below
+		nodeStore: IndexedNodeStore{}, //nolint:exhaustruct // set below
 	}
 
 	if p.state.conf.DumpState != nil {
@@ -119,6 +124,11 @@ func makeAutoscaleEnforcerPlugin(
 	}
 
 	hlogger := logger.Named("handlers")
+	nwc := nodeWatchCallbacks{
+		submitNodeDeletion: func(logger *zap.Logger, nodeName string) {
+			pushToQueue(logger, func() { p.handleNodeDeletion(hlogger, nodeName) })
+		},
+	}
 	pwc := podWatchCallbacks{
 		submitVMDeletion: func(logger *zap.Logger, pod util.NamespacedName) {
 			pushToQueue(logger, func() { p.handleVMDeletion(hlogger, pod) })
@@ -147,6 +157,14 @@ func makeAutoscaleEnforcerPlugin(
 
 	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
 
+	logger.Info("Starting node watcher")
+	nodeStore, err := p.watchNodeEvents(ctx, logger, watchMetrics, nwc)
+	if err != nil {
+		return nil, fmt.Errorf("Error starting node watcher: %w", err)
+	}
+
+	p.nodeStore = watch.NewIndexedStore(nodeStore, watch.NewFlatNameIndex[corev1.Node]())
+
 	logger.Info("Starting pod watcher")
 	if err := p.watchPodEvents(ctx, logger, watchMetrics, pwc); err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
@@ -159,6 +177,11 @@ func makeAutoscaleEnforcerPlugin(
 	}
 
 	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
+
+	// makePrometheusRegistry sets p.metrics, which we need to do before calling readClusterState,
+	// because we set metrics for each node while we build the state.
+	promReg := p.makePrometheusRegistry()
+	watchMetrics.MustRegister(promReg)
 
 	// ... but before handling the events, read the current cluster state:
 	logger.Info("Reading initial cluster state")
@@ -176,9 +199,6 @@ func makeAutoscaleEnforcerPlugin(
 			logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
 		}
 	}()
-
-	promReg := p.makePrometheusRegistry()
-	watchMetrics.MustRegister(promReg)
 
 	if err := util.StartPrometheusMetricsServer(ctx, logger.Named("prometheus"), 9100, promReg); err != nil {
 		return nil, fmt.Errorf("Error starting prometheus server: %w", err)
@@ -223,9 +243,11 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 		return nil, nil
 	}
 
-	vm, ok := vmStore.GetIndexed(func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
+	accessor := func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
 		return index.Get(vmName.Namespace, vmName.Name)
-	})
+	}
+
+	vm, ok := vmStore.GetIndexed(accessor)
 	if !ok {
 		logger.Warn(
 			"VM is missing from local store. Relisting",
@@ -248,9 +270,7 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 		}
 
 		// retry fetching the VM, now that we know it's been synced.
-		vm, ok = vmStore.GetIndexed(func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
-			return index.Get(vmName.Namespace, vmName.Name)
-		})
+		vm, ok = vmStore.GetIndexed(accessor)
 		if !ok {
 			// if the VM is still not present after relisting, then either it's already been deleted
 			// or there's a deeper problem.
@@ -282,8 +302,34 @@ func (e *AutoscaleEnforcer) checkSchedulerName(logger *zap.Logger, pod *corev1.P
 	return nil
 }
 
-// PostFilter is used by us to check the status of the filtered pods, so that we can have metrics
-// that are a strong indicator of pods stuck in pending because of an error in the plugin
+// PreFilter is called at the start of any Pod's filter cycle. We use it in combination with
+// PostFilter (which is only called on failure) to provide metrics for pods that are rejected by
+// this process.
+func (e *AutoscaleEnforcer) PreFilter(
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+) (_ *framework.PreFilterResult, status *framework.Status) {
+	e.metrics.pluginCalls.WithLabelValues("PreFilter").Inc()
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("PreFilter", status)
+	}()
+
+	return nil, nil
+}
+
+// PreFilterExtensions is required for framework.PreFilterPlugin, and can return nil if it's not used
+func (e *AutoscaleEnforcer) PreFilterExtensions() framework.PreFilterExtensions {
+	return nil
+}
+
+// PostFilter is used by us for metrics on filter cycles that reject a Pod by filtering out all
+// applicable nodes.
+//
+// Quoting the docs for PostFilter:
+//
+// > These plugins are called after Filter phase, but only when no feasible nodes were found for the
+// > pod.
 //
 // Required for framework.PostFilterPlugin
 func (e *AutoscaleEnforcer) PostFilter(
@@ -296,26 +342,6 @@ func (e *AutoscaleEnforcer) PostFilter(
 	defer func() {
 		e.metrics.IncFailIfNotSuccess("PostFilter", status)
 	}()
-
-	// FIXME: what to do here? Can this happen?
-	if len(filteredNodeStatusMap) == 0 {
-		return nil, nil
-	}
-
-	hasSuccess := false
-	for _, status := range filteredNodeStatusMap {
-		if status.IsSuccess() {
-			hasSuccess = true
-			break
-		}
-	}
-
-	if !hasSuccess {
-		podName := fmt.Sprint(util.GetNamespacedName(pod))
-		e.metrics.filterCycleRejections.WithLabelValues(podName).Inc()
-	} else {
-		e.metrics.filterCycleSuccesses.Inc()
-	}
 
 	return nil, nil // PostFilterResult is optional, nil Status is success.
 }
@@ -378,7 +404,7 @@ func (e *AutoscaleEnforcer) Filter(
 		)
 	}
 
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return framework.NewStatus(
@@ -546,7 +572,7 @@ func (e *AutoscaleEnforcer) Score(
 	}
 
 	// Score by total resources available:
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return 0, framework.NewStatus(framework.Error, "Error fetching state for node")
@@ -638,7 +664,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		)
 	}
 
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.handle, nodeName)
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
 	if err != nil {
 		logger.Error("Error getting node state", zap.Error(err))
 		return framework.NewStatus(
@@ -696,6 +722,8 @@ func (e *AutoscaleEnforcer) Reserve(
 					mem: memVerdict,
 				}),
 			)
+
+			node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 
 			return nil // nil is success
 		} else {
@@ -777,6 +805,9 @@ func (e *AutoscaleEnforcer) Reserve(
 		}
 		node.pods[pName] = ps
 		e.state.podMap[pName] = ps
+
+		node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+
 		return nil // nil is success
 	} else {
 		cpuShortVerdict := "NOT ENOUGH"
@@ -841,6 +872,8 @@ func (e *AutoscaleEnforcer) Unreserve(
 				mem: memVerdict,
 			}),
 		)
+
+		otherPs.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 	} else if ok && !otherOk {
 		// Mark the resources as no longer reserved
 
@@ -862,6 +895,8 @@ func (e *AutoscaleEnforcer) Unreserve(
 				mem: memVerdict,
 			}),
 		)
+
+		ps.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 	} else {
 		logger.Warn("Cannot find pod in podMap in otherPods")
 		return

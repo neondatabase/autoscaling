@@ -14,10 +14,10 @@ import (
 type PromMetrics struct {
 	pluginCalls           *prometheus.CounterVec
 	pluginCallFails       *prometheus.CounterVec
-	filterCycleSuccesses  prometheus.Counter
-	filterCycleRejections *prometheus.CounterVec
 	resourceRequests      *prometheus.CounterVec
 	validResourceRequests *prometheus.CounterVec
+	nodeCPUResources      *prometheus.GaugeVec
+	nodeMemResources      *prometheus.GaugeVec
 }
 
 func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
@@ -47,19 +47,6 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 			},
 			[]string{"method", "status"},
 		)),
-		filterCycleSuccesses: util.RegisterMetric(reg, prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "autoscaling_plugin_filter_cycle_successes_total",
-				Help: "Number of successful Filter stages for any pod",
-			},
-		)),
-		filterCycleRejections: util.RegisterMetric(reg, prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "autoscaling_plugin_filter_cycle_rejections_total",
-				Help: "For each pod, number of times rejected by *all* Filter evaluations",
-			},
-			[]string{"pod_name"},
-		)),
 		resourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_resource_requests_total",
@@ -73,6 +60,20 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Help: "Number of resource requests to the scheduler plugin with various results",
 			},
 			[]string{"code", "node", "has_metrics"},
+		)),
+		nodeCPUResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_node_cpu_resources_current",
+				Help: "Current amount of CPU for 'nodeResourceState' fields",
+			},
+			[]string{"node", "field"},
+		)),
+		nodeMemResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_node_mem_resources_current",
+				Help: "Current amount of memory (in bytes) for 'nodeResourceState' fields",
+			},
+			[]string{"node", "field"},
 		)),
 	}
 
