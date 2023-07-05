@@ -156,7 +156,7 @@ func (s *State) NotifyUpscale(
 		return nil, 400, fmt.Errorf("Agent ID %s is not the active Agent", incomingId)
 	}
 
-    s.agents.ReceivedUpscale()
+	s.agents.ReceivedUpscale()
 
 	tx, rx := util.Oneshot[MonitorResult]()
 	s.dispatcher.Call(
