@@ -59,7 +59,7 @@ _informant_) and makes scaling decisions about the _desired_ resource allocation
 requests these resources from the scheduler plugin, and submits a patch request for its NeonVM to
 update the resources.
 
-The VM informant manages the `autoscaler-agent` associated with a given compute instance and relays
+The VM informant manages the `autoscaler-agent`(s) associated with a given compute instance and relays
 messages between the agent and the VM monitor on that compute instance.
 
 The VM monitor is responsible for handling all of the functionality inside the VM that
@@ -303,7 +303,7 @@ Monitor   res => Returns DownscaleResult
 Informant req => ResourceMessage
 Monitor   res => Returns No Data
 ```
-which roughly correspond to `/upscale`, `/downscale`, and `/try-upcale` endpoints
+which roughly correspond to `/try-upscale`, `/downscale`, and `/upscale` endpoints
 from the agent<->informant protocol.
 
 ## Footguns
