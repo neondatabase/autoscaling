@@ -198,9 +198,8 @@ docker-build-pg14-disk-test: vm-informant bin/vm-builder-generic ## Build a VM i
 	    chmod uga+rw 'vm-examples/pg14-disk-test/ssh_id_rsa' 'vm-examples/pg14-disk-test/ssh_id_rsa.pub'; \
 	fi
 
-	docker buildx build \
+	docker build \
 		--tag tmp-$(PG14_DISK_TEST_IMG) \
-		--load \
 		--file vm-examples/pg14-disk-test/Dockerfile.vmdata \
 		vm-examples/pg14-disk-test/
 	./bin/vm-builder-generic -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
