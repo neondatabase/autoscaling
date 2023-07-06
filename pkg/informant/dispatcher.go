@@ -1,5 +1,8 @@
 package informant
 
+// The Dispatcher is our interface with the monitor. We interact via a websocket
+// connection through a simple RPC-style protocol.
+
 import (
 	"context"
 	"fmt"
@@ -16,9 +19,8 @@ type MonitorResult struct {
 	Confirmation struct{}
 }
 
-// TODO: do we need synchronization?
 // The Dispatcher is the main object managing the websocket connection to the
-// monitor. For more information on the protocol, see TODO.
+// monitor. For more information on the protocol, see Rust docs and transport.go
 type Dispatcher struct {
 	Conn *websocket.Conn
 	ctx  context.Context
@@ -46,11 +48,11 @@ type Dispatcher struct {
 	logger *zap.Logger
 }
 
-// Create a new Dispatcher. Note that this does not immediately start the Dispatcher.
-// Call Run() to start it.
+// Create a new Dispatcher, establishing a connection with the informant.
+// Note that this does not immediately start the Dispatcher. Call Run() to start it.
 func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (disp Dispatcher, _ error) {
-	// TODO: have this context actually do something. As of now it's just being
-	// passed around to satisfy typing
+	// FIXME: have this context actually do something? As of now it's just being
+	// passed around to satisfy typing. Maybe it's not really necessary.
 	ctx := context.Background()
 
 	logger.Info("Connecting via websocket.", zap.String("addr", addr))
@@ -61,8 +63,6 @@ func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (d
 	if err != nil {
 		return disp, fmt.Errorf("Error creating dispatcher: %w", err)
 	}
-	// See docs: apparently we don't need to close this
-	// defer resp.Body.Close()
 
 	disp = Dispatcher{
 		Conn:     c,
@@ -117,6 +117,65 @@ func (disp *Dispatcher) Call(req Request, sender util.OneshotSender[MonitorResul
 	disp.waiters[id] = sender
 }
 
+// Handle a request. In reality, the only request we should ever receive is
+// a request upscale, in which we sent an event down the dispatcher's notifier
+// channel.
+func (disp *Dispatcher) handleRequest(req Request) {
+	if req.RequestUpscale != nil {
+		disp.logger.Info("Received request for upscale")
+		// The goroutine listening on the other side will make the request
+		disp.notifier <- struct{}{}
+	} else if req.NotifyUpscale != nil {
+		panic("informant should never receive a NotifyUpscale request from monitor")
+	} else if req.TryDownscale != nil {
+		panic("informant should never receive a TryDownscale request from monitor")
+	} else {
+		panic("all fields nil")
+	}
+}
+
+// Handle a response. This basically means sending back the result on the channel
+// that the original requester gave us.
+func (disp *Dispatcher) handleResponse(res Response, id uint64) {
+	if res.DownscaleResult != nil {
+		// Loop up the waiter and send back the result
+		sender, ok := disp.waiters[id]
+		if ok {
+			disp.logger.Info("Received DownscaleResult. Notifying receiver.", zap.Uint64("id", id))
+			sender.Send(MonitorResult{Result: res.DownscaleResult, Confirmation: struct{}{}})
+			// Don't forget to delete the waiter
+			delete(disp.waiters, id)
+			err := disp.send(Done(id))
+			if err != nil {
+				disp.logger.Warn("Failed to send Done packet.")
+			}
+		} else {
+			panic("Received response for id without a registered sender")
+		}
+	} else if res.ResourceConfirmation != nil {
+		// Loop up the waiter and send back the result
+		sender, ok := disp.waiters[id]
+		if ok {
+			disp.logger.Info("Received ResourceConfirmation. Notifying receiver.", zap.Uint64("id", id))
+			//
+			sender.Send(MonitorResult{Result: nil, Confirmation: struct{}{}})
+			// Don't forget to delete the waiter
+			delete(disp.waiters, id)
+			err := disp.send(Done(id))
+			if err != nil {
+				disp.logger.Warn("Failed to send Done packet.")
+			}
+		} else {
+			panic("Received response for id without a registered sender")
+		}
+	} else if res.UpscaleResult != nil {
+		panic("informant should never receive an UpscaleResult response from monitor")
+	} else {
+		// This is a serialization error
+		panic("all fields nil")
+	}
+}
+
 // Long running function that performs all orchestrates all requests/responses.
 func (disp *Dispatcher) run() {
 	disp.logger.Info("Starting.")
@@ -128,87 +187,13 @@ func (disp *Dispatcher) run() {
 		}
 		stage := packet.Stage
 		id := packet.Id
-		switch {
-		case stage.Request != nil:
-			{
-				req := stage.Request
-				switch {
-				case req.RequestUpscale != nil:
-					{
-						disp.logger.Info("Received request for upscale")
-						// The goroutine listening on the other side will make the
-						// request
-						disp.notifier <- struct{}{}
-					}
-				case req.NotifyUpscale != nil:
-					{
-						panic("informant should never receive a NotifyUpscale request from monitor")
-					}
-				case req.TryDownscale != nil:
-					{
-						panic("informant should never receive a TryDownscale request from monitor")
-					}
-				default:
-					{
-						panic("all fields nil")
-					}
-				}
-			}
-		case stage.Response != nil:
-			{
-				res := stage.Response
-				switch {
-				case res.DownscaleResult != nil:
-					{
-						// Loop up the waiter and send back the result
-						sender, ok := disp.waiters[id]
-						if ok {
-							disp.logger.Info("Received DownscaleResult. Notifying receiver.", zap.Uint64("id", id))
-							sender.Send(MonitorResult{Result: res.DownscaleResult, Confirmation: struct{}{}})
-							// Don't forget to delete the waiter
-							delete(disp.waiters, id)
-							err := disp.send(Done(id))
-							if err != nil {
-								disp.logger.Warn("Failed to send Done packet.")
-							}
-						} else {
-							panic("Received response for id without a registered sender")
-						}
-					}
-				case res.ResourceConfirmation != nil:
-					{
-						// Loop up the waiter and send back the result
-						sender, ok := disp.waiters[id]
-						if ok {
-							disp.logger.Info("Received ResourceConfirmation. Notifying receiver.", zap.Uint64("id", id))
-							//
-							sender.Send(MonitorResult{Result: nil, Confirmation: struct{}{}})
-							// Don't forget to delete the waiter
-							delete(disp.waiters, id)
-							err := disp.send(Done(id))
-							if err != nil {
-								disp.logger.Warn("Failed to send Done packet.")
-							}
-						} else {
-							panic("Received response for id without a registered sender")
-						}
-					}
-				case res.UpscaleResult != nil:
-					{
-						panic("informant should never receive an UpscaleResult response from monitor")
-					}
-				default:
-					{
-						// This is a serialization error
-						panic("all fields nil")
-					}
-				}
-			}
-		case stage.Done != nil:
-			{
-				disp.logger.Debug("Transaction finished.", zap.Uint64("id", id))
-				// yay! :)
-			}
+		if stage.Request != nil {
+			disp.handleRequest(*stage.Request)
+		} else if stage.Response != nil {
+			disp.handleResponse(*stage.Response, id)
+		} else if stage.Done != nil {
+			disp.logger.Debug("Transaction finished.", zap.Uint64("id", id))
+			// yay! :)
 		}
 	}
 }

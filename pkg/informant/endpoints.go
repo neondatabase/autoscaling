@@ -81,9 +81,8 @@ func (s *State) HealthCheck(ctx context.Context, logger *zap.Logger, info *api.A
 	return &api.InformantHealthCheckResp{}, 200, nil
 }
 
-// MARKER
 // TryDownscale tries to downscale the VM's current resource usage, returning whether the proposed
-// amount is ok
+// amount is ok.
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
@@ -115,13 +114,15 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 				Mem: mem,
 			},
 		},
-		tx)
+		tx,
+	)
+
+	// Wait for result
 	res := rx.Recv().Result
 
 	return res.Into(), 200, nil
 }
 
-// MARKER
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
@@ -167,7 +168,11 @@ func (s *State) NotifyUpscale(
 				Mem: mem,
 			},
 			TryDownscale: nil,
-		}, tx)
+		},
+		tx,
+	)
+
+	// Wait for result
 	res := rx.Recv().Confirmation
 
 	return &res, 200, nil

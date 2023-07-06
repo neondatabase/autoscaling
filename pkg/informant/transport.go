@@ -1,11 +1,32 @@
 package informant
 
+// Defines types that are used to communicate with the monitor over websocket
+// connection. Carefully ensure that serialization is compatible with transport
+// types defined in the monitor.
+
 import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-// Defines types that are used to communicate with the monitor over websocket
-// connection
+// See monitor docs for a more thorough explanation of the monitor protocol. In
+// short, one party sends a `Request`, they are responded to with a `Response`,
+// and then they send a `Done` to finish off the transaction. The only thing
+// sent over the network is the `Packet` struct.
+//
+// These types might look a little funky . . . that's because go doesn't have
+// enums. On the rust side, `Stage`, `Request` and `Response` are all enums.
+// The way deserialization works is that the the only the specific struct field
+// that matches the enum variant is serialized out. The other pointers are set
+// to nil. Thus, a Request(RequestUpscale) would be deserialized as
+//
+// Request{
+//     RequestUpscale 0xdeadbeef
+//     NotifyUpscale  0x0
+//     TryDownscale   0x0
+// }
+//
+// This is achieved using the `omitempty` struct tag.
+
 type Packet struct {
 	Stage Stage  `json:"stage"`
 	Id    uint64 `json:"id"`
