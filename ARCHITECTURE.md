@@ -292,10 +292,15 @@ types used to communicate with the informant.
    sent with their `Request`.
 6. The process repeats, with many transactions possibly happening at the same time.
 
+*Note*: there is one exception to this flow. When the monitor sends a `Request{RequestUpscale}`,
+the informant immediately responds with a `Done`, since it must wait for the agent to
+make a decision. If the agent decides to upscale, it will be sent to the monitor
+(via the informant) as a `Request{UpscaleResult}`
+
 Currently, the following transactions are used:
 ```
 Monitor   req => RequestUpscale
-Informant res => Returns No Data
+Informant res => Returns Resources
 
 Informant req => TryDownscale
 Monitor   res => Returns DownscaleResult

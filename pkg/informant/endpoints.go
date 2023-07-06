@@ -106,6 +106,7 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 	tx, rx := util.Oneshot[MonitorResult]()
 
 	s.dispatcher.Call(
+		ctx,
 		Request{
 			RequestUpscale: nil,
 			NotifyUpscale:  nil,
@@ -161,6 +162,7 @@ func (s *State) NotifyUpscale(
 
 	tx, rx := util.Oneshot[MonitorResult]()
 	s.dispatcher.Call(
+		ctx,
 		Request{
 			RequestUpscale: nil,
 			NotifyUpscale: &Resources{

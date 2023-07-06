@@ -8,7 +8,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-// See monitor docs for a more thorough explanation of the monitor protocol. In
+// See ARCHITECTURE.md for a more thorough explanation of the monitor protocol. In
 // short, one party sends a `Request`, they are responded to with a `Response`,
 // and then they send a `Done` to finish off the transaction. The only thing
 // sent over the network is the `Packet` struct.

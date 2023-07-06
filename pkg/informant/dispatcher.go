@@ -22,8 +22,8 @@ type MonitorResult struct {
 // The Dispatcher is the main object managing the websocket connection to the
 // monitor. For more information on the protocol, see Rust docs and transport.go
 type Dispatcher struct {
+	// The underlying connection we are managing
 	Conn *websocket.Conn
-	ctx  context.Context
 
 	// When someone sends a message, the dispatcher will attach a transaction id
 	// to it so that it knows when a response is back. When it receives a packet
@@ -66,7 +66,6 @@ func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (d
 
 	disp = Dispatcher{
 		Conn:     c,
-		ctx:      ctx,
 		notifier: notifier,
 		waiters:  make(map[uint64]util.OneshotSender[MonitorResult]),
 		counter:  0,
@@ -76,16 +75,16 @@ func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (d
 }
 
 // Send a packet down the connection.
-func (disp *Dispatcher) send(p Packet) error {
+func (disp *Dispatcher) send(ctx context.Context, p Packet) error {
 	disp.logger.Debug("Sending packet", zap.Any("packet", p))
-	return wsjson.Write(disp.ctx, disp.Conn, p)
+	return wsjson.Write(ctx, disp.Conn, p)
 }
 
 // Try to receive a packet off the connection.
-func (disp *Dispatcher) recv() (*Packet, error) {
+func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
 	var p Packet
 	disp.logger.Debug("Reading packet off connection.")
-	err := wsjson.Read(disp.ctx, disp.Conn, &p)
+	err := wsjson.Read(ctx, disp.Conn, &p)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +98,7 @@ func (disp *Dispatcher) recv() (*Packet, error) {
 // *Note*: sending a RequestUpscale to the monitor is incorrect. The monitor does
 // not (and should) not know how to handle this and will panic. Likewise, we panic
 // upon receiving a TryDownscale or NotifyUpscale request.
-func (disp *Dispatcher) Call(req Request, sender util.OneshotSender[MonitorResult]) {
+func (disp *Dispatcher) Call(ctx context.Context, req Request, sender util.OneshotSender[MonitorResult]) {
 	id := disp.counter
 	disp.counter += 1
 	packet := Packet{
@@ -110,7 +109,7 @@ func (disp *Dispatcher) Call(req Request, sender util.OneshotSender[MonitorResul
 		},
 		Id: id,
 	}
-	err := disp.send(packet)
+	err := disp.send(ctx, packet)
 	if err != nil {
 		disp.logger.Warn("Failed to send packet.", zap.Any("packet", packet))
 	}
@@ -130,6 +129,7 @@ func (disp *Dispatcher) handleRequest(req Request) {
 	} else if req.TryDownscale != nil {
 		panic("informant should never receive a TryDownscale request from monitor")
 	} else {
+		// This is a serialization error
 		panic("all fields nil")
 	}
 }
@@ -145,10 +145,6 @@ func (disp *Dispatcher) handleResponse(res Response, id uint64) {
 			sender.Send(MonitorResult{Result: res.DownscaleResult, Confirmation: struct{}{}})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
-			err := disp.send(Done(id))
-			if err != nil {
-				disp.logger.Warn("Failed to send Done packet.")
-			}
 		} else {
 			panic("Received response for id without a registered sender")
 		}
@@ -161,10 +157,6 @@ func (disp *Dispatcher) handleResponse(res Response, id uint64) {
 			sender.Send(MonitorResult{Result: nil, Confirmation: struct{}{}})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
-			err := disp.send(Done(id))
-			if err != nil {
-				disp.logger.Warn("Failed to send Done packet.")
-			}
 		} else {
 			panic("Received response for id without a registered sender")
 		}
@@ -179,8 +171,9 @@ func (disp *Dispatcher) handleResponse(res Response, id uint64) {
 // Long running function that performs all orchestrates all requests/responses.
 func (disp *Dispatcher) run() {
 	disp.logger.Info("Starting.")
+	ctx := context.Background()
 	for {
-		packet, err := disp.recv()
+		packet, err := disp.recv(ctx)
 		if err != nil {
 			disp.logger.Warn("Error receiving from ws connection. Continuing.", zap.Error(err))
 			continue
@@ -189,8 +182,20 @@ func (disp *Dispatcher) run() {
 		id := packet.Id
 		if stage.Request != nil {
 			disp.handleRequest(*stage.Request)
+
+			// We actually send a done here because there's nothing more we can
+			// do, since the request could only be a RequestUpscale. If the agent
+			// decides to upscale, it will go to the monitor as a Request{NotifyUpscale}
+			err := disp.send(ctx, Done(id))
+			if err != nil {
+				disp.logger.Warn("Failed to send Done packet.")
+			}
 		} else if stage.Response != nil {
 			disp.handleResponse(*stage.Response, id)
+			err := disp.send(ctx, Done(id))
+			if err != nil {
+				disp.logger.Warn("Failed to send Done packet.")
+			}
 		} else if stage.Done != nil {
 			disp.logger.Debug("Transaction finished.", zap.Uint64("id", id))
 			// yay! :)
