@@ -15,7 +15,7 @@ import (
 //
 // These types might look a little funky . . . that's because go doesn't have
 // enums. On the rust side, `Stage`, `Request` and `Response` are all enums.
-// The way deserialization works is that the the only the specific struct field
+// The way deserialization works is that the only the specific struct field
 // that matches the enum variant is serialized out. The other pointers are set
 // to nil. Thus, a Request(RequestUpscale) would be deserialized as
 //
