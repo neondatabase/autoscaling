@@ -20,4 +20,3 @@ RUN cargo clean --release --manifest-path vm-monitor/Cargo.toml
 
 FROM builder
 COPY --from=builder /workspace/bin/vm-monitor /usr/bin/vm-monitor
-ENTRYPOINT [ "RUST_LOG=trace", "/usr/bin/vm-monitor" ]
