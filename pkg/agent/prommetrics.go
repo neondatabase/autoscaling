@@ -98,7 +98,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 				Name: "autoscaling_agent_informant_outbound_requests_total",
 				Help: "Number of attempted HTTP requests to vm-informants by autoscaler-agents",
 			},
-			[]string{"code"},
+			[]string{"endpoint", "code"},
 		)),
 		informantRequestsInbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
