@@ -66,7 +66,7 @@ discussed more in the [high-level consequences] section below.
 
 ## Network connections between components
 
-![Diagram of network connections between the components listed above, in addition to the kubernetes API and Neon compute node. Directed arrows indicate which component initiates each TCP connection](ARCHITECTURE-network-diagram.png)
+![Diagram of network connections between the components listed above, in addition to the Kubernetes API and Neon compute node. Directed arrows indicate which component initiates each TCP connection](ARCHITECTURE-network-diagram.png)
 [Diagram source](ARCHITECTURE-network-diagram.org)
 
 ## Repository structure
@@ -98,7 +98,7 @@ discussed more in the [high-level consequences] section below.
     * `scripts/patch-*.json` — patches for testing live-updating of a VM or config
     * `scripts/replace-scheduler.sh` — replaces the currently running scheduler, for quick redeploy
     * `scripts/repeat-delete-scheduler.sh` — repeatedly deletes the scheduler (which will be
-        recreated by the depoyment). For debugging.
+        recreated by the deployment). For debugging.
     * `scripts/run-bench.sh` — starts a CPU-intensive pgbench connected to a VM. Useful to watch
       the TPS and get confirmation that autoscaled CPUs are being used.
     * `scripts/scheduler-logs.sh` — convenience script to tail the scheduler's logs
@@ -111,7 +111,7 @@ discussed more in the [high-level consequences] section below.
 * `vm-examples/` — collection of VMs:
     * `pg14-disk-test/` — VM with Postgres 14 and and ssh access
       * Refer to [`vm-examples/pg14-disk-test/README.md`](./vm-examples/pg14-disk-test)  for more information.
-    * `postgres-minimal/` — Minimal postgres 15 VM used in e2e tests
+    * `postgres-minimal/` — Minimal Postgres 15 VM used in e2e tests
 
 [cluster-autoscaler]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler
 
