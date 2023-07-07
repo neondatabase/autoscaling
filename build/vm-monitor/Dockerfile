@@ -14,8 +14,7 @@ ADD "https://api.github.com/repos/neondatabase/vm-monitor/branches" latest_commi
 RUN git clone --branch fprasx/testing https://github.com/neondatabase/vm-monitor.git 
 RUN cargo build --release --manifest-path vm-monitor/Cargo.toml
 # Move binary so we can cargo clean
-RUN mkdir /workspace/bin && touch /workspace/bin/vm-monitor
-RUN cp /workspace/vm-monitor/target/release/vm-monitor /workspace/bin/vm-monitor
+RUN mv /workspace/vm-monitor/target/release/vm-monitor /workspace/bin/vm-monitor
 # Cargo clean dramatically reduces the size of the image
 RUN cargo clean --release --manifest-path vm-monitor/Cargo.toml
 
