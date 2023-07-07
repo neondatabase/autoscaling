@@ -28,7 +28,7 @@ This isn't the only architecture document. You may also want to look at:
 
 * [`pkg/plugin/ARCHITECTURE.md`](pkg/plugin/ARCHITECTURE.md) — detail on the implementation of the
   scheduler plugin
-* [`neon/compute_tools`](https://github.com/neondatabase/neon/tree/main/compute_tools) -
+* [`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor) -
 where the (VM) monitor, an autoscaling component that manages a Postgres, lives.
 
 ## High-level overview
@@ -44,10 +44,10 @@ At a high level, this repository provides three components:
    the monitor's functionality, but that functionality was moved to allow the
    informant to start before Postgres and to have monitoring closer to Postgres.
 
-A fourth component, a binary running inside of the VM to (a) provide metrics to the VM informant
+A fourth component, a binary running inside of the VM to (a) handle being upscaled
 (b) validate that downscaling is ok, and (c) request immediate upscaling due to sharp changes in demand
 — known as "the (VM) monitor", lives in
-[`neon/compute_tools`](https://github.com/neondatabase/neon/tree/main/compute_tools).
+[`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor)
 
 [plugin interface]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
 
@@ -60,11 +60,14 @@ requests these resources from the scheduler plugin, and submits a patch request 
 update the resources.
 
 The VM informant manages the `autoscaler-agent`(s) associated with a given compute instance and relays
-messages between the agent and the VM monitor on that compute instance.
+messages between the agent and the VM monitor on that compute instance. It also provides metrics
+for the agent, or informs the agent where it can find them.
 
-The VM monitor is responsible for handling all of the functionality inside the VM that
-the `autoscaler-agent` cannot. It provides metrics (or: informs the agent where it can find those)
-and approves attempts to downscale resource usage (or: rejects them, if they're still in use).
+The VM monitor is responsible for handling all of the resource management functionality inside
+the VM that the `autoscaler-agent` cannot. This constitutes handling upscales (eg. increasing Postgres
+file cache size), approving attempts to downscale resource usage (or: rejecting them, if those
+resources are still in use), and requesting upscale when memory usage increases too rapidly for
+metrics to catch.
 
 NeonVM is able to live-scale the resources given to a VM (i.e. CPU and memory _slots_) by handling
 patches to the Kubernetes VM object, which requires connecting to QEMU running on the outer
