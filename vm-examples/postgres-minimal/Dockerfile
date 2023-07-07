@@ -27,5 +27,5 @@ RUN adduser vm-informant --disabled-password --no-create-home
 # note: Use 'respawn' and '--auto-restart' so that the logs are noisy if the arguments are bad,
 # but we still have proper handling around cgroups, etc.
 # *Note*: Start the monitor before the informant
-RUN echo "::respawn:su vm-informant -c 'RUST_LOG=trace /bin/vm-monitor --cgroup=neon-test'" >> /etc/inittab
+RUN echo "::respawn:su vm-informant -c '/bin/vm-monitor --cgroup=neon-test'" >> /etc/inittab
 RUN echo "::respawn:su vm-informant -c '/bin/vm-informant --auto-restart'" >> /etc/inittab
