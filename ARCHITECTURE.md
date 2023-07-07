@@ -33,7 +33,7 @@ This isn't the only architecture document. You may also want to look at:
 At a high level, this repository provides three components:
 
 1. A modified Kubernetes scheduler (using the [plugin interface]) — known as "the (scheduler)
-   plugin", `AutoscaleEnforcer`, `autscale-scheduler`
+   plugin", `AutoscaleEnforcer`, `autoscale-scheduler`
 2. A daemonset responsible for making VM scaling decisions & checking with interested parties
    — known as `autoscaler-agent` or simply `agent`
 3. A binary running inside of the VM to (a) provide metrics to the `autoscaler-agent`, (b) validate
