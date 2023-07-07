@@ -15,8 +15,10 @@ config.billing = {
       "cpuMetricName": "effective_compute_seconds",
       "activeTimeMetricName": "active_time_seconds",
       "collectEverySeconds": 4,
-      "pushEverySeconds": 24,
-      "pushTimeoutSeconds": 2
+      "accumulateEverySeconds": 24,
+      "pushEverySeconds": 30,
+      "pushRequestTimeoutSeconds": 30,
+      "maxBatchSize": 200
 }
 ```
 
