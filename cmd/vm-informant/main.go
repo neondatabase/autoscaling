@@ -20,9 +20,7 @@ import (
 const minSubProcessRestartInterval = 5 * time.Second
 
 func main() {
-	cfg := zap.NewProductionConfig()
-	cfg.Level.SetLevel(zap.DebugLevel)
-	logger := zap.Must(cfg.Build()).Named("vm-informant")
+	logger := zap.Must(zap.NewProductionConfig().Build()).Named("vm-informant")
 	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
 
 	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
