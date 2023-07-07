@@ -23,7 +23,7 @@ type MonitorResult struct {
 // monitor. For more information on the protocol, see Rust docs and transport.go
 type Dispatcher struct {
 	// The underlying connection we are managing
-	Conn *websocket.Conn
+	conn *websocket.Conn
 
 	// When someone sends a message, the dispatcher will attach a transaction id
 	// to it so that it knows when a response is back. When it receives a packet
@@ -50,7 +50,7 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (disp Dispatcher, _ error) {
+func NewDispatcher(logger *zap.Logger, addr string, notifier chan<- struct{}) (disp Dispatcher, _ error) {
 	// FIXME: have this context actually do something? As of now it's just being
 	// passed around to satisfy typing. Maybe it's not really necessary.
 	ctx := context.Background()
@@ -65,7 +65,7 @@ func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (d
 	}
 
 	disp = Dispatcher{
-		Conn:     c,
+		conn:     c,
 		notifier: notifier,
 		waiters:  make(map[uint64]util.OneshotSender[MonitorResult]),
 		counter:  0,
@@ -77,14 +77,14 @@ func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (d
 // Send a packet down the connection.
 func (disp *Dispatcher) send(ctx context.Context, p Packet) error {
 	disp.logger.Debug("Sending packet", zap.Any("packet", p))
-	return wsjson.Write(ctx, disp.Conn, p)
+	return wsjson.Write(ctx, disp.conn, p)
 }
 
 // Try to receive a packet off the connection.
 func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
 	var p Packet
 	disp.logger.Debug("Reading packet off connection.")
-	err := wsjson.Read(ctx, disp.Conn, &p)
+	err := wsjson.Read(ctx, disp.conn, &p)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
 // *Note*: sending a RequestUpscale to the monitor is incorrect. The monitor does
 // not (and should) not know how to handle this and will panic. Likewise, we panic
 // upon receiving a TryDownscale or NotifyUpscale request.
-func (disp *Dispatcher) Call(ctx context.Context, req Request, sender util.OneshotSender[MonitorResult]) {
+func (disp *Dispatcher) Call(ctx context.Context, sender util.OneshotSender[MonitorResult], req Request ) {
 	id := disp.counter
 	disp.counter += 1
 	packet := Packet{
