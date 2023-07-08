@@ -47,7 +47,7 @@ type Config struct {
 
 	// K8sNodeGroupLabel, if provided, gives the label to use when recording k8s node groups in the
 	// metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
-	K8sNodeGroupLabel string `json:"nodeGroupLabel"`
+	K8sNodeGroupLabel string `json:"k8sNodeGroupLabel"`
 
 	// DumpState, if provided, enables a server to dump internal state
 	DumpState *dumpStateConfig `json:"dumpState"`
