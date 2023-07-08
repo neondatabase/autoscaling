@@ -120,6 +120,7 @@ type pointerString string
 type nodeStateDump struct {
 	Obj       pointerString                                   `json:"obj"`
 	Name      string                                          `json:"name"`
+	NodeGroup string                                          `json:"nodeGroup"`
 	VCPU      nodeResourceState[vmapi.MilliCPU]               `json:"vCPU"`
 	MemSlots  nodeResourceState[uint16]                       `json:"memSlots"`
 	Pods      []keyed[util.NamespacedName, podStateDump]      `json:"pods"`
@@ -225,6 +226,7 @@ func (s *nodeState) dump() nodeStateDump {
 	return nodeStateDump{
 		Obj:       makePointerString(s),
 		Name:      s.name,
+		NodeGroup: s.nodeGroup,
 		VCPU:      s.vCPU,
 		MemSlots:  s.memSlots,
 		Pods:      pods,

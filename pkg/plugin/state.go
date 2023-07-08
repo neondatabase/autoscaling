@@ -60,6 +60,9 @@ type nodeState struct {
 	// name is the name of the node, guaranteed by kubernetes to be unique
 	name string
 
+	// nodeGroup, if present, gives the node group that this node belongs to.
+	nodeGroup string
+
 	// vCPU tracks the state of vCPU resources -- what's available and how
 	vCPU nodeResourceState[vmapi.MilliCPU]
 	// memSlots tracks the state of memory slots -- what's available and how
@@ -100,15 +103,15 @@ func (s *nodeResourceState[T]) fields() []nodeResourceStateField[T] {
 }
 
 func (s *nodeState) updateMetrics(metrics PromMetrics, memSlotSizeBytes uint64) {
-	s.vCPU.updateMetrics(metrics.nodeCPUResources, s.name, vmapi.MilliCPU.AsFloat64)
-	s.memSlots.updateMetrics(metrics.nodeMemResources, s.name, func(memSlots uint16) float64 {
+	s.vCPU.updateMetrics(metrics.nodeCPUResources, s.name, s.nodeGroup, vmapi.MilliCPU.AsFloat64)
+	s.memSlots.updateMetrics(metrics.nodeMemResources, s.name, s.nodeGroup, func(memSlots uint16) float64 {
 		return float64(uint64(memSlots) * memSlotSizeBytes) // convert memSlots -> bytes
 	})
 }
 
-func (s *nodeResourceState[T]) updateMetrics(metric *prometheus.GaugeVec, nodeName string, convert func(T) float64) {
+func (s *nodeResourceState[T]) updateMetrics(metric *prometheus.GaugeVec, nodeName, nodeGroup string, convert func(T) float64) {
 	for _, f := range s.fields() {
-		metric.WithLabelValues(nodeName, f.valueName).Set(convert(f.value))
+		metric.WithLabelValues(nodeName, nodeGroup, f.valueName).Set(convert(f.value))
 	}
 }
 
@@ -118,7 +121,7 @@ func (s *nodeState) removeMetrics(metrics PromMetrics) {
 
 	for _, g := range gauges {
 		for _, f := range fields {
-			g.DeleteLabelValues(s.name, f.valueName)
+			g.DeleteLabelValues(s.name, s.nodeGroup, f.valueName)
 		}
 	}
 }
@@ -615,8 +618,18 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", node.Name, err)
 	}
 
+	var nodeGroup string
+	if conf.K8sNodeGroupLabel != "" {
+		var ok bool
+		nodeGroup, ok = node.Labels[conf.K8sNodeGroupLabel]
+		if !ok {
+			logger.Warn("Node does not have node group label", zap.String("label", conf.K8sNodeGroupLabel))
+		}
+	}
+
 	n := &nodeState{
 		name:      node.Name,
+		nodeGroup: nodeGroup,
 		vCPU:      vCPU,
 		memSlots:  memSlots,
 		pods:      make(map[util.NamespacedName]*podState),
