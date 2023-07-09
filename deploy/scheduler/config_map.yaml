@@ -37,5 +37,5 @@ data:
         "port": 10298,
         "timeoutSeconds": 5
       },
-      "doMigration": false
+      "doMigration": true
     }
