@@ -180,10 +180,17 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 
 	var migrateDecision *api.MigrateResponse
 	if mustMigrate {
-		migrateDecision = &api.MigrateResponse{}
-		err = e.state.startMigration(context.Background(), logger, pod, e.vmClient)
+		created, err := e.state.startMigration(context.Background(), logger, pod, e.vmClient)
 		if err != nil {
 			return nil, 500, fmt.Errorf("Error starting migration for pod %v: %w", pod.name, err)
+		}
+
+		// We should only signal to the autoscaler-agent that we've started migrating if we actually
+		// *created* the migration. We're not *supposed* to receive requests for a VM that's already
+		// migrating, so receiving one means that *something*'s gone wrong. If that's on us, we
+		// should try to avoid
+		if created {
+			migrateDecision = &api.MigrateResponse{}
 		}
 	}
 

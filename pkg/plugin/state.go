@@ -1000,9 +1000,9 @@ func (s *podState) isBetterMigrationTarget(other *podState) bool {
 // send requests to the API server
 //
 // A lock will ALWAYS be held on return from this function.
-func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, pod *podState, vmClient *vmclient.Clientset) error {
+func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, pod *podState, vmClient *vmclient.Clientset) (created bool, _ error) {
 	if pod.currentlyMigrating() {
-		return fmt.Errorf("Pod is already migrating")
+		return false, fmt.Errorf("Pod is already migrating")
 	}
 
 	// Unlock to make the API request(s), then make sure we're locked on return.
@@ -1029,12 +1029,12 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 		Get(ctx, vmmName.Name, metav1.GetOptions{})
 	if err == nil {
 		logger.Warn("VirtualMachineMigration already exists, nothing to do")
-		return nil
+		return false, nil
 	} else if !apierrors.IsNotFound(err) {
 		// We're *expecting* to get IsNotFound = true; if err != nil and isn't NotFound, then
 		// there's some unexpected error.
 		logger.Error("Unexpected error doing Get request to check if migration already exists", zap.Error(err))
-		return fmt.Errorf("Error checking if migration exists: %w", err)
+		return false, fmt.Errorf("Error checking if migration exists: %w", err)
 	}
 
 	vmm := &vmapi.VirtualMachineMigration{
@@ -1063,11 +1063,11 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 	if err != nil {
 		// log here, while the logger's fields are in scope
 		logger.Error("Unexpected error doing Create request for new migration", zap.Error(err))
-		return fmt.Errorf("Error creating migration: %w", err)
+		return false, fmt.Errorf("Error creating migration: %w", err)
 	}
 	logger.Info("VM migration request successful")
 
-	return nil
+	return true, nil
 }
 
 // readClusterState sets the initial node and pod maps for the plugin's state, getting its
