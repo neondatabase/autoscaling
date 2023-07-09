@@ -19,7 +19,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -32,6 +31,8 @@ import (
 // Accessing the individual fields MUST be done while holding a lock.
 type pluginState struct {
 	lock util.ChanMutex
+
+	ongoingMigrationDeletions map[util.NamespacedName]int
 
 	podMap  map[util.NamespacedName]*podState
 	nodeMap map[string]*nodeState
@@ -986,6 +987,101 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(logger *zap.Logger, 
 	)
 }
 
+// NB: expected to be run in its own thread.
+func (e *AutoscaleEnforcer) cleanupMigration(logger *zap.Logger, vmm *vmapi.VirtualMachineMigration) {
+	vmmName := util.GetNamespacedName(vmm)
+
+	logger = logger.With(
+		// note: use the "virtualmachinemigration" key here for just the name, because it mirrors
+		// what we log in startMigration.
+		zap.Object("virtualmachinemigration", vmmName),
+		// also include the VM, for better association.
+		zap.Object("virtualmachine", util.NamespacedName{
+			Name:      vmm.Spec.VmName,
+			Namespace: vmm.Namespace,
+		}),
+	)
+	// Failed migrations should be noisy. Everything to do with cleaning up a failed migration
+	// should be logged at "Warn" or higher.
+	var logInfo func(string, ...zap.Field)
+	if vmm.Status.Phase == vmapi.VmmSucceeded {
+		logInfo = logger.Info
+	} else {
+		logInfo = logger.Warn
+	}
+	logInfo(
+		"Going to delete VirtualMachineMigration",
+		// Explicitly include "phase" here because we have metrics for it.
+		zap.String("phase", string(vmm.Status.Phase)),
+		// ... and then log the rest of the information about the migration:
+		zap.Any("spec", vmm.Spec),
+		zap.Any("status", vmm.Status),
+	)
+
+	// mark the operation as ongoing
+	func() {
+		e.state.lock.Lock()
+		defer e.state.lock.Unlock()
+
+		newCount := e.state.ongoingMigrationDeletions[vmmName] + 1
+		if newCount != 1 {
+			// context included by logger
+			logger.Error(
+				"More than one ongoing deletion for VirtualMachineMigration",
+				zap.Int("count", newCount),
+			)
+		}
+		e.state.ongoingMigrationDeletions[vmmName] = newCount
+	}()
+	// ... and remember to clean up when we're done:
+	defer func() {
+		e.state.lock.Lock()
+		defer e.state.lock.Unlock()
+
+		newCount := e.state.ongoingMigrationDeletions[vmmName] - 1
+		if newCount == 0 {
+			delete(e.state.ongoingMigrationDeletions, vmmName)
+		} else {
+			// context included by logger
+			logger.Error(
+				"More than one ongoing deletion for VirtualMachineMigration",
+				zap.Int("count", newCount),
+			)
+			e.state.ongoingMigrationDeletions[vmmName] = newCount
+		}
+	}()
+
+	// Continually retry the operation, until we're successful (or the VM doesn't exist anymore)
+
+	retryWait := time.Second * time.Duration(e.state.conf.MigrationDeletionRetrySeconds)
+
+	for {
+		logInfo("Attempting to delete VirtualMachineMigration")
+		err := e.vmClient.NeonvmV1().
+			VirtualMachineMigrations(vmmName.Namespace).
+			Delete(context.TODO(), vmmName.Name, metav1.DeleteOptions{})
+		if err == nil /* NB! This condition is inverted! */ {
+			logInfo("Successfully deleted VirtualMachineMigration")
+			e.metrics.migrationDeletions.WithLabelValues(string(vmm.Status.Phase)).Inc()
+			return
+		} else if apierrors.IsNotFound(err) {
+			logger.Warn("Deletion was handled for us; VirtualMachineMigration no longer exists")
+			return
+		}
+
+		logger.Error(
+			"Failed to delete VirtualMachineMigration, will try again after delay",
+			zap.Duration("delay", retryWait),
+			zap.Error(err),
+		)
+		e.metrics.migrationDeleteFails.WithLabelValues(string(vmm.Status.Phase)).Inc()
+
+		// retry after a delay
+		time.Sleep(retryWait)
+		continue
+	}
+}
+
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
 	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
 	if s.metrics == nil || other.metrics == nil {
@@ -1000,14 +1096,14 @@ func (s *podState) isBetterMigrationTarget(other *podState) bool {
 // send requests to the API server
 //
 // A lock will ALWAYS be held on return from this function.
-func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, pod *podState, vmClient *vmclient.Clientset) (created bool, _ error) {
+func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logger, pod *podState) (created bool, _ error) {
 	if pod.currentlyMigrating() {
 		return false, fmt.Errorf("Pod is already migrating")
 	}
 
 	// Unlock to make the API request(s), then make sure we're locked on return.
-	s.lock.Unlock()
-	defer s.lock.Lock()
+	e.state.lock.Unlock()
+	defer e.state.lock.Lock()
 
 	vmmName := util.NamespacedName{
 		Name:      fmt.Sprintf("schedplugin-%s", pod.vmName.Name),
@@ -1024,7 +1120,7 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 	// We technically don't *need* this additional request here (because we can check the return
 	// from the Create request with apierrors.IsAlreadyExists). However: the benefit we get from
 	// this is that the logs are significantly clearer.
-	_, err := vmClient.NeonvmV1().
+	_, err := e.vmClient.NeonvmV1().
 		VirtualMachineMigrations(pod.name.Namespace).
 		Get(ctx, vmmName.Name, metav1.GetOptions{})
 	if err == nil {
@@ -1059,12 +1155,14 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 	}
 
 	logger.Info("Migration doesn't already exist, creating one for VM", zap.Any("spec", vmm.Spec))
-	_, err = vmClient.NeonvmV1().VirtualMachineMigrations(pod.name.Namespace).Create(ctx, vmm, metav1.CreateOptions{})
+	_, err = e.vmClient.NeonvmV1().VirtualMachineMigrations(pod.name.Namespace).Create(ctx, vmm, metav1.CreateOptions{})
 	if err != nil {
+		e.metrics.migrationCreateFails.Inc()
 		// log here, while the logger's fields are in scope
 		logger.Error("Unexpected error doing Create request for new migration", zap.Error(err))
 		return false, fmt.Errorf("Error creating migration: %w", err)
 	}
+	e.metrics.migrationCreations.Inc()
 	logger.Info("VM migration request successful")
 
 	return true, nil

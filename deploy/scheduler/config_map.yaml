@@ -37,5 +37,6 @@ data:
         "port": 10298,
         "timeoutSeconds": 5
       },
+      "migrationDeletionRetrySeconds": 5,
       "doMigration": false
     }

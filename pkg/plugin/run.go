@@ -180,7 +180,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 
 	var migrateDecision *api.MigrateResponse
 	if mustMigrate {
-		created, err := e.state.startMigration(context.Background(), logger, pod, e.vmClient)
+		created, err := e.startMigration(context.Background(), logger, pod)
 		if err != nil {
 			return nil, 500, fmt.Errorf("Error starting migration for pod %v: %w", pod.name, err)
 		}

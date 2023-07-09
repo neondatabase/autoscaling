@@ -39,6 +39,10 @@ type Config struct {
 	// version handled.
 	SchedulerName string `json:"schedulerName"`
 
+	// MigrationDeletionRetrySeconds gives the duration, in seconds, we should wait between retrying
+	// a failed attempt to delete a VirtualMachineMigration that's finished.
+	MigrationDeletionRetrySeconds uint `json:"migrationDeletionRetrySeconds"`
+
 	// DoMigration, if provided, allows VM migration to be disabled
 	//
 	// This flag is intended to be temporary, just until NeonVM supports mgirations and we can
@@ -113,6 +117,10 @@ func (c *Config) validate() (string, error) {
 		if path, err := c.DumpState.validate(); err != nil {
 			return fmt.Sprintf("dumpState.%s", path), err
 		}
+	}
+
+	if c.MigrationDeletionRetrySeconds == 0 {
+		return "migrationDeletionRetrySeconds", errors.New("value must be > 0")
 	}
 
 	return "", nil

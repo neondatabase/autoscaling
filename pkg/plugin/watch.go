@@ -298,3 +298,47 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 		},
 	)
 }
+
+type migrationWatchCallbacks struct {
+	submitMigrationFinished func(*vmapi.VirtualMachineMigration)
+}
+
+func (e *AutoscaleEnforcer) watchMigrationEvents(
+	ctx context.Context,
+	parentLogger *zap.Logger,
+	metrics watch.Metrics,
+	callbacks migrationWatchCallbacks,
+) (*watch.Store[vmapi.VirtualMachineMigration], error) {
+	logger := parentLogger.Named("vmm-watch")
+
+	return watch.Watch(
+		ctx,
+		logger.Named("watch"),
+		e.vmClient.NeonvmV1().VirtualMachineMigrations(corev1.NamespaceAll),
+		watch.Config{
+			ObjectNameLogField: "virtualmachinemigration",
+			Metrics: watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "VirtualMachineMigrations",
+			},
+			// FIXME: make these durations configurable.
+			RetryRelistAfter: util.NewTimeRange(time.Second, 3, 5),
+			RetryWatchAfter:  util.NewTimeRange(time.Second, 3, 5),
+		},
+		watch.Accessors[*vmapi.VirtualMachineMigrationList, vmapi.VirtualMachineMigration]{
+			Items: func(list *vmapi.VirtualMachineMigrationList) []vmapi.VirtualMachineMigration { return list.Items },
+		},
+		watch.InitModeSync,
+		metav1.ListOptions{},
+		watch.HandlerFuncs[*vmapi.VirtualMachineMigration]{
+			UpdateFunc: func(oldObj, newObj *vmapi.VirtualMachineMigration) {
+				shouldDelete := newObj.Status.Phase != oldObj.Status.Phase &&
+					(newObj.Status.Phase == vmapi.VmmSucceeded || newObj.Status.Phase == vmapi.VmmFailed)
+
+				if shouldDelete {
+					callbacks.submitMigrationFinished(newObj)
+				}
+			},
+		},
+	)
+}
