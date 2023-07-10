@@ -10,7 +10,7 @@ data:
         "requestTimeoutSeconds": 10,
         "defaultConfig": {
           "loadAverageFractionTarget": 0.9
-          "memoryUsageFractionTarget": 0.9
+          "memoryUsageFractionTarget": 0.75
         }
       },
       "informant": {
