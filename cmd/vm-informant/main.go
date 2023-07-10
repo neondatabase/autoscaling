@@ -154,6 +154,7 @@ func runRestartOnFailure(ctx context.Context, logger *zap.Logger, args []string,
 	selfPath := os.Args[0]
 	timer := time.NewTimer(0)
 	defer timer.Stop()
+	var alreadyReceivedFromTimer bool
 
 	for {
 		startTime := time.Now()
@@ -217,10 +218,11 @@ func runRestartOnFailure(ctx context.Context, logger *zap.Logger, args []string,
 			dur := time.Since(startTime)
 			if dur < minSubProcessRestartInterval {
 				// drain the timer before resetting it, required by Timer.Reset::
-				if !timer.Stop() {
+				if !timer.Stop() && !alreadyReceivedFromTimer {
 					<-timer.C
 				}
 				timer.Reset(minSubProcessRestartInterval - dur)
+				alreadyReceivedFromTimer = false
 
 				logger.Info(
 					"Child vm-informant failed, respecting minimum delay before restart",
@@ -231,6 +233,7 @@ func runRestartOnFailure(ctx context.Context, logger *zap.Logger, args []string,
 					logger.Info("Received shutdown signal while delaying before restart", zap.Duration("delay", minSubProcessRestartInterval))
 					return
 				case <-timer.C:
+					alreadyReceivedFromTimer = true
 					continue
 				}
 			}
