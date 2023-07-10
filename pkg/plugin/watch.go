@@ -265,24 +265,35 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 
 				if newVM.Status.PodName == "" {
 					logger.Info("Skipping update for VM because .status.podName is empty", util.VMNameFields(newVM))
-				} else if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
+					return
+				}
+
+				if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
 					logger.Info("Received update to disable autoscaling for VM", util.VMNameFields(newVM))
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					callbacks.submitVMDisabledScaling(logger, name)
-				} else if (!oldInfo.ScalingEnabled || !newInfo.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
+				}
+
+				if (!oldInfo.ScalingEnabled || !newInfo.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
 					podName := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					logger.Info("Received update changing usage for VM", zap.Object("old", oldInfo.Using()), zap.Object("new", newInfo.Using()))
 					callbacks.submitNonAutoscalingVmUsageChanged(logger, newInfo, podName.Name)
-				} else if oldVM.Status.PodName != newVM.Status.PodName {
-					// If the pod changed, then we're going to handle a deletion event for the old pod,
-					// plus creation event for the new pod. Don't worry about it - because all VM
-					// information comes from this watch.Store anyways, there's no possibility of missing
-					// an update.
-				} else if oldInfo.EqualScalingBounds(*newInfo) {
-					// If bounds didn't change, then no need to update
-				} else {
-					callbacks.submitVMBoundsChanged(logger, newInfo, newVM.Status.PodName)
 				}
+
+				// If the pod changed, then we're going to handle a deletion event for the old pod,
+				// plus creation event for the new pod. Don't worry about it - because all VM
+				// information comes from this watch.Store anyways, there's no possibility of missing
+				// an update.
+				if oldVM.Status.PodName != newVM.Status.PodName {
+					return
+				}
+
+				// If bounds didn't change, then no need to update
+				if oldInfo.EqualScalingBounds(*newInfo) {
+					return
+				}
+
+				callbacks.submitVMBoundsChanged(logger, newInfo, newVM.Status.PodName)
 			},
 		},
 	)
