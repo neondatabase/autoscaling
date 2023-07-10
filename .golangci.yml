@@ -49,8 +49,8 @@ linters-settings:
     exclude:
       - '^net/http\.(Client|Server)'
       - '^net\.TCPAddr$'
-      # metav1.{CreateOptions,GetOptions,ListOptions,WatchOptions,PatchOptions}
-      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch)Options$'
+      # metav1.{CreateOptions,GetOptions,ListOptions,WatchOptions,PatchOptions,DeleteOptions}
+      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch|Delete)Options$'
       - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.ObjectMeta$'
       - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
       - '^github.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'
