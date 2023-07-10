@@ -70,7 +70,9 @@ func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err e
 	if err != nil {
 		return
 	}
-	m.MemoryUsageBytes = totalMem - availableMem
+
+    // Subract off an extra 100 MiB to account for the kernel
+	m.MemoryUsageBytes = totalMem - availableMem - 100 * (1 << 20)
 
 	return
 }
