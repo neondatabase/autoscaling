@@ -25,6 +25,7 @@ import (
 
 const Name = "AutoscaleEnforcer"
 const LabelVM = vmapi.VirtualMachineNameLabel
+const LabelPluginCreatedMigration = "autoscaling.neon.tech/created-by-scheduler"
 const ConfigMapNamespace = "kube-system"
 const ConfigMapName = "scheduler-plugin-config"
 const ConfigMapKey = "autoscaler-enforcer-config.json"

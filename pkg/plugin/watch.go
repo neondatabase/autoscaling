@@ -329,7 +329,14 @@ func (e *AutoscaleEnforcer) watchMigrationEvents(
 			Items: func(list *vmapi.VirtualMachineMigrationList) []vmapi.VirtualMachineMigration { return list.Items },
 		},
 		watch.InitModeSync,
-		metav1.ListOptions{},
+		metav1.ListOptions{
+			// NB: Including just the label itself means that we select for objects that *have* the
+			// label, without caring about the actual value.
+			//
+			// See also:
+			// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement
+			LabelSelector: LabelPluginCreatedMigration,
+		},
 		watch.HandlerFuncs[*vmapi.VirtualMachineMigration]{
 			UpdateFunc: func(oldObj, newObj *vmapi.VirtualMachineMigration) {
 				shouldDelete := newObj.Status.Phase != oldObj.Status.Phase &&

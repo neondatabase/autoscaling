@@ -1139,6 +1139,14 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 			// should do if that happens.
 			Name:      vmmName.Name,
 			Namespace: pod.name.Namespace,
+			Labels: map[string]string{
+				// NB: There's requirements on what constitutes a valid label. Thankfully, the
+				// output of `git describe` always will.
+				//
+				// See also:
+				// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set
+				LabelPluginCreatedMigration: util.GetBuildInfo().GitInfo,
+			},
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
 			VmName: pod.vmName.Name,
