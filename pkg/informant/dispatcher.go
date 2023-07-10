@@ -98,7 +98,7 @@ func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
 // *Note*: sending a RequestUpscale to the monitor is incorrect. The monitor does
 // not (and should) not know how to handle this and will panic. Likewise, we panic
 // upon receiving a TryDownscale or NotifyUpscale request.
-func (disp *Dispatcher) Call(ctx context.Context, sender util.OneshotSender[MonitorResult], req Request ) {
+func (disp *Dispatcher) Call(ctx context.Context, sender util.OneshotSender[MonitorResult], req Request) {
 	id := disp.counter
 	disp.counter += 1
 	packet := Packet{
