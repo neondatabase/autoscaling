@@ -277,6 +277,11 @@ type ScalingConfig struct {
 	// CPU,
 	// scaling CPU to make this happen.
 	LoadAverageFractionTarget float64 `json:"loadAverageFractionTarget"`
+
+	// MemoryUsageFractionTarget sets the desired fraction of current memory that
+	// we would like to be using. For example, with a value of 0.7, on a 4GB VM
+	// we'd like to be using 2.8GB of memory.
+	MemoryUsageFractionTarget float64 `json:"memoryUsageFractionTarget"`
 }
 
 func (c *ScalingConfig) Validate() error {
@@ -287,6 +292,10 @@ func (c *ScalingConfig) Validate() error {
 	// bound, but it's a good safety check.
 	erc.Whenf(ec, c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
 	erc.Whenf(ec, c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget")
+
+	// Make sure c.MemoryUsageFractionTarget is between 0 and 1
+	erc.Whenf(ec, c.MemoryUsageFractionTarget < 0.0, "%s must be set to value >= 0", ".memoryUsageFractionTarget")
+	erc.Whenf(ec, c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget")
 
 	// heads-up! some functions elsewhere depend on the concrete return type of this function.
 	return ec.Resolve()

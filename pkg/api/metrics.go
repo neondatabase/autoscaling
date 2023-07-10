@@ -11,8 +11,9 @@ import (
 // Metrics gives the information pulled from node_exporter that the scheduler may use to prioritize
 // which pods it should migrate.
 type Metrics struct {
-	LoadAverage1Min float32 `json:"loadAvg1M"`
-	LoadAverage5Min float32 `json:"loadAvg5M"`
+	LoadAverage1Min  float32 `json:"loadAvg1M"`
+	LoadAverage5Min  float32 `json:"loadAvg5M"`
+	MemoryUsageBytes float32 `json:"memoryUsageBytes"`
 }
 
 // ReadMetrics generates Metrics from node_exporter output, or returns error on failure
@@ -60,6 +61,16 @@ func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err e
 	if err != nil {
 		return
 	}
+
+	availableMem, err := getField(loadPrefix+"memory_MemAvailable_bytes", "")
+	if err != nil {
+		return
+	}
+	totalMem, err := getField(loadPrefix+"memory_MemTotal_bytes", "")
+	if err != nil {
+		return
+	}
+	m.MemoryUsageBytes = totalMem - availableMem
 
 	return
 }
