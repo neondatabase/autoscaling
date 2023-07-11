@@ -25,6 +25,7 @@ import (
 
 const Name = "AutoscaleEnforcer"
 const LabelVM = vmapi.VirtualMachineNameLabel
+const LabelPluginCreatedMigration = "autoscaling.neon.tech/created-by-scheduler"
 const ConfigMapNamespace = "kube-system"
 const ConfigMapName = "scheduler-plugin-config"
 const ConfigMapKey = "autoscaler-enforcer-config.json"
@@ -100,8 +101,9 @@ func makeAutoscaleEnforcerPlugin(
 		vmClient: vmClient,
 		// remaining fields are set by p.readClusterState and p.makePrometheusRegistry
 		state: pluginState{ //nolint:exhaustruct // see above.
-			lock: util.NewChanMutex(),
-			conf: config,
+			lock:                      util.NewChanMutex(),
+			ongoingMigrationDeletions: make(map[util.NamespacedName]int),
+			conf:                      config,
 		},
 		metrics:   PromMetrics{},      //nolint:exhaustruct // set by makePrometheusRegistry
 		vmStore:   IndexedVMStore{},   //nolint:exhaustruct // set below
@@ -154,6 +156,13 @@ func makeAutoscaleEnforcerPlugin(
 			pushToQueue(logger, func() { p.handleNonAutoscalingUsageChange(hlogger, vm, podName) })
 		},
 	}
+	mwc := migrationWatchCallbacks{
+		submitMigrationFinished: func(vmm *vmapi.VirtualMachineMigration) {
+			// When cleaning up migrations, we don't want to process those events synchronously.
+			// So instead, we'll spawn a goroutine to delete the completed migration.
+			go p.cleanupMigration(hlogger, vmm)
+		},
+	}
 
 	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
 
@@ -174,6 +183,11 @@ func makeAutoscaleEnforcerPlugin(
 	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, vwc)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
+	}
+
+	logger.Info("Starting VM Migration watcher")
+	if _, err := p.watchMigrationEvents(ctx, logger, watchMetrics, mwc); err != nil {
+		return nil, fmt.Errorf("Error starting VM Migration watcher: %w", err)
 	}
 
 	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())

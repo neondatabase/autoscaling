@@ -33,6 +33,8 @@ func GetBuildInfo() BuildInfo {
 		}
 	}
 
+	// FIXME: the "<unknown>" string is depended upon by the plugin's VirtualMachineMigration
+	// creation process. We should expose something better here.
 	gitInfo := BuildGitInfo
 	if BuildGitInfo == "" {
 		gitInfo = "<unknown>"
