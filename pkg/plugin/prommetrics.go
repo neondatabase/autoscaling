@@ -66,14 +66,14 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Name: "autoscaling_plugin_node_cpu_resources_current",
 				Help: "Current amount of CPU for 'nodeResourceState' fields",
 			},
-			[]string{"node", "field"},
+			[]string{"node", "node_group", "field"},
 		)),
 		nodeMemResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_plugin_node_mem_resources_current",
 				Help: "Current amount of memory (in bytes) for 'nodeResourceState' fields",
 			},
-			[]string{"node", "field"},
+			[]string{"node", "node_group", "field"},
 		)),
 	}
 
