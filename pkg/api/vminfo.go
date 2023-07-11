@@ -213,7 +213,7 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 }
 
 func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
-	return vm.Min() != cmp.Min() || vm.Max() != cmp.Max()
+	return vm.Min() == cmp.Min() && vm.Max() == cmp.Max()
 }
 
 func (vm *VmInfo) applyBounds(b ScalingBounds) {
