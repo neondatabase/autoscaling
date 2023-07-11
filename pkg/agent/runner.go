@@ -1301,10 +1301,12 @@ func (r *Runner) getStateForVMUpdate(logger *zap.Logger, updateReason VMUpdateRe
 
 	// Check that the VM's current usage is <= lastApproved
 	if vmUsing := r.vm.Using(); vmUsing.HasFieldGreaterThan(*r.lastApproved) {
-		panic(fmt.Errorf(
-			"invalid state: r.vm has resources greater than r.lastApproved (%+v vs %+v)",
-			vmUsing, *r.lastApproved,
-		))
+		// ref <https://github.com/neondatabase/autoscaling/issues/234>
+		logger.Warn(
+			"r.vm has resources greater than r.lastApproved. This should only happen when scaling bounds change",
+			zap.Object("using", vmUsing),
+			zap.Object("lastApproved", *r.lastApproved),
+		)
 	}
 
 	config := r.global.config.Scaling.DefaultConfig
