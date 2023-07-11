@@ -24,4 +24,3 @@ spec:
       - port: 5432 # postgres
       - port: 9100 # metrics
       - port: 10301 # informant
-      - port: 10369 # monitor (ws)
