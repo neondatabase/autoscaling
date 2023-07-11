@@ -303,6 +303,15 @@ type migrationWatchCallbacks struct {
 	submitMigrationFinished func(*vmapi.VirtualMachineMigration)
 }
 
+// watchMigrationEvents *only* looks at migrations that were created by the scheduler plugin (or a
+// previous version of it).
+//
+// We use this to trigger cleaning up migrations once they're finished, because they don't
+// auto-delete, and our deterministic naming means that each we won't be able to create a new
+// migration for the same VM until the old one's gone.
+//
+// Tracking whether a migration was created by the scheduler plugin is done by adding the label
+// 'autoscaling.neon.tech/created-by-scheduler' to every migration we create.
 func (e *AutoscaleEnforcer) watchMigrationEvents(
 	ctx context.Context,
 	parentLogger *zap.Logger,
