@@ -24,7 +24,7 @@ func NewState(logger *zap.Logger) (state State, _ error) {
 	agents := NewAgentSet(logger)
 	requests := make(chan struct{})
 	logger.Info("Creating new dispatcher.")
-	disp, err := NewDispatcher("ws://127.0.0.1:10369", logger, requests)
+	disp, err := NewDispatcher(logger, "ws://127.0.0.1:10369", requests)
 	if err != nil {
 		return state, err
 	}
@@ -107,6 +107,7 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 
 	s.dispatcher.Call(
 		ctx,
+		tx,
 		Request{
 			RequestUpscale: nil,
 			NotifyUpscale:  nil,
@@ -115,7 +116,6 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 				Mem: mem,
 			},
 		},
-		tx,
 	)
 
 	// Wait for result
@@ -163,6 +163,7 @@ func (s *State) NotifyUpscale(
 	tx, rx := util.Oneshot[MonitorResult]()
 	s.dispatcher.Call(
 		ctx,
+		tx,
 		Request{
 			RequestUpscale: nil,
 			NotifyUpscale: &Resources{
@@ -171,7 +172,6 @@ func (s *State) NotifyUpscale(
 			},
 			TryDownscale: nil,
 		},
-		tx,
 	)
 
 	// Wait for result

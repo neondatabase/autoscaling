@@ -50,7 +50,7 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(addr string, logger *zap.Logger, notifier chan<- struct{}) (disp Dispatcher, _ error) {
+func NewDispatcher(logger *zap.Logger, addr string, notifier chan<- struct{}) (disp Dispatcher, _ error) {
 	// FIXME: have this context actually do something? As of now it's just being
 	// passed around to satisfy typing. Maybe it's not really necessary.
 	ctx := context.Background()
@@ -98,7 +98,7 @@ func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
 // *Note*: sending a RequestUpscale to the monitor is incorrect. The monitor does
 // not (and should) not know how to handle this and will panic. Likewise, we panic
 // upon receiving a TryDownscale or NotifyUpscale request.
-func (disp *Dispatcher) Call(ctx context.Context, req Request, sender util.OneshotSender[MonitorResult]) {
+func (disp *Dispatcher) Call(ctx context.Context, sender util.OneshotSender[MonitorResult], req Request) {
 	id := disp.counter
 	disp.counter += 1
 	packet := Packet{
