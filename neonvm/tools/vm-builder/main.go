@@ -248,7 +248,7 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant -c 'RUST_LOG=trace /usr/local/bin/vm-monitor --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
+::respawn:su -p vm-informant -c 'RUST_LOG=info /usr/local/bin/vm-monitor --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
 ::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart'
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
