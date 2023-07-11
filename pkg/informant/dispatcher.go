@@ -23,7 +23,7 @@ type MonitorResult struct {
 // monitor. For more information on the protocol, see Rust docs and transport.go
 type Dispatcher struct {
 	// The underlying connection we are managing
-	Conn *websocket.Conn
+	conn *websocket.Conn
 
 	// When someone sends a message, the dispatcher will attach a transaction id
 	// to it so that it knows when a response is back. When it receives a packet
@@ -65,7 +65,7 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier chan<- struct{}) (d
 	}
 
 	disp = Dispatcher{
-		Conn:     c,
+		conn:     c,
 		notifier: notifier,
 		waiters:  make(map[uint64]util.OneshotSender[MonitorResult]),
 		counter:  0,
@@ -77,14 +77,14 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier chan<- struct{}) (d
 // Send a packet down the connection.
 func (disp *Dispatcher) send(ctx context.Context, p Packet) error {
 	disp.logger.Debug("Sending packet", zap.Any("packet", p))
-	return wsjson.Write(ctx, disp.Conn, p)
+	return wsjson.Write(ctx, disp.conn, p)
 }
 
 // Try to receive a packet off the connection.
 func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
 	var p Packet
 	disp.logger.Debug("Reading packet off connection.")
-	err := wsjson.Read(ctx, disp.Conn, &p)
+	err := wsjson.Read(ctx, disp.conn, &p)
 	if err != nil {
 		return nil, err
 	}
