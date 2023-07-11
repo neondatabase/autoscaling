@@ -1146,6 +1146,12 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 		return false, fmt.Errorf("Error checking if migration exists: %w", err)
 	}
 
+	gitVersion := util.GetBuildInfo().GitInfo
+	// FIXME: make this not depend on GetBuildInfo() internals.
+	if gitVersion == "<unknown>" {
+		gitVersion = "unknown"
+	}
+
 	vmm := &vmapi.VirtualMachineMigration{
 		ObjectMeta: metav1.ObjectMeta{
 			// TODO: it's maybe possible for this to run into name length limits? Unclear what we
@@ -1158,7 +1164,7 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 				//
 				// See also:
 				// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set
-				LabelPluginCreatedMigration: util.GetBuildInfo().GitInfo,
+				LabelPluginCreatedMigration: gitVersion,
 			},
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
