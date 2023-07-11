@@ -23,6 +23,7 @@ config.billing = {
 }
 
 // Scheduler:
+config.k8sNodeGroupLabel = "eks.amazonaws.com/nodegroup"
 config.doMigration = true
 ```
 

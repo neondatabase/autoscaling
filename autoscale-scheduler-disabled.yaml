@@ -106,7 +106,9 @@ data:
         "port": 10298,
         "timeoutSeconds": 5
       },
-      "doMigration": false
+      "migrationDeletionRetrySeconds": 5,
+      "k8sNodeGroupLabel": "eks.amazonaws.com/nodegroup",
+      "doMigration": true
     }
 kind: ConfigMap
 metadata:
@@ -138,7 +140,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.12.0
+        image: neondatabase/autoscale-scheduler:v0.12.1
         livenessProbe:
           httpGet:
             path: /healthz
