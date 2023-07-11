@@ -1359,9 +1359,11 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
 	// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
 	// that to CUs
-	memGoalBytes := uint32(math.Round(float64(s.metrics.MemoryUsageBytes) / s.config.MemoryUsageFractionTarget))
-	bytesPerCU := uint32(s.computeUnit.Mem * uint16(s.vm.Mem.SlotSize.Value()))
-	memGoalCU := memGoalBytes / bytesPerCU
+	//
+	// NOTE: use uint64 for calculations on bytes as uint32 can overflow
+	memGoalBytes := uint64(math.Round(float64(s.metrics.MemoryUsageBytes) / s.config.MemoryUsageFractionTarget))
+	bytesPerCU := uint64(int64(s.computeUnit.Mem) * s.vm.Mem.SlotSize.Value())
+	memGoalCU := uint32(memGoalBytes / bytesPerCU)
 
 	goalCU := util.Max(cpuGoalCU, memGoalCU)
 
