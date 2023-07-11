@@ -1486,7 +1486,7 @@ func (r *Runner) doVMUpdate(
 		}
 	}
 
-	r.recordResourceChange(downscaled, target, r.global.metrics.neonvmRequestedChange)
+	r.recordResourceChange(current, target, r.global.metrics.neonvmRequestedChange)
 
 	// Make the NeonVM request
 	patches := []util.JSONPatch{{
