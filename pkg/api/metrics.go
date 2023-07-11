@@ -62,11 +62,11 @@ func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err e
 		return
 	}
 
-	availableMem, err := getField(loadPrefix+"memory_MemAvailable_bytes", "")
+	availableMem, err := getField(loadPrefix+"memory_available_bytes", "")
 	if err != nil {
 		return
 	}
-	totalMem, err := getField(loadPrefix+"memory_MemTotal_bytes", "")
+	totalMem, err := getField(loadPrefix+"memory_total_bytes", "")
 	if err != nil {
 		return
 	}
