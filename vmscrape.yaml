@@ -1,3 +1,4 @@
+# Victoria Metrics scraper for autoscaler-agent and autoscale-scheduler
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
 metadata:
