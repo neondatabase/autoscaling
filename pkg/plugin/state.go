@@ -554,20 +554,23 @@ func (s *pluginState) getOrFetchNodeState(
 		return nil, err
 	}
 
-	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
-	totalReservableCPU := n.totalReservableCPU()
-	if totalReservableCPU > s.maxTotalReservableCPU {
-		s.maxTotalReservableCPU = totalReservableCPU
-	}
-	totalReservableMemSlots := n.totalReservableMemSlots()
-	if totalReservableMemSlots > s.maxTotalReservableMemSlots {
-		s.maxTotalReservableMemSlots = totalReservableMemSlots
-	}
-
+	s.updateMaxTotalReservable(n)
 	n.updateMetrics(metrics, s.memSlotSizeBytes())
 
 	s.nodeMap[nodeName] = n
 	return n, nil
+}
+
+func (s *pluginState) updateMaxTotalReservable(node *nodeState) {
+	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
+	totalReservableCPU := node.totalReservableCPU()
+	if totalReservableCPU > s.maxTotalReservableCPU {
+		s.maxTotalReservableCPU = totalReservableCPU
+	}
+	totalReservableMemSlots := node.totalReservableMemSlots()
+	if totalReservableMemSlots > s.maxTotalReservableMemSlots {
+		s.maxTotalReservableMemSlots = totalReservableMemSlots
+	}
 }
 
 // this method must only be called while holding s.lock. It will not be released during this
@@ -705,6 +708,38 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 	}
 
 	return podOtherResourceState{RawCPU: cpu, RawMemory: mem}, nil
+}
+
+// handleMaybeNewNode does the internal state update when we receive information about a K8s node
+func (e *AutoscaleEnforcer) handleMaybeNewNode(logger *zap.Logger, node *corev1.Node, isNew bool) {
+	logger = logger.With(
+		zap.String("action", "Node add/update"),
+		zap.String("node", node.Name),
+	)
+
+	logger.Info("Handling maybe-addition of node")
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	if _, ok := e.state.nodeMap[node.Name]; ok {
+		log := logger.Info
+		if isNew {
+			log = logger.Warn
+		}
+		log("Node is already known")
+		return
+	}
+
+	n, err := buildInitialNodeState(logger, node, e.state.conf)
+	if err != nil {
+		logger.Error("Failed to build node state", zap.Error(err))
+	}
+
+	e.state.updateMaxTotalReservable(n)
+	n.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+
+	e.state.nodeMap[node.Name] = n
 }
 
 func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName string) {

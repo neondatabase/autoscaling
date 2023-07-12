@@ -21,6 +21,8 @@ import (
 )
 
 type nodeWatchCallbacks struct {
+	submitNodeAddition func(*zap.Logger, *corev1.Node)
+	submitNodeUpdate   func(*zap.Logger, *corev1.Node)
 	submitNodeDeletion func(*zap.Logger, string)
 }
 
@@ -54,6 +56,15 @@ func (e *AutoscaleEnforcer) watchNodeEvents(
 		watch.InitModeSync,
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*corev1.Node]{
+			AddFunc: func(node *corev1.Node, preexisting bool) {
+				msg := "Received add event for node"
+				if preexisting {
+					msg = "Received add event for preexisting node"
+				}
+
+				logger.Info(msg, zap.String("node", node.Name))
+				callbacks.submitNodeAddition(logger, node)
+			},
 			DeleteFunc: func(node *corev1.Node, mayBeStale bool) {
 				logger.Info("Received delete event for node", zap.String("node", node.Name))
 				callbacks.submitNodeDeletion(logger, node.Name)

@@ -127,6 +127,12 @@ func makeAutoscaleEnforcerPlugin(
 
 	hlogger := logger.Named("handlers")
 	nwc := nodeWatchCallbacks{
+		submitNodeAddition: func(logger *zap.Logger, node *corev1.Node) {
+			pushToQueue(logger, func() { p.handleMaybeNewNode(hlogger, node, true /* Yes "new" */) })
+		},
+		submitNodeUpdate: func(logger *zap.Logger, node *corev1.Node) {
+			pushToQueue(logger, func() { p.handleMaybeNewNode(hlogger, node, false /* No, not new */) })
+		},
 		submitNodeDeletion: func(logger *zap.Logger, nodeName string) {
 			pushToQueue(logger, func() { p.handleNodeDeletion(hlogger, nodeName) })
 		},
