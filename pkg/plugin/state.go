@@ -94,7 +94,6 @@ type nodeResourceStateField[T any] struct {
 func (s *nodeResourceState[T]) fields() []nodeResourceStateField[T] {
 	return []nodeResourceStateField[T]{
 		{"Total", s.Total},
-		{"System", s.System},
 		{"Watermark", s.Watermark},
 		{"Reserved", s.Reserved},
 		{"Buffer", s.Buffer},
@@ -131,23 +130,15 @@ func (s *nodeState) removeMetrics(metrics PromMetrics) {
 type nodeResourceState[T any] struct {
 	// Total is the Total amount of T available on the node. This value does not change.
 	Total T `json:"total"`
-	// System is the amount of T pre-reserved for system functions, and cannot be handed out to pods
-	// on the node. This amount CAN change on config updates, which may result in more of T than
-	// we'd like being already provided to the pods.
-	//
-	// This is equivalent to the value of this resource's resourceConfig.System, rounded up to the
-	// nearest size of the units of T.
-	System T `json:"system"`
 	// Watermark is the amount of T reserved to pods above which we attempt to reduce usage via
 	// migration.
 	Watermark T `json:"watermark"`
 	// Reserved is the current amount of T reserved to pods. It SHOULD be less than or equal to
-	// (Total - System), and we take active measures reduce it once it is above watermark.
+	// Total), and we take active measures reduce it once it is above Watermark.
 	//
 	// Reserved MAY be greater than Total on scheduler restart (because of buffering with VM scaling
 	// maximums), but (Reserved - Buffer) MUST be less than Total. In general, (Reserved - Buffer)
-	// SHOULD be less than or equal to (Total - System), but this can be temporarily violated after
-	// restart or config change.
+	// SHOULD be less than or equal to Total, but this can be temporarily violated after restart.
 	//
 	// For more information, refer to the ARCHITECTURE.md file in this directory.
 	//
@@ -187,7 +178,7 @@ type nodeOtherResourceState struct {
 	ReservedMemSlots uint16         `json:"reservedMemSlots"`
 
 	// MarginCPU and MarginMemory track the amount of other resources we can get "for free" because
-	// they were left out when rounding the System usage to fit in integer units of CPUs or memory
+	// they were left out when rounding the Total usage to fit in integer units of CPUs or memory
 	// slots
 	//
 	// These values are both only changed by configuration changes.
@@ -381,16 +372,14 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 	}
 }
 
-// totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
-// excluding the CPU pre-reserved for system tasks.
+// totalReservableCPU returns the amount of node CPU that may be allocated to VM pods
 func (s *nodeState) totalReservableCPU() vmapi.MilliCPU {
-	return s.vCPU.Total - s.vCPU.System
+	return s.vCPU.Total
 }
 
-// totalReservableMemSlots returns the number of memory slots that may be allocated to VM pods --
-// i.e., excluding the memory pre-reserved for system tasks.
+// totalReservableMemSlots returns the number of memory slots that may be allocated to VM pods
 func (s *nodeState) totalReservableMemSlots() uint16 {
-	return s.memSlots.Total - s.memSlots.System
+	return s.memSlots.Total
 }
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods

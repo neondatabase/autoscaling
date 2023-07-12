@@ -85,7 +85,7 @@ func (s verdictSet) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
 func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool, onlyThousands bool) (verdict string) {
-	totalReservable := r.node.Total - r.node.System
+	totalReservable := r.node.Total
 	// note: it's possible to temporarily have reserved > totalReservable, after loading state or
 	// config change; we have to use SaturatingSub here to account for that.
 	remainingReservable := util.SaturatingSub(totalReservable, r.oldNode.reserved)
