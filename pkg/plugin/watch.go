@@ -63,6 +63,7 @@ func (e *AutoscaleEnforcer) watchNodeEvents(
 }
 
 type podWatchCallbacks struct {
+	submitPodStarted        func(*zap.Logger, *corev1.Pod)
 	submitVMDeletion        func(*zap.Logger, util.NamespacedName)
 	submitPodDeletion       func(*zap.Logger, util.NamespacedName)
 	submitPodStartMigration func(_ *zap.Logger, podName, migrationName util.NamespacedName, source bool)
@@ -106,14 +107,38 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 		watch.InitModeSync, // note: doesn't matter, because AddFunc = nil.
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*corev1.Pod]{
+			AddFunc: func(pod *corev1.Pod, preexisting bool) {
+				_, isVM := pod.Labels[LabelVM]
+
+				// Generate events for all non-VM pods that are running
+				if !isVM && pod.Status.Phase == corev1.PodRunning {
+					if !preexisting {
+						// Generally pods shouldn't be immediately running, so we log this as a
+						// warning. If it was preexisting, then it'll be handled on the initial
+						// cluster read already (but we generate the events anyways so that we
+						// definitely don't miss anything).
+						name := util.GetNamespacedName(pod)
+						logger.Warn("Received add event for new non-VM pod already running", zap.Object("pod", name))
+					}
+					callbacks.submitPodStarted(logger, pod)
+				}
+			},
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
 				name := util.GetNamespacedName(newPod)
+
+				_, isVM := newPod.Labels[LabelVM]
+
+				// Check if a non-VM pod is now running.
+				if !isVM && oldPod.Status.Phase == corev1.PodPending && newPod.Status.Phase == corev1.PodRunning {
+					logger.Info("Received update event for non-VM pod now running", zap.Object("pod", name))
+					callbacks.submitPodStarted(logger, newPod)
+				}
 
 				// Check if pod is "completed" - handle that the same as deletion.
 				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
 					logger.Info("Received update event for completion of pod", zap.Object("pod", name))
 
-					if _, ok := newPod.Labels[LabelVM]; ok {
+					if isVM {
 						callbacks.submitVMDeletion(logger, name)
 					} else {
 						callbacks.submitPodDeletion(logger, name)

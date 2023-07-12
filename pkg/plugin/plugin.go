@@ -132,6 +132,9 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 	pwc := podWatchCallbacks{
+		submitPodStarted: func(logger *zap.Logger, pod *corev1.Pod) {
+			pushToQueue(logger, func() { p.handlePodStarted(hlogger, pod) })
+		},
 		submitVMDeletion: func(logger *zap.Logger, pod util.NamespacedName) {
 			pushToQueue(logger, func() { p.handleVMDeletion(hlogger, pod) })
 		},
