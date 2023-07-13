@@ -200,7 +200,7 @@ func runRestartOnFailure(ctx context.Context, logger *zap.Logger, args []string,
 			}
 
 			if err != nil {
-				logger.Error("Child vm-informrant exited with error", zap.Error(err))
+				logger.Error("Child vm-informant exited with error", zap.Error(err))
 			} else {
 				logger.Warn("Child vm-informant exited without error. This should not happen")
 			}

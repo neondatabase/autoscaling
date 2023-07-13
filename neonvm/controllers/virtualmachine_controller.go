@@ -379,7 +379,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		if err != nil && apierrors.IsNotFound(err) {
 			// lost runner pod for running VirtualMachine ?
 			r.Recorder.Event(virtualmachine, "Warning", "NotFound",
-				fmt.Sprintf("runner pod %s not fodund",
+				fmt.Sprintf("runner pod %s not found",
 					virtualmachine.Status.PodName))
 			virtualmachine.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
