@@ -357,6 +357,9 @@ func (e *AutoscaleEnforcer) PostFilter(
 		e.metrics.IncFailIfNotSuccess("PostFilter", status)
 	}()
 
+	logger := e.logger.With(zap.String("method", "Filter"), util.PodNameFields(pod))
+	logger.Error("Pod rejected by all Filter method calls")
+
 	return nil, nil // PostFilterResult is optional, nil Status is success.
 }
 
@@ -520,13 +523,16 @@ func (e *AutoscaleEnforcer) Filter(
 	}
 
 	var message string
+	var logFunc func(string, ...zap.Field)
 	if allowing {
 		message = "Allowing Pod"
+		logFunc = logger.Info
 	} else {
 		message = "Rejecting Pod"
+		logFunc = logger.Warn
 	}
 
-	logger.Info(
+	logFunc(
 		message,
 		zap.Object("verdict", verdictSet{
 			cpu: cpuMsg,
@@ -597,7 +603,9 @@ func (e *AutoscaleEnforcer) Score(
 		(vmInfo.Cpu.Use > node.remainingReservableCPU() ||
 			vmInfo.Mem.Use > node.remainingReservableMemSlots())
 	if noRoom {
-		return framework.MinNodeScore, nil
+		score := framework.MinNodeScore
+		logger.Warn("No room on node, giving minimum score (typically handled by Filter method)", zap.Int64("score", score))
+		return score, nil
 	}
 
 	totalMilliCpu := int64(node.totalReservableCPU())
@@ -610,12 +618,10 @@ func (e *AutoscaleEnforcer) Score(
 	scoreCpu := framework.MinNodeScore + scoreLen*totalMilliCpu/maxTotalMilliCpu
 	scoreMem := framework.MinNodeScore + scoreLen*totalMem/maxTotalMem
 
-	// return the minimum of the two resources scores
-	if scoreCpu < scoreMem {
-		return scoreCpu, nil
-	} else {
-		return scoreMem, nil
-	}
+	score := util.Min(scoreCpu, scoreMem)
+	logger.Info("Scored pod placement for node", zap.Int64("score", score))
+
+	return score, nil
 }
 
 // ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used
