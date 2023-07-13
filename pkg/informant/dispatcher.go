@@ -36,7 +36,7 @@ type Dispatcher struct {
 	// just tries to receive off the channel and then request the upscale.
 	// A different way to do this would be to keep a backpointer to the parent
 	// `State` and then just call a method on it when an upscale is requested.
-	notifier chan<- struct{}
+	notifier util.CondChannelSender
 
 	// This counter represents the current transaction id. When we need a new one
 	// we simply bump it and take the new number.
@@ -50,7 +50,7 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(logger *zap.Logger, addr string, notifier chan<- struct{}) (disp Dispatcher, _ error) {
+func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSender) (disp Dispatcher, _ error) {
 	// FIXME: have this context actually do something? As of now it's just being
 	// passed around to satisfy typing. Maybe it's not really necessary.
 	ctx := context.Background()
@@ -123,7 +123,7 @@ func (disp *Dispatcher) handleRequest(req Request) {
 	if req.RequestUpscale != nil {
 		disp.logger.Info("Received request for upscale")
 		// The goroutine listening on the other side will make the request
-		disp.notifier <- struct{}{}
+		disp.notifier.Send()
 	} else if req.NotifyUpscale != nil {
 		panic("informant should never receive a NotifyUpscale request from monitor")
 	} else if req.TryDownscale != nil {

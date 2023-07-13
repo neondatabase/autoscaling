@@ -17,18 +17,18 @@ import (
 type State struct {
 	agents     *AgentSet
 	dispatcher *Dispatcher
-	requests   <-chan struct{}
+	// requests   util.CondChannelReceiver
 }
 
 func NewState(logger *zap.Logger) (state State, _ error) {
 	logger.Info("Creating new agent-set.")
 	agents := NewAgentSet(logger)
-	requests := make(chan struct{})
+	sender, receiver := util.NewCondChannelPair()
 	logger.Info("Creating new dispatcher.")
 	var disp Dispatcher
 	var err error
 	for {
-		disp, err = NewDispatcher(logger, "ws://127.0.0.1:10369", requests)
+		disp, err = NewDispatcher(logger, "ws://127.0.0.1:10369", sender)
 		if err != nil {
 			// Five * (1000 * ~1000000) = Five * ~1000000000 nanos
 			wait := time.Duration(5 * 1000 * (1 << 20))
@@ -47,12 +47,12 @@ func NewState(logger *zap.Logger) (state State, _ error) {
 	logger.Info("Spawning goroutine to listen for upscale requests.")
 	go func() {
 		for {
-			<-requests
+			_ = <-receiver.Recv()
 			agents.RequestUpscale(agents.baseLogger)
 		}
 	}()
 
-	return State{agents: agents, dispatcher: &disp, requests: requests}, nil
+	return State{agents: agents, dispatcher: &disp}, nil
 }
 
 // RegisterAgent registers a new or updated autoscaler-agent
