@@ -68,6 +68,9 @@ const (
 	// in microseconds. Min 1000 microseconds, max 1 second
 	cgroupPeriod     = uint64(100000)
 	cgroupMountPoint = "/sys/fs/cgroup"
+
+	// Estimated time that the VM startup takes. The CPU limit is set only after this.
+	cpuThrottleDelay = 10 * time.Second
 )
 
 var (
@@ -581,9 +584,22 @@ func main() {
 	// leading slash is important
 	cgroupPath := fmt.Sprintf("/%s-vm-runner", vmStatus.PodName)
 
-	if err := setCgroupLimit(qemuCPUs.use, cgroupPath); err != nil {
+	// To start up the VM as fast as possible, we let it run with a full CPU for the first few
+	// seconds (cpuThrottleDelay). Ideally we would get some kind of a signal from the VM when
+	// it's done all the endpoint-independent initialization, the 10 second delay is just a
+	// crude approximation of how long it will take. It doesn't need to be very accurate: if the
+	// delay is too long, we'll give away a few CPU seconds of extra computing power for free.
+	// If it's too short, the VM startup will just take a little longer.
+	log.Printf("initializing cgroup with full CPU")
+	if err := setCgroupLimit(1000, cgroupPath); err != nil {
 		log.Fatalf("Failed to set cgroup limit: %s", err)
 	}
+	go func() {
+		time.Sleep(cpuThrottleDelay);
+		if err := setCgroupLimit(qemuCPUs.use, cgroupPath); err != nil {
+			log.Fatalf("Failed to set cgroup limit: %s", err)
+		}
+	}()
 	defer cleanupCgroup(cgroupPath)
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
