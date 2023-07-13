@@ -962,6 +962,41 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		}
 	}
 
+	// Set up extra firewall rules to unexpected reject connections from the VM to
+	// internal neon network.
+	iptables_args := [...]string{
+		"-A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT",
+
+		// Allow connections to pageservers
+		"-A FORWARD -o eth0 -p tcp -m tcp --dport 6400 -j ACCEPT",
+
+		// Allow connections to safekeepers
+		"-A FORWARD -o eth0 -p tcp -m tcp --dport 6500 -j ACCEPT",
+
+		// OpenTelemetry collector
+		"-A FORWARD -o eth0 -p tcp -m tcp --dport 4317 -j ACCEPT",
+		"-A FORWARD -o eth0 -p tcp -m tcp --dport 4318 -j ACCEPT",
+
+		// Allow connection to the control plane's /computes API
+		"-A FORWARD -o eth0 -p tcp -m tcp --dport 9095 -j ACCEPT",
+
+		// legacy, for the  /computes API
+		"-A FORWARD -o eth0 -p tcp -m tcp --dport 80 -j ACCEPT",
+
+		// Allow DNS
+		"-A FORWARD -o eth0 -p udp -m udp --dport 53 -j ACCEPT",
+
+		// Reject any other connection to internal network
+		"-A FORWARD -o eth0 -d 10.0.0.0/8 -j REJECT",
+	}
+	for _, rule := range iptables_args {
+		log.Printf("setting up extra iptables rule: %s", rule)
+		if err := execFg("iptables", strings.Fields(rule)...); err != nil {
+			log.Printf("could not set extra iptables rule \"%s\": %s", rule, err)
+			return nil, err
+		}
+	}
+
 	// get dns details from /etc/resolv.conf
 	resolvConf, err := getResolvConf()
 	if err != nil {
