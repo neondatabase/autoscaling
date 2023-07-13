@@ -2,9 +2,6 @@
 run:
   deadline: 5m
   issues-exit-code: 1
-  # TODO: fix all the issues for neonvm and enable linter for it
-  skip-dirs:
-    - neonvm
 
 issues:
   exclude:
