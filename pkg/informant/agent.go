@@ -72,9 +72,9 @@ type Agent struct {
 
 	// unregistered signalled when the agent is unregistered (due to an error or an /unregister
 	// request)
-	unregistered util.SignalReceiver
+	unregistered util.SignalReceiver[struct{}]
 	// Sending half of unregistered — only used by EnsureUnregistered()
-	signalUnregistered util.SignalSender
+	signalUnregistered util.SignalSender[struct{}]
 
 	id         uuid.UUID
 	serverAddr string
@@ -89,7 +89,7 @@ type Agent struct {
 
 type agentRequest struct {
 	ctx       context.Context
-	done      util.SignalSender
+	done      util.SignalSender[struct{}]
 	doRequest func(context.Context, *http.Client)
 }
 
@@ -277,7 +277,7 @@ func (s *AgentSet) RegisterNewAgent(logger *zap.Logger, info *api.AgentDesc) (ap
 		)
 	}
 
-	unregisterSend, unregisterRecv := util.NewSingleSignalPair()
+	unregisterSend, unregisterRecv := util.NewSingleSignalPair[struct{}]()
 
 	agent := &Agent{
 		lock: sync.Mutex{},
@@ -457,7 +457,7 @@ func (a *Agent) runHandler() {
 
 				done := make(chan struct{})
 				go func() {
-					defer req.done.Send()
+					defer req.done.Send(struct{}{})
 					defer close(done)
 					req.doRequest(reqCtx, &client)
 				}()
@@ -531,7 +531,7 @@ func doRequest[B any, R any](
 func doRequestWithStartSignal[B any, R any](
 	agent *Agent,
 	timeout time.Duration,
-	start *util.SignalSender,
+	start *util.SignalSender[struct{}],
 	method string,
 	path string,
 	body *B,
@@ -547,7 +547,7 @@ func doRequestWithStartSignal[B any, R any](
 		requestErr   error
 	)
 
-	sendDone, recvDone := util.NewSingleSignalPair()
+	sendDone, recvDone := util.NewSingleSignalPair[struct{}]()
 
 	url := fmt.Sprintf("http://%s%s", agent.serverAddr, path)
 
@@ -625,7 +625,7 @@ func doRequestWithStartSignal[B any, R any](
 	}
 
 	if start != nil {
-		start.Send()
+		start.Send(struct{}{})
 	}
 
 	// At this point, runHandler is appropriately handling the request, and will call
@@ -656,7 +656,7 @@ func (a *Agent) EnsureUnregistered(logger *zap.Logger) (wasCurrent bool) {
 
 	logger.Info("Unregistering agent")
 
-	a.signalUnregistered.Send()
+	a.signalUnregistered.Send(struct{}{})
 
 	a.parent.lock.Lock()
 	defer a.parent.lock.Unlock()
@@ -822,11 +822,11 @@ func (a *Agent) SpawnRequestUpscale(logger *zap.Logger, timeout time.Duration, h
 	default:
 	}
 
-	sendDone, recvDone := util.NewSingleSignalPair()
+	sendDone, recvDone := util.NewSingleSignalPair[struct{}]()
 
 	go func() {
 		// If we exit early, signal that we're done.
-		defer sendDone.Send()
+		defer sendDone.Send(struct{}{})
 
 		unsetWantsUpscale := func() {
 			// Unset s.wantsMemoryUpscale if the agent is still current. We want to allow further
