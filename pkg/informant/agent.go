@@ -457,7 +457,7 @@ func (a *Agent) runHandler() {
 
 				done := make(chan struct{})
 				go func() {
-					defer req.done.Send()
+					defer req.done.Send(struct{}{})
 					defer close(done)
 					req.doRequest(reqCtx, &client)
 				}()
@@ -625,7 +625,7 @@ func doRequestWithStartSignal[B any, R any](
 	}
 
 	if start != nil {
-		start.Send()
+		start.Send(struct{}{})
 	}
 
 	// At this point, runHandler is appropriately handling the request, and will call
@@ -656,7 +656,7 @@ func (a *Agent) EnsureUnregistered(logger *zap.Logger) (wasCurrent bool) {
 
 	logger.Info("Unregistering agent")
 
-	a.signalUnregistered.Send()
+	a.signalUnregistered.Send(struct{}{})
 
 	a.parent.lock.Lock()
 	defer a.parent.lock.Unlock()
@@ -826,7 +826,7 @@ func (a *Agent) SpawnRequestUpscale(logger *zap.Logger, timeout time.Duration, h
 
 	go func() {
 		// If we exit early, signal that we're done.
-		defer sendDone.Send()
+		defer sendDone.Send(struct{}{})
 
 		unsetWantsUpscale := func() {
 			// Unset s.wantsMemoryUpscale if the agent is still current. We want to allow further

@@ -571,7 +571,7 @@ func (w *Store[T]) Relist() <-chan struct{} {
 }
 
 func (w *Store[T]) Stop() {
-	w.stopSignal.Send()
+	w.stopSignal.Send(struct{}{})
 	w.stopped.Store(true)
 }
 

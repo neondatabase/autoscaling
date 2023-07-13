@@ -42,7 +42,7 @@ func (w SchedulerWatch) Using(sched SchedulerInfo) {
 
 func (w SchedulerWatch) Stop() {
 	w.stopEventStream()
-	w.stop.Send()
+	w.stop.Send(struct{}{})
 }
 
 const schedulerNamespace string = "kube-system"

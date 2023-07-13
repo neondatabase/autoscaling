@@ -184,7 +184,7 @@ func NewInformantServer(
 
 	// note: docs for server.exit guarantee this function is called while holding runner.lock.
 	server.exit = func(status InformantServerExitStatus) {
-		sendFinished.Send()
+		sendFinished.Send(struct{}{})
 		cancelBackground()
 
 		// Set server.exitStatus if isn't already

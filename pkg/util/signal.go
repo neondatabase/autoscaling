@@ -12,11 +12,16 @@ func NewSingleSignalPair[T any]() (SignalSender[T], SignalReceiver[T]) {
 	once := &sync.Once{}
 	closeSigCh := func() { once.Do(func() { close(sigCh) }) }
 
-	return SignalSender[T]{send: closeSigCh}, SignalReceiver[T]{sigCh: sigCh, closeSigCh: closeSigCh}
+	return SignalSender[T]{
+		send: func(data T) {
+			sigCh <- data
+			closeSigCh()
+		},
+	}, SignalReceiver[T]{sigCh: sigCh, closeSigCh: closeSigCh}
 }
 
 type SignalSender[T any] struct {
-	send func()
+	send func(T)
 }
 
 type SignalReceiver[T any] struct {
@@ -24,8 +29,8 @@ type SignalReceiver[T any] struct {
 	closeSigCh func()
 }
 
-func (s SignalSender[T]) Send() {
-	s.send()
+func (s SignalSender[T]) Send(data T) {
+	s.send(data)
 }
 
 func (s SignalReceiver[T]) Recv() chan T {
