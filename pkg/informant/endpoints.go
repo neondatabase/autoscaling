@@ -5,6 +5,7 @@ package informant
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -24,9 +25,18 @@ func NewState(logger *zap.Logger) (state State, _ error) {
 	agents := NewAgentSet(logger)
 	requests := make(chan struct{})
 	logger.Info("Creating new dispatcher.")
-	disp, err := NewDispatcher(logger, "ws://127.0.0.1:10369", requests)
-	if err != nil {
-		return state, err
+	var disp Dispatcher
+	var err error
+	for {
+		disp, err = NewDispatcher(logger, "ws://127.0.0.1:10369", requests)
+		if err != nil {
+			// Five * (1000 * ~1000000) = Five * ~1000000000 nanos
+			wait := time.Duration(5 * 1000 * (1 << 20))
+			logger.Warn("failed to connect to dispatcher, retrying", zap.Error(err), zap.Duration("wait", wait))
+			time.Sleep(wait)
+		} else {
+			break
+		}
 	}
 
 	logger.Info("Spawning goroutine to run dispatcher.")
