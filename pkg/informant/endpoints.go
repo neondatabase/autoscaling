@@ -113,7 +113,7 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 		return nil, 400, fmt.Errorf("Agent ID %s is not the active Agent", incomingId)
 	}
 
-	tx, rx := util.Oneshot[MonitorResult]()
+	tx, rx := util.NewSingleSignalPair[MonitorResult]()
 
 	s.dispatcher.Call(
 		ctx,
@@ -129,9 +129,9 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 	)
 
 	// Wait for result
-	res := rx.Recv().Result
+	res := <-rx.Recv()
 
-	return res.Into(), 200, nil
+	return res.Result.Into(), 200, nil
 }
 
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
@@ -170,7 +170,7 @@ func (s *State) NotifyUpscale(
 
 	s.agents.ReceivedUpscale()
 
-	tx, rx := util.Oneshot[MonitorResult]()
+	tx, rx := util.NewSingleSignalPair[MonitorResult]()
 	s.dispatcher.Call(
 		ctx,
 		tx,
@@ -185,9 +185,9 @@ func (s *State) NotifyUpscale(
 	)
 
 	// Wait for result
-	res := rx.Recv().Confirmation
+	res := <-rx.Recv()
 
-	return &res, 200, nil
+	return &res.Confirmation, 200, nil
 }
 
 // UnregisterAgent unregisters the autoscaler-agent given by info, if it is currently registered

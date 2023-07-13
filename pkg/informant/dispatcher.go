@@ -29,7 +29,7 @@ type Dispatcher struct {
 	// to it so that it knows when a response is back. When it receives a packet
 	// with the same transaction id, it knows that that is the repsonse to the original
 	// message and will send it down the oneshot so the original sender can use it.
-	waiters map[uint64]util.OneshotSender[MonitorResult]
+	waiters map[uint64]util.SignalSender[MonitorResult]
 
 	// A message is sent along this channel when an upscale is requested.
 	// When the informant.NewState is called, a goroutine will be spawned that
@@ -67,7 +67,7 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 	disp = Dispatcher{
 		conn:     c,
 		notifier: notifier,
-		waiters:  make(map[uint64]util.OneshotSender[MonitorResult]),
+		waiters:  make(map[uint64]util.SignalSender[MonitorResult]),
 		counter:  0,
 		logger:   logger.Named("dispatcher"),
 	}
@@ -98,7 +98,7 @@ func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
 // *Note*: sending a RequestUpscale to the monitor is incorrect. The monitor does
 // not (and should) not know how to handle this and will panic. Likewise, we panic
 // upon receiving a TryDownscale or NotifyUpscale request.
-func (disp *Dispatcher) Call(ctx context.Context, sender util.OneshotSender[MonitorResult], req Request) {
+func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[MonitorResult], req Request) {
 	id := disp.counter
 	disp.counter += 1
 	packet := Packet{
