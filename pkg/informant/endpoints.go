@@ -47,7 +47,7 @@ func NewState(logger *zap.Logger) (state State, _ error) {
 	logger.Info("Spawning goroutine to listen for upscale requests.")
 	go func() {
 		for {
-			_ = <-receiver.Recv()
+			<-receiver.Recv()
 			agents.RequestUpscale(agents.baseLogger)
 		}
 	}()
