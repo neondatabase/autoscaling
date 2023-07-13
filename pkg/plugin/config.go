@@ -7,6 +7,8 @@ import (
 	"math"
 	"os"
 
+	"golang.org/x/exp/slices"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -52,6 +54,17 @@ type Config struct {
 	// K8sNodeGroupLabel, if provided, gives the label to use when recording k8s node groups in the
 	// metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
 	K8sNodeGroupLabel string `json:"k8sNodeGroupLabel"`
+
+	// IgnoreNamespaces, if provided, gives a list of namespaces that the plugin should completely
+	// ignore, as if pods from those namespaces do not exist.
+	//
+	// This is specifically designed for our "overprovisioning" namespace, which creates paused pods
+	// to trigger cluster-autoscaler.
+	//
+	// The only exception to this rule is during Filter method calls, where we do still count the
+	// resources from such pods. The reason to do that is so that these overprovisioning pods can be
+	// evicted, which will allow cluster-autoscaler to trigger scale-up.
+	IgnoreNamespaces []string `json:"ignoreNamespaces"`
 
 	// DumpState, if provided, enables a server to dump internal state
 	DumpState *dumpStateConfig `json:"dumpState"`
@@ -193,6 +206,11 @@ func ReadConfig(path string) (*Config, error) {
 //////////////////////////////////////
 // HELPER METHODS FOR USING CONFIGS //
 //////////////////////////////////////
+
+// ignoredNamespace returns whether items in the namespace should be treated as if they don't exist
+func (c *Config) ignoredNamespace(namespace string) bool {
+	return slices.Contains(c.IgnoreNamespaces, namespace)
+}
 
 // forNode returns the individual nodeConfig for a node with a particular name, taking override
 // settings into account

@@ -1338,7 +1338,10 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			skippedVms += 1
 		}
 
-		if pod.Spec.NodeName == "" {
+		if p.state.conf.ignoredNamespace(pod.Namespace) {
+			logSkip("VM is in ignored namespace")
+			continue
+		} else if pod.Spec.NodeName == "" {
 			logSkip("VM pod's Spec.NodeName = \"\" (maybe it hasn't been scheduled yet?)")
 			continue
 		}
@@ -1468,6 +1471,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		}
 
 		if _, ok := p.state.podMap[podName]; ok {
+			continue
+		} else if p.state.conf.ignoredNamespace(pod.Namespace) {
+			logSkip("non-VM pod is in ignored namespace")
 			continue
 		}
 

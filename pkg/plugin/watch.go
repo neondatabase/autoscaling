@@ -108,6 +108,13 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*corev1.Pod]{
 			AddFunc: func(pod *corev1.Pod, preexisting bool) {
+				name := util.GetNamespacedName(pod)
+
+				if e.state.conf.ignoredNamespace(pod.Namespace) {
+					logger.Info("Received add event for ignored pod", zap.Object("pod", name))
+					return
+				}
+
 				_, isVM := pod.Labels[LabelVM]
 
 				// Generate events for all non-VM pods that are running
@@ -117,7 +124,6 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 						// warning. If it was preexisting, then it'll be handled on the initial
 						// cluster read already (but we generate the events anyways so that we
 						// definitely don't miss anything).
-						name := util.GetNamespacedName(pod)
 						logger.Warn("Received add event for new non-VM pod already running", zap.Object("pod", name))
 					}
 					callbacks.submitPodStarted(logger, pod)
@@ -125,6 +131,11 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			},
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
 				name := util.GetNamespacedName(newPod)
+
+				if e.state.conf.ignoredNamespace(newPod.Namespace) {
+					logger.Info("Received update event for ignored pod", zap.Object("pod", name))
+					return
+				}
 
 				_, isVM := newPod.Labels[LabelVM]
 
@@ -160,6 +171,11 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			},
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				name := util.GetNamespacedName(pod)
+
+				if e.state.conf.ignoredNamespace(pod.Namespace) {
+					logger.Info("Received delete event for ignored pod", zap.Object("pod", name))
+					return
+				}
 
 				if util.PodCompleted(pod) {
 					logger.Info("Received delete event for completed pod", zap.Object("pod", name))
@@ -277,6 +293,11 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
+				if e.state.conf.ignoredNamespace(newVM.Namespace) {
+					logger.Info("Received update event for ignored VM", util.VMNameFields(newVM))
+					return
+				}
+
 				oldInfo, err := api.ExtractVmInfo(logger, oldVM)
 				if err != nil {
 					logger.Error("Failed to extract VM info in update for old VM", util.VMNameFields(oldVM), zap.Error(err))
@@ -373,6 +394,14 @@ func (e *AutoscaleEnforcer) watchMigrationEvents(
 		},
 		watch.HandlerFuncs[*vmapi.VirtualMachineMigration]{
 			UpdateFunc: func(oldObj, newObj *vmapi.VirtualMachineMigration) {
+				if e.state.conf.ignoredNamespace(newObj.Namespace) {
+					logger.Info(
+						"Received update event for ignored VM Migration",
+						zap.Object("virtualmachinemigration", util.GetNamespacedName(newObj)),
+					)
+					return
+				}
+
 				shouldDelete := newObj.Status.Phase != oldObj.Status.Phase &&
 					(newObj.Status.Phase == vmapi.VmmSucceeded || newObj.Status.Phase == vmapi.VmmFailed)
 

@@ -385,6 +385,12 @@ func (e *AutoscaleEnforcer) Filter(
 	logger := e.logger.With(zap.String("method", "Filter"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Filter request")
 
+	if e.state.conf.ignoredNamespace(pod.Namespace) {
+		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
+		logger.Warn("Ignoring Filter request for pod in ignored namespace")
+		return
+	}
+
 	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
 	if err != nil {
 		logger.Error("Error getting VM info for Pod", zap.Error(err))
@@ -656,6 +662,12 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	logger.Info("Handling Reserve request")
 
+	if e.state.conf.ignoredNamespace(pod.Namespace) {
+		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
+		logger.Warn("Ignoring Reserve request for pod in ignored namespace")
+		return nil // success; allow the Pod onto the node.
+	}
+
 	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
 	if err != nil {
 		logger.Error("Error getting VM info for pod", zap.Error(err))
@@ -875,6 +887,12 @@ func (e *AutoscaleEnforcer) Unreserve(
 
 	logger := e.logger.With(zap.String("method", "Unreserve"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Unreserve request")
+
+	if e.state.conf.ignoredNamespace(pod.Namespace) {
+		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
+		logger.Warn("Ignoring Unreserve request for pod in ignored namespace")
+		return
+	}
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
