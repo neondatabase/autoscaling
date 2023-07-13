@@ -99,6 +99,8 @@ type keyed[K any, V any] struct {
 }
 
 type pluginStateDump struct {
+	OngoingMigrationDeletions []keyed[util.NamespacedName, int] `json:"ongoingMigrationDeletions"`
+
 	Nodes []keyed[string, nodeStateDump] `json:"nodes"`
 
 	VMPods    []podNameAndPointer `json:"vmPods"`
@@ -120,6 +122,7 @@ type pointerString string
 type nodeStateDump struct {
 	Obj       pointerString                                   `json:"obj"`
 	Name      string                                          `json:"name"`
+	NodeGroup string                                          `json:"nodeGroup"`
 	VCPU      nodeResourceState[vmapi.MilliCPU]               `json:"vCPU"`
 	MemSlots  nodeResourceState[uint16]                       `json:"memSlots"`
 	Pods      []keyed[util.NamespacedName, podStateDump]      `json:"pods"`
@@ -189,7 +192,14 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 		return kvx.Key < kvy.Key
 	})
 
+	ongoingMigrationDeletions := make([]keyed[util.NamespacedName, int], 0, len(s.ongoingMigrationDeletions))
+	for k, count := range s.ongoingMigrationDeletions {
+		ongoingMigrationDeletions = append(ongoingMigrationDeletions, keyed[util.NamespacedName, int]{Key: k, Value: count})
+	}
+	sortSliceByPodName(ongoingMigrationDeletions, func(kv keyed[util.NamespacedName, int]) util.NamespacedName { return kv.Key })
+
 	return &pluginStateDump{
+		OngoingMigrationDeletions:  ongoingMigrationDeletions,
 		Nodes:                      nodes,
 		VMPods:                     vmPods,
 		OtherPods:                  otherPods,
@@ -225,6 +235,7 @@ func (s *nodeState) dump() nodeStateDump {
 	return nodeStateDump{
 		Obj:       makePointerString(s),
 		Name:      s.name,
+		NodeGroup: s.nodeGroup,
 		VCPU:      s.vCPU,
 		MemSlots:  s.memSlots,
 		Pods:      pods,

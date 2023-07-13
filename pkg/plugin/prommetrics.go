@@ -18,6 +18,10 @@ type PromMetrics struct {
 	validResourceRequests *prometheus.CounterVec
 	nodeCPUResources      *prometheus.GaugeVec
 	nodeMemResources      *prometheus.GaugeVec
+	migrationCreations    prometheus.Counter
+	migrationDeletions    *prometheus.CounterVec
+	migrationCreateFails  prometheus.Counter
+	migrationDeleteFails  *prometheus.CounterVec
 }
 
 func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
@@ -66,14 +70,40 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Name: "autoscaling_plugin_node_cpu_resources_current",
 				Help: "Current amount of CPU for 'nodeResourceState' fields",
 			},
-			[]string{"node", "field"},
+			[]string{"node", "node_group", "field"},
 		)),
 		nodeMemResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_plugin_node_mem_resources_current",
 				Help: "Current amount of memory (in bytes) for 'nodeResourceState' fields",
 			},
-			[]string{"node", "field"},
+			[]string{"node", "node_group", "field"},
+		)),
+		migrationCreations: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_migrations_created_total",
+				Help: "Number of successful VirtualMachineMigration Create requests by the plugin",
+			},
+		)),
+		migrationDeletions: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_migrations_deleted_total",
+				Help: "Number of successful VirtualMachineMigration Delete requests by the plugin",
+			},
+			[]string{"phase"},
+		)),
+		migrationCreateFails: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_migration_create_fails_total",
+				Help: "Number of failed VirtualMachineMigration Create requests by the plugin",
+			},
+		)),
+		migrationDeleteFails: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_migration_delete_fails_total",
+				Help: "Number of failed VirtualMachineMigration Delete requests by the plugin",
+			},
+			[]string{"phase"},
 		)),
 	}
 

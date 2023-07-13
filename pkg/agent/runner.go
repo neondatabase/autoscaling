@@ -1301,10 +1301,12 @@ func (r *Runner) getStateForVMUpdate(logger *zap.Logger, updateReason VMUpdateRe
 
 	// Check that the VM's current usage is <= lastApproved
 	if vmUsing := r.vm.Using(); vmUsing.HasFieldGreaterThan(*r.lastApproved) {
-		panic(fmt.Errorf(
-			"invalid state: r.vm has resources greater than r.lastApproved (%+v vs %+v)",
-			vmUsing, *r.lastApproved,
-		))
+		// ref <https://github.com/neondatabase/autoscaling/issues/234>
+		logger.Warn(
+			"r.vm has resources greater than r.lastApproved. This should only happen when scaling bounds change",
+			zap.Object("using", vmUsing),
+			zap.Object("lastApproved", *r.lastApproved),
+		)
 	}
 
 	config := r.global.config.Scaling.DefaultConfig
@@ -1338,14 +1340,34 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// ---
 	//
 	// Broadly, the implementation works like this:
-	// 1. Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
+	// For CPU:
+	// Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
+	//
+	// For Memory:
+	// Based on memory usage, calculate the VM's desired memory allocation and extrapolate a
+	// goal number of CUs from that.
+	//
+	// 1. Take the maximum of these two goal CUs to create a unified goal CU
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
+	// For CPU:
 	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
 	// average),
 	// which we can get by dividing LA by LAFT.
-	goalCU := uint32(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
+	cpuGoalCU := uint32(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
+
+	// For Mem:
+	// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
+	// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
+	// that to CUs
+	//
+	// NOTE: use uint64 for calculations on bytes as uint32 can overflow
+	memGoalBytes := uint64(math.Round(float64(s.metrics.MemoryUsageBytes) / s.config.MemoryUsageFractionTarget))
+	bytesPerCU := uint64(int64(s.computeUnit.Mem) * s.vm.Mem.SlotSize.Value())
+	memGoalCU := uint32(memGoalBytes / bytesPerCU)
+
+	goalCU := util.Max(cpuGoalCU, memGoalCU)
 
 	// Update goalCU based on any requested upscaling
 	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling())
@@ -1486,7 +1508,7 @@ func (r *Runner) doVMUpdate(
 		}
 	}
 
-	r.recordResourceChange(downscaled, target, r.global.metrics.neonvmRequestedChange)
+	r.recordResourceChange(current, target, r.global.metrics.neonvmRequestedChange)
 
 	// Make the NeonVM request
 	patches := []util.JSONPatch{{

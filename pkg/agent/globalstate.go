@@ -248,7 +248,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 		r := util.NewTimeRange(time.Second, RunnerRestartMinWaitSeconds, RunnerRestartMaxWaitSeconds)
 		waitDuration = r.Random()
 		logger.Info(
-			"Runner was not runnign for long, restarting after delay",
+			"Runner was not running for long, restarting after delay",
 			zap.Duration("totalRuntime", totalRuntime),
 			zap.Duration("delay", waitDuration),
 		)

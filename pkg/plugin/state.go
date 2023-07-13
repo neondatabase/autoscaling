@@ -19,7 +19,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -32,6 +31,8 @@ import (
 // Accessing the individual fields MUST be done while holding a lock.
 type pluginState struct {
 	lock util.ChanMutex
+
+	ongoingMigrationDeletions map[util.NamespacedName]int
 
 	podMap  map[util.NamespacedName]*podState
 	nodeMap map[string]*nodeState
@@ -59,6 +60,9 @@ func (s *pluginState) memSlotSizeBytes() uint64 {
 type nodeState struct {
 	// name is the name of the node, guaranteed by kubernetes to be unique
 	name string
+
+	// nodeGroup, if present, gives the node group that this node belongs to.
+	nodeGroup string
 
 	// vCPU tracks the state of vCPU resources -- what's available and how
 	vCPU nodeResourceState[vmapi.MilliCPU]
@@ -100,15 +104,15 @@ func (s *nodeResourceState[T]) fields() []nodeResourceStateField[T] {
 }
 
 func (s *nodeState) updateMetrics(metrics PromMetrics, memSlotSizeBytes uint64) {
-	s.vCPU.updateMetrics(metrics.nodeCPUResources, s.name, vmapi.MilliCPU.AsFloat64)
-	s.memSlots.updateMetrics(metrics.nodeMemResources, s.name, func(memSlots uint16) float64 {
+	s.vCPU.updateMetrics(metrics.nodeCPUResources, s.name, s.nodeGroup, vmapi.MilliCPU.AsFloat64)
+	s.memSlots.updateMetrics(metrics.nodeMemResources, s.name, s.nodeGroup, func(memSlots uint16) float64 {
 		return float64(uint64(memSlots) * memSlotSizeBytes) // convert memSlots -> bytes
 	})
 }
 
-func (s *nodeResourceState[T]) updateMetrics(metric *prometheus.GaugeVec, nodeName string, convert func(T) float64) {
+func (s *nodeResourceState[T]) updateMetrics(metric *prometheus.GaugeVec, nodeName, nodeGroup string, convert func(T) float64) {
 	for _, f := range s.fields() {
-		metric.WithLabelValues(nodeName, f.valueName).Set(convert(f.value))
+		metric.WithLabelValues(nodeName, nodeGroup, f.valueName).Set(convert(f.value))
 	}
 }
 
@@ -118,7 +122,7 @@ func (s *nodeState) removeMetrics(metrics PromMetrics) {
 
 	for _, g := range gauges {
 		for _, f := range fields {
-			g.DeleteLabelValues(s.name, f.valueName)
+			g.DeleteLabelValues(s.name, s.nodeGroup, f.valueName)
 		}
 	}
 }
@@ -615,8 +619,18 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", node.Name, err)
 	}
 
+	var nodeGroup string
+	if conf.K8sNodeGroupLabel != "" {
+		var ok bool
+		nodeGroup, ok = node.Labels[conf.K8sNodeGroupLabel]
+		if !ok {
+			logger.Warn("Node does not have node group label", zap.String("label", conf.K8sNodeGroupLabel))
+		}
+	}
+
 	n := &nodeState{
 		name:      node.Name,
+		nodeGroup: nodeGroup,
 		vCPU:      vCPU,
 		memSlots:  memSlots,
 		pods:      make(map[util.NamespacedName]*podState),
@@ -986,6 +1000,101 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(logger *zap.Logger, 
 	)
 }
 
+// NB: expected to be run in its own thread.
+func (e *AutoscaleEnforcer) cleanupMigration(logger *zap.Logger, vmm *vmapi.VirtualMachineMigration) {
+	vmmName := util.GetNamespacedName(vmm)
+
+	logger = logger.With(
+		// note: use the "virtualmachinemigration" key here for just the name, because it mirrors
+		// what we log in startMigration.
+		zap.Object("virtualmachinemigration", vmmName),
+		// also include the VM, for better association.
+		zap.Object("virtualmachine", util.NamespacedName{
+			Name:      vmm.Spec.VmName,
+			Namespace: vmm.Namespace,
+		}),
+	)
+	// Failed migrations should be noisy. Everything to do with cleaning up a failed migration
+	// should be logged at "Warn" or higher.
+	var logInfo func(string, ...zap.Field)
+	if vmm.Status.Phase == vmapi.VmmSucceeded {
+		logInfo = logger.Info
+	} else {
+		logInfo = logger.Warn
+	}
+	logInfo(
+		"Going to delete VirtualMachineMigration",
+		// Explicitly include "phase" here because we have metrics for it.
+		zap.String("phase", string(vmm.Status.Phase)),
+		// ... and then log the rest of the information about the migration:
+		zap.Any("spec", vmm.Spec),
+		zap.Any("status", vmm.Status),
+	)
+
+	// mark the operation as ongoing
+	func() {
+		e.state.lock.Lock()
+		defer e.state.lock.Unlock()
+
+		newCount := e.state.ongoingMigrationDeletions[vmmName] + 1
+		if newCount != 1 {
+			// context included by logger
+			logger.Error(
+				"More than one ongoing deletion for VirtualMachineMigration",
+				zap.Int("count", newCount),
+			)
+		}
+		e.state.ongoingMigrationDeletions[vmmName] = newCount
+	}()
+	// ... and remember to clean up when we're done:
+	defer func() {
+		e.state.lock.Lock()
+		defer e.state.lock.Unlock()
+
+		newCount := e.state.ongoingMigrationDeletions[vmmName] - 1
+		if newCount == 0 {
+			delete(e.state.ongoingMigrationDeletions, vmmName)
+		} else {
+			// context included by logger
+			logger.Error(
+				"More than one ongoing deletion for VirtualMachineMigration",
+				zap.Int("count", newCount),
+			)
+			e.state.ongoingMigrationDeletions[vmmName] = newCount
+		}
+	}()
+
+	// Continually retry the operation, until we're successful (or the VM doesn't exist anymore)
+
+	retryWait := time.Second * time.Duration(e.state.conf.MigrationDeletionRetrySeconds)
+
+	for {
+		logInfo("Attempting to delete VirtualMachineMigration")
+		err := e.vmClient.NeonvmV1().
+			VirtualMachineMigrations(vmmName.Namespace).
+			Delete(context.TODO(), vmmName.Name, metav1.DeleteOptions{})
+		if err == nil /* NB! This condition is inverted! */ {
+			logInfo("Successfully deleted VirtualMachineMigration")
+			e.metrics.migrationDeletions.WithLabelValues(string(vmm.Status.Phase)).Inc()
+			return
+		} else if apierrors.IsNotFound(err) {
+			logger.Warn("Deletion was handled for us; VirtualMachineMigration no longer exists")
+			return
+		}
+
+		logger.Error(
+			"Failed to delete VirtualMachineMigration, will try again after delay",
+			zap.Duration("delay", retryWait),
+			zap.Error(err),
+		)
+		e.metrics.migrationDeleteFails.WithLabelValues(string(vmm.Status.Phase)).Inc()
+
+		// retry after a delay
+		time.Sleep(retryWait)
+		continue
+	}
+}
+
 func (s *podState) isBetterMigrationTarget(other *podState) bool {
 	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
 	if s.metrics == nil || other.metrics == nil {
@@ -1000,14 +1109,14 @@ func (s *podState) isBetterMigrationTarget(other *podState) bool {
 // send requests to the API server
 //
 // A lock will ALWAYS be held on return from this function.
-func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, pod *podState, vmClient *vmclient.Clientset) error {
+func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logger, pod *podState) (created bool, _ error) {
 	if pod.currentlyMigrating() {
-		return fmt.Errorf("Pod is already migrating")
+		return false, fmt.Errorf("Pod is already migrating")
 	}
 
 	// Unlock to make the API request(s), then make sure we're locked on return.
-	s.lock.Unlock()
-	defer s.lock.Lock()
+	e.state.lock.Unlock()
+	defer e.state.lock.Lock()
 
 	vmmName := util.NamespacedName{
 		Name:      fmt.Sprintf("schedplugin-%s", pod.vmName.Name),
@@ -1024,17 +1133,23 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 	// We technically don't *need* this additional request here (because we can check the return
 	// from the Create request with apierrors.IsAlreadyExists). However: the benefit we get from
 	// this is that the logs are significantly clearer.
-	_, err := vmClient.NeonvmV1().
+	_, err := e.vmClient.NeonvmV1().
 		VirtualMachineMigrations(pod.name.Namespace).
 		Get(ctx, vmmName.Name, metav1.GetOptions{})
 	if err == nil {
 		logger.Warn("VirtualMachineMigration already exists, nothing to do")
-		return nil
+		return false, nil
 	} else if !apierrors.IsNotFound(err) {
 		// We're *expecting* to get IsNotFound = true; if err != nil and isn't NotFound, then
 		// there's some unexpected error.
 		logger.Error("Unexpected error doing Get request to check if migration already exists", zap.Error(err))
-		return fmt.Errorf("Error checking if migration exists: %w", err)
+		return false, fmt.Errorf("Error checking if migration exists: %w", err)
+	}
+
+	gitVersion := util.GetBuildInfo().GitInfo
+	// FIXME: make this not depend on GetBuildInfo() internals.
+	if gitVersion == "<unknown>" {
+		gitVersion = "unknown"
 	}
 
 	vmm := &vmapi.VirtualMachineMigration{
@@ -1043,6 +1158,14 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 			// should do if that happens.
 			Name:      vmmName.Name,
 			Namespace: pod.name.Namespace,
+			Labels: map[string]string{
+				// NB: There's requirements on what constitutes a valid label. Thankfully, the
+				// output of `git describe` always will.
+				//
+				// See also:
+				// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set
+				LabelPluginCreatedMigration: gitVersion,
+			},
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
 			VmName: pod.vmName.Name,
@@ -1059,15 +1182,17 @@ func (s *pluginState) startMigration(ctx context.Context, logger *zap.Logger, po
 	}
 
 	logger.Info("Migration doesn't already exist, creating one for VM", zap.Any("spec", vmm.Spec))
-	_, err = vmClient.NeonvmV1().VirtualMachineMigrations(pod.name.Namespace).Create(ctx, vmm, metav1.CreateOptions{})
+	_, err = e.vmClient.NeonvmV1().VirtualMachineMigrations(pod.name.Namespace).Create(ctx, vmm, metav1.CreateOptions{})
 	if err != nil {
+		e.metrics.migrationCreateFails.Inc()
 		// log here, while the logger's fields are in scope
 		logger.Error("Unexpected error doing Create request for new migration", zap.Error(err))
-		return fmt.Errorf("Error creating migration: %w", err)
+		return false, fmt.Errorf("Error creating migration: %w", err)
 	}
+	e.metrics.migrationCreations.Inc()
 	logger.Info("VM migration request successful")
 
-	return nil
+	return true, nil
 }
 
 // readClusterState sets the initial node and pod maps for the plugin's state, getting its

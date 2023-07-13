@@ -602,7 +602,7 @@ func doInformantRequest[Q any, R any](
 ) (_ *R, statusCode int, _ error) {
 	result := "<internal error>"
 	defer func() {
-		s.runner.global.metrics.informantRequestsOutbound.WithLabelValues(result).Inc()
+		s.runner.global.metrics.informantRequestsOutbound.WithLabelValues(path, result).Inc()
 	}()
 
 	reqBody, err := json.Marshal(reqData)

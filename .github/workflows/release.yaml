@@ -203,3 +203,4 @@ jobs:
             rendered_manifests/multus.yaml
             rendered_manifests/multus-eks.yaml
             rendered_manifests/whereabouts.yaml
+            deploy/vmscrape.yaml

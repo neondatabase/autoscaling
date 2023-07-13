@@ -298,3 +298,63 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 		},
 	)
 }
+
+type migrationWatchCallbacks struct {
+	submitMigrationFinished func(*vmapi.VirtualMachineMigration)
+}
+
+// watchMigrationEvents *only* looks at migrations that were created by the scheduler plugin (or a
+// previous version of it).
+//
+// We use this to trigger cleaning up migrations once they're finished, because they don't
+// auto-delete, and our deterministic naming means that each we won't be able to create a new
+// migration for the same VM until the old one's gone.
+//
+// Tracking whether a migration was created by the scheduler plugin is done by adding the label
+// 'autoscaling.neon.tech/created-by-scheduler' to every migration we create.
+func (e *AutoscaleEnforcer) watchMigrationEvents(
+	ctx context.Context,
+	parentLogger *zap.Logger,
+	metrics watch.Metrics,
+	callbacks migrationWatchCallbacks,
+) (*watch.Store[vmapi.VirtualMachineMigration], error) {
+	logger := parentLogger.Named("vmm-watch")
+
+	return watch.Watch(
+		ctx,
+		logger.Named("watch"),
+		e.vmClient.NeonvmV1().VirtualMachineMigrations(corev1.NamespaceAll),
+		watch.Config{
+			ObjectNameLogField: "virtualmachinemigration",
+			Metrics: watch.MetricsConfig{
+				Metrics:  metrics,
+				Instance: "VirtualMachineMigrations",
+			},
+			// FIXME: make these durations configurable.
+			RetryRelistAfter: util.NewTimeRange(time.Second, 3, 5),
+			RetryWatchAfter:  util.NewTimeRange(time.Second, 3, 5),
+		},
+		watch.Accessors[*vmapi.VirtualMachineMigrationList, vmapi.VirtualMachineMigration]{
+			Items: func(list *vmapi.VirtualMachineMigrationList) []vmapi.VirtualMachineMigration { return list.Items },
+		},
+		watch.InitModeSync,
+		metav1.ListOptions{
+			// NB: Including just the label itself means that we select for objects that *have* the
+			// label, without caring about the actual value.
+			//
+			// See also:
+			// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement
+			LabelSelector: LabelPluginCreatedMigration,
+		},
+		watch.HandlerFuncs[*vmapi.VirtualMachineMigration]{
+			UpdateFunc: func(oldObj, newObj *vmapi.VirtualMachineMigration) {
+				shouldDelete := newObj.Status.Phase != oldObj.Status.Phase &&
+					(newObj.Status.Phase == vmapi.VmmSucceeded || newObj.Status.Phase == vmapi.VmmFailed)
+
+				if shouldDelete {
+					callbacks.submitMigrationFinished(newObj)
+				}
+			},
+		},
+	)
+}

@@ -39,11 +39,19 @@ type Config struct {
 	// version handled.
 	SchedulerName string `json:"schedulerName"`
 
+	// MigrationDeletionRetrySeconds gives the duration, in seconds, we should wait between retrying
+	// a failed attempt to delete a VirtualMachineMigration that's finished.
+	MigrationDeletionRetrySeconds uint `json:"migrationDeletionRetrySeconds"`
+
 	// DoMigration, if provided, allows VM migration to be disabled
 	//
 	// This flag is intended to be temporary, just until NeonVM supports mgirations and we can
 	// re-enable it.
 	DoMigration *bool `json:"doMigration"`
+
+	// K8sNodeGroupLabel, if provided, gives the label to use when recording k8s node groups in the
+	// metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
+	K8sNodeGroupLabel string `json:"k8sNodeGroupLabel"`
 
 	// DumpState, if provided, enables a server to dump internal state
 	DumpState *dumpStateConfig `json:"dumpState"`
@@ -113,6 +121,10 @@ func (c *Config) validate() (string, error) {
 		if path, err := c.DumpState.validate(); err != nil {
 			return fmt.Sprintf("dumpState.%s", path), err
 		}
+	}
+
+	if c.MigrationDeletionRetrySeconds == 0 {
+		return "migrationDeletionRetrySeconds", errors.New("value must be > 0")
 	}
 
 	return "", nil
