@@ -14,8 +14,6 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-const minSubProcessRestartInterval = 5 * time.Second
-
 func main() {
 	logger := zap.Must(zap.NewProduction()).Named("vm-informant")
 	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
