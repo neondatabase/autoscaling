@@ -912,7 +912,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 
 		ps.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 	} else {
-		logger.Warn("Cannot find pod in podMap in otherPods")
+		logger.Warn("Cannot find pod in podMap or otherPods")
 		return
 	}
 }
