@@ -5,17 +5,19 @@ package informant
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
+	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type MonitorResult struct {
-	Result       *DownscaleResult
+	Result       *api.DownscaleResult
 	Confirmation struct{}
 }
 
@@ -75,21 +77,12 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 }
 
 // Send a packet down the connection.
-func (disp *Dispatcher) send(ctx context.Context, p Packet) error {
-	disp.logger.Debug("Sending packet", zap.Any("packet", p))
-	return wsjson.Write(ctx, disp.conn, p)
-}
-
-// Try to receive a packet off the connection.
-func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
-	var p Packet
-	disp.logger.Debug("Reading packet off connection.")
-	err := wsjson.Read(ctx, disp.conn, &p)
-	if err != nil {
-		return nil, err
+func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error {
+	data, error := api.SerializeInformantMessage(message, id)
+	if error != nil {
+		return fmt.Errorf("error serializing message: %w", error)
 	}
-	disp.logger.Debug("Received packet", zap.Any("packet", p))
-	return &p, nil
+	return wsjson.Write(ctx, disp.conn, data)
 }
 
 // Make a request to the monitor. The dispatcher will handle returning a response
@@ -98,73 +91,86 @@ func (disp *Dispatcher) recv(ctx context.Context) (*Packet, error) {
 // *Note*: sending a RequestUpscale to the monitor is incorrect. The monitor does
 // not (and should) not know how to handle this and will panic. Likewise, we panic
 // upon receiving a TryDownscale or NotifyUpscale request.
-func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[MonitorResult], req Request) {
+func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[MonitorResult], message any) error {
 	id := disp.counter
 	disp.counter += 1
-	packet := Packet{
-		Stage: Stage{
-			Request:  &req,
-			Response: nil,
-			Done:     nil,
-		},
-		Id: id,
-	}
-	err := disp.send(ctx, packet)
+	err := disp.send(ctx, id, message)
 	if err != nil {
-		disp.logger.Warn("Failed to send packet.", zap.Any("packet", packet))
+		disp.logger.Warn("Failed to send packet.", zap.Any("message", message))
 	}
 	disp.waiters[id] = sender
+	return nil
 }
 
-// Handle a request. In reality, the only request we should ever receive is
-// a request upscale, in which we sent an event down the dispatcher's notifier
-// channel.
-func (disp *Dispatcher) handleRequest(req Request) {
-	if req.RequestUpscale != nil {
-		disp.logger.Info("Received request for upscale")
-		// The goroutine listening on the other side will make the request
-		disp.notifier.Send()
-	} else if req.NotifyUpscale != nil {
-		panic("informant should never receive a NotifyUpscale request from monitor")
-	} else if req.TryDownscale != nil {
-		panic("informant should never receive a TryDownscale request from monitor")
-	} else {
-		// This is a serialization error
-		panic("all fields nil")
+func (disp *Dispatcher) HandlePacket(
+	ctx context.Context,
+	handleUpscaleRequest func(api.UpscaleRequest),
+	handleUpscaleConfirmation func(api.UpscaleConfirmation, uint64) error,
+	handleDownscaleResult func(api.DownscaleResult, uint64) error,
+) error {
+	var message []byte
+	if err := wsjson.Read(ctx, disp.conn, message); err != nil {
+		return fmt.Errorf("error receiving message: %w", err)
 	}
-}
 
-// Handle a response. This basically means sending back the result on the channel
-// that the original requester gave us.
-func (disp *Dispatcher) handleResponse(res Response, id uint64) {
-	if res.DownscaleResult != nil {
-		// Loop up the waiter and send back the result
-		sender, ok := disp.waiters[id]
-		if ok {
-			disp.logger.Info("Received DownscaleResult. Notifying receiver.", zap.Uint64("id", id))
-			sender.Send(MonitorResult{Result: res.DownscaleResult, Confirmation: struct{}{}})
-			// Don't forget to delete the waiter
-			delete(disp.waiters, id)
-		} else {
-			panic("Received response for id without a registered sender")
+	var unstructured map[string]interface{}
+	if err := json.Unmarshal(message, &unstructured); err != nil {
+		panic(err)
+	}
+
+	typeField, ok := unstructured["type"]
+	if !ok {
+		return fmt.Errorf("packet did not have \"type\" field")
+	}
+	typeStr, ok := typeField.(string)
+	if !ok {
+		return fmt.Errorf("value with key \"type\" was not a string")
+	}
+
+	idField, ok := unstructured["id"]
+	if !ok {
+		return fmt.Errorf("packet did not have \"id\" field")
+	}
+	id, ok := idField.(uint64)
+	if !ok {
+		return fmt.Errorf("value with key \"id\" was not an integer")
+	}
+
+	switch typeStr {
+	case "UpscaleRequest":
+		{
+			var req api.UpscaleRequest
+			if err := json.Unmarshal(message, &req); err != nil {
+				return fmt.Errorf("error unmarshaling UpscaleRequest: %w", err)
+			}
+			handleUpscaleRequest(req)
+			return nil
 		}
-	} else if res.ResourceConfirmation != nil {
-		// Loop up the waiter and send back the result
-		sender, ok := disp.waiters[id]
-		if ok {
-			disp.logger.Info("Received ResourceConfirmation. Notifying receiver.", zap.Uint64("id", id))
-			//
-			sender.Send(MonitorResult{Result: nil, Confirmation: struct{}{}})
-			// Don't forget to delete the waiter
-			delete(disp.waiters, id)
-		} else {
-			panic("Received response for id without a registered sender")
+	case "UpscaleConfirmation":
+		{
+			var confirmation api.UpscaleConfirmation
+			if err := json.Unmarshal(message, &confirmation); err != nil {
+				return fmt.Errorf("error unmarshaling UpscaleConfirmation: %w", err)
+			}
+			return handleUpscaleConfirmation(confirmation, id)
 		}
-	} else if res.UpscaleResult != nil {
-		panic("informant should never receive an UpscaleResult response from monitor")
-	} else {
-		// This is a serialization error
-		panic("all fields nil")
+	case "DownscaleResult":
+		{
+			var res api.DownscaleResult
+			if err := json.Unmarshal(message, &res); err != nil {
+				return fmt.Errorf("error unmarshaling DownscaleResult: %w", err)
+			}
+			return handleDownscaleResult(res, id)
+
+		}
+	default:
+		{
+			err := disp.send(ctx, id, api.InvalidMessage{Error: "received packet of unknown type"})
+			if err != nil {
+				return err
+			}
+			return nil
+		}
 	}
 }
 
@@ -173,32 +179,44 @@ func (disp *Dispatcher) run() {
 	disp.logger.Info("Starting.")
 	ctx := context.Background()
 	for {
-		packet, err := disp.recv(ctx)
-		if err != nil {
-			disp.logger.Warn("Error receiving from ws connection. Continuing.", zap.Error(err))
-			continue
+		handleUpscaleRequest := func(api.UpscaleRequest) {
+			disp.notifier.Send()
 		}
-		stage := packet.Stage
-		id := packet.Id
-		if stage.Request != nil {
-			disp.handleRequest(*stage.Request)
+		handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
+			sender, ok := disp.waiters[id]
+			if ok {
+				sender.Send(MonitorResult{Result: nil, Confirmation: struct{}{}})
+				// Don't forget to delete the waiter
+				delete(disp.waiters, id)
+			} else {
+				fmtString := "received UpscaleConfirmation with id %d but no record of previous packet with that id"
+				err := disp.send(ctx, id, api.InvalidMessage{Error: fmt.Sprintf(fmtString, id)})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		handleDownscaleResult := func(res api.DownscaleResult, id uint64) error {
+			sender, ok := disp.waiters[id]
+			if ok {
+				sender.Send(MonitorResult{Result: &res, Confirmation: struct{}{}})
+				// Don't forget to delete the waiter
+				delete(disp.waiters, id)
+			} else {
+				fmtString := "received DownscaleResult with id %d but no record of previous packet with that id"
+				err := disp.send(ctx, id, api.InvalidMessage{Error: fmt.Sprintf(fmtString, id)})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 
-			// We actually send a done here because there's nothing more we can
-			// do, since the request could only be a RequestUpscale. If the agent
-			// decides to upscale, it will go to the monitor as a Request{NotifyUpscale}
-			err := disp.send(ctx, Done(id))
-			if err != nil {
-				disp.logger.Warn("Failed to send Done packet.")
-			}
-		} else if stage.Response != nil {
-			disp.handleResponse(*stage.Response, id)
-			err := disp.send(ctx, Done(id))
-			if err != nil {
-				disp.logger.Warn("Failed to send Done packet.")
-			}
-		} else if stage.Done != nil {
-			disp.logger.Debug("Transaction finished.", zap.Uint64("id", id))
-			// yay! :)
-		}
+		disp.HandlePacket(ctx,
+			handleUpscaleRequest,
+			handleUpscaleConfirmation,
+			handleDownscaleResult,
+		)
 	}
 }

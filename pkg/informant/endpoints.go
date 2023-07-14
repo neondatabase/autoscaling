@@ -118,20 +118,15 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 	s.dispatcher.Call(
 		ctx,
 		tx,
-		Request{
-			RequestUpscale: nil,
-			NotifyUpscale:  nil,
-			TryDownscale: &Resources{
-				Cpu: cpu,
-				Mem: mem,
-			},
+		api.DownscaleRequest{
+			Target: api.Allocation{Cpu: cpu, Mem: mem},
 		},
 	)
 
 	// Wait for result
 	res := <-rx.Recv()
 
-	return res.Result.Into(), 200, nil
+	return res.Result, 200, nil
 }
 
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
@@ -174,13 +169,8 @@ func (s *State) NotifyUpscale(
 	s.dispatcher.Call(
 		ctx,
 		tx,
-		Request{
-			RequestUpscale: nil,
-			NotifyUpscale: &Resources{
-				Cpu: cpu,
-				Mem: mem,
-			},
-			TryDownscale: nil,
+		api.UpscaleNotification{
+			api.Allocation{Cpu: cpu, Mem: mem},
 		},
 	)
 

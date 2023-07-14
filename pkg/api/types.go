@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap/zapcore"
@@ -605,4 +607,69 @@ const (
 
 func (v RunnerProtoVersion) SupportsCgroupFractionalCPU() bool {
 	return v >= RunnerProtoV1
+}
+
+////////////////////////////////////
+// Informant <-> Monitor Messages //
+////////////////////////////////////
+
+type Allocation struct {
+	// Number of vCPUs
+	Cpu uint64 `json:"cpu"`
+
+	// Number of bytes
+	Mem uint64 `json:"mem"`
+}
+
+// Types sent by monitor
+
+type UpscaleRequest struct{}
+
+type UpscaleConfirmation struct {
+	Error string
+}
+
+// Also api.DownscaleResult
+
+// Types sent by informant
+
+type UpscaleNotification struct {
+	Granted Allocation `json:"granted"`
+}
+
+type DownscaleRequest struct {
+	Target Allocation `json:"target"`
+}
+
+// Type shared by informant and monitor
+
+type InvalidMessage struct {
+	Error string `json:"error"`
+}
+
+func SerializeInformantMessage(message any, id uint64) ([]byte, error) {
+	// The final type that gets sent over the wire
+	type Bundle struct {
+		Message any    `json:"informantMessage"`
+		Type    string `json:"type"`
+		Id      uint64 `json:"id"`
+	}
+
+	var typeStr string
+	switch message.(type) {
+	case DownscaleRequest:
+		typeStr = "DownscaleRequest"
+	case UpscaleNotification:
+		typeStr = "UpscaleNotification"
+	case InvalidMessage:
+		typeStr = "InvalidPacket"
+	default:
+		return nil, fmt.Errorf("unknown message type \"%s\"", reflect.TypeOf(message))
+	}
+
+	return json.Marshal(Bundle{
+		Message: message,
+		Type:    typeStr,
+		Id:      id,
+	})
 }

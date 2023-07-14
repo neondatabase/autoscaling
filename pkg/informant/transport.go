@@ -1,5 +1,6 @@
 package informant
 
+/*
 // Defines types that are used to communicate with the monitor over websocket
 // connection. Carefully ensure that serialization is compatible with transport
 // types defined in the monitor.
@@ -81,3 +82,4 @@ func Done(id uint64) Packet {
 		Id: id,
 	}
 }
+*/
