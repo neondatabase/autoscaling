@@ -370,7 +370,7 @@ func createISO9660FromPath(diskName string, diskPath string, contentPath string)
 			continue
 		}
 
-		log.Printf("adding file: %s\n", outputPath)
+		log.Printf("adding file: %s", outputPath)
 		fileToAdd, err := os.Open(fileName)
 		if err != nil {
 			return err
@@ -487,12 +487,12 @@ func main() {
 	// going to resize
 	if !vmSpec.Guest.RootDisk.Size.IsZero() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
-			log.Printf("resizing rootDisk from %s to %s\n", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
+			log.Printf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
 			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
 				log.Fatal(err)
 			}
 		} else {
-			log.Printf("rootDisk.size (%s) should be more than size in image (%s)\n", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
+			log.Printf("rootDisk.size (%s) should be more than size in image (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
 		}
 	}
 
@@ -605,13 +605,13 @@ func main() {
 
 func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "POST" {
-		log.Printf("unexpected method: %s\n", r.Method)
+		log.Printf("unexpected method: %s", r.Method)
 		w.WriteHeader(400)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("could not read body: %s\n", err)
+		log.Printf("could not read body: %s", err)
 		w.WriteHeader(400)
 		return
 	}
@@ -619,7 +619,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	parsed := api.VCPUChange{}
 	err = json.Unmarshal(body, &parsed)
 	if err != nil {
-		log.Printf("could not parse body: %s\n", err)
+		log.Printf("could not parse body: %s", err)
 		w.WriteHeader(400)
 		return
 	}
@@ -628,7 +628,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	log.Printf("got CPU update %v", parsed.VCPUs.AsFloat64())
 	err = setCgroupLimit(parsed.VCPUs, cgroupPath)
 	if err != nil {
-		log.Printf("could not set cgroup limit: %s\n", err)
+		log.Printf("could not set cgroup limit: %s", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -638,21 +638,21 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 
 func handleCPUCurrent(w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "GET" {
-		log.Printf("unexpected method: %s\n", r.Method)
+		log.Printf("unexpected method: %s", r.Method)
 		w.WriteHeader(400)
 		return
 	}
 
 	cpus, err := getCgroupQuota(cgroupPath)
 	if err != nil {
-		log.Printf("could not get cgroup quota: %s\n", err)
+		log.Printf("could not get cgroup quota: %s", err)
 		w.WriteHeader(500)
 		return
 	}
 	resp := api.VCPUCgroup{VCPUs: *cpus}
 	body, err := json.Marshal(resp)
 	if err != nil {
-		log.Printf("could not marshal body: %s\n", err)
+		log.Printf("could not marshal body: %s", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -686,7 +686,7 @@ func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg 
 		if errors.Is(err, http.ErrServerClosed) {
 			log.Println("cpu_change server closed")
 		} else if err != nil {
-			log.Fatalf("error starting server: %s\n", err)
+			log.Fatalf("error starting server: %s", err)
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
@@ -700,7 +700,7 @@ func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	// quota may be greater than period if the cgroup is allowed
 	// to use more than 100% of a CPU.
 	quota := int64(float64(r) / float64(1000) * float64(cgroupPeriod))
-	log.Printf("setting cgroup to %v %v\n", quota, period)
+	log.Printf("setting cgroup to %v %v", quota, period)
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
