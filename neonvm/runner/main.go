@@ -478,7 +478,7 @@ func main() {
 	// get current disk size by qemu-img info command
 	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalf("could not get root image size: %s", err)
 	}
 	imageSize := QemuImgOutputPartial{}
 	json.Unmarshal(qemuImgOut, &imageSize)
@@ -871,6 +871,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// gerenare random MAC for default Guest interface
 	mac, err := mac.GenerateRandMAC()
 	if err != nil {
+		log.Fatalf("could not generate random MAC: %s", err)
 		return nil, err
 	}
 
@@ -882,10 +883,12 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.LinkAdd(bridge); err != nil {
+		log.Fatalf("could not create bridge interface: %s", err)
 		return nil, err
 	}
 	ipPod, ipVm, mask, err := calcIPs(cidr)
 	if err != nil {
+		log.Fatalf("could not parse IP: %s", err)
 		return nil, err
 	}
 	bridgeAddr := &netlink.Addr{
@@ -895,9 +898,11 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.AddrAdd(bridge, bridgeAddr); err != nil {
+		log.Fatalf("could not parse IP: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(bridge); err != nil {
+		log.Fatalf("could not setup bridge: %s", err)
 		return nil, err
 	}
 
@@ -924,18 +929,22 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		Flags: netlink.TUNTAP_DEFAULTS,
 	}
 	if err := netlink.LinkAdd(tap); err != nil {
+		log.Printf("could not add tap device: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetMaster(tap, bridge); err != nil {
+		log.Printf("could not setup tap as master: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(tap); err != nil {
+		log.Printf("could not setup tap device: %s", err)
 		return nil, err
 	}
 
 	// setup masquerading outgoing (from VM) traffic
 	log.Println("setup masquerading for outgoing traffic")
 	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
+		log.Printf("could not setup masquerading for outgoing traffic: %s", err)
 		return nil, err
 	}
 
@@ -948,6 +957,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
+			log.Printf("could not setup DNAT for incoming traffic: %s", err)
 			return nil, err
 		}
 	}
@@ -955,6 +965,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// get dns details from /etc/resolv.conf
 	resolvConf, err := getResolvConf()
 	if err != nil {
+		log.Printf("could not get DNS details: %s", err)
 		return nil, err
 	}
 	dns := getNameservers(resolvConf.Content, types.IP)[0]
@@ -977,6 +988,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 
 	// run dnsmasq for default Guest interface
 	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
+		log.Printf("could not run dnsmasq: %s", err)
 		return nil, err
 	}
 
