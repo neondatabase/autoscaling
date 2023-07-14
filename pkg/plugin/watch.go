@@ -298,14 +298,23 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
-				oldInfo, err := api.ExtractVmInfo(logger, oldVM)
-				if err != nil {
-					logger.Error("Failed to extract VM info in update for old VM", util.VMNameFields(oldVM), zap.Error(err))
-					return
-				}
 				newInfo, err := api.ExtractVmInfo(logger, newVM)
 				if err != nil {
 					logger.Error("Failed to extract VM info in update for new VM", util.VMNameFields(newVM), zap.Error(err))
+					e.handle.EventRecorder().Eventf(
+						newVM,            // regarding
+						nil,              // related
+						"Warning",        // eventtype
+						"ExtractVmInfo",  // reason
+						"HandleVmUpdate", // action
+						"Failed to extract autoscaling info about VM: %s", // note
+						err,
+					)
+					return
+				}
+				oldInfo, err := api.ExtractVmInfo(logger, oldVM)
+				if err != nil {
+					logger.Error("Failed to extract VM info in update for old VM", util.VMNameFields(oldVM), zap.Error(err))
 					return
 				}
 

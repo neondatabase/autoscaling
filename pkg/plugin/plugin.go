@@ -250,7 +250,7 @@ func (e *AutoscaleEnforcer) Name() string {
 // getVmInfo is a helper for the plugin-related functions
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
-func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
+func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, action string) (*api.VmInfo, error) {
 	var vmName util.NamespacedName
 	vmName.Namespace = pod.Namespace
 
@@ -264,7 +264,7 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 		return index.Get(vmName.Namespace, vmName.Name)
 	}
 
-	vm, ok := vmStore.GetIndexed(accessor)
+	vm, ok := e.vmStore.GetIndexed(accessor)
 	if !ok {
 		logger.Warn(
 			"VM is missing from local store. Relisting",
@@ -281,13 +281,13 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 		defer timer.Stop()
 
 		select {
-		case <-vmStore.Relist():
+		case <-e.vmStore.Relist():
 		case <-timer.C:
 			return nil, fmt.Errorf("Timed out waiting on VM store relist (timeout = %s)", timeout)
 		}
 
 		// retry fetching the VM, now that we know it's been synced.
-		vm, ok = vmStore.GetIndexed(accessor)
+		vm, ok = e.vmStore.GetIndexed(accessor)
 		if !ok {
 			// if the VM is still not present after relisting, then either it's already been deleted
 			// or there's a deeper problem.
@@ -297,6 +297,15 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 
 	vmInfo, err := api.ExtractVmInfo(logger, vm)
 	if err != nil {
+		e.handle.EventRecorder().Eventf(
+			vm,              // regarding
+			pod,             // related
+			"Warning",       // eventtype
+			"ExtractVmInfo", // reason
+			action,          // action
+			"Failed to extract autoscaling info about VM: %s", // node
+			err,
+		)
 		return nil, fmt.Errorf("Error extracting VM info: %w", err)
 	}
 
@@ -391,7 +400,7 @@ func (e *AutoscaleEnforcer) Filter(
 		return
 	}
 
-	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
+	vmInfo, err := e.getVmInfo(logger, pod, "Filter")
 	if err != nil {
 		logger.Error("Error getting VM info for Pod", zap.Error(err))
 		return framework.NewStatus(
@@ -584,7 +593,7 @@ func (e *AutoscaleEnforcer) Score(
 
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
-	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
+	vmInfo, err := e.getVmInfo(logger, pod, "Score")
 	if err != nil {
 		logger.Error("Error getting VM info for Pod", zap.Error(err))
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
@@ -668,7 +677,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		return nil // success; allow the Pod onto the node.
 	}
 
-	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
+	vmInfo, err := e.getVmInfo(logger, pod, "Reserve")
 	if err != nil {
 		logger.Error("Error getting VM info for pod", zap.Error(err))
 		return framework.NewStatus(
