@@ -24,6 +24,7 @@ config.billing = {
 
 // Scheduler:
 config.k8sNodeGroupLabel = "eks.amazonaws.com/nodegroup"
+config.ignoreNamespaces = ["overprovisioning"]
 config.doMigration = true
 ```
 
