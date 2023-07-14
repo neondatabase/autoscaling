@@ -1439,6 +1439,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			}),
 		)
 
+		ns.updateMetrics(p.metrics, p.state.memSlotSizeBytes())
+
 		ns.pods[podName] = ps
 		p.state.podMap[podName] = ps
 	}
@@ -1530,6 +1532,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 				mem: memVerdict,
 			}),
 		)
+
+		ns.updateMetrics(p.metrics, p.state.memSlotSizeBytes())
 
 		ns.otherPods[podName] = ps
 		p.state.otherPods[podName] = ps
