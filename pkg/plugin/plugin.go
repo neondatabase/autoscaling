@@ -207,13 +207,15 @@ func makeAutoscaleEnforcerPlugin(
 	}
 
 	go func() {
-		iter := queue.Iterator()
-		for iter.Next(ctx) {
-			callback := iter.Value()
+		for {
+			callback, err := queue.Wait(ctx)
+			if err != nil {
+				logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
+				break
+			}
+
 			callback()
-		}
-		if err := iter.Close(); err != nil {
-			logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
+			queue.Remove()
 		}
 	}()
 
