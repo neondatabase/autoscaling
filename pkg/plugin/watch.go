@@ -82,10 +82,10 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
 	callbacks podWatchCallbacks,
-) error {
+) (*watch.Store[corev1.Pod], error) {
 	logger := parentLogger.Named("pod-watch")
 
-	_, err := watch.Watch(
+	return watch.Watch(
 		ctx,
 		logger.Named("watch"),
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
@@ -190,7 +190,6 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			},
 		},
 	)
-	return err
 }
 
 // tryMigrationOwnerReference returns the name of the owning migration, if this pod *is* owned by a
@@ -269,6 +268,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
 	callbacks vmWatchCallbacks,
+	podIndex watch.IndexedStore[corev1.Pod, *watch.NameIndex[corev1.Pod]],
 ) (*watch.Store[vmapi.VirtualMachine], error) {
 	logger := parentLogger.Named("vm-watch")
 
@@ -298,14 +298,34 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
+				newInfo, err := api.ExtractVmInfo(logger, newVM)
+				if err != nil {
+					// Try to get the runner pod associated with the VM, if we can, but don't worry
+					// about it if we can't.
+					var runnerPod *corev1.Pod
+					if podName := newVM.Status.PodName; podName != "" {
+						// NB: index.Get returns nil if not found, so we only have a non-nil
+						// runnerPod if it's currently known.
+						runnerPod, _ = podIndex.GetIndexed(func(index *watch.NameIndex[corev1.Pod]) (*corev1.Pod, bool) {
+							return index.Get(newVM.Namespace, podName)
+						})
+					}
+
+					logger.Error("Failed to extract VM info in update for new VM", util.VMNameFields(newVM), zap.Error(err))
+					e.handle.EventRecorder().Eventf(
+						newVM,            // regarding
+						runnerPod,        // related
+						"Warning",        // eventtype
+						"ExtractVmInfo",  // reason
+						"HandleVmUpdate", // action
+						"Failed to extract autoscaling info about VM: %s", // note
+						err,
+					)
+					return
+				}
 				oldInfo, err := api.ExtractVmInfo(logger, oldVM)
 				if err != nil {
 					logger.Error("Failed to extract VM info in update for old VM", util.VMNameFields(oldVM), zap.Error(err))
-					return
-				}
-				newInfo, err := api.ExtractVmInfo(logger, newVM)
-				if err != nil {
-					logger.Error("Failed to extract VM info in update for new VM", util.VMNameFields(newVM), zap.Error(err))
 					return
 				}
 
