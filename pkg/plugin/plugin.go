@@ -178,12 +178,15 @@ func makeAutoscaleEnforcerPlugin(
 	p.nodeStore = watch.NewIndexedStore(nodeStore, watch.NewFlatNameIndex[corev1.Node]())
 
 	logger.Info("Starting pod watcher")
-	if err := p.watchPodEvents(ctx, logger, watchMetrics, pwc); err != nil {
+	podStore, err := p.watchPodEvents(ctx, logger, watchMetrics, pwc)
+	if err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
+	podIndex := watch.NewIndexedStore(podStore, watch.NewNameIndex[corev1.Pod]())
+
 	logger.Info("Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, vwc)
+	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, vwc, podIndex)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
 	}
