@@ -400,9 +400,7 @@ func (e *AutoscaleEnforcer) Filter(
 	logger.Info("Handling Filter request")
 
 	if e.state.conf.ignoredNamespace(pod.Namespace) {
-		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
-		logger.Warn("Ignoring Filter request for pod in ignored namespace")
-		return
+		logger.Warn("Received Filter request for pod in ignored namespace, continuing anyways.")
 	}
 
 	vmInfo, err := e.getVmInfo(logger, pod, "Filter")
