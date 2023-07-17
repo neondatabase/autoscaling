@@ -94,7 +94,6 @@ type nodeResourceStateField[T any] struct {
 func (s *nodeResourceState[T]) fields() []nodeResourceStateField[T] {
 	return []nodeResourceStateField[T]{
 		{"Total", s.Total},
-		{"System", s.System},
 		{"Watermark", s.Watermark},
 		{"Reserved", s.Reserved},
 		{"Buffer", s.Buffer},
@@ -131,23 +130,15 @@ func (s *nodeState) removeMetrics(metrics PromMetrics) {
 type nodeResourceState[T any] struct {
 	// Total is the Total amount of T available on the node. This value does not change.
 	Total T `json:"total"`
-	// System is the amount of T pre-reserved for system functions, and cannot be handed out to pods
-	// on the node. This amount CAN change on config updates, which may result in more of T than
-	// we'd like being already provided to the pods.
-	//
-	// This is equivalent to the value of this resource's resourceConfig.System, rounded up to the
-	// nearest size of the units of T.
-	System T `json:"system"`
 	// Watermark is the amount of T reserved to pods above which we attempt to reduce usage via
 	// migration.
 	Watermark T `json:"watermark"`
 	// Reserved is the current amount of T reserved to pods. It SHOULD be less than or equal to
-	// (Total - System), and we take active measures reduce it once it is above watermark.
+	// Total), and we take active measures reduce it once it is above Watermark.
 	//
 	// Reserved MAY be greater than Total on scheduler restart (because of buffering with VM scaling
 	// maximums), but (Reserved - Buffer) MUST be less than Total. In general, (Reserved - Buffer)
-	// SHOULD be less than or equal to (Total - System), but this can be temporarily violated after
-	// restart or config change.
+	// SHOULD be less than or equal to Total, but this can be temporarily violated after restart.
 	//
 	// For more information, refer to the ARCHITECTURE.md file in this directory.
 	//
@@ -187,7 +178,7 @@ type nodeOtherResourceState struct {
 	ReservedMemSlots uint16         `json:"reservedMemSlots"`
 
 	// MarginCPU and MarginMemory track the amount of other resources we can get "for free" because
-	// they were left out when rounding the System usage to fit in integer units of CPUs or memory
+	// they were left out when rounding the Total usage to fit in integer units of CPUs or memory
 	// slots
 	//
 	// These values are both only changed by configuration changes.
@@ -381,16 +372,14 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 	}
 }
 
-// totalReservableCPU returns the amount of node CPU that may be allocated to VM pods -- i.e.,
-// excluding the CPU pre-reserved for system tasks.
+// totalReservableCPU returns the amount of node CPU that may be allocated to VM pods
 func (s *nodeState) totalReservableCPU() vmapi.MilliCPU {
-	return s.vCPU.Total - s.vCPU.System
+	return s.vCPU.Total
 }
 
-// totalReservableMemSlots returns the number of memory slots that may be allocated to VM pods --
-// i.e., excluding the memory pre-reserved for system tasks.
+// totalReservableMemSlots returns the number of memory slots that may be allocated to VM pods
 func (s *nodeState) totalReservableMemSlots() uint16 {
-	return s.memSlots.Total - s.memSlots.System
+	return s.memSlots.Total
 }
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
@@ -680,28 +669,14 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 	var cpu resource.Quantity
 	var mem resource.Quantity
 
-	for i, container := range pod.Spec.Containers {
-		// For each resource, use requests if it's provided, or fallback on the limit.
-
-		cpuRequest := container.Resources.Requests.Cpu()
-		cpuLimit := container.Resources.Limits.Cpu()
-		if cpuRequest.IsZero() && cpuLimit.IsZero() {
-			err := fmt.Errorf("containers[%d] (%q) missing resources.requests.cpu AND resources.limits.cpu", i, container.Name)
-			return podOtherResourceState{}, err
-		} else if cpuRequest.IsZero() /* && !cpuLimit.IsZero() */ {
-			cpuRequest = cpuLimit
-		}
-		cpu.Add(*cpuRequest)
-
-		memRequest := container.Resources.Requests.Memory()
-		memLimit := container.Resources.Limits.Memory()
-		if memRequest.IsZero() && memLimit.IsZero() {
-			err := fmt.Errorf("containers[%d] (%q) missing resources.limits.memory", i, container.Name)
-			return podOtherResourceState{}, err
-		} else if memRequest.IsZero() /* && !memLimit.IsZero() */ {
-			memRequest = memLimit
-		}
-		mem.Add(*memRequest)
+	for _, container := range pod.Spec.Containers {
+		// For each resource, add the requests, if they're provided. We use this because it matches
+		// what cluster-autoscaler uses.
+		//
+		// NB: .Cpu() returns a pointer to a value equal to zero if the resource is not present. So
+		// we can just add it either way.
+		cpu.Add(*container.Resources.Requests.Cpu())
+		mem.Add(*container.Resources.Requests.Memory())
 	}
 
 	return podOtherResourceState{RawCPU: cpu, RawMemory: mem}, nil
@@ -745,6 +720,90 @@ func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName stri
 
 	delete(e.state.nodeMap, nodeName)
 	logger.Info("Deleted node")
+}
+
+func (e *AutoscaleEnforcer) handlePodStarted(logger *zap.Logger, pod *corev1.Pod) {
+	podName := util.GetNamespacedName(pod)
+	nodeName := pod.Spec.NodeName
+
+	logger = logger.With(
+		zap.String("action", "Pod started"),
+		zap.Object("pod", podName),
+		zap.String("node", nodeName),
+	)
+
+	if pod.Spec.SchedulerName == e.state.conf.SchedulerName {
+		logger.Info("Got non-VM pod start event for pod assigned to this scheduler; nothing to do")
+		return
+	}
+
+	logger.Info("Handling non-VM pod start event")
+
+	podResources, err := extractPodOtherPodResourceState(pod)
+	if err != nil {
+		logger.Error("Error extracting resource state for non-VM pod", zap.Error(err))
+		return
+	}
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
+
+	if _, ok := e.state.otherPods[podName]; ok {
+		logger.Info("Pod is already known") // will happen during startup
+		return
+	}
+
+	// Pod is not known - let's get information about the node!
+	node, err := e.state.getOrFetchNodeState(context.TODO(), logger, e.metrics, e.nodeStore, nodeName)
+	if err != nil {
+		logger.Error("Failed to state for node", zap.Error(err))
+	}
+
+	// TODO: this is pretty similar to the Reserve method. Maybe we should join them into one.
+	oldNodeRes := node.otherResources
+	newNodeRes := node.otherResources.addPod(&e.state.conf.MemSlotSize, podResources)
+
+	addCPU := newNodeRes.ReservedCPU - oldNodeRes.ReservedCPU
+	addMem := newNodeRes.ReservedMemSlots - oldNodeRes.ReservedMemSlots
+
+	oldNodeCPUReserved := node.vCPU.Reserved
+	oldNodeMemReserved := node.memSlots.Reserved
+
+	node.otherResources = newNodeRes
+	node.vCPU.Reserved += addCPU
+	node.memSlots.Reserved += addMem
+
+	ps := &otherPodState{
+		name:      podName,
+		node:      node,
+		resources: podResources,
+	}
+	node.otherPods[podName] = ps
+	e.state.otherPods[podName] = ps
+
+	cpuVerdict := fmt.Sprintf(
+		"node reserved %d -> %d / %d, node other resources %d -> %d rounded (%v -> %v raw, %v margin)",
+		oldNodeCPUReserved, node.vCPU.Reserved, node.vCPU.Total, oldNodeRes.ReservedCPU, newNodeRes.ReservedCPU, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, newNodeRes.MarginCPU,
+	)
+	memVerdict := fmt.Sprintf(
+		"node reserved %d -> %d / %d, node other resources %d -> %d slots (%v -> %v raw, %v margin)",
+		oldNodeMemReserved, node.memSlots.Reserved, node.memSlots.Total, oldNodeRes.ReservedMemSlots, newNodeRes.ReservedMemSlots, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, newNodeRes.MarginMemory,
+	)
+
+	log := logger.Info
+	if node.vCPU.Reserved > node.vCPU.Total || node.memSlots.Reserved > node.memSlots.Total {
+		log = logger.Warn
+	}
+
+	log(
+		"Handled new non-VM pod",
+		zap.Object("verdict", verdictSet{
+			cpu: cpuVerdict,
+			mem: memVerdict,
+		}),
+	)
+
+	node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 }
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
@@ -1279,8 +1338,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			skippedVms += 1
 		}
 
-		if pod.Spec.SchedulerName != p.state.conf.SchedulerName {
-			logSkip("Spec.SchedulerName %q != our config.SchedulerName %q", pod.Spec.SchedulerName, p.state.conf.SchedulerName)
+		if p.state.conf.ignoredNamespace(pod.Namespace) {
+			logSkip("VM is in ignored namespace")
 			continue
 		} else if pod.Spec.NodeName == "" {
 			logSkip("VM pod's Spec.NodeName = \"\" (maybe it hasn't been scheduled yet?)")
@@ -1380,6 +1439,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			}),
 		)
 
+		ns.updateMetrics(p.metrics, p.state.memSlotSizeBytes())
+
 		ns.pods[podName] = ps
 		p.state.podMap[podName] = ps
 	}
@@ -1413,8 +1474,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 		if _, ok := p.state.podMap[podName]; ok {
 			continue
-		} else if pod.Spec.SchedulerName != p.state.conf.SchedulerName {
-			logSkip("Spec.SchedulerName %q != our config.SchedulerName %q", pod.Spec.SchedulerName, p.state.conf.SchedulerName)
+		} else if p.state.conf.ignoredNamespace(pod.Namespace) {
+			logSkip("non-VM pod is in ignored namespace")
 			continue
 		}
 
@@ -1471,6 +1532,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 				mem: memVerdict,
 			}),
 		)
+
+		ns.updateMetrics(p.metrics, p.state.memSlotSizeBytes())
 
 		ns.otherPods[podName] = ps
 		p.state.otherPods[podName] = ps

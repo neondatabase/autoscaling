@@ -63,6 +63,7 @@ func (e *AutoscaleEnforcer) watchNodeEvents(
 }
 
 type podWatchCallbacks struct {
+	submitPodStarted        func(*zap.Logger, *corev1.Pod)
 	submitVMDeletion        func(*zap.Logger, util.NamespacedName)
 	submitPodDeletion       func(*zap.Logger, util.NamespacedName)
 	submitPodStartMigration func(_ *zap.Logger, podName, migrationName util.NamespacedName, source bool)
@@ -81,10 +82,10 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
 	callbacks podWatchCallbacks,
-) error {
+) (*watch.Store[corev1.Pod], error) {
 	logger := parentLogger.Named("pod-watch")
 
-	_, err := watch.Watch(
+	return watch.Watch(
 		ctx,
 		logger.Named("watch"),
 		e.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll),
@@ -106,14 +107,49 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 		watch.InitModeSync, // note: doesn't matter, because AddFunc = nil.
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*corev1.Pod]{
+			AddFunc: func(pod *corev1.Pod, preexisting bool) {
+				name := util.GetNamespacedName(pod)
+
+				if e.state.conf.ignoredNamespace(pod.Namespace) {
+					logger.Info("Received add event for ignored pod", zap.Object("pod", name))
+					return
+				}
+
+				_, isVM := pod.Labels[LabelVM]
+
+				// Generate events for all non-VM pods that are running
+				if !isVM && pod.Status.Phase == corev1.PodRunning {
+					if !preexisting {
+						// Generally pods shouldn't be immediately running, so we log this as a
+						// warning. If it was preexisting, then it'll be handled on the initial
+						// cluster read already (but we generate the events anyways so that we
+						// definitely don't miss anything).
+						logger.Warn("Received add event for new non-VM pod already running", zap.Object("pod", name))
+					}
+					callbacks.submitPodStarted(logger, pod)
+				}
+			},
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
 				name := util.GetNamespacedName(newPod)
+
+				if e.state.conf.ignoredNamespace(newPod.Namespace) {
+					logger.Info("Received update event for ignored pod", zap.Object("pod", name))
+					return
+				}
+
+				_, isVM := newPod.Labels[LabelVM]
+
+				// Check if a non-VM pod is now running.
+				if !isVM && oldPod.Status.Phase == corev1.PodPending && newPod.Status.Phase == corev1.PodRunning {
+					logger.Info("Received update event for non-VM pod now running", zap.Object("pod", name))
+					callbacks.submitPodStarted(logger, newPod)
+				}
 
 				// Check if pod is "completed" - handle that the same as deletion.
 				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
 					logger.Info("Received update event for completion of pod", zap.Object("pod", name))
 
-					if _, ok := newPod.Labels[LabelVM]; ok {
+					if isVM {
 						callbacks.submitVMDeletion(logger, name)
 					} else {
 						callbacks.submitPodDeletion(logger, name)
@@ -136,6 +172,11 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				name := util.GetNamespacedName(pod)
 
+				if e.state.conf.ignoredNamespace(pod.Namespace) {
+					logger.Info("Received delete event for ignored pod", zap.Object("pod", name))
+					return
+				}
+
 				if util.PodCompleted(pod) {
 					logger.Info("Received delete event for completed pod", zap.Object("pod", name))
 				} else {
@@ -149,7 +190,6 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			},
 		},
 	)
-	return err
 }
 
 // tryMigrationOwnerReference returns the name of the owning migration, if this pod *is* owned by a
@@ -228,6 +268,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
 	callbacks vmWatchCallbacks,
+	podIndex watch.IndexedStore[corev1.Pod, *watch.NameIndex[corev1.Pod]],
 ) (*watch.Store[vmapi.VirtualMachine], error) {
 	logger := parentLogger.Named("vm-watch")
 
@@ -252,14 +293,39 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
+				if e.state.conf.ignoredNamespace(newVM.Namespace) {
+					logger.Info("Received update event for ignored VM", util.VMNameFields(newVM))
+					return
+				}
+
+				newInfo, err := api.ExtractVmInfo(logger, newVM)
+				if err != nil {
+					// Try to get the runner pod associated with the VM, if we can, but don't worry
+					// about it if we can't.
+					var runnerPod *corev1.Pod
+					if podName := newVM.Status.PodName; podName != "" {
+						// NB: index.Get returns nil if not found, so we only have a non-nil
+						// runnerPod if it's currently known.
+						runnerPod, _ = podIndex.GetIndexed(func(index *watch.NameIndex[corev1.Pod]) (*corev1.Pod, bool) {
+							return index.Get(newVM.Namespace, podName)
+						})
+					}
+
+					logger.Error("Failed to extract VM info in update for new VM", util.VMNameFields(newVM), zap.Error(err))
+					e.handle.EventRecorder().Eventf(
+						newVM,            // regarding
+						runnerPod,        // related
+						"Warning",        // eventtype
+						"ExtractVmInfo",  // reason
+						"HandleVmUpdate", // action
+						"Failed to extract autoscaling info about VM: %s", // note
+						err,
+					)
+					return
+				}
 				oldInfo, err := api.ExtractVmInfo(logger, oldVM)
 				if err != nil {
 					logger.Error("Failed to extract VM info in update for old VM", util.VMNameFields(oldVM), zap.Error(err))
-					return
-				}
-				newInfo, err := api.ExtractVmInfo(logger, newVM)
-				if err != nil {
-					logger.Error("Failed to extract VM info in update for new VM", util.VMNameFields(newVM), zap.Error(err))
 					return
 				}
 
@@ -348,6 +414,14 @@ func (e *AutoscaleEnforcer) watchMigrationEvents(
 		},
 		watch.HandlerFuncs[*vmapi.VirtualMachineMigration]{
 			UpdateFunc: func(oldObj, newObj *vmapi.VirtualMachineMigration) {
+				if e.state.conf.ignoredNamespace(newObj.Namespace) {
+					logger.Info(
+						"Received update event for ignored VM Migration",
+						zap.Object("virtualmachinemigration", util.GetNamespacedName(newObj)),
+					)
+					return
+				}
+
 				shouldDelete := newObj.Status.Phase != oldObj.Status.Phase &&
 					(newObj.Status.Phase == vmapi.VmmSucceeded || newObj.Status.Phase == vmapi.VmmFailed)
 

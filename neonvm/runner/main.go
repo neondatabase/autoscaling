@@ -370,7 +370,7 @@ func createISO9660FromPath(diskName string, diskPath string, contentPath string)
 			continue
 		}
 
-		log.Printf("adding file: %s\n", outputPath)
+		log.Printf("adding file: %s", outputPath)
 		fileToAdd, err := os.Open(fileName)
 		if err != nil {
 			return err
@@ -478,7 +478,7 @@ func main() {
 	// get current disk size by qemu-img info command
 	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalf("could not get root image size: %s", err)
 	}
 	imageSize := QemuImgOutputPartial{}
 	json.Unmarshal(qemuImgOut, &imageSize)
@@ -487,12 +487,12 @@ func main() {
 	// going to resize
 	if !vmSpec.Guest.RootDisk.Size.IsZero() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
-			log.Printf("resizing rootDisk from %s to %s\n", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
+			log.Printf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
 			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
 				log.Fatal(err)
 			}
 		} else {
-			log.Printf("rootDisk.size (%s) should be more than size in image (%s)\n", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
+			log.Printf("rootDisk.size (%s) should be more than size in image (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
 		}
 	}
 
@@ -605,13 +605,13 @@ func main() {
 
 func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "POST" {
-		log.Printf("unexpected method: %s\n", r.Method)
+		log.Printf("unexpected method: %s", r.Method)
 		w.WriteHeader(400)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("could not read body: %s\n", err)
+		log.Printf("could not read body: %s", err)
 		w.WriteHeader(400)
 		return
 	}
@@ -619,7 +619,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	parsed := api.VCPUChange{}
 	err = json.Unmarshal(body, &parsed)
 	if err != nil {
-		log.Printf("could not parse body: %s\n", err)
+		log.Printf("could not parse body: %s", err)
 		w.WriteHeader(400)
 		return
 	}
@@ -628,7 +628,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	log.Printf("got CPU update %v", parsed.VCPUs.AsFloat64())
 	err = setCgroupLimit(parsed.VCPUs, cgroupPath)
 	if err != nil {
-		log.Printf("could not set cgroup limit: %s\n", err)
+		log.Printf("could not set cgroup limit: %s", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -638,21 +638,21 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 
 func handleCPUCurrent(w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "GET" {
-		log.Printf("unexpected method: %s\n", r.Method)
+		log.Printf("unexpected method: %s", r.Method)
 		w.WriteHeader(400)
 		return
 	}
 
 	cpus, err := getCgroupQuota(cgroupPath)
 	if err != nil {
-		log.Printf("could not get cgroup quota: %s\n", err)
+		log.Printf("could not get cgroup quota: %s", err)
 		w.WriteHeader(500)
 		return
 	}
 	resp := api.VCPUCgroup{VCPUs: *cpus}
 	body, err := json.Marshal(resp)
 	if err != nil {
-		log.Printf("could not marshal body: %s\n", err)
+		log.Printf("could not marshal body: %s", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -686,7 +686,7 @@ func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg 
 		if errors.Is(err, http.ErrServerClosed) {
 			log.Println("cpu_change server closed")
 		} else if err != nil {
-			log.Fatalf("error starting server: %s\n", err)
+			log.Fatalf("error starting server: %s", err)
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
@@ -700,7 +700,7 @@ func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	// quota may be greater than period if the cgroup is allowed
 	// to use more than 100% of a CPU.
 	quota := int64(float64(r) / float64(1000) * float64(cgroupPeriod))
-	log.Printf("setting cgroup to %v %v\n", quota, period)
+	log.Printf("setting cgroup to %v %v", quota, period)
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
@@ -871,6 +871,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// gerenare random MAC for default Guest interface
 	mac, err := mac.GenerateRandMAC()
 	if err != nil {
+		log.Fatalf("could not generate random MAC: %s", err)
 		return nil, err
 	}
 
@@ -882,10 +883,12 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.LinkAdd(bridge); err != nil {
+		log.Fatalf("could not create bridge interface: %s", err)
 		return nil, err
 	}
 	ipPod, ipVm, mask, err := calcIPs(cidr)
 	if err != nil {
+		log.Fatalf("could not parse IP: %s", err)
 		return nil, err
 	}
 	bridgeAddr := &netlink.Addr{
@@ -895,9 +898,11 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.AddrAdd(bridge, bridgeAddr); err != nil {
+		log.Fatalf("could not parse IP: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(bridge); err != nil {
+		log.Fatalf("could not setup bridge: %s", err)
 		return nil, err
 	}
 
@@ -924,18 +929,22 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		Flags: netlink.TUNTAP_DEFAULTS,
 	}
 	if err := netlink.LinkAdd(tap); err != nil {
+		log.Printf("could not add tap device: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetMaster(tap, bridge); err != nil {
+		log.Printf("could not setup tap as master: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(tap); err != nil {
+		log.Printf("could not setup tap device: %s", err)
 		return nil, err
 	}
 
 	// setup masquerading outgoing (from VM) traffic
 	log.Println("setup masquerading for outgoing traffic")
 	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
+		log.Printf("could not setup masquerading for outgoing traffic: %s", err)
 		return nil, err
 	}
 
@@ -948,6 +957,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
+			log.Printf("could not setup DNAT for incoming traffic: %s", err)
 			return nil, err
 		}
 	}
@@ -955,6 +965,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// get dns details from /etc/resolv.conf
 	resolvConf, err := getResolvConf()
 	if err != nil {
+		log.Printf("could not get DNS details: %s", err)
 		return nil, err
 	}
 	dns := getNameservers(resolvConf.Content, types.IP)[0]
@@ -977,6 +988,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 
 	// run dnsmasq for default Guest interface
 	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
+		log.Printf("could not run dnsmasq: %s", err)
 		return nil, err
 	}
 
