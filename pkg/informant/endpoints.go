@@ -132,7 +132,7 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 		{
 			return res.Result, 200, nil
 		}
-	case <-time.NewTimer(MonitorResponseTimeout).C:
+	case <-time.After(MonitorResponseTimeout):
 		{
 			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", MonitorResponseTimeout)
 		}
@@ -193,7 +193,7 @@ func (s *State) NotifyUpscale(
 		{
 			return &res.Confirmation, 200, nil
 		}
-	case <-time.NewTimer(MonitorResponseTimeout).C:
+	case <-time.After(MonitorResponseTimeout):
 		{
 			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", MonitorResponseTimeout)
 		}
