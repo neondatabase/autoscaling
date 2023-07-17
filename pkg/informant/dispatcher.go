@@ -55,7 +55,7 @@ type Dispatcher struct {
 func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSender) (disp Dispatcher, _ error) {
 	// FIXME: have this context actually do something? As of now it's just being
 	// passed around to satisfy typing. Maybe it's not really necessary.
-	ctx := context.Background()
+	ctx := context.TODO()
 
 	logger.Info("Connecting via websocket.", zap.String("addr", addr))
 
