@@ -150,43 +150,34 @@ func (disp *Dispatcher) HandlePacket(
 
 	switch typeStr {
 	case "UpscaleRequest":
-		{
-			var req api.UpscaleRequest
-			if err := json.Unmarshal(message, &req); err != nil {
-				return fmt.Errorf("error unmarshaling UpscaleRequest: %w", err)
-			}
-			handleUpscaleRequest(req)
-			return nil
+		var req api.UpscaleRequest
+		if err := json.Unmarshal(message, &req); err != nil {
+			return fmt.Errorf("error unmarshaling UpscaleRequest: %w", err)
 		}
+		handleUpscaleRequest(req)
+		return nil
 	case "UpscaleConfirmation":
-		{
-			var confirmation api.UpscaleConfirmation
-			if err := json.Unmarshal(message, &confirmation); err != nil {
-				return fmt.Errorf("error unmarshaling UpscaleConfirmation: %w", err)
-			}
-			return handleUpscaleConfirmation(confirmation, id)
+		var confirmation api.UpscaleConfirmation
+		if err := json.Unmarshal(message, &confirmation); err != nil {
+			return fmt.Errorf("error unmarshaling UpscaleConfirmation: %w", err)
 		}
+		return handleUpscaleConfirmation(confirmation, id)
 	case "DownscaleResult":
-		{
-			var res api.DownscaleResult
-			if err := json.Unmarshal(message, &res); err != nil {
-				return fmt.Errorf("error unmarshaling DownscaleResult: %w", err)
-			}
-			return handleDownscaleResult(res, id)
-
+		var res api.DownscaleResult
+		if err := json.Unmarshal(message, &res); err != nil {
+			return fmt.Errorf("error unmarshaling DownscaleResult: %w", err)
 		}
+		return handleDownscaleResult(res, id)
 	default:
-		{
-			err := disp.send(
-				ctx,
-				id,
-				api.InvalidMessage{Error: fmt.Sprintf("received packet of unknown type: <%s>", typeStr)},
-			)
-			if err != nil {
-				return err
-			}
-			return nil
+		err := disp.send(
+			ctx,
+			id,
+			api.InvalidMessage{Error: fmt.Sprintf("received packet of unknown type: <%s>", typeStr)},
+		)
+		if err != nil {
+			return err
 		}
+		return nil
 	}
 }
 
