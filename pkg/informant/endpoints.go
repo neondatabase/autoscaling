@@ -115,13 +115,16 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 
 	tx, rx := util.NewSingleSignalPair[MonitorResult]()
 
-	s.dispatcher.Call(
+	err := s.dispatcher.Call(
 		ctx,
 		tx,
 		api.DownscaleRequest{
 			Target: api.Allocation{Cpu: cpu, Mem: mem},
 		},
 	)
+	if err != nil {
+		return nil, 500, err
+	}
 
 	// Wait for result
 	res := <-rx.Recv()
@@ -166,13 +169,16 @@ func (s *State) NotifyUpscale(
 	s.agents.ReceivedUpscale()
 
 	tx, rx := util.NewSingleSignalPair[MonitorResult]()
-	s.dispatcher.Call(
+	err := s.dispatcher.Call(
 		ctx,
 		tx,
 		api.UpscaleNotification{
-			api.Allocation{Cpu: cpu, Mem: mem},
+			Granted: api.Allocation{Cpu: cpu, Mem: mem},
 		},
 	)
+	if err != nil {
+		return nil, 500, err
+	}
 
 	// Wait for result
 	res := <-rx.Recv()

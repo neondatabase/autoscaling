@@ -78,9 +78,9 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 
 // Send a packet down the connection.
 func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error {
-	data, error := api.SerializeInformantMessage(message, id)
-	if error != nil {
-		return fmt.Errorf("error serializing message: %w", error)
+	data, err := api.SerializeInformantMessage(message, id)
+	if err != nil {
+		return fmt.Errorf("error serializing message: %w", err)
 	}
 	// wsjson.Write serializes whatever is passed in, and go serializes []byte
 	// by base64 encoding it, so use RawMessage to avoid serializing to []byte
