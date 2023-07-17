@@ -82,7 +82,11 @@ func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error 
 	if error != nil {
 		return fmt.Errorf("error serializing message: %w", error)
 	}
-	return wsjson.Write(ctx, disp.conn, data)
+	// wsjson.Write serializes whatever is passed in, and go serializes []byte
+	// by base64 encoding it, so use RawMessage to avoid serializing to []byte
+	// (done by SerializeInformantMessage), and then base64 encoding again
+	raw := json.RawMessage(data)
+	return wsjson.Write(ctx, disp.conn, &raw)
 }
 
 // Make a request to the monitor. The dispatcher will handle returning a response
@@ -96,7 +100,7 @@ func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[Monit
 	disp.counter += 1
 	err := disp.send(ctx, id, message)
 	if err != nil {
-		disp.logger.Warn("Failed to send packet.", zap.Any("message", message))
+		disp.logger.Error("failed to send packet", zap.Any("message", message), zap.Error(err))
 	}
 	disp.waiters[id] = sender
 	return nil
@@ -104,12 +108,16 @@ func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[Monit
 
 func (disp *Dispatcher) HandlePacket(
 	ctx context.Context,
+	logger *zap.Logger,
 	handleUpscaleRequest func(api.UpscaleRequest),
 	handleUpscaleConfirmation func(api.UpscaleConfirmation, uint64) error,
 	handleDownscaleResult func(api.DownscaleResult, uint64) error,
 ) error {
-	var message []byte
-	if err := wsjson.Read(ctx, disp.conn, message); err != nil {
+	// wsjson.Read tries to deserialize the message. If we were to read to a
+	// []byte, it would base64 encode it as part of deserialization. json.RawMessage
+	// avoids this, and we manually deserialize later
+	var message json.RawMessage
+	if err := wsjson.Read(ctx, disp.conn, &message); err != nil {
 		return fmt.Errorf("error receiving message: %w", err)
 	}
 
@@ -124,17 +132,21 @@ func (disp *Dispatcher) HandlePacket(
 	}
 	typeStr, ok := typeField.(string)
 	if !ok {
-		return fmt.Errorf("value with key \"type\" was not a string")
+		return fmt.Errorf("value <%s> with key \"type\" was not a string", typeField)
 	}
 
 	idField, ok := unstructured["id"]
 	if !ok {
 		return fmt.Errorf("packet did not have \"id\" field")
 	}
-	id, ok := idField.(uint64)
+
+	// Go expects JSON numbers to be float64, so we first assert to that then
+	// convert to uint64
+	f, ok := idField.(float64)
 	if !ok {
-		return fmt.Errorf("value with key \"id\" was not an integer")
+		return fmt.Errorf("value <%s> with key \"id\" was not a number", idField)
 	}
+	id := uint64(f)
 
 	switch typeStr {
 	case "UpscaleRequest":
@@ -165,7 +177,11 @@ func (disp *Dispatcher) HandlePacket(
 		}
 	default:
 		{
-			err := disp.send(ctx, id, api.InvalidMessage{Error: "received packet of unknown type"})
+			err := disp.send(
+				ctx,
+				id,
+				api.InvalidMessage{Error: fmt.Sprintf("received packet of unknown type: <%s>", typeStr)},
+			)
 			if err != nil {
 				return err
 			}
@@ -179,6 +195,7 @@ func (disp *Dispatcher) run() {
 	disp.logger.Info("Starting.")
 	ctx := context.Background()
 	for {
+		logger := disp.logger.Named("message-handler")
 		handleUpscaleRequest := func(api.UpscaleRequest) {
 			disp.notifier.Send()
 		}
@@ -213,10 +230,15 @@ func (disp *Dispatcher) run() {
 			return nil
 		}
 
-		disp.HandlePacket(ctx,
+		err := disp.HandlePacket(
+			ctx,
+			logger,
 			handleUpscaleRequest,
 			handleUpscaleConfirmation,
 			handleDownscaleResult,
 		)
+		if err != nil {
+			logger.Error("error handling message", zap.Error(err))
+		}
 	}
 }
