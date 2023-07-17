@@ -48,6 +48,8 @@ type Dispatcher struct {
 	counter uint64
 
 	logger *zap.Logger
+
+	protoVersion api.MonitorProtoVersion
 }
 
 // Create a new Dispatcher, establishing a connection with the informant.
@@ -66,12 +68,35 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 		return disp, fmt.Errorf("Error creating dispatcher: %w", err)
 	}
 
+	// Figure out protocol version
+	// TODO: how many retries should this have
+	// ctx, cancel := context.WithTimeout(ctx, MonitorResponseTimeout)
+	// defer cancel()
+	wsjson.Write(
+		ctx,
+		c,
+		api.VersionRange[api.MonitorProtoVersion]{
+			Min: api.MonitorProtoV1_0,
+			Max: api.MonitorProtoV1_0,
+		},
+	)
+	var version api.MonitorProtocolResponse
+	err = wsjson.Read(ctx, c, &version)
+	if err != nil {
+		return Dispatcher{}, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
+	}
+	if version.Error != nil {
+		return Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %s", *version.Error)
+	}
+	logger.Info("negotiated protocol with monitor", zap.String("protocol", version.Version.String()))
+
 	disp = Dispatcher{
-		conn:     c,
-		notifier: notifier,
-		waiters:  make(map[uint64]util.SignalSender[MonitorResult]),
-		counter:  0,
-		logger:   logger.Named("dispatcher"),
+		conn:         c,
+		notifier:     notifier,
+		waiters:      make(map[uint64]util.SignalSender[MonitorResult]),
+		counter:      0,
+		logger:       logger.Named("dispatcher"),
+		protoVersion: version.Version,
 	}
 	return disp, nil
 }
@@ -187,6 +212,9 @@ func (disp *Dispatcher) run() {
 	ctx := context.Background()
 	for {
 		logger := disp.logger.Named("message-handler")
+		// Does not take a message id because we don't know when the agent will
+		// upscale. The monitor will get the result back as a NotifyUpscale message
+		// from us, with a new id.
 		handleUpscaleRequest := func(api.UpscaleRequest) {
 			disp.notifier.Send()
 		}

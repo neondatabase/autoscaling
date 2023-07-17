@@ -677,3 +677,49 @@ func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
 		Id:      id,
 	})
 }
+
+// MonitorProtoVersion represents a single version of the informant<->monitor protocol
+//
+// Each version of the agent<->monitor protocol is named independently from releases of the
+// repository containing this code. Names follow semver, although this does not necessarily
+// guarantee support - for example, the monitor may only support versions above v1.1.
+//
+// Version compatibility is documented in the neighboring file VERSIONING.md.
+type MonitorProtoVersion uint32
+
+const (
+	// MonitorProtoV1_0 represents v1.0 of the agent<->monitor protocol - the initial version.
+	//
+	// Last used in release version TBD // FIXME
+	MonitorProtoV1_0 = iota + 1
+
+	// latestMonitorProtoVersion represents the latest version of the agent<->Monitor protocol
+	//
+	// This value is kept private because it should not be used externally; any desired
+	// functionality that could be implemented with it should instead be a method on
+	// MonitorProtoVersion.
+	latestMonitorProtoVersion MonitorProtoVersion = iota // excluding +1 makes it equal to previous
+)
+
+func (v MonitorProtoVersion) String() string {
+	var zero MonitorProtoVersion
+
+	switch v {
+	case zero:
+		return "<invalid: zero>"
+	case MonitorProtoV1_0:
+		return "v1.0"
+	default:
+		diff := v - latestMonitorProtoVersion
+		return fmt.Sprintf("<unknown = %v + %d>", latestMonitorProtoVersion, diff)
+	}
+}
+
+// Sent back by the monitor after figuring out what protocol version we should use
+type MonitorProtocolResponse struct {
+	// If `Error` is nil, contains the value of the settled on protocol version
+	Version MonitorProtoVersion `json:"version"`
+
+	// Will be nill if no error occured
+	Error *string
+}

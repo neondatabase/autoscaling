@@ -14,8 +14,8 @@ import (
 //
 // The bounds are inclusive, representing all versions v with Min <= v <= Max.
 type VersionRange[V constraints.Ordered] struct {
-	Min V
-	Max V
+	Min V `json:"min"`
+	Max V `json:"max"`
 }
 
 func (r VersionRange[V]) String() string {
