@@ -127,9 +127,17 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 	}
 
 	// Wait for result
-	res := <-rx.Recv()
-
-	return res.Result, 200, nil
+	timeout := time.Second
+	select {
+	case res := <-rx.Recv():
+		{
+			return res.Result, 200, nil
+		}
+	case <-time.NewTimer(timeout).C:
+		{
+			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		}
+	}
 }
 
 // NotifyUpscale signals that the VM's resource usage has been increased to the new amount
@@ -181,9 +189,17 @@ func (s *State) NotifyUpscale(
 	}
 
 	// Wait for result
-	res := <-rx.Recv()
-
-	return &res.Confirmation, 200, nil
+	timeout := time.Second
+	select {
+	case res := <-rx.Recv():
+		{
+			return &res.Confirmation, 200, nil
+		}
+	case <-time.NewTimer(timeout).C:
+		{
+			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		}
+	}
 }
 
 // UnregisterAgent unregisters the autoscaler-agent given by info, if it is currently registered
