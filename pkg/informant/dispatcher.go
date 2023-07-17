@@ -72,7 +72,7 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 	// TODO: how many retries should this have
 	// ctx, cancel := context.WithTimeout(ctx, MonitorResponseTimeout)
 	// defer cancel()
-	wsjson.Write(
+	err = wsjson.Write(
 		ctx,
 		c,
 		api.VersionRange[api.MonitorProtoVersion]{
@@ -80,6 +80,9 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 			Max: api.MonitorProtoV1_0,
 		},
 	)
+    if err != nil {
+        return Dispatcher{}, fmt.Errorf("error sending protocol range to monitor: %w", err)
+    }
 	var version api.MonitorProtocolResponse
 	err = wsjson.Read(ctx, c, &version)
 	if err != nil {
