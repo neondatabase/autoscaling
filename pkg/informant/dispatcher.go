@@ -59,13 +59,13 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 	// passed around to satisfy typing. Maybe it's not really necessary.
 	ctx := context.TODO()
 
-	logger.Info("Connecting via websocket.", zap.String("addr", addr))
+	logger.Info("connecting via websocket", zap.String("addr", addr))
 
 	// We do not need to close the response body according to docs.
 	// Doing so causes memory bugs.
 	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
 	if err != nil {
-		return disp, fmt.Errorf("Error creating dispatcher: %w", err)
+		return disp, fmt.Errorf("error creating dispatcher: %w", err)
 	}
 
 	// Figure out protocol version
