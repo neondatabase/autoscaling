@@ -123,7 +123,7 @@ func (disp *Dispatcher) HandlePacket(
 
 	var unstructured map[string]interface{}
 	if err := json.Unmarshal(message, &unstructured); err != nil {
-		panic(err)
+		return fmt.Errorf("error deserializing message: \"%s\"", string(message))
 	}
 
 	typeField, ok := unstructured["type"]
