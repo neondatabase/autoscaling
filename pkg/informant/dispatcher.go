@@ -55,8 +55,6 @@ type Dispatcher struct {
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
 func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSender) (disp Dispatcher, _ error) {
-	// FIXME: have this context actually do something? As of now it's just being
-	// passed around to satisfy typing. Maybe it's not really necessary.
 	ctx := context.TODO()
 
 	logger.Info("connecting via websocket", zap.String("addr", addr))
@@ -70,8 +68,6 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 
 	// Figure out protocol version
 	// TODO: how many retries should this have
-	// ctx, cancel := context.WithTimeout(ctx, MonitorResponseTimeout)
-	// defer cancel()
 	err = wsjson.Write(
 		ctx,
 		c,
