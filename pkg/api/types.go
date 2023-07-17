@@ -650,28 +650,28 @@ type InvalidMessage struct {
 	Error string `json:"error"`
 }
 
-func SerializeInformantMessage(message any, id uint64) ([]byte, error) {
+func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
 	// The final type that gets sent over the wire
 	type Bundle struct {
-		Message any    `json:"informantMessage"`
+		Content any    `json:"content"`
 		Type    string `json:"type"`
 		Id      uint64 `json:"id"`
 	}
 
 	var typeStr string
-	switch message.(type) {
+	switch content.(type) {
 	case DownscaleRequest:
 		typeStr = "DownscaleRequest"
 	case UpscaleNotification:
 		typeStr = "UpscaleNotification"
 	case InvalidMessage:
-		typeStr = "InvalidPacket"
+		typeStr = "InvalidMessage"
 	default:
-		return nil, fmt.Errorf("unknown message type \"%s\"", reflect.TypeOf(message))
+		return nil, fmt.Errorf("unknown message type \"%s\"", reflect.TypeOf(content))
 	}
 
 	return json.Marshal(Bundle{
-		Message: message,
+		Content: content,
 		Type:    typeStr,
 		Id:      id,
 	})
