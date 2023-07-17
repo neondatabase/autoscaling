@@ -127,15 +127,14 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 	}
 
 	// Wait for result
-	timeout := time.Second
 	select {
 	case res := <-rx.Recv():
 		{
 			return res.Result, 200, nil
 		}
-	case <-time.NewTimer(timeout).C:
+	case <-time.NewTimer(MonitorResponseTimeout).C:
 		{
-			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", timeout)
+			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", MonitorResponseTimeout)
 		}
 	}
 }
@@ -189,15 +188,14 @@ func (s *State) NotifyUpscale(
 	}
 
 	// Wait for result
-	timeout := time.Second
 	select {
 	case res := <-rx.Recv():
 		{
 			return &res.Confirmation, 200, nil
 		}
-	case <-time.NewTimer(timeout).C:
+	case <-time.NewTimer(MonitorResponseTimeout).C:
 		{
-			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", timeout)
+			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", MonitorResponseTimeout)
 		}
 	}
 }
