@@ -96,11 +96,11 @@ func (s *State) HealthCheck(ctx context.Context, logger *zap.Logger, info *api.A
 //
 // Returns: body (if successful), status code and error (if unsuccessful)
 func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *api.AgentResourceMessage) (*api.DownscaleResult, int, error) {
-	cpu := uint64(target.Data.Cpu.Value())
+	cpu := float64(target.Data.Cpu.Value())
 	mem := uint64(target.Data.Memory.Value())
 
 	logger.Info("Sending try downscale.",
-		zap.Uint64("cpu", cpu),
+		zap.Float64("cpu", cpu),
 		zap.Uint64("mem", mem),
 	)
 	currentId := s.agents.CurrentIdStr()
@@ -155,11 +155,11 @@ func (s *State) NotifyUpscale(
 	//
 	// So until the race condition described in #23 is fixed, we have to just trust that the agent
 	// is telling the truth, *especially because it might not be*.
-	cpu := uint64(newResources.Data.Cpu.Value())
+	cpu := float64(newResources.Data.Cpu.Value())
 	mem := uint64(newResources.Data.Memory.Value())
 
 	logger.Info("Sending NotifyUpscale to monitor",
-		zap.Uint64("cpu", cpu),
+		zap.Float64("cpu", cpu),
 		zap.Uint64("mem", mem),
 	)
 

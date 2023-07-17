@@ -616,9 +616,10 @@ func (v RunnerProtoVersion) SupportsCgroupFractionalCPU() bool {
 // Informant <-> Monitor Messages //
 ////////////////////////////////////
 
+// Represents the resources that VM has been granted
 type Allocation struct {
 	// Number of vCPUs
-	Cpu uint64 `json:"cpu"`
+	Cpu float64 `json:"cpu"`
 
 	// Number of bytes
 	Mem uint64 `json:"mem"`
