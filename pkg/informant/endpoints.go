@@ -113,7 +113,7 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 		return nil, 400, fmt.Errorf("Agent ID %s is not the active Agent", incomingId)
 	}
 
-	tx, rx := util.NewSingleSignalPair[MonitorResult]()
+	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
 
 	err := s.dispatcher.Call(
 		ctx,
@@ -129,13 +129,14 @@ func (s *State) TryDownscale(ctx context.Context, logger *zap.Logger, target *ap
 	// Wait for result
 	select {
 	case res := <-rx.Recv():
-		{
+		// A nil pointer means an error occured
+		if res != nil {
 			return res.Result, 200, nil
+		} else {
+			return nil, 500, fmt.Errorf("monitor experienced an internal error")
 		}
 	case <-time.After(MonitorResponseTimeout):
-		{
-			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", MonitorResponseTimeout)
-		}
+		return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", MonitorResponseTimeout)
 	}
 }
 
@@ -175,7 +176,7 @@ func (s *State) NotifyUpscale(
 
 	s.agents.ReceivedUpscale()
 
-	tx, rx := util.NewSingleSignalPair[MonitorResult]()
+	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
 	err := s.dispatcher.Call(
 		ctx,
 		tx,
@@ -190,13 +191,14 @@ func (s *State) NotifyUpscale(
 	// Wait for result
 	select {
 	case res := <-rx.Recv():
-		{
+        // A nil pointer means a monitor error occured
+		if res != nil {
 			return &res.Confirmation, 200, nil
+		} else {
+			return nil, 500, fmt.Errorf("monitor experienced an internal error")
 		}
 	case <-time.After(MonitorResponseTimeout):
-		{
-			return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", MonitorResponseTimeout)
-		}
+		return nil, 500, fmt.Errorf("timed out waiting %v for monitor response", MonitorResponseTimeout)
 	}
 }
 

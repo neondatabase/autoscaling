@@ -13,6 +13,9 @@ import (
 // VersionRange is a helper type to represent a range of versions.
 //
 // The bounds are inclusive, representing all versions v with Min <= v <= Max.
+//
+// This type is sent directly to the monitor during the creation of a new
+// Dispatcher as part of figuring out which protocol to use.
 type VersionRange[V constraints.Ordered] struct {
 	Min V `json:"min"`
 	Max V `json:"max"`
