@@ -20,6 +20,10 @@ config.billing = {
       "pushRequestTimeoutSeconds": 30,
       "maxBatchSize": 200
 }
+
+// Scheduler:
+config.k8sNodeGroupLabel = "eks.amazonaws.com/nodegroup"
+config.ignoreNamespaces = ["overprovisioning"]
 ```
 
 The following production clusters have autoscaling deployed with the config represented in this
