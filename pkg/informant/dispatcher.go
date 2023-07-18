@@ -134,11 +134,11 @@ func (disp *Dispatcher) HandleMessage(
 	handleDownscaleResult func(api.DownscaleResult, uint64) error,
 	handleMonitorError func(api.InternalError, uint64) error,
 ) error {
-    // Deserialization has several steps:
-    // 1. Deserialize into an unstructured map[string]interface{}
-    // 2. Read the `type` field to know the type of the message
-    // 3. Then try to to deserialize again, but into that specific type
-    // 4. All message also come with an integer id under the key `id`
+	// Deserialization has several steps:
+	// 1. Deserialize into an unstructured map[string]interface{}
+	// 2. Read the `type` field to know the type of the message
+	// 3. Then try to to deserialize again, but into that specific type
+	// 4. All message also come with an integer id under the key `id`
 
 	// wsjson.Read tries to deserialize the message. If we were to read to a
 	// []byte, it would base64 encode it as part of deserialization. json.RawMessage
@@ -271,9 +271,9 @@ func (disp *Dispatcher) run() {
 		)
 		if err != nil {
 			logger.Error("error handling message -> panicking", zap.Error(err))
-            // We actually want to panic here so we get respawned by the inittab,
-            // and so the monitor's connection is closed and it also gets restarted
-            panic(err)
+			// We actually want to panic here so we get respawned by the inittab,
+			// and so the monitor's connection is closed and it also gets restarted
+			panic(err)
 		}
 	}
 }

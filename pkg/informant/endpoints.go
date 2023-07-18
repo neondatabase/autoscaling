@@ -191,7 +191,7 @@ func (s *State) NotifyUpscale(
 	// Wait for result
 	select {
 	case res := <-rx.Recv():
-        // A nil pointer means a monitor error occured
+		// A nil pointer means a monitor error occured
 		if res != nil {
 			return &res.Confirmation, 200, nil
 		} else {
