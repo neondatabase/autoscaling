@@ -341,9 +341,11 @@ func (e *AutoscaleEnforcer) PreFilter(
 	state *framework.CycleState,
 	pod *corev1.Pod,
 ) (_ *framework.PreFilterResult, status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("PreFilter").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("PreFilter", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("PreFilter", status)
+		e.metrics.IncFailIfNotSuccess("PreFilter", ignored, status)
 	}()
 
 	return nil, nil
@@ -369,9 +371,11 @@ func (e *AutoscaleEnforcer) PostFilter(
 	pod *corev1.Pod,
 	filteredNodeStatusMap framework.NodeToStatusMap,
 ) (_ *framework.PostFilterResult, status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("PostFilter").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("PostFilter", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("PostFilter", status)
+		e.metrics.IncFailIfNotSuccess("PostFilter", ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Filter"), util.PodNameFields(pod))
@@ -389,9 +393,11 @@ func (e *AutoscaleEnforcer) Filter(
 	pod *corev1.Pod,
 	nodeInfo *framework.NodeInfo,
 ) (status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("Filter").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("Filter", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Filter", status)
+		e.metrics.IncFailIfNotSuccess("Filter", ignored, status)
 	}()
 
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
@@ -399,10 +405,8 @@ func (e *AutoscaleEnforcer) Filter(
 	logger := e.logger.With(zap.String("method", "Filter"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Filter request")
 
-	if e.state.conf.ignoredNamespace(pod.Namespace) {
-		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
-		logger.Warn("Ignoring Filter request for pod in ignored namespace")
-		return
+	if ignored {
+		logger.Warn("Received Filter request for pod in ignored namespace, continuing anyways.")
 	}
 
 	vmInfo, err := e.getVmInfo(logger, pod, "Filter")
@@ -477,6 +481,36 @@ func (e *AutoscaleEnforcer) Filter(
 		} else if otherPodState, ok := e.state.otherPods[pn]; ok {
 			oldRes := otherResources
 			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, otherPodState.resources)
+			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
+			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
+		} else {
+			name := util.GetNamespacedName(podInfo.Pod)
+
+			if !e.state.conf.ignoredNamespace(podInfo.Pod.Namespace) {
+				// FIXME: this gets us duplicated "pod" fields. Not great. But we're using
+				// logger.With pretty pervasively, and it's hard to avoid this while using that.
+				// For now, we can get around this by including the pod name in an error.
+				logger.Error(
+					"Unknown-but-not-ignored Pod in Filter node's pods",
+					zap.Object("pod", name),
+					zap.Error(fmt.Errorf("Pod %v is unknown but not ignored", name)),
+				)
+			}
+
+			// We *also* need to count pods in ignored namespaces
+			resources, err := extractPodOtherPodResourceState(podInfo.Pod)
+			if err != nil {
+				// FIXME: Same duplicate "pod" field issue as above; same temporary solution.
+				logger.Error(
+					"Error extracting resource state for non-VM Pod",
+					zap.Object("pod", name),
+					zap.Error(fmt.Errorf("Error extracting resource state for %v: %w", name, err)),
+				)
+				continue
+			}
+
+			oldRes := otherResources
+			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, resources)
 			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
 			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
 		}
@@ -588,9 +622,11 @@ func (e *AutoscaleEnforcer) Score(
 	pod *corev1.Pod,
 	nodeName string,
 ) (_ int64, status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("Score").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("Score", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Score", status)
+		e.metrics.IncFailIfNotSuccess("Score", ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
@@ -663,9 +699,11 @@ func (e *AutoscaleEnforcer) Reserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) (status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("Reserve").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("Reserve", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Reserve", status)
+		e.metrics.IncFailIfNotSuccess("Reserve", ignored, status)
 	}()
 
 	pName := util.GetNamespacedName(pod)
@@ -676,7 +714,7 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	logger.Info("Handling Reserve request")
 
-	if e.state.conf.ignoredNamespace(pod.Namespace) {
+	if ignored {
 		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
 		logger.Warn("Ignoring Reserve request for pod in ignored namespace")
 		return nil // success; allow the Pod onto the node.
@@ -895,14 +933,15 @@ func (e *AutoscaleEnforcer) Unreserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) {
-	e.metrics.pluginCalls.WithLabelValues("Unreserve").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+	e.metrics.IncMethodCall("Unreserve", ignored)
 
 	podName := util.GetNamespacedName(pod)
 
 	logger := e.logger.With(zap.String("method", "Unreserve"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Unreserve request")
 
-	if e.state.conf.ignoredNamespace(pod.Namespace) {
+	if ignored {
 		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
 		logger.Warn("Ignoring Unreserve request for pod in ignored namespace")
 		return

@@ -1354,8 +1354,9 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// For CPU:
 	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
 	// average),
-	// which we can get by dividing LA by LAFT.
-	cpuGoalCU := uint32(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
+	// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
+	goalCPUs := float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget
+	cpuGoalCU := uint32(math.Round(goalCPUs / s.computeUnit.VCPU.AsFloat64()))
 
 	// For Mem:
 	// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
