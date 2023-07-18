@@ -486,6 +486,15 @@ func (e *AutoscaleEnforcer) Filter(
 		} else {
 			name := util.GetNamespacedName(podInfo.Pod)
 
+			if util.PodCompleted(podInfo.Pod) {
+				logger.Warn(
+					"Skipping completed Pod in Filter node's pods",
+					zap.Object("pod", name),
+					zap.String("phase", string(podInfo.Pod.Status.Phase)),
+				)
+				continue
+			}
+
 			if !e.state.conf.ignoredNamespace(podInfo.Pod.Namespace) {
 				// FIXME: this gets us duplicated "pod" fields. Not great. But we're using
 				// logger.With pretty pervasively, and it's hard to avoid this while using that.
