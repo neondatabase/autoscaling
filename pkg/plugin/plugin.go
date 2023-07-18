@@ -400,9 +400,7 @@ func (e *AutoscaleEnforcer) Filter(
 	logger.Info("Handling Filter request")
 
 	if e.state.conf.ignoredNamespace(pod.Namespace) {
-		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
-		logger.Warn("Ignoring Filter request for pod in ignored namespace")
-		return
+		logger.Warn("Received Filter request for pod in ignored namespace, continuing anyways.")
 	}
 
 	vmInfo, err := e.getVmInfo(logger, pod, "Filter")
@@ -477,6 +475,36 @@ func (e *AutoscaleEnforcer) Filter(
 		} else if otherPodState, ok := e.state.otherPods[pn]; ok {
 			oldRes := otherResources
 			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, otherPodState.resources)
+			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
+			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
+		} else {
+			name := util.GetNamespacedName(podInfo.Pod)
+
+			if !e.state.conf.ignoredNamespace(podInfo.Pod.Namespace) {
+				// FIXME: this gets us duplicated "pod" fields. Not great. But we're using
+				// logger.With pretty pervasively, and it's hard to avoid this while using that.
+				// For now, we can get around this by including the pod name in an error.
+				logger.Error(
+					"Unknown-but-not-ignored Pod in Filter node's pods",
+					zap.Object("pod", name),
+					zap.Error(fmt.Errorf("Pod %v is unknown but not ignored", name)),
+				)
+			}
+
+			// We *also* need to count pods in ignored namespaces
+			resources, err := extractPodOtherPodResourceState(podInfo.Pod)
+			if err != nil {
+				// FIXME: Same duplicate "pod" field issue as above; same temporary solution.
+				logger.Error(
+					"Error extracting resource state for non-VM Pod",
+					zap.Object("pod", name),
+					zap.Error(fmt.Errorf("Error extracting resource state for %v: %w", name, err)),
+				)
+				continue
+			}
+
+			oldRes := otherResources
+			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, resources)
 			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
 			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
 		}
