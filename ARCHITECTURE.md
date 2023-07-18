@@ -276,43 +276,42 @@ code 404, and the agent SHOULD try reconnecting.
 
 ## Informant-Monitor protocol details
 
-Informant-Monitor communication is carried out through a relatively simple RPC-style protocol.
-This protocol is not versioned as it is small and should not change much. Communication happens
-through `Packet`s, which contain a `Stage` and `Id`. There are three `Stage` variants:
-`Request`, `Response`, and `Done`, which is simply a final acknowledgement. `Id`s may be used
-to identify packets that are part of the same `Request->Response->Done` transaction.
+Informant-Monitor communication is carried out through a relatively simple _versioned_ protocol
+over websocket. One party sends a message, the other responds. There are various
+message types that each party sends, and all messages are annotated with an ID.
+The allows a sender to recognize responses to its previous messages. If the
+out-message has ID X, then the return message will also have ID X.
 
-A convenient way to view the whole protocol at once is to look through
-[`pkg/informant/transport.go`](./pkg/informant/transport.go), which contains the
-types used to communicate with the informant.
+Like the other protocols, relevant types are located in [`pkg/api/types.go`].
 
 1. On startup, the VM monitor listens for websocket connections on `127.0.0.1:10369`
-2. On startup, the VM monitor connects to the monitor via websocket on `127.0.0.1:10369`
-3. At any point, either party may initiate a transaction by sending a `Request`.
-4. The other party should return a packet with the specific type of `Response` appropriate
-   for that request. The packet `Id` should be the same as that of the request.
-5. The initiating party responds with a `Done`, with the same packet `Id` they originally
-   sent with their `Request`.
-6. The process repeats, with many transactions possibly happening at the same time.
+2. On startup, the VM informant connects to the monitor via websocket on `127.0.0.1:10369`
+3. The informant then sends a `VersionRange[MonitorProtocolVersion]` with the range of
+   protocols it supports.
+4. The monitor responds with the highest common version between the two. If there is no
+   compatible protocol, it returns and error.
+5. From this point on, either party may initiate a transaction by sending a Message.
+6. The other party responds with the appropriate message, with the same ID attached
+   so that the receiver knows it has received a response.
 
-*Note*: there is one exception to this flow. When the monitor sends a `Request{RequestUpscale}`,
-the informant immediately responds with a `Done`, since it must wait for the agent to
-make a decision. If the agent decides to upscale, it will be sent to the monitor
-(via the informant) as a `Request{UpscaleResult}`
-
-Currently, the following transactions are used:
+Currently, the following interactions are supported:
 ```
-Monitor   req => RequestUpscale
-Informant res => Returns Resources
+Monitor   sends   UpscaleRequest
+Informant returns NotifyUpscale
 
-Informant req => TryDownscale
-Monitor   res => Returns DownscaleResult
+Informant sends   TryDownscale
+Monitor   returns DownscaleResult
 
-Informant req => ResourceMessage
-Monitor   res => Returns No Data
+Informant sends   NotifyUpscale
+Monitor   returns UpscaleConfirmation
 ```
 which roughly correspond to `/try-upscale`, `/downscale`, and `/upscale` endpoints
 from the agent<->informant protocol.
+
+There are two additional messages types that either party may send:
+- `InvalidMessage`: sent when either party fails to deserialize a message it received
+- `InternalError`: used to indicate that an error occured while processing a request,
+  for example, if the monitor errors while trying to downscale
 
 ## Footguns
 
