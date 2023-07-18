@@ -121,5 +121,5 @@ func (m *PromMetrics) IncFailIfNotSuccess(method string, ignored bool, status *f
 		return
 	}
 
-	m.pluginCallFails.WithLabelValues(method, status.Code().String())
+	m.pluginCallFails.WithLabelValues(method, strconv.FormatBool(ignored), status.Code().String())
 }
