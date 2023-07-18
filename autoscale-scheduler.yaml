@@ -96,8 +96,8 @@ data:
     {
       "memBlockSize": "1Gi",
       "nodeDefaults": {
-        "cpu": { "watermark": 0.7, "system": "500m" },
-        "memory": { "watermark": 0.7, "system": "0.5Gi" },
+        "cpu": { "watermark": 0.7 },
+        "memory": { "watermark": 0.7 },
         "computeUnit": { "vCPUs": 0.25, "mem": 1 }
       },
       "nodeOverrides": [],
@@ -108,6 +108,7 @@ data:
       },
       "migrationDeletionRetrySeconds": 5,
       "k8sNodeGroupLabel": "eks.amazonaws.com/nodegroup",
+      "ignoreNamespaces": ["overprovisioning"],
       "doMigration": false
     }
 kind: ConfigMap
@@ -140,7 +141,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.12.2
+        image: neondatabase/autoscale-scheduler:v0.13.4
         livenessProbe:
           httpGet:
             path: /healthz
