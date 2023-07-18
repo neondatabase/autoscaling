@@ -9,6 +9,12 @@ The table below should provide the necessary information. For each release, it g
 supported protocol versions by each component. The topmost line - "Current" - refers to the latest
 commit in this repository, possibly unreleased.
 
+## informant<->monitor protocol
+
+| Release | VM informant | VM monitor |
+|---------|------------------|--------------|
+| _Current_ | v1.0 only | v1.0 only |
+
 ## agent<->informant protocol
 
 | Release | autoscaler-agent | VM informant |
