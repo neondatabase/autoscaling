@@ -1420,7 +1420,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		oldNodeMemBuffer := ns.memSlots.Buffer
 
 		ns.vCPU.Reserved += ps.vCPU.Reserved
+		ns.vCPU.Buffer += ps.vCPU.Buffer
 		ns.memSlots.Reserved += ps.memSlots.Reserved
+		ns.memSlots.Buffer += ps.memSlots.Buffer
 
 		cpuVerdict := fmt.Sprintf(
 			"pod = %v/%v (node %v -> %v / %v, %v -> %v buffer)",
