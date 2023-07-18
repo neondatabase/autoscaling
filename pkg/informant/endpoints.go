@@ -28,7 +28,7 @@ func NewState(logger *zap.Logger) (state State, _ error) {
 	var disp Dispatcher
 	var err error
 	for {
-		disp, err = NewDispatcher(logger, "ws://127.0.0.1:10369", sender)
+		disp, err = NewDispatcher(logger, "ws://127.0.0.1:10369/monitor", sender)
 		if err != nil {
 			// Five * (1000 * ~1000000) = Five * ~1000000000 nanos
 			wait := time.Duration(5 * 1000 * (1 << 20))
