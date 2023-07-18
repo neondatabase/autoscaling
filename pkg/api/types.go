@@ -690,7 +690,7 @@ type MonitorProtoVersion uint32
 const (
 	// MonitorProtoV1_0 represents v1.0 of the agent<->monitor protocol - the initial version.
 	//
-	// Last used in release version TBD // FIXME
+	// Currently the lastest version.
 	MonitorProtoV1_0 = iota + 1
 
 	// latestMonitorProtoVersion represents the latest version of the agent<->Monitor protocol
@@ -717,9 +717,10 @@ func (v MonitorProtoVersion) String() string {
 
 // Sent back by the monitor after figuring out what protocol version we should use
 type MonitorProtocolResponse struct {
-	// If `Error` is nil, contains the value of the settled on protocol version
+	// If `Error` is nil, contains the value of the settled on protocol version.
+	// Otherwise, will be set to 0 (MonitorProtocolVersion's zero value).
 	Version MonitorProtoVersion `json:"version"`
 
-	// Will be nill if no error occured
-	Error *string
+	// Will be nil if no error occured.
+	Error *string `json:"error"`
 }
