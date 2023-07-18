@@ -3,6 +3,8 @@ package plugin
 // defines prometheus metrics and provides the server, via (*AutoscaleEnforcer).startPrometheusServer()
 
 import (
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
@@ -42,14 +44,14 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Name: "autoscaling_plugin_extension_calls_total",
 				Help: "Number of calls to scheduler plugin extension points",
 			},
-			[]string{"method"},
+			[]string{"method", "ignored_namespace"},
 		)),
 		pluginCallFails: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_extension_call_fails_total",
 				Help: "Number of unsuccessful calls to scheduler plugin extension points",
 			},
-			[]string{"method", "status"},
+			[]string{"method", "ignored_namespace", "status"},
 		)),
 		resourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -110,10 +112,14 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 	return reg
 }
 
-func (m *PromMetrics) IncFailIfNotSuccess(method string, status *framework.Status) {
+func (m *PromMetrics) IncMethodCall(method string, ignored bool) {
+	m.pluginCalls.WithLabelValues(method, strconv.FormatBool(ignored)).Inc()
+}
+
+func (m *PromMetrics) IncFailIfNotSuccess(method string, ignored bool, status *framework.Status) {
 	if !status.IsSuccess() {
 		return
 	}
 
-	m.pluginCallFails.WithLabelValues(method, status.Code().String())
+	m.pluginCallFails.WithLabelValues(method, strconv.FormatBool(ignored), status.Code().String())
 }
