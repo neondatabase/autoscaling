@@ -565,8 +565,8 @@ type ResourceMessage struct {
 // DownscaleResult is also used in informant-monitor communications. The monitor can send a
 // DownscaleResult, which is then propagated to the informant.
 type DownscaleResult struct {
-	Ok     bool   `json:"ok"`
-	Status string `json:"status"`
+	Ok     bool
+	Status string
 }
 
 // SuspendAgent is sent from the VM informant to the autoscaler-agent when it has been contacted by
