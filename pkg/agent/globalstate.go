@@ -140,11 +140,12 @@ func (s *agentState) handleVMEventAdded(
 	runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
 
 	status := &podStatus{
-		mu:                sync.Mutex{},
-		endState:          nil,
-		previousEndStates: nil,
-		vmInfo:            event.vmInfo,
-		endpointID:        event.endpointID,
+		mu:                 sync.Mutex{},
+		endState:           nil,
+		previousEndStates:  nil,
+		vmInfo:             event.vmInfo,
+		endpointID:         event.endpointID,
+		endpointAssignedAt: nil,
 
 		startTime:                   time.Now(),
 		lastSuccessfulInformantComm: nil,
@@ -404,6 +405,7 @@ type podStatus struct {
 	// endpointID, if non-empty, stores the ID of the endpoint associated with the VM
 	endpointID string
 
+	// NB: this value, once non-nil, is never changed.
 	endpointAssignedAt *time.Time
 }
 
@@ -488,9 +490,10 @@ func (s *podStatus) dump() podStatusDump {
 		PreviousEndStates: previousEndStates,
 
 		// FIXME: api.VmInfo contains a resource.Quantity - is that safe to copy by value?
-		VMInfo:     s.vmInfo,
-		EndpointID: s.endpointID,
-		StartTime:  s.startTime,
+		VMInfo:             s.vmInfo,
+		EndpointID:         s.endpointID,
+		EndpointAssignedAt: s.endpointAssignedAt, // ok to share the pointer, because it's not updated
+		StartTime:          s.startTime,
 
 		LastSuccessfulInformantComm: s.lastSuccessfulInformantComm,
 	}
