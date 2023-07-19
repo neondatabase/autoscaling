@@ -8,7 +8,7 @@ import (
 )
 
 func NewSingleSignalPair[T any]() (SignalSender[T], SignalReceiver[T]) {
-	sigCh := make(chan T)
+	sigCh := make(chan T, 1)
 	once := &sync.Once{}
 	closeSigCh := func() { once.Do(func() { close(sigCh) }) }
 
