@@ -676,8 +676,8 @@ func (e *AutoscaleEnforcer) Score(
 		return score, nil
 	}
 
-	totalMilliCpu := int64(node.totalReservableCPU())
-	totalMem := int64(node.totalReservableMemSlots())
+	totalMilliCpu := int64(node.remainingReservableCPU())
+	totalMem := int64(node.remainingReservableMemSlots())
 	maxTotalMilliCpu := int64(e.state.maxTotalReservableCPU)
 	maxTotalMem := int64(e.state.maxTotalReservableMemSlots)
 
