@@ -473,16 +473,29 @@ func (e *AutoscaleEnforcer) Filter(
 	otherResources.MarginCPU = node.otherResources.MarginCPU
 	otherResources.MarginMemory = node.otherResources.MarginMemory
 
+	// As we process all pods, we should record all the pods that either aren't
+	missedPods := make(map[util.NamespacedName]struct{})
+	for name := range node.pods {
+		missedPods[name] = struct{}{}
+	}
+	for name := range node.otherPods {
+		missedPods[name] = struct{}{}
+	}
+
+	var unknownPods []util.NamespacedName
+
 	for _, podInfo := range nodeInfo.Pods {
 		pn := util.NamespacedName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
 			totalNodeVCPU += podState.vCPU.Reserved
 			totalNodeMem += podState.memSlots.Reserved
+			delete(missedPods, pn)
 		} else if otherPodState, ok := e.state.otherPods[pn]; ok {
 			oldRes := otherResources
 			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, otherPodState.resources)
 			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
 			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
+			delete(missedPods, pn)
 		} else {
 			name := util.GetNamespacedName(podInfo.Pod)
 
@@ -494,6 +507,8 @@ func (e *AutoscaleEnforcer) Filter(
 				)
 				continue
 			}
+
+			unknownPods = append(unknownPods, name)
 
 			if !e.state.conf.ignoredNamespace(podInfo.Pod.Namespace) {
 				// FIXME: this gets us duplicated "pod" fields. Not great. But we're using
@@ -523,6 +538,17 @@ func (e *AutoscaleEnforcer) Filter(
 			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
 			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
 		}
+	}
+
+	if len(missedPods) != 0 {
+		var missedPodsList []util.NamespacedName
+		for name := range missedPods {
+			missedPodsList = append(missedPodsList, name)
+		}
+		logger.Warn("Some known Pods weren't included in Filter NodeInfo", zap.Objects("missedPods", missedPodsList))
+	}
+	if len(unknownPods) != 0 {
+		logger.Warn("Received unknown pods from Filter NodeInfo", zap.Objects("unknownPods", unknownPods))
 	}
 
 	nodeTotalReservableCPU := node.totalReservableCPU()
@@ -676,18 +702,25 @@ func (e *AutoscaleEnforcer) Score(
 		return score, nil
 	}
 
-	totalMilliCpu := int64(node.remainingReservableCPU())
-	totalMem := int64(node.remainingReservableMemSlots())
-	maxTotalMilliCpu := int64(e.state.maxTotalReservableCPU)
-	maxTotalMem := int64(e.state.maxTotalReservableMemSlots)
+	remainingCPU := node.remainingReservableCPU()
+	remainingMem := node.remainingReservableMemSlots()
+	totalCPU := e.state.maxTotalReservableCPU
+	totalMem := e.state.maxTotalReservableMemSlots
 
 	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
 	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	scoreCpu := framework.MinNodeScore + scoreLen*totalMilliCpu/maxTotalMilliCpu
-	scoreMem := framework.MinNodeScore + scoreLen*totalMem/maxTotalMem
+	cpuScore := framework.MinNodeScore + scoreLen*int64(remainingCPU)/int64(totalCPU)
+	memScore := framework.MinNodeScore + scoreLen*int64(remainingMem)/int64(totalMem)
 
-	score := util.Min(scoreCpu, scoreMem)
-	logger.Info("Scored pod placement for node", zap.Int64("score", score))
+	score := util.Min(cpuScore, memScore)
+	logger.Info(
+		"Scored pod placement for node",
+		zap.Int64("score", score),
+		zap.Object("verdict", verdictSet{
+			cpu: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingCPU, totalCPU, cpuScore),
+			mem: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingMem, totalMem, memScore),
+		}),
+	)
 
 	return score, nil
 }
@@ -833,12 +866,12 @@ func (e *AutoscaleEnforcer) Reserve(
 			}
 
 			cpuVerdict := fmt.Sprintf(
-				"need %v vCPU (%v -> %v raw), have %v available (%s)",
-				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.remainingReservableCPU(), cpuShortVerdict,
+				"need %v CPU (%v -> %v raw), %v of %v used, so %v available (%s)",
+				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
 			)
 			memVerdict := fmt.Sprintf(
-				"need %v mem slots (%v -> %v raw), have %d available (%s)",
-				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.remainingReservableMemSlots(), memShortVerdict,
+				"need %v CPU (%v -> %v raw), %v of %v used, so %v available (%s)",
+				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
 			)
 
 			logger.Error(
