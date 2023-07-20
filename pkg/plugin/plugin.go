@@ -473,7 +473,10 @@ func (e *AutoscaleEnforcer) Filter(
 	otherResources.MarginCPU = node.otherResources.MarginCPU
 	otherResources.MarginMemory = node.otherResources.MarginMemory
 
-	// As we process all pods, we should record all the pods that either aren't
+	// As we process all pods, we should record all the pods that aren't present in both nodeInfo
+	// and e.state's maps, so that we can log any inconsistencies instead of silently using
+	// *potentially* bad data. Some differences are expected, but on the whole this extra
+	// information should be helpful.
 	missedPods := make(map[util.NamespacedName]struct{})
 	for name := range node.pods {
 		missedPods[name] = struct{}{}
