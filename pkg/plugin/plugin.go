@@ -869,11 +869,11 @@ func (e *AutoscaleEnforcer) Reserve(
 			}
 
 			cpuVerdict := fmt.Sprintf(
-				"need %v CPU (%v -> %v raw), %v of %v used, so %v available (%s)",
+				"need %v (%v -> %v raw), %v of %v used, so %v available (%s)",
 				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
 			)
 			memVerdict := fmt.Sprintf(
-				"need %v CPU (%v -> %v raw), %v of %v used, so %v available (%s)",
+				"need %v (%v -> %v raw), %v of %v used, so %v available (%s)",
 				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
 			)
 
@@ -951,8 +951,14 @@ func (e *AutoscaleEnforcer) Reserve(
 			memShortVerdict = "OK"
 		}
 
-		cpuVerdict := fmt.Sprintf("need %v vCPU, have %v available (%s)", vmInfo.Cpu.Use, node.remainingReservableCPU(), cpuShortVerdict)
-		memVerdict := fmt.Sprintf("need %v mem slots, have %v available (%s)", vmInfo.Mem.Use, node.remainingReservableMemSlots(), memShortVerdict)
+		cpuVerdict := fmt.Sprintf(
+			"need %v, %v of %v used, so %v available (%s)",
+			vmInfo.Cpu.Use, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
+		)
+		memVerdict := fmt.Sprintf(
+			"need %v, %v of %v used, so %v available (%s)",
+			vmInfo.Mem.Use, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
+		)
 
 		logger.Error(
 			"Can't reserve VM pod (not enough resources)",
