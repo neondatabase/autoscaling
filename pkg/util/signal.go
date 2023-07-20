@@ -8,14 +8,16 @@ import (
 )
 
 func NewSingleSignalPair[T any]() (SignalSender[T], SignalReceiver[T]) {
-	sigCh := make(chan T)
+	sigCh := make(chan T, 1)
 	once := &sync.Once{}
 	closeSigCh := func() { once.Do(func() { close(sigCh) }) }
 
 	return SignalSender[T]{
 		send: func(data T) {
-			sigCh <- data
-			closeSigCh()
+			once.Do(func() {
+				sigCh <- data
+                close(sigCh)
+			})
 		},
 	}, SignalReceiver[T]{sigCh: sigCh, closeSigCh: closeSigCh}
 }
