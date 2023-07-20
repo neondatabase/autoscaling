@@ -211,14 +211,13 @@ func makeAutoscaleEnforcerPlugin(
 
 	go func() {
 		for {
-			callback, err := queue.Wait(ctx)
+			callback, err := queue.Wait(ctx) // NB: Wait pulls from the front of the queue
 			if err != nil {
 				logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
 				break
 			}
 
 			callback()
-			queue.Remove()
 		}
 	}()
 
