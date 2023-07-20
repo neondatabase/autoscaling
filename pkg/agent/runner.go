@@ -1674,7 +1674,7 @@ func (r *Runner) doInformantDownscale(ctx context.Context, logger *zap.Logger, t
 	return resp, nil
 }
 
-// doInformantDownscale is a convenience wrapper around (*InformantServer).Upscale that locks r,
+// doInformantUpscale is a convenience wrapper around (*InformantServer).Upscale that locks r,
 // checks if r.server is nil, and does the request.
 //
 // Some errors are logged by this method instead of being returned. If that happens, this method

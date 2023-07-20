@@ -211,14 +211,13 @@ func makeAutoscaleEnforcerPlugin(
 
 	go func() {
 		for {
-			callback, err := queue.Wait(ctx)
+			callback, err := queue.Wait(ctx) // NB: Wait pulls from the front of the queue
 			if err != nil {
 				logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
 				break
 			}
 
 			callback()
-			queue.Remove()
 		}
 	}()
 
@@ -473,18 +472,45 @@ func (e *AutoscaleEnforcer) Filter(
 	otherResources.MarginCPU = node.otherResources.MarginCPU
 	otherResources.MarginMemory = node.otherResources.MarginMemory
 
+	// As we process all pods, we should record all the pods that aren't present in both nodeInfo
+	// and e.state's maps, so that we can log any inconsistencies instead of silently using
+	// *potentially* bad data. Some differences are expected, but on the whole this extra
+	// information should be helpful.
+	missedPods := make(map[util.NamespacedName]struct{})
+	for name := range node.pods {
+		missedPods[name] = struct{}{}
+	}
+	for name := range node.otherPods {
+		missedPods[name] = struct{}{}
+	}
+
+	var unknownPods []util.NamespacedName
+
 	for _, podInfo := range nodeInfo.Pods {
 		pn := util.NamespacedName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
 			totalNodeVCPU += podState.vCPU.Reserved
 			totalNodeMem += podState.memSlots.Reserved
+			delete(missedPods, pn)
 		} else if otherPodState, ok := e.state.otherPods[pn]; ok {
 			oldRes := otherResources
 			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, otherPodState.resources)
 			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
 			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
+			delete(missedPods, pn)
 		} else {
 			name := util.GetNamespacedName(podInfo.Pod)
+
+			if util.PodCompleted(podInfo.Pod) {
+				logger.Warn(
+					"Skipping completed Pod in Filter node's pods",
+					zap.Object("pod", name),
+					zap.String("phase", string(podInfo.Pod.Status.Phase)),
+				)
+				continue
+			}
+
+			unknownPods = append(unknownPods, name)
 
 			if !e.state.conf.ignoredNamespace(podInfo.Pod.Namespace) {
 				// FIXME: this gets us duplicated "pod" fields. Not great. But we're using
@@ -514,6 +540,17 @@ func (e *AutoscaleEnforcer) Filter(
 			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
 			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
 		}
+	}
+
+	if len(missedPods) != 0 {
+		var missedPodsList []util.NamespacedName
+		for name := range missedPods {
+			missedPodsList = append(missedPodsList, name)
+		}
+		logger.Warn("Some known Pods weren't included in Filter NodeInfo", zap.Objects("missedPods", missedPodsList))
+	}
+	if len(unknownPods) != 0 {
+		logger.Warn("Received unknown pods from Filter NodeInfo", zap.Objects("unknownPods", unknownPods))
 	}
 
 	nodeTotalReservableCPU := node.totalReservableCPU()
@@ -667,18 +704,25 @@ func (e *AutoscaleEnforcer) Score(
 		return score, nil
 	}
 
-	totalMilliCpu := int64(node.totalReservableCPU())
-	totalMem := int64(node.totalReservableMemSlots())
-	maxTotalMilliCpu := int64(e.state.maxTotalReservableCPU)
-	maxTotalMem := int64(e.state.maxTotalReservableMemSlots)
+	remainingCPU := node.remainingReservableCPU()
+	remainingMem := node.remainingReservableMemSlots()
+	totalCPU := e.state.maxTotalReservableCPU
+	totalMem := e.state.maxTotalReservableMemSlots
 
 	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
 	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	scoreCpu := framework.MinNodeScore + scoreLen*totalMilliCpu/maxTotalMilliCpu
-	scoreMem := framework.MinNodeScore + scoreLen*totalMem/maxTotalMem
+	cpuScore := framework.MinNodeScore + scoreLen*int64(remainingCPU)/int64(totalCPU)
+	memScore := framework.MinNodeScore + scoreLen*int64(remainingMem)/int64(totalMem)
 
-	score := util.Min(scoreCpu, scoreMem)
-	logger.Info("Scored pod placement for node", zap.Int64("score", score))
+	score := util.Min(cpuScore, memScore)
+	logger.Info(
+		"Scored pod placement for node",
+		zap.Int64("score", score),
+		zap.Object("verdict", verdictSet{
+			cpu: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingCPU, totalCPU, cpuScore),
+			mem: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingMem, totalMem, memScore),
+		}),
+	)
 
 	return score, nil
 }
@@ -824,12 +868,12 @@ func (e *AutoscaleEnforcer) Reserve(
 			}
 
 			cpuVerdict := fmt.Sprintf(
-				"need %v vCPU (%v -> %v raw), have %v available (%s)",
-				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.remainingReservableCPU(), cpuShortVerdict,
+				"need %v (%v -> %v raw), %v of %v used, so %v available (%s)",
+				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
 			)
 			memVerdict := fmt.Sprintf(
-				"need %v mem slots (%v -> %v raw), have %d available (%s)",
-				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.remainingReservableMemSlots(), memShortVerdict,
+				"need %v (%v -> %v raw), %v of %v used, so %v available (%s)",
+				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
 			)
 
 			logger.Error(
@@ -906,8 +950,14 @@ func (e *AutoscaleEnforcer) Reserve(
 			memShortVerdict = "OK"
 		}
 
-		cpuVerdict := fmt.Sprintf("need %v vCPU, have %v available (%s)", vmInfo.Cpu.Use, node.remainingReservableCPU(), cpuShortVerdict)
-		memVerdict := fmt.Sprintf("need %v mem slots, have %v available (%s)", vmInfo.Mem.Use, node.remainingReservableMemSlots(), memShortVerdict)
+		cpuVerdict := fmt.Sprintf(
+			"need %v, %v of %v used, so %v available (%s)",
+			vmInfo.Cpu.Use, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
+		)
+		memVerdict := fmt.Sprintf(
+			"need %v, %v of %v used, so %v available (%s)",
+			vmInfo.Mem.Use, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
+		)
 
 		logger.Error(
 			"Can't reserve VM pod (not enough resources)",

@@ -384,13 +384,13 @@ func (s *nodeState) totalReservableMemSlots() uint16 {
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
 func (s *nodeState) remainingReservableCPU() vmapi.MilliCPU {
-	return s.totalReservableCPU() - s.vCPU.Reserved
+	return util.SaturatingSub(s.totalReservableCPU(), s.vCPU.Reserved)
 }
 
 // remainingReservableMemSlots returns the remaining number of memory slots that can be allocated to
 // VM pods
 func (s *nodeState) remainingReservableMemSlots() uint16 {
-	return s.totalReservableMemSlots() - s.memSlots.Reserved
+	return util.SaturatingSub(s.totalReservableMemSlots(), s.memSlots.Reserved)
 }
 
 // tooMuchPressure is used to signal whether the node should start migrating pods out in order to
@@ -1420,7 +1420,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		oldNodeMemBuffer := ns.memSlots.Buffer
 
 		ns.vCPU.Reserved += ps.vCPU.Reserved
+		ns.vCPU.Buffer += ps.vCPU.Buffer
 		ns.memSlots.Reserved += ps.memSlots.Reserved
+		ns.memSlots.Buffer += ps.memSlots.Buffer
 
 		cpuVerdict := fmt.Sprintf(
 			"pod = %v/%v (node %v -> %v / %v, %v -> %v buffer)",
