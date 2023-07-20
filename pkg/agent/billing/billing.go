@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -56,6 +57,10 @@ func (m *metricsTimeSlice) Duration() time.Duration { return m.endTime.Sub(m.sta
 type vmMetricsInstant struct {
 	// cpu stores the cpu allocation at a particular instant.
 	cpu vmapi.MilliCPU
+	// number of bytes received by the VM from the open internet since the last time slice
+	ingressBytes vmapi.NetworkBytes
+	// number of bytes sent by the VM to the open internet since the last time slice
+	egressBytes vmapi.NetworkBytes
 }
 
 // vmMetricsSeconds is like vmMetrics, but the values cover the allocation over time
@@ -110,7 +115,9 @@ func RunBillingMetricsCollector(
 	// The rest of this function is to do with collection
 	logger = logger.Named("collect")
 
-	state.collect(logger, store, metrics)
+	if err := state.collect(conf, store, metrics, logger); err != nil {
+		logger.Panic("Metrics collection failed", zap.Error(err))
+	}
 
 	for {
 		select {
@@ -120,7 +127,9 @@ func RunBillingMetricsCollector(
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
-			state.collect(logger, store, metrics)
+			if err := state.collect(conf, store, metrics, logger); err != nil {
+				logger.Panic("Metrics collection failed", zap.Error(err))
+			}
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, conf, client.Hostname(), queueWriter)
@@ -130,7 +139,7 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics PromMetrics) {
+func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromMetrics, logger *zap.Logger) error {
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
@@ -149,28 +158,40 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 	for _, vm := range vmsOnThisNode {
 		endpointID, isEndpoint := vm.Annotations[api.AnnotationBillingEndpointID]
 		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
-		if !isEndpoint {
-			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
-			continue
-		}
+		// if !isEndpoint {
+		// 	// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
+		// 	continue
+		// }
 
 		if !vm.Status.Phase.IsAlive() || vm.Status.CPUs == nil {
+			logger.Info("Skipping gathering metrics for VM")
 			continue
 		}
 
+		byteCounts, err := vm.GetNetworkUsage()
+		if err != nil {
+			return err
+		}
+		logger.Info(fmt.Sprintf("Got byte counts %v", byteCounts))
 		key := metricsKey{
 			uid:        vm.UID,
 			endpointID: endpointID,
 		}
+
 		presentMetrics := vmMetricsInstant{
-			cpu: *vm.Status.CPUs,
+			cpu:          *vm.Status.CPUs,
+			ingressBytes: byteCounts.IngressBytes,
+			egressBytes:  byteCounts.EgressBytes,
 		}
+
 		if oldMetrics, ok := old[key]; ok {
 			// The VM was present from s.lastTime to now. Add a time slice to its metrics history.
 			timeSlice := metricsTimeSlice{
 				metrics: vmMetricsInstant{
 					// strategically under-bill by assigning the minimum to the entire time slice.
-					cpu: util.Min(oldMetrics.cpu, presentMetrics.cpu),
+					cpu:          util.Min(oldMetrics.cpu, presentMetrics.cpu),
+					ingressBytes: presentMetrics.ingressBytes,
+					egressBytes:  presentMetrics.egressBytes,
 				},
 				// note: we know s.lastTime != nil because otherwise old would be empty.
 				startTime: *s.lastCollectTime,
@@ -193,6 +214,7 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 	}
 
 	s.lastCollectTime = &now
+	return nil
 }
 
 func (h *vmMetricsHistory) appendSlice(timeSlice metricsTimeSlice) {

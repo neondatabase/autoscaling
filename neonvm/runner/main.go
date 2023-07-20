@@ -27,6 +27,9 @@ import (
 
 	"github.com/alessio/shellescape"
 	"github.com/cilium/cilium/pkg/mac"
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/rlimit"
 	"github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup1"
 	"github.com/containerd/cgroups/v3/cgroup2"
@@ -100,6 +103,113 @@ var (
 type resolveFile struct {
 	Content []byte
 	Hash    string
+}
+
+func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map, error) {
+	const (
+		MAP_KEY_SIZE = 4
+		MAP_VAL_SIZE = 8
+
+		LEN_OFFSET        = 4
+		PKT_TYPE_OFFSET   = 8
+		REMOTE_IP4_OFFSET = 100
+
+		PACKET_OUTGOING = 4
+
+		CLASS_A_MASK int32 = -16777216 // (255 << 24)
+		CLASS_B_MASK int32 = CLASS_A_MASK + (240 << 16)
+		CLASS_C_MASK int32 = CLASS_A_MASK + (255 << 16)
+
+		CLASS_A_ADDRESS int32 = (10 << 24)
+		CLASS_B_ADDRESS int32 = -1408237568 // (172 << 24) | (16 << 16)
+		CLASS_C_ADDRESS int32 = -1062731776 // (192 << 24) | (168 << 16)
+
+		LOOPBACK_ADDRESS int32 = (127 << 24) | (0 << 16) | (0 << 8) | (1 << 0)
+	)
+
+	if err := rlimit.RemoveMemlock(); err != nil {
+		logger.Fatal("Failed to remove memlock", zap.Error(err))
+		return nil, nil, err
+	}
+
+	counters, err := ebpf.NewMap(&ebpf.MapSpec{
+		Type:       ebpf.Array,
+		KeySize:    MAP_KEY_SIZE,
+		ValueSize:  MAP_VAL_SIZE,
+		MaxEntries: 2,
+	})
+	if err != nil {
+		logger.Fatal("Failed to create eBPF map: %v", zap.Error(err))
+		return nil, nil, err
+	}
+
+	insns := asm.Instructions{
+		// R1 contains a pointer to an __sk_buf (defined in bpf.h)
+		// Load length, pkt_type, and remote_ip4 into R6, R7, and R8
+		asm.LoadMem(asm.R6, asm.R1, LEN_OFFSET, asm.Word),
+		asm.LoadMem(asm.R7, asm.R1, PKT_TYPE_OFFSET, asm.Word),
+		asm.LoadMem(asm.R8, asm.R1, REMOTE_IP4_OFFSET, asm.Word),
+
+		// Check if remote address is a the loopback address,
+		// or class A, B, or C private address
+		// If it is any of these, exit
+		asm.JEq.Imm(asm.R8, LOOPBACK_ADDRESS, "exit"),
+		asm.Mov.Reg(asm.R9, asm.R8),
+		asm.And.Imm(asm.R9, CLASS_A_MASK),
+		asm.JEq.Imm(asm.R9, CLASS_A_ADDRESS, "exit"),
+		asm.Mov.Reg(asm.R9, asm.R8),
+		asm.And.Imm(asm.R9, CLASS_B_MASK),
+		asm.JEq.Imm(asm.R9, CLASS_B_ADDRESS, "exit"),
+		asm.Mov.Reg(asm.R9, asm.R8),
+		asm.And.Imm(asm.R9, CLASS_C_MASK),
+		asm.JEq.Imm(asm.R9, CLASS_C_ADDRESS, "exit"),
+
+		// Load the map into R1
+		asm.LoadMapPtr(asm.R1, counters.FD()),
+		// If it's an outgoing packet, bump the egress counter
+		asm.JEq.Imm(asm.R7, PACKET_OUTGOING, "bump-egress"),
+		// Else bump the ingress counter
+
+		// bpf_map_lookup_elem takes a pointer to the key, so we
+		// have to spill the key to the stack
+		asm.StoreImm(asm.RFP, -MAP_KEY_SIZE, 0, asm.Word),
+		asm.Mov.Reg(asm.R2, asm.RFP),
+		asm.Add.Imm(asm.R2, -MAP_KEY_SIZE),
+		asm.FnMapLookupElem.Call(),
+		asm.JEq.Imm(asm.R0, 0, "exit"),
+		// R0 now holds a pointer to the ingress counter
+		// Atomically add the packet length (stored in R6) to it
+		asm.StoreXAdd(asm.R0, asm.R6, asm.DWord),
+		asm.Ja.Label("exit"),
+
+		// Bump the egress counter. This is the same as above
+		// except we store 1 onto the stack instead of 0
+		asm.StoreImm(asm.RFP, -MAP_KEY_SIZE, 1, asm.Word).WithSymbol("bump-egress"),
+		asm.Mov.Reg(asm.R2, asm.RFP),
+		asm.Add.Imm(asm.R2, -MAP_KEY_SIZE),
+		asm.FnMapLookupElem.Call(),
+		asm.JEq.Imm(asm.R0, 0, "exit"),
+		asm.StoreXAdd(asm.R0, asm.R6, asm.DWord),
+
+		asm.Mov.Imm(asm.R0, 1).WithSymbol("exit"),
+		asm.Return(),
+	}
+
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
+		Name:         "neon_network_monitor",
+		Type:         ebpf.CGroupSKB,
+		License:      "Apache 2.0",
+		Instructions: insns,
+		AttachTo:     cgroupPath,
+	})
+	if err != nil {
+		logger.Fatal("Failed to attach eBPF program: %v", zap.Error(err))
+		counters.Close()
+		return nil, nil, err
+	}
+
+	logger.Info("Successfully created eBPF program")
+	return prog, counters, nil
 }
 
 // Get returns the contents of /etc/resolv.conf and its hash
@@ -671,13 +781,20 @@ func main() {
 	if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
 		logger.Fatal("Failed to set cgroup limit", zap.Error(err))
 	}
+
+	bpf_program, counters, err := attachBPF(logger, cgroupPath)
+	if err != nil {
+		logger.Fatal("Failed to load BPF program", zap.Error(err))
+	}
+	defer bpf_program.Close()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
 	wg.Add(1)
-	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
+	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, cgroupPath, counters, &wg)
 
 	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
 	logger.Info("calling cgexec", zap.Strings("args", args))
@@ -748,17 +865,58 @@ func handleCPUCurrent(logger *zap.Logger, w http.ResponseWriter, r *http.Request
 	w.Write(body) //nolint:errcheck // Not much to do with the error here. TODO: log it?
 }
 
-func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cgroupPath string, wg *sync.WaitGroup) {
+func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Request, counters *ebpf.Map) {
+	if r.Method != "GET" {
+		logger.Error("unexpected method", zap.String("method", r.Method))
+		w.WriteHeader(400)
+		return
+	}
+
+	var counts vmv1.VirtualMachineNetworkUsage
+	if err := counters.Lookup(0, &counts.IngressBytes); err != nil {
+		logger.Error("error reading ingress byte counts", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+	if err := counters.Lookup(1, &counts.EgressBytes); err != nil {
+		logger.Error("error reading egress byte counts: %v", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+	body, err := json.Marshal(counts)
+	if err != nil {
+		logger.Error("could not marshal byte counts: %v", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	w.Write(body)
+}
+
+func listenForHTTPRequests(
+	ctx context.Context,
+	logger *zap.Logger,
+	port int32,
+	cgroupPath string,
+	counters *ebpf.Map,
+	wg *sync.WaitGroup,
+) {
 	defer wg.Done()
+	defer counters.Close()
 	mux := http.NewServeMux()
 	loggerHandlers := logger.Named("http-handlers")
 	cpuChangeLogger := loggerHandlers.Named("cpu_change")
+	networkUsageLogger := loggerHandlers.Named("network_usage")
 	mux.HandleFunc("/cpu_change", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUChange(cpuChangeLogger, w, r, cgroupPath)
 	})
 	cpuCurrentLogger := loggerHandlers.Named("cpu_current")
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUCurrent(cpuCurrentLogger, w, r, cgroupPath)
+	})
+	mux.HandleFunc("/get_network_usage", func(w http.ResponseWriter, r *http.Request) {
+		handleGetNetworkUsage(networkUsageLogger, w, r, counters)
 	})
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
@@ -774,13 +932,13 @@ func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cg
 	select {
 	case err := <-errChan:
 		if errors.Is(err, http.ErrServerClosed) {
-			logger.Info("cpu_change server closed")
+			logger.Info("http server closed")
 		} else if err != nil {
 			logger.Fatal("cpu_change exited with error", zap.Error(err))
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
-		logger.Info("shut down cpu_change server", zap.Error(err))
+		logger.Info("shut down http", zap.Error(err))
 	}
 }
 

@@ -19,6 +19,8 @@ package v1
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -47,6 +49,11 @@ const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 type VirtualMachineUsage struct {
 	CPU    *resource.Quantity `json:"cpu"`
 	Memory *resource.Quantity `json:"memory"`
+}
+
+type VirtualMachineNetworkUsage struct {
+	IngressBytes NetworkBytes `json:"ingress_bytes"`
+	EgressBytes  NetworkBytes `json:"egress_bytes"`
 }
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -181,6 +188,7 @@ type CPUs struct {
 // +kubebuilder:validation:XIntOrString
 // +kubebuilder:validation:Pattern=^[0-9]+((\.[0-9]*)?|m)
 type MilliCPU uint32 // note: pattern is more restrictive than resource.Quantity, because we're just using it for CPU
+type NetworkBytes uint64
 
 // RoundedUp returns the smallest integer number of CPUs greater than or equal to the effective
 // value of m.
@@ -445,6 +453,20 @@ type VirtualMachine struct {
 
 	Spec   VirtualMachineSpec   `json:"spec,omitempty"`
 	Status VirtualMachineStatus `json:"status,omitempty"`
+}
+
+func (vm *VirtualMachine) GetNetworkUsage() (*VirtualMachineNetworkUsage, error) {
+	resp, err := http.Get(fmt.Sprintf("localhost:%d/get_network_usage", vm.Spec.RunnerPort))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	var result VirtualMachineNetworkUsage
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func (vm *VirtualMachine) Cleanup() {
