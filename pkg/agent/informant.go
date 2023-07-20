@@ -132,12 +132,12 @@ func NewInformantServer(
 	runner *Runner,
 	updatedInformant util.CondChannelSender,
 	upscaleRequested util.CondChannelSender,
-) (*InformantServer, util.SignalReceiver, error) {
+) (*InformantServer, util.SignalReceiver[struct{}], error) {
 	// Manually start the TCP listener so that we can see the port it's assigned
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: 0 /* 0 means it'll be assigned any(-ish) port */}
 	listener, err := net.ListenTCP("tcp", &addr)
 	if err != nil {
-		return nil, util.SignalReceiver{}, fmt.Errorf("Error listening on TCP: %w", err)
+		return nil, util.SignalReceiver[struct{}]{}, fmt.Errorf("Error listening on TCP: %w", err)
 	}
 
 	// Get back the assigned port
@@ -179,12 +179,12 @@ func NewInformantServer(
 	util.AddHandler(logger, mux, "/try-upscale", http.MethodPost, "MoreResourcesRequest", server.handleTryUpscale)
 	httpServer := &http.Server{Handler: mux}
 
-	sendFinished, recvFinished := util.NewSingleSignalPair()
+	sendFinished, recvFinished := util.NewSingleSignalPair[struct{}]()
 	backgroundCtx, cancelBackground := context.WithCancel(ctx)
 
 	// note: docs for server.exit guarantee this function is called while holding runner.lock.
 	server.exit = func(status InformantServerExitStatus) {
-		sendFinished.Send()
+		sendFinished.Send(struct{}{})
 		cancelBackground()
 
 		// Set server.exitStatus if isn't already

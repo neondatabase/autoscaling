@@ -146,7 +146,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	// the initial list
 	opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
 
-	sendStop, stopSignal := util.NewSingleSignalPair()
+	sendStop, stopSignal := util.NewSingleSignalPair[struct{}]()
 
 	store := Store[T]{
 		objects:       make(map[types.UID]*T),
@@ -552,7 +552,7 @@ type Store[T any] struct {
 	nextIndexID uint64
 	indexes     map[uint64]Index[T]
 
-	stopSignal util.SignalSender
+	stopSignal util.SignalSender[struct{}]
 	stopped    atomic.Bool
 }
 
@@ -571,7 +571,7 @@ func (w *Store[T]) Relist() <-chan struct{} {
 }
 
 func (w *Store[T]) Stop() {
-	w.stopSignal.Send()
+	w.stopSignal.Send(struct{}{})
 	w.stopped.Store(true)
 }
 

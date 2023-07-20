@@ -209,7 +209,7 @@ type Scheduler struct {
 
 	// fatal is used for signalling that fatalError has been set (and so we should look for a new
 	// scheduler)
-	fatal util.SignalSender
+	fatal util.SignalSender[struct{}]
 }
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
@@ -798,7 +798,7 @@ func (r *Runner) trackSchedulerLoop(
 		minWait     time.Duration    = 5 * time.Second // minimum time we have to wait between scheduler starts
 		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
 		currentInfo schedwatch.SchedulerInfo
-		fatal       util.SignalReceiver
+		fatal       util.SignalReceiver[struct{}]
 		failed      bool
 	)
 
@@ -816,7 +816,7 @@ startScheduler:
 	failed = false
 
 	// Set the current scheduler
-	fatal = func() util.SignalReceiver {
+	fatal = func() util.SignalReceiver[struct{}] {
 		logger := logger.With(zap.Object("scheduler", currentInfo))
 
 		// Print info about a new scheduler, unless this is the first one.
@@ -824,7 +824,7 @@ startScheduler:
 			logger.Info("Updating scheduler pod")
 		}
 
-		sendFatal, recvFatal := util.NewSingleSignalPair()
+		sendFatal, recvFatal := util.NewSingleSignalPair[struct{}]()
 
 		sched := &Scheduler{
 			runner:     r,

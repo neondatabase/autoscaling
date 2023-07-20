@@ -7,32 +7,39 @@ import (
 	"sync"
 )
 
-func NewSingleSignalPair() (SignalSender, SignalReceiver) {
-	sigCh := make(chan struct{})
+func NewSingleSignalPair[T any]() (SignalSender[T], SignalReceiver[T]) {
+	sigCh := make(chan T, 1)
 	once := &sync.Once{}
 	closeSigCh := func() { once.Do(func() { close(sigCh) }) }
 
-	return SignalSender{send: closeSigCh}, SignalReceiver{sigCh: sigCh, closeSigCh: closeSigCh}
+	return SignalSender[T]{
+		send: func(data T) {
+			once.Do(func() {
+				sigCh <- data
+                close(sigCh)
+			})
+		},
+	}, SignalReceiver[T]{sigCh: sigCh, closeSigCh: closeSigCh}
 }
 
-type SignalSender struct {
-	send func()
+type SignalSender[T any] struct {
+	send func(T)
 }
 
-type SignalReceiver struct {
-	sigCh      chan struct{}
+type SignalReceiver[T any] struct {
+	sigCh      chan T
 	closeSigCh func()
 }
 
-func (s SignalSender) Send() {
-	s.send()
+func (s SignalSender[T]) Send(data T) {
+	s.send(data)
 }
 
-func (s SignalReceiver) Recv() chan struct{} {
+func (s SignalReceiver[T]) Recv() chan T {
 	return s.sigCh
 }
 
-func (s SignalReceiver) Close() {
+func (s SignalReceiver[T]) Close() {
 	s.closeSigCh()
 }
 
