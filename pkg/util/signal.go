@@ -11,12 +11,13 @@ func NewSingleSignalPair[T any]() (SignalSender[T], SignalReceiver[T]) {
 	sigCh := make(chan T, 1)
 	once := &sync.Once{}
 	closeSigCh := func() { once.Do(func() { close(sigCh) }) }
-	sendOnce := &sync.Once{}
 
 	return SignalSender[T]{
 		send: func(data T) {
-			sendOnce.Do(func() { sigCh <- data })
-			closeSigCh()
+			once.Do(func() {
+				sigCh <- data
+				closeSigCh()
+			})
 		},
 	}, SignalReceiver[T]{sigCh: sigCh, closeSigCh: closeSigCh}
 }
