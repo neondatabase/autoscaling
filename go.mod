@@ -60,7 +60,7 @@ require (
 	github.com/onsi/gomega v1.24.2
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/prometheus/client_golang v1.14.0
-	github.com/tychoish/fun v0.8.5
+	github.com/tychoish/fun v0.10.1
 	github.com/vishvananda/netlink v1.1.1-0.20220125195016-0639e7e787ba
 	go.uber.org/zap v1.24.0
 	golang.org/x/exp v0.0.0-20221126150942-6ab00d035af9

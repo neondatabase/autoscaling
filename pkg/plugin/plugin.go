@@ -209,16 +209,25 @@ func makeAutoscaleEnforcerPlugin(
 		return nil, fmt.Errorf("Error reading cluster state: %w", err)
 	}
 
+	// the Distributor's Producer function is safe for multiple
+	// concurrent use (unused here,) and removes one item from the
+	// queue. Distributors also expose an iterator interface if
+	// that's more ergonomic.
+	getCallback := queue.Distributor().Producer()
 	go func() {
 		for {
-			callback, err := queue.Wait(ctx)
+			callback, err := getCallback(ctx)
 			if err != nil {
+				// this is always going to be either
+				// pubsub.QueueClosed or the context's
+				// cancellation error.
 				logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
 				break
 			}
-
+			// note: there's no panic handler here: if a
+			// caller submits a nil function (or a bug)
+			// then everything goes boom.
 			callback()
-			queue.Remove()
 		}
 	}()
 
