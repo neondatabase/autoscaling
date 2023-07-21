@@ -32,10 +32,5 @@ branch.
 - prod-ap-southeast-1-epsilon
 - prod-eu-central-1-gamma
 - prod-us-east-2-delta
-
-### Other regions
-
-The other production regions have the following deployed:
-
-* prod-us-east-1-theta: `autoscale-scheduler-disabled.yaml`
-* prod-us-west-2-eta: `autoscale-scheduler-disabled.yaml`
+- prod-us-east-1-theta
+- prod-us-west-2-eta
