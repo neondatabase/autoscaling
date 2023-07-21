@@ -136,12 +136,13 @@ spec:
         component: scheduler
         name: autoscale-scheduler
         tier: control-plane
+        scheduler-plugin-disabled: "true"
     spec:
       containers:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.13.3
+        image: neondatabase/autoscale-scheduler:v0.14.0
         livenessProbe:
           httpGet:
             path: /healthz
