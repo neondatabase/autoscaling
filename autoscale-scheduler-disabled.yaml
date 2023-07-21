@@ -136,6 +136,7 @@ spec:
         component: scheduler
         name: autoscale-scheduler
         tier: control-plane
+        scheduler-plugin-disabled: "true"
     spec:
       containers:
       - command:
