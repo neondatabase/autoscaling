@@ -732,11 +732,6 @@ func (e *AutoscaleEnforcer) handlePodStarted(logger *zap.Logger, pod *corev1.Pod
 		zap.String("node", nodeName),
 	)
 
-	if pod.Spec.SchedulerName == e.state.conf.SchedulerName {
-		logger.Info("Got non-VM pod start event for pod assigned to this scheduler; nothing to do")
-		return
-	}
-
 	logger.Info("Handling non-VM pod start event")
 
 	podResources, err := extractPodOtherPodResourceState(pod)
@@ -751,6 +746,8 @@ func (e *AutoscaleEnforcer) handlePodStarted(logger *zap.Logger, pod *corev1.Pod
 	if _, ok := e.state.otherPods[podName]; ok {
 		logger.Info("Pod is already known") // will happen during startup
 		return
+	} else if pod.Spec.SchedulerName == e.state.conf.SchedulerName {
+		logger.Error("Got non-VM pod start event for unknown pod assigned to this scheduler")
 	}
 
 	// Pod is not known - let's get information about the node!
