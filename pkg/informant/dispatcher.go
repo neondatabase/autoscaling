@@ -182,6 +182,8 @@ func (disp *Dispatcher) HandleMessage(
 		return fmt.Errorf("error extracting 'type' field: %w", err)
 	}
 
+    // go thinks all json numbers are float64 so we first deserialize to that to
+    // avoid the type error, then cast to uint64
 	f, err := extractField[float64](unstructured, "id")
 	if err != nil {
 		return fmt.Errorf("error extracting 'id field: %w", err)
