@@ -14,6 +14,7 @@ commit in this repository, possibly unreleased.
 | Release | autoscaler-agent | VM informant |
 |---------|------------------|--------------|
 | _Current_ | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.14.1 | v1.0 - v2.0 | v2.0 - v2.0 |
 | v0.14.0 | v1.0 - v2.0 | v2.0 - v2.0 |
 | v0.13.3 | v1.0 - v2.0 | v2.0 - v2.0 |
 | v0.13.2 | v1.0 - v2.0 | v2.0 - v2.0 |
@@ -62,6 +63,7 @@ number.
 | Release | autoscaler-agent | Scheduler plugin |
 |---------|------------------|------------------|
 | _Current_ | v2.0 only | v1.0-v2.0 |
+| v0.14.1 | v2.0 only | v1.0-v2.0 |
 | v0.14.0 | v2.0 only | v1.0-v2.0 |
 | v0.13.3 | v2.0 only | v1.0-v2.0 |
 | v0.13.2 | v2.0 only | v1.0-v2.0 |
@@ -106,6 +108,7 @@ Note: Components v0.6.0 and below did not have a versioned protocol between the 
 | Release | controller | runner |
 |---------|------------|--------|
 | _Current_ | 0 - 1 | 1 |
+| v0.14.1 | 0 - 1 | 1 |
 | v0.14.0 | 0 - 1 | 1 |
 | v0.13.3 | 0 - 1 | 1 |
 | v0.13.2 | 0 - 1 | 1 |
