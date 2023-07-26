@@ -484,7 +484,7 @@ func (e *AutoscaleEnforcer) Filter(
 		missedPods[name] = struct{}{}
 	}
 
-	var unknownPods []util.NamespacedName
+	var includedIgnoredPods []util.NamespacedName
 
 	for _, podInfo := range nodeInfo.Pods {
 		pn := util.NamespacedName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
@@ -510,8 +510,6 @@ func (e *AutoscaleEnforcer) Filter(
 				continue
 			}
 
-			unknownPods = append(unknownPods, name)
-
 			if !e.state.conf.ignoredNamespace(podInfo.Pod.Namespace) {
 				// FIXME: this gets us duplicated "pod" fields. Not great. But we're using
 				// logger.With pretty pervasively, and it's hard to avoid this while using that.
@@ -521,6 +519,8 @@ func (e *AutoscaleEnforcer) Filter(
 					zap.Object("pod", name),
 					zap.Error(fmt.Errorf("Pod %v is unknown but not ignored", name)),
 				)
+			} else {
+				includedIgnoredPods = append(includedIgnoredPods, name)
 			}
 
 			// We *also* need to count pods in ignored namespaces
@@ -548,9 +548,6 @@ func (e *AutoscaleEnforcer) Filter(
 			missedPodsList = append(missedPodsList, name)
 		}
 		logger.Warn("Some known Pods weren't included in Filter NodeInfo", zap.Objects("missedPods", missedPodsList))
-	}
-	if len(unknownPods) != 0 {
-		logger.Warn("Received unknown pods from Filter NodeInfo", zap.Objects("unknownPods", unknownPods))
 	}
 
 	nodeTotalReservableCPU := node.totalReservableCPU()
@@ -628,6 +625,7 @@ func (e *AutoscaleEnforcer) Filter(
 
 	logFunc(
 		message,
+		zap.Objects("includedIgnoredPods", includedIgnoredPods),
 		zap.Object("verdict", verdictSet{
 			cpu: cpuMsg,
 			mem: memMsg,
