@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
+	"nhooyr.io/websocket"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -30,6 +31,13 @@ const (
 )
 
 type InformantServer struct {
+	// If the "informant" we're talking to is actually a monitor
+	informantIsMonitor bool
+
+	// The dispatcher we're using to connect to the monitor if informantIsMonitor
+	// is true
+	dispatcher *Dispatcher
+
 	// runner is the Runner currently responsible for this InformantServer. We must acquire its lock
 	// before making any updates to other fields of this struct
 	runner *Runner
@@ -150,7 +158,9 @@ func NewInformantServer(
 	}
 
 	server := &InformantServer{
-		runner: runner,
+		informantIsMonitor: false,
+		dispatcher:         nil,
+		runner:             runner,
 		desc: api.AgentDesc{
 			AgentID:         uuid.New(),
 			ServerAddr:      serverAddr,
@@ -210,7 +220,11 @@ func NewInformantServer(
 				logger.Warn("Error shutting down InformantServer", zap.Error(err))
 			}
 		})
-		if server.madeContact {
+
+		if server.informantIsMonitor {
+			server.dispatcher.conn.Close(websocket.StatusInternalError, "informant exit")
+			logger.Info("Successfully closed websocket connection")
+		} else if server.madeContact {
 			// only unregister the server if we could have plausibly contacted the informant
 			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), logger, "InformantServer unregister", func(_ context.Context, logger *zap.Logger) {
 				// we want shutdown to (potentially) live longer than the request which
@@ -269,6 +283,15 @@ func NewInformantServer(
 			case <-ticker.C:
 			}
 
+            // Are we talking to a monitor?
+            if server.informantIsMonitor {
+                if err = server.MonitorHealthCheck(c, logger); err != nil {
+                    logger.Warn("monitor health check failed", zap.Error(err))
+                }
+                continue
+            }
+
+            // Otherwise do normal informant health checks
 			var done bool
 			func() {
 				server.requestLock.Lock()
@@ -413,12 +436,58 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 	resp, statusCode, err := doInformantRequest[api.AgentDesc, api.InformantDesc](
 		ctx, logger, s, timeout, http.MethodPost, "/register", &s.desc,
 	)
+
+	connectedToMonitor := false
+
 	// Do some stuff with the lock acquired:
 	func() {
 		maybeMadeContact := statusCode != 0 || ctx.Err() != nil
 
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
+
+		if statusCode == 404 {
+			addr := fmt.Sprintf(
+				"ws://%s:%d/monitor",
+				s.runner.podIP,
+				s.runner.global.config.Informant.ServerPort,
+			)
+			logger.Info(
+				"received 404 from informant's /register endpoint; connecting to monitor",
+				zap.String("addr", addr),
+			)
+			// pre-declare disp so that err get's assigned to err from enclosing scope,
+			// overwriting original request error.
+			var disp Dispatcher
+			disp, err = NewDispatcher(logger, addr, s)
+			// If the error is not nil, it will get handled below
+			if err == nil {
+				connectedToMonitor = true
+				s.informantIsMonitor = true
+				s.dispatcher = &disp
+				s.mode = InformantServerRunning
+				s.updatedInformant.Send()
+				if s.runner.server == s {
+					s.runner.informant = &api.InformantDesc{
+						ProtoVersion: MaxInformantProtocolVersion,
+						MetricsMethod: api.InformantMetricsMethod{
+							Prometheus: &api.MetricsMethodPrometheus{
+								Port: 9100,
+							},
+						},
+					}
+					// we exited
+				} else if s.exitStatus != nil {
+					// runner is talking to a different informant
+					// close ws
+
+					// updated
+				} else {
+					// close ws
+
+				}
+			}
+		}
 
 		// Record whether we might've contacted the informant:
 		s.madeContact = maybeMadeContact
@@ -440,6 +509,10 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 			}
 		}
 	}()
+
+	if connectedToMonitor {
+		return nil
+	}
 
 	if err != nil {
 		return err // the errors returned by doInformantRequest are descriptive enough.
@@ -1090,4 +1163,94 @@ func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to ap
 
 	logger.Info("Received successful upscale result")
 	return nil
+}
+
+func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Logger) error {
+	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
+	err := s.dispatcher.Call(
+		ctx,
+		tx,
+		api.HealthCheck{},
+	)
+	if err != nil {
+		return err
+	}
+
+	// Wait for result
+	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+	select {
+	case res := <-rx.Recv():
+		// A nil pointer means a monitor error occured
+		if res != nil {
+			return nil
+		} else {
+			return fmt.Errorf("monitor experienced an internal error")
+		}
+	case <-time.After(timeout):
+		return fmt.Errorf("timed out waiting %v for monitor response", timeout)
+	}
+}
+
+func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
+	cpu := rawResources.Cpu.AsApproximateFloat64()
+	mem := uint64(rawResources.Memory.Value())
+
+	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
+	err := s.dispatcher.Call(
+		ctx,
+		tx,
+		api.UpscaleNotification{
+			Granted: api.Allocation{Cpu: cpu, Mem: mem},
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	// Wait for result
+	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+	select {
+	case res := <-rx.Recv():
+		// A nil pointer means a monitor error occured
+		if res != nil {
+			return nil
+		} else {
+			return fmt.Errorf("monitor experienced an internal error")
+		}
+	case <-time.After(timeout):
+		return fmt.Errorf("timed out waiting %v for monitor response", timeout)
+	}
+}
+
+func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
+	cpu := rawResources.Cpu.AsApproximateFloat64()
+	mem := uint64(rawResources.Memory.Value())
+
+	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
+	err := s.dispatcher.Call(
+		ctx,
+		tx,
+		api.DownscaleRequest{
+			Target: api.Allocation{Cpu: cpu, Mem: mem},
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for result
+	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+	select {
+	case res := <-rx.Recv():
+		// A nil pointer means a monitor error occured
+		if res != nil {
+			return res.Result, nil
+		} else {
+			return nil, fmt.Errorf("monitor experienced an internal error")
+		}
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("timed out waiting %v for monitor response", timeout)
+	}
 }

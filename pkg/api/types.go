@@ -674,6 +674,10 @@ type InternalError struct {
 	Error string `json:"error"`
 }
 
+// This type is sent as part of a bidirectional heartbeat between the monitor and
+// informant. The check is initiated by the informant.
+type HealthCheck struct{}
+
 // This function is used to prepare a message for serialization. Any data passed
 // to the monitor should be serialized with this function. As of protocol v1.0,
 // the following types maybe be sent to the monitor, and thus passed in:
@@ -681,6 +685,7 @@ type InternalError struct {
 // - UpscaleNotification
 // - InvalidMessage
 // - InternalError
+// - HealthCheck
 func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
 	// The final type that gets sent over the wire
 	type Bundle struct {
@@ -699,6 +704,8 @@ func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
 		typeStr = "InvalidMessage"
 	case InternalError:
 		typeStr = "InternalError"
+    case HealthCheck:
+        typeStr = "HealthCheck"
 	default:
 		return nil, fmt.Errorf("unknown message type \"%s\"", reflect.TypeOf(content))
 	}
