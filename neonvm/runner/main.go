@@ -583,7 +583,6 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	// leading slash is important
 	selfCgroupPath, err := getSelfCgroupPath()
 	if err != nil {
 		log.Fatalf("Failed to get self cgroup path: %s", err)
