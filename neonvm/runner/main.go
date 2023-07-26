@@ -433,6 +433,11 @@ func main() {
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.Parse()
 
+	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
+	if !ok {
+		log.Fatalf("environment variable K8S_POD_NAME missing")
+	}
+
 	vmSpecJson, err := base64.StdEncoding.DecodeString(vmSpecDump)
 	if err != nil {
 		log.Fatalf("Failed to decode VirtualMachine Spec dump: %s", err)
@@ -578,13 +583,27 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	// leading slash is important
-	cgroupPath := fmt.Sprintf("/%s-vm-runner", vmStatus.PodName)
+	selfCgroupPath, err := getSelfCgroupPath()
+	if err != nil {
+		log.Fatalf("Failed to get self cgroup path: %s", err)
+	}
+	// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
+	// that the cgroup '/neonvm-qemu-...' still works.
+	if selfCgroupPath == "/" {
+		selfCgroupPath = ""
+	}
+	// ... but also we should have some uniqueness just in case, so we're not sharing a root level
+	// cgroup if that *is* what's happening. This *should* only be relevant for local clusters.
+	//
+	// We don't want to just use the VM spec's .status.PodName because during migrations that will
+	// be equal to the source pod, not this one, which may be... somewhat confusing.
+	cgroupPath := fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
+
+	log.Printf("Using QEMU cgroup path %q", cgroupPath)
 
 	if err := setCgroupLimit(qemuCPUs.use, cgroupPath); err != nil {
 		log.Fatalf("Failed to set cgroup limit: %s", err)
 	}
-	defer cleanupCgroup(cgroupPath)
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
 
@@ -694,6 +713,111 @@ func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg 
 	}
 }
 
+func getSelfCgroupPath() (string, error) {
+	// There's some fun stuff here. For general information, refer to `man 7 cgroups` - specifically
+	// the section titled "/proc files" - for "/proc/cgroups" and "/proc/pid/cgroup".
+	//
+	// In general, the idea is this: If we start QEMU outside of the cgroup for the container we're
+	// running in, we run into multiple problems - it won't show up in metrics, and we'll have to
+	// clean up the cgroup ourselves. (not good!).
+	//
+	// So we'd like to start it in the same cgroup - the question is just how to find the name of
+	// the cgroup we're running in. Thankfully, this is visible in `/proc/self/cgroup`!
+	// The only difficulty is the file format.
+	//
+	// In cgroup v1 (which is what we have on EKS [as of 2023-07]), the contents of
+	// /proc/<pid>/cgroup tend to look like:
+	//
+	//   11:cpuset:/path/to/cgroup
+	//   10:perf_event:/path/to/cgroup
+	//   9:hugetlb:/path/to/cgroup
+	//   8:blkio:/path/to/cgroup
+	//   7:pids:/path/to/cgroup
+	//   6:freezer:/path/to/cgroup
+	//   5:memory:/path/to/cgroup
+	//   4:net_cls,net_prio:/path/to/cgroup
+	//   3:cpu,cpuacct:/path/to/cgroup
+	//   2:devices:/path/to/cgroup
+	//   1:name=systemd:/path/to/cgroup
+	//
+	// For cgroup v2, we have:
+	//
+	//   0::/path/to/cgroup
+	//
+	// The file format is defined to have 3 fields, separated by colons. The first field gives the
+	// Hierarchy ID, which is guaranteed to be 0 if the cgroup is part of a cgroup v2 ("unified")
+	// hierarchy.
+	// The second field is a comma-separated list of the controllers. Or, if it's cgroup v2, nothing.
+	// The third field is the "pathname" of the cgroup *in its hierarchy*, relative to the mount
+	// point of the hierarchy.
+	//
+	// So we're looking for EITHER:
+	//  1. an entry like '<N>:<controller...>,cpu,<controller...>:/path/to/cgroup (cgroup v1); OR
+	//  2. an entry like '0::/path/to/cgroup', and we'll return the path (cgroup v2)
+	// We primarily care about the 'cpu' controller, so for cgroup v1, we'll search for that instead
+	// of e.g. "name=systemd", although it *really* shouldn't matter because the paths will be the
+	// same anyways.
+	//
+	// As far as I (@sharnoff) can tell, the only case where that might actually get messed up is if
+	// the CPU controller isn't available for the cgroup we're running in, in which case there's
+	// nothing we can do about it! (other than e.g. using a cgroup higher up the chain, which would
+	// be really bad tbh).
+
+	// ---
+	// On to the show!
+
+	procSelfCgroupContents, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return "", fmt.Errorf("failed to read /proc/self/cgroup: %w", err)
+	}
+
+	// Collect all candidate paths from the lines of the file. If there isn't exactly one,
+	// something's wrong and we should make an error.
+	var candidates []string
+	for lineno, line := range strings.Split(string(procSelfCgroupContents), "\n") {
+		if line == "" {
+			continue
+		}
+
+		// Split into the three ':'-delimited fields
+		fields := strings.Split(line, ":")
+		if len(fields) != 3 {
+			log.Printf("Contents of /proc/self/cgroup:\n%s", procSelfCgroupContents)
+			return "", fmt.Errorf("line %d of /proc/self/cgroup did not have 3 colon-delimited fields", lineno+1)
+		}
+
+		id := fields[0]
+		controllers := fields[1]
+		path := fields[2]
+		if id == "0" {
+			candidates = append(candidates, path)
+			continue
+		}
+
+		// It's not cgroup v2, otherwise id would have been 0. So, check if the comma-separated list
+		// of controllers contains 'cpu' as an entry.
+		for _, c := range strings.Split(controllers, ",") {
+			if c == "cpu" {
+				candidates = append(candidates, path)
+				break // ... and then continue to the next loop iteration
+			}
+		}
+	}
+
+	// Success:
+	if len(candidates) == 1 {
+		return candidates[0], nil
+	}
+
+	// Failure cases:
+	log.Printf("Contents of /proc/self/cgroup:\n%s", procSelfCgroupContents)
+	if len(candidates) == 0 {
+		return "", errors.New("Couldn't find applicable entry in /proc/self/cgroup")
+	} else {
+		return "", errors.New("More than one applicable entry in /proc/self/cgroup")
+	}
+}
+
 func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	isV2 := cgroups.Mode() == cgroups.Unified
 	period := cgroupPeriod
@@ -724,23 +848,6 @@ func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	}
 
 	return nil
-}
-
-func cleanupCgroup(cgroupPath string) error {
-	isV2 := cgroups.Mode() == cgroups.Unified
-	if isV2 {
-		control, err := cgroup2.Load(cgroupPath)
-		if err != nil {
-			return err
-		}
-		return control.Delete()
-	} else {
-		control, err := cgroup1.Load(cgroup1.StaticPath(cgroupPath))
-		if err != nil {
-			return err
-		}
-		return control.Delete()
-	}
 }
 
 func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {

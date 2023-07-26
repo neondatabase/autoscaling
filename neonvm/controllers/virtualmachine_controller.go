@@ -1043,6 +1043,14 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 					"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 					"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 				},
+				Env: []corev1.EnvVar{{
+					Name: "K8S_POD_NAME",
+					ValueFrom: &corev1.EnvVarSource{
+						FieldRef: &corev1.ObjectFieldSelector{
+							FieldPath: "metadata.name",
+						},
+					},
+				}},
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						Name:      "virtualmachineimages",
