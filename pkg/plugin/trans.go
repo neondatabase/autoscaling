@@ -228,12 +228,23 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 		r.node.PressureAccountedFor -= r.pod.Reserved + r.pod.CapacityPressure
 	}
 
-	fmtString := "pod had %d; node reserved %d -> %d, " +
+	var podBuffer string
+	var oldNodeBuffer string
+	var newNodeBuffer string
+	if r.pod.Buffer != 0 {
+		r.node.Buffer -= r.pod.Buffer
+
+		podBuffer = fmt.Sprintf(" [buffer %d]", r.pod.Buffer)
+		oldNodeBuffer = fmt.Sprintf(" [buffer %d]", r.oldNode.buffer)
+		newNodeBuffer = fmt.Sprintf(" [buffer %d]", r.node.Buffer)
+	}
+
+	fmtString := "pod had %d%s; node reserved %d%s -> %d%s, " +
 		"node capacityPressure %d -> %d (%d -> %d spoken for)"
 	verdict = fmt.Sprintf(
 		fmtString,
-		// pod had %d; node reserved %d -> %d
-		r.pod.Reserved, r.oldNode.reserved, r.node.Reserved,
+		// pod had %d%s; node reserved %d%s -> %d%s
+		r.pod.Reserved, podBuffer, r.oldNode.reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer,
 		// node capacityPressure %d -> %d (%d -> %d spoken for)
 		r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
 	)
