@@ -16,6 +16,13 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+const (
+	MinMonitorProtocolVersion api.MonitorProtoVersion = api.MonitorProtoV1_0
+	MaxMonitorProtocolVersion api.MonitorProtoVersion = api.MonitorProtoV1_0
+)
+
+// Refactor this struct. At present it's being used as a bunch of different things.
+// See the handle[messageType] functions below in the dispatcher main loop
 type MonitorResult struct {
 	Result       *api.DownscaleResult
 	Confirmation struct{}
@@ -60,7 +67,7 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 	// Doing so causes memory bugs.
 	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
 	if err != nil {
-		return disp, fmt.Errorf("error creating dispatcher: %w", err)
+		return disp, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
 	// Figure out protocol version
@@ -68,8 +75,8 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 		ctx,
 		c,
 		api.VersionRange[api.MonitorProtoVersion]{
-			Min: api.MonitorProtoV1_0,
-			Max: api.MonitorProtoV1_0,
+			Min: MinMonitorProtocolVersion,
+			Max: MaxMonitorProtocolVersion,
 		},
 	)
 	if err != nil {
@@ -81,7 +88,7 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 		return Dispatcher{}, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
 	}
 	if version.Error != nil {
-		return Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %s", *version.Error)
+		return Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
 	}
 	logger.Info("negotiated protocol with monitor", zap.String("protocol", version.Version.String()))
 
@@ -107,6 +114,7 @@ func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error 
 	// by base64 encoding it, so use RawMessage to avoid serializing to []byte
 	// (done by SerializeInformantMessage), and then base64 encoding again
 	raw := json.RawMessage(data)
+	disp.logger.Info("sending message to monitor", zap.ByteString("message", raw))
 	return wsjson.Write(ctx, disp.conn, &raw)
 }
 
@@ -124,6 +132,20 @@ func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*Moni
 	return nil
 }
 
+func extractField[T any](data map[string]interface{}, key string) (*T, error) {
+	field, ok := data[key]
+	if !ok {
+		return nil, fmt.Errorf("data had no key %q", key)
+	}
+
+	coerced, ok := field.(T)
+	if !ok {
+		return nil, fmt.Errorf("data[%q] was not of type %T", key, *new(T))
+	}
+
+	return &coerced, nil
+}
+
 // Handle messages from the monitor. Make sure that all message types the monitor
 // can send are included in the inner switch statement.
 func (disp *Dispatcher) HandleMessage(
@@ -133,6 +155,7 @@ func (disp *Dispatcher) HandleMessage(
 	handleUpscaleConfirmation func(api.UpscaleConfirmation, uint64) error,
 	handleDownscaleResult func(api.DownscaleResult, uint64) error,
 	handleMonitorError func(api.InternalError, uint64) error,
+	handleHealthCheck func(api.HealthCheck, uint64) error,
 ) error {
 	// Deserialization has several steps:
 	// 1. Deserialize into an unstructured map[string]interface{}
@@ -147,35 +170,25 @@ func (disp *Dispatcher) HandleMessage(
 	if err := wsjson.Read(ctx, disp.conn, &message); err != nil {
 		return fmt.Errorf("error receiving message: %w", err)
 	}
+	logger.Info("(pre-decoding): received a message", zap.ByteString("message", message))
 
 	var unstructured map[string]interface{}
 	if err := json.Unmarshal(message, &unstructured); err != nil {
-		return fmt.Errorf("error deserializing message: \"%s\"", string(message))
+		return fmt.Errorf("error deserializing message: %q", string(message))
 	}
 
-	typeField, ok := unstructured["type"]
-	if !ok {
-		return fmt.Errorf("message did not have \"type\" field")
-	}
-	typeStr, ok := typeField.(string)
-	if !ok {
-		return fmt.Errorf("value <%s> with key \"type\" was not a string", typeField)
+	typeStr, err := extractField[string](unstructured, "type")
+	if err != nil {
+		return fmt.Errorf("error extracting 'type' field: %w", err)
 	}
 
-	idField, ok := unstructured["id"]
-	if !ok {
-		return fmt.Errorf("message did not have \"id\" field")
+	f, err := extractField[float64](unstructured, "id")
+	if err != nil {
+		return fmt.Errorf("error extracting 'id field: %w", err)
 	}
+	id := uint64(*f)
 
-	// Go expects JSON numbers to be float64, so we first assert to that then
-	// convert to uint64. Trying to go straight to (uint64) will fail
-	f, ok := idField.(float64)
-	if !ok {
-		return fmt.Errorf("value <%s> with key \"id\" was not a number", idField)
-	}
-	id := uint64(f)
-
-	switch typeStr {
+	switch *typeStr {
 	case "UpscaleRequest":
 		var req api.UpscaleRequest
 		if err := json.Unmarshal(message, &req); err != nil {
@@ -201,11 +214,23 @@ func (disp *Dispatcher) HandleMessage(
 			return fmt.Errorf("error unmarshaling InternalError: %w", err)
 		}
 		return handleMonitorError(monitorErr, id)
+	case "HealthCheck":
+		var healthCheck api.HealthCheck
+		if err := json.Unmarshal(message, &healthCheck); err != nil {
+			return fmt.Errorf("error unmarshaling HealthCheck: %w", err)
+		}
+		return handleHealthCheck(healthCheck, id)
+	case "InvalidMessage":
+		var warning api.InvalidMessage
+		if err := json.Unmarshal(message, &warning); err != nil {
+			disp.logger.Warn("received notification we sent an invalid message", zap.Any("warning", warning))
+		}
+		return nil
 	default:
 		return disp.send(
 			ctx,
 			id,
-			api.InvalidMessage{Error: fmt.Sprintf("received message of unknown type: <%s>", typeStr)},
+			api.InvalidMessage{Error: fmt.Sprintf("received message of unknown type: %q", *typeStr)},
 		)
 	}
 }
@@ -214,53 +239,79 @@ func (disp *Dispatcher) HandleMessage(
 func (disp *Dispatcher) run() {
 	disp.logger.Info("Starting.")
 	ctx := context.Background()
-	for {
-		logger := disp.logger.Named("message-handler")
-		// Does not take a message id because we don't know when the agent will
-		// upscale. The monitor will get the result back as a NotifyUpscale message
-		// from us, with a new id.
-		handleUpscaleRequest := func(api.UpscaleRequest) {
-			disp.notifier.Send()
-		}
-		handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
-			sender, ok := disp.waiters[id]
-			if ok {
-				sender.Send(&MonitorResult{Result: nil, Confirmation: struct{}{}})
-				// Don't forget to delete the waiter
-				delete(disp.waiters, id)
-				return nil
-			} else {
-				fmtString := "received UpscaleConfirmation with id %d but no record of previous message with that id"
-				return disp.send(ctx, id, api.InvalidMessage{Error: fmt.Sprintf(fmtString, id)})
-			}
-		}
-		handleDownscaleResult := func(res api.DownscaleResult, id uint64) error {
-			sender, ok := disp.waiters[id]
-			if ok {
-				sender.Send(&MonitorResult{Result: &res, Confirmation: struct{}{}})
-				// Don't forget to delete the waiter
-				delete(disp.waiters, id)
-				return nil
-			} else {
-				fmtString := "received DownscaleResult with id %d but no record of previous message with that id"
-				return disp.send(ctx, id, api.InvalidMessage{Error: fmt.Sprintf(fmtString, id)})
-			}
-		}
-		handleMonitorError := func(err api.InternalError, id uint64) error {
-			sender, ok := disp.waiters[id]
-			if ok {
-				logger.Warn("monitor experienced an internal error", zap.String("error", err.Error))
-				// Indicate to the receiver that an error occured
-				sender.Send(nil)
-				// Don't forget to delete the waiter
-				delete(disp.waiters, id)
-				return nil
-			} else {
-				fmtString := "received InternalError with id %d but no record of previous message with that id"
-				return disp.send(ctx, id, api.InvalidMessage{Error: fmt.Sprintf(fmtString, id)})
-			}
-		}
+	logger := disp.logger.Named("message-handler")
 
+	// Utility for logging + returning an error when we get a message with an
+	// id we're unaware of. Note: unknownMessage is not a message type.
+	handleUnkownMessage := func(messageType string, id uint64) error {
+		fmtString := "received %s with id %d but no record of previous message with that id"
+		msg := fmt.Sprintf(fmtString, messageType, id)
+		logger.Warn(msg, zap.Uint64("id", id))
+		return disp.send(ctx, id, api.InvalidMessage{Error: msg})
+	}
+
+	// Does not take a message id because we don't know when the agent will
+	// upscale. The monitor will get the result back as a NotifyUpscale message
+	// from us, with a new id.
+	handleUpscaleRequest := func(req api.UpscaleRequest) {
+		disp.notifier.Send()
+	}
+	handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
+		sender, ok := disp.waiters[id]
+		if ok {
+			logger.Info("monitor confirmed upscale", zap.Uint64("id", id))
+			sender.Send(&MonitorResult{Result: nil, Confirmation: struct{}{}})
+			// Don't forget to delete the waiter
+			delete(disp.waiters, id)
+			return nil
+		} else {
+			return handleUnkownMessage("UpscaleConfirmation", id)
+		}
+	}
+	handleDownscaleResult := func(res api.DownscaleResult, id uint64) error {
+		sender, ok := disp.waiters[id]
+		if ok {
+			logger.Info("monitor returned downscale result", zap.Uint64("id", id))
+			sender.Send(&MonitorResult{Result: &res, Confirmation: struct{}{}})
+			// Don't forget to delete the waiter
+			delete(disp.waiters, id)
+			return nil
+		} else {
+			return handleUnkownMessage("DownscaleResult", id)
+		}
+	}
+	handleMonitorError := func(err api.InternalError, id uint64) error {
+		sender, ok := disp.waiters[id]
+		if ok {
+			logger.Warn(
+				"monitor experienced an internal error",
+				zap.String("error", err.Error),
+				zap.Uint64("id", id),
+			)
+			// Indicate to the receiver that an error occured
+			sender.Send(nil)
+			// Don't forget to delete the waiter
+			delete(disp.waiters, id)
+			return nil
+		} else {
+			return handleUnkownMessage("MonitorError", id)
+		}
+	}
+	handleHealthCheck := func(confirmation api.HealthCheck, id uint64) error {
+		sender, ok := disp.waiters[id]
+		if ok {
+			logger.Info("monitor responded to health check", zap.Uint64("id", id))
+			// Indicate to the receiver that an error occured
+			sender.Send(&MonitorResult{Result: nil, Confirmation: struct{}{}})
+			// Don't forget to delete the waiter
+			delete(disp.waiters, id)
+			return nil
+		} else {
+			return handleUnkownMessage("HealthCheck", id)
+		}
+	}
+
+	for {
 		err := disp.HandleMessage(
 			ctx,
 			logger,
@@ -268,9 +319,11 @@ func (disp *Dispatcher) run() {
 			handleUpscaleConfirmation,
 			handleDownscaleResult,
 			handleMonitorError,
+			handleHealthCheck,
 		)
 		if err != nil {
 			logger.Error("error handling message -> panicking", zap.Error(err))
+			// TODO: fix this comment for the agent
 			// We actually want to panic here so we get respawned by the inittab,
 			// and so the monitor's connection is closed and it also gets restarted
 			panic(err)
