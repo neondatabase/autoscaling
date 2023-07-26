@@ -588,7 +588,7 @@ func main() {
 		log.Fatalf("Failed to get self cgroup path: %s", err)
 	}
 	// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
-	// that the cgroup '/neonvm-qemu' still works.
+	// that the cgroup '/neonvm-qemu-...' still works.
 	if selfCgroupPath == "/" {
 		selfCgroupPath = ""
 	}
