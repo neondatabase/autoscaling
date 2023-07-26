@@ -63,7 +63,7 @@ func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (di
 	// Doing so causes memory bugs.
 	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
 	if err != nil {
-		return disp, fmt.Errorf("error creating dispatcher: %w", err)
+		return disp, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
 	// Figure out protocol version
@@ -166,39 +166,21 @@ func (disp *Dispatcher) HandleMessage(
 	if err := wsjson.Read(ctx, disp.conn, &message); err != nil {
 		return fmt.Errorf("error receiving message: %w", err)
 	}
+	logger.Info("(pre-decoding): received a message", zap.ByteString("message", message))
 
 	var unstructured map[string]interface{}
 	if err := json.Unmarshal(message, &unstructured); err != nil {
 		return fmt.Errorf("error deserializing message: %q", string(message))
 	}
 
-	// typeField, ok := unstructured["type"]
-	// if !ok {
-	// 	return fmt.Errorf("message did not have \"type\" field")
-	// }
-	// typeStr, ok := typeField.(string)
-	// if !ok {
-	// 	return fmt.Errorf("value %q with key \"type\" was not a string", typeField)
-	// }
 	typeStr, err := extractField[string](unstructured, "type")
 	if err != nil {
-		return fmt.Errorf("error extracting %q field: %w", "type", err)
+		return fmt.Errorf("error extracting 'type' field: %w", err)
 	}
 
-	// idField, ok := unstructured["id"]
-	// if !ok {
-	// 	return fmt.Errorf("message did not have \"id\" field")
-	// }
-	//
-	// // Go expects JSON numbers to be float64, so we first assert to that then
-	// // convert to uint64. Trying to go straight to (uint64) will fail
-	// f, ok := idField.(float64)
-	// if !ok {
-	// 	return fmt.Errorf("value %q with key \"id\" was not a number", idField)
-	// }
 	f, err := extractField[float64](unstructured, "id")
 	if err != nil {
-		return fmt.Errorf("error extracting %q field: %w", "id", err)
+		return fmt.Errorf("error extracting 'id field: %w", err)
 	}
 	id := uint64(*f)
 
@@ -244,7 +226,7 @@ func (disp *Dispatcher) HandleMessage(
 		return disp.send(
 			ctx,
 			id,
-			api.InvalidMessage{Error: fmt.Sprintf("received message of unknown type: %q", typeStr)},
+			api.InvalidMessage{Error: fmt.Sprintf("received message of unknown type: %q", *typeStr)},
 		)
 	}
 }
