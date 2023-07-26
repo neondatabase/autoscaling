@@ -16,7 +16,7 @@ func NewSingleSignalPair[T any]() (SignalSender[T], SignalReceiver[T]) {
 		send: func(data T) {
 			once.Do(func() {
 				sigCh <- data
-                close(sigCh)
+				close(sigCh)
 			})
 		},
 	}, SignalReceiver[T]{sigCh: sigCh, closeSigCh: closeSigCh}
