@@ -90,7 +90,7 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 	if version.Error != nil {
 		return Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
 	}
-	logger.Info("negotiated protocol with monitor", zap.String("protocol", version.Version.String()))
+	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
 	disp = Dispatcher{
 		conn:         c,
