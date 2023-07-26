@@ -10,7 +10,8 @@ RUN apk add musl-dev git
 # `latest_commit` will change upon a commit in any branch
 ADD "https://api.github.com/repos/neondatabase/vm-monitor/branches" latest_commit
 
-RUN git clone https://github.com/neondatabase/vm-monitor.git 
+# FIXME RELEASE: change this back to main branch
+RUN git clone --branch fprasx/testing https://github.com/neondatabase/vm-monitor.git 
 RUN cargo build --release --manifest-path vm-monitor/Cargo.toml
 # Move binary so we can cargo clean
 RUN mkdir -p /workspace/bin && cp /workspace/vm-monitor/target/release/vm-monitor /workspace/bin

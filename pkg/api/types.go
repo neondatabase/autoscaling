@@ -704,8 +704,8 @@ func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
 		typeStr = "InvalidMessage"
 	case InternalError:
 		typeStr = "InternalError"
-    case HealthCheck:
-        typeStr = "HealthCheck"
+	case HealthCheck:
+		typeStr = "HealthCheck"
 	default:
 		return nil, fmt.Errorf("unknown message type \"%s\"", reflect.TypeOf(content))
 	}

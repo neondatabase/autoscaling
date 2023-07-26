@@ -283,15 +283,15 @@ func NewInformantServer(
 			case <-ticker.C:
 			}
 
-            // Are we talking to a monitor?
-            if server.informantIsMonitor {
-                if err = server.MonitorHealthCheck(c, logger); err != nil {
-                    logger.Warn("monitor health check failed", zap.Error(err))
-                }
-                continue
-            }
+			// Are we talking to a monitor?
+			if server.informantIsMonitor {
+				if err = server.MonitorHealthCheck(c, logger); err != nil {
+					logger.Warn("Monitor health check failed", zap.Error(err))
+				}
+				continue
+			}
 
-            // Otherwise do normal informant health checks
+			// Otherwise do normal informant health checks
 			var done bool
 			func() {
 				server.requestLock.Lock()
@@ -476,15 +476,26 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 							},
 						},
 					}
+					// TODO: fix context/logger stuff
+					s.runner.spawnBackgroundWorker(
+						context.Background(),
+						disp.logger,
+						"dispatcher message handler",
+						func(context.Context, *zap.Logger) { disp.run() },
+					)
 					// we exited
 				} else if s.exitStatus != nil {
 					// runner is talking to a different informant
 					// close ws
+					disp.conn.Close(websocket.StatusInternalError, "informant exited")
 
 					// updated
 				} else {
 					// close ws
-
+					disp.conn.Close(
+						websocket.StatusInternalError,
+						"runner is talking to a different informant",
+					)
 				}
 			}
 		}

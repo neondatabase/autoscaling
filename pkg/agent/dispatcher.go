@@ -352,6 +352,7 @@ func (disp *Dispatcher) run() {
 		)
 		if err != nil {
 			logger.Error("error handling message -> panicking", zap.Error(err))
+			// TODO: fix this comment for the agent
 			// We actually want to panic here so we get respawned by the inittab,
 			// and so the monitor's connection is closed and it also gets restarted
 			panic(err)
