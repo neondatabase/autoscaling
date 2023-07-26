@@ -235,7 +235,7 @@ func (disp *Dispatcher) HandleMessage(
 	}
 }
 
-// Long running function that performs all orchestrates all requests/responses.
+// Long running function that orchestrates all requests/responses.
 func (disp *Dispatcher) run() {
 	disp.logger.Info("Starting.")
 	ctx := context.Background()
