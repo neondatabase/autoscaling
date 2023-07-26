@@ -47,9 +47,9 @@ type Dispatcher struct {
 	// `State` and then just call a method on it when an upscale is requested.
 	notifier util.CondChannelSender
 
-	// This counter represents the current transaction id. When we need a new one
+	// This nextTransactionID represents the current transaction id. When we need a new one
 	// we simply bump it and take the new number.
-	counter uint64
+	nextTransactionID uint64
 
 	logger *zap.Logger
 
@@ -96,7 +96,7 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 		conn:         c,
 		notifier:     notifier,
 		waiters:      make(map[uint64]util.SignalSender[*MonitorResult]),
-		counter:      0,
+		nextTransactionID:      0,
 		logger:       logger.Named("dispatcher"),
 		protoVersion: version.Version,
 	}
@@ -122,8 +122,8 @@ func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error 
 // on the provided SignalSender. The value passed into message must be a valid value
 // to send to the monitor. See the docs for SerializeInformantMessage.
 func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*MonitorResult], message any) error {
-	id := disp.counter
-	disp.counter += 1
+	id := disp.nextTransactionID
+	disp.nextTransactionID += 1
 	err := disp.send(ctx, id, message)
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
