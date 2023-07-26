@@ -433,6 +433,11 @@ func main() {
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.Parse()
 
+	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
+	if !ok {
+		log.Fatalf("environment variable K8S_POD_NAME missing")
+	}
+
 	vmSpecJson, err := base64.StdEncoding.DecodeString(vmSpecDump)
 	if err != nil {
 		log.Fatalf("Failed to decode VirtualMachine Spec dump: %s", err)
@@ -583,7 +588,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get self cgroup path: %s", err)
 	}
-	cgroupPath := fmt.Sprintf("%s/neonvm-qemu", selfCgroupPath)
+	// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
+	// that the cgroup '/neonvm-qemu' still works.
+	if selfCgroupPath == "/" {
+		selfCgroupPath = ""
+	}
+	// ... but also we should have some uniqueness just in case, so we're not sharing a root level
+	// cgroup if that *is* what's happening. This *should* only be relevant for local clusters.
+	//
+	// We don't want to just use the VM spec's .status.PodName because during migrations that will
+	// be equal to the source pod, not this one, which may be... somewhat confusing.
+	cgroupPath := fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
 
 	log.Printf("Using QEMU cgroup path %q", cgroupPath)
 
