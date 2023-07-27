@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
@@ -21,15 +22,19 @@ const (
 	MaxMonitorProtocolVersion api.MonitorProtoVersion = api.MonitorProtoV1_0
 )
 
-// Refactor this struct. At present it's being used as a bunch of different things.
-// See the handle[messageType] functions below in the dispatcher main loop
+// This struct represents the result of a dispatcher.Call. Because the SignalSender
+// passed in can only be generic over one type - we have this mock enum. Only
+// one field should ever be non-nil, and it should always be clear which field
+// is readable. For example, the caller of dispatcher.call(HealthCheck { .. })
+// should only read the healthcheck field.
 type MonitorResult struct {
 	Result       *api.DownscaleResult
-	Confirmation struct{}
+	Confirmation *api.UpscaleConfirmation
+	HealthCheck  *api.HealthCheck
 }
 
 // The Dispatcher is the main object managing the websocket connection to the
-// monitor. For more information on the protocol, see Rust docs and transport.go
+// monitor. For more information on the protocol, see pkg/api/types.go
 type Dispatcher struct {
 	// The underlying connection we are managing
 	conn *websocket.Conn
@@ -45,9 +50,13 @@ type Dispatcher struct {
 	// just tries to receive off the channel and then request the upscale.
 	// A different way to do this would be to keep a backpointer to the parent
 	// `State` and then just call a method on it when an upscale is requested.
+	// However, we do not do this because it causes a reference cycle, which
+	// interferes with go's ability to run finalizers - which nhooyr/websocket
+	// uses to manage connections. Thus, if a panic were to happen, the connection
+	// might not get dropped.
 	notifier util.CondChannelSender
 
-	// This nextTransactionID represents the current transaction id. When we need a new one
+	// nextTransactionID represents the current transaction id. When we need a new one
 	// we simply bump it and take the new number.
 	nextTransactionID uint64
 
@@ -93,12 +102,12 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
 	disp = Dispatcher{
-		conn:         c,
-		notifier:     notifier,
-		waiters:      make(map[uint64]util.SignalSender[*MonitorResult]),
-		nextTransactionID:      0,
-		logger:       logger.Named("dispatcher"),
-		protoVersion: version.Version,
+		conn:              c,
+		notifier:          notifier,
+		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
+		nextTransactionID: 0,
+		logger:            logger.Named("dispatcher"),
+		protoVersion:      version.Version,
 	}
 	return disp, nil
 }
@@ -182,8 +191,8 @@ func (disp *Dispatcher) HandleMessage(
 		return fmt.Errorf("error extracting 'type' field: %w", err)
 	}
 
-    // go thinks all json numbers are float64 so we first deserialize to that to
-    // avoid the type error, then cast to uint64
+	// go thinks all json numbers are float64 so we first deserialize to that to
+	// avoid the type error, then cast to uint64
 	f, err := extractField[float64](unstructured, "id")
 	if err != nil {
 		return fmt.Errorf("error extracting 'id field: %w", err)
@@ -237,11 +246,48 @@ func (disp *Dispatcher) HandleMessage(
 	}
 }
 
+func (disp *Dispatcher) DoHealthChecks(ctx context.Context) {
+	logger := disp.logger.Named("health-checker")
+	logger.Info("starting health checks")
+	ticker := time.NewTicker(MonitorHealthCheckDelay)
+	for {
+		select {
+		case <-ticker.C:
+			{
+				tx, rx := util.NewSingleSignalPair[*MonitorResult]()
+				err := disp.Call(ctx, tx, api.HealthCheck{})
+				if err != nil {
+					panic("failed to make dispatcher call -> panicking")
+				}
+
+				// Wait for the response
+				select {
+				case res := <-rx.Recv():
+					// A nil pointer means an error occured
+					if res != nil {
+						continue
+					} else {
+						logger.Warn("monitor experienced an internal error")
+					}
+				case <-time.After(MonitorResponseTimeout):
+					logger.Warn(
+						"timed out waiting for monitor response",
+						zap.Duration("timeout", MonitorResponseTimeout),
+					)
+				}
+
+			}
+		}
+	}
+}
+
 // Long running function that orchestrates all requests/responses.
 func (disp *Dispatcher) run() {
-	disp.logger.Info("Starting.")
 	ctx := context.Background()
+	go disp.DoHealthChecks(ctx)
+
 	logger := disp.logger.Named("message-handler")
+	logger.Info("starting message handler")
 
 	// Utility for logging + returning an error when we get a message with an
 	// id we're unaware of. Note: unknownMessage is not a message type.
@@ -256,13 +302,18 @@ func (disp *Dispatcher) run() {
 	// upscale. The monitor will get the result back as a NotifyUpscale message
 	// from us, with a new id.
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
+		logger.Info("monitor requested upscale")
 		disp.notifier.Send()
 	}
 	handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("monitor confirmed upscale", zap.Uint64("id", id))
-			sender.Send(&MonitorResult{Result: nil, Confirmation: struct{}{}})
+			sender.Send(&MonitorResult{
+				Confirmation: &api.UpscaleConfirmation{},
+				Result:       nil,
+				HealthCheck:  nil,
+			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
 			return nil
@@ -274,7 +325,11 @@ func (disp *Dispatcher) run() {
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("monitor returned downscale result", zap.Uint64("id", id))
-			sender.Send(&MonitorResult{Result: &res, Confirmation: struct{}{}})
+			sender.Send(&MonitorResult{
+				Result:       &res,
+				Confirmation: nil,
+				HealthCheck:  nil,
+			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
 			return nil
@@ -304,7 +359,11 @@ func (disp *Dispatcher) run() {
 		if ok {
 			logger.Info("monitor responded to health check", zap.Uint64("id", id))
 			// Indicate to the receiver that an error occured
-			sender.Send(&MonitorResult{Result: nil, Confirmation: struct{}{}})
+			sender.Send(&MonitorResult{
+				HealthCheck:  &api.HealthCheck{},
+				Result:       nil,
+				Confirmation: nil,
+			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
 			return nil

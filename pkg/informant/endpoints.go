@@ -193,7 +193,7 @@ func (s *State) NotifyUpscale(
 	case res := <-rx.Recv():
 		// A nil pointer means a monitor error occured
 		if res != nil {
-			return &res.Confirmation, 200, nil
+			return &struct{}{}, 200, nil
 		} else {
 			return nil, 500, fmt.Errorf("monitor experienced an internal error")
 		}
