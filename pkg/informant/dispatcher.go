@@ -250,33 +250,27 @@ func (disp *Dispatcher) DoHealthChecks(ctx context.Context) {
 	logger := disp.logger.Named("health-checker")
 	logger.Info("starting health checks")
 	ticker := time.NewTicker(MonitorHealthCheckDelay)
-	for {
+	for range ticker.C {
+		tx, rx := util.NewSingleSignalPair[*MonitorResult]()
+		err := disp.Call(ctx, tx, api.HealthCheck{})
+		if err != nil {
+			panic("failed to make dispatcher call -> panicking")
+		}
+
+		// Wait for the response
 		select {
-		case <-ticker.C:
-			{
-				tx, rx := util.NewSingleSignalPair[*MonitorResult]()
-				err := disp.Call(ctx, tx, api.HealthCheck{})
-				if err != nil {
-					panic("failed to make dispatcher call -> panicking")
-				}
-
-				// Wait for the response
-				select {
-				case res := <-rx.Recv():
-					// A nil pointer means an error occured
-					if res != nil {
-						continue
-					} else {
-						logger.Warn("monitor experienced an internal error")
-					}
-				case <-time.After(MonitorResponseTimeout):
-					logger.Warn(
-						"timed out waiting for monitor response",
-						zap.Duration("timeout", MonitorResponseTimeout),
-					)
-				}
-
+		case res := <-rx.Recv():
+			// A nil pointer means an error occured
+			if res != nil {
+				continue
+			} else {
+				logger.Warn("monitor experienced an internal error")
 			}
+		case <-time.After(MonitorResponseTimeout):
+			logger.Warn(
+				"timed out waiting for monitor response",
+				zap.Duration("timeout", MonitorResponseTimeout),
+			)
 		}
 	}
 }
