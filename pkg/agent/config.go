@@ -18,6 +18,9 @@ type Config struct {
 	Scheduler SchedulerConfig  `json:"scheduler"`
 	Billing   *billing.Config  `json:"billing,omitempty"`
 	DumpState *DumpStateConfig `json:"dumpState"`
+
+	// Port to listen on for informant -> agent requests
+	InformantCallbackPort int `json:"informant_callback_port"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
