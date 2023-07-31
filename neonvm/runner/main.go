@@ -46,7 +46,7 @@ const (
 	QEMU_BIN      = "qemu-system-x86_64"
 	QEMU_IMG_BIN  = "qemu-img"
 	kernelPath    = "/vm/kernel/vmlinuz"
-	kernelCmdline = "init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
+	kernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath    = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath = "/vm/images/runtime.iso"
