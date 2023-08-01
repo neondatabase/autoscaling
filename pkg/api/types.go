@@ -758,7 +758,7 @@ func (v MonitorProtoVersion) String() string {
 type MonitorProtocolResponse struct {
 	// If `Error` is nil, contains the value of the settled on protocol version.
 	// Otherwise, will be set to 0 (MonitorProtocolVersion's zero value).
-	Version *MonitorProtoVersion `json:"version,omitempty"`
+	Version MonitorProtoVersion `json:"version,omitempty"`
 
 	// Will be nil if no error occured.
 	Error *string `json:"error,omitempty"`
