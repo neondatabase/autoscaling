@@ -357,8 +357,8 @@ default_pool_size=16
 )
 
 var (
-	Version     string
-	VMMonitor   string
+	Version   string
+	VMMonitor string
 
 	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
 	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
@@ -419,13 +419,13 @@ func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplSt
 }
 
 type TemplatesContext struct {
-	User           string
-	Entrypoint     []string
-	Cmd            []string
-	Env            []string
-	RootDiskImage  string
-	MonitorImage   string
-	FileCache      bool
+	User          string
+	Entrypoint    []string
+	Cmd           []string
+	Env           []string
+	RootDiskImage string
+	MonitorImage  string
+	FileCache     bool
 }
 
 func main() {
@@ -507,12 +507,12 @@ func main() {
 	}
 
 	tmplArgs := TemplatesContext{
-		Entrypoint:     append(entrypointPrefix, imageSpec.Config.Entrypoint...),
-		Cmd:            imageSpec.Config.Cmd,
-		Env:            imageSpec.Config.Env,
-		RootDiskImage:  *srcImage,
-		MonitorImage:   *monitor,
-		FileCache:      *fileCache,
+		Entrypoint:    append(entrypointPrefix, imageSpec.Config.Entrypoint...),
+		Cmd:           imageSpec.Config.Cmd,
+		Env:           imageSpec.Config.Env,
+		RootDiskImage: *srcImage,
+		MonitorImage:  *monitor,
+		FileCache:     *fileCache,
 	}
 
 	if len(imageSpec.Config.User) != 0 {
