@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
