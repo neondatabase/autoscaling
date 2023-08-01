@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
@@ -21,15 +23,19 @@ const (
 	MaxMonitorProtocolVersion api.MonitorProtoVersion = api.MonitorProtoV1_0
 )
 
-// Refactor this struct. At present it's being used as a bunch of different things.
-// See the handle[messageType] functions below in the dispatcher main loop
+// This struct represents the result of a dispatcher.Call. Because the SignalSender
+// passed in can only be generic over one type - we have this mock enum. Only
+// one field should ever be non-nil, and it should always be clear which field
+// is readable. For example, the caller of dispatcher.call(HealthCheck { .. })
+// should only read the healthcheck field.
 type MonitorResult struct {
 	Result       *api.DownscaleResult
-	Confirmation struct{}
+	Confirmation *api.UpscaleConfirmation
+	HealthCheck  *api.HealthCheck
 }
 
 // The Dispatcher is the main object managing the websocket connection to the
-// monitor. For more information on the protocol, see Rust docs and transport.go
+// monitor. For more information on the protocol, see pkg/api/types.go
 type Dispatcher struct {
 	// The underlying connection we are managing
 	conn *websocket.Conn
@@ -45,7 +51,7 @@ type Dispatcher struct {
 
 	// This counter represents the current transaction id. When we need a new one
 	// we simply bump it and take the new number.
-	counter uint64
+	nextTransactionID uint64
 
 	logger *zap.Logger
 
@@ -86,15 +92,15 @@ func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (di
 	if version.Error != nil {
 		return Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
 	}
-	logger.Info("negotiated protocol with monitor", zap.String("protocol", version.Version.String()))
+	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
 	disp = Dispatcher{
-		conn:         c,
-		waiters:      make(map[uint64]util.SignalSender[*MonitorResult]),
-		counter:      0,
-		logger:       logger.Named("dispatcher"),
-		protoVersion: version.Version,
-		server:       parent,
+		conn:              c,
+		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
+		nextTransactionID: 0,
+		logger:            logger.Named("dispatcher"),
+		protoVersion:      version.Version,
+		server:            parent,
 	}
 	return disp, nil
 }
@@ -118,8 +124,8 @@ func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error 
 // on the provided SignalSender. The value passed into message must be a valid value
 // to send to the monitor. See the docs for SerializeInformantMessage.
 func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*MonitorResult], message any) error {
-	id := disp.counter
-	disp.counter += 1
+	id := atomic.LoadUint64(&disp.nextTransactionID)
+	atomic.AddUint64(&disp.nextTransactionID, 1)
 	err := disp.send(ctx, id, message)
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
@@ -178,6 +184,8 @@ func (disp *Dispatcher) HandleMessage(
 		return fmt.Errorf("error extracting 'type' field: %w", err)
 	}
 
+	// go thinks all json numbers are float64 so we first deserialize to that to
+	// avoid the type error, then cast to uint64
 	f, err := extractField[float64](unstructured, "id")
 	if err != nil {
 		return fmt.Errorf("error extracting 'id field: %w", err)
@@ -231,11 +239,11 @@ func (disp *Dispatcher) HandleMessage(
 	}
 }
 
-// Long running function that performs all orchestrates all requests/responses.
+// Long running function that orchestrates all requests/responses.
 func (disp *Dispatcher) run() {
-	disp.logger.Info("Starting.")
 	ctx := context.Background()
 	logger := disp.logger.Named("message-handler")
+	logger.Info("starting message handler")
 
 	// Utility for logging + returning an error when we get a message with an
 	// id we're unaware of. Note: unknownMessage is not a message type.
@@ -271,7 +279,11 @@ func (disp *Dispatcher) run() {
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("monitor confirmed upscale", zap.Uint64("id", id))
-			sender.Send(&MonitorResult{Result: nil, Confirmation: struct{}{}})
+			sender.Send(&MonitorResult{
+				Confirmation: &api.UpscaleConfirmation{},
+				Result:       nil,
+				HealthCheck:  nil,
+			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
 			return nil
@@ -283,7 +295,11 @@ func (disp *Dispatcher) run() {
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("monitor returned downscale result", zap.Uint64("id", id))
-			sender.Send(&MonitorResult{Result: &res, Confirmation: struct{}{}})
+			sender.Send(&MonitorResult{
+				Result:       &res,
+				Confirmation: nil,
+				HealthCheck:  nil,
+			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
 			return nil
@@ -313,7 +329,11 @@ func (disp *Dispatcher) run() {
 		if ok {
 			logger.Info("monitor responded to health check", zap.Uint64("id", id))
 			// Indicate to the receiver that an error occured
-			sender.Send(&MonitorResult{Result: nil, Confirmation: struct{}{}})
+			sender.Send(&MonitorResult{
+				HealthCheck:  &api.HealthCheck{},
+				Result:       nil,
+				Confirmation: nil,
+			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
 			return nil
