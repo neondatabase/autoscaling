@@ -133,7 +133,7 @@ func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error 
 // to send to the monitor. See the docs for SerializeInformantMessage.
 func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*MonitorResult], message any) error {
 	id := atomic.LoadUint64(&disp.nextTransactionID)
-    atomic.AddUint64(&disp.nextTransactionID, 1)
+	atomic.AddUint64(&disp.nextTransactionID, 1)
 	err := disp.send(ctx, id, message)
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
