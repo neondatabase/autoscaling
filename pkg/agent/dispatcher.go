@@ -93,7 +93,7 @@ func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (di
 		waiters:      make(map[uint64]util.SignalSender[*MonitorResult]),
 		counter:      0,
 		logger:       logger.Named("dispatcher"),
-		protoVersion: version.Version,
+		protoVersion: *version.Version,
 		server:       parent,
 	}
 	return disp, nil
