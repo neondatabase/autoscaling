@@ -31,7 +31,7 @@ jobs:
       - name: build linux kernel
         uses: docker/build-push-action@v3
         with:
-          build-args:
+          build-args: |
             KERNEL_MAJOR_VERSION=${{ env.VM_KERNEL_MAJOR_VERSION }}
             KERNEL_VERSION_FULL=${{ env.VM_KERNEL_VERSION_FULL }}
           context: neonvm/hack
