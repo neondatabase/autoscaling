@@ -11,7 +11,8 @@ E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
 # kernel for guests
-VM_KERNEL_VERSION ?= "5.15.80"
+VM_KERNEL_MAJOR_VERSION ?= "6"
+VM_KERNEL_VERSION_FULL ?= "6.4.7"
 
 ## Golang details
 GOARCH ?= $(shell go env GOARCH)
@@ -237,7 +238,8 @@ endif
 kernel: ## Build linux kernel.
 	rm -f neonvm/hack/vmlinuz
 	docker buildx build \
-		--build-arg KERNEL_VERSION=$(VM_KERNEL_VERSION) \
+		--build-arg KERNEL_VERSION_FULL=$(VM_KERNEL_VERSION_FULL) \
+		--build-arg KERNEL_MAJOR_VERSION=$(VM_KERNEL_MAJOR_VERSION) \
 		--output type=local,dest=neonvm/hack/ \
 		--platform linux/amd64 \
 		--pull \

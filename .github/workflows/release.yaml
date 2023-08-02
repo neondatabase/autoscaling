@@ -16,7 +16,7 @@ env:
   IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:               "neondatabase/neonvm-runner"
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
-  VM_KERNEL_VERSION:        "5.15.80"
+  VM_KERNEL_VERSION:        "6.4.7"
 
   CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
 

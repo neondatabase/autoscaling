@@ -1,10 +1,14 @@
 FROM debian:11 AS build
 
-ARG KERNEL_VERSION
+# Split major version from minor & patch because the source URL has that "/v5.x/" or "/v6.x/"
+# component and there isn't a great way for us to get around that.
+ARG KERNEL_MAJOR_VERSION
+ARG KERNEL_VERSION_FULL
 
 RUN set -e \
-    && echo "Build linux  kernel ${KERNEL_VERSION}" \
-    && test -n "${KERNEL_VERSION}"
+    && echo "Build linux kernel major = v${KERNEL_MAJOR_VERSION}.x ; full = ${KERNEL_VERSION_FULL}" \
+    && test -n "${KERNEL_MAJOR_VERSION}" \
+	&& test -n "${KERNEL_VERSION_FULL}"
 
 WORKDIR /build
 
@@ -24,10 +28,10 @@ RUN apt-get update && apt-get -y install \
 
 RUN set -e \
     && mkdir linux \
-    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
-    && tar --strip-components=1 -C linux -xf linux-${KERNEL_VERSION}
+    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v${KERNEL_MAJOR_VERSION}.x/linux-${KERNEL_VERSION_FULL}.tar.xz -o linux-${KERNEL_VERSION_FULL} \
+    && tar --strip-components=1 -C linux -xf linux-${KERNEL_VERSION_FULL}
 
-ADD linux-config-${KERNEL_VERSION} linux/.config
+ADD linux-config-${KERNEL_VERSION_FULL} linux/.config
 
 RUN cd linux && make -j `nproc`
 
