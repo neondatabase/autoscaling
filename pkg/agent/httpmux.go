@@ -48,11 +48,13 @@ func (s *HttpMuxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.lock.Lock()
-	subServer := s.muxedServers[muxID]
-	s.lock.Unlock()
-	if subServer == nil {
-		// muxed service not found
+	var subServer *http.ServeMux
+	func() {
+		s.lock.Lock()
+		defer s.lock.Unlock()
+		subServer, found = s.muxedServers[muxID]
+	}()
+	if !found {
 		w.WriteHeader(http.StatusNotAcceptable)
 		s.logger.Warn(fmt.Sprintf("MUX: could not route request, mux ID not found): %s", r.URL.Path))
 		_, _ = w.Write([]byte("mux ID not found"))
@@ -84,7 +86,7 @@ func (s *HttpMuxServer) RegisterMux(muxID string, subServer *http.ServeMux) erro
 func (s *HttpMuxServer) UnregisterMux(muxID string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.muxedServers[muxID] = nil
+	delete(s.muxedServers, muxID)
 }
 
 // Create a new HttpMuxServer, listening on the given port
