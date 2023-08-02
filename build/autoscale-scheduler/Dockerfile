@@ -18,6 +18,7 @@ ARG GIT_INFO
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -a \
+    -race \
 	# future compat: don't modify go.mod if we have a vendor directory \
 	-mod readonly \
     # -ldflags "-X ..." allows us to overwrite the value of a variable in a package \
