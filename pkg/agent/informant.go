@@ -205,17 +205,18 @@ func NewInformantServer(
 		}
 	}
 
+	// Register with multiplexer, so that requests with this muxID are routed to
+	// this InformantServer instance.
+	if err := runner.global.informantMuxServer.RegisterMux(muxID.String(), mux); err != nil {
+		logger.Error("Could not register to muxed server", zap.Error(err))
+		return nil, util.SignalReceiver[struct{}]{}, fmt.Errorf("Could not register informant service with the multiplexer: %w", err)
+	}
+
 	// Deadlock checker for server.requestLock
 	//
 	// FIXME: make these timeouts/delays separately defined constants, or configurable
 	deadlockChecker := server.requestLock.DeadlockChecker(5*time.Second, time.Second)
 	runner.spawnBackgroundWorker(backgroundCtx, logger, "InformantServer deadlock checker", ignoreLogger(deadlockChecker))
-
-	// Register with multiplexer, so that requests with this muxID are routed to the
-	// this InformantServer instance.
-	if err := runner.global.informantMuxServer.RegisterMux(muxID.String(), mux); err != nil {
-		logger.Error("Could not register to muxed server", zap.Error(err))
-	}
 
 	// Thread waiting for the context to be canceled so we can use it to shut down the server
 	runner.spawnBackgroundWorker(ctx, logger, "InformantServer shutdown waiter", func(context.Context, *zap.Logger) {
