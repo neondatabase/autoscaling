@@ -26,7 +26,7 @@ type MainRunner struct {
 }
 
 func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
-	informantServer, err := StartHttpMuxServer(logger, r.Config.InformantCallbackPort)
+	informantServer, err := StartHttpMuxServer(logger, r.Config.Informant.CallbackPort)
 	if err != nil {
 		return fmt.Errorf("Error starting muxed informant server: %w", err)
 	}

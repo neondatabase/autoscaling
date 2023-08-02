@@ -136,7 +136,7 @@ func NewInformantServer(
 	// Generate a new random "mux ID" that is used to distinguish requests to
 	// the informant port that from this registration.
 	muxID := uuid.New()
-	serverAddr := fmt.Sprintf("%s:%d/%s", runner.global.podIP, runner.global.config.InformantCallbackPort, muxID)
+	serverAddr := fmt.Sprintf("%s:%d/%s", runner.global.podIP, runner.global.config.Informant.CallbackPort, muxID)
 	server := &InformantServer{
 		runner: runner,
 		desc: api.AgentDesc{

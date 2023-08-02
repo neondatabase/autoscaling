@@ -18,9 +18,6 @@ type Config struct {
 	Scheduler SchedulerConfig  `json:"scheduler"`
 	Billing   *billing.Config  `json:"billing,omitempty"`
 	DumpState *DumpStateConfig `json:"dumpState"`
-
-	// Port to listen on for informant -> agent requests
-	InformantCallbackPort int `json:"informant_callback_port"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
@@ -44,6 +41,9 @@ type ScalingConfig struct {
 type InformantConfig struct {
 	// ServerPort is the port that the VM informant serves from
 	ServerPort uint16 `json:"serverPort"`
+
+	// Port that the agent listens on for informant -> agent requests
+	CallbackPort int `json:"callbackPort"`
 
 	// RetryServerMinWaitSeconds gives the minimum duration, in seconds, that we must wait between the
 	// start of one InformantServer and the next
