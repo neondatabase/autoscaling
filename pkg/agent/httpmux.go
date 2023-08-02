@@ -109,12 +109,12 @@ func StartHttpMuxServer(
 		Handler: &muxServer,
 	}
 
-	// Main thread running the server. After httpServer.Serve() completes, we do some error
-	// handling, but that's about it.
+	// Main thread running the server.
 	go func() {
-		if err := httpServer.Serve(listener); err != nil {
-			logger.Error("Muxed http server exited unexpectedly", zap.Error(err))
-		}
+		err := httpServer.Serve(listener)
+
+		// The Serve call should never return
+		panic(fmt.Errorf("muxed http server exited unexpectedly: %w", err))
 	}()
 	return &muxServer, nil
 }
