@@ -136,7 +136,13 @@ func main() {
 
 	// we create an http service and add it to the orchestrator,
 	// which will start it and manage its lifecycle.
-	if err := orca.Add(srv.HTTP("vm-informant-api", 5*time.Second, &http.Server{Addr: addr, Handler: mux})); err != nil {
+	apisrv := srv.HTTP("vm-informant-api", 5*time.Second, &http.Server{Addr: addr, Handler: mux})
+	apisrv.ErrorHandler.Set(func(err error) {
+		if err != nil {
+			cancel()
+		}
+	})
+	if err := orca.Add(apisrv); err != nil {
 		logger.Fatal("Failed to add API server", zap.Error(err))
 	}
 
