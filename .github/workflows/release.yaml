@@ -51,10 +51,11 @@ jobs:
         run: go build ./...
 
       - name: build binaries
-        run:  make \
-          VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} \
-          VM_MONITOR_IMG=${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} \
-          build
+        run: |
+          make \
+            VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} \
+            VM_MONITOR_IMG=${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} \
+            build
 
       - name: docker - install qemu
         uses: docker/setup-qemu-action@v2
