@@ -138,6 +138,14 @@ vm-monitor: ## Build vm-monitor image
 		--file build/vm-monitor/Dockerfile \
 		.
 
+.PHONY: vm-monitor
+vm-monitor: ## Build vm-monitor image
+	docker buildx build \
+		--tag $(VM_MONITOR_IMG) \
+		--load \
+		--file build/vm-monitor/Dockerfile \
+		.
+
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/

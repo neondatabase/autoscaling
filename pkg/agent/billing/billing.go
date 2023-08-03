@@ -115,7 +115,7 @@ func RunBillingMetricsCollector(
 	// The rest of this function is to do with collection
 	logger = logger.Named("collect")
 
-	state.collect(conf, store, metrics)
+	state.collect(logger, conf, store, metrics)
 
 	for {
 		select {
@@ -125,7 +125,7 @@ func RunBillingMetricsCollector(
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
-			state.collect(conf, store, metrics)
+			state.collect(logger, conf, store, metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, conf, client.Hostname(), queueWriter)
@@ -135,7 +135,7 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromMetrics) {
+func (s *metricsState) collect(logger *zap.Logger, conf *Config, store VMStoreForNode, metrics PromMetrics) {
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
@@ -143,9 +143,14 @@ func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromM
 
 	old := s.present
 	s.present = make(map[metricsKey]vmMetricsInstant)
-	vmsOnThisNode := store.ListIndexed(func(i *VMNodeIndex) []*vmapi.VirtualMachine {
-		return i.List()
-	})
+	var vmsOnThisNode []*vmapi.VirtualMachine
+	if store.Failing() {
+		logger.Error("VM store is currently stopped. No events will be recorded")
+	} else {
+		vmsOnThisNode = store.ListIndexed(func(i *VMNodeIndex) []*vmapi.VirtualMachine {
+			return i.List()
+		})
+	}
 	for _, vm := range vmsOnThisNode {
 		endpointID, isEndpoint := vm.Labels[EndpointLabel]
 		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)

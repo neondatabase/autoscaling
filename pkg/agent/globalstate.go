@@ -120,8 +120,10 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 		state.status.mu.Lock()
 		defer state.status.mu.Unlock()
 
+		now := time.Now()
 		state.status.vmInfo = event.vmInfo
 		state.status.endpointID = event.endpointID
+		state.status.endpointAssignedAt = &now
 		state.vmInfoUpdated.Send()
 	case vmEventAdded:
 		s.handleVMEventAdded(ctx, event, podName)
@@ -138,11 +140,12 @@ func (s *agentState) handleVMEventAdded(
 	runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
 
 	status := &podStatus{
-		mu:                sync.Mutex{},
-		endState:          nil,
-		previousEndStates: nil,
-		vmInfo:            event.vmInfo,
-		endpointID:        event.endpointID,
+		mu:                 sync.Mutex{},
+		endState:           nil,
+		previousEndStates:  nil,
+		vmInfo:             event.vmInfo,
+		endpointID:         event.endpointID,
+		endpointAssignedAt: nil,
 
 		startTime:                   time.Now(),
 		lastSuccessfulInformantComm: nil,
@@ -401,6 +404,9 @@ type podStatus struct {
 
 	// endpointID, if non-empty, stores the ID of the endpoint associated with the VM
 	endpointID string
+
+	// NB: this value, once non-nil, is never changed.
+	endpointAssignedAt *time.Time
 }
 
 type podStatusDump struct {
@@ -413,7 +419,8 @@ type podStatusDump struct {
 
 	VMInfo api.VmInfo `json:"vmInfo"`
 
-	EndpointID string `json:"endpointID"`
+	EndpointID         string     `json:"endpointID"`
+	EndpointAssignedAt *time.Time `json:"endpointAssignedAt"`
 }
 
 type podStatusEndState struct {
@@ -432,15 +439,34 @@ const (
 	podStatusExitCanceled podStatusExitKind = "canceled" // top-down signal that the Runner should stop.
 )
 
-func (s *podStatus) informantIsUnhealthy(config *Config) bool {
+type unhealthyKind string
+
+const (
+	unhealthyAny      unhealthyKind = "any"
+	unhealthyEndpoint unhealthyKind = "endpoint"
+)
+
+func (s *podStatus) informantIsUnhealthy(config *Config, kind unhealthyKind) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	startupGracePeriod := time.Second * time.Duration(config.Informant.UnhealthyStartupGracePeriodSeconds)
 	unhealthySilencePeriod := time.Second * time.Duration(config.Informant.UnhealthyAfterSilenceDurationSeconds)
 
+	if kind == unhealthyEndpoint && s.endpointID == "" {
+		return false // It's not an endpoint.
+	}
+
 	if s.lastSuccessfulInformantComm == nil {
-		return time.Since(s.startTime) >= startupGracePeriod
+		start := s.startTime
+
+		// if we specifically care about unhealthy *endpoints*, then we should start the grace period
+		// from when the VM was *assigned* the endpoint, rather than when the VM was created.
+		if s.endpointID != "" {
+			start = *s.endpointAssignedAt
+		}
+
+		return time.Since(start) >= startupGracePeriod
 	} else {
 		return time.Since(*s.lastSuccessfulInformantComm) >= unhealthySilencePeriod
 	}
@@ -464,9 +490,10 @@ func (s *podStatus) dump() podStatusDump {
 		PreviousEndStates: previousEndStates,
 
 		// FIXME: api.VmInfo contains a resource.Quantity - is that safe to copy by value?
-		VMInfo:     s.vmInfo,
-		EndpointID: s.endpointID,
-		StartTime:  s.startTime,
+		VMInfo:             s.vmInfo,
+		EndpointID:         s.endpointID,
+		EndpointAssignedAt: s.endpointAssignedAt, // ok to share the pointer, because it's not updated
+		StartTime:          s.startTime,
 
 		LastSuccessfulInformantComm: s.lastSuccessfulInformantComm,
 	}

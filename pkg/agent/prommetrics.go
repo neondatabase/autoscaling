@@ -293,7 +293,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 			count := 0
 
 			for _, p := range globalstate.pods {
-				if p.status.informantIsUnhealthy(globalstate.config) {
+				if p.status.informantIsUnhealthy(globalstate.config, unhealthyAny) {
 					count++
 				}
 			}
@@ -314,7 +314,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 			count := 0
 
 			for _, p := range globalstate.pods {
-				if p.status.endpointID != "" && p.status.informantIsUnhealthy(globalstate.config) {
+				if p.status.informantIsUnhealthy(globalstate.config, unhealthyEndpoint) {
 					count++
 				}
 			}
