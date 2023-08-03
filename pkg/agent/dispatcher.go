@@ -147,16 +147,20 @@ func extractField[T any](data map[string]interface{}, key string) (*T, error) {
 	return &coerced, nil
 }
 
+type messageHandlerFuncs struct {
+	handleUpscaleRequest      func(api.UpscaleRequest)
+	handleUpscaleConfirmation func(api.UpscaleConfirmation, uint64) error
+	handleDownscaleResult     func(api.DownscaleResult, uint64) error
+	handleMonitorError        func(api.InternalError, uint64) error
+	handleHealthCheck         func(api.HealthCheck, uint64) error
+}
+
 // Handle messages from the monitor. Make sure that all message types the monitor
 // can send are included in the inner switch statement.
 func (disp *Dispatcher) HandleMessage(
 	ctx context.Context,
 	logger *zap.Logger,
-	handleUpscaleRequest func(api.UpscaleRequest),
-	handleUpscaleConfirmation func(api.UpscaleConfirmation, uint64) error,
-	handleDownscaleResult func(api.DownscaleResult, uint64) error,
-	handleMonitorError func(api.InternalError, uint64) error,
-	handleHealthCheck func(api.HealthCheck, uint64) error,
+	handlers messageHandlerFuncs,
 ) error {
 	// Deserialization has several steps:
 	// 1. Deserialize into an unstructured map[string]interface{}
@@ -197,32 +201,32 @@ func (disp *Dispatcher) HandleMessage(
 		if err := json.Unmarshal(message, &req); err != nil {
 			return fmt.Errorf("error unmarshaling UpscaleRequest: %w", err)
 		}
-		handleUpscaleRequest(req)
+		handlers.handleUpscaleRequest(req)
 		return nil
 	case "UpscaleConfirmation":
 		var confirmation api.UpscaleConfirmation
 		if err := json.Unmarshal(message, &confirmation); err != nil {
 			return fmt.Errorf("error unmarshaling UpscaleConfirmation: %w", err)
 		}
-		return handleUpscaleConfirmation(confirmation, id)
+		return handlers.handleUpscaleConfirmation(confirmation, id)
 	case "DownscaleResult":
 		var res api.DownscaleResult
 		if err := json.Unmarshal(message, &res); err != nil {
 			return fmt.Errorf("error unmarshaling DownscaleResult: %w", err)
 		}
-		return handleDownscaleResult(res, id)
+		return handlers.handleDownscaleResult(res, id)
 	case "InternalError":
 		var monitorErr api.InternalError
 		if err := json.Unmarshal(message, &monitorErr); err != nil {
 			return fmt.Errorf("error unmarshaling InternalError: %w", err)
 		}
-		return handleMonitorError(monitorErr, id)
+		return handlers.handleMonitorError(monitorErr, id)
 	case "HealthCheck":
 		var healthCheck api.HealthCheck
 		if err := json.Unmarshal(message, &healthCheck); err != nil {
 			return fmt.Errorf("error unmarshaling HealthCheck: %w", err)
 		}
-		return handleHealthCheck(healthCheck, id)
+		return handlers.handleHealthCheck(healthCheck, id)
 	case "InvalidMessage":
 		var warning api.InvalidMessage
 		if err := json.Unmarshal(message, &warning); err != nil {
@@ -341,15 +345,19 @@ func (disp *Dispatcher) run() {
 		}
 	}
 
+	handlers := messageHandlerFuncs{
+		handleUpscaleRequest:      handleUpscaleRequest,
+		handleUpscaleConfirmation: handleUpscaleConfirmation,
+		handleDownscaleResult:     handleDownscaleResult,
+		handleMonitorError:        handleMonitorError,
+		handleHealthCheck:         handleHealthCheck,
+	}
+
 	for {
 		err := disp.HandleMessage(
 			ctx,
 			logger,
-			handleUpscaleRequest,
-			handleUpscaleConfirmation,
-			handleDownscaleResult,
-			handleMonitorError,
-			handleHealthCheck,
+			handlers,
 		)
 		if err != nil {
 			logger.Error("error handling message -> panicking", zap.Error(err))
