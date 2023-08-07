@@ -118,14 +118,15 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 		state.stop()
 		delete(s.pods, podName)
 	case vmEventUpdated:
-		state.status.mu.Lock()
-		defer state.status.mu.Unlock()
+		state.status.update(s, func(stat podStatus) podStatus {
+			now := time.Now()
+			stat.vmInfo = event.vmInfo
+			stat.endpointID = event.endpointID
+			stat.endpointAssignedAt = &now
+			state.vmInfoUpdated.Send()
 
-		now := time.Now()
-		state.status.vmInfo = event.vmInfo
-		state.status.endpointID = event.endpointID
-		state.status.endpointAssignedAt = &now
-		state.vmInfoUpdated.Send()
+			return stat
+		})
 	case vmEventAdded:
 		s.handleVMEventAdded(ctx, event, podName)
 	default:
@@ -150,13 +151,16 @@ func (s *agentState) handleVMEventAdded(
 			vmInfo:             event.vmInfo,
 			endpointID:         event.endpointID,
 			endpointAssignedAt: nil,
-			state:              runnerMetricStateOk,
+			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
 			stateUpdatedAt:     now,
 
 			startTime:                   now,
 			lastSuccessfulInformantComm: nil,
 		},
 	}
+
+	// Empty update to trigger updating metrics and state.
+	status.update(s, func(s podStatus) podStatus { return s })
 
 	restartCount := 0
 	runner := s.newRunner(event.vmInfo, podName, event.podIP, restartCount)
