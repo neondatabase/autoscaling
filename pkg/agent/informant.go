@@ -695,9 +695,10 @@ func (s *InformantServer) handleID(ctx context.Context, _ *zap.Logger, body *str
 	// currently enabled. This allows us to detect cases where the informant is not currently
 	// communicating back to the agent - OR when the informant never /resume'd the agent.
 	if s.mode == InformantServerRunning {
-		s.runner.setStatus(func(s *podStatus) {
+		s.runner.status.update(s.runner.global, func(s podStatus) podStatus {
 			now := time.Now()
 			s.lastSuccessfulInformantComm = &now
+			return s
 		})
 	}
 
