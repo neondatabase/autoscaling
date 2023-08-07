@@ -20,7 +20,7 @@ type PromMetrics struct {
 	neonvmRequestsOutbound *prometheus.CounterVec
 	neonvmRequestedChange  resourceChangePair
 
-	runnersCount       *prometheus.CounterVec
+	runnersCount       *prometheus.GaugeVec
 	runnerFatalErrors  prometheus.Counter
 	runnerThreadPanics prometheus.Counter
 	runnerStarts       prometheus.Counter
@@ -178,8 +178,8 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		},
 
 		// ---- RUNNER LIFECYCLE ----
-		runnersCount: util.RegisterMetric(reg, prometheus.NewCounterVec(
-			prometheus.CounterOpts{
+		runnersCount: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
 				Name: "autoscaling_agent_runners_current",
 				Help: "Number of per-VM runners, with associated metadata",
 			},

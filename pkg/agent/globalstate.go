@@ -486,12 +486,12 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	// Update the metrics:
 	if s.state != "" {
 		oldIsEndpoint := strconv.FormatBool(s.endpointID != "")
-		global.metrics.runnersCount.WithLabelValues(oldIsEndpoint, string(s.state)).Add(-1)
+		global.metrics.runnersCount.WithLabelValues(oldIsEndpoint, string(s.state)).Dec()
 	}
 
 	if newStatus.state != "" {
 		newIsEndpoint := strconv.FormatBool(newStatus.endpointID != "")
-		global.metrics.runnersCount.WithLabelValues(newIsEndpoint, string(newStatus.state)).Add(1)
+		global.metrics.runnersCount.WithLabelValues(newIsEndpoint, string(newStatus.state)).Inc()
 	}
 
 	s.podStatus = newStatus
