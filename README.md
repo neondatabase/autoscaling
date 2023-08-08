@@ -10,9 +10,9 @@ Images are available as:
 |----------------|------------|
 | scheduler (and plugin) | `neondatabase/autoscale-scheduler` |
 | autoscaler-agent | `neondatabase/autoscaler-agent` |
-| VM informant | `neondatabase/vm-informant` |
+| VM monitor | `neondatabase/vm-monitor` |
 
-The deployment files and a VM informant binary are attached to each release.
+The deployment files and a VM monitor binary are attached to each release.
 
 For information on inter-version compatibility, see
 [`pkg/api/VERSIONING.md`](./pkg/api/VERSIONING.md).
@@ -41,7 +41,7 @@ settled on the following:
   demand is above a pre-configured threshold
 * Each K8s node has an `autoscaler-agent` pod that triggers scaling decisions and makes resource
   requests to the K8s scheduler on the VMs' behalf to reserve additional resources for them
-* Each VM runs the _VM informant_ binary, which communicates to the autoscaler-agent so that it can
+* Each compute node runs the _VM monitor binary, which communicates to the autoscaler-agent so that it can
   immediately respond to memory pressure by allocating more (among other things).
 
 Networking is preserved across migrations by giving each VM an additional IP address on a bridge

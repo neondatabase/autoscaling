@@ -18,8 +18,7 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
   * [Agent-Scheduler protocol steps](#agent-scheduler-protocol-steps)
   * [Node pressure and watermarks](#node-pressure-and-watermarks)
 * [High-level consequences of the Agent-Scheduler protocol](#high-level-consequences-of-the-agent-scheduler-protocol)
-* [Agent-Informant protocol details](#agent-informant-protocol-details)
-* [Informant-Monitor protocol details](#informant-monitor-protocol-details)
+* [Agent-Monitor protocol details](#agent-monitor-protocol-details)
 * [Footguns](#footguns)
 
 ## See also
@@ -33,18 +32,14 @@ where the (VM) monitor, an autoscaling component that manages a Postgres, lives.
 
 ## High-level overview
 
-At a high level, this repository provides three components:
+At a high level, this repository provides two components:
 
 1. A modified Kubernetes scheduler (using the [plugin interface]) — known as "the (scheduler)
    plugin", `AutoscaleEnforcer`, `autoscale-scheduler`
 2. A daemonset responsible for making VM scaling decisions & checking with interested parties
    — known as `autoscaler-agent` or simply `agent`
-3. A binary running inside of the VM that relays information between the VM monitor (see below) and
-   `autoscaler-agent`s - known as "the (VM) informant". The informant used to also perform
-   the monitor's functionality, but that functionality was moved to allow the
-   informant to start before Postgres and to have monitoring closer to Postgres.
 
-A fourth component, a binary running inside of the VM to (a) handle being upscaled
+A third component, a binary running inside of the VM to (a) handle being upscaled
 (b) validate that downscaling is ok, and (c) request immediate upscaling due to sharp changes in demand
 — known as "the (VM) monitor", lives in
 [`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor)
@@ -58,10 +53,6 @@ The `autoscaler-agent` periodically reads from a metrics source in the VM (defin
 _informant_) and makes scaling decisions about the _desired_ resource allocation. It then
 requests these resources from the scheduler plugin, and submits a patch request for its NeonVM to
 update the resources.
-
-The VM informant manages the `autoscaler-agent`(s) associated with a given compute instance and relays
-messages between the agent and the VM monitor on that compute instance. It also provides metrics
-for the agent, or informs the agent where it can find them.
 
 The VM monitor is responsible for handling all of the resource management functionality inside
 the VM that the `autoscaler-agent` cannot. This constitutes handling upscales (eg. increasing Postgres
@@ -88,8 +79,8 @@ discussed more in the [high-level consequences] section below.
 
 * `build/` — scripts for building the scheduler (`autoscale-scheduler`) and `autoscaler-agent`
 * `cluster-autoscaler/` — patch and Dockerfile for building a NeonVM-compatible [cluster-autoscaler]
-* `cmd/` — entrypoints for the `autoscaler-agent`, VM informant, and scheduler plugin. Very little
-    functionality implemented here. (See: `pkg/agent`, `pkg/informant`, and `pkg/plugin`)
+* `cmd/` — entrypoints for the `autoscaler-agent` and scheduler plugin. Very little
+    functionality implemented here. (See: `pkg/agent` and `pkg/plugin`)
 * `deploy/` — YAML files used during cluster init. Of these, only the following two are manually
   written:
     * `deploy/autoscaler-agent.yaml`
@@ -105,7 +96,6 @@ discussed more in the [high-level consequences] section below.
         independently used by multiple components.
     * `pkg/billing/` — consumption metrics API, primarily used in
         [`pkg/agent/billing.go`](pkg/agent/billing.go)
-    * `pkg/informant/` — implementation of the VM informant
     * `pkg/plugin/` — implementation of the scheduler plugin
     * `pkg/util/` — miscellaneous utilities that are too general to be included in `agent` or
       `plugin`.
@@ -147,7 +137,7 @@ on each node, the scheduler can prevent
 
 ### Agent-Scheduler protocol steps
 
-1. On startup (for a particular VM), the `autoscaler-agent` [connects to the VM informant] and
+1. On startup (for a particular VM), the `autoscaler-agent` [connects to the VM monitor] and
    fetches some initial metrics.
 2. After successfully receiving a response, the autoscaler-agent sends an `AgentRequest` with the
    metrics and current resource allocation (i.e. it does not request any scaling).
@@ -174,7 +164,7 @@ on each node, the scheduler can prevent
        that scales those resources up.
        * This has the same connection flow as the earlier patch request.
 
-[connects to the VM informant]: #agent-informant-protocol-details
+[connects to the VM monitor]: #agent-monitor-protocol-details
 
 ### Node pressure and watermarks
 
@@ -207,76 +197,9 @@ than the amount of pressure already accounted for.
    cause the scheduler to return `Permit`s that aren't a clean multiple of a compute unit.
    (e.g., nodes have mismatched memory vs CPU, or external pods / system reserved are mismatched)
 
-## Agent-Informant protocol details
+## Agent-Monitor protocol details
 
-A brief note before we get started: There are a lot of specific difficulties around making sure that
-the informant is always talking to _some_ agent — ideally the most recent one. While _in theory_
-there should only ever be one, we might have `n=0` or `n>1` during rollouts of new versions. Our
-process for handling this is not discussed here — this section only covers the communciations
-between a single agent and informant.
-
-The relevant types for the agent-informant protocol are all in [`pkg/api/types.go`]. If using this
-as a reference, it may be helpful to have that file open at the same time.
-
-[`pkg/api/types.go`]: ./pkg/api/types.go
-
-It may also be worth noting that this protocol is versioned. For an overview of version
-compatibility and how it relates to releases of this repository, refer to
-[`pkg/api/VERSIONING.md`](./pkg/api/VERSIONING.md).
-
-The protocol is as follows:
-
-1. On startup, the VM informant starts an HTTP server listening on `0.0.0.0:10301`.
-2. On startup for this VM, the `autoscaler-agent` starts an HTTP server listening _some_ port
-3. The agent sends an `AgentDesc` to the informant as a POST request on the `/register` endpoint.
-   Before responding:
-    1. If the informant has already registered an agent with the same `AgentDesc.AgentID`, it
-       immediately responds with HTTP code 409.
-    2. If the informant's protocol version doesn't match the `AgentDesc`'s min/max protocol
-       versions, it immediately responds with HTTP code 400.
-    3. Using the provided `ServerAddr` from the agent's `AgentDesc`, the informant makes a GET
-       request on the agent's `/id` endpoint
-    4. The agent responds immediately to the `/id` request with an `AgentMessage[AgentIdentification]`.
-    5. If the agent's `AgentIdentification.AgentID` doesn't match the original `AgentDesc.AgentID`,
-       the informant responds with HTTP code 400.
-    6. Otherwise, the informant responds with HTTP code 200, returning an `InformantDesc` describing
-       its capabilities and which protocol version to use.
-4. Begin "normal operation". During this, there are a few types of requests made between the agent
-   and informant. Each party can make **only one request at a time**. The agent starts in the
-   "suspended" state.
-    1. The informant's `/health-check` endpoint (via PUT), with `AgentIdentification`. This allows
-       the autoscaler-agent to check that the informant is up and running, and that it still
-       recognizes the agent.
-    2. The informant's `/downscale` endpoint (via PUT), with `AgentResourceMessage`. This serves as the
-       agent _politely asking_ the informant to decrease resource usage to the specified amount.
-       The informant returns a `DownscaleResult` indicating whether it was able to downscale (it may
-       not, if e.g. memory usage is too high).
-    3. The informant's `/upscale` endpoint (via PUT), with `AgentResourceMessage`. This serves as the agent
-       _notifying_ the informant that its resources have increased to the provided amount.
-    4. The agent's `/suspend` endpoint (via POST), with `SuspendAgent`. This allows the informant to
-       inform the agent that it is no longer in use for the VM. While suspended, the agent **must
-       not** make any `downscale` or `upscale` requests. The informant **must not** double-suspend
-       an agent.
-    5. The agent's `/resume` endpoint (via POST), with `ResumeAgent`. This allows the informant to
-       pick up communication with an agent that was previously suspended. The informant **must not**
-       double-resume an agent.
-    6. The agent's `/id` endpoint (via GET) is also available during normal operation, and is used
-       as a health check by the informant.
-    7. The agent's `/try-upscale` endpoint (via POST), with `MoreResources`. This allows the
-       informant to request more of a particular resource (e.g. memory). The agent MUST respond
-       immediately with an `AgentIdentification`. It MAY later send an `/upscale` request to the
-       informant once the requested increase in resources has been achieved.
-5. If explicitly cut off, communication ends with the agent sending the original `AgentDesc` as a
-   DELETE request on the `/unregister` endpoint. The informant returns an `UnregisterAgent`.
-
-Broadly, agent<->informant connections are not expected to survive restarts of the informant (due
-to failure, or otherwise). So, it is expected that *sometimes*, the informant will receive a request
-for an agent that it has no connection to. When that happens, the informant MUST respond with HTTP
-code 404, and the agent SHOULD try reconnecting.
-
-## Informant-Monitor protocol details
-
-Informant-Monitor communication is carried out through a relatively simple _versioned_ protocol
+Agent-Monitor communication is carried out through a relatively simple _versioned_ protocol
 over websocket. One party sends a message, the other responds. There are various
 message types that each party sends, and all messages are annotated with an ID.
 The allows a sender to recognize responses to its previous messages. If the
@@ -285,11 +208,11 @@ out-message has ID X, then the return message will also have ID X.
 Like the other protocols, relevant types are located in [`pkg/api/types.go`].
 
 1. On startup, the VM monitor listens for websocket connections on `127.0.0.1:10369`
-2. On startup, the VM informant connects to the monitor via websocket on `127.0.0.1:10369`
-3. The informant then sends a `VersionRange[MonitorProtocolVersion]` with the range of
+2. On startup, the agent connects to the monitor via websocket on `127.0.0.1:10369/monitor`
+3. The agent then sends a `VersionRange[MonitorProtocolVersion]` with the range of
    protocols it supports.
 4. The monitor responds with the highest common version between the two. If there is no
-   compatible protocol, it returns and error.
+   compatible protocol, it returns an error.
 5. From this point on, either party may initiate a transaction by sending a Message.
 6. The other party responds with the appropriate message, with the same ID attached
    so that the receiver knows it has received a response.
@@ -297,16 +220,20 @@ Like the other protocols, relevant types are located in [`pkg/api/types.go`].
 Currently, the following interactions are supported:
 ```
 Monitor   sends   UpscaleRequest
-Informant returns NotifyUpscale
+Agent     returns NotifyUpscale
 
-Informant sends   TryDownscale
+Agent     sends   TryDownscale
 Monitor   returns DownscaleResult
 
-Informant sends   NotifyUpscale
+Agent     sends   NotifyUpscale
 Monitor   returns UpscaleConfirmation
+
+Agent     sends   HealthCheck
+Monitor   returns HealthCheck
 ```
-which roughly correspond to `/try-upscale`, `/downscale`, and `/upscale` endpoints
-from the agent<->informant protocol.
+
+*Healthchecks*: the agent initiates a health check every 5 seconds. The monitor
+simply returns with an ack.
 
 There are two additional messages types that either party may send:
 - `InvalidMessage`: sent when either party fails to deserialize a message it received
