@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -133,22 +132,11 @@ func NewInformantServer(
 	updatedInformant util.CondChannelSender,
 	upscaleRequested util.CondChannelSender,
 ) (*InformantServer, util.SignalReceiver[struct{}], error) {
-	// Manually start the TCP listener so that we can see the port it's assigned
-	addr := net.TCPAddr{IP: net.IPv4zero, Port: 0 /* 0 means it'll be assigned any(-ish) port */}
-	listener, err := net.ListenTCP("tcp", &addr)
-	if err != nil {
-		return nil, util.SignalReceiver[struct{}]{}, fmt.Errorf("Error listening on TCP: %w", err)
-	}
 
-	// Get back the assigned port
-	var serverAddr string
-	switch addr := listener.Addr().(type) {
-	case *net.TCPAddr:
-		serverAddr = fmt.Sprintf("%s:%d", runner.global.podIP, addr.Port)
-	default:
-		panic(errors.New("unexpected net.Addr type"))
-	}
-
+	// Generate a new random "mux ID" that is used to distinguish requests to
+	// the informant port that from this registration.
+	muxID := uuid.New()
+	serverAddr := fmt.Sprintf("%s:%d/%s", runner.global.podIP, runner.global.config.Informant.CallbackPort, muxID)
 	server := &InformantServer{
 		runner: runner,
 		desc: api.AgentDesc{
@@ -177,7 +165,6 @@ func NewInformantServer(
 	util.AddHandler(logger, mux, "/resume", http.MethodPost, "ResumeAgent", server.handleResume)
 	util.AddHandler(logger, mux, "/suspend", http.MethodPost, "SuspendAgent", server.handleSuspend)
 	util.AddHandler(logger, mux, "/try-upscale", http.MethodPost, "MoreResourcesRequest", server.handleTryUpscale)
-	httpServer := &http.Server{Handler: mux}
 
 	sendFinished, recvFinished := util.NewSingleSignalPair[struct{}]()
 	backgroundCtx, cancelBackground := context.WithCancel(ctx)
@@ -198,18 +185,11 @@ func NewInformantServer(
 			logFunc("Informant server exiting", zap.Bool("retry", status.RetryShouldFix), zap.Error(status.Err))
 		}
 
-		// we need to spawn these in separate threads so the caller doesn't block while holding
-		// runner.lock
-		runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), logger, "InformantServer shutdown", func(_ context.Context, logger *zap.Logger) {
-			// we want shutdown to (potentially) live longer than the request which
-			// made it, but having a timeout is still good.
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
+		// Stop accepting HTTP requests for this registration
+		runner.global.informantMuxServer.UnregisterMux(muxID.String())
 
-			if err := httpServer.Shutdown(ctx); err != nil {
-				logger.Warn("Error shutting down InformantServer", zap.Error(err))
-			}
-		})
+		// we need to spawn this in separate threads so the caller doesn't block while holding
+		// runner.lock
 		if server.madeContact {
 			// only unregister the server if we could have plausibly contacted the informant
 			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), logger, "InformantServer unregister", func(_ context.Context, logger *zap.Logger) {
@@ -225,31 +205,18 @@ func NewInformantServer(
 		}
 	}
 
+	// Register with multiplexer, so that requests with this muxID are routed to
+	// this InformantServer instance.
+	if err := runner.global.informantMuxServer.RegisterMux(muxID.String(), mux); err != nil {
+		logger.Error("Could not register to muxed server", zap.Error(err))
+		return nil, util.SignalReceiver[struct{}]{}, fmt.Errorf("Could not register informant service with the multiplexer: %w", err)
+	}
+
 	// Deadlock checker for server.requestLock
 	//
 	// FIXME: make these timeouts/delays separately defined constants, or configurable
 	deadlockChecker := server.requestLock.DeadlockChecker(5*time.Second, time.Second)
 	runner.spawnBackgroundWorker(backgroundCtx, logger, "InformantServer deadlock checker", ignoreLogger(deadlockChecker))
-
-	// Main thread running the server. After httpServer.Serve() completes, we do some error
-	// handling, but that's about it.
-	runner.spawnBackgroundWorker(ctx, logger, "InformantServer", func(c context.Context, logger *zap.Logger) {
-		if err := httpServer.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("InformantServer exited with unexpected error", zap.Error(err))
-		}
-
-		// set server.exitStatus if it isn't already -- generally this should only occur if err
-		// isn't http.ErrServerClosed, because other server exits should be controlled by
-		runner.lock.Lock()
-		defer runner.lock.Unlock()
-
-		if server.exitStatus == nil {
-			server.exitStatus = &InformantServerExitStatus{
-				Err:            fmt.Errorf("Unexpected exit: %w", err),
-				RetryShouldFix: false,
-			}
-		}
-	})
 
 	// Thread waiting for the context to be canceled so we can use it to shut down the server
 	runner.spawnBackgroundWorker(ctx, logger, "InformantServer shutdown waiter", func(context.Context, *zap.Logger) {
