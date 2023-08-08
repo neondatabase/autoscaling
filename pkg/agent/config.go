@@ -42,7 +42,7 @@ type InformantConfig struct {
 	// ServerPort is the port that the VM informant serves from
 	ServerPort uint16 `json:"serverPort"`
 
-	// CallbackPort is that the agent listens on for informant -> agent requests
+	// CallbackPort is the port that the agent listens on for informant -> agent requests
 	CallbackPort int `json:"callbackPort"`
 
 	// RetryServerMinWaitSeconds gives the minimum duration, in seconds, that we must wait between the
