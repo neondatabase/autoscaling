@@ -30,13 +30,13 @@ type HttpMuxServer struct {
 
 // Implements http.Handler
 func (s *HttpMuxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.logger.Debug(fmt.Sprintf("MUX: received request: %s", r.URL.Path))
+	s.logger.Debug(fmt.Sprintf("received request: %s", r.URL.Path))
 
 	path, found := strings.CutPrefix(r.URL.Path, "/")
 	if !found {
 		w.WriteHeader(http.StatusBadRequest)
 		s.logger.Warn(
-			"MUX: invalid request (path doesn't start with '/')",
+			"invalid request (path doesn't start with '/')",
 			zap.String("path", r.URL.Path),
 		)
 		_, _ = w.Write([]byte("missing /"))
@@ -47,7 +47,7 @@ func (s *HttpMuxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		w.WriteHeader(http.StatusBadRequest)
 		s.logger.Warn(
-			"MUX: invalid request (no mux ID in path)",
+			"invalid request (no mux ID in path)",
 			zap.String("path", r.URL.Path),
 		)
 		_, _ = w.Write([]byte("request must start with mux ID"))
@@ -63,7 +63,7 @@ func (s *HttpMuxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		w.WriteHeader(http.StatusNotAcceptable)
 		s.logger.Warn(
-			"MUX: could not route request, mux ID not found",
+			"could not route request, mux ID not found",
 			zap.String("path", r.URL.Path),
 			zap.String("muxID", muxID),
 		)
