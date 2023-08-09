@@ -401,30 +401,30 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 	)
 
 	connectedToMonitor := false
+	maybeMadeContact := statusCode != 0 || ctx.Err() != nil
 
-	// Do some stuff with the lock acquired:
-	func() {
-		maybeMadeContact := statusCode != 0 || ctx.Err() != nil
+	if statusCode == 404 {
+		addr := fmt.Sprintf(
+			"ws://%s:%d/monitor",
+			s.runner.podIP,
+			s.runner.global.config.Informant.ServerPort,
+		)
+		logger.Info(
+			"received 404 from informant's /register endpoint; connecting to monitor",
+			zap.String("addr", addr),
+		)
+		// pre-declare disp so that err get's assigned to err from enclosing scope,
+		// overwriting original request error.
+		var disp Dispatcher
+		disp, err = NewDispatcher(logger, addr, s)
+		// If the error is not nil, it will get handled below
+		if err == nil {
+			// Acquire the lock late so as not to hold it will connecting to the
+			// dispatcher
+			func() {
+				s.runner.lock.Lock()
+				defer s.runner.lock.Unlock()
 
-		s.runner.lock.Lock()
-		defer s.runner.lock.Unlock()
-
-		if statusCode == 404 {
-			addr := fmt.Sprintf(
-				"ws://%s:%d/monitor",
-				s.runner.podIP,
-				s.runner.global.config.Informant.ServerPort,
-			)
-			logger.Info(
-				"received 404 from informant's /register endpoint; connecting to monitor",
-				zap.String("addr", addr),
-			)
-			// pre-declare disp so that err get's assigned to err from enclosing scope,
-			// overwriting original request error.
-			var disp Dispatcher
-			disp, err = NewDispatcher(logger, addr, s)
-			// If the error is not nil, it will get handled below
-			if err == nil {
 				connectedToMonitor = true
 				s.informantIsMonitor = true
 				s.dispatcher = &disp
@@ -446,22 +446,25 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 						"dispatcher message handler",
 						func(context.Context, *zap.Logger) { disp.run() },
 					)
-					// we exited
 				} else if s.exitStatus != nil {
-					// runner is talking to a different informant
-					// close ws
+					// we exited -> close ws
 					disp.conn.Close(websocket.StatusInternalError, "informant exited")
 
-					// updated
 				} else {
-					// close ws
+					// updated -> close ws
 					disp.conn.Close(
 						websocket.StatusInternalError,
 						"runner is talking to a different informant",
 					)
 				}
-			}
+			}()
 		}
+	}
+
+	// Do more stuff with the lock acquired:
+	func() {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
 
 		// Record whether we might've contacted the informant:
 		s.madeContact = maybeMadeContact
