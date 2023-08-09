@@ -758,6 +758,12 @@ func getSelfCgroupPath() (string, error) {
 	// of e.g. "name=systemd", although it *really* shouldn't matter because the paths will be the
 	// same anyways.
 	//
+	// Now: Technically it's possible to run a "hybrid" system with both cgroup v1 and v2
+	// hierarchies. If this is the case, it's possible for /proc/self/cgroup to show *some* v1
+	// hierarchies attached, in addition to the v2 "unified" hierarchy, for the same cgroup. To
+	// handle this, we should look for a cgroup v1 "cpu" controller, and if we can't find it, try
+	// for the cgroup v2 unified entry.
+	//
 	// As far as I (@sharnoff) can tell, the only case where that might actually get messed up is if
 	// the CPU controller isn't available for the cgroup we're running in, in which case there's
 	// nothing we can do about it! (other than e.g. using a cgroup higher up the chain, which would
@@ -773,7 +779,8 @@ func getSelfCgroupPath() (string, error) {
 
 	// Collect all candidate paths from the lines of the file. If there isn't exactly one,
 	// something's wrong and we should make an error.
-	var candidates []string
+	var v1Candidates []string
+	var v2Candidates []string
 	for lineno, line := range strings.Split(string(procSelfCgroupContents), "\n") {
 		if line == "" {
 			continue
@@ -790,7 +797,7 @@ func getSelfCgroupPath() (string, error) {
 		controllers := fields[1]
 		path := fields[2]
 		if id == "0" {
-			candidates = append(candidates, path)
+			v2Candidates = append(v2Candidates, path)
 			continue
 		}
 
@@ -798,24 +805,29 @@ func getSelfCgroupPath() (string, error) {
 		// of controllers contains 'cpu' as an entry.
 		for _, c := range strings.Split(controllers, ",") {
 			if c == "cpu" {
-				candidates = append(candidates, path)
+				v1Candidates = append(v1Candidates, path)
 				break // ... and then continue to the next loop iteration
 			}
 		}
 	}
 
-	// Success:
-	if len(candidates) == 1 {
-		return candidates[0], nil
+	var errMsg string
+
+	// Check v1, then v2
+	if len(v1Candidates) == 1 {
+		return v1Candidates[0], nil
+	} else if len(v1Candidates) != 0 {
+		errMsg = "More than one applicable cgroup v1 entry in /proc/self/cgroup"
+	} else if len(v2Candidates) == 1 {
+		return v2Candidates[0], nil
+	} else if len(v2Candidates) != 0 {
+		errMsg = "More than one applicable cgroup v2 entry in /proc/self/cgroup"
+	} else {
+		errMsg = "Couldn't find applicable entry in /proc/self/cgroup"
 	}
 
-	// Failure cases:
 	log.Printf("Contents of /proc/self/cgroup:\n%s", procSelfCgroupContents)
-	if len(candidates) == 0 {
-		return "", errors.New("Couldn't find applicable entry in /proc/self/cgroup")
-	} else {
-		return "", errors.New("More than one applicable entry in /proc/self/cgroup")
-	}
+	return "", errors.New(errMsg)
 }
 
 func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
