@@ -232,5 +232,16 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		}
 	}
 
+	runnerStates := []runnerMetricState{
+		runnerMetricStateOk,
+		runnerMetricStateStuck,
+		runnerMetricStateErrored,
+		runnerMetricStatePanicked,
+	}
+	for _, s := range runnerStates {
+		metrics.runnersCount.WithLabelValues("true", string(s)).Set(0.0)
+		metrics.runnersCount.WithLabelValues("false", string(s)).Set(0.0)
+	}
+
 	return metrics, reg
 }
