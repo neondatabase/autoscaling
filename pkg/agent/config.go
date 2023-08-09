@@ -47,6 +47,9 @@ type InformantConfig struct {
 	// ServerPort is the port that the VM informant serves from
 	ServerPort uint16 `json:"serverPort"`
 
+	// CallbackPort is the port that the agent listens on for informant -> agent requests
+	CallbackPort int `json:"callbackPort"`
+
 	// RetryServerMinWaitSeconds gives the minimum duration, in seconds, that we must wait between the
 	// start of one InformantServer and the next
 	//
@@ -153,6 +156,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Informant.RetryServerMinWaitSeconds == 0, zeroTmpl, ".informant.retryServerMinWaitSeconds")
 	erc.Whenf(ec, c.Informant.RetryServerNormalWaitSeconds == 0, zeroTmpl, ".informant.retryServerNormalWaitSeconds")
 	erc.Whenf(ec, c.Informant.ServerPort == 0, zeroTmpl, ".informant.serverPort")
+	erc.Whenf(ec, c.Informant.CallbackPort == 0, zeroTmpl, ".informant.callbackPort")
 	erc.Whenf(ec, c.Informant.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".informant.unhealthyAfterSilenceDurationSeconds")
 	erc.Whenf(ec, c.Informant.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".informant.unhealthyStartupGracePeriodSeconds")
 	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")

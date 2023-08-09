@@ -625,6 +625,13 @@ func (in *VirtualMachineSpec) DeepCopyInto(out *VirtualMachineSpec) {
 		copy(*out, *in)
 	}
 	in.Guest.DeepCopyInto(&out.Guest)
+	if in.ExtraInitContainers != nil {
+		in, out := &in.ExtraInitContainers, &out.ExtraInitContainers
+		*out = make([]corev1.Container, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.Disks != nil {
 		in, out := &in.Disks, &out.Disks
 		*out = make([]Disk, len(*in))

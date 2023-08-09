@@ -83,6 +83,8 @@ type VirtualMachineSpec struct {
 
 	Guest Guest `json:"guest"`
 
+	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
+
 	// List of disk that can be mounted by virtual machine.
 	// +optional
 	Disks []Disk `json:"disks,omitempty"`

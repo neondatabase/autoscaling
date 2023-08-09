@@ -1089,6 +1089,9 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		},
 	}
 
+	// Add any InitContainers that were specified by the spec
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, virtualmachine.Spec.ExtraInitContainers...)
+
 	// allow access to /dev/kvm and /dev/vhost-net devices by generic-device-plugin for kubelet
 	if pod.Spec.Containers[0].Resources.Limits == nil {
 		pod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{}

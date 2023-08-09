@@ -32,6 +32,8 @@ type agentState struct {
 	lock util.ChanMutex
 	pods map[util.NamespacedName]*podState
 
+	informantMuxServer *HttpMuxServer
+
 	// A base logger to pass around, so we can recreate the logger for a Runner on restart, without
 	// running the risk of leaking keys.
 	baseLogger *zap.Logger
@@ -50,10 +52,12 @@ func (r MainRunner) newAgentState(
 	podIP string,
 	broker *pubsub.Broker[schedwatch.WatchEvent],
 	schedulerStore *watch.Store[corev1.Pod],
+	informantMuxServer *HttpMuxServer,
 ) (*agentState, *prometheus.Registry) {
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
+		informantMuxServer:   informantMuxServer,
 		baseLogger:           baseLogger,
 		config:               r.Config,
 		kubeClient:           r.KubeClient,
