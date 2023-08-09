@@ -154,7 +154,7 @@ func (s *agentState) handleVMEventAdded(
 			previousEndStates:  nil,
 			vmInfo:             event.vmInfo,
 			endpointID:         event.endpointID,
-			endpointAssignedAt: nil,
+			endpointAssignedAt: &now,
 			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
 			stateUpdatedAt:     now,
 
