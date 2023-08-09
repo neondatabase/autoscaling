@@ -48,7 +48,7 @@ type Dispatcher struct {
 	// The InformantServer that this dispatcher is part of
 	server *InformantServer
 
-	// This counter represents the current transaction id. When we need a new one
+	// nextTransactionID  the current transaction id. When we need a new one
 	// we simply bump it and take the new number.
 	nextTransactionID uint64
 

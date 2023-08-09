@@ -195,13 +195,12 @@ func NewInformantServer(
 			logFunc("Informant server exiting", zap.Bool("retry", status.RetryShouldFix), zap.Error(status.Err))
 		}
 
-
 		if server.informantIsMonitor {
 			server.dispatcher.conn.Close(websocket.StatusInternalError, "informant exit")
 			logger.Info("Successfully closed websocket connection")
 		} else if server.madeContact {
-            // Stop accepting HTTP requests for this registration
-            runner.global.informantMuxServer.UnregisterMux(muxID.String())
+			// Stop accepting HTTP requests for this registration
+			runner.global.informantMuxServer.UnregisterMux(muxID.String())
 			// only unregister the server if we could have plausibly contacted the informant
 			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), logger, "InformantServer unregister", func(_ context.Context, logger *zap.Logger) {
 				// we want shutdown to (potentially) live longer than the request which
@@ -249,7 +248,7 @@ func NewInformantServer(
 
 			// Are we talking to a monitor?
 			if server.informantIsMonitor {
-                if err := server.MonitorHealthCheck(c, logger); err != nil {
+				if err := server.MonitorHealthCheck(c, logger); err != nil {
 					logger.Warn("Monitor health check failed", zap.Error(err))
 				}
 				continue
@@ -1153,15 +1152,17 @@ func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Lo
 
 	// Wait for result
 	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case res := <-rx.Recv():
 		// A nil pointer means a monitor error occured
 		if res != nil {
 			return nil
 		} else {
-			return fmt.Errorf("monitor experienced an internal error")
+			return errors.New("monitor experienced an internal error")
 		}
-	case <-time.After(timeout):
+	case <-timer.C:
 		return fmt.Errorf("timed out waiting %v for monitor response", timeout)
 	}
 }
@@ -1185,15 +1186,17 @@ func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger
 
 	// Wait for result
 	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case res := <-rx.Recv():
 		// A nil pointer means a monitor error occured
 		if res != nil {
 			return nil
 		} else {
-			return fmt.Errorf("monitor experienced an internal error")
+			return errors.New("monitor experienced an internal error")
 		}
-	case <-time.After(timeout):
+	case <-timer.C:
 		return fmt.Errorf("timed out waiting %v for monitor response", timeout)
 	}
 }
@@ -1217,15 +1220,17 @@ func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logg
 
 	// Wait for result
 	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case res := <-rx.Recv():
 		// A nil pointer means a monitor error occured
 		if res != nil {
 			return res.Result, nil
 		} else {
-			return nil, fmt.Errorf("monitor experienced an internal error")
+			return nil, errors.New("monitor experienced an internal error")
 		}
-	case <-time.After(timeout):
+	case <-timer.C:
 		return nil, fmt.Errorf("timed out waiting %v for monitor response", timeout)
 	}
 }
