@@ -1088,6 +1088,7 @@ func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to 
 	return resp, nil
 }
 
+// This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
 func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
 	s.requestLock.Lock()
 	defer s.requestLock.Unlock()
@@ -1142,7 +1143,18 @@ func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to ap
 	return nil
 }
 
+// MonitorHealthCheck is the equivalent of (*InformantServer).HealthCheck for
+// when we're connected to a monitor.
+//
+// This method MUST be called while holding s.requestLock AND NOT while holding
+// s.runner.lock.
 func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Logger) error {
+	// Locking requestLock is not technically necessary, but it allows for better
+	// serialization. For example, if this function exits, we know that no other
+	// dispatcher calls will be made.
+	s.requestLock.Lock()
+	defer s.requestLock.Unlock()
+
 	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
 	err := s.dispatcher.Call(
 		ctx,
@@ -1151,6 +1163,15 @@ func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Lo
 	)
 	if err != nil {
 		return err
+	}
+
+	exit := func(err error) {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		s.exit(InformantServerExitStatus{
+			Err:            err,
+			RetryShouldFix: false,
+		})
 	}
 
 	// Wait for result
@@ -1163,14 +1184,28 @@ func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Lo
 		if res != nil {
 			return nil
 		} else {
-			return errors.New("monitor experienced an internal error")
+			err := errors.New("monitor experienced an internal error")
+			exit(err)
+			return err
 		}
 	case <-timer.C:
-		return fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		exit(err)
+		return err
 	}
 }
 
+// MonitorUpscale is the equivalent of (*InformantServer).Upscale for
+// when we're connected to a monitor.
+//
+// This method MUST NOT be called while holding s.requestLock OR s.runner.lock
 func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
+	// Locking requestLock is not technically necessary, but it allows for better
+	// serialization. For example, if this function exits, we know that no other
+	// dispatcher calls will be made.
+	s.requestLock.Lock()
+	defer s.requestLock.Unlock()
+
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 	cpu := rawResources.Cpu.AsApproximateFloat64()
 	mem := uint64(rawResources.Memory.Value())
@@ -1187,6 +1222,15 @@ func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger
 		return err
 	}
 
+	exit := func(err error) {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		s.exit(InformantServerExitStatus{
+			Err:            err,
+			RetryShouldFix: false,
+		})
+	}
+
 	// Wait for result
 	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
 	timer := time.NewTimer(timeout)
@@ -1197,14 +1241,28 @@ func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger
 		if res != nil {
 			return nil
 		} else {
-			return errors.New("monitor experienced an internal error")
+			err := errors.New("monitor experienced an internal error")
+			exit(err)
+			return err
 		}
 	case <-timer.C:
-		return fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		exit(err)
+		return err
 	}
 }
 
+// MonitorDownscale is the equivalent of (*InformantServer).Downscale for
+// when we're connected to a monitor.
+//
+// This method MUST NOT be called while holding s.requestLock OR s.runner.lock
 func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
+	// Locking requestLock is not technically necessary, but it allows for better
+	// serialization. For example, if this function exits, we know that no other
+	// dispatcher calls will be made.
+	s.requestLock.Lock()
+	defer s.requestLock.Unlock()
+
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 	cpu := rawResources.Cpu.AsApproximateFloat64()
 	mem := uint64(rawResources.Memory.Value())
@@ -1221,6 +1279,15 @@ func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logg
 		return nil, err
 	}
 
+	exit := func(err error) {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		s.exit(InformantServerExitStatus{
+			Err:            err,
+			RetryShouldFix: false,
+		})
+	}
+
 	// Wait for result
 	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
 	timer := time.NewTimer(timeout)
@@ -1231,9 +1298,13 @@ func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logg
 		if res != nil {
 			return res.Result, nil
 		} else {
-			return nil, errors.New("monitor experienced an internal error")
+			err := errors.New("monitor experienced an internal error")
+			exit(err)
+			return nil, err
 		}
 	case <-timer.C:
-		return nil, fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		exit(err)
+		return nil, err
 	}
 }
