@@ -6,8 +6,6 @@ IMG_VXLAN ?= vxlan-controller:dev
 # Autoscaler related images
 AUTOSCALER_SCHEDULER_IMG ?= autoscale-scheduler:dev
 AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
-VM_INFORMANT_IMG ?= vm-informant:dev
-VM_MONITOR_IMG ?= vm-monitor:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
@@ -121,7 +119,7 @@ build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binarie
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMInformant=${VM_INFORMANT_IMG} -X main.VMMonitor=${VM_MONITOR_IMG}" neonvm/tools/vm-builder/main.go
+	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" neonvm/tools/vm-builder/main.go
 
 .PHONY: bin/vm-builder-generic
 bin/vm-builder-generic: ## Build vm-builder-generic binary.
@@ -131,28 +129,11 @@ bin/vm-builder-generic: ## Build vm-builder-generic binary.
 run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
 
-.PHONY: vm-informant
-vm-informant: ## Build vm-informant image
-	docker buildx build \
-		--tag $(VM_INFORMANT_IMG) \
-		--load \
-		--build-arg GIT_INFO=$(GIT_INFO) \
-		--file build/vm-informant/Dockerfile \
-		.
-
-.PHONY: vm-monitor
-vm-monitor: ## Build vm-monitor image
-	docker buildx build \
-		--tag $(VM_MONITOR_IMG) \
-		--load \
-		--file build/vm-monitor/Dockerfile \
-		.
-
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler vm-informant vm-monitor ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler, vm-informant, vm-monitor
+docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler
 
 .PHONY: docker-push
 docker-push: docker-build ## Push docker images to docker registry
@@ -161,8 +142,6 @@ docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_VXLAN)
 	docker push -q $(AUTOSCALER_SCHEDULER_IMG)
 	docker push -q $(AUTOSCALER_AGENT_IMG)
-	docker push -q $(VM_INFORMANT_IMG)
-	docker push -q $(VM_MONITOR_IMG)
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
@@ -195,11 +174,11 @@ docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
 		.
 
 .PHONY: docker-build-examples
-docker-build-examples: vm-informant bin/vm-builder ## Build docker images for testing VMs
+docker-build-examples: bin/vm-builder ## Build docker images for testing VMs
 	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG)
 
 .PHONY: docker-build-pg14-disk-test
-docker-build-pg14-disk-test: vm-informant bin/vm-builder-generic ## Build a VM image for testing
+docker-build-pg14-disk-test: bin/vm-builder-generic ## Build a VM image for testing
 	if [ -a 'vm-examples/pg14-disk-test/ssh_id_rsa' ]; then \
 	    echo "Skipping keygen because 'ssh_id_rsa' already exists"; \
 	else \
