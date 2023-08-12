@@ -506,12 +506,14 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	}
 
 	// Update the metrics:
-	if !s.deleted {
+	// Note: s.state is initialized to the empty string to signify that it's not yet represented in
+	// the metrics.
+	if !s.deleted && s.state != "" {
 		oldIsEndpoint := strconv.FormatBool(s.endpointID != "")
 		global.metrics.runnersCount.WithLabelValues(oldIsEndpoint, string(s.state)).Dec()
 	}
 
-	if !newStatus.deleted {
+	if !newStatus.deleted && newStatus.state != "" {
 		newIsEndpoint := strconv.FormatBool(newStatus.endpointID != "")
 		global.metrics.runnersCount.WithLabelValues(newIsEndpoint, string(newStatus.state)).Inc()
 	}
