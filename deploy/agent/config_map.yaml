@@ -15,6 +15,7 @@ data:
       },
       "informant": {
         "serverPort": 10301,
+        "callbackPort": 10302,
         "retryServerMinWaitSeconds": 5,
         "retryServerNormalWaitSeconds": 5,
         "registerRetrySeconds": 5,

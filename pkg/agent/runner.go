@@ -84,7 +84,7 @@ type Runner struct {
 	global *agentState
 	// status provides the high-level status of the Runner. Reading or updating the status requires
 	// holding podStatus.lock. Updates are typically done handled by the setStatus method.
-	status *podStatus
+	status *lockedPodStatus
 
 	// shutdown provides a clean way to trigger all background Runner threads to shut down. shutdown
 	// is set exactly once, by (*Runner).Run
@@ -287,12 +287,13 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 		defer func() {
 			if err := recover(); err != nil {
 				now := time.Now()
-				r.setStatus(func(stat *podStatus) {
+				r.status.update(r.global, func(stat podStatus) podStatus {
 					stat.endState = &podStatusEndState{
 						ExitKind: podStatusExitPanicked,
 						Error:    fmt.Errorf("Runner %v panicked: %v", r.vm.NamespacedName(), err),
 						Time:     now,
 					}
+					return stat
 				})
 			}
 
@@ -307,12 +308,13 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 			exitKind = podStatusExitErrored
 			r.global.metrics.runnerFatalErrors.Inc()
 		}
-		r.setStatus(func(stat *podStatus) {
+		r.status.update(r.global, func(stat podStatus) podStatus {
 			stat.endState = &podStatusEndState{
 				ExitKind: exitKind,
 				Error:    err,
 				Time:     endTime,
 			}
+			return stat
 		})
 
 		if err != nil {
@@ -321,12 +323,6 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 			logger.Info("Ended without error")
 		}
 	}()
-}
-
-func (r *Runner) setStatus(with func(*podStatus)) {
-	r.status.mu.Lock()
-	defer r.status.mu.Unlock()
-	with(r.status)
 }
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
@@ -364,6 +360,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
 	reqDeadlockChecker := r.requestLock.DeadlockChecker(5*time.Second, time.Second)
 
+	r.spawnBackgroundWorker(ctx, logger, "podStatus updater", func(c context.Context, l *zap.Logger) {
+		r.status.periodicallyRefreshState(c, l, r.global)
+	})
 	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (main)", ignoreLogger(mainDeadlockChecker))
 	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (request lock)", ignoreLogger(reqDeadlockChecker))
 	r.spawnBackgroundWorker(ctx, logger, "track scheduler", func(c context.Context, l *zap.Logger) {

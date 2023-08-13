@@ -33,8 +33,8 @@ awk '/#\+BEGIN_SRC/{flag=1;next}/#\+END_SRC/{flag=0}flag' ARCHITECTURE-network-d
                   |                                |                    |
                   |                                | (one per K8s node) |
                   |                                +-----------------*--+
-                  |                                  |           |   ^ random port
-                  |                                  |           |   |  (per VM)
+                  |                                  |           |   ^ 10302
+                  |                                  |           |   |
                   |                                  |           |   |
 +=================|==================================|===========|===|======+
 : K8s pod         |                                  |           |   |      :

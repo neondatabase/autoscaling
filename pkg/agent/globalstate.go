@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +33,8 @@ type agentState struct {
 	lock util.ChanMutex
 	pods map[util.NamespacedName]*podState
 
+	informantMuxServer *HttpMuxServer
+
 	// A base logger to pass around, so we can recreate the logger for a Runner on restart, without
 	// running the risk of leaking keys.
 	baseLogger *zap.Logger
@@ -50,10 +53,12 @@ func (r MainRunner) newAgentState(
 	podIP string,
 	broker *pubsub.Broker[schedwatch.WatchEvent],
 	schedulerStore *watch.Store[corev1.Pod],
+	informantMuxServer *HttpMuxServer,
 ) (*agentState, *prometheus.Registry) {
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
+		informantMuxServer:   informantMuxServer,
 		baseLogger:           baseLogger,
 		config:               r.Config,
 		kubeClient:           r.KubeClient,
@@ -115,16 +120,22 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 	switch event.kind {
 	case vmEventDeleted:
 		state.stop()
-		delete(s.pods, podName)
+		// mark the status as deleted, so that it gets removed from metrics.
+		state.status.update(s, func(stat podStatus) podStatus {
+			stat.deleted = true
+			delete(s.pods, podName) // Do the removal while synchronized, because we can :)
+			return stat
+		})
 	case vmEventUpdated:
-		state.status.mu.Lock()
-		defer state.status.mu.Unlock()
+		state.status.update(s, func(stat podStatus) podStatus {
+			now := time.Now()
+			stat.vmInfo = event.vmInfo
+			stat.endpointID = event.endpointID
+			stat.endpointAssignedAt = &now
+			state.vmInfoUpdated.Send()
 
-		now := time.Now()
-		state.status.vmInfo = event.vmInfo
-		state.status.endpointID = event.endpointID
-		state.status.endpointAssignedAt = &now
-		state.vmInfoUpdated.Send()
+			return stat
+		})
 	case vmEventAdded:
 		s.handleVMEventAdded(ctx, event, podName)
 	default:
@@ -139,17 +150,27 @@ func (s *agentState) handleVMEventAdded(
 ) {
 	runnerCtx, cancelRunnerContext := context.WithCancel(ctx)
 
-	status := &podStatus{
-		mu:                 sync.Mutex{},
-		endState:           nil,
-		previousEndStates:  nil,
-		vmInfo:             event.vmInfo,
-		endpointID:         event.endpointID,
-		endpointAssignedAt: nil,
+	now := time.Now()
 
-		startTime:                   time.Now(),
-		lastSuccessfulInformantComm: nil,
+	status := &lockedPodStatus{
+		mu: sync.Mutex{},
+		podStatus: podStatus{
+			deleted:            false,
+			endState:           nil,
+			previousEndStates:  nil,
+			vmInfo:             event.vmInfo,
+			endpointID:         event.endpointID,
+			endpointAssignedAt: &now,
+			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
+			stateUpdatedAt:     now,
+
+			startTime:                   now,
+			lastSuccessfulInformantComm: nil,
+		},
 	}
+
+	// Empty update to trigger updating metrics and state.
+	status.update(s, func(s podStatus) podStatus { return s })
 
 	restartCount := 0
 	runner := s.newRunner(event.vmInfo, podName, event.podIP, restartCount)
@@ -186,7 +207,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 	//  2. Wait for a random amount of time (between RunnerRestartMinWaitSeconds and RunnerRestartMaxWaitSeconds)
 	//  3. Restart the Runner (if it still should be restarted)
 
-	status, ok := func() (*podStatus, bool) {
+	status, ok := func() (*lockedPodStatus, bool) {
 		s.lock.Lock()
 		defer s.lock.Unlock()
 		// note: pod.status has a separate lock, so we're ok to release s.lock
@@ -290,34 +311,34 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 			return
 		}
 
-		pod.status.mu.Lock()
-		defer pod.status.mu.Unlock()
+		pod.status.update(s, func(status podStatus) podStatus {
+			// Runner was already restarted
+			if status.endState == nil {
+				addedInfo := "this generally shouldn't happen, but could if there's a new pod with the same name"
+				logCancel(logger.Warn, fmt.Errorf("Runner was already restarted (%s)", addedInfo))
+				return status
+			}
 
-		// Runner was already restarted
-		if pod.status.endState == nil {
-			addedInfo := "this generally shouldn't happen, but could if there's a new pod with the same name"
-			logCancel(logger.Warn, fmt.Errorf("Runner was already restarted (%s)", addedInfo))
-			return
-		}
+			logger.Info("Restarting runner", zap.String("exitKind", string(exitKind)), zap.Duration("delay", time.Since(endTime)))
+			s.metrics.runnerRestarts.Inc()
 
-		logger.Info("Restarting runner", zap.String("exitKind", string(exitKind)), zap.Duration("delay", time.Since(endTime)))
-		s.metrics.runnerRestarts.Inc()
+			restartCount := len(status.previousEndStates) + 1
+			runner := s.newRunner(status.vmInfo, podName, podIP, restartCount)
+			runner.status = pod.status
 
-		restartCount := len(pod.status.previousEndStates) + 1
-		runner := s.newRunner(pod.status.vmInfo, podName, podIP, restartCount)
-		runner.status = pod.status
+			txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
+			// note: pod is *podState, so we don't need to re-assign to the map.
+			pod.vmInfoUpdated = txVMUpdate
+			pod.runner = runner
 
-		txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
-		// note: pod is *podState, so we don't need to re-assign to the map.
-		pod.vmInfoUpdated = txVMUpdate
-		pod.runner = runner
+			status.previousEndStates = append(status.previousEndStates, *status.endState)
+			status.endState = nil
+			status.startTime = time.Now()
 
-		pod.status.previousEndStates = append(pod.status.previousEndStates, *pod.status.endState)
-		pod.status.endState = nil
-		pod.status.startTime = time.Now()
-
-		runnerLogger := s.loggerForRunner(pod.status.vmInfo.NamespacedName(), podName)
-		runner.Spawn(runnerCtx, runnerLogger, rxVMUpdate)
+			runnerLogger := s.loggerForRunner(status.vmInfo.NamespacedName(), podName)
+			runner.Spawn(runnerCtx, runnerLogger, rxVMUpdate)
+			return status
+		})
 	}()
 }
 
@@ -359,7 +380,7 @@ type podState struct {
 
 	stop   context.CancelFunc
 	runner *Runner
-	status *podStatus
+	status *lockedPodStatus
 
 	vmInfoUpdated util.CondChannelSender
 }
@@ -385,10 +406,17 @@ func (p *podState) dump(ctx context.Context) podStateDump {
 	}
 }
 
-type podStatus struct {
+type lockedPodStatus struct {
 	mu sync.Mutex
 
+	podStatus
+}
+
+type podStatus struct {
 	startTime time.Time
+
+	// if true, the corresponding podState is no longer included in the global pod map
+	deleted bool
 
 	// if non-nil, the runner is finished
 	endState          *podStatusEndState
@@ -407,6 +435,9 @@ type podStatus struct {
 
 	// NB: this value, once non-nil, is never changed.
 	endpointAssignedAt *time.Time
+
+	state          runnerMetricState
+	stateUpdatedAt time.Time
 }
 
 type podStatusDump struct {
@@ -421,6 +452,9 @@ type podStatusDump struct {
 
 	EndpointID         string     `json:"endpointID"`
 	EndpointAssignedAt *time.Time `json:"endpointAssignedAt"`
+
+	State          runnerMetricState `json:"state"`
+	StateUpdatedAt time.Time         `json:"stateUpdatedAt"`
 }
 
 type podStatusEndState struct {
@@ -439,40 +473,115 @@ const (
 	podStatusExitCanceled podStatusExitKind = "canceled" // top-down signal that the Runner should stop.
 )
 
-type unhealthyKind string
-
-const (
-	unhealthyAny      unhealthyKind = "any"
-	unhealthyEndpoint unhealthyKind = "endpoint"
-)
-
-func (s *podStatus) informantIsUnhealthy(config *Config, kind unhealthyKind) bool {
+func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	newStatus := with(s.podStatus)
+	now := time.Now()
+
+	// Calculate the new state:
+	var newState runnerMetricState
+	if s.deleted {
+		// If deleted, don't change anything.
+	} else if s.endState != nil {
+		switch s.endState.ExitKind {
+		case podStatusExitCanceled:
+			// If canceled, don't change the state.
+			newState = s.state
+		case podStatusExitErrored:
+			newState = runnerMetricStateErrored
+		case podStatusExitPanicked:
+			newState = runnerMetricStatePanicked
+		}
+	} else if newStatus.informantStuckAt(global.config).Before(now) {
+		newState = runnerMetricStateStuck
+	} else {
+		newState = runnerMetricStateOk
+	}
+
+	if !newStatus.deleted {
+		newStatus.state = newState
+		newStatus.stateUpdatedAt = now
+	}
+
+	// Update the metrics:
+	// Note: s.state is initialized to the empty string to signify that it's not yet represented in
+	// the metrics.
+	if !s.deleted && s.state != "" {
+		oldIsEndpoint := strconv.FormatBool(s.endpointID != "")
+		global.metrics.runnersCount.WithLabelValues(oldIsEndpoint, string(s.state)).Dec()
+	}
+
+	if !newStatus.deleted && newStatus.state != "" {
+		newIsEndpoint := strconv.FormatBool(newStatus.endpointID != "")
+		global.metrics.runnersCount.WithLabelValues(newIsEndpoint, string(newStatus.state)).Inc()
+	}
+
+	s.podStatus = newStatus
+}
+
+// informantStuckAt returns the time at which the Runner will be marked "stuck"
+func (s podStatus) informantStuckAt(config *Config) time.Time {
 	startupGracePeriod := time.Second * time.Duration(config.Informant.UnhealthyStartupGracePeriodSeconds)
 	unhealthySilencePeriod := time.Second * time.Duration(config.Informant.UnhealthyAfterSilenceDurationSeconds)
-
-	if kind == unhealthyEndpoint && s.endpointID == "" {
-		return false // It's not an endpoint.
-	}
 
 	if s.lastSuccessfulInformantComm == nil {
 		start := s.startTime
 
-		// if we specifically care about unhealthy *endpoints*, then we should start the grace period
-		// from when the VM was *assigned* the endpoint, rather than when the VM was created.
+		// For endpoints, we should start the grace period from when the VM was *assigned* the
+		// endpoint, rather than when the VM was created.
 		if s.endpointID != "" {
 			start = *s.endpointAssignedAt
 		}
 
-		return time.Since(start) >= startupGracePeriod
+		return start.Add(startupGracePeriod)
 	} else {
-		return time.Since(*s.lastSuccessfulInformantComm) >= unhealthySilencePeriod
+		return s.lastSuccessfulInformantComm.Add(unhealthySilencePeriod)
 	}
 }
 
-func (s *podStatus) dump() podStatusDump {
+func (s *lockedPodStatus) periodicallyRefreshState(ctx context.Context, logger *zap.Logger, global *agentState) {
+	maxUpdateSeconds := util.Min(
+		global.config.Informant.UnhealthyStartupGracePeriodSeconds,
+		global.config.Informant.UnhealthyAfterSilenceDurationSeconds,
+	)
+	// make maxTick a bit less than maxUpdateSeconds for the benefit of consistency and having
+	// relatively frequent log messages if things are stuck.
+	maxTick := time.Second * time.Duration(maxUpdateSeconds/2)
+
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+
+		// use s.update to trigger re-evaluating the metrics, and simultaneously reset the timer to
+		// the next point in time at which the state might have changed, so that we minimize the
+		// time between the VM meeting the conditions for being "stuck" and us recognizing it.
+		s.update(global, func(stat podStatus) podStatus {
+			stuckAt := stat.informantStuckAt(global.config)
+			now := time.Now()
+			if stuckAt.Before(now) && stat.state != runnerMetricStateErrored && stat.state != runnerMetricStatePanicked {
+				if stat.endpointID != "" {
+					logger.Warn("Runner with endpoint is currently stuck", zap.String("endpointID", stat.endpointID))
+				} else {
+					logger.Warn("Runner without endpoint is currently stuck")
+				}
+				timer.Reset(maxTick)
+			} else {
+				timer.Reset(util.Min(maxTick, stuckAt.Sub(now)))
+			}
+			return stat
+		})
+	}
+}
+
+func (s *lockedPodStatus) dump() podStatusDump {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -494,6 +603,9 @@ func (s *podStatus) dump() podStatusDump {
 		EndpointID:         s.endpointID,
 		EndpointAssignedAt: s.endpointAssignedAt, // ok to share the pointer, because it's not updated
 		StartTime:          s.startTime,
+
+		State:          s.state,
+		StateUpdatedAt: s.stateUpdatedAt,
 
 		LastSuccessfulInformantComm: s.lastSuccessfulInformantComm,
 	}
