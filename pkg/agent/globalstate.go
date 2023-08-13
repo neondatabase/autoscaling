@@ -120,7 +120,12 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 	switch event.kind {
 	case vmEventDeleted:
 		state.stop()
-		delete(s.pods, podName)
+		// mark the status as deleted, so that it gets removed from metrics.
+		state.status.update(s, func(stat podStatus) podStatus {
+			stat.deleted = true
+			delete(s.pods, podName) // Do the removal while synchronized, because we can :)
+			return stat
+		})
 	case vmEventUpdated:
 		state.status.update(s, func(stat podStatus) podStatus {
 			now := time.Now()
@@ -150,11 +155,12 @@ func (s *agentState) handleVMEventAdded(
 	status := &lockedPodStatus{
 		mu: sync.Mutex{},
 		podStatus: podStatus{
+			deleted:            false,
 			endState:           nil,
 			previousEndStates:  nil,
 			vmInfo:             event.vmInfo,
 			endpointID:         event.endpointID,
-			endpointAssignedAt: nil,
+			endpointAssignedAt: &now,
 			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
 			stateUpdatedAt:     now,
 
@@ -409,6 +415,9 @@ type lockedPodStatus struct {
 type podStatus struct {
 	startTime time.Time
 
+	// if true, the corresponding podState is no longer included in the global pod map
+	deleted bool
+
 	// if non-nil, the runner is finished
 	endState          *podStatusEndState
 	previousEndStates []podStatusEndState
@@ -473,10 +482,13 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 
 	// Calculate the new state:
 	var newState runnerMetricState
-	if s.endState != nil {
+	if s.deleted {
+		// If deleted, don't change anything.
+	} else if s.endState != nil {
 		switch s.endState.ExitKind {
 		case podStatusExitCanceled:
-			newState = runnerMetricState("") // signal for later that we should remove the value.
+			// If canceled, don't change the state.
+			newState = s.state
 		case podStatusExitErrored:
 			newState = runnerMetricStateErrored
 		case podStatusExitPanicked:
@@ -488,16 +500,20 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 		newState = runnerMetricStateOk
 	}
 
-	newStatus.state = newState
-	newStatus.stateUpdatedAt = now
+	if !newStatus.deleted {
+		newStatus.state = newState
+		newStatus.stateUpdatedAt = now
+	}
 
 	// Update the metrics:
-	if s.state != "" {
+	// Note: s.state is initialized to the empty string to signify that it's not yet represented in
+	// the metrics.
+	if !s.deleted && s.state != "" {
 		oldIsEndpoint := strconv.FormatBool(s.endpointID != "")
 		global.metrics.runnersCount.WithLabelValues(oldIsEndpoint, string(s.state)).Dec()
 	}
 
-	if newStatus.state != "" {
+	if !newStatus.deleted && newStatus.state != "" {
 		newIsEndpoint := strconv.FormatBool(newStatus.endpointID != "")
 		global.metrics.runnersCount.WithLabelValues(newIsEndpoint, string(newStatus.state)).Inc()
 	}
