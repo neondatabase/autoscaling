@@ -12,7 +12,7 @@ The following components have been updated to follow this document:
 - [x] autoscale-scheduler (scheduler plugin)
 - [x] vm-informant
 - [ ] neonvm-controlller
-- [ ] neonvm-runner
+- [x] neonvm-runner
 
 ## Common keys
 
