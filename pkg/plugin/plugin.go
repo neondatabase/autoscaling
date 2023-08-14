@@ -25,6 +25,7 @@ import (
 
 const Name = "AutoscaleEnforcer"
 const LabelVM = vmapi.VirtualMachineNameLabel
+const LabelPluginCreatedMigration = "autoscaling.neon.tech/created-by-scheduler"
 const ConfigMapNamespace = "kube-system"
 const ConfigMapName = "scheduler-plugin-config"
 const ConfigMapKey = "autoscaler-enforcer-config.json"
@@ -100,8 +101,9 @@ func makeAutoscaleEnforcerPlugin(
 		vmClient: vmClient,
 		// remaining fields are set by p.readClusterState and p.makePrometheusRegistry
 		state: pluginState{ //nolint:exhaustruct // see above.
-			lock: util.NewChanMutex(),
-			conf: config,
+			lock:                      util.NewChanMutex(),
+			ongoingMigrationDeletions: make(map[util.NamespacedName]int),
+			conf:                      config,
 		},
 		metrics:   PromMetrics{},      //nolint:exhaustruct // set by makePrometheusRegistry
 		vmStore:   IndexedVMStore{},   //nolint:exhaustruct // set below
@@ -130,6 +132,9 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 	pwc := podWatchCallbacks{
+		submitPodStarted: func(logger *zap.Logger, pod *corev1.Pod) {
+			pushToQueue(logger, func() { p.handlePodStarted(hlogger, pod) })
+		},
 		submitVMDeletion: func(logger *zap.Logger, pod util.NamespacedName) {
 			pushToQueue(logger, func() { p.handleVMDeletion(hlogger, pod) })
 		},
@@ -154,6 +159,13 @@ func makeAutoscaleEnforcerPlugin(
 			pushToQueue(logger, func() { p.handleNonAutoscalingUsageChange(hlogger, vm, podName) })
 		},
 	}
+	mwc := migrationWatchCallbacks{
+		submitMigrationFinished: func(vmm *vmapi.VirtualMachineMigration) {
+			// When cleaning up migrations, we don't want to process those events synchronously.
+			// So instead, we'll spawn a goroutine to delete the completed migration.
+			go p.cleanupMigration(hlogger, vmm)
+		},
+	}
 
 	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
 
@@ -166,14 +178,22 @@ func makeAutoscaleEnforcerPlugin(
 	p.nodeStore = watch.NewIndexedStore(nodeStore, watch.NewFlatNameIndex[corev1.Node]())
 
 	logger.Info("Starting pod watcher")
-	if err := p.watchPodEvents(ctx, logger, watchMetrics, pwc); err != nil {
+	podStore, err := p.watchPodEvents(ctx, logger, watchMetrics, pwc)
+	if err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
+	podIndex := watch.NewIndexedStore(podStore, watch.NewNameIndex[corev1.Pod]())
+
 	logger.Info("Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, vwc)
+	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, vwc, podIndex)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
+	}
+
+	logger.Info("Starting VM Migration watcher")
+	if _, err := p.watchMigrationEvents(ctx, logger, watchMetrics, mwc); err != nil {
+		return nil, fmt.Errorf("Error starting VM Migration watcher: %w", err)
 	}
 
 	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
@@ -190,13 +210,14 @@ func makeAutoscaleEnforcerPlugin(
 	}
 
 	go func() {
-		iter := queue.Iterator()
-		for iter.Next(ctx) {
-			callback := iter.Value()
+		for {
+			callback, err := queue.Wait(ctx) // NB: Wait pulls from the front of the queue
+			if err != nil {
+				logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
+				break
+			}
+
 			callback()
-		}
-		if err := iter.Close(); err != nil {
-			logger.Info("Stopped waiting on pod/VM queue", zap.Error(err))
 		}
 	}()
 
@@ -233,7 +254,7 @@ func (e *AutoscaleEnforcer) Name() string {
 // getVmInfo is a helper for the plugin-related functions
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
-func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*api.VmInfo, error) {
+func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, action string) (*api.VmInfo, error) {
 	var vmName util.NamespacedName
 	vmName.Namespace = pod.Namespace
 
@@ -247,7 +268,7 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 		return index.Get(vmName.Namespace, vmName.Name)
 	}
 
-	vm, ok := vmStore.GetIndexed(accessor)
+	vm, ok := e.vmStore.GetIndexed(accessor)
 	if !ok {
 		logger.Warn(
 			"VM is missing from local store. Relisting",
@@ -264,13 +285,13 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 		defer timer.Stop()
 
 		select {
-		case <-vmStore.Relist():
+		case <-e.vmStore.Relist():
 		case <-timer.C:
 			return nil, fmt.Errorf("Timed out waiting on VM store relist (timeout = %s)", timeout)
 		}
 
 		// retry fetching the VM, now that we know it's been synced.
-		vm, ok = vmStore.GetIndexed(accessor)
+		vm, ok = e.vmStore.GetIndexed(accessor)
 		if !ok {
 			// if the VM is still not present after relisting, then either it's already been deleted
 			// or there's a deeper problem.
@@ -280,6 +301,15 @@ func getVmInfo(logger *zap.Logger, vmStore IndexedVMStore, pod *corev1.Pod) (*ap
 
 	vmInfo, err := api.ExtractVmInfo(logger, vm)
 	if err != nil {
+		e.handle.EventRecorder().Eventf(
+			vm,              // regarding
+			pod,             // related
+			"Warning",       // eventtype
+			"ExtractVmInfo", // reason
+			action,          // action
+			"Failed to extract autoscaling info about VM: %s", // node
+			err,
+		)
 		return nil, fmt.Errorf("Error extracting VM info: %w", err)
 	}
 
@@ -310,9 +340,11 @@ func (e *AutoscaleEnforcer) PreFilter(
 	state *framework.CycleState,
 	pod *corev1.Pod,
 ) (_ *framework.PreFilterResult, status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("PreFilter").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("PreFilter", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("PreFilter", status)
+		e.metrics.IncFailIfNotSuccess("PreFilter", ignored, status)
 	}()
 
 	return nil, nil
@@ -338,10 +370,15 @@ func (e *AutoscaleEnforcer) PostFilter(
 	pod *corev1.Pod,
 	filteredNodeStatusMap framework.NodeToStatusMap,
 ) (_ *framework.PostFilterResult, status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("PostFilter").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("PostFilter", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("PostFilter", status)
+		e.metrics.IncFailIfNotSuccess("PostFilter", ignored, status)
 	}()
+
+	logger := e.logger.With(zap.String("method", "Filter"), util.PodNameFields(pod))
+	logger.Error("Pod rejected by all Filter method calls")
 
 	return nil, nil // PostFilterResult is optional, nil Status is success.
 }
@@ -355,9 +392,11 @@ func (e *AutoscaleEnforcer) Filter(
 	pod *corev1.Pod,
 	nodeInfo *framework.NodeInfo,
 ) (status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("Filter").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("Filter", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Filter", status)
+		e.metrics.IncFailIfNotSuccess("Filter", ignored, status)
 	}()
 
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
@@ -365,7 +404,11 @@ func (e *AutoscaleEnforcer) Filter(
 	logger := e.logger.With(zap.String("method", "Filter"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Filter request")
 
-	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
+	if ignored {
+		logger.Warn("Received Filter request for pod in ignored namespace, continuing anyways.")
+	}
+
+	vmInfo, err := e.getVmInfo(logger, pod, "Filter")
 	if err != nil {
 		logger.Error("Error getting VM info for Pod", zap.Error(err))
 		return framework.NewStatus(
@@ -429,17 +472,82 @@ func (e *AutoscaleEnforcer) Filter(
 	otherResources.MarginCPU = node.otherResources.MarginCPU
 	otherResources.MarginMemory = node.otherResources.MarginMemory
 
+	// As we process all pods, we should record all the pods that aren't present in both nodeInfo
+	// and e.state's maps, so that we can log any inconsistencies instead of silently using
+	// *potentially* bad data. Some differences are expected, but on the whole this extra
+	// information should be helpful.
+	missedPods := make(map[util.NamespacedName]struct{})
+	for name := range node.pods {
+		missedPods[name] = struct{}{}
+	}
+	for name := range node.otherPods {
+		missedPods[name] = struct{}{}
+	}
+
+	var includedIgnoredPods []util.NamespacedName
+
 	for _, podInfo := range nodeInfo.Pods {
 		pn := util.NamespacedName{Name: podInfo.Pod.Name, Namespace: podInfo.Pod.Namespace}
 		if podState, ok := e.state.podMap[pn]; ok {
 			totalNodeVCPU += podState.vCPU.Reserved
 			totalNodeMem += podState.memSlots.Reserved
+			delete(missedPods, pn)
 		} else if otherPodState, ok := e.state.otherPods[pn]; ok {
 			oldRes := otherResources
 			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, otherPodState.resources)
 			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
 			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
+			delete(missedPods, pn)
+		} else {
+			name := util.GetNamespacedName(podInfo.Pod)
+
+			if util.PodCompleted(podInfo.Pod) {
+				logger.Warn(
+					"Skipping completed Pod in Filter node's pods",
+					zap.Object("pod", name),
+					zap.String("phase", string(podInfo.Pod.Status.Phase)),
+				)
+				continue
+			}
+
+			if !e.state.conf.ignoredNamespace(podInfo.Pod.Namespace) {
+				// FIXME: this gets us duplicated "pod" fields. Not great. But we're using
+				// logger.With pretty pervasively, and it's hard to avoid this while using that.
+				// For now, we can get around this by including the pod name in an error.
+				logger.Error(
+					"Unknown-but-not-ignored Pod in Filter node's pods",
+					zap.Object("pod", name),
+					zap.Error(fmt.Errorf("Pod %v is unknown but not ignored", name)),
+				)
+			} else {
+				includedIgnoredPods = append(includedIgnoredPods, name)
+			}
+
+			// We *also* need to count pods in ignored namespaces
+			resources, err := extractPodOtherPodResourceState(podInfo.Pod)
+			if err != nil {
+				// FIXME: Same duplicate "pod" field issue as above; same temporary solution.
+				logger.Error(
+					"Error extracting resource state for non-VM Pod",
+					zap.Object("pod", name),
+					zap.Error(fmt.Errorf("Error extracting resource state for %v: %w", name, err)),
+				)
+				continue
+			}
+
+			oldRes := otherResources
+			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, resources)
+			totalNodeVCPU += otherResources.ReservedCPU - oldRes.ReservedCPU
+			totalNodeMem += otherResources.ReservedMemSlots - oldRes.ReservedMemSlots
 		}
+	}
+
+	if len(missedPods) != 0 {
+		var missedPodsList []util.NamespacedName
+		for name := range missedPods {
+			missedPodsList = append(missedPodsList, name)
+		}
+		logger.Warn("Some known Pods weren't included in Filter NodeInfo", zap.Objects("missedPods", missedPodsList))
 	}
 
 	nodeTotalReservableCPU := node.totalReservableCPU()
@@ -506,14 +614,18 @@ func (e *AutoscaleEnforcer) Filter(
 	}
 
 	var message string
+	var logFunc func(string, ...zap.Field)
 	if allowing {
 		message = "Allowing Pod"
+		logFunc = logger.Info
 	} else {
 		message = "Rejecting Pod"
+		logFunc = logger.Warn
 	}
 
-	logger.Info(
+	logFunc(
 		message,
+		zap.Objects("includedIgnoredPods", includedIgnoredPods),
 		zap.Object("verdict", verdictSet{
 			cpu: cpuMsg,
 			mem: memMsg,
@@ -545,9 +657,11 @@ func (e *AutoscaleEnforcer) Score(
 	pod *corev1.Pod,
 	nodeName string,
 ) (_ int64, status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("Score").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("Score", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Score", status)
+		e.metrics.IncFailIfNotSuccess("Score", ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
@@ -555,7 +669,7 @@ func (e *AutoscaleEnforcer) Score(
 
 	scoreLen := framework.MaxNodeScore - framework.MinNodeScore
 
-	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
+	vmInfo, err := e.getVmInfo(logger, pod, "Score")
 	if err != nil {
 		logger.Error("Error getting VM info for Pod", zap.Error(err))
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
@@ -583,25 +697,32 @@ func (e *AutoscaleEnforcer) Score(
 		(vmInfo.Cpu.Use > node.remainingReservableCPU() ||
 			vmInfo.Mem.Use > node.remainingReservableMemSlots())
 	if noRoom {
-		return framework.MinNodeScore, nil
+		score := framework.MinNodeScore
+		logger.Warn("No room on node, giving minimum score (typically handled by Filter method)", zap.Int64("score", score))
+		return score, nil
 	}
 
-	totalMilliCpu := int64(node.totalReservableCPU())
-	totalMem := int64(node.totalReservableMemSlots())
-	maxTotalMilliCpu := int64(e.state.maxTotalReservableCPU)
-	maxTotalMem := int64(e.state.maxTotalReservableMemSlots)
+	remainingCPU := node.remainingReservableCPU()
+	remainingMem := node.remainingReservableMemSlots()
+	totalCPU := e.state.maxTotalReservableCPU
+	totalMem := e.state.maxTotalReservableMemSlots
 
 	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
 	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	scoreCpu := framework.MinNodeScore + scoreLen*totalMilliCpu/maxTotalMilliCpu
-	scoreMem := framework.MinNodeScore + scoreLen*totalMem/maxTotalMem
+	cpuScore := framework.MinNodeScore + scoreLen*int64(remainingCPU)/int64(totalCPU)
+	memScore := framework.MinNodeScore + scoreLen*int64(remainingMem)/int64(totalMem)
 
-	// return the minimum of the two resources scores
-	if scoreCpu < scoreMem {
-		return scoreCpu, nil
-	} else {
-		return scoreMem, nil
-	}
+	score := util.Min(cpuScore, memScore)
+	logger.Info(
+		"Scored pod placement for node",
+		zap.Int64("score", score),
+		zap.Object("verdict", verdictSet{
+			cpu: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingCPU, totalCPU, cpuScore),
+			mem: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingMem, totalMem, memScore),
+		}),
+	)
+
+	return score, nil
 }
 
 // ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used
@@ -620,9 +741,11 @@ func (e *AutoscaleEnforcer) Reserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) (status *framework.Status) {
-	e.metrics.pluginCalls.WithLabelValues("Reserve").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("Reserve", ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Reserve", status)
+		e.metrics.IncFailIfNotSuccess("Reserve", ignored, status)
 	}()
 
 	pName := util.GetNamespacedName(pod)
@@ -633,7 +756,13 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	logger.Info("Handling Reserve request")
 
-	vmInfo, err := getVmInfo(logger, e.vmStore, pod)
+	if ignored {
+		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
+		logger.Warn("Ignoring Reserve request for pod in ignored namespace")
+		return nil // success; allow the Pod onto the node.
+	}
+
+	vmInfo, err := e.getVmInfo(logger, pod, "Reserve")
 	if err != nil {
 		logger.Error("Error getting VM info for pod", zap.Error(err))
 		return framework.NewStatus(
@@ -737,12 +866,12 @@ func (e *AutoscaleEnforcer) Reserve(
 			}
 
 			cpuVerdict := fmt.Sprintf(
-				"need %v vCPU (%v -> %v raw), have %v available (%s)",
-				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.remainingReservableCPU(), cpuShortVerdict,
+				"need %v (%v -> %v raw), %v of %v used, so %v available (%s)",
+				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
 			)
 			memVerdict := fmt.Sprintf(
-				"need %v mem slots (%v -> %v raw), have %d available (%s)",
-				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.remainingReservableMemSlots(), memShortVerdict,
+				"need %v (%v -> %v raw), %v of %v used, so %v available (%s)",
+				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
 			)
 
 			logger.Error(
@@ -819,8 +948,14 @@ func (e *AutoscaleEnforcer) Reserve(
 			memShortVerdict = "OK"
 		}
 
-		cpuVerdict := fmt.Sprintf("need %v vCPU, have %v available (%s)", vmInfo.Cpu.Use, node.remainingReservableCPU(), cpuShortVerdict)
-		memVerdict := fmt.Sprintf("need %v mem slots, have %v available (%s)", vmInfo.Mem.Use, node.remainingReservableMemSlots(), memShortVerdict)
+		cpuVerdict := fmt.Sprintf(
+			"need %v, %v of %v used, so %v available (%s)",
+			vmInfo.Cpu.Use, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
+		)
+		memVerdict := fmt.Sprintf(
+			"need %v, %v of %v used, so %v available (%s)",
+			vmInfo.Mem.Use, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
+		)
 
 		logger.Error(
 			"Can't reserve VM pod (not enough resources)",
@@ -846,12 +981,19 @@ func (e *AutoscaleEnforcer) Unreserve(
 	pod *corev1.Pod,
 	nodeName string,
 ) {
-	e.metrics.pluginCalls.WithLabelValues("Unreserve").Inc()
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+	e.metrics.IncMethodCall("Unreserve", ignored)
 
 	podName := util.GetNamespacedName(pod)
 
 	logger := e.logger.With(zap.String("method", "Unreserve"), zap.String("node", nodeName), util.PodNameFields(pod))
 	logger.Info("Handling Unreserve request")
+
+	if ignored {
+		// Generally, we shouldn't be getting plugin requests for resources that are ignored.
+		logger.Warn("Ignoring Unreserve request for pod in ignored namespace")
+		return
+	}
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
@@ -898,7 +1040,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 
 		ps.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 	} else {
-		logger.Warn("Cannot find pod in podMap in otherPods")
+		logger.Warn("Cannot find pod in podMap or otherPods")
 		return
 	}
 }

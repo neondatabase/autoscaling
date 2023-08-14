@@ -27,6 +27,7 @@ var entrypointPrefix = []string{"/usr/bin/cgexec", "-g", "memory:neon-postgres"}
 const (
 	dockerfileVmBuilder = `
 FROM {{.InformantImage}} as informant
+FROM {{.MonitorImage}} as monitor
 
 # Build cgroup-tools
 #
@@ -108,6 +109,7 @@ RUN set -e \
 
 USER postgres
 
+COPY --from=monitor           /usr/bin/vm-monitor /usr/local/bin/vm-monitor
 COPY --from=informant         /usr/bin/vm-informant /usr/local/bin/vm-informant
 COPY --from=libcgroup-builder /libcgroup-install/bin/*  /usr/bin/
 COPY --from=libcgroup-builder /libcgroup-install/lib/*  /usr/lib/
@@ -246,7 +248,8 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
+::respawn:su -p vm-informant -c 'RUST_LOG=info /usr/local/bin/vm-monitor --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="host=localhost port=5432 dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
+::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant'
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
@@ -359,6 +362,7 @@ default_pool_size=16
 var (
 	Version     string
 	VMInformant string
+	VMMonitor   string
 
 	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
 	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
@@ -367,6 +371,7 @@ var (
 	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
 	informant = flag.String("informant", VMInformant, `vm-informant docker image`)
+	monitor   = flag.String("monitor", VMMonitor, `vm-monitor docker image`)
 	fileCache = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 )
@@ -425,6 +430,7 @@ type TemplatesContext struct {
 	Env            []string
 	RootDiskImage  string
 	InformantImage string
+	MonitorImage   string
 	FileCache      bool
 }
 
@@ -512,6 +518,7 @@ func main() {
 		Env:            imageSpec.Config.Env,
 		RootDiskImage:  *srcImage,
 		InformantImage: *informant,
+		MonitorImage:   *monitor,
 		FileCache:      *fileCache,
 	}
 

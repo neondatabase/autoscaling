@@ -84,7 +84,7 @@ type Runner struct {
 	global *agentState
 	// status provides the high-level status of the Runner. Reading or updating the status requires
 	// holding podStatus.lock. Updates are typically done handled by the setStatus method.
-	status *podStatus
+	status *lockedPodStatus
 
 	// shutdown provides a clean way to trigger all background Runner threads to shut down. shutdown
 	// is set exactly once, by (*Runner).Run
@@ -209,7 +209,7 @@ type Scheduler struct {
 
 	// fatal is used for signalling that fatalError has been set (and so we should look for a new
 	// scheduler)
-	fatal util.SignalSender
+	fatal util.SignalSender[struct{}]
 }
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
@@ -287,12 +287,13 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 		defer func() {
 			if err := recover(); err != nil {
 				now := time.Now()
-				r.setStatus(func(stat *podStatus) {
+				r.status.update(r.global, func(stat podStatus) podStatus {
 					stat.endState = &podStatusEndState{
 						ExitKind: podStatusExitPanicked,
 						Error:    fmt.Errorf("Runner %v panicked: %v", r.vm.NamespacedName(), err),
 						Time:     now,
 					}
+					return stat
 				})
 			}
 
@@ -307,12 +308,13 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 			exitKind = podStatusExitErrored
 			r.global.metrics.runnerFatalErrors.Inc()
 		}
-		r.setStatus(func(stat *podStatus) {
+		r.status.update(r.global, func(stat podStatus) podStatus {
 			stat.endState = &podStatusEndState{
 				ExitKind: exitKind,
 				Error:    err,
 				Time:     endTime,
 			}
+			return stat
 		})
 
 		if err != nil {
@@ -321,12 +323,6 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 			logger.Info("Ended without error")
 		}
 	}()
-}
-
-func (r *Runner) setStatus(with func(*podStatus)) {
-	r.status.mu.Lock()
-	defer r.status.mu.Unlock()
-	with(r.status)
 }
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
@@ -364,6 +360,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
 	reqDeadlockChecker := r.requestLock.DeadlockChecker(5*time.Second, time.Second)
 
+	r.spawnBackgroundWorker(ctx, logger, "podStatus updater", func(c context.Context, l *zap.Logger) {
+		r.status.periodicallyRefreshState(c, l, r.global)
+	})
 	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (main)", ignoreLogger(mainDeadlockChecker))
 	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (request lock)", ignoreLogger(reqDeadlockChecker))
 	r.spawnBackgroundWorker(ctx, logger, "track scheduler", func(c context.Context, l *zap.Logger) {
@@ -798,7 +797,7 @@ func (r *Runner) trackSchedulerLoop(
 		minWait     time.Duration    = 5 * time.Second // minimum time we have to wait between scheduler starts
 		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
 		currentInfo schedwatch.SchedulerInfo
-		fatal       util.SignalReceiver
+		fatal       util.SignalReceiver[struct{}]
 		failed      bool
 	)
 
@@ -816,7 +815,7 @@ startScheduler:
 	failed = false
 
 	// Set the current scheduler
-	fatal = func() util.SignalReceiver {
+	fatal = func() util.SignalReceiver[struct{}] {
 		logger := logger.With(zap.Object("scheduler", currentInfo))
 
 		// Print info about a new scheduler, unless this is the first one.
@@ -824,7 +823,7 @@ startScheduler:
 			logger.Info("Updating scheduler pod")
 		}
 
-		sendFatal, recvFatal := util.NewSingleSignalPair()
+		sendFatal, recvFatal := util.NewSingleSignalPair[struct{}]()
 
 		sched := &Scheduler{
 			runner:     r,
@@ -1301,10 +1300,12 @@ func (r *Runner) getStateForVMUpdate(logger *zap.Logger, updateReason VMUpdateRe
 
 	// Check that the VM's current usage is <= lastApproved
 	if vmUsing := r.vm.Using(); vmUsing.HasFieldGreaterThan(*r.lastApproved) {
-		panic(fmt.Errorf(
-			"invalid state: r.vm has resources greater than r.lastApproved (%+v vs %+v)",
-			vmUsing, *r.lastApproved,
-		))
+		// ref <https://github.com/neondatabase/autoscaling/issues/234>
+		logger.Warn(
+			"r.vm has resources greater than r.lastApproved. This should only happen when scaling bounds change",
+			zap.Object("using", vmUsing),
+			zap.Object("lastApproved", *r.lastApproved),
+		)
 	}
 
 	config := r.global.config.Scaling.DefaultConfig
@@ -1338,14 +1339,35 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// ---
 	//
 	// Broadly, the implementation works like this:
-	// 1. Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
+	// For CPU:
+	// Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
+	//
+	// For Memory:
+	// Based on memory usage, calculate the VM's desired memory allocation and extrapolate a
+	// goal number of CUs from that.
+	//
+	// 1. Take the maximum of these two goal CUs to create a unified goal CU
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
+	// For CPU:
 	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
 	// average),
-	// which we can get by dividing LA by LAFT.
-	goalCU := uint32(math.Round(float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget))
+	// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
+	goalCPUs := float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget
+	cpuGoalCU := uint32(math.Round(goalCPUs / s.computeUnit.VCPU.AsFloat64()))
+
+	// For Mem:
+	// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
+	// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
+	// that to CUs
+	//
+	// NOTE: use uint64 for calculations on bytes as uint32 can overflow
+	memGoalBytes := uint64(math.Round(float64(s.metrics.MemoryUsageBytes) / s.config.MemoryUsageFractionTarget))
+	bytesPerCU := uint64(int64(s.computeUnit.Mem) * s.vm.Mem.SlotSize.Value())
+	memGoalCU := uint32(memGoalBytes / bytesPerCU)
+
+	goalCU := util.Max(cpuGoalCU, memGoalCU)
 
 	// Update goalCU based on any requested upscaling
 	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling())
@@ -1486,7 +1508,7 @@ func (r *Runner) doVMUpdate(
 		}
 	}
 
-	r.recordResourceChange(downscaled, target, r.global.metrics.neonvmRequestedChange)
+	r.recordResourceChange(current, target, r.global.metrics.neonvmRequestedChange)
 
 	// Make the NeonVM request
 	patches := []util.JSONPatch{{
@@ -1651,7 +1673,7 @@ func (r *Runner) doInformantDownscale(ctx context.Context, logger *zap.Logger, t
 	return resp, nil
 }
 
-// doInformantDownscale is a convenience wrapper around (*InformantServer).Upscale that locks r,
+// doInformantUpscale is a convenience wrapper around (*InformantServer).Upscale that locks r,
 // checks if r.server is nil, and does the request.
 //
 // Some errors are logged by this method instead of being returned. If that happens, this method

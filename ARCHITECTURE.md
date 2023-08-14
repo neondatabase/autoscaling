@@ -19,6 +19,7 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
   * [Node pressure and watermarks](#node-pressure-and-watermarks)
 * [High-level consequences of the Agent-Scheduler protocol](#high-level-consequences-of-the-agent-scheduler-protocol)
 * [Agent-Informant protocol details](#agent-informant-protocol-details)
+* [Informant-Monitor protocol details](#informant-monitor-protocol-details)
 * [Footguns](#footguns)
 
 ## See also
@@ -27,18 +28,26 @@ This isn't the only architecture document. You may also want to look at:
 
 * [`pkg/plugin/ARCHITECTURE.md`](pkg/plugin/ARCHITECTURE.md) — detail on the implementation of the
   scheduler plugin
+* [`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor) -
+where the (VM) monitor, an autoscaling component that manages a Postgres, lives.
 
 ## High-level overview
 
 At a high level, this repository provides three components:
 
 1. A modified Kubernetes scheduler (using the [plugin interface]) — known as "the (scheduler)
-   plugin", `AutoscaleEnforcer`, `autscale-scheduler`
+   plugin", `AutoscaleEnforcer`, `autoscale-scheduler`
 2. A daemonset responsible for making VM scaling decisions & checking with interested parties
    — known as `autoscaler-agent` or simply `agent`
-3. A binary running inside of the VM to (a) provide metrics to the `autoscaler-agent`, (b) validate
-   that downscaling is ok, and (c) request immediate upscaling due to sharp changes in demand —
-   known as "the (VM) informant"
+3. A binary running inside of the VM that relays information between the VM monitor (see below) and
+   `autoscaler-agent`s - known as "the (VM) informant". The informant used to also perform
+   the monitor's functionality, but that functionality was moved to allow the
+   informant to start before Postgres and to have monitoring closer to Postgres.
+
+A fourth component, a binary running inside of the VM to (a) handle being upscaled
+(b) validate that downscaling is ok, and (c) request immediate upscaling due to sharp changes in demand
+— known as "the (VM) monitor", lives in
+[`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor)
 
 [plugin interface]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
 
@@ -50,9 +59,15 @@ _informant_) and makes scaling decisions about the _desired_ resource allocation
 requests these resources from the scheduler plugin, and submits a patch request for its NeonVM to
 update the resources.
 
-The VM informant provides is responsible for handling all of the functionality inside the VM that
-the `autoscaler-agent` cannot. It provides metrics (or: informs the agent where it can find those)
-and approves attempts to downscale resource usage (or: rejects them, if they're still in use).
+The VM informant manages the `autoscaler-agent`(s) associated with a given compute instance and relays
+messages between the agent and the VM monitor on that compute instance. It also provides metrics
+for the agent, or informs the agent where it can find them.
+
+The VM monitor is responsible for handling all of the resource management functionality inside
+the VM that the `autoscaler-agent` cannot. This constitutes handling upscales (eg. increasing Postgres
+file cache size), approving attempts to downscale resource usage (or: rejecting them, if those
+resources are still in use), and requesting upscale when memory usage increases too rapidly for
+metrics to catch.
 
 NeonVM is able to live-scale the resources given to a VM (i.e. CPU and memory _slots_) by handling
 patches to the Kubernetes VM object, which requires connecting to QEMU running on the outer
@@ -66,7 +81,7 @@ discussed more in the [high-level consequences] section below.
 
 ## Network connections between components
 
-![Diagram of network connections between the components listed above, in addition to the kubernetes API and Neon compute node. Directed arrows indicate which component initiates each TCP connection](ARCHITECTURE-network-diagram.png)
+![Diagram of network connections between the components listed above, in addition to the Kubernetes API and Neon compute node. Directed arrows indicate which component initiates each TCP connection](ARCHITECTURE-network-diagram.png)
 [Diagram source](ARCHITECTURE-network-diagram.org)
 
 ## Repository structure
@@ -98,7 +113,7 @@ discussed more in the [high-level consequences] section below.
     * `scripts/patch-*.json` — patches for testing live-updating of a VM or config
     * `scripts/replace-scheduler.sh` — replaces the currently running scheduler, for quick redeploy
     * `scripts/repeat-delete-scheduler.sh` — repeatedly deletes the scheduler (which will be
-        recreated by the depoyment). For debugging.
+        recreated by the deployment). For debugging.
     * `scripts/run-bench.sh` — starts a CPU-intensive pgbench connected to a VM. Useful to watch
       the TPS and get confirmation that autoscaled CPUs are being used.
     * `scripts/scheduler-logs.sh` — convenience script to tail the scheduler's logs
@@ -111,7 +126,7 @@ discussed more in the [high-level consequences] section below.
 * `vm-examples/` — collection of VMs:
     * `pg14-disk-test/` — VM with Postgres 14 and and ssh access
       * Refer to [`vm-examples/pg14-disk-test/README.md`](./vm-examples/pg14-disk-test)  for more information.
-    * `postgres-minimal/` — Minimal postgres 15 VM used in e2e tests
+    * `postgres-minimal/` — Minimal Postgres 15 VM used in e2e tests
 
 [cluster-autoscaler]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler
 
@@ -258,6 +273,45 @@ Broadly, agent<->informant connections are not expected to survive restarts of t
 to failure, or otherwise). So, it is expected that *sometimes*, the informant will receive a request
 for an agent that it has no connection to. When that happens, the informant MUST respond with HTTP
 code 404, and the agent SHOULD try reconnecting.
+
+## Informant-Monitor protocol details
+
+Informant-Monitor communication is carried out through a relatively simple _versioned_ protocol
+over websocket. One party sends a message, the other responds. There are various
+message types that each party sends, and all messages are annotated with an ID.
+The allows a sender to recognize responses to its previous messages. If the
+out-message has ID X, then the return message will also have ID X.
+
+Like the other protocols, relevant types are located in [`pkg/api/types.go`].
+
+1. On startup, the VM monitor listens for websocket connections on `127.0.0.1:10369`
+2. On startup, the VM informant connects to the monitor via websocket on `127.0.0.1:10369`
+3. The informant then sends a `VersionRange[MonitorProtocolVersion]` with the range of
+   protocols it supports.
+4. The monitor responds with the highest common version between the two. If there is no
+   compatible protocol, it returns and error.
+5. From this point on, either party may initiate a transaction by sending a Message.
+6. The other party responds with the appropriate message, with the same ID attached
+   so that the receiver knows it has received a response.
+
+Currently, the following interactions are supported:
+```
+Monitor   sends   UpscaleRequest
+Informant returns NotifyUpscale
+
+Informant sends   TryDownscale
+Monitor   returns DownscaleResult
+
+Informant sends   NotifyUpscale
+Monitor   returns UpscaleConfirmation
+```
+which roughly correspond to `/try-upscale`, `/downscale`, and `/upscale` endpoints
+from the agent<->informant protocol.
+
+There are two additional messages types that either party may send:
+- `InvalidMessage`: sent when either party fails to deserialize a message it received
+- `InternalError`: used to indicate that an error occured while processing a request,
+  for example, if the monitor errors while trying to downscale
 
 ## Footguns
 

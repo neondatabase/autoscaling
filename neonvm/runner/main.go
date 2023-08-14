@@ -46,7 +46,7 @@ const (
 	QEMU_BIN      = "qemu-system-x86_64"
 	QEMU_IMG_BIN  = "qemu-img"
 	kernelPath    = "/vm/kernel/vmlinuz"
-	kernelCmdline = "init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
+	kernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath    = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath = "/vm/images/runtime.iso"
@@ -370,7 +370,7 @@ func createISO9660FromPath(diskName string, diskPath string, contentPath string)
 			continue
 		}
 
-		log.Printf("adding file: %s\n", outputPath)
+		log.Printf("adding file: %s", outputPath)
 		fileToAdd, err := os.Open(fileName)
 		if err != nil {
 			return err
@@ -433,6 +433,11 @@ func main() {
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.Parse()
 
+	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
+	if !ok {
+		log.Fatalf("environment variable K8S_POD_NAME missing")
+	}
+
 	vmSpecJson, err := base64.StdEncoding.DecodeString(vmSpecDump)
 	if err != nil {
 		log.Fatalf("Failed to decode VirtualMachine Spec dump: %s", err)
@@ -478,7 +483,7 @@ func main() {
 	// get current disk size by qemu-img info command
 	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalf("could not get root image size: %s", err)
 	}
 	imageSize := QemuImgOutputPartial{}
 	json.Unmarshal(qemuImgOut, &imageSize)
@@ -487,12 +492,12 @@ func main() {
 	// going to resize
 	if !vmSpec.Guest.RootDisk.Size.IsZero() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
-			log.Printf("resizing rootDisk from %s to %s\n", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
+			log.Printf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
 			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
 				log.Fatal(err)
 			}
 		} else {
-			log.Printf("rootDisk.size (%s) should be more than size in image (%s)\n", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
+			log.Printf("rootDisk.size (%s) should be more than size in image (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
 		}
 	}
 
@@ -578,13 +583,27 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	// leading slash is important
-	cgroupPath := fmt.Sprintf("/%s-vm-runner", vmStatus.PodName)
+	selfCgroupPath, err := getSelfCgroupPath()
+	if err != nil {
+		log.Fatalf("Failed to get self cgroup path: %s", err)
+	}
+	// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
+	// that the cgroup '/neonvm-qemu-...' still works.
+	if selfCgroupPath == "/" {
+		selfCgroupPath = ""
+	}
+	// ... but also we should have some uniqueness just in case, so we're not sharing a root level
+	// cgroup if that *is* what's happening. This *should* only be relevant for local clusters.
+	//
+	// We don't want to just use the VM spec's .status.PodName because during migrations that will
+	// be equal to the source pod, not this one, which may be... somewhat confusing.
+	cgroupPath := fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
+
+	log.Printf("Using QEMU cgroup path %q", cgroupPath)
 
 	if err := setCgroupLimit(qemuCPUs.use, cgroupPath); err != nil {
 		log.Fatalf("Failed to set cgroup limit: %s", err)
 	}
-	defer cleanupCgroup(cgroupPath)
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
 
@@ -605,13 +624,13 @@ func main() {
 
 func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "POST" {
-		log.Printf("unexpected method: %s\n", r.Method)
+		log.Printf("unexpected method: %s", r.Method)
 		w.WriteHeader(400)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("could not read body: %s\n", err)
+		log.Printf("could not read body: %s", err)
 		w.WriteHeader(400)
 		return
 	}
@@ -619,7 +638,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	parsed := api.VCPUChange{}
 	err = json.Unmarshal(body, &parsed)
 	if err != nil {
-		log.Printf("could not parse body: %s\n", err)
+		log.Printf("could not parse body: %s", err)
 		w.WriteHeader(400)
 		return
 	}
@@ -628,7 +647,7 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	log.Printf("got CPU update %v", parsed.VCPUs.AsFloat64())
 	err = setCgroupLimit(parsed.VCPUs, cgroupPath)
 	if err != nil {
-		log.Printf("could not set cgroup limit: %s\n", err)
+		log.Printf("could not set cgroup limit: %s", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -638,21 +657,21 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 
 func handleCPUCurrent(w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "GET" {
-		log.Printf("unexpected method: %s\n", r.Method)
+		log.Printf("unexpected method: %s", r.Method)
 		w.WriteHeader(400)
 		return
 	}
 
 	cpus, err := getCgroupQuota(cgroupPath)
 	if err != nil {
-		log.Printf("could not get cgroup quota: %s\n", err)
+		log.Printf("could not get cgroup quota: %s", err)
 		w.WriteHeader(500)
 		return
 	}
 	resp := api.VCPUCgroup{VCPUs: *cpus}
 	body, err := json.Marshal(resp)
 	if err != nil {
-		log.Printf("could not marshal body: %s\n", err)
+		log.Printf("could not marshal body: %s", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -686,12 +705,129 @@ func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg 
 		if errors.Is(err, http.ErrServerClosed) {
 			log.Println("cpu_change server closed")
 		} else if err != nil {
-			log.Fatalf("error starting server: %s\n", err)
+			log.Fatalf("error starting server: %s", err)
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
 		log.Printf("shut down cpu_change server: %v", err)
 	}
+}
+
+func getSelfCgroupPath() (string, error) {
+	// There's some fun stuff here. For general information, refer to `man 7 cgroups` - specifically
+	// the section titled "/proc files" - for "/proc/cgroups" and "/proc/pid/cgroup".
+	//
+	// In general, the idea is this: If we start QEMU outside of the cgroup for the container we're
+	// running in, we run into multiple problems - it won't show up in metrics, and we'll have to
+	// clean up the cgroup ourselves. (not good!).
+	//
+	// So we'd like to start it in the same cgroup - the question is just how to find the name of
+	// the cgroup we're running in. Thankfully, this is visible in `/proc/self/cgroup`!
+	// The only difficulty is the file format.
+	//
+	// In cgroup v1 (which is what we have on EKS [as of 2023-07]), the contents of
+	// /proc/<pid>/cgroup tend to look like:
+	//
+	//   11:cpuset:/path/to/cgroup
+	//   10:perf_event:/path/to/cgroup
+	//   9:hugetlb:/path/to/cgroup
+	//   8:blkio:/path/to/cgroup
+	//   7:pids:/path/to/cgroup
+	//   6:freezer:/path/to/cgroup
+	//   5:memory:/path/to/cgroup
+	//   4:net_cls,net_prio:/path/to/cgroup
+	//   3:cpu,cpuacct:/path/to/cgroup
+	//   2:devices:/path/to/cgroup
+	//   1:name=systemd:/path/to/cgroup
+	//
+	// For cgroup v2, we have:
+	//
+	//   0::/path/to/cgroup
+	//
+	// The file format is defined to have 3 fields, separated by colons. The first field gives the
+	// Hierarchy ID, which is guaranteed to be 0 if the cgroup is part of a cgroup v2 ("unified")
+	// hierarchy.
+	// The second field is a comma-separated list of the controllers. Or, if it's cgroup v2, nothing.
+	// The third field is the "pathname" of the cgroup *in its hierarchy*, relative to the mount
+	// point of the hierarchy.
+	//
+	// So we're looking for EITHER:
+	//  1. an entry like '<N>:<controller...>,cpu,<controller...>:/path/to/cgroup (cgroup v1); OR
+	//  2. an entry like '0::/path/to/cgroup', and we'll return the path (cgroup v2)
+	// We primarily care about the 'cpu' controller, so for cgroup v1, we'll search for that instead
+	// of e.g. "name=systemd", although it *really* shouldn't matter because the paths will be the
+	// same anyways.
+	//
+	// Now: Technically it's possible to run a "hybrid" system with both cgroup v1 and v2
+	// hierarchies. If this is the case, it's possible for /proc/self/cgroup to show *some* v1
+	// hierarchies attached, in addition to the v2 "unified" hierarchy, for the same cgroup. To
+	// handle this, we should look for a cgroup v1 "cpu" controller, and if we can't find it, try
+	// for the cgroup v2 unified entry.
+	//
+	// As far as I (@sharnoff) can tell, the only case where that might actually get messed up is if
+	// the CPU controller isn't available for the cgroup we're running in, in which case there's
+	// nothing we can do about it! (other than e.g. using a cgroup higher up the chain, which would
+	// be really bad tbh).
+
+	// ---
+	// On to the show!
+
+	procSelfCgroupContents, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return "", fmt.Errorf("failed to read /proc/self/cgroup: %w", err)
+	}
+
+	// Collect all candidate paths from the lines of the file. If there isn't exactly one,
+	// something's wrong and we should make an error.
+	var v1Candidates []string
+	var v2Candidates []string
+	for lineno, line := range strings.Split(string(procSelfCgroupContents), "\n") {
+		if line == "" {
+			continue
+		}
+
+		// Split into the three ':'-delimited fields
+		fields := strings.Split(line, ":")
+		if len(fields) != 3 {
+			log.Printf("Contents of /proc/self/cgroup:\n%s", procSelfCgroupContents)
+			return "", fmt.Errorf("line %d of /proc/self/cgroup did not have 3 colon-delimited fields", lineno+1)
+		}
+
+		id := fields[0]
+		controllers := fields[1]
+		path := fields[2]
+		if id == "0" {
+			v2Candidates = append(v2Candidates, path)
+			continue
+		}
+
+		// It's not cgroup v2, otherwise id would have been 0. So, check if the comma-separated list
+		// of controllers contains 'cpu' as an entry.
+		for _, c := range strings.Split(controllers, ",") {
+			if c == "cpu" {
+				v1Candidates = append(v1Candidates, path)
+				break // ... and then continue to the next loop iteration
+			}
+		}
+	}
+
+	var errMsg string
+
+	// Check v1, then v2
+	if len(v1Candidates) == 1 {
+		return v1Candidates[0], nil
+	} else if len(v1Candidates) != 0 {
+		errMsg = "More than one applicable cgroup v1 entry in /proc/self/cgroup"
+	} else if len(v2Candidates) == 1 {
+		return v2Candidates[0], nil
+	} else if len(v2Candidates) != 0 {
+		errMsg = "More than one applicable cgroup v2 entry in /proc/self/cgroup"
+	} else {
+		errMsg = "Couldn't find applicable entry in /proc/self/cgroup"
+	}
+
+	log.Printf("Contents of /proc/self/cgroup:\n%s", procSelfCgroupContents)
+	return "", errors.New(errMsg)
 }
 
 func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
@@ -700,7 +836,7 @@ func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	// quota may be greater than period if the cgroup is allowed
 	// to use more than 100% of a CPU.
 	quota := int64(float64(r) / float64(1000) * float64(cgroupPeriod))
-	log.Printf("setting cgroup to %v %v\n", quota, period)
+	log.Printf("setting cgroup to %v %v", quota, period)
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
@@ -724,23 +860,6 @@ func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
 	}
 
 	return nil
-}
-
-func cleanupCgroup(cgroupPath string) error {
-	isV2 := cgroups.Mode() == cgroups.Unified
-	if isV2 {
-		control, err := cgroup2.Load(cgroupPath)
-		if err != nil {
-			return err
-		}
-		return control.Delete()
-	} else {
-		control, err := cgroup1.Load(cgroup1.StaticPath(cgroupPath))
-		if err != nil {
-			return err
-		}
-		return control.Delete()
-	}
 }
 
 func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
@@ -871,6 +990,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// gerenare random MAC for default Guest interface
 	mac, err := mac.GenerateRandMAC()
 	if err != nil {
+		log.Fatalf("could not generate random MAC: %s", err)
 		return nil, err
 	}
 
@@ -882,10 +1002,12 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.LinkAdd(bridge); err != nil {
+		log.Fatalf("could not create bridge interface: %s", err)
 		return nil, err
 	}
 	ipPod, ipVm, mask, err := calcIPs(cidr)
 	if err != nil {
+		log.Fatalf("could not parse IP: %s", err)
 		return nil, err
 	}
 	bridgeAddr := &netlink.Addr{
@@ -895,9 +1017,11 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.AddrAdd(bridge, bridgeAddr); err != nil {
+		log.Fatalf("could not parse IP: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(bridge); err != nil {
+		log.Fatalf("could not setup bridge: %s", err)
 		return nil, err
 	}
 
@@ -924,18 +1048,22 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		Flags: netlink.TUNTAP_DEFAULTS,
 	}
 	if err := netlink.LinkAdd(tap); err != nil {
+		log.Printf("could not add tap device: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetMaster(tap, bridge); err != nil {
+		log.Printf("could not setup tap as master: %s", err)
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(tap); err != nil {
+		log.Printf("could not setup tap device: %s", err)
 		return nil, err
 	}
 
 	// setup masquerading outgoing (from VM) traffic
 	log.Println("setup masquerading for outgoing traffic")
 	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
+		log.Printf("could not setup masquerading for outgoing traffic: %s", err)
 		return nil, err
 	}
 
@@ -948,6 +1076,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
+			log.Printf("could not setup DNAT for incoming traffic: %s", err)
 			return nil, err
 		}
 	}
@@ -955,6 +1084,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// get dns details from /etc/resolv.conf
 	resolvConf, err := getResolvConf()
 	if err != nil {
+		log.Printf("could not get DNS details: %s", err)
 		return nil, err
 	}
 	dns := getNameservers(resolvConf.Content, types.IP)[0]
@@ -977,6 +1107,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 
 	// run dnsmasq for default Guest interface
 	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
+		log.Printf("could not run dnsmasq: %s", err)
 		return nil, err
 	}
 

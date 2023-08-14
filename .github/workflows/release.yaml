@@ -8,6 +8,7 @@ env:
   AGENT_IMAGE: "neondatabase/autoscaler-agent"
   SCHED_IMAGE: "neondatabase/autoscale-scheduler"
   INFORMANT_IMAGE: "neondatabase/vm-informant"
+  MONITOR_IMAGE: "neondatabase/vm-monitor"
 
   KUSTOMIZE_VERSION:        "4.5.7"
   CONTROLLER_TOOLS_VERSION: "0.10.0"
@@ -50,7 +51,11 @@ jobs:
         run: go build ./...
 
       - name: build binaries
-        run:  make VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} build
+        run: |
+          make \
+            VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} \
+            VM_MONITOR_IMG=${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} \
+            build
 
       - name: docker - install qemu
         uses: docker/setup-qemu-action@v2
@@ -130,6 +135,17 @@ jobs:
           build-args: |
             GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
 
+      - name: build and push vm-monitor image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: build/vm-monitor/Dockerfile
+          tags: ${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
+          build-args: |
+            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
+
       - name: render kubernetes resources
         uses: stefanprodan/kube-tools@v1
         with:
@@ -157,6 +173,13 @@ jobs:
           docker cp $ID:/usr/bin/vm-informant bin/vm-informant
           docker rm -f $ID
 
+      # Same situation as with informant
+      - name: extract vm-monitor binary
+        run: |
+          ID=$(docker create ${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }})
+          docker cp $ID:/usr/bin/vm-monitor bin/vm-monitor
+          docker rm -f $ID
+
       - name: build and push cluster-autoscaler image
         uses: docker/build-push-action@v3
         with:
@@ -174,9 +197,11 @@ jobs:
             bin/vm-builder
             bin/vm-builder-generic
             bin/vm-informant
+            bin/vm-monitor
             rendered_manifests/autoscale-scheduler.yaml
             rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml
             rendered_manifests/multus.yaml
             rendered_manifests/multus-eks.yaml
             rendered_manifests/whereabouts.yaml
+            deploy/vmscrape.yaml

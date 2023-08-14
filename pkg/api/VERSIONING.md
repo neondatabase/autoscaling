@@ -9,11 +9,29 @@ The table below should provide the necessary information. For each release, it g
 supported protocol versions by each component. The topmost line - "Current" - refers to the latest
 commit in this repository, possibly unreleased.
 
+## informant<->monitor protocol
+
+| Release | VM informant | VM monitor |
+|---------|------------------|--------------|
+| _Current_ | v1.0 only | v1.0 only |
+| v0.15.0 | **v1.0** only | **v1.0** only |
+
 ## agent<->informant protocol
 
 | Release | autoscaler-agent | VM informant |
 |---------|------------------|--------------|
 | _Current_ | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.15.0 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.14.2 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.14.1 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.14.0 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.13.3 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.13.2 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.13.1 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.13.0 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.12.2 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.12.1 | v1.0 - v2.0 | v2.0 - v2.0 |
+| v0.12.0 | v1.0 - v2.0 | v2.0 - v2.0 |
 | v0.11.0 | v1.0 - v2.0 | v2.0 - v2.0 |
 | v0.10.0 | **v1.0 - v2.0** | **v2.0 - v2.0** |
 | v0.9.0 | v1.0 - v1.2 | v1.1 - v1.2 |
@@ -54,6 +72,17 @@ number.
 | Release | autoscaler-agent | Scheduler plugin |
 |---------|------------------|------------------|
 | _Current_ | v2.0 only | v1.0-v2.0 |
+| v0.15.0 | v2.0 only | v1.0-v2.0 |
+| v0.14.2 | v2.0 only | v1.0-v2.0 |
+| v0.14.1 | v2.0 only | v1.0-v2.0 |
+| v0.14.0 | v2.0 only | v1.0-v2.0 |
+| v0.13.3 | v2.0 only | v1.0-v2.0 |
+| v0.13.2 | v2.0 only | v1.0-v2.0 |
+| v0.13.1 | v2.0 only | v1.0-v2.0 |
+| v0.13.0 | v2.0 only | v1.0-v2.0 |
+| v0.12.2 | v2.0 only | v1.0-v2.0 |
+| v0.12.1 | v2.0 only | v1.0-v2.0 |
+| v0.12.0 | v2.0 only | v1.0-v2.0 |
 | v0.11.0 | v2.0 only | v1.0-v2.0 |
 | v0.10.0 | v2.0 only | v1.0-v2.0 |
 | v0.9.0 | v2.0 only | v1.0-v2.0 |
@@ -90,6 +119,17 @@ Note: Components v0.6.0 and below did not have a versioned protocol between the 
 | Release | controller | runner |
 |---------|------------|--------|
 | _Current_ | 0 - 1 | 1 |
+| v0.15.0 | 0 - 1 | 1 |
+| v0.14.2 | 0 - 1 | 1 |
+| v0.14.1 | 0 - 1 | 1 |
+| v0.14.0 | 0 - 1 | 1 |
+| v0.13.3 | 0 - 1 | 1 |
+| v0.13.2 | 0 - 1 | 1 |
+| v0.13.1 | 0 - 1 | 1 |
+| v0.13.0 | 0 - 1 | 1 |
+| v0.12.2 | 0 - 1 | 1 |
+| v0.12.1 | 0 - 1 | 1 |
+| v0.12.0 | 0 - 1 | 1 |
 | v0.11.0 | 0 - 1 | 1 |
 | v0.10.0 | 0 - 1 | 1 |
 | v0.9.0 | 0 - 1 | 1 |

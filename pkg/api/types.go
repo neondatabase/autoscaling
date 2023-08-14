@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap/zapcore"
@@ -558,7 +560,10 @@ type ResourceMessage struct {
 }
 
 // DownscaleResult is used by the VM informant to return whether it downscaled successfully, and
-// some indication of its status when doing so
+// some indication of its status when doing so.
+//
+// DownscaleResult is also used in informant-monitor communications. The monitor can send a
+// DownscaleResult, which is then propagated to the informant.
 type DownscaleResult struct {
 	Ok     bool
 	Status string
@@ -605,4 +610,156 @@ const (
 
 func (v RunnerProtoVersion) SupportsCgroupFractionalCPU() bool {
 	return v >= RunnerProtoV1
+}
+
+////////////////////////////////////
+// Informant <-> Monitor Messages //
+////////////////////////////////////
+
+// Represents the resources that a VM has been granted
+type Allocation struct {
+	// Number of vCPUs
+	Cpu float64 `json:"cpu"`
+
+	// Number of bytes
+	Mem uint64 `json:"mem"`
+}
+
+// ** Types sent by monitor **
+
+// This type is sent to the informant as a way to request immediate upscale.
+// Since the informant cannot control if the agent will choose to upscale the VM,
+// it does not return anything. However, it should internally request an upscale
+// from the agent. If an upscale is granted, the monitor will be notified via an
+// UpscaleNotification.
+type UpscaleRequest struct{}
+
+// This type is sent to the informant to confirm it successfully upscaled, meaning
+// it increased its filecache and/or cgroup memory limits. The informant does not
+// need to respond.
+type UpscaleConfirmation struct{}
+
+// `api.DownscaleResult` is also sent to the informant after the monitor tries to
+// downscale
+
+// ** Types sent by informant **
+
+// This type is sent to the monitor to inform it that it has been granted a geater
+// allocation. Once the monitor is done applying this new allocation (i.e, increasing
+// file cache size, cgroup memory limits) it should reply with an UpscaleConfirmation.
+type UpscaleNotification struct {
+	Granted Allocation `json:"granted"`
+}
+
+// This type is sent to the monitor as a request to downscale its resource usage.
+// Once the monitor has downscaled or failed to do so, it should respond with a
+// api.DownscaleResult (listed in the informant<->agent protocol section).
+type DownscaleRequest struct {
+	Target Allocation `json:"target"`
+}
+
+// ** Types shared by informant and monitor **
+
+// This type can be sent by either party whenever they receive a message they
+// cannot deserialize properly.
+type InvalidMessage struct {
+	Error string `json:"error"`
+}
+
+// This type can be sent by either party to signal that an error occured carrying
+// out the other party's request, for example, the monitor erroring while trying
+// to downscale. The receiving party can they log the error or propagate it as they
+// see fit.
+type InternalError struct {
+	Error string `json:"error"`
+}
+
+// This type is sent as part of a bidirectional heartbeat between the monitor and
+// informant. The check is initiated by the informant.
+type HealthCheck struct{}
+
+// This function is used to prepare a message for serialization. Any data passed
+// to the monitor should be serialized with this function. As of protocol v1.0,
+// the following types maybe be sent to the monitor, and thus passed in:
+// - DownscaleRequest
+// - UpscaleNotification
+// - InvalidMessage
+// - InternalError
+// - HealthCheck
+func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
+	// The final type that gets sent over the wire
+	type Bundle struct {
+		Content any    `json:"content"`
+		Type    string `json:"type"`
+		Id      uint64 `json:"id"`
+	}
+
+	var typeStr string
+	switch content.(type) {
+	case DownscaleRequest:
+		typeStr = "DownscaleRequest"
+	case UpscaleNotification:
+		typeStr = "UpscaleNotification"
+	case InvalidMessage:
+		typeStr = "InvalidMessage"
+	case InternalError:
+		typeStr = "InternalError"
+	case HealthCheck:
+		typeStr = "HealthCheck"
+	default:
+		return nil, fmt.Errorf("unknown message type \"%s\"", reflect.TypeOf(content))
+	}
+
+	return json.Marshal(Bundle{
+		Content: content,
+		Type:    typeStr,
+		Id:      id,
+	})
+}
+
+// MonitorProtoVersion represents a single version of the informant<->monitor protocol
+//
+// Each version of the agent<->monitor protocol is named independently from releases of the
+// repository containing this code. Names follow semver, although this does not necessarily
+// guarantee support - for example, the monitor may only support versions above v1.1.
+//
+// Version compatibility is documented in the neighboring file VERSIONING.md.
+type MonitorProtoVersion uint32
+
+const (
+	// MonitorProtoV1_0 represents v1.0 of the agent<->monitor protocol - the initial version.
+	//
+	// Currently the lastest version.
+	MonitorProtoV1_0 = iota + 1
+
+	// latestMonitorProtoVersion represents the latest version of the agent<->Monitor protocol
+	//
+	// This value is kept private because it should not be used externally; any desired
+	// functionality that could be implemented with it should instead be a method on
+	// MonitorProtoVersion.
+	latestMonitorProtoVersion MonitorProtoVersion = iota // excluding +1 makes it equal to previous
+)
+
+func (v MonitorProtoVersion) String() string {
+	var zero MonitorProtoVersion
+
+	switch v {
+	case zero:
+		return "<invalid: zero>"
+	case MonitorProtoV1_0:
+		return "v1.0"
+	default:
+		diff := v - latestMonitorProtoVersion
+		return fmt.Sprintf("<unknown = %v + %d>", latestMonitorProtoVersion, diff)
+	}
+}
+
+// Sent back by the monitor after figuring out what protocol version we should use
+type MonitorProtocolResponse struct {
+	// If `Error` is nil, contains the value of the settled on protocol version.
+	// Otherwise, will be set to 0 (MonitorProtocolVersion's zero value).
+	Version MonitorProtoVersion `json:"version,omitempty"`
+
+	// Will be nil if no error occured.
+	Error *string `json:"error,omitempty"`
 }

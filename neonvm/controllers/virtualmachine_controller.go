@@ -379,7 +379,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		if err != nil && apierrors.IsNotFound(err) {
 			// lost runner pod for running VirtualMachine ?
 			r.Recorder.Event(virtualmachine, "Warning", "NotFound",
-				fmt.Sprintf("runner pod %s not fodund",
+				fmt.Sprintf("runner pod %s not found",
 					virtualmachine.Status.PodName))
 			virtualmachine.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -1043,6 +1043,14 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 					"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 					"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 				},
+				Env: []corev1.EnvVar{{
+					Name: "K8S_POD_NAME",
+					ValueFrom: &corev1.EnvVarSource{
+						FieldRef: &corev1.ObjectFieldSelector{
+							FieldPath: "metadata.name",
+						},
+					},
+				}},
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						Name:      "virtualmachineimages",
@@ -1080,6 +1088,9 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 			},
 		},
 	}
+
+	// Add any InitContainers that were specified by the spec
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, virtualmachine.Spec.ExtraInitContainers...)
 
 	// allow access to /dev/kvm and /dev/vhost-net devices by generic-device-plugin for kubelet
 	if pod.Spec.Containers[0].Resources.Limits == nil {

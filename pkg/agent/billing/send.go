@@ -106,12 +106,20 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 			return
 		}
 
+		traceID := s.client.GenerateTraceID()
+
+		logger.Info(
+			"Pushing billing events",
+			zap.String("traceID", string(traceID)),
+			zap.Int("count", count),
+		)
+
 		reqStart := time.Now()
 		err := func() error {
 			reqCtx, cancel := context.WithTimeout(context.TODO(), time.Second*time.Duration(s.config.PushRequestTimeoutSeconds))
 			defer cancel()
 
-			return billing.Send(reqCtx, s.client, chunk)
+			return billing.Send(reqCtx, s.client, traceID, chunk)
 		}()
 		reqDuration := time.Since(reqStart)
 
@@ -120,6 +128,7 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 			// events.
 			logger.Error(
 				"Failed to push billing events",
+				zap.String("traceID", string(traceID)),
 				zap.Int("count", count),
 				zap.Duration("after", reqDuration),
 				zap.Int("total", total),
@@ -150,6 +159,7 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 
 		logger.Info(
 			"Successfully pushed some billing events",
+			zap.String("traceID", string(traceID)),
 			zap.Int("count", count),
 			zap.Duration("after", reqDuration),
 			zap.Int("total", total),

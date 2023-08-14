@@ -85,7 +85,7 @@ func (s verdictSet) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
 func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool, onlyThousands bool) (verdict string) {
-	totalReservable := r.node.Total - r.node.System
+	totalReservable := r.node.Total
 	// note: it's possible to temporarily have reserved > totalReservable, after loading state or
 	// config change; we have to use SaturatingSub here to account for that.
 	remainingReservable := util.SaturatingSub(totalReservable, r.oldNode.reserved)
@@ -184,15 +184,20 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 	}
 
 	fmtString := "Register %d%s -> %d%s (pressure %d -> %d); " +
-		"node reserved %d -> %d (of %d), " +
+		"node reserved %d%s -> %d%s (of %d), " +
 		"node capacityPressure %d -> %d (%d -> %d spoken for)"
 
-	var buffer string
+	var podBuffer string
+	var oldNodeBuffer string
+	var newNodeBuffer string
 	if r.pod.Buffer != 0 {
-		buffer = fmt.Sprintf(" (buffer %d)", r.pod.Buffer)
+		podBuffer = fmt.Sprintf(" [buffer %d]", r.pod.Buffer)
+		oldNodeBuffer = fmt.Sprintf(" [buffer %d]", r.oldNode.buffer)
 
 		r.node.Buffer -= r.pod.Buffer
 		r.pod.Buffer = 0
+
+		newNodeBuffer = fmt.Sprintf(" [buffer %d]", r.node.Buffer)
 	}
 
 	var wanted string
@@ -203,9 +208,9 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 	verdict = fmt.Sprintf(
 		fmtString,
 		// Register %d%s -> %d%s (pressure %d -> %d)
-		r.oldPod.reserved, buffer, r.pod.Reserved, wanted, r.oldPod.capacityPressure, r.pod.CapacityPressure,
-		// node reserved %d -> %d (of %d)
-		r.oldNode.reserved, r.node.Reserved, totalReservable,
+		r.oldPod.reserved, podBuffer, r.pod.Reserved, wanted, r.oldPod.capacityPressure, r.pod.CapacityPressure,
+		// node reserved %d%s -> %d%s (of %d)
+		r.oldNode.reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer, totalReservable,
 		// node capacityPressure %d -> %d (%d -> %d spoken for)
 		r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
 	)
@@ -223,12 +228,23 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 		r.node.PressureAccountedFor -= r.pod.Reserved + r.pod.CapacityPressure
 	}
 
-	fmtString := "pod had %d; node reserved %d -> %d, " +
+	var podBuffer string
+	var oldNodeBuffer string
+	var newNodeBuffer string
+	if r.pod.Buffer != 0 {
+		r.node.Buffer -= r.pod.Buffer
+
+		podBuffer = fmt.Sprintf(" [buffer %d]", r.pod.Buffer)
+		oldNodeBuffer = fmt.Sprintf(" [buffer %d]", r.oldNode.buffer)
+		newNodeBuffer = fmt.Sprintf(" [buffer %d]", r.node.Buffer)
+	}
+
+	fmtString := "pod had %d%s; node reserved %d%s -> %d%s, " +
 		"node capacityPressure %d -> %d (%d -> %d spoken for)"
 	verdict = fmt.Sprintf(
 		fmtString,
-		// pod had %d; node reserved %d -> %d
-		r.pod.Reserved, r.oldNode.reserved, r.node.Reserved,
+		// pod had %d%s; node reserved %d%s -> %d%s
+		r.pod.Reserved, podBuffer, r.oldNode.reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer,
 		// node capacityPressure %d -> %d (%d -> %d spoken for)
 		r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
 	)
@@ -261,14 +277,19 @@ func (r resourceTransition[T]) handleAutoscalingDisabled() (verdict string) {
 	r.node.CapacityPressure -= r.pod.CapacityPressure
 	r.pod.CapacityPressure = 0
 
+	var nodeBufferChange string
+	if r.oldPod.buffer != 0 {
+		nodeBufferChange = fmt.Sprintf(" [buffer %d -> %d]", r.oldNode.buffer, r.node.Buffer)
+	}
+
 	fmtString := "pod had buffer %d, capacityPressure %d; " +
-		"node reserved %d -> %d, capacityPressure %d -> %d"
+		"node reserved %d -> %d%s, capacityPressure %d -> %d"
 	verdict = fmt.Sprintf(
 		fmtString,
 		// pod had buffer %d, capacityPressure %d;
 		r.oldPod.buffer, r.oldPod.capacityPressure,
-		// node reserved %d -> %d, capacityPressure %d -> %d
-		r.oldNode.reserved, r.node.Reserved, r.oldNode.capacityPressure, r.node.CapacityPressure,
+		// node reserved %d -> %d%s, capacityPressure %d -> %d
+		r.oldNode.reserved, r.node.Reserved, nodeBufferChange, r.oldNode.capacityPressure, r.node.CapacityPressure,
 	)
 	return verdict
 }

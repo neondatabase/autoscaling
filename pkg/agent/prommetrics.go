@@ -20,6 +20,7 @@ type PromMetrics struct {
 	neonvmRequestsOutbound *prometheus.CounterVec
 	neonvmRequestedChange  resourceChangePair
 
+	runnersCount       *prometheus.GaugeVec
 	runnerFatalErrors  prometheus.Counter
 	runnerThreadPanics prometheus.Counter
 	runnerStarts       prometheus.Counter
@@ -35,6 +36,15 @@ const (
 	directionLabel    = "direction"
 	directionValueInc = "inc"
 	directionValueDec = "dec"
+)
+
+type runnerMetricState string
+
+const (
+	runnerMetricStateOk       runnerMetricState = "ok"
+	runnerMetricStateStuck    runnerMetricState = "stuck"
+	runnerMetricStateErrored  runnerMetricState = "errored"
+	runnerMetricStatePanicked runnerMetricState = "panicked"
 )
 
 func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Registry) {
@@ -98,7 +108,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 				Name: "autoscaling_agent_informant_outbound_requests_total",
 				Help: "Number of attempted HTTP requests to vm-informants by autoscaler-agents",
 			},
-			[]string{"code"},
+			[]string{"endpoint", "code"},
 		)),
 		informantRequestsInbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -168,6 +178,14 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		},
 
 		// ---- RUNNER LIFECYCLE ----
+		runnersCount: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_agent_runners_current",
+				Help: "Number of per-VM runners, with associated metadata",
+			},
+			// NB: is_endpoint ∈ ("true", "false"), state ∈ runnerMetricState = ("ok", "stuck", "errored", "panicked")
+			[]string{"is_endpoint", "state"},
+		)),
 		runnerFatalErrors: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_runner_fatal_errors_total",
@@ -214,114 +232,16 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		}
 	}
 
-	// the remaining metrics are computed at scrape time by prom:
-	// register them directly.
-	reg.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Name: "autoscaling_errored_vm_runners_current",
-			Help: "Number of VMs whose per-VM runner has panicked (and not restarted)",
-		},
-		func() float64 {
-			globalstate.lock.Lock()
-			defer globalstate.lock.Unlock()
-
-			count := 0
-
-			for _, p := range globalstate.pods {
-				func() {
-					p.status.mu.Lock()
-					defer p.status.mu.Unlock()
-
-					if p.status.endState != nil && p.status.endState.ExitKind == podStatusExitErrored {
-						count += 1
-					}
-				}()
-			}
-
-			return float64(count)
-		},
-	))
-
-	reg.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Name: "autoscaling_panicked_vm_runners_current",
-			Help: "Number of VMs whose per-VM runner has panicked (and not restarted)",
-		},
-		func() float64 {
-			globalstate.lock.Lock()
-			defer globalstate.lock.Unlock()
-
-			count := 0
-
-			for _, p := range globalstate.pods {
-				func() {
-					p.status.mu.Lock()
-					defer p.status.mu.Unlock()
-
-					if p.status.endState != nil && p.status.endState.ExitKind == podStatusExitPanicked {
-						count += 1
-					}
-				}()
-			}
-
-			return float64(count)
-		},
-	))
-
-	reg.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Name: "autoscaling_agent_tracked_vms_current",
-			Help: "Number of autoscaling-enabled non-migrating VMs on the autoscaler-agent's node",
-		},
-		func() float64 {
-			globalstate.lock.Lock()
-			defer globalstate.lock.Unlock()
-
-			return float64(len(globalstate.pods))
-		},
-	))
-
-	reg.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Name: "autoscaling_vms_unsuccessful_communication_with_informant_current",
-			Help: "Number of VMs whose vm-informants aren't successfully communicating with the autoscaler-agent",
-		},
-		func() float64 {
-			globalstate.lock.Lock()
-			defer globalstate.lock.Unlock()
-
-			count := 0
-
-			for _, p := range globalstate.pods {
-				if p.status.informantIsUnhealthy(globalstate.config) {
-					count++
-				}
-			}
-
-			return float64(count)
-		},
-	))
-
-	reg.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Name: "autoscaling_billed_vms_unsuccessful_communication_with_informant_current",
-			Help: "Number of VMs *getting billed* whose vm-informants aren't successfully communicating with the autoscaler-agent",
-		},
-		func() float64 {
-			globalstate.lock.Lock()
-			defer globalstate.lock.Unlock()
-
-			count := 0
-
-			for _, p := range globalstate.pods {
-				if p.status.endpointID != "" && p.status.informantIsUnhealthy(globalstate.config) {
-					count++
-				}
-			}
-
-			return float64(count)
-		},
-	))
+	runnerStates := []runnerMetricState{
+		runnerMetricStateOk,
+		runnerMetricStateStuck,
+		runnerMetricStateErrored,
+		runnerMetricStatePanicked,
+	}
+	for _, s := range runnerStates {
+		metrics.runnersCount.WithLabelValues("true", string(s)).Set(0.0)
+		metrics.runnersCount.WithLabelValues("false", string(s)).Set(0.0)
+	}
 
 	return metrics, reg
 }

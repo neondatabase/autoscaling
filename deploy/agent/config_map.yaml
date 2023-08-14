@@ -9,11 +9,13 @@ data:
       "scaling": {
         "requestTimeoutSeconds": 10,
         "defaultConfig": {
-          "loadAverageFractionTarget": 0.9
+          "loadAverageFractionTarget": 0.9,
+          "memoryUsageFractionTarget": 0.75
         }
       },
       "informant": {
         "serverPort": 10301,
+        "callbackPort": 10302,
         "retryServerMinWaitSeconds": 5,
         "retryServerNormalWaitSeconds": 5,
         "registerRetrySeconds": 5,
