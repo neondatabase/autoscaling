@@ -82,6 +82,28 @@ type nodeConfig struct {
 	Cpu         resourceConfig `json:"cpu"`
 	Memory      resourceConfig `json:"memory"`
 	ComputeUnit api.Resources  `json:"computeUnit"`
+
+	// Details about node scoring:
+	// See also: https://www.desmos.com/calculator/wg8s0yn63s
+	// In the desmos, the value f(x,s) gives the score (from 0 to 1) of a node that's x amount full
+	// (where x is a fraction from 0 to 1), with a total size that is equal to the maximum size node
+	// times s (i.e. s (or: "scale") gives the ratio between this nodes's size and the biggest one).
+
+	// MinUsageScore gives the ratio of the score at the minimum usage (i.e. 0) relative to the
+	// score at the midpoint, which will have the maximum.
+	//
+	// This corresponds to y₀ in the desmos link above.
+	MinUsageScore float64 `json:"minUsageScore"`
+	// MaxUsageScore gives the ratio of the score at the maximum usage (i.e. full) relative to the
+	// score at the midpoint, which will have the maximum.
+	//
+	// This corresponds to y₁ in the desmos link above.
+	MaxUsageScore float64 `json:"maxUsageScore"`
+	// ScoreMidpoint gives the fraction full at which the "midpoint" should be -- or, in other
+	// words, it gives a notion of a "target" usage.
+	//
+	// The midpoint has the maximum score attached to it, and corresponds to xₚ in the desmos link.
+	ScoreMidpoint float64 `json:"scoreMidpoint"`
 }
 
 // resourceConfig configures the amount of a particular resource we're willing to allocate to VMs,

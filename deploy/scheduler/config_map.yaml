@@ -29,7 +29,10 @@ data:
       "nodeDefaults": {
         "cpu": { "watermark": 0.9 },
         "memory": { "watermark": 0.9 },
-        "computeUnit": { "vCPUs": 0.25, "mem": 1 }
+        "computeUnit": { "vCPUs": 0.25, "mem": 1 },
+        "minUsageScore": 0.5,
+        "maxUsageScore": 0,
+        "scoreMidpoint": 0.8
       },
       "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
