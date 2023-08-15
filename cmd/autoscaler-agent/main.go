@@ -21,7 +21,9 @@ import (
 )
 
 func main() {
-	logger := zap.Must(zap.NewProduction()).Named("autoscaler-agent")
+	logConfig := zap.NewProductionConfig()
+	logConfig.Sampling = nil // Disable sampling, which the production config enables by default.
+	logger := zap.Must(logConfig.Build()).Named("autoscaler-agent")
 	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
 
 	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
