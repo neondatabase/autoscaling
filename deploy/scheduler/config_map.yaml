@@ -27,8 +27,8 @@ data:
     {
       "memBlockSize": "1Gi",
       "nodeDefaults": {
-        "cpu": { "watermark": 0.7 },
-        "memory": { "watermark": 0.7 },
+        "cpu": { "watermark": 0.9 },
+        "memory": { "watermark": 0.9 },
         "computeUnit": { "vCPUs": 0.25, "mem": 1 }
       },
       "nodeOverrides": [],
