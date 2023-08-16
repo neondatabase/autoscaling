@@ -99,8 +99,8 @@ type nodeConfig struct {
 	//
 	// This corresponds to y₁ in the desmos link above.
 	MaxUsageScore float64 `json:"maxUsageScore"`
-	// ScorePeak gives the fraction full at which the "midpoint" should be -- or, in other
-	// words, it gives a notion of a "target" usage.
+	// ScorePeak gives the fraction at which the "midpoint" should be -- or, in other words, it
+	// gives a notion of a "target" usage.
 	//
 	// The midpoint has the maximum score attached to it, and corresponds to xₚ in the desmos link.
 	ScorePeak float64 `json:"scoreMidpoint"`
