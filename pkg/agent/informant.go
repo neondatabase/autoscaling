@@ -247,10 +247,20 @@ func NewInformantServer(
 			}
 
 			// Are we talking to a monitor?
-			if server.informantIsMonitor {
-				if err := server.MonitorHealthCheck(c, logger); err != nil {
-					logger.Warn("Monitor health check failed", zap.Error(err))
+			var isMonitor bool
+			func() {
+				server.requestLock.Lock()
+				defer server.requestLock.Unlock()
+				if server.informantIsMonitor {
+					if err := server.MonitorHealthCheck(c, logger); err != nil {
+						logger.Warn("Monitor health check failed", zap.Error(err))
+					}
+					isMonitor = true
+				} else {
+					isMonitor = false
 				}
+			}()
+			if isMonitor {
 				continue
 			}
 
@@ -1202,7 +1212,7 @@ func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Lo
 // MonitorUpscale is the equivalent of (*InformantServer).Upscale for
 // when we're connected to a monitor.
 //
-// This method MUST be called while holding s.requestLock AND NOT s.runner.lock
+// # This method MUST be called while holding s.requestLock AND NOT s.runner.lock
 //
 // *Note*: Locking requestLock is not technically necessary, but it allows for
 // better serialization. For example, if this function exits, we know that no
@@ -1231,7 +1241,7 @@ func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger
 // MonitorDownscale is the equivalent of (*InformantServer).Downscale for
 // when we're connected to a monitor.
 //
-// This method MUST be called while holding s.requestLock AND NOT s.runner.lock
+// # This method MUST be called while holding s.requestLock AND NOT s.runner.lock
 //
 // *Note*: Locking requestLock is not technically necessary, but it allows for
 // better serialization. For example, if this function exits, we know that no

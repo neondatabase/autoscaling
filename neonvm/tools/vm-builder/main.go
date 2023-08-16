@@ -360,16 +360,16 @@ var (
 	Version   string
 	VMMonitor string
 
-	srcImage        = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage        = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
-	size            = flag.String("size", "1G", `Size for disk image: --size=1G`)
-	outFile         = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
-	quiet           = flag.Bool("quiet", false, `Show less output from the docker build process`)
-	forcePull       = flag.Bool("pull", false, `Pull src image even if already present locally`)
-	monitor         = flag.String("monitor", VMMonitor, `vm-monitor docker image`)
-	enableMonitor   = flag.Bool("enable-monitor", false, `start the vm-monitor during VM startup`)
-	fileCache       = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
-	version         = flag.Bool("version", false, `Print vm-builder version`)
+	srcImage      = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
+	dstImage      = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	size          = flag.String("size", "1G", `Size for disk image: --size=1G`)
+	outFile       = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	quiet         = flag.Bool("quiet", false, `Show less output from the docker build process`)
+	forcePull     = flag.Bool("pull", false, `Pull src image even if already present locally`)
+	monitor       = flag.String("monitor", VMMonitor, `vm-monitor docker image`)
+	enableMonitor = flag.Bool("enable-monitor", false, `start the vm-monitor during VM startup`)
+	fileCache     = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
+	version       = flag.Bool("version", false, `Print vm-builder version`)
 )
 
 type dockerMessage struct {
@@ -420,14 +420,14 @@ func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplSt
 }
 
 type TemplatesContext struct {
-	User            string
-	Entrypoint      []string
-	Cmd             []string
-	Env             []string
-	RootDiskImage   string
-	MonitorImage    string
-	FileCache       bool
-	EnableMonitor   bool
+	User          string
+	Entrypoint    []string
+	Cmd           []string
+	Env           []string
+	RootDiskImage string
+	MonitorImage  string
+	FileCache     bool
+	EnableMonitor bool
 }
 
 func main() {
@@ -509,13 +509,13 @@ func main() {
 	}
 
 	tmplArgs := TemplatesContext{
-		Entrypoint:      imageSpec.Config.Entrypoint,
-		Cmd:             imageSpec.Config.Cmd,
-		Env:             imageSpec.Config.Env,
-		RootDiskImage:   *srcImage,
-		MonitorImage:    *monitor,
-		FileCache:       *fileCache,
-		EnableMonitor:   *enableMonitor,
+		Entrypoint:    imageSpec.Config.Entrypoint,
+		Cmd:           imageSpec.Config.Cmd,
+		Env:           imageSpec.Config.Env,
+		RootDiskImage: *srcImage,
+		MonitorImage:  *monitor,
+		FileCache:     *fileCache,
+		EnableMonitor: *enableMonitor,
 	}
 
 	if len(imageSpec.Config.User) != 0 {
