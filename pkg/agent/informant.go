@@ -1144,6 +1144,41 @@ func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to ap
 	return nil
 }
 
+// awaitMonitorResponse awaits the dispatchers's response after making a call,
+// handling timeouts and calling s.exit if an error occurs.
+//
+// This method MUST NOT be called while holding s.runner.lock
+func (s *InformantServer) awaitMonitorResponse(ctx context.Context, rx util.SignalReceiver[*MonitorResult]) (*MonitorResult, error) {
+	exit := func(err error) {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		s.exit(InformantServerExitStatus{
+			Err:            err,
+			RetryShouldFix: false,
+		})
+	}
+
+	// Wait for result
+	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case res := <-rx.Recv():
+		// A nil pointer means a monitor error occured
+		if res != nil {
+			return res, nil
+		} else {
+			err := errors.New("monitor experienced an internal error")
+			exit(err)
+			return nil, err
+		}
+	case <-timer.C:
+		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		exit(err)
+		return nil, err
+	}
+}
+
 // MonitorHealthCheck is the equivalent of (*InformantServer).HealthCheck for
 // when we're connected to a monitor.
 //
@@ -1166,34 +1201,8 @@ func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Lo
 		return err
 	}
 
-	exit := func(err error) {
-		s.runner.lock.Lock()
-		defer s.runner.lock.Unlock()
-		s.exit(InformantServerExitStatus{
-			Err:            err,
-			RetryShouldFix: false,
-		})
-	}
-
-	// Wait for result
-	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case res := <-rx.Recv():
-		// A nil pointer means a monitor error occured
-		if res != nil {
-			return nil
-		} else {
-			err := errors.New("monitor experienced an internal error")
-			exit(err)
-			return err
-		}
-	case <-timer.C:
-		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
-		exit(err)
-		return err
-	}
+	_, err = s.awaitMonitorResponse(ctx, rx)
+	return err
 }
 
 // MonitorUpscale is the equivalent of (*InformantServer).Upscale for
@@ -1223,34 +1232,8 @@ func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger
 		return err
 	}
 
-	exit := func(err error) {
-		s.runner.lock.Lock()
-		defer s.runner.lock.Unlock()
-		s.exit(InformantServerExitStatus{
-			Err:            err,
-			RetryShouldFix: false,
-		})
-	}
-
-	// Wait for result
-	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case res := <-rx.Recv():
-		// A nil pointer means a monitor error occured
-		if res != nil {
-			return nil
-		} else {
-			err := errors.New("monitor experienced an internal error")
-			exit(err)
-			return err
-		}
-	case <-timer.C:
-		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
-		exit(err)
-		return err
-	}
+	_, err = s.awaitMonitorResponse(ctx, rx)
+	return err
 }
 
 // MonitorDownscale is the equivalent of (*InformantServer).Downscale for
@@ -1280,32 +1263,10 @@ func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logg
 		return nil, err
 	}
 
-	exit := func(err error) {
-		s.runner.lock.Lock()
-		defer s.runner.lock.Unlock()
-		s.exit(InformantServerExitStatus{
-			Err:            err,
-			RetryShouldFix: false,
-		})
-	}
-
-	// Wait for result
-	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case res := <-rx.Recv():
-		// A nil pointer means a monitor error occured
-		if res != nil {
-			return res.Result, nil
-		} else {
-			err := errors.New("monitor experienced an internal error")
-			exit(err)
-			return nil, err
-		}
-	case <-timer.C:
-		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
-		exit(err)
+	res, err := s.awaitMonitorResponse(ctx, rx)
+	if err != nil {
 		return nil, err
+	} else {
+		return res.Result, nil
 	}
 }
