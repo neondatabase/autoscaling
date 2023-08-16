@@ -185,6 +185,14 @@ func (c *nodeConfig) validate() (string, error) {
 		return "computeUnit", err
 	}
 
+	if c.MinUsageScore < 0 || c.MinUsageScore > 1 {
+		return "minUsageScore", errors.New("value must be between 0 and 1, inclusive")
+	} else if c.MaxUsageScore < 0 || c.MaxUsageScore > 1 {
+		return "maxUsageScore", errors.New("value must be between 0 and 1, inclusive")
+	} else if c.ScorePeak < 0 || c.ScorePeak > 1 {
+		return "scorePeak", errors.New("value must be between 0 and 1, inclusive")
+	}
+
 	return "", nil
 }
 
