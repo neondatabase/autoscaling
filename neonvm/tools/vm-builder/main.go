@@ -22,8 +22,6 @@ import (
 
 // vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
 
-var entrypointPrefix = []string{"/usr/bin/cgexec", "-g", "memory:neon-postgres"}
-
 const (
 	dockerfileVmBuilder = `
 FROM {{.InformantImage}} as informant
@@ -521,7 +519,7 @@ func main() {
 	}
 
 	tmplArgs := TemplatesContext{
-		Entrypoint:      append(entrypointPrefix, imageSpec.Config.Entrypoint...),
+		Entrypoint:      imageSpec.Config.Entrypoint,
 		Cmd:             imageSpec.Config.Cmd,
 		Env:             imageSpec.Config.Env,
 		RootDiskImage:   *srcImage,
