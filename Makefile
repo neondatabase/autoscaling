@@ -184,7 +184,7 @@ docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
 		.
 
 .PHONY: docker-build-examples
-docker-build-examples: vm-informant bin/vm-builder ## Build docker images for testing VMs
+docker-build-examples: bin/vm-builder ## Build docker images for testing VMs
 	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -enable-monitor
 
 .PHONY: docker-build-pg14-disk-test
