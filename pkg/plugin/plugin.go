@@ -718,12 +718,12 @@ func (e *AutoscaleEnforcer) Score(
 	calculateScore := func(fraction, scale float64) (float64, int64) {
 		y0 := nodeConf.MinUsageScore
 		y1 := nodeConf.MaxUsageScore
-		xp := nodeConf.ScoreMidpoint
+		xp := nodeConf.ScorePeak
 
-		score := float64(1) // if fraction == nodeConf.ScoreMidpoint
-		if fraction < nodeConf.ScoreMidpoint {
+		score := float64(1) // if fraction == nodeConf.ScorePeak
+		if fraction < nodeConf.ScorePeak {
 			score = y0 + (1-y0)/xp*fraction
-		} else if fraction > nodeConf.ScoreMidpoint {
+		} else if fraction > nodeConf.ScorePeak {
 			score = y1 + (1-y1)/(1-xp)*(1-fraction)
 		}
 
