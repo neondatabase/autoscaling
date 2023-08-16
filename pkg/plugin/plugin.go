@@ -702,23 +702,52 @@ func (e *AutoscaleEnforcer) Score(
 		return score, nil
 	}
 
-	remainingCPU := node.remainingReservableCPU()
-	remainingMem := node.remainingReservableMemSlots()
-	totalCPU := e.state.maxTotalReservableCPU
-	totalMem := e.state.maxTotalReservableMemSlots
+	cpuRemaining := node.remainingReservableCPU()
+	cpuTotal := node.totalReservableCPU()
+	memRemaining := node.remainingReservableMemSlots()
+	memTotal := node.totalReservableMemSlots()
 
-	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
-	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	cpuScore := framework.MinNodeScore + scoreLen*int64(remainingCPU)/int64(totalCPU)
-	memScore := framework.MinNodeScore + scoreLen*int64(remainingMem)/int64(totalMem)
+	cpuFraction := 1 - cpuRemaining.AsFloat64()/cpuTotal.AsFloat64()
+	memFraction := 1 - float64(memRemaining)/float64(memTotal)
+	cpuScale := node.totalReservableCPU().AsFloat64() / e.state.maxTotalReservableCPU.AsFloat64()
+	memScale := float64(node.totalReservableMemSlots()) / float64(e.state.maxTotalReservableMemSlots)
 
-	score := util.Min(cpuScore, memScore)
+	nodeConf := e.state.conf.forNode(nodeName)
+
+	// Refer to the comments in nodeConfig for more. Also, see: https://www.desmos.com/calculator/wg8s0yn63s
+	calculateScore := func(fraction, scale float64) (float64, int64) {
+		y0 := nodeConf.MinUsageScore
+		y1 := nodeConf.MaxUsageScore
+		xp := nodeConf.ScorePeak
+
+		score := float64(1) // if fraction == nodeConf.ScorePeak
+		if fraction < nodeConf.ScorePeak {
+			score = y0 + (1-y0)/xp*fraction
+		} else if fraction > nodeConf.ScorePeak {
+			score = y1 + (1-y1)/(1-xp)*(1-fraction)
+		}
+
+		score /= scale
+
+		return score, framework.MinNodeScore + int64(float64(scoreLen)*score)
+	}
+
+	cpuFScore, cpuIScore := calculateScore(cpuFraction, cpuScale)
+	memFScore, memIScore := calculateScore(memFraction, memScale)
+
+	score := util.Min(cpuIScore, memIScore)
 	logger.Info(
 		"Scored pod placement for node",
 		zap.Int64("score", score),
 		zap.Object("verdict", verdictSet{
-			cpu: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingCPU, totalCPU, cpuScore),
-			mem: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingMem, totalMem, memScore),
+			cpu: fmt.Sprintf(
+				"%d remaining reservable of %d total => fraction=%g, scale=%g => score=(%g :: %d)",
+				cpuRemaining, cpuTotal, cpuFraction, cpuScale, cpuFScore, cpuIScore,
+			),
+			mem: fmt.Sprintf(
+				"%d remaining reservable of %d total => fraction=%g, scale=%g => score=(%g :: %d)",
+				memRemaining, memTotal, memFraction, memScale, memFScore, memIScore,
+			),
 		}),
 	)
 
