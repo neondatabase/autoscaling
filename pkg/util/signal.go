@@ -35,7 +35,7 @@ func (s SignalSender[T]) Send(data T) {
 	s.send(data)
 }
 
-func (s SignalReceiver[T]) Recv() chan T {
+func (s SignalReceiver[T]) Recv() <-chan T {
 	return s.sigCh
 }
 

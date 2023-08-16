@@ -23,7 +23,9 @@ import (
 // all of the juicy bits are defined in pkg/plugin/
 
 func main() {
-	logger := zap.Must(zap.NewProduction()).Named("autoscale-scheduler")
+	logConfig := zap.NewProductionConfig()
+	logConfig.Sampling = nil // Disable sampling, which the production config enables by default.
+	logger := zap.Must(logConfig.Build()).Named("autoscale-scheduler")
 	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
 
 	if err := runProgram(logger); err != nil {
