@@ -1033,11 +1033,8 @@ func (s *InformantServer) HealthCheck(ctx context.Context, logger *zap.Logger) (
 
 // Downscale makes a request to the informant's /downscale endpoint with the api.Resources
 //
-// This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
+// This method MUST be called while holding s.requestLock AND NOT s.runner.lock
 func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
@@ -1089,11 +1086,8 @@ func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to 
 	return resp, nil
 }
 
-// This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
+// This method MUST be called while holding s.requestLock AND NOT s.runner.lock
 func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
@@ -1208,14 +1202,12 @@ func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Lo
 // MonitorUpscale is the equivalent of (*InformantServer).Upscale for
 // when we're connected to a monitor.
 //
-// This method MUST NOT be called while holding s.requestLock OR s.runner.lock
+// This method MUST be called while holding s.requestLock AND NOT s.runner.lock
+//
+// *Note*: Locking requestLock is not technically necessary, but it allows for
+// better serialization. For example, if this function exits, we know that no
+// other dispatcher calls will be made.
 func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
-	// Locking requestLock is not technically necessary, but it allows for better
-	// serialization. For example, if this function exits, we know that no other
-	// dispatcher calls will be made.
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 	cpu := rawResources.Cpu.AsApproximateFloat64()
 	mem := uint64(rawResources.Memory.Value())
@@ -1239,14 +1231,12 @@ func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger
 // MonitorDownscale is the equivalent of (*InformantServer).Downscale for
 // when we're connected to a monitor.
 //
-// This method MUST NOT be called while holding s.requestLock OR s.runner.lock
+// This method MUST be called while holding s.requestLock AND NOT s.runner.lock
+//
+// *Note*: Locking requestLock is not technically necessary, but it allows for
+// better serialization. For example, if this function exits, we know that no
+// other dispatcher calls will be made.
 func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
-	// Locking requestLock is not technically necessary, but it allows for better
-	// serialization. For example, if this function exits, we know that no other
-	// dispatcher calls will be made.
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
 	cpu := rawResources.Cpu.AsApproximateFloat64()
 	mem := uint64(rawResources.Memory.Value())

@@ -1665,6 +1665,9 @@ func (r *Runner) doInformantDownscale(ctx context.Context, logger *zap.Logger, t
 		return nil, fmt.Errorf("%s: InformantServer is not set (this should not occur after startup)", msg)
 	}
 
+	server.requestLock.Lock()
+	defer server.requestLock.Unlock()
+
 	downscale := server.Downscale
 	if server.informantIsMonitor {
 		downscale = server.MonitorDownscale
@@ -1701,6 +1704,9 @@ func (r *Runner) doInformantUpscale(ctx context.Context, logger *zap.Logger, to 
 	if server == nil {
 		return false, fmt.Errorf("%s: InformantServer is not set (this should not occur after startup)", msg)
 	}
+
+	server.requestLock.Lock()
+	defer server.requestLock.Unlock()
 
 	upscale := server.Upscale
 	if server.informantIsMonitor {
