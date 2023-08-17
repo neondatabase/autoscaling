@@ -334,7 +334,7 @@ sinks:
 group neon-postgres {
     perm {
         admin {
-            uid = {{.CgroupUid}};
+            uid = {{.CgroupUID}};
         }
         task {
             gid = users;
@@ -377,7 +377,7 @@ var (
 	enableMonitor   = flag.Bool("enable-monitor", false, `start the vm-monitor during VM startup`)
 	enableInformant = flag.Bool("enable-informant", false, `start the vm-informant during VM startup`)
 	fileCache       = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
-	cgroupUid       = flag.String("cgroup-uid", "vm-informant", `specifies the user that owns the neon-postgres cgroup`)
+	cgroupUID       = flag.String("cgroup-uid", "vm-informant", `specifies the user that owns the neon-postgres cgroup`)
 	version         = flag.Bool("version", false, `Print vm-builder version`)
 )
 
@@ -439,7 +439,7 @@ type TemplatesContext struct {
 	FileCache       bool
 	EnableMonitor   bool
 	EnableInformant bool
-	CgroupUid       string
+	CgroupUID       string
 }
 
 func main() {
@@ -530,7 +530,7 @@ func main() {
 		FileCache:       *fileCache,
 		EnableMonitor:   *enableMonitor,
 		EnableInformant: *enableInformant,
-		CgroupUid:       *cgroupUid,
+		CgroupUID:       *cgroupUID,
 	}
 
 	if len(imageSpec.Config.User) != 0 {
