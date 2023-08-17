@@ -1635,6 +1635,11 @@ func (r *Runner) validateInformant() error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
+	// Automatically valid if we are talking to a monitor
+	if r.server.informantIsMonitor {
+		return nil
+	}
+
 	if r.server == nil {
 		return errors.New("no informant server set")
 	}
@@ -1660,7 +1665,15 @@ func (r *Runner) doInformantDownscale(ctx context.Context, logger *zap.Logger, t
 		return nil, fmt.Errorf("%s: InformantServer is not set (this should not occur after startup)", msg)
 	}
 
-	resp, err := server.Downscale(ctx, logger, to)
+	server.requestLock.Lock()
+	defer server.requestLock.Unlock()
+
+	downscale := server.Downscale
+	if server.informantIsMonitor {
+		downscale = server.MonitorDownscale
+	}
+
+	resp, err := downscale(ctx, logger, to)
 	if err != nil {
 		if IsNormalInformantError(err) {
 			logger.Warn(msg, zap.Object("server", server.desc), zap.Error(err))
@@ -1692,7 +1705,15 @@ func (r *Runner) doInformantUpscale(ctx context.Context, logger *zap.Logger, to 
 		return false, fmt.Errorf("%s: InformantServer is not set (this should not occur after startup)", msg)
 	}
 
-	if err := server.Upscale(ctx, logger, to); err != nil {
+	server.requestLock.Lock()
+	defer server.requestLock.Unlock()
+
+	upscale := server.Upscale
+	if server.informantIsMonitor {
+		upscale = server.MonitorUpscale
+	}
+
+	if err := upscale(ctx, logger, to); err != nil {
 		if IsNormalInformantError(err) {
 			logger.Warn(msg, zap.Error(err))
 			return false, nil

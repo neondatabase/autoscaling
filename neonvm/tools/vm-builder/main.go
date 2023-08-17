@@ -24,13 +24,12 @@ import (
 
 const (
 	dockerfileVmBuilder = `
-FROM {{.InformantImage}} as informant
 FROM {{.MonitorImage}} as monitor
 
 # Build cgroup-tools
 #
 # At time of writing (2023-03-14), debian bullseye has a version of cgroup-tools (technically
-# libcgroup) that doesn't support cgroup v2 (version 0.41-11). Unfortunately, the vm-informant
+# libcgroup) that doesn't support cgroup v2 (version 0.41-11). Unfortunately, the vm-monitor
 # requires cgroup v2, so we'll build cgroup-tools ourselves.
 FROM debian:bullseye-slim as libcgroup-builder
 ENV LIBCGROUP_VERSION v2.0.3
@@ -88,7 +87,7 @@ RUN set -e \
 FROM {{.RootDiskImage}} AS rootdisk
 
 USER root
-RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant
+RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "monitor user" --shell /bin/false vm-monitor
 
 # tweak nofile limits
 RUN set -e \
@@ -108,7 +107,6 @@ RUN set -e \
 USER postgres
 
 COPY --from=monitor           /usr/bin/vm-monitor /usr/local/bin/vm-monitor
-COPY --from=informant         /usr/bin/vm-informant /usr/local/bin/vm-informant
 COPY --from=libcgroup-builder /libcgroup-install/bin/*  /usr/bin/
 COPY --from=libcgroup-builder /libcgroup-install/lib/*  /usr/lib/
 COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
@@ -247,10 +245,7 @@ fi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
 {{if .EnableMonitor}}
-::respawn:su -p vm-informant -c 'RUST_LOG=info /usr/local/bin/vm-monitor --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="host=localhost port=5432 dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
-{{end}}
-{{if .EnableInformant}}
-::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant'
+::respawn:su -p vm-monitor -c 'RUST_LOG=info /usr/local/bin/vm-monitor --addr "0.0.0.0:10301" --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="host=localhost port=5432 dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
 {{end}}
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
@@ -362,23 +357,20 @@ default_pool_size=16
 )
 
 var (
-	Version     string
-	VMInformant string
-	VMMonitor   string
+	Version   string
+	VMMonitor string
 
-	srcImage        = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage        = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
-	size            = flag.String("size", "1G", `Size for disk image: --size=1G`)
-	outFile         = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
-	quiet           = flag.Bool("quiet", false, `Show less output from the docker build process`)
-	forcePull       = flag.Bool("pull", false, `Pull src image even if already present locally`)
-	informant       = flag.String("informant", VMInformant, `vm-informant docker image`)
-	monitor         = flag.String("monitor", VMMonitor, `vm-monitor docker image`)
-	enableMonitor   = flag.Bool("enable-monitor", false, `start the vm-monitor during VM startup`)
-	enableInformant = flag.Bool("enable-informant", false, `start the vm-informant during VM startup`)
-	fileCache       = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
-	cgroupUID       = flag.String("cgroup-uid", "vm-informant", `specifies the user that owns the neon-postgres cgroup`)
-	version         = flag.Bool("version", false, `Print vm-builder version`)
+	srcImage      = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
+	dstImage      = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	size          = flag.String("size", "1G", `Size for disk image: --size=1G`)
+	outFile       = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	quiet         = flag.Bool("quiet", false, `Show less output from the docker build process`)
+	forcePull     = flag.Bool("pull", false, `Pull src image even if already present locally`)
+	monitor       = flag.String("monitor", VMMonitor, `vm-monitor docker image`)
+	enableMonitor = flag.Bool("enable-monitor", false, `start the vm-monitor during VM startup`)
+	fileCache     = flag.Bool("enable-file-cache", false, `enables the vm-monitor's file cache integration`)
+	cgroupUID     = flag.String("cgroup-uid", "vm-monitor", `specifies the user that owns the neon-postgres cgroup`)
+	version       = flag.Bool("version", false, `Print vm-builder version`)
 )
 
 type dockerMessage struct {
@@ -429,17 +421,15 @@ func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplSt
 }
 
 type TemplatesContext struct {
-	User            string
-	Entrypoint      []string
-	Cmd             []string
-	Env             []string
-	RootDiskImage   string
-	InformantImage  string
-	MonitorImage    string
-	FileCache       bool
-	EnableMonitor   bool
-	EnableInformant bool
-	CgroupUID       string
+	User          string
+	Entrypoint    []string
+	Cmd           []string
+	Env           []string
+	RootDiskImage string
+	MonitorImage  string
+	FileCache     bool
+	EnableMonitor bool
+	CgroupUID     string
 }
 
 func main() {
@@ -521,16 +511,14 @@ func main() {
 	}
 
 	tmplArgs := TemplatesContext{
-		Entrypoint:      imageSpec.Config.Entrypoint,
-		Cmd:             imageSpec.Config.Cmd,
-		Env:             imageSpec.Config.Env,
-		RootDiskImage:   *srcImage,
-		InformantImage:  *informant,
-		MonitorImage:    *monitor,
-		FileCache:       *fileCache,
-		EnableMonitor:   *enableMonitor,
-		EnableInformant: *enableInformant,
-		CgroupUID:       *cgroupUID,
+		Entrypoint:    imageSpec.Config.Entrypoint,
+		Cmd:           imageSpec.Config.Cmd,
+		Env:           imageSpec.Config.Env,
+		RootDiskImage: *srcImage,
+		MonitorImage:  *monitor,
+		FileCache:     *fileCache,
+		EnableMonitor: *enableMonitor,
+		CgroupUID:     *cgroupUID,
 	}
 
 	if len(imageSpec.Config.User) != 0 {

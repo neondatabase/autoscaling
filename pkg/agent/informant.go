@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
+	"nhooyr.io/websocket"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -29,6 +30,13 @@ const (
 )
 
 type InformantServer struct {
+	// If the "informant" we're talking to is actually a monitor
+	informantIsMonitor bool
+
+	// The dispatcher we're using to connect to the monitor if informantIsMonitor
+	// is true
+	dispatcher *Dispatcher
+
 	// runner is the Runner currently responsible for this InformantServer. We must acquire its lock
 	// before making any updates to other fields of this struct
 	runner *Runner
@@ -138,7 +146,9 @@ func NewInformantServer(
 	muxID := uuid.New()
 	serverAddr := fmt.Sprintf("%s:%d/%s", runner.global.podIP, runner.global.config.Informant.CallbackPort, muxID)
 	server := &InformantServer{
-		runner: runner,
+		informantIsMonitor: false,
+		dispatcher:         nil,
+		runner:             runner,
 		desc: api.AgentDesc{
 			AgentID:         uuid.New(),
 			ServerAddr:      serverAddr,
@@ -185,12 +195,12 @@ func NewInformantServer(
 			logFunc("Informant server exiting", zap.Bool("retry", status.RetryShouldFix), zap.Error(status.Err))
 		}
 
-		// Stop accepting HTTP requests for this registration
-		runner.global.informantMuxServer.UnregisterMux(muxID.String())
-
-		// we need to spawn this in separate threads so the caller doesn't block while holding
-		// runner.lock
-		if server.madeContact {
+		if server.informantIsMonitor {
+			server.dispatcher.conn.Close(websocket.StatusInternalError, "informant exit")
+			logger.Info("Successfully closed websocket connection")
+		} else if server.madeContact {
+			// Stop accepting HTTP requests for this registration
+			runner.global.informantMuxServer.UnregisterMux(muxID.String())
 			// only unregister the server if we could have plausibly contacted the informant
 			runner.spawnBackgroundWorker(srv.GetBaseContext(ctx), logger, "InformantServer unregister", func(_ context.Context, logger *zap.Logger) {
 				// we want shutdown to (potentially) live longer than the request which
@@ -236,6 +246,25 @@ func NewInformantServer(
 			case <-ticker.C:
 			}
 
+			// Are we talking to a monitor?
+			var isMonitor bool
+			func() {
+				server.requestLock.Lock()
+				defer server.requestLock.Unlock()
+				if server.informantIsMonitor {
+					if err := server.MonitorHealthCheck(c, logger); err != nil {
+						logger.Warn("Monitor health check failed", zap.Error(err))
+					}
+					isMonitor = true
+				} else {
+					isMonitor = false
+				}
+			}()
+			if isMonitor {
+				continue
+			}
+
+			// Otherwise do normal informant health checks
 			var done bool
 			func() {
 				server.requestLock.Lock()
@@ -380,10 +409,70 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 	resp, statusCode, err := doInformantRequest[api.AgentDesc, api.InformantDesc](
 		ctx, logger, s, timeout, http.MethodPost, "/register", &s.desc,
 	)
-	// Do some stuff with the lock acquired:
-	func() {
-		maybeMadeContact := statusCode != 0 || ctx.Err() != nil
 
+	connectedToMonitor := false
+	maybeMadeContact := statusCode != 0 || ctx.Err() != nil
+
+	if statusCode == 404 {
+		addr := fmt.Sprintf(
+			"ws://%s:%d/monitor",
+			s.runner.podIP,
+			s.runner.global.config.Informant.ServerPort,
+		)
+		logger.Info(
+			"received 404 from informant's /register endpoint; connecting to monitor",
+			zap.String("addr", addr),
+		)
+		// pre-declare disp so that err get's assigned to err from enclosing scope,
+		// overwriting original request error.
+		var disp Dispatcher
+		disp, err = NewDispatcher(logger, addr, s)
+		// If the error is not nil, it will get handled below
+		if err == nil {
+			// Acquire the lock late so as not to hold it will connecting to the
+			// dispatcher
+			func() {
+				s.runner.lock.Lock()
+				defer s.runner.lock.Unlock()
+
+				connectedToMonitor = true
+				s.informantIsMonitor = true
+				s.dispatcher = &disp
+				s.mode = InformantServerRunning
+				s.updatedInformant.Send()
+				if s.runner.server == s {
+					s.runner.informant = &api.InformantDesc{
+						ProtoVersion: MaxInformantProtocolVersion,
+						MetricsMethod: api.InformantMetricsMethod{
+							Prometheus: &api.MetricsMethodPrometheus{
+								Port: 9100,
+							},
+						},
+					}
+					// TODO: fix context/logger stuff
+					s.runner.spawnBackgroundWorker(
+						context.Background(),
+						disp.logger,
+						"dispatcher message handler",
+						func(context.Context, *zap.Logger) { disp.run() },
+					)
+				} else if s.exitStatus != nil {
+					// we exited -> close ws
+					disp.conn.Close(websocket.StatusInternalError, "informant exited")
+
+				} else {
+					// updated -> close ws
+					disp.conn.Close(
+						websocket.StatusInternalError,
+						"runner is talking to a different informant",
+					)
+				}
+			}()
+		}
+	}
+
+	// Do more stuff with the lock acquired:
+	func() {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
 
@@ -407,6 +496,10 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 			}
 		}
 	}()
+
+	if connectedToMonitor {
+		return nil
+	}
 
 	if err != nil {
 		return err // the errors returned by doInformantRequest are descriptive enough.
@@ -950,11 +1043,8 @@ func (s *InformantServer) HealthCheck(ctx context.Context, logger *zap.Logger) (
 
 // Downscale makes a request to the informant's /downscale endpoint with the api.Resources
 //
-// This method MUST NOT be called while holding i.server.runner.lock OR i.server.requestLock.
+// This method MUST be called while holding s.requestLock AND NOT s.runner.lock
 func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
@@ -1006,10 +1096,8 @@ func (s *InformantServer) Downscale(ctx context.Context, logger *zap.Logger, to 
 	return resp, nil
 }
 
+// This method MUST be called while holding s.requestLock AND NOT s.runner.lock
 func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	err := func() error {
 		s.runner.lock.Lock()
 		defer s.runner.lock.Unlock()
@@ -1058,4 +1146,127 @@ func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to ap
 
 	logger.Info("Received successful upscale result")
 	return nil
+}
+
+// awaitMonitorResponse awaits the dispatchers's response after making a call,
+// handling timeouts and calling s.exit if an error occurs.
+//
+// This method MUST NOT be called while holding s.runner.lock
+func (s *InformantServer) awaitMonitorResponse(ctx context.Context, rx util.SignalReceiver[*MonitorResult]) (*MonitorResult, error) {
+	exit := func(err error) {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		s.exit(InformantServerExitStatus{
+			Err:            err,
+			RetryShouldFix: false,
+		})
+	}
+
+	// Wait for result
+	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case res := <-rx.Recv():
+		// A nil pointer means a monitor error occured
+		if res != nil {
+			return res, nil
+		} else {
+			err := errors.New("monitor experienced an internal error")
+			exit(err)
+			return nil, err
+		}
+	case <-timer.C:
+		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		exit(err)
+		return nil, err
+	}
+}
+
+// MonitorHealthCheck is the equivalent of (*InformantServer).HealthCheck for
+// when we're connected to a monitor.
+//
+// This method MUST be called while holding s.requestLock AND NOT while holding
+// s.runner.lock.
+func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Logger) error {
+	// Locking requestLock is not technically necessary, but it allows for better
+	// serialization. For example, if this function exits, we know that no other
+	// dispatcher calls will be made.
+	s.requestLock.Lock()
+	defer s.requestLock.Unlock()
+
+	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
+	err := s.dispatcher.Call(
+		ctx,
+		tx,
+		api.HealthCheck{},
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.awaitMonitorResponse(ctx, rx)
+	return err
+}
+
+// MonitorUpscale is the equivalent of (*InformantServer).Upscale for
+// when we're connected to a monitor.
+//
+// # This method MUST be called while holding s.requestLock AND NOT s.runner.lock
+//
+// *Note*: Locking requestLock is not technically necessary, but it allows for
+// better serialization. For example, if this function exits, we know that no
+// other dispatcher calls will be made.
+func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger, to api.Resources) error {
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
+	cpu := rawResources.Cpu.AsApproximateFloat64()
+	mem := uint64(rawResources.Memory.Value())
+
+	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
+	err := s.dispatcher.Call(
+		ctx,
+		tx,
+		api.UpscaleNotification{
+			Granted: api.Allocation{Cpu: cpu, Mem: mem},
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.awaitMonitorResponse(ctx, rx)
+	return err
+}
+
+// MonitorDownscale is the equivalent of (*InformantServer).Downscale for
+// when we're connected to a monitor.
+//
+// # This method MUST be called while holding s.requestLock AND NOT s.runner.lock
+//
+// *Note*: Locking requestLock is not technically necessary, but it allows for
+// better serialization. For example, if this function exits, we know that no
+// other dispatcher calls will be made.
+func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
+	rawResources := to.ConvertToRaw(s.runner.vm.Mem.SlotSize)
+	cpu := rawResources.Cpu.AsApproximateFloat64()
+	mem := uint64(rawResources.Memory.Value())
+
+	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
+	err := s.dispatcher.Call(
+		ctx,
+		tx,
+		api.DownscaleRequest{
+			Target: api.Allocation{Cpu: cpu, Mem: mem},
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := s.awaitMonitorResponse(ctx, rx)
+	if err != nil {
+		return nil, err
+	} else {
+		return res.Result, nil
+	}
 }

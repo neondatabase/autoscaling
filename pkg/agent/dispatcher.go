@@ -1,4 +1,4 @@
-package informant
+package agent
 
 // The Dispatcher is our interface with the monitor. We interact via a websocket
 // connection through a simple RPC-style protocol.
@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
@@ -46,18 +45,10 @@ type Dispatcher struct {
 	// message and will send it down the SignalSender so the original sender can use it.
 	waiters map[uint64]util.SignalSender[*MonitorResult]
 
-	// A message is sent along this channel when an upscale is requested.
-	// When the informant.NewState is called, a goroutine will be spawned that
-	// just tries to receive off the channel and then request the upscale.
-	// A different way to do this would be to keep a backpointer to the parent
-	// `State` and then just call a method on it when an upscale is requested.
-	// However, we do not do this because it causes a reference cycle, which
-	// interferes with go's ability to run finalizers - which nhooyr/websocket
-	// uses to manage connections. Thus, if a panic were to happen, the connection
-	// might not get dropped.
-	notifier util.CondChannelSender
+	// The InformantServer that this dispatcher is part of
+	server *InformantServer
 
-	// nextTransactionID represents the current transaction id. When we need a new one
+	// nextTransactionID is the current transaction id. When we need a new one
 	// we simply bump it and take the new number.
 	nextTransactionID uint64
 
@@ -68,7 +59,7 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSender) (disp Dispatcher, _ error) {
+func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (disp Dispatcher, _ error) {
 	ctx := context.TODO()
 
 	logger.Info("connecting via websocket", zap.String("addr", addr))
@@ -104,11 +95,11 @@ func NewDispatcher(logger *zap.Logger, addr string, notifier util.CondChannelSen
 
 	disp = Dispatcher{
 		conn:              c,
-		notifier:          notifier,
 		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
 		nextTransactionID: 0,
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
+		server:            parent,
 	}
 	return disp, nil
 }
@@ -251,40 +242,9 @@ func (disp *Dispatcher) HandleMessage(
 	}
 }
 
-func (disp *Dispatcher) DoHealthChecks(ctx context.Context) {
-	logger := disp.logger.Named("health-checker")
-	logger.Info("starting health checks")
-	ticker := time.NewTicker(MonitorHealthCheckDelay)
-	for range ticker.C {
-		tx, rx := util.NewSingleSignalPair[*MonitorResult]()
-		err := disp.Call(ctx, tx, api.HealthCheck{})
-		if err != nil {
-			panic("failed to make dispatcher call -> panicking")
-		}
-
-		// Wait for the response
-		select {
-		case res := <-rx.Recv():
-			// A nil pointer means an error occured
-			if res != nil {
-				continue
-			} else {
-				logger.Warn("monitor experienced an internal error")
-			}
-		case <-time.After(MonitorResponseTimeout):
-			logger.Warn(
-				"timed out waiting for monitor response",
-				zap.Duration("timeout", MonitorResponseTimeout),
-			)
-		}
-	}
-}
-
 // Long running function that orchestrates all requests/responses.
 func (disp *Dispatcher) run() {
 	ctx := context.Background()
-	go disp.DoHealthChecks(ctx)
-
 	logger := disp.logger.Named("message-handler")
 	logger.Info("starting message handler")
 
@@ -301,8 +261,22 @@ func (disp *Dispatcher) run() {
 	// upscale. The monitor will get the result back as a NotifyUpscale message
 	// from us, with a new id.
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
-		logger.Info("monitor requested upscale")
-		disp.notifier.Send()
+		disp.server.runner.lock.Lock()
+		defer disp.server.runner.lock.Unlock()
+
+		disp.server.upscaleRequested.Send()
+
+		resourceReq := api.MoreResources{
+			Cpu:    false,
+			Memory: true,
+		}
+
+		logger.Info(
+			"Updating requested upscale",
+			zap.Any("oldRequested", disp.server.runner.requestedUpscale),
+			zap.Any("newRequested", resourceReq),
+		)
+		disp.server.runner.requestedUpscale = resourceReq
 	}
 	handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
 		sender, ok := disp.waiters[id]
