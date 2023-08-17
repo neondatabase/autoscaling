@@ -23,8 +23,6 @@ config.billing = {
 }
 
 // Scheduler:
-config.nodeDefaults.cpu.watermark = 0.85
-config.nodeDefaults.memory.watermark = 0.85
 config.k8sNodeGroupLabel = "eks.amazonaws.com/nodegroup"
 config.ignoreNamespaces = ["overprovisioning"]
 config.doMigration = true
