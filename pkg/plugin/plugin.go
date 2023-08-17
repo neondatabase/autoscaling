@@ -727,7 +727,7 @@ func (e *AutoscaleEnforcer) Score(
 			score = y1 + (1-y1)/(1-xp)*(1-fraction)
 		}
 
-		score /= scale
+		score *= scale
 
 		return score, framework.MinNodeScore + int64(float64(scoreLen)*score)
 	}
