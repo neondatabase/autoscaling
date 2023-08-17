@@ -103,7 +103,7 @@ type nodeConfig struct {
 	// sloping down on either side towards MinUsageScore at 0 and MaxUsageScore at 1.
 	//
 	// This corresponds to xₚ in the desmos link.
-	ScorePeak float64 `json:"scoreMidpoint"`
+	ScorePeak float64 `json:"scorePeak"`
 }
 
 // resourceConfig configures the amount of a particular resource we're willing to allocate to VMs,
