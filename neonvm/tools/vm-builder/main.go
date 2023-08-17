@@ -329,7 +329,7 @@ sinks:
 group neon-postgres {
     perm {
         admin {
-            uid = vm-monitor;
+            uid = {{.CgroupUID}};
         }
         task {
             gid = users;
@@ -368,7 +368,8 @@ var (
 	forcePull     = flag.Bool("pull", false, `Pull src image even if already present locally`)
 	monitor       = flag.String("monitor", VMMonitor, `vm-monitor docker image`)
 	enableMonitor = flag.Bool("enable-monitor", false, `start the vm-monitor during VM startup`)
-	fileCache     = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
+	fileCache     = flag.Bool("enable-file-cache", false, `enables the vm-monitor's file cache integration`)
+	cgroupUID     = flag.String("cgroup-uid", "vm-monitor", `specifies the user that owns the neon-postgres cgroup`)
 	version       = flag.Bool("version", false, `Print vm-builder version`)
 )
 
@@ -428,6 +429,7 @@ type TemplatesContext struct {
 	MonitorImage  string
 	FileCache     bool
 	EnableMonitor bool
+	CgroupUID     string
 }
 
 func main() {
@@ -516,6 +518,7 @@ func main() {
 		MonitorImage:  *monitor,
 		FileCache:     *fileCache,
 		EnableMonitor: *enableMonitor,
+		CgroupUID:     *cgroupUID,
 	}
 
 	if len(imageSpec.Config.User) != 0 {

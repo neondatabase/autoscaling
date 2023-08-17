@@ -32,7 +32,7 @@ data:
         "computeUnit": { "vCPUs": 0.25, "mem": 1 },
         "minUsageScore": 0.5,
         "maxUsageScore": 0,
-        "scoreMidpoint": 0.8
+        "scorePeak": 0.8
       },
       "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
