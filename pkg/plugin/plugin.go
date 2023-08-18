@@ -756,7 +756,7 @@ func (e *AutoscaleEnforcer) Score(
 	return score, nil
 }
 
-// NormalizeScore weights scores uniformly in the range [minScore, trueScore], were
+// NormalizeScore weights scores uniformly in the range [minScore, trueScore], where
 // minScore is framework.MinNodeScore + 1.
 func (e *AutoscaleEnforcer) NormalizeScore(
 	ctx context.Context,
@@ -773,7 +773,7 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 		}
 
 		// This is different from framework.MinNodeScore. We use framework.MinNodeScore
-		// to indicate that a pod should not be placed on a node. Thus, the lowest
+		// to indicate that a pod should not be placed on a node. The lowest
 		// actual score we assign a node is thus framework.MinNodeScore + 1
 		minScore := framework.MinNodeScore + 1
 
