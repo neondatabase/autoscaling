@@ -96,9 +96,12 @@ data:
     {
       "memBlockSize": "1Gi",
       "nodeDefaults": {
-        "cpu": { "watermark": 0.7 },
-        "memory": { "watermark": 0.7 },
-        "computeUnit": { "vCPUs": 0.25, "mem": 1 }
+        "cpu": { "watermark": 0.9 },
+        "memory": { "watermark": 0.9 },
+        "computeUnit": { "vCPUs": 0.25, "mem": 1 },
+        "minUsageScore": 0.5,
+        "maxUsageScore": 0,
+        "scorePeak": 0.8
       },
       "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
@@ -141,7 +144,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.15.2
+        image: neondatabase/autoscale-scheduler:v0.16.1
         livenessProbe:
           httpGet:
             path: /healthz
