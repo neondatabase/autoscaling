@@ -774,7 +774,7 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 
 		// This is different from framework.MinNodeScore. We use framework.MinNodeScore
 		// to indicate that a pod should not be placed on a node. Thus, the lowest
-        // actual score we assign a node is thus framework.MinNodeScore + 1
+		// actual score we assign a node is thus framework.MinNodeScore + 1
 		minScore := framework.MinNodeScore + 1
 
 		// We want to pick a score in the range [minScore, score], so use
