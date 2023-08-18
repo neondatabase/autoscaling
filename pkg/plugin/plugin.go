@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/tychoish/fun/pubsub"
@@ -60,6 +61,7 @@ var _ framework.PreFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.PostFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
+var _ framework.ScoreExtensions = (*AutoscaleEnforcer)(nil)
 var _ framework.ReservePlugin = (*AutoscaleEnforcer)(nil)
 
 func NewAutoscaleEnforcerPlugin(ctx context.Context, logger *zap.Logger, config *Config) func(runtime.Object, framework.Handle) (framework.Plugin, error) {
@@ -752,6 +754,35 @@ func (e *AutoscaleEnforcer) Score(
 	)
 
 	return score, nil
+}
+
+// NormalizeScore weights scores uniformly in the range [minScore, trueScore], were
+// minScore is framework.MinNodeScore + 1.
+func (e *AutoscaleEnforcer) NormalizeScore(
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+	scores framework.NodeScoreList,
+) *framework.Status {
+	for _, nodeScore := range scores {
+		score := nodeScore.Score
+
+		// rand.Intn will panic if we pass in 0
+		if score == 0 {
+			continue
+		}
+
+		// This is different from framework.MinNodeScore. We use framework.MinNodeScore
+		// to indicate that a pod should not be placed on a node. Thus, the lowest
+        // actual score we assign a node is thus framework.MinNodeScore + 1
+		minScore := framework.MinNodeScore + 1
+
+		// We want to pick a score in the range [minScore, score], so use
+		// score _+ 1_ - minscore, as rand.Intn picks a number in the _half open_
+		// range [0, n)
+		nodeScore.Score = int64(rand.Intn(int(score+1-minScore))) + minScore
+	}
+	return nil
 }
 
 // ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used
