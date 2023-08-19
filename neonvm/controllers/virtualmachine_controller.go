@@ -508,6 +508,58 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 	case vmv1.VmScaling:
+		// Check that runner pod is still ok
+		vmRunner := &corev1.Pod{}
+		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+		if err != nil && apierrors.IsNotFound(err) {
+			// lost runner pod for running VirtualMachine ?
+			r.Recorder.Event(virtualmachine, "Warning", "NotFound",
+				fmt.Sprintf("runner pod %s not found",
+					virtualmachine.Status.PodName))
+			virtualmachine.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+				metav1.Condition{Type: typeDegradedVirtualMachine,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Reconciling",
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", virtualmachine.Status.PodName, virtualmachine.Name)})
+		} else if err != nil {
+			log.Error(err, "Failed to get runner Pod")
+			return err
+		}
+
+		// Update the metadata (including "usage" annotation) before anything else, so that it
+		// will be correctly set even if the rest of the reconcile operation fails.
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, virtualmachine, vmRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", virtualmachine.Name)
+		}
+
+		// runner pod found, check that it's still up:
+		switch vmRunner.Status.Phase {
+		case corev1.PodSucceeded:
+			virtualmachine.Status.Phase = vmv1.VmSucceeded
+			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+				metav1.Condition{Type: typeAvailableVirtualMachine,
+					Status:  metav1.ConditionFalse,
+					Reason:  "Reconciling",
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
+		case corev1.PodFailed:
+			virtualmachine.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+				metav1.Condition{Type: typeDegradedVirtualMachine,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Reconciling",
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
+		case corev1.PodUnknown:
+			virtualmachine.Status.Phase = vmv1.VmPending
+			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+				metav1.Condition{Type: typeAvailableVirtualMachine,
+					Status:  metav1.ConditionUnknown,
+					Reason:  "Reconciling",
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", virtualmachine.Status.PodName, virtualmachine.Name)})
+		default:
+			// do nothing
+		}
+
 		cpuScaled := false
 		ramScaled := false
 
