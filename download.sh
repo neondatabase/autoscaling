@@ -12,7 +12,7 @@ fi
 VERSION="$1"
 
 download () {
-    curl -fL "https://github.com/neondatabase/autoscaling/releases/download/$VERSION/$1.yaml" -o "$1-$VERSION.yaml"
+    curl -fL "https://github.com/neondatabase/autoscaling/releases/download/$VERSION/$1.yaml" -o "$1.yaml"
 }
 
 download 'whereabouts'

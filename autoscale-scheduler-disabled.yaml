@@ -110,9 +110,7 @@ data:
         "timeoutSeconds": 5
       },
       "migrationDeletionRetrySeconds": 5,
-      "k8sNodeGroupLabel": "eks.amazonaws.com/nodegroup",
-      "ignoreNamespaces": ["overprovisioning"],
-      "doMigration": true
+      "doMigration": false
     }
 kind: ConfigMap
 metadata:

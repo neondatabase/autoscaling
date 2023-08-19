@@ -1,0 +1,34 @@
+{
+  "autoscaler-agent": {
+    "@base": [
+      {
+        "path": ".billing",
+        "value": {
+          "url": "https://vector-usage-tracking.beta.us-east-2.internal.aws.neon.build/v1",
+          "cpuMetricName": "effective_compute_seconds",
+          "activeTimeMetricName": "active_time_seconds",
+          "collectEverySeconds": 4,
+          "accumulateEverySeconds": 24,
+          "pushEverySeconds": 30,
+          "pushRequestTimeoutSeconds": 30,
+          "maxBatchSize": 200
+        }
+      }
+    ],
+    "dev-eu-central-1-alpha": [
+      { "path": ".billing", "value": null }
+    ],
+    "dev-eu-west-1-zeta": [],
+    "dev-us-east-2-beta": []
+  },
+  "autoscale-scheduler": {
+    "@base": [
+      { "path": ".k8sNodeGroupLabel", "value": "eks.amazonaws.com/nodegroup" },
+      { "path": ".ignoreNamespaces", "value": ["overprovisioning"] },
+      { "path": ".doMigration", "value": true }
+    ],
+    "dev-eu-central-1-alpha": [],
+    "dev-eu-west-1-zeta": [],
+    "dev-us-east-2-beta": []
+  }
+}
