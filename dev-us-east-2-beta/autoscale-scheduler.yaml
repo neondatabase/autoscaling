@@ -91,8 +91,9 @@ data:
     : 0,\n    \"scorePeak\": 0.8\n  },\n  \"nodeOverrides\": [],\n  \"schedulerName\"\
     : \"autoscale-scheduler\",\n  \"dumpState\": {\n    \"port\": 10298,\n    \"timeoutSeconds\"\
     : 5\n  },\n  \"migrationDeletionRetrySeconds\": 5,\n  \"doMigration\": true,\n\
-    \  \"k8sNodeGroupLabel\": \"eks.amazonaws.com/nodegroup\",\n  \"ignoreNamespaces\"\
-    : [\n    \"overprovisioning\"\n  ]\n}"
+    \  \"k8sNodeGroupLabel\": \"eks.amazonaws.com/nodegroup\",\n  \"k8sAvailabilityZoneLabel\"\
+    : \"topology.kubernetes.io/zone\",\n  \"ignoreNamespaces\": [\n    \"overprovisioning\"\
+    \n  ]\n}"
 kind: ConfigMap
 metadata:
   name: scheduler-plugin-config
@@ -123,7 +124,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.16.1
+        image: neondatabase/autoscale-scheduler:v0.17.0
         livenessProbe:
           httpGet:
             path: /healthz
