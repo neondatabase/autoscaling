@@ -105,6 +105,7 @@ func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (di
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
 		server:            parent,
+		lock:              &sync.Mutex{},
 	}
 	return disp, nil
 }
