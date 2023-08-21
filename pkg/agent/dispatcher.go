@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"go.uber.org/zap"
@@ -44,6 +45,10 @@ type Dispatcher struct {
 	// with the same transaction id, it knows that that is the repsonse to the original
 	// message and will send it down the SignalSender so the original sender can use it.
 	waiters map[uint64]util.SignalSender[*MonitorResult]
+
+	// lock guards mutating the waiters field. conn, logger, and nextTransactionID
+	// are all thread safe. server and protoVersion are never modified.
+	lock *sync.Mutex
 
 	// The InformantServer that this dispatcher is part of
 	server *InformantServer
@@ -119,6 +124,14 @@ func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error 
 	return wsjson.Write(ctx, disp.conn, &raw)
 }
 
+// registerWaiter registers a util.SignalSender to get notified when a
+// message with the given id arrives.
+func (disp *Dispatcher) registerWaiter(id uint64, sender util.SignalSender[*MonitorResult]) {
+	disp.lock.Lock()
+	defer disp.lock.Unlock()
+	disp.waiters[id] = sender
+}
+
 // Make a request to the monitor. The dispatcher will handle returning a response
 // on the provided SignalSender. The value passed into message must be a valid value
 // to send to the monitor. See the docs for SerializeInformantMessage.
@@ -128,7 +141,7 @@ func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*Moni
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
 	}
-	disp.waiters[id] = sender
+	disp.registerWaiter(id, sender)
 	return nil
 }
 
