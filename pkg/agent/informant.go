@@ -449,9 +449,8 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 							},
 						},
 					}
-					// TODO: fix context/logger stuff
 					s.runner.spawnBackgroundWorker(
-						context.Background(),
+						ctx,
 						disp.logger,
 						"dispatcher message handler",
 						func(context.Context, *zap.Logger) { disp.run() },
