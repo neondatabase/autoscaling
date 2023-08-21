@@ -1149,7 +1149,8 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		pod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{}
 	}
 	pod.Spec.Containers[0].Resources.Limits["neonvm/vhost-net"] = resource.MustParse("1")
-	if virtualmachine.Spec.EnableAcceleration {
+	// NB: EnableAcceleration guaranteed non-nil because the k8s API server sets the default for us.
+	if *virtualmachine.Spec.EnableAcceleration {
 		pod.Spec.Containers[0].Resources.Limits["neonvm/kvm"] = resource.MustParse("1")
 	}
 

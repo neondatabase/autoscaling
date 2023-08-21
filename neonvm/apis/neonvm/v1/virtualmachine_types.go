@@ -99,7 +99,7 @@ type VirtualMachineSpec struct {
 	// Use KVM acceleation
 	// +kubebuilder:default:=true
 	// +optional
-	EnableAcceleration bool `json:"enableAcceleration"`
+	EnableAcceleration *bool `json:"enableAcceleration,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
