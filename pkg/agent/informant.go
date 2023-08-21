@@ -1186,15 +1186,12 @@ func (s *InformantServer) awaitMonitorResponse(ctx context.Context, rx util.Sign
 // MonitorHealthCheck is the equivalent of (*InformantServer).HealthCheck for
 // when we're connected to a monitor.
 //
-// This method MUST be called while holding s.requestLock AND NOT while holding
-// s.runner.lock.
+// # This method MUST be called while holding s.requestLock AND NOT s.runner.lock
+//
+// *Note*: Locking requestLock is not technically necessary, but it allows for better
+// serialization. For example, if this function exits, we know that no other
+// dispatcher calls will be made.
 func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Logger) error {
-	// Locking requestLock is not technically necessary, but it allows for better
-	// serialization. For example, if this function exits, we know that no other
-	// dispatcher calls will be made.
-	s.requestLock.Lock()
-	defer s.requestLock.Unlock()
-
 	tx, rx := util.NewSingleSignalPair[*MonitorResult]()
 	err := s.dispatcher.Call(
 		ctx,
