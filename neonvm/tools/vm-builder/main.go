@@ -87,7 +87,7 @@ RUN set -e \
 FROM {{.RootDiskImage}} AS rootdisk
 
 USER root
-RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "monitor user" --shell /bin/false vm-monitor
+RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "monitor user" --shell /bin/false {{.CgroupUID}}
 
 # tweak nofile limits
 RUN set -e \
@@ -245,7 +245,7 @@ fi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
 {{if .EnableMonitor}}
-::respawn:su -p vm-monitor -c 'RUST_LOG=info /usr/local/bin/vm-monitor --addr "0.0.0.0:10301" --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="host=localhost port=5432 dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
+::respawn:su -p {{.CgroupUID}} -c 'RUST_LOG=info /usr/local/bin/vm-monitor --addr "0.0.0.0:10301" --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="host=localhost port=5432 dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
 {{end}}
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
@@ -332,7 +332,7 @@ group neon-postgres {
             uid = {{.CgroupUID}};
         }
         task {
-            gid = users;
+            gid = {{.CgroupUID}};
         }
     }
     memory {}
