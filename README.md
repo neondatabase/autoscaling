@@ -31,6 +31,7 @@ branch.
 
 - prod-ap-southeast-1-epsilon
 - prod-eu-central-1-gamma
-- prod-us-east-2-delta
+- prod-il-central-1-iota
 - prod-us-east-1-theta
+- prod-us-east-2-delta
 - prod-us-west-2-eta
