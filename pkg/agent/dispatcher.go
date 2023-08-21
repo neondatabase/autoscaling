@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"go.uber.org/zap"
@@ -45,12 +46,16 @@ type Dispatcher struct {
 	// message and will send it down the SignalSender so the original sender can use it.
 	waiters map[uint64]util.SignalSender[*MonitorResult]
 
+	// lock guards mutating the waiters field. conn, logger, and nextTransactionID
+	// are all thread safe. server and protoVersion are never modified.
+	lock sync.Mutex
+
 	// The InformantServer that this dispatcher is part of
 	server *InformantServer
 
-	// nextTransactionID is the current transaction id. When we need a new one
+	// lastTransactionID is the last transaction id. When we need a new one
 	// we simply bump it and take the new number.
-	nextTransactionID uint64
+	lastTransactionID atomic.Uint64
 
 	logger *zap.Logger
 
@@ -59,7 +64,7 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (disp Dispatcher, _ error) {
+func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (disp *Dispatcher, _ error) {
 	ctx := context.TODO()
 
 	logger.Info("connecting via websocket", zap.String("addr", addr))
@@ -81,25 +86,26 @@ func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (di
 		},
 	)
 	if err != nil {
-		return Dispatcher{}, fmt.Errorf("error sending protocol range to monitor: %w", err)
+		return nil, fmt.Errorf("error sending protocol range to monitor: %w", err)
 	}
 	var version api.MonitorProtocolResponse
 	err = wsjson.Read(ctx, c, &version)
 	if err != nil {
-		return Dispatcher{}, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
+		return nil, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
 	}
 	if version.Error != nil {
-		return Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
+		return nil, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
 	}
 	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
-	disp = Dispatcher{
+	disp = &Dispatcher{
 		conn:              c,
 		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
-		nextTransactionID: 0,
+		lastTransactionID: atomic.Uint64{},
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
 		server:            parent,
+		lock:              sync.Mutex{},
 	}
 	return disp, nil
 }
@@ -119,17 +125,24 @@ func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error 
 	return wsjson.Write(ctx, disp.conn, &raw)
 }
 
+// registerWaiter registers a util.SignalSender to get notified when a
+// message with the given id arrives.
+func (disp *Dispatcher) registerWaiter(id uint64, sender util.SignalSender[*MonitorResult]) {
+	disp.lock.Lock()
+	defer disp.lock.Unlock()
+	disp.waiters[id] = sender
+}
+
 // Make a request to the monitor. The dispatcher will handle returning a response
 // on the provided SignalSender. The value passed into message must be a valid value
 // to send to the monitor. See the docs for SerializeInformantMessage.
 func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*MonitorResult], message any) error {
-	id := atomic.LoadUint64(&disp.nextTransactionID)
-	atomic.AddUint64(&disp.nextTransactionID, 1)
+	id := disp.lastTransactionID.Add(1)
 	err := disp.send(ctx, id, message)
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
 	}
-	disp.waiters[id] = sender
+	disp.registerWaiter(id, sender)
 	return nil
 }
 
