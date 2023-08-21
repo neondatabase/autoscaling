@@ -48,14 +48,14 @@ type Dispatcher struct {
 
 	// lock guards mutating the waiters field. conn, logger, and nextTransactionID
 	// are all thread safe. server and protoVersion are never modified.
-	lock *sync.Mutex
+	lock sync.Mutex
 
 	// The InformantServer that this dispatcher is part of
 	server *InformantServer
 
 	// nextTransactionID is the current transaction id. When we need a new one
 	// we simply bump it and take the new number.
-	nextTransactionID *atomic.Uint64
+	nextTransactionID atomic.Uint64
 
 	logger *zap.Logger
 
@@ -64,7 +64,7 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (disp Dispatcher, _ error) {
+func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (disp *Dispatcher, _ error) {
 	ctx := context.TODO()
 
 	logger.Info("connecting via websocket", zap.String("addr", addr))
@@ -86,26 +86,26 @@ func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (di
 		},
 	)
 	if err != nil {
-		return Dispatcher{}, fmt.Errorf("error sending protocol range to monitor: %w", err)
+		return &Dispatcher{}, fmt.Errorf("error sending protocol range to monitor: %w", err)
 	}
 	var version api.MonitorProtocolResponse
 	err = wsjson.Read(ctx, c, &version)
 	if err != nil {
-		return Dispatcher{}, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
+		return &Dispatcher{}, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
 	}
 	if version.Error != nil {
-		return Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
+		return &Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
 	}
 	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
-	disp = Dispatcher{
+	disp = &Dispatcher{
 		conn:              c,
 		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
-		nextTransactionID: &atomic.Uint64{},
+		nextTransactionID: atomic.Uint64{},
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
 		server:            parent,
-		lock:              &sync.Mutex{},
+		lock:              sync.Mutex{},
 	}
 	return disp, nil
 }

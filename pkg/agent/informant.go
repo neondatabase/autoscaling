@@ -425,7 +425,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 		)
 		// pre-declare disp so that err get's assigned to err from enclosing scope,
 		// overwriting original request error.
-		var disp Dispatcher
+		var disp *Dispatcher
 		disp, err = NewDispatcher(logger, addr, s)
 		// If the error is not nil, it will get handled below
 		if err == nil {
@@ -437,7 +437,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 
 				connectedToMonitor = true
 				s.informantIsMonitor = true
-				s.dispatcher = &disp
+				s.dispatcher = disp
 				s.mode = InformantServerRunning
 				s.updatedInformant.Send()
 				if s.runner.server == s {
