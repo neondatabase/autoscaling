@@ -292,6 +292,9 @@ func (disp *Dispatcher) run() {
 		disp.server.runner.requestedUpscale = resourceReq
 	}
 	handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
+		disp.lock.Lock()
+		defer disp.lock.Unlock()
+
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("monitor confirmed upscale", zap.Uint64("id", id))
@@ -308,6 +311,9 @@ func (disp *Dispatcher) run() {
 		}
 	}
 	handleDownscaleResult := func(res api.DownscaleResult, id uint64) error {
+		disp.lock.Lock()
+		defer disp.lock.Unlock()
+
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("monitor returned downscale result", zap.Uint64("id", id))
@@ -324,6 +330,9 @@ func (disp *Dispatcher) run() {
 		}
 	}
 	handleMonitorError := func(err api.InternalError, id uint64) error {
+		disp.lock.Lock()
+		defer disp.lock.Unlock()
+
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Warn(
@@ -341,6 +350,9 @@ func (disp *Dispatcher) run() {
 		}
 	}
 	handleHealthCheck := func(confirmation api.HealthCheck, id uint64) error {
+		disp.lock.Lock()
+		defer disp.lock.Unlock()
+
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("monitor responded to health check", zap.Uint64("id", id))
