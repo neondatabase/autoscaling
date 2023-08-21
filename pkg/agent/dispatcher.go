@@ -86,15 +86,15 @@ func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (di
 		},
 	)
 	if err != nil {
-		return &Dispatcher{}, fmt.Errorf("error sending protocol range to monitor: %w", err)
+		return nil, fmt.Errorf("error sending protocol range to monitor: %w", err)
 	}
 	var version api.MonitorProtocolResponse
 	err = wsjson.Read(ctx, c, &version)
 	if err != nil {
-		return &Dispatcher{}, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
+		return nil, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
 	}
 	if version.Error != nil {
-		return &Dispatcher{}, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
+		return nil, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
 	}
 	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
