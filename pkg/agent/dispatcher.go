@@ -53,9 +53,9 @@ type Dispatcher struct {
 	// The InformantServer that this dispatcher is part of
 	server *InformantServer
 
-	// nextTransactionID is the current transaction id. When we need a new one
+	// lastTransactionID is the last transaction id. When we need a new one
 	// we simply bump it and take the new number.
-	nextTransactionID atomic.Uint64
+	lastTransactionID atomic.Uint64
 
 	logger *zap.Logger
 
@@ -101,7 +101,7 @@ func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (di
 	disp = &Dispatcher{
 		conn:              c,
 		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
-		nextTransactionID: atomic.Uint64{},
+		lastTransactionID: atomic.Uint64{},
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
 		server:            parent,
@@ -137,7 +137,7 @@ func (disp *Dispatcher) registerWaiter(id uint64, sender util.SignalSender[*Moni
 // on the provided SignalSender. The value passed into message must be a valid value
 // to send to the monitor. See the docs for SerializeInformantMessage.
 func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*MonitorResult], message any) error {
-	id := disp.nextTransactionID.Add(1)
+	id := disp.lastTransactionID.Add(1)
 	err := disp.send(ctx, id, message)
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
