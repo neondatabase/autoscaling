@@ -55,6 +55,10 @@ type Config struct {
 	// metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
 	K8sNodeGroupLabel string `json:"k8sNodeGroupLabel"`
 
+	// K8sAvailabilityZoneLabel, if provided, gives the label to use when recording nodes'
+	// availability zones in the metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
+	K8sAvailabilityZoneLabel string `json:"k8sAvailabilityZoneLabel"`
+
 	// IgnoreNamespaces, if provided, gives a list of namespaces that the plugin should completely
 	// ignore, as if pods from those namespaces do not exist.
 	//
