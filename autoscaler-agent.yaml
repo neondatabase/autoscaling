@@ -102,7 +102,7 @@ spec:
               fieldPath: status.podIP
         - name: CONFIG_PATH
           value: /etc/autoscaler-agent-config/config.json
-        image: neondatabase/autoscaler-agent:v0.17.2
+        image: neondatabase/autoscaler-agent:v0.17.3
         name: autoscaler-agent
         ports:
         - containerPort: 9100
