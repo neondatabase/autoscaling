@@ -139,6 +139,7 @@ func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*Moni
 	err := disp.send(ctx, id, message)
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
+		return err
 	}
 	disp.registerWaiter(id, sender)
 	return nil
