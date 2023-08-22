@@ -25,6 +25,7 @@
   "autoscale-scheduler": {
     "@base": [
       { "path": ".k8sNodeGroupLabel", "value": "eks.amazonaws.com/nodegroup" },
+      { "path": ".k8sAvailabilityZoneLabel", "value": "topology.kubernetes.io/zone" },
       { "path": ".ignoreNamespaces", "value": ["overprovisioning"] }
     ],
     "prod-ap-southeast-1-epsilon": [],
