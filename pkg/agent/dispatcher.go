@@ -211,13 +211,9 @@ func (disp *Dispatcher) HandleMessage(
 	// Helper function to handle common unmarshalling logic
 	unmarshal := func(value any) error {
 		if err := json.Unmarshal(message, value); err != nil {
-			error := fmt.Errorf("error unmarshaling %s: %w", *typeStr, err)
-			disp.send(
-				ctx,
-				id,
-				api.InvalidMessage{Error: error.Error()},
-			)
-			return error
+			err := fmt.Errorf("error unmarshaling %s: %w", *typeStr, err)
+			disp.send(ctx, id, api.InvalidMessage{Error: err.Error()})
+			return err
 		}
 
 		return nil
