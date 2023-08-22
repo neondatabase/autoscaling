@@ -36,7 +36,7 @@ COPY --from=allocate-loop-builder /bin/allocate-loop /bin/allocate-loop
 # Add the vm-monitor
 COPY --from=monitor /usr/bin/vm-monitor /bin/vm-monitor 
 RUN adduser vm-monitor --disabled-password --no-create-home
-RUN echo "::respawn:su vm-monitor -c 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test'" >> /etc/inittab
+RUN echo "::respawn:su vm-monitor -c 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test --addr=\"0.0.0.0:10301\"'" >> /etc/inittab
 
 # Install vector.dev binary
 RUN set -e \
