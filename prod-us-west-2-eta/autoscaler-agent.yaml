@@ -32,42 +32,22 @@ subjects:
 ---
 apiVersion: v1
 data:
-  config.json: |
-    {
-      "scaling": {
-        "requestTimeoutSeconds": 10,
-        "defaultConfig": {
-          "loadAverageFractionTarget": 0.9,
-          "memoryUsageFractionTarget": 0.75
-        }
-      },
-      "informant": {
-        "serverPort": 10301,
-        "callbackPort": 10302,
-        "retryServerMinWaitSeconds": 5,
-        "retryServerNormalWaitSeconds": 5,
-        "registerRetrySeconds": 5,
-        "requestTimeoutSeconds": 1,
-        "registerTimeoutSeconds": 2,
-        "downscaleTimeoutSeconds": 2,
-        "unhealthyAfterSilenceDurationSeconds": 20,
-        "unhealthyStartupGracePeriodSeconds": 20
-      },
-      "metrics": {
-        "loadMetricPrefix": "host_",
-        "requestTimeoutSeconds": 2,
-        "secondsBetweenRequests": 5
-      },
-      "scheduler": {
-        "schedulerName": "autoscale-scheduler",
-        "requestTimeoutSeconds": 2,
-        "requestPort": 10299
-      },
-      "dumpState": {
-        "port": 10300,
-        "timeoutSeconds": 5
-      }
-    }
+  config.json: "{\n  \"scaling\": {\n    \"requestTimeoutSeconds\": 10,\n    \"defaultConfig\"\
+    : {\n      \"loadAverageFractionTarget\": 0.9,\n      \"memoryUsageFractionTarget\"\
+    : 0.75\n    }\n  },\n  \"informant\": {\n    \"serverPort\": 10301,\n    \"callbackPort\"\
+    : 10302,\n    \"retryServerMinWaitSeconds\": 5,\n    \"retryServerNormalWaitSeconds\"\
+    : 5,\n    \"registerRetrySeconds\": 5,\n    \"requestTimeoutSeconds\": 1,\n  \
+    \  \"registerTimeoutSeconds\": 2,\n    \"downscaleTimeoutSeconds\": 2,\n    \"\
+    unhealthyAfterSilenceDurationSeconds\": 20,\n    \"unhealthyStartupGracePeriodSeconds\"\
+    : 20\n  },\n  \"metrics\": {\n    \"loadMetricPrefix\": \"host_\",\n    \"requestTimeoutSeconds\"\
+    : 2,\n    \"secondsBetweenRequests\": 5\n  },\n  \"scheduler\": {\n    \"schedulerName\"\
+    : \"autoscale-scheduler\",\n    \"requestTimeoutSeconds\": 2,\n    \"requestPort\"\
+    : 10299\n  },\n  \"dumpState\": {\n    \"port\": 10300,\n    \"timeoutSeconds\"\
+    : 5\n  },\n  \"billing\": {\n    \"url\": \"https://vector-usage-tracking.service.us-east-2.internal.aws.neon.tech/v1\"\
+    ,\n    \"cpuMetricName\": \"effective_compute_seconds\",\n    \"activeTimeMetricName\"\
+    : \"active_time_seconds\",\n    \"collectEverySeconds\": 4,\n    \"accumulateEverySeconds\"\
+    : 24,\n    \"pushEverySeconds\": 30,\n    \"pushRequestTimeoutSeconds\": 30,\n\
+    \    \"maxBatchSize\": 200\n  }\n}"
 kind: ConfigMap
 metadata:
   name: autoscaler-agent-config

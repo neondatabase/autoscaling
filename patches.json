@@ -1,0 +1,37 @@
+{
+  "autoscaler-agent": {
+    "@base": [
+      {
+        "path": ".billing",
+        "value": {
+          "url": "https://vector-usage-tracking.service.us-east-2.internal.aws.neon.tech/v1",
+          "cpuMetricName": "effective_compute_seconds",
+          "activeTimeMetricName": "active_time_seconds",
+          "collectEverySeconds": 4,
+          "accumulateEverySeconds": 24,
+          "pushEverySeconds": 30,
+          "pushRequestTimeoutSeconds": 30,
+          "maxBatchSize": 200
+        }
+      }
+    ],
+    "prod-ap-southeast-1-epsilon": [],
+    "prod-eu-central-1-gamma": [],
+    "prod-il-central-1-iota": [],
+    "prod-us-east-1-theta": [],
+    "prod-us-east-2-delta": [],
+    "prod-us-west-2-eta": []
+  },
+  "autoscale-scheduler": {
+    "@base": [
+      { "path": ".k8sNodeGroupLabel", "value": "eks.amazonaws.com/nodegroup" },
+      { "path": ".ignoreNamespaces", "value": ["overprovisioning"] }
+    ],
+    "prod-ap-southeast-1-epsilon": [],
+    "prod-eu-central-1-gamma": [],
+    "prod-il-central-1-iota": [],
+    "prod-us-east-1-theta": [],
+    "prod-us-east-2-delta": [],
+    "prod-us-west-2-eta": []
+  }
+}
