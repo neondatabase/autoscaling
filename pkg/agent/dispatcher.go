@@ -68,13 +68,14 @@ type Dispatcher struct {
 func NewDispatcher(
 	ctx context.Context,
 	logger *zap.Logger,
-	addr string, parent *InformantServer,
-) (disp *Dispatcher, _ error) {
-    // server.runner, runner.global, and global.config are immutable so we don't
-    // need to acquire runner.lock here
+	addr string,
+	parent *InformantServer,
+) (*Dispatcher, error) {
+	// server.runner, runner.global, and global.config are immutable so we don't
+	// need to acquire runner.lock here
 	ctx, cancel := context.WithTimeout(
 		ctx,
-		time.Second*time.Duration(disp.server.runner.global.config.Monitor.ConnectionTimeoutSeconds),
+		time.Second*time.Duration(parent.runner.global.config.Monitor.ConnectionTimeoutSeconds),
 	)
 	defer cancel()
 
@@ -84,7 +85,7 @@ func NewDispatcher(
 	// Doing so causes memory bugs.
 	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
 	if err != nil {
-		return disp, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
+		return nil, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
 	// Figure out protocol version
@@ -109,7 +110,7 @@ func NewDispatcher(
 	}
 	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
-	disp = &Dispatcher{
+	disp := &Dispatcher{
 		conn:              c,
 		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
 		lastTransactionID: atomic.Uint64{},
