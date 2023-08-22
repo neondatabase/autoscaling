@@ -212,7 +212,8 @@ func (disp *Dispatcher) HandleMessage(
 	unmarshal := func(value any) error {
 		if err := json.Unmarshal(message, value); err != nil {
 			err := fmt.Errorf("error unmarshaling %s: %w", *typeStr, err)
-			disp.send(ctx, id, api.InvalidMessage{Error: err.Error()})
+			// we're already on the error path anyways
+			_ = disp.send(ctx, id, api.InvalidMessage{Error: err.Error()})
 			return err
 		}
 
