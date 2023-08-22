@@ -216,43 +216,56 @@ func (disp *Dispatcher) HandleMessage(
 		}
 	}()
 
+	// Helper function to handle common unmarshalling logic
+	unmarshal := func(value any) error {
+		if err := json.Unmarshal(message, value); err != nil {
+			err := fmt.Errorf("error unmarshaling %s: %w", *typeStr, err)
+			// we're already on the error path anyways
+			_ = disp.send(ctx, id, api.InvalidMessage{Error: err.Error()})
+			return err
+		}
+
+		return nil
+	}
+
 	switch *typeStr {
 	case "UpscaleRequest":
 		var req api.UpscaleRequest
-		if err := json.Unmarshal(message, &req); err != nil {
-			return fmt.Errorf("error unmarshaling UpscaleRequest: %w", err)
+		if err := unmarshal(&req); err != nil {
+			return err
 		}
 		handlers.handleUpscaleRequest(req)
 		return nil
 	case "UpscaleConfirmation":
 		var confirmation api.UpscaleConfirmation
-		if err := json.Unmarshal(message, &confirmation); err != nil {
-			return fmt.Errorf("error unmarshaling UpscaleConfirmation: %w", err)
+		if err := unmarshal(&confirmation); err != nil {
+			return err
 		}
 		return handlers.handleUpscaleConfirmation(confirmation, id)
 	case "DownscaleResult":
 		var res api.DownscaleResult
-		if err := json.Unmarshal(message, &res); err != nil {
-			return fmt.Errorf("error unmarshaling DownscaleResult: %w", err)
+		if err := unmarshal(&res); err != nil {
+			return err
 		}
 		return handlers.handleDownscaleResult(res, id)
 	case "InternalError":
 		var monitorErr api.InternalError
-		if err := json.Unmarshal(message, &monitorErr); err != nil {
-			return fmt.Errorf("error unmarshaling InternalError: %w", err)
+		if err := unmarshal(&monitorErr); err != nil {
+			return err
 		}
 		return handlers.handleMonitorError(monitorErr, id)
 	case "HealthCheck":
 		var healthCheck api.HealthCheck
-		if err := json.Unmarshal(message, &healthCheck); err != nil {
-			return fmt.Errorf("error unmarshaling HealthCheck: %w", err)
+		if err := unmarshal(&healthCheck); err != nil {
+			return err
 		}
 		return handlers.handleHealthCheck(healthCheck, id)
 	case "InvalidMessage":
 		var warning api.InvalidMessage
-		if err := json.Unmarshal(message, &warning); err != nil {
-			disp.logger.Warn("received notification we sent an invalid message", zap.Any("warning", warning))
+		if err := unmarshal(&warning); err != nil {
+			return err
 		}
+		disp.logger.Warn("received notification we sent an invalid message", zap.Any("warning", warning))
 		return nil
 	default:
 		return disp.send(
