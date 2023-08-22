@@ -453,7 +453,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 						ctx,
 						disp.logger,
 						"dispatcher message handler",
-						func(ctx context.Context, _ *zap.Logger) { disp.run(ctx) },
+						ignoreLogger(disp.run),
 					)
 				} else if s.exitStatus != nil {
 					// we exited -> close ws

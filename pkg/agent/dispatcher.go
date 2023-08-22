@@ -370,15 +370,24 @@ func (disp *Dispatcher) run(ctx context.Context) {
 			handlers,
 		)
 		if err != nil {
-			func() {
-				logger.Error("error handling message -> triggering informant server exit", zap.Error(err))
-				disp.server.runner.lock.Lock()
-				defer disp.server.runner.lock.Unlock()
-				disp.server.exit(InformantServerExitStatus{
-					Err:            err,
-					RetryShouldFix: false,
-				})
-			}()
+			if ctx.Err() != nil {
+				// The context is already cancelled, so this error is mostly likely
+				// expected. For example, if the context is cancelled becaues the
+				// informant server exited, we should expect to fail to read off the
+				// connection, which is closed by the server exit.
+				logger.Warn("context is already cancelled, but received an error", zap.Error(err))
+			} else {
+				func() {
+					logger.Error("error handling message -> triggering informant server exit", zap.Error(err))
+					disp.server.runner.lock.Lock()
+					defer disp.server.runner.lock.Unlock()
+					disp.server.exit(InformantServerExitStatus{
+						Err:            err,
+						RetryShouldFix: false,
+					})
+				}()
+			}
+			return
 		}
 	}
 }
