@@ -6,9 +6,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
@@ -132,31 +134,42 @@ func (disp *Dispatcher) registerWaiter(id uint64, sender util.SignalSender[*Moni
 }
 
 // unregisterWaiter deletes a preexisting waiter without interacting with it.
-//
-// This method is intended to be used for error cases where the waiter was created but never
-// returned to the caller.
 func (disp *Dispatcher) unregisterWaiter(id uint64) {
 	disp.lock.Lock()
 	defer disp.lock.Unlock()
 	delete(disp.waiters, id)
 }
 
-// Make a request to the monitor. The dispatcher will handle returning a response
-// on the provided SignalSender. The value passed into message must be a valid value
-// to send to the monitor. See the docs for SerializeInformantMessage.
-func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*MonitorResult], message any) error {
+// Make a request to the monitor and wait for a response. The value passed as message must be a
+// valid value to send to the monitor. See the docs for SerializeInformantMessage for more.
+func (disp *Dispatcher) Call(ctx context.Context, timeout time.Duration, message any) (*MonitorResult, error) {
 	id := disp.lastTransactionID.Add(1)
+	sender, receiver := util.NewSingleSignalPair[*MonitorResult]()
+
 	// register the waiter *before* sending, so that we avoid a potential race where we'd get a
 	// reply to the message before being ready to receive it.
 	disp.registerWaiter(id, sender)
-
 	err := disp.send(ctx, id, message)
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
 		disp.unregisterWaiter(id)
-		return err
+		return nil, err
 	}
-	return nil
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case result := <-receiver.Recv():
+		if result == nil {
+			return nil, errors.New("monitor experienced an internal error")
+		}
+		return result, nil
+	case <-timer.C:
+		err := fmt.Errorf("timed out waiting %v for monitor response", timeout)
+		disp.unregisterWaiter(id)
+		return nil, err
+	}
 }
 
 func extractField[T any](data map[string]interface{}, key string) (*T, error) {
