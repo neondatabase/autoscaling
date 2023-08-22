@@ -426,7 +426,7 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 		// pre-declare disp so that err get's assigned to err from enclosing scope,
 		// overwriting original request error.
 		var disp *Dispatcher
-		disp, err = NewDispatcher(logger, addr, s)
+		disp, err = NewDispatcher(ctx, logger, addr, s)
 		// If the error is not nil, it will get handled below
 		if err == nil {
 			// Acquire the lock late so as not to hold it will connecting to the
@@ -449,12 +449,11 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 							},
 						},
 					}
-					// TODO: fix context/logger stuff
 					s.runner.spawnBackgroundWorker(
-						context.Background(),
+						ctx,
 						disp.logger,
 						"dispatcher message handler",
-						func(context.Context, *zap.Logger) { disp.run() },
+						ignoreLogger(disp.run),
 					)
 				} else if s.exitStatus != nil {
 					// we exited -> close ws
