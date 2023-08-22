@@ -154,6 +154,7 @@ func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*Moni
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
 		disp.unregisterWaiter(id)
+		return err
 	}
 	return nil
 }
