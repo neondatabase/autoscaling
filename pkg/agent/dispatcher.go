@@ -71,7 +71,7 @@ func NewDispatcher(
 	addr string,
 	parent *InformantServer,
 ) (*Dispatcher, error) {
-	// server.runner, runner.global, and global.config are immutable so we don't
+	// parent.runner, runner.global, and global.config are immutable so we don't
 	// need to acquire runner.lock here
 	ctx, cancel := context.WithTimeout(
 		ctx,
