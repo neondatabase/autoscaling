@@ -207,6 +207,16 @@ func (disp *Dispatcher) HandleMessage(
 		return fmt.Errorf("error extracting 'id field: %w", err)
 	}
 	id := uint64(*f)
+	// now that we have the waiter's ID, make sure that if there's some failure past this point, we
+	// propagate that along to the monitor and remove it
+	defer func() {
+		disp.lock.Lock()
+		defer disp.lock.Unlock()
+		if sender, ok := disp.waiters[id]; ok {
+			sender.Send(nil) // nil for failure
+			delete(disp.waiters, id)
+		}
+	}()
 
 	switch *typeStr {
 	case "UpscaleRequest":
