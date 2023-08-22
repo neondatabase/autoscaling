@@ -1210,9 +1210,8 @@ func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Lo
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
 
-	// Update our record of the last successful time we heard from the monitor, if the "server"
-	// is currently enabled. This allows us to detect cases where the communication has broken
-	// down.
+	// Update our record of the last successful time we heard from the monitor. This allows us to
+	// detect cases where the communication has broken down.
 	s.runner.status.update(s.runner.global, func(s podStatus) podStatus {
 		now := time.Now()
 		s.lastSuccessfulInformantComm = &now
