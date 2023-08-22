@@ -64,9 +64,7 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(logger *zap.Logger, addr string, parent *InformantServer) (disp *Dispatcher, _ error) {
-	ctx := context.TODO()
-
+func NewDispatcher(ctx context.Context, logger *zap.Logger, addr string, parent *InformantServer) (disp *Dispatcher, _ error) {
 	logger.Info("connecting via websocket", zap.String("addr", addr))
 
 	// We do not need to close the response body according to docs.
@@ -256,8 +254,7 @@ func (disp *Dispatcher) HandleMessage(
 }
 
 // Long running function that orchestrates all requests/responses.
-func (disp *Dispatcher) run() {
-	ctx := context.Background()
+func (disp *Dispatcher) run(ctx context.Context) {
 	logger := disp.logger.Named("message-handler")
 	logger.Info("starting message handler")
 
@@ -373,11 +370,15 @@ func (disp *Dispatcher) run() {
 			handlers,
 		)
 		if err != nil {
-			logger.Error("error handling message -> panicking", zap.Error(err))
-			// TODO: fix this comment for the agent
-			// We actually want to panic here so we get respawned by the inittab,
-			// and so the monitor's connection is closed and it also gets restarted
-			panic(err)
+			func() {
+				logger.Error("error handling message -> triggering informant server exit", zap.Error(err))
+				disp.server.runner.lock.Lock()
+				defer disp.server.runner.lock.Unlock()
+				disp.server.exit(InformantServerExitStatus{
+					Err:            err,
+					RetryShouldFix: false,
+				})
+			}()
 		}
 	}
 }
