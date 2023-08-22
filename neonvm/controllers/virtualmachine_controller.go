@@ -409,7 +409,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
 			// get CPU details from QEMU and update status
-			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
+			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(virtualmachine))
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
@@ -452,7 +452,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// get Memory details from hypervisor and update VM status
-			memorySize, err := QmpGetMemorySize(virtualmachine)
+			memorySize, err := QmpGetMemorySize(QmpAddr(virtualmachine))
 			if err != nil {
 				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
@@ -565,7 +565,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 		// do hotplug/unplug CPU
 		// firstly get current state from QEMU
-		cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
+		cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(virtualmachine))
 		if err != nil {
 			log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 			return err
@@ -576,7 +576,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		if specCPU > pluggedCPU {
 			// going to plug one CPU
 			log.Info("Plug one more CPU into VM")
-			if err := QmpPlugCpu(virtualmachine); err != nil {
+			if err := QmpPlugCpu(QmpAddr(virtualmachine)); err != nil {
 				return err
 			}
 			r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
@@ -585,7 +585,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		} else if specCPU < pluggedCPU {
 			// going to unplug one CPU
 			log.Info("Unplug one CPU from VM")
-			if err := QmpUnplugCpu(virtualmachine); err != nil {
+			if err := QmpUnplugCpu(QmpAddr(virtualmachine)); err != nil {
 				return err
 			}
 			r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
@@ -598,7 +598,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 		// do hotplug/unplug Memory
 		// firstly get current state from QEMU
-		memoryDevices, err := QmpQueryMemoryDevices(virtualmachine)
+		memoryDevices, err := QmpQueryMemoryDevices(QmpAddr(virtualmachine))
 		memoryPluggedSlots := *virtualmachine.Spec.Guest.MemorySlots.Min + int32(len(memoryDevices))
 		if err != nil {
 			log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
@@ -617,7 +617,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
 			// going to unplug one Memory Slot
 			log.Info("Unplug one Memory module from VM")
-			if err := QmpUnplugMemory(virtualmachine); err != nil {
+			if err := QmpUnplugMemory(QmpAddr(virtualmachine)); err != nil {
 				// special case !
 				// error means VM hadn't memory devices available for unplug
 				// need set .memorySlots.Use back to real value
