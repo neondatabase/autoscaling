@@ -131,17 +131,31 @@ func (disp *Dispatcher) registerWaiter(id uint64, sender util.SignalSender[*Moni
 	disp.waiters[id] = sender
 }
 
+// unregisterWaiter deletes a preexisting waiter without interacting with it.
+//
+// This method is intended to be used for error cases where the waiter was created but never
+// returned to the caller.
+func (disp *Dispatcher) unregisterWaiter(id uint64) {
+	disp.lock.Lock()
+	defer disp.lock.Unlock()
+	delete(disp.waiters, id)
+}
+
 // Make a request to the monitor. The dispatcher will handle returning a response
 // on the provided SignalSender. The value passed into message must be a valid value
 // to send to the monitor. See the docs for SerializeInformantMessage.
 func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*MonitorResult], message any) error {
 	id := disp.lastTransactionID.Add(1)
+	// register the waiter *before* sending, so that we avoid a potential race where we'd get a
+	// reply to the message before being ready to receive it.
+	disp.registerWaiter(id, sender)
+
 	err := disp.send(ctx, id, message)
 	if err != nil {
 		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
+		disp.unregisterWaiter(id)
 		return err
 	}
-	disp.registerWaiter(id, sender)
 	return nil
 }
 
@@ -217,43 +231,56 @@ func (disp *Dispatcher) HandleMessage(
 		}
 	}()
 
+	// Helper function to handle common unmarshalling logic
+	unmarshal := func(value any) error {
+		if err := json.Unmarshal(message, value); err != nil {
+			err := fmt.Errorf("error unmarshaling %s: %w", *typeStr, err)
+			// we're already on the error path anyways
+			_ = disp.send(ctx, id, api.InvalidMessage{Error: err.Error()})
+			return err
+		}
+
+		return nil
+	}
+
 	switch *typeStr {
 	case "UpscaleRequest":
 		var req api.UpscaleRequest
-		if err := json.Unmarshal(message, &req); err != nil {
-			return fmt.Errorf("error unmarshaling UpscaleRequest: %w", err)
+		if err := unmarshal(&req); err != nil {
+			return err
 		}
 		handlers.handleUpscaleRequest(req)
 		return nil
 	case "UpscaleConfirmation":
 		var confirmation api.UpscaleConfirmation
-		if err := json.Unmarshal(message, &confirmation); err != nil {
-			return fmt.Errorf("error unmarshaling UpscaleConfirmation: %w", err)
+		if err := unmarshal(&confirmation); err != nil {
+			return err
 		}
 		return handlers.handleUpscaleConfirmation(confirmation, id)
 	case "DownscaleResult":
 		var res api.DownscaleResult
-		if err := json.Unmarshal(message, &res); err != nil {
-			return fmt.Errorf("error unmarshaling DownscaleResult: %w", err)
+		if err := unmarshal(&res); err != nil {
+			return err
 		}
 		return handlers.handleDownscaleResult(res, id)
 	case "InternalError":
 		var monitorErr api.InternalError
-		if err := json.Unmarshal(message, &monitorErr); err != nil {
-			return fmt.Errorf("error unmarshaling InternalError: %w", err)
+		if err := unmarshal(&monitorErr); err != nil {
+			return err
 		}
 		return handlers.handleMonitorError(monitorErr, id)
 	case "HealthCheck":
 		var healthCheck api.HealthCheck
-		if err := json.Unmarshal(message, &healthCheck); err != nil {
-			return fmt.Errorf("error unmarshaling HealthCheck: %w", err)
+		if err := unmarshal(&healthCheck); err != nil {
+			return err
 		}
 		return handlers.handleHealthCheck(healthCheck, id)
 	case "InvalidMessage":
 		var warning api.InvalidMessage
-		if err := json.Unmarshal(message, &warning); err != nil {
-			disp.logger.Warn("received notification we sent an invalid message", zap.Any("warning", warning))
+		if err := unmarshal(&warning); err != nil {
+			return err
 		}
+		disp.logger.Warn("received notification we sent an invalid message", zap.Any("warning", warning))
 		return nil
 	default:
 		return disp.send(
