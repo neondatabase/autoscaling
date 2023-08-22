@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
@@ -64,14 +65,27 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(ctx context.Context, logger *zap.Logger, addr string, parent *InformantServer) (disp *Dispatcher, _ error) {
+func NewDispatcher(
+	ctx context.Context,
+	logger *zap.Logger,
+	addr string,
+	parent *InformantServer,
+) (*Dispatcher, error) {
+	// parent.runner, runner.global, and global.config are immutable so we don't
+	// need to acquire runner.lock here
+	ctx, cancel := context.WithTimeout(
+		ctx,
+		time.Second*time.Duration(parent.runner.global.config.Monitor.ConnectionTimeoutSeconds),
+	)
+	defer cancel()
+
 	logger.Info("connecting via websocket", zap.String("addr", addr))
 
 	// We do not need to close the response body according to docs.
 	// Doing so causes memory bugs.
 	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
 	if err != nil {
-		return disp, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
+		return nil, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
 	// Figure out protocol version
@@ -96,7 +110,7 @@ func NewDispatcher(ctx context.Context, logger *zap.Logger, addr string, parent 
 	}
 	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
-	disp = &Dispatcher{
+	disp := &Dispatcher{
 		conn:              c,
 		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
 		lastTransactionID: atomic.Uint64{},
