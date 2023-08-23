@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/tychoish/fun/pubsub"
@@ -754,9 +755,63 @@ func (e *AutoscaleEnforcer) Score(
 	return score, nil
 }
 
-// ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used
-func (e *AutoscaleEnforcer) ScoreExtensions() framework.ScoreExtensions {
+// NormalizeScore weights scores uniformly in the range [minScore, trueScore], where
+// minScore is framework.MinNodeScore + 1.
+func (e *AutoscaleEnforcer) NormalizeScore(
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+	scores framework.NodeScoreList,
+) (status *framework.Status) {
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("NormalizeScore", ignored)
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("NormalizeScore", ignored, status)
+	}()
+
+	logger := e.logger.With(zap.String("method", "NormalizeScore"), util.PodNameFields(pod))
+	logger.Info("Handling NormalizeScore request")
+
+	for _, node := range scores {
+		nodeScore := node.Score
+		nodeName := node.Name
+
+		// rand.Intn will panic if we pass in 0
+		if nodeScore == 0 {
+			logger.Info("Ignoring node as it was assigned a score of 0", zap.String("node", nodeName))
+			continue
+		}
+
+		// This is different from framework.MinNodeScore. We use framework.MinNodeScore
+		// to indicate that a pod should not be placed on a node. The lowest
+		// actual score we assign a node is thus framework.MinNodeScore + 1
+		minScore := framework.MinNodeScore + 1
+
+		// We want to pick a score in the range [minScore, score], so use
+		// score _+ 1_ - minscore, as rand.Intn picks a number in the _half open_
+		// range [0, n)
+		newScore := int64(rand.Intn(int(nodeScore+1-minScore))) + minScore
+		logger.Info(
+			"Randomly choosing newScore from range [minScore, trueScore]",
+			zap.String("node", nodeName),
+			zap.Int64("newScore", newScore),
+			zap.Int64("minScore", minScore),
+			zap.Int64("trueScore", nodeScore),
+		)
+		node.Score = newScore
+	}
 	return nil
+}
+
+// ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used.
+// However, we do use it, to randomize scores.
+func (e *AutoscaleEnforcer) ScoreExtensions() framework.ScoreExtensions {
+	if e.state.conf.RandomizeScores {
+		return e
+	} else {
+		return nil
+	}
 }
 
 // Reserve signals to our plugin that a particular pod will (probably) be bound to a node, giving us

@@ -57,6 +57,10 @@ type Dispatcher struct {
 
 	// lastTransactionID is the last transaction id. When we need a new one
 	// we simply bump it and take the new number.
+	//
+	// In order to prevent collisions between the IDs generated here vs by
+	// the monitor, we only generate even IDs, and the monitor only generates
+	// odd ones. So generating a new value is done by adding 2.
 	lastTransactionID atomic.Uint64
 
 	logger *zap.Logger
@@ -66,14 +70,27 @@ type Dispatcher struct {
 
 // Create a new Dispatcher, establishing a connection with the informant.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
-func NewDispatcher(ctx context.Context, logger *zap.Logger, addr string, parent *InformantServer) (disp *Dispatcher, _ error) {
+func NewDispatcher(
+	ctx context.Context,
+	logger *zap.Logger,
+	addr string,
+	parent *InformantServer,
+) (*Dispatcher, error) {
+	// parent.runner, runner.global, and global.config are immutable so we don't
+	// need to acquire runner.lock here
+	ctx, cancel := context.WithTimeout(
+		ctx,
+		time.Second*time.Duration(parent.runner.global.config.Monitor.ConnectionTimeoutSeconds),
+	)
+	defer cancel()
+
 	logger.Info("connecting via websocket", zap.String("addr", addr))
 
 	// We do not need to close the response body according to docs.
 	// Doing so causes memory bugs.
 	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
 	if err != nil {
-		return disp, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
+		return nil, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
 	// Figure out protocol version
@@ -98,10 +115,10 @@ func NewDispatcher(ctx context.Context, logger *zap.Logger, addr string, parent 
 	}
 	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
-	disp = &Dispatcher{
+	disp := &Dispatcher{
 		conn:              c,
 		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
-		lastTransactionID: atomic.Uint64{},
+		lastTransactionID: atomic.Uint64{}, // Note: initialized to 0, so it's even, as required.
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
 		server:            parent,
@@ -143,7 +160,7 @@ func (disp *Dispatcher) unregisterWaiter(id uint64) {
 // Make a request to the monitor and wait for a response. The value passed as message must be a
 // valid value to send to the monitor. See the docs for SerializeInformantMessage for more.
 func (disp *Dispatcher) Call(ctx context.Context, timeout time.Duration, message any) (*MonitorResult, error) {
-	id := disp.lastTransactionID.Add(1)
+	id := disp.lastTransactionID.Add(2)
 	sender, receiver := util.NewSingleSignalPair[*MonitorResult]()
 
 	// register the waiter *before* sending, so that we avoid a potential race where we'd get a
