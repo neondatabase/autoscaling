@@ -763,12 +763,28 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 	state *framework.CycleState,
 	pod *corev1.Pod,
 	scores framework.NodeScoreList,
-) *framework.Status {
-	for _, nodeScore := range scores {
-		score := nodeScore.Score
+) (status *framework.Status) {
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("NormalizeScore", ignored)
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("NormalizeScore", ignored, status)
+	}()
+
+	logger := e.logger.With(zap.String("method", "NormalizeScore"), util.PodNameFields(pod))
+	logger.Info("Handling NormalizeScore request")
+
+	for _, node := range scores {
+		// logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
+		nodeScore := node.Score
+		nodeName := node.Name
 
 		// rand.Intn will panic if we pass in 0
-		if score == 0 {
+		if nodeScore == 0 {
+			logger.Info(
+				fmt.Sprintf("Ignoring node %s as it was assigned a score of 0", nodeName),
+				zap.String("node", nodeName),
+			)
 			continue
 		}
 
@@ -780,14 +796,24 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 		// We want to pick a score in the range [minScore, score], so use
 		// score _+ 1_ - minscore, as rand.Intn picks a number in the _half open_
 		// range [0, n)
-		nodeScore.Score = int64(rand.Intn(int(score+1-minScore))) + minScore
+		newScore := int64(rand.Intn(int(nodeScore+1-minScore))) + minScore
+		logger.Info(
+			fmt.Sprintf(
+				"Randomly chose score %d from range [minScore=%d, trueScore=%d]",
+				newScore, minScore, nodeScore,
+			),
+			zap.String("node", nodeName),
+			zap.Int64("score", newScore),
+		)
+		node.Score = newScore
 	}
 	return nil
 }
 
-// ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used
+// ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used.
+// However, we do use it, to randomize scores.
 func (e *AutoscaleEnforcer) ScoreExtensions() framework.ScoreExtensions {
-	return nil
+	return e
 }
 
 // Reserve signals to our plugin that a particular pod will (probably) be bound to a node, giving us
