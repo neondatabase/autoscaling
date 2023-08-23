@@ -41,6 +41,10 @@ type Config struct {
 	// version handled.
 	SchedulerName string `json:"schedulerName"`
 
+	// RandomizeScores, if true, will cause the scheduler to score a node with a random number in
+	// the range [minScore + 1, trueScore], instead of the trueScore
+	RandomizeScores bool `json:"randomizeScores"`
+
 	// MigrationDeletionRetrySeconds gives the duration, in seconds, we should wait between retrying
 	// a failed attempt to delete a VirtualMachineMigration that's finished.
 	MigrationDeletionRetrySeconds uint `json:"migrationDeletionRetrySeconds"`
