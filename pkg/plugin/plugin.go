@@ -61,7 +61,6 @@ var _ framework.PreFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.PostFilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
 var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
-var _ framework.ScoreExtensions = (*AutoscaleEnforcer)(nil)
 var _ framework.ReservePlugin = (*AutoscaleEnforcer)(nil)
 
 func NewAutoscaleEnforcerPlugin(ctx context.Context, logger *zap.Logger, config *Config) func(runtime.Object, framework.Handle) (framework.Plugin, error) {
@@ -780,10 +779,7 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 
 		// rand.Intn will panic if we pass in 0
 		if nodeScore == 0 {
-			logger.Info(
-				fmt.Sprintf("Ignoring node %s as it was assigned a score of 0", nodeName),
-				zap.String("node", nodeName),
-			)
+			logger.Info("Ignoring node as it was assigned a score of 0", zap.String("node", nodeName))
 			continue
 		}
 
@@ -798,8 +794,8 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 		newScore := int64(rand.Intn(int(nodeScore+1-minScore))) + minScore
 		logger.Info(
 			fmt.Sprintf(
-				"Randomly chose score %d from range [minScore=%d, trueScore=%d]",
-				newScore, minScore, nodeScore,
+				"Randomly choosing from range [minScore=%d, trueScore=%d]",
+				minScore, nodeScore,
 			),
 			zap.String("node", nodeName),
 			zap.Int64("score", newScore),
