@@ -164,7 +164,12 @@ func (disp *Dispatcher) unregisterWaiter(id uint64) {
 
 // Make a request to the monitor and wait for a response. The value passed as message must be a
 // valid value to send to the monitor. See the docs for SerializeInformantMessage for more.
-func (disp *Dispatcher) Call(ctx context.Context, timeout time.Duration, messageType string, message any) (*MonitorResult, error) {
+func (disp *Dispatcher) Call(
+	ctx context.Context,
+	timeout time.Duration,
+	messageType string,
+	message any,
+) (*MonitorResult, error) {
 	id := disp.lastTransactionID.Add(2)
 	sender, receiver := util.NewSingleSignalPair[waiterResult]()
 
