@@ -56,6 +56,10 @@ type Dispatcher struct {
 
 	// lastTransactionID is the last transaction id. When we need a new one
 	// we simply bump it and take the new number.
+	//
+	// In order to prevent collisions between the IDs generated here vs by
+	// the monitor, we only generate even IDs, and the monitor only generates
+	// odd ones. So generating a new value is done by adding 2.
 	lastTransactionID atomic.Uint64
 
 	logger *zap.Logger
@@ -113,7 +117,7 @@ func NewDispatcher(
 	disp := &Dispatcher{
 		conn:              c,
 		waiters:           make(map[uint64]util.SignalSender[*MonitorResult]),
-		lastTransactionID: atomic.Uint64{},
+		lastTransactionID: atomic.Uint64{}, // Note: initialized to 0, so it's even, as required.
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
 		server:            parent,
@@ -159,7 +163,9 @@ func (disp *Dispatcher) unregisterWaiter(id uint64) {
 // on the provided SignalSender. The value passed into message must be a valid value
 // to send to the monitor. See the docs for SerializeInformantMessage.
 func (disp *Dispatcher) Call(ctx context.Context, sender util.SignalSender[*MonitorResult], message any) error {
-	id := disp.lastTransactionID.Add(1)
+	// NB: we add 2 to maintain parity (i.e. keep lastTransactionID even). See the comment on the
+	// field for more information.
+	id := disp.lastTransactionID.Add(2)
 	// register the waiter *before* sending, so that we avoid a potential race where we'd get a
 	// reply to the message before being ready to receive it.
 	disp.registerWaiter(id, sender)
