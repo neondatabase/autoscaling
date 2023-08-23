@@ -281,6 +281,10 @@ func (disp *Dispatcher) HandleMessage(
 		} else if rootErr != nil {
 			err = rootErr
 		} else {
+			// if HandleMessage bailed without panicking or setting rootErr, but *also* without
+			// sending a message to the waiter, we should make sure that *something* gets sent, so
+			// the message doesn't just time out. But we don't have more information, so the error
+			// is still just "unknown".
 			err = errors.New("unknown")
 		}
 
