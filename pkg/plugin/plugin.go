@@ -775,7 +775,6 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 	logger.Info("Handling NormalizeScore request")
 
 	for _, node := range scores {
-		// logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
 		nodeScore := node.Score
 		nodeName := node.Name
 
