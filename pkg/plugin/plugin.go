@@ -773,11 +773,6 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 	logger := e.logger.With(zap.String("method", "NormalizeScore"), util.PodNameFields(pod))
 	logger.Info("Handling NormalizeScore request")
 
-	if !e.state.conf.RandomizeScores {
-		logger.Info("randomizeScores not set, skipping randomizations")
-		return
-	}
-
 	for _, node := range scores {
 		nodeScore := node.Score
 		nodeName := node.Name
@@ -812,7 +807,11 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 // ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used.
 // However, we do use it, to randomize scores.
 func (e *AutoscaleEnforcer) ScoreExtensions() framework.ScoreExtensions {
-	return e
+	if e.state.conf.RandomizeScores {
+		return e
+	} else {
+		return nil
+	}
 }
 
 // Reserve signals to our plugin that a particular pod will (probably) be bound to a node, giving us
