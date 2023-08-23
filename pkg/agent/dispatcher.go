@@ -289,6 +289,11 @@ func (disp *Dispatcher) HandleMessage(
 		if sender, ok := disp.waiters[id]; ok {
 			sender.Send(waiterResult{err: err, res: nil})
 			delete(disp.waiters, id)
+		} else if rootErr != nil {
+			// we had some error while handling the message with this ID, and there wasn't a
+			// corresponding waiter. We should make note of this in the metrics:
+			status := fmt.Sprintf("[error: %s]", rootErr)
+			disp.server.runner.global.metrics.informantRequestsInbound.WithLabelValues(*typeStr, status)
 		}
 
 		// resume panicking if we were before
@@ -379,6 +384,11 @@ func (disp *Dispatcher) run(ctx context.Context) {
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
 		disp.server.runner.lock.Lock()
 		defer disp.server.runner.lock.Unlock()
+
+		// TODO: it shouldn't be this function's responsibility to update metrics.
+		defer func() {
+			disp.server.runner.global.metrics.informantRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
+		}()
 
 		disp.server.upscaleRequested.Send()
 
