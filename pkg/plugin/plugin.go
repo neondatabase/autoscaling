@@ -798,12 +798,11 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 		// range [0, n)
 		newScore := int64(rand.Intn(int(nodeScore+1-minScore))) + minScore
 		logger.Info(
-			fmt.Sprintf(
-				"Randomly choosing from range [minScore=%d, trueScore=%d]",
-				minScore, nodeScore,
-			),
+			"Randomly choosing newScore from range [minScore, trueScore]",
 			zap.String("node", nodeName),
-			zap.Int64("score", newScore),
+			zap.Int64("newScore", newScore),
+			zap.Int64("minScore", minScore),
+			zap.Int64("trueScore", nodeScore),
 		)
 		node.Score = newScore
 	}
