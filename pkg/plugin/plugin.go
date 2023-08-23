@@ -773,6 +773,11 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 	logger := e.logger.With(zap.String("method", "NormalizeScore"), util.PodNameFields(pod))
 	logger.Info("Handling NormalizeScore request")
 
+	if !e.state.conf.RandomizeScores {
+		logger.Info("randomizeScores not set, skipping randomizations")
+		return
+	}
+
 	for _, node := range scores {
 		nodeScore := node.Score
 		nodeName := node.Name
