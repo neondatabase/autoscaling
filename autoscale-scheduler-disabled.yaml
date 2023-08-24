@@ -110,7 +110,8 @@ data:
         "timeoutSeconds": 5
       },
       "migrationDeletionRetrySeconds": 5,
-      "doMigration": false
+      "doMigration": false,
+      "randomizeScores": true
     }
 kind: ConfigMap
 metadata:
@@ -143,7 +144,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.17.0
+        image: neondatabase/autoscale-scheduler:v0.17.4
         livenessProbe:
           httpGet:
             path: /healthz
