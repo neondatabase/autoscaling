@@ -187,6 +187,18 @@ chmod 1777 /dev/shm
 mount -t proc  proc  /proc
 mount -t sysfs sysfs /sys
 mount -t cgroup2 cgroup2 /sys/fs/cgroup
+
+# Allow all users to move processes to/from the root cgroup.
+#
+# This is required in order to be able to 'cgexec' anything, if the entrypoint is not being run as
+# root, because moving tasks betweeen one cgroup and another *requires write access to the
+# cgroup.procs file of the common ancestor*, and because the entrypoint isn't already in a cgroup,
+# any new tasks are automatically placed in the top-level cgroup.
+#
+# This *would* be bad for security, if we relied on cgroups for security; but instead because they
+# are just used for cooperative signaling, this should be mostly ok.
+chmod go+w /sys/fs/cgroup/cgroup.procs
+
 mount -t devpts -o noexec,nosuid       devpts    /dev/pts
 mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
 
