@@ -1158,7 +1158,7 @@ func (s *InformantServer) Upscale(ctx context.Context, logger *zap.Logger, to ap
 func (s *InformantServer) MonitorHealthCheck(ctx context.Context, logger *zap.Logger) error {
 	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
 
-	_, err := s.dispatcher.Call(ctx, timeout, api.HealthCheck{})
+	_, err := s.dispatcher.Call(ctx, timeout, "HealthCheck", api.HealthCheck{})
 
 	s.runner.lock.Lock()
 	defer s.runner.lock.Unlock()
@@ -1197,7 +1197,7 @@ func (s *InformantServer) MonitorUpscale(ctx context.Context, logger *zap.Logger
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
 
-	_, err := s.dispatcher.Call(ctx, timeout, api.UpscaleNotification{
+	_, err := s.dispatcher.Call(ctx, timeout, "UpscaleNotification", api.UpscaleNotification{
 		Granted: api.Allocation{Cpu: cpu, Mem: mem},
 	})
 	if err != nil {
@@ -1227,7 +1227,7 @@ func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logg
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
 
-	res, err := s.dispatcher.Call(ctx, timeout, api.DownscaleRequest{
+	res, err := s.dispatcher.Call(ctx, timeout, "DownscaleRequest", api.DownscaleRequest{
 		Target: api.Allocation{Cpu: cpu, Mem: mem},
 	})
 	if err != nil {
