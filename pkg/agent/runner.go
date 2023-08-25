@@ -331,7 +331,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	addr := fmt.Sprintf(
 		"ws://%s:%d/monitor",
 		r.podIP,
-		r.global.config.Informant.ServerPort,
+		r.global.config.Monitor.ServerPort,
 	)
 	dispatcher, err := NewDispatcher(ctx, logger, addr, r, sendUpscaleRequested)
 	if err != nil {

@@ -213,7 +213,7 @@ func (disp *Dispatcher) Call(
 		// detect cases where the communication has broken down.
 		disp.runner.status.update(disp.runner.global, func(s podStatus) podStatus {
 			now := time.Now()
-			s.lastSuccessfulInformantComm = &now
+			s.lastSuccessfulMonitorComm = &now
 			return s
 		})
 
