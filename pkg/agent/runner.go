@@ -58,6 +58,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"nhooyr.io/websocket"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -79,6 +80,7 @@ const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV2_0
 // It primarily operates as a source of shared data for a number of long-running tasks. For
 // additional general information, refer to the comment at the top of this file.
 type Runner struct {
+	// Set in (*Runner).Run()
 	dispatcher *Dispatcher
 
 	global *agentState
@@ -250,6 +252,15 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 	go func() {
 		// Gracefully handle panics, plus trigger restart
 		defer func() {
+			// Since the dispatcher form a reference cycle, the dispatcher's finalizer may not
+			// get run, and thus its connection might not be closed. This is not a massive issue
+			// as the monitor will just kill the connection when it gets a new one, but explicitly
+			// closing the connection might make the event timeline easier to understand.
+			if r.dispatcher != nil {
+				logger.Info("runner lifecycle ended -> closing dispatcher connection")
+				r.dispatcher.conn.Close(websocket.StatusInternalError, "runner lifecycle ended")
+			}
+
 			if err := recover(); err != nil {
 				now := time.Now()
 				r.status.update(r.global, func(stat podStatus) podStatus {
