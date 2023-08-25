@@ -23,4 +23,4 @@ spec:
       - port: 22   # ssh
       - port: 5432 # postgres
       - port: 9100 # metrics
-      - port: 10301 # informant
+      - port: 10301 # monitor
