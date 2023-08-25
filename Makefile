@@ -10,6 +10,9 @@ VM_MONITOR_IMG ?= vm-monitor:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
+# Which branch of neondatabase/neon to pull the vm-monitor from
+VM_MONITOR_BRANCH ?= main
+
 # kernel for guests
 VM_KERNEL_VERSION ?= "5.15.80"
 
@@ -135,6 +138,7 @@ vm-monitor: ## Build vm-monitor image
 	docker buildx build \
 		--tag $(VM_MONITOR_IMG) \
 		--load \
+		--build-arg BRANCH=$(VM_MONITOR_BRANCH) \
 		--file build/vm-monitor/Dockerfile \
 		.
 
