@@ -1425,6 +1425,7 @@ func (r *Runner) recordResourceChange(current, target api.Resources, metrics res
 	}
 }
 
+// This function must NOT be called while holding r.lock.
 func (r *Runner) doDownscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
 	rawResources := to.ConvertToRaw(r.vm.Mem.SlotSize)
 	cpu := rawResources.Cpu.AsApproximateFloat64()
@@ -1443,6 +1444,7 @@ func (r *Runner) doDownscale(ctx context.Context, logger *zap.Logger, to api.Res
 	return res.Result, nil
 }
 
+// This function must NOT be called while holding r.lock.
 func (r *Runner) doUpscale(ctx context.Context, logger *zap.Logger, to api.Resources) (ok bool, _ error) {
 	rawResources := to.ConvertToRaw(r.vm.Mem.SlotSize)
 	cpu := rawResources.Cpu.AsApproximateFloat64()

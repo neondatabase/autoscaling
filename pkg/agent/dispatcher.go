@@ -169,6 +169,8 @@ func (disp *Dispatcher) unregisterWaiter(id uint64) {
 
 // Make a request to the monitor and wait for a response. The value passed as message must be a
 // valid value to send to the monitor. See the docs for SerializeInformantMessage for more.
+//
+// This function must NOT be called while holding disp.runner.lock.
 func (disp *Dispatcher) Call(
 	ctx context.Context,
 	timeout time.Duration,
@@ -203,6 +205,17 @@ func (disp *Dispatcher) Call(
 			status = fmt.Sprintf("[error: %s]", result.err)
 			return nil, errors.New("monitor experienced an internal error")
 		}
+
+		disp.runner.lock.Lock()
+		defer disp.runner.lock.Unlock()
+
+		// Update our record of the last successful time we heard from the monitor. This allows us to
+		// detect cases where the communication has broken down.
+		disp.runner.status.update(disp.runner.global, func(s podStatus) podStatus {
+			now := time.Now()
+			s.lastSuccessfulInformantComm = &now
+			return s
+		})
 
 		status = "ok"
 		return result.res, nil
