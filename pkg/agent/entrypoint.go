@@ -26,11 +26,6 @@ type MainRunner struct {
 }
 
 func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
-	informantServer, err := StartHttpMuxServer(logger, r.Config.Informant.CallbackPort)
-	if err != nil {
-		return fmt.Errorf("Error starting muxed informant server: %w", err)
-	}
-
 	vmEventQueue := pubsub.NewUnlimitedQueue[vmEvent]()
 	defer vmEventQueue.Close()
 	pushToQueue := func(ev vmEvent) {
@@ -60,7 +55,7 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	}
 	defer schedulerStore.Stop()
 
-	globalState, promReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, broker, schedulerStore, informantServer)
+	globalState, promReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, broker, schedulerStore)
 	watchMetrics.MustRegister(promReg)
 
 	if r.Config.Billing != nil {
