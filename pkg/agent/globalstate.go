@@ -350,6 +350,7 @@ func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, p
 		schedulerRespondedWithMigration: false,
 
 		shutdown:         nil, // set by (*Runner).Run
+		dispatcher:       nil,
 		vm:               vmInfo,
 		podName:          podName,
 		podIP:            podIP,
