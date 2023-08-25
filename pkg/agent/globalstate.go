@@ -160,7 +160,7 @@ func (s *agentState) handleVMEventAdded(
 			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
 			stateUpdatedAt:     now,
 
-			startTime:                   now,
+			startTime:                 now,
 			lastSuccessfulMonitorComm: nil,
 		},
 	}

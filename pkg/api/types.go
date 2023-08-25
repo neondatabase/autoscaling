@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap/zapcore"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -234,11 +233,11 @@ func (r Resources) IncreaseFrom(old Resources) MoreResources {
 	}
 }
 
-// ConvertToRaw produces the RawResources equivalent to these Resources with the given slot size
-func (r Resources) ConvertToRaw(memSlotSize *resource.Quantity) RawResources {
-	return RawResources{
-		Cpu:    r.VCPU.ToResourceQuantity(),
-		Memory: resource.NewQuantity(int64(r.Mem)*memSlotSize.Value(), resource.BinarySI),
+// ConvertToRaw produces the Allocation equivalent to these Resources with the given slot size
+func (r Resources) ConvertToAllocation(memSlotSize *resource.Quantity) Allocation {
+	return Allocation{
+		Cpu: r.VCPU.ToResourceQuantity().AsApproximateFloat64(),
+		Mem: uint64(int64(r.Mem) * memSlotSize.Value()),
 	}
 }
 
@@ -275,251 +274,11 @@ type PluginResponse struct {
 // TODO: fill this with more information as required
 type MigrateResponse struct{}
 
-///////////////////////////
-// VM Informant Messages //
-///////////////////////////
-
-// InformantProtoVersion represents a single version of the agent<->informant protocol
-//
-// Each version of the agent<->informant protocol is named independently from releases of the
-// repository containing this code. Names follow semver, although this does not necessarily
-// guarantee support - for example, the VM informant may only support versions above v1.1.
-//
-// Version compatibility is documented in the neighboring file VERSIONING.md.
-type InformantProtoVersion uint32
-
-const (
-	// InformantProtoV1_0 represents v1.0 of the agent<->informant protocol - the initial version.
-	//
-	// Last used in release version 0.1.2.
-	InformantProtoV1_0 InformantProtoVersion = iota + 1 // +1 so we start from 1
-
-	// InformantProtoV1_1 represents v1.1 of the agent<->informant protocol.
-	//
-	// Changes from v1.0:
-	//
-	// * Adds /try-upscale endpoint to the autoscaler-agent.
-	//
-	// Last used in release version v0.6.0.
-	InformantProtoV1_1
-
-	// InformantProtoV1_2 represents v1.2 of the agent<->informant protocol.
-	//
-	// Changes from v1.1:
-	//
-	// * Adds /health-check endpoint to the vm-informant.
-	//
-	// Last used in release version v0.9.0
-	InformantProtoV1_2
-
-	// InformantProtoV2_0 represents v2.0 of the agent<->informant protocol.
-	//
-	// Changes from v1.2:
-	//
-	// * Agents now return a AgentResourceMessage when notifying VM's of changes
-	//   in resources on their /upscale and /downscale endpoints. Since
-	//   RawResources (the response type in previous protocols) is not
-	//   deserializable out of an AgentResourceMessage, this is a breaking
-	//   change.
-	//
-	// Currently the latest version.
-	InformantProtoV2_0
-
-	// latestInformantProtoVersion represents the latest version of the agent<->informant protocol
-	//
-	// This value is kept private because it should not be used externally; any desired
-	// functionality that could be implemented with it should instead be a method on
-	// InformantProtoVersion.
-	latestInformantProtoVersion InformantProtoVersion = iota // excluding +1 makes it equal to previous
-)
-
-func (v InformantProtoVersion) String() string {
-	var zero InformantProtoVersion
-
-	switch v {
-	case zero:
-		return "<invalid: zero>"
-	case InformantProtoV1_0:
-		return "v1.0"
-	case InformantProtoV1_1:
-		return "v1.1"
-	case InformantProtoV1_2:
-		return "v1.2"
-	case InformantProtoV2_0:
-		return "v2.0"
-	default:
-		diff := v - latestInformantProtoVersion
-		return fmt.Sprintf("<unknown = %v + %d>", latestInformantProtoVersion, diff)
-	}
-}
-
-// IsValid returns whether the protocol version is valid. The zero value is not valid.
-func (v InformantProtoVersion) IsValid() bool {
-	return uint(v) != 0
-}
-
-// HasTryUpscale returns whether this version of the protocol has the /try-upscale endpoint
-//
-// This is true for version v1.1 and greater.
-func (v InformantProtoVersion) HasTryUpscale() bool {
-	return v >= InformantProtoV1_1
-}
-
-// AllowsHealthCheck returns whether this version of the protocol has the informant's /health-check
-// endpoint
-//
-// This is true for version v1.2 and greater.
-func (v InformantProtoVersion) AllowsHealthCheck() bool {
-	return v >= InformantProtoV1_2
-}
-
-// SignsResourceUpdates returns whether agents inform VMs of resource updates with an
-// AgentResourceMessage in this version of the protocol
-//
-// This is true for version v2.0 and greater
-func (v InformantProtoVersion) SignsResourceUpdates() bool {
-	return v >= InformantProtoV2_0
-}
-
-// AgentMessage is used for (almost) every message sent from the autoscaler-agent to the VM
-// informant, and serves to wrap the type T with a SequenceNumber
-//
-// The SequenceNumber provides a total ordering of states, even if the ordering of HTTP requests and
-// responses are out of order. Fundamentally this is required because we have bidirectional
-// communication between the autoscaler-agent and VM informant — without it, we run the risk of racy
-// behavior, which could *actually* result in data corruption.
-type AgentMessage[T any] struct {
-	// Data is the content of the request or response
-	Data T `json:"data"`
-
-	// SequenceNumber is a unique-per-instance monotonically increasing number passed in each
-	// non-initial message from the autoscaler-agent to the VM informant, both requests and
-	// responses.
-	SequenceNumber uint64 `json:"sequenceNumber"`
-}
-
-// AgentDesc is the first message sent from an autoscaler-agent to a VM informant, describing some
-// information about the autoscaler-agent
-//
-// Each time an autoscaler-agent (re)connects to a VM informant, it sends an AgentDesc to the
-// "/register" endpoint.
-//
-// For more information on the agent<->informant protocol, refer to the top-level ARCHITECTURE.md
-type AgentDesc struct {
-	// AgentID is a unique UUID for the current instance of the autoscaler-agent
-	//
-	// This is helpful so that we can distinguish between (incorrect) duplicate calls to /register
-	// and (correct) re-registering of an agent.
-	AgentID uuid.UUID `json:"agentID"`
-
-	// ServeAddr gives the unique (per instance)
-	ServerAddr string `json:"agentServeAddr"`
-
-	// MinProtoVersion is the minimum version of the agent<->informant protocol that the
-	// autoscaler-agent supports
-	//
-	// Protocol versions are always non-zero.
-	//
-	// AgentDesc must always have MinProtoVersion <= MaxProtoVersion.
-	MinProtoVersion InformantProtoVersion `json:"minProtoVersion"`
-	// MaxProtoVersion is the maximum version of the agent<->informant protocol that the
-	// autoscaler-agent supports, inclusive.
-	//
-	// Protocol versions are always non-zero.
-	//
-	// AgentDesc must always have MinProtoVersion <= MaxProtoVersion.
-	MaxProtoVersion InformantProtoVersion `json:"maxProtoVersion"`
-}
-
-// MarshalLogObject implements zapcore.ObjectMarshaler, so that Resources can be used with zap.Object
-func (d AgentDesc) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("agentID", d.AgentID.String())
-	enc.AddString("agentServeAddr", string(d.ServerAddr))
-	enc.AddString("minProtoVersion", d.MinProtoVersion.String())
-	enc.AddString("maxProtoVersion", d.MaxProtoVersion.String())
-	return nil
-}
-
-// ProtocolRange returns a VersionRange from d.MinProtoVersion to d.MaxProtoVersion.
-func (d AgentDesc) ProtocolRange() VersionRange[InformantProtoVersion] {
-	return VersionRange[InformantProtoVersion]{
-		Min: d.MinProtoVersion,
-		Max: d.MaxProtoVersion,
-	}
-}
-
-type AgentIdentificationMessage = AgentMessage[AgentIdentification]
-
-// AgentIdentification affirms the AgentID of the autoscaler-agent in its initial response to a VM
-// informant, on the /id endpoint. This response is always wrapped in an AgentMessage. A type alias
-// for this is provided as AgentIdentificationMessage, for convenience.
-type AgentIdentification struct {
-	// AgentID is the same AgentID as given in the AgentDesc initially provided to the VM informant
-	AgentID uuid.UUID `json:"agentID"`
-}
-
-// InformantDesc describes the capabilities of a VM informant, in response to an autoscaler-agent's
-// request on the /register endpoint
-//
-// For more information on the agent<->informant protocol, refer to the top-level ARCHITECTURE.md
-type InformantDesc struct {
-	// ProtoVersion is the version of the agent<->informant protocol that the VM informant has
-	// selected
-	//
-	// If an autoscaler-agent is successfully registered, a well-behaved VM informant MUST respond
-	// with a ProtoVersion within the bounds of the agent's declared minimum and maximum protocol
-	// versions. If the VM informant does not use a protocol version within those bounds, then it
-	// MUST respond with an error status code.
-	ProtoVersion InformantProtoVersion `json:"protoVersion"`
-
-	// MetricsMethod tells the autoscaler-agent how to fetch metrics from the VM
-	MetricsMethod InformantMetricsMethod `json:"metricsMethod"`
-}
-
-// InformantMetricsMethod collects the options for ways the VM informant can report metrics
-//
-// At least one method *must* be provided in an InformantDesc, and more than one method gives the
-// autoscaler-agent freedom to choose.
-//
-// We use this type so it's easier to ensure backwards compatibility with previous versions of the
-// VM informant — at least during the rollout of new autoscaler-agent or VM informant versions.
-type InformantMetricsMethod struct {
-	// Prometheus describes prometheus-format metrics, typically not through the informant itself
-	Prometheus *MetricsMethodPrometheus `json:"prometheus,omitempty"`
-}
-
-// MetricsMethodPrometheus describes VM informant's metrics in the prometheus format, made available
-// on a particular port
-type MetricsMethodPrometheus struct {
-	Port uint16 `json:"port"`
-}
-
-// InformantHealthCheckResp is the result of a successful request to a VM informant's /health-check
-// endpoint.
-type InformantHealthCheckResp struct{}
-
-// UnregisterAgent is the result of a successful request to a VM informant's /unregister endpoint
-type UnregisterAgent struct {
-	// WasActive indicates whether the unregistered autoscaler-agent was the one in-use by the VM
-	// informant
-	WasActive bool `json:"wasActive"`
-}
-
-// MoreResourcesRequest is the request type wrapping MoreResources that's sent by the VM informant
-// to the autoscaler-agent's /try-upscale endpoint when the VM is urgently in need of more
-// resources.
-type MoreResourcesRequest struct {
-	MoreResources
-
-	// ExpectedID is the expected AgentID of the autoscaler-agent
-	ExpectedID uuid.UUID `json:"expectedID"`
-}
-
 // MoreResources holds the data associated with a MoreResourcesRequest
 type MoreResources struct {
-	// Cpu is true if the VM informant is requesting more CPU
+	// Cpu is true if the VM monitor is requesting more CPU
 	Cpu bool `json:"cpu"`
-	// Memory is true if the VM informant is requesting more memory
+	// Memory is true if the VM monitor is requesting more memory
 	Memory bool `json:"memory"`
 }
 
@@ -537,51 +296,6 @@ func (m MoreResources) And(cmp MoreResources) MoreResources {
 		Cpu:    m.Cpu && cmp.Cpu,
 		Memory: m.Memory && cmp.Memory,
 	}
-}
-
-// RawResources signals raw resource amounts, and is primarily used in communications with the VM
-// informant because it doesn't know about things like memory slots.
-//
-// This is used in protocol versions <2. In later versions, AgentResourceMessage is used.
-type RawResources struct {
-	Cpu    *resource.Quantity `json:"cpu"`
-	Memory *resource.Quantity `json:"memory"`
-}
-
-type AgentResourceMessage = AgentMessage[ResourceMessage]
-
-// Similar to RawResources, stores raw resource amounts. However, it also stores the ID of the agent
-// notifying the VM of a change in resources. In protocol versions 2 and on, agents notify VM's of
-// changes to their available resources with an AgentResourceMessage. This allows VM informants to verify
-// the authenticity of the agent responding.
-type ResourceMessage struct {
-	RawResources
-	Id AgentIdentification `json:"id"`
-}
-
-// DownscaleResult is used by the VM informant to return whether it downscaled successfully, and
-// some indication of its status when doing so.
-//
-// DownscaleResult is also used in informant-monitor communications. The monitor can send a
-// DownscaleResult, which is then propagated to the informant.
-type DownscaleResult struct {
-	Ok     bool
-	Status string
-}
-
-// SuspendAgent is sent from the VM informant to the autoscaler-agent when it has been contacted by
-// a new autoscaler-agent and wishes to switch to that instead
-//
-// Instead of just cutting off any connection(s) to the agent, the informant keeps it around in case
-// the new one fails and it needs to fall back to the old one.
-type SuspendAgent struct {
-	ExpectedID uuid.UUID `json:"expectedID"`
-}
-
-// ResumeAgent is sent from the VM informant to the autoscaler-agent to resume contact when it was
-// previously suspended.
-type ResumeAgent struct {
-	ExpectedID uuid.UUID `json:"expectedID"`
 }
 
 ////////////////////////////////////
@@ -613,7 +327,7 @@ func (v RunnerProtoVersion) SupportsCgroupFractionalCPU() bool {
 }
 
 ////////////////////////////////////
-// Informant <-> Monitor Messages //
+//   Agent <-> Monitor Messages   //
 ////////////////////////////////////
 
 // Represents the resources that a VM has been granted
@@ -627,22 +341,25 @@ type Allocation struct {
 
 // ** Types sent by monitor **
 
-// This type is sent to the informant as a way to request immediate upscale.
-// Since the informant cannot control if the agent will choose to upscale the VM,
-// it does not return anything. However, it should internally request an upscale
-// from the agent. If an upscale is granted, the monitor will be notified via an
-// UpscaleNotification.
+// This type is sent to the agent as a way to request immediate upscale.
+// Since the agent cannot control if the agent will choose to upscale the VM,
+// it does not return anything. If an upscale is granted, the agent will notify
+// the monitor via an UpscaleConfirmation
 type UpscaleRequest struct{}
 
-// This type is sent to the informant to confirm it successfully upscaled, meaning
-// it increased its filecache and/or cgroup memory limits. The informant does not
+// This type is sent to the agent to confirm it successfully upscaled, meaning
+// it increased its filecache and/or cgroup memory limits. The agent does not
 // need to respond.
 type UpscaleConfirmation struct{}
 
-// `api.DownscaleResult` is also sent to the informant after the monitor tries to
-// downscale
+// This type is sent to the agent to indicate if downscaling was successful. The
+// agent does not need to respond.
+type DownscaleResult struct {
+	Ok     bool
+	Status string
+}
 
-// ** Types sent by informant **
+// ** Types sent by agent **
 
 // This type is sent to the monitor to inform it that it has been granted a geater
 // allocation. Once the monitor is done applying this new allocation (i.e, increasing
@@ -653,12 +370,12 @@ type UpscaleNotification struct {
 
 // This type is sent to the monitor as a request to downscale its resource usage.
 // Once the monitor has downscaled or failed to do so, it should respond with a
-// api.DownscaleResult (listed in the informant<->agent protocol section).
+// DownscaleResult.
 type DownscaleRequest struct {
 	Target Allocation `json:"target"`
 }
 
-// ** Types shared by informant and monitor **
+// ** Types shared by agent and monitor **
 
 // This type can be sent by either party whenever they receive a message they
 // cannot deserialize properly.
@@ -675,7 +392,7 @@ type InternalError struct {
 }
 
 // This type is sent as part of a bidirectional heartbeat between the monitor and
-// informant. The check is initiated by the informant.
+// agent. The check is initiated by the agent.
 type HealthCheck struct{}
 
 // This function is used to prepare a message for serialization. Any data passed
@@ -686,7 +403,7 @@ type HealthCheck struct{}
 // - InvalidMessage
 // - InternalError
 // - HealthCheck
-func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
+func SerializeAgentMessage(content any, id uint64) ([]byte, error) {
 	// The final type that gets sent over the wire
 	type Bundle struct {
 		Content any    `json:"content"`
@@ -717,7 +434,7 @@ func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
 	})
 }
 
-// MonitorProtoVersion represents a single version of the informant<->monitor protocol
+// MonitorProtoVersion represents a single version of the agent<->monitor protocol
 //
 // Each version of the agent<->monitor protocol is named independently from releases of the
 // repository containing this code. Names follow semver, although this does not necessarily

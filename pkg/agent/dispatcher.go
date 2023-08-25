@@ -52,7 +52,7 @@ type Dispatcher struct {
 	// are all thread safe. server and protoVersion are never modified.
 	lock sync.Mutex
 
-	// The InformantServer that this dispatcher is part of
+	// The runner that this dispatcher is part of
 	runner *Runner
 
 	// lastTransactionID is the last transaction id. When we need a new one
@@ -76,7 +76,7 @@ type waiterResult struct {
 	res *MonitorResult
 }
 
-// Create a new Dispatcher, establishing a connection with the informant.
+// Create a new Dispatcher, establishing a connection with the agent.
 // Note that this does not immediately start the Dispatcher. Call Run() to start it.
 func NewDispatcher(
 	ctx context.Context,
@@ -138,15 +138,15 @@ func NewDispatcher(
 }
 
 // Send a message down the connection. Only call this method with types that
-// SerializeInformantMessage can handle.
+// SerializeAgentMessage can handle.
 func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error {
-	data, err := api.SerializeInformantMessage(message, id)
+	data, err := api.SerializeAgentMessage(message, id)
 	if err != nil {
 		return fmt.Errorf("error serializing message: %w", err)
 	}
 	// wsjson.Write serializes whatever is passed in, and go serializes []byte
 	// by base64 encoding it, so use RawMessage to avoid serializing to []byte
-	// (done by SerializeInformantMessage), and then base64 encoding again
+	// (done by SerializeAgentMessage), and then base64 encoding again
 	raw := json.RawMessage(data)
 	disp.logger.Info("sending message to monitor", zap.ByteString("message", raw))
 	return wsjson.Write(ctx, disp.conn, &raw)
@@ -168,7 +168,7 @@ func (disp *Dispatcher) unregisterWaiter(id uint64) {
 }
 
 // Make a request to the monitor and wait for a response. The value passed as message must be a
-// valid value to send to the monitor. See the docs for SerializeInformantMessage for more.
+// valid value to send to the monitor. See the docs for SerializeAgentMessage for more.
 //
 // This function must NOT be called while holding disp.runner.lock.
 func (disp *Dispatcher) Call(
@@ -539,13 +539,16 @@ func (disp *Dispatcher) run(ctx context.Context) {
 		if err != nil {
 			if ctx.Err() != nil {
 				// The context is already cancelled, so this error is mostly likely
-				// expected. For example, if the context is cancelled becaues the
-				// informant server exited, we should expect to fail to read off the
-				// connection, which is closed by the server exit.
+				// expected. For example, if the context is cancelled because the
+				// runner exited, we should expect to fail to read off the connection,
+				// which is closed by the server exit.
 				logger.Warn("context is already cancelled, but received an error", zap.Error(err))
 			} else {
-				// TODO
-				logger.Error("error handling message -> triggering informant server exit", zap.Error(err))
+				logger.Error(
+					"error handling message + context was not cancelled -> panicking",
+					zap.Error(err),
+				)
+				panic(err)
 			}
 			return
 		}
