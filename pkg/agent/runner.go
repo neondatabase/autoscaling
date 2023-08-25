@@ -350,6 +350,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	r.spawnBackgroundWorker(ctx, logger, "handle VM resources", func(c context.Context, l *zap.Logger) {
 		r.handleVMResources(c, l, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal, vmInfoUpdated)
 	})
+	r.spawnBackgroundWorker(ctx, logger, "monitor health-checker", func(c context.Context, l *zap.Logger) {
+		r.doHealthChecks(c, l)
+	})
 
 	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
 	// pod was deleted, or the autoscaler-agent is exiting.
@@ -418,6 +421,26 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, logger *zap.Logger, 
 
 		f(ctx, logger)
 	}()
+}
+
+// doHealthChecks sends an api.HealthCheck to the monitor every 5 seconds
+func (r *Runner) doHealthChecks(ctx context.Context, logger *zap.Logger) {
+	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
+	// FIXME: make this duration configurable
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		_, err := r.dispatcher.Call(ctx, timeout, "HealthCheck", api.HealthCheck{})
+		if err != nil {
+			logger.Warn("monitor health check failed", zap.Error(err))
+		}
+	}
 }
 
 // getMetricsLoop repeatedly attempts to fetch metrics from the VM
