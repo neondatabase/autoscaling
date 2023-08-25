@@ -363,12 +363,9 @@ func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, p
 
 		lastMetrics:        nil,
 		scheduler:          nil,
-		server:             nil,
-		informant:          nil,
 		computeUnit:        nil,
 		lastApproved:       nil,
 		lastSchedulerError: nil,
-		lastInformantError: nil,
 
 		backgroundWorkerCount: atomic.Int64{},
 		backgroundPanic:       make(chan error),

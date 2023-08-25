@@ -53,7 +53,7 @@ type Dispatcher struct {
 	lock sync.Mutex
 
 	// The InformantServer that this dispatcher is part of
-	server *InformantServer
+	runner *Runner
 
 	// lastTransactionID is the last transaction id. When we need a new one
 	// we simply bump it and take the new number.
@@ -62,6 +62,9 @@ type Dispatcher struct {
 	// the monitor, we only generate even IDs, and the monitor only generates
 	// odd ones. So generating a new value is done by adding 2.
 	lastTransactionID atomic.Uint64
+
+	// A sender on which to signal an upscale request
+	upscaleRequester util.CondChannelSender
 
 	logger *zap.Logger
 
@@ -79,13 +82,14 @@ func NewDispatcher(
 	ctx context.Context,
 	logger *zap.Logger,
 	addr string,
-	parent *InformantServer,
+	parent *Runner,
+	sendUpscaleRequested util.CondChannelSender,
 ) (*Dispatcher, error) {
 	// parent.runner, runner.global, and global.config are immutable so we don't
 	// need to acquire runner.lock here
 	ctx, cancel := context.WithTimeout(
 		ctx,
-		time.Second*time.Duration(parent.runner.global.config.Monitor.ConnectionTimeoutSeconds),
+		time.Second*time.Duration(parent.global.config.Monitor.ConnectionTimeoutSeconds),
 	)
 	defer cancel()
 
@@ -126,7 +130,8 @@ func NewDispatcher(
 		lastTransactionID: atomic.Uint64{}, // Note: initialized to 0, so it's even, as required.
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
-		server:            parent,
+		runner:            parent,
+		upscaleRequester:  sendUpscaleRequested,
 		lock:              sync.Mutex{},
 	}
 	return disp, nil
@@ -175,7 +180,7 @@ func (disp *Dispatcher) Call(
 
 	status := "internal error"
 	defer func() {
-		disp.server.runner.global.metrics.informantRequestsOutbound.WithLabelValues(messageType, status).Inc()
+		disp.runner.global.metrics.informantRequestsOutbound.WithLabelValues(messageType, status).Inc()
 	}()
 
 	// register the waiter *before* sending, so that we avoid a potential race where we'd get a
@@ -302,7 +307,7 @@ func (disp *Dispatcher) HandleMessage(
 			// we had some error while handling the message with this ID, and there wasn't a
 			// corresponding waiter. We should make note of this in the metrics:
 			status := fmt.Sprintf("[error: %s]", rootErr)
-			disp.server.runner.global.metrics.informantRequestsInbound.WithLabelValues(*typeStr, status)
+			disp.runner.global.metrics.informantRequestsInbound.WithLabelValues(*typeStr, status)
 		}
 
 		// resume panicking if we were before
@@ -391,15 +396,15 @@ func (disp *Dispatcher) run(ctx context.Context) {
 	// upscale. The monitor will get the result back as a NotifyUpscale message
 	// from us, with a new id.
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
-		disp.server.runner.lock.Lock()
-		defer disp.server.runner.lock.Unlock()
+		disp.runner.lock.Lock()
+		defer disp.runner.lock.Unlock()
 
 		// TODO: it shouldn't be this function's responsibility to update metrics.
 		defer func() {
-			disp.server.runner.global.metrics.informantRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
+			disp.runner.global.metrics.informantRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
 		}()
 
-		disp.server.upscaleRequested.Send()
+		disp.upscaleRequester.Send()
 
 		resourceReq := api.MoreResources{
 			Cpu:    false,
@@ -408,10 +413,10 @@ func (disp *Dispatcher) run(ctx context.Context) {
 
 		logger.Info(
 			"Updating requested upscale",
-			zap.Any("oldRequested", disp.server.runner.requestedUpscale),
+			zap.Any("oldRequested", disp.runner.requestedUpscale),
 			zap.Any("newRequested", resourceReq),
 		)
-		disp.server.runner.requestedUpscale = resourceReq
+		disp.runner.requestedUpscale = resourceReq
 	}
 	handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
 		disp.lock.Lock()
@@ -526,15 +531,8 @@ func (disp *Dispatcher) run(ctx context.Context) {
 				// connection, which is closed by the server exit.
 				logger.Warn("context is already cancelled, but received an error", zap.Error(err))
 			} else {
-				func() {
-					logger.Error("error handling message -> triggering informant server exit", zap.Error(err))
-					disp.server.runner.lock.Lock()
-					defer disp.server.runner.lock.Unlock()
-					disp.server.exit(InformantServerExitStatus{
-						Err:            err,
-						RetryShouldFix: false,
-					})
-				}()
+				// TODO
+				logger.Error("error handling message -> triggering informant server exit", zap.Error(err))
 			}
 			return
 		}
