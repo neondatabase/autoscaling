@@ -409,7 +409,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
 			// get CPU details from QEMU and update status
-			cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
+			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(virtualmachine))
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
@@ -452,7 +452,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// get Memory details from hypervisor and update VM status
-			memorySize, err := QmpGetMemorySize(virtualmachine)
+			memorySize, err := QmpGetMemorySize(QmpAddr(virtualmachine))
 			if err != nil {
 				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
@@ -508,12 +508,67 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 	case vmv1.VmScaling:
+		// Check that runner pod is still ok
+		vmRunner := &corev1.Pod{}
+		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+		if err != nil && apierrors.IsNotFound(err) {
+			// lost runner pod for running VirtualMachine ?
+			r.Recorder.Event(virtualmachine, "Warning", "NotFound",
+				fmt.Sprintf("runner pod %s not found",
+					virtualmachine.Status.PodName))
+			virtualmachine.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+				metav1.Condition{Type: typeDegradedVirtualMachine,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Reconciling",
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", virtualmachine.Status.PodName, virtualmachine.Name)})
+		} else if err != nil {
+			log.Error(err, "Failed to get runner Pod")
+			return err
+		}
+
+		// Update the metadata (including "usage" annotation) before anything else, so that it
+		// will be correctly set even if the rest of the reconcile operation fails.
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, virtualmachine, vmRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", virtualmachine.Name)
+		}
+
+		// runner pod found, check that it's still up:
+		switch vmRunner.Status.Phase {
+		case corev1.PodSucceeded:
+			virtualmachine.Status.Phase = vmv1.VmSucceeded
+			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+				metav1.Condition{Type: typeAvailableVirtualMachine,
+					Status:  metav1.ConditionFalse,
+					Reason:  "Reconciling",
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
+			return nil
+		case corev1.PodFailed:
+			virtualmachine.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+				metav1.Condition{Type: typeDegradedVirtualMachine,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Reconciling",
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
+			return nil
+		case corev1.PodUnknown:
+			virtualmachine.Status.Phase = vmv1.VmPending
+			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+				metav1.Condition{Type: typeAvailableVirtualMachine,
+					Status:  metav1.ConditionUnknown,
+					Reason:  "Reconciling",
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", virtualmachine.Status.PodName, virtualmachine.Name)})
+			return nil
+		default:
+			// do nothing
+		}
+
 		cpuScaled := false
 		ramScaled := false
 
 		// do hotplug/unplug CPU
 		// firstly get current state from QEMU
-		cpuSlotsPlugged, _, err := QmpGetCpus(virtualmachine)
+		cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(virtualmachine))
 		if err != nil {
 			log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 			return err
@@ -524,7 +579,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		if specCPU > pluggedCPU {
 			// going to plug one CPU
 			log.Info("Plug one more CPU into VM")
-			if err := QmpPlugCpu(virtualmachine); err != nil {
+			if err := QmpPlugCpu(QmpAddr(virtualmachine)); err != nil {
 				return err
 			}
 			r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
@@ -533,7 +588,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		} else if specCPU < pluggedCPU {
 			// going to unplug one CPU
 			log.Info("Unplug one CPU from VM")
-			if err := QmpUnplugCpu(virtualmachine); err != nil {
+			if err := QmpUnplugCpu(QmpAddr(virtualmachine)); err != nil {
 				return err
 			}
 			r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
@@ -546,7 +601,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 		// do hotplug/unplug Memory
 		// firstly get current state from QEMU
-		memoryDevices, err := QmpQueryMemoryDevices(virtualmachine)
+		memoryDevices, err := QmpQueryMemoryDevices(QmpAddr(virtualmachine))
 		memoryPluggedSlots := *virtualmachine.Spec.Guest.MemorySlots.Min + int32(len(memoryDevices))
 		if err != nil {
 			log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
@@ -565,7 +620,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
 			// going to unplug one Memory Slot
 			log.Info("Unplug one Memory module from VM")
-			if err := QmpUnplugMemory(virtualmachine); err != nil {
+			if err := QmpUnplugMemory(QmpAddr(virtualmachine)); err != nil {
 				// special case !
 				// error means VM hadn't memory devices available for unplug
 				// need set .memorySlots.Use back to real value
@@ -1097,7 +1152,8 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		pod.Spec.Containers[0].Resources.Limits = corev1.ResourceList{}
 	}
 	pod.Spec.Containers[0].Resources.Limits["neonvm/vhost-net"] = resource.MustParse("1")
-	if virtualmachine.Spec.EnableAcceleration {
+	// NB: EnableAcceleration guaranteed non-nil because the k8s API server sets the default for us.
+	if *virtualmachine.Spec.EnableAcceleration {
 		pod.Spec.Containers[0].Resources.Limits["neonvm/kvm"] = resource.MustParse("1")
 	}
 

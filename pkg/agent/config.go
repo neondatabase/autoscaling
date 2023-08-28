@@ -16,8 +16,16 @@ type Config struct {
 	Informant InformantConfig  `json:"informant"`
 	Metrics   MetricsConfig    `json:"metrics"`
 	Scheduler SchedulerConfig  `json:"scheduler"`
+	Monitor   MonitorConfig    `json:"monitor"`
 	Billing   *billing.Config  `json:"billing,omitempty"`
 	DumpState *DumpStateConfig `json:"dumpState"`
+}
+
+type MonitorConfig struct {
+	ResponseTimeoutSeconds uint `json:"responseTimeoutSeconds"`
+	// ConnectionTimeoutSeconds gives how long we may take to connect to the
+	// monitor before cancelling.
+	ConnectionTimeoutSeconds uint `json:"connectionTimeoutSeconds"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
@@ -157,6 +165,8 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
 	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds")
+	erc.Whenf(ec, c.Monitor.ConnectionTimeoutSeconds == 0, zeroTmpl, ".monitor.connectionTimeoutSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.Validate())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")

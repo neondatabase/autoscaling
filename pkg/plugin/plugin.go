@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/tychoish/fun/pubsub"
@@ -702,32 +703,115 @@ func (e *AutoscaleEnforcer) Score(
 		return score, nil
 	}
 
-	remainingCPU := node.remainingReservableCPU()
-	remainingMem := node.remainingReservableMemSlots()
-	totalCPU := e.state.maxTotalReservableCPU
-	totalMem := e.state.maxTotalReservableMemSlots
+	cpuRemaining := node.remainingReservableCPU()
+	cpuTotal := node.totalReservableCPU()
+	memRemaining := node.remainingReservableMemSlots()
+	memTotal := node.totalReservableMemSlots()
 
-	// The ordering of multiplying before dividing is intentional; it allows us to get an exact
-	// result, because scoreLen and total will both be small (i.e. their product fits within an int64)
-	cpuScore := framework.MinNodeScore + scoreLen*int64(remainingCPU)/int64(totalCPU)
-	memScore := framework.MinNodeScore + scoreLen*int64(remainingMem)/int64(totalMem)
+	cpuFraction := 1 - cpuRemaining.AsFloat64()/cpuTotal.AsFloat64()
+	memFraction := 1 - float64(memRemaining)/float64(memTotal)
+	cpuScale := node.totalReservableCPU().AsFloat64() / e.state.maxTotalReservableCPU.AsFloat64()
+	memScale := float64(node.totalReservableMemSlots()) / float64(e.state.maxTotalReservableMemSlots)
 
-	score := util.Min(cpuScore, memScore)
+	nodeConf := e.state.conf.forNode(nodeName)
+
+	// Refer to the comments in nodeConfig for more. Also, see: https://www.desmos.com/calculator/wg8s0yn63s
+	calculateScore := func(fraction, scale float64) (float64, int64) {
+		y0 := nodeConf.MinUsageScore
+		y1 := nodeConf.MaxUsageScore
+		xp := nodeConf.ScorePeak
+
+		score := float64(1) // if fraction == nodeConf.ScorePeak
+		if fraction < nodeConf.ScorePeak {
+			score = y0 + (1-y0)/xp*fraction
+		} else if fraction > nodeConf.ScorePeak {
+			score = y1 + (1-y1)/(1-xp)*(1-fraction)
+		}
+
+		score *= scale
+
+		return score, framework.MinNodeScore + int64(float64(scoreLen)*score)
+	}
+
+	cpuFScore, cpuIScore := calculateScore(cpuFraction, cpuScale)
+	memFScore, memIScore := calculateScore(memFraction, memScale)
+
+	score := util.Min(cpuIScore, memIScore)
 	logger.Info(
 		"Scored pod placement for node",
 		zap.Int64("score", score),
 		zap.Object("verdict", verdictSet{
-			cpu: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingCPU, totalCPU, cpuScore),
-			mem: fmt.Sprintf("%d remaining reservable of %d total => score is %d", remainingMem, totalMem, memScore),
+			cpu: fmt.Sprintf(
+				"%d remaining reservable of %d total => fraction=%g, scale=%g => score=(%g :: %d)",
+				cpuRemaining, cpuTotal, cpuFraction, cpuScale, cpuFScore, cpuIScore,
+			),
+			mem: fmt.Sprintf(
+				"%d remaining reservable of %d total => fraction=%g, scale=%g => score=(%g :: %d)",
+				memRemaining, memTotal, memFraction, memScale, memFScore, memIScore,
+			),
 		}),
 	)
 
 	return score, nil
 }
 
-// ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used
-func (e *AutoscaleEnforcer) ScoreExtensions() framework.ScoreExtensions {
+// NormalizeScore weights scores uniformly in the range [minScore, trueScore], where
+// minScore is framework.MinNodeScore + 1.
+func (e *AutoscaleEnforcer) NormalizeScore(
+	ctx context.Context,
+	state *framework.CycleState,
+	pod *corev1.Pod,
+	scores framework.NodeScoreList,
+) (status *framework.Status) {
+	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
+
+	e.metrics.IncMethodCall("NormalizeScore", ignored)
+	defer func() {
+		e.metrics.IncFailIfNotSuccess("NormalizeScore", ignored, status)
+	}()
+
+	logger := e.logger.With(zap.String("method", "NormalizeScore"), util.PodNameFields(pod))
+	logger.Info("Handling NormalizeScore request")
+
+	for _, node := range scores {
+		nodeScore := node.Score
+		nodeName := node.Name
+
+		// rand.Intn will panic if we pass in 0
+		if nodeScore == 0 {
+			logger.Info("Ignoring node as it was assigned a score of 0", zap.String("node", nodeName))
+			continue
+		}
+
+		// This is different from framework.MinNodeScore. We use framework.MinNodeScore
+		// to indicate that a pod should not be placed on a node. The lowest
+		// actual score we assign a node is thus framework.MinNodeScore + 1
+		minScore := framework.MinNodeScore + 1
+
+		// We want to pick a score in the range [minScore, score], so use
+		// score _+ 1_ - minscore, as rand.Intn picks a number in the _half open_
+		// range [0, n)
+		newScore := int64(rand.Intn(int(nodeScore+1-minScore))) + minScore
+		logger.Info(
+			"Randomly choosing newScore from range [minScore, trueScore]",
+			zap.String("node", nodeName),
+			zap.Int64("newScore", newScore),
+			zap.Int64("minScore", minScore),
+			zap.Int64("trueScore", nodeScore),
+		)
+		node.Score = newScore
+	}
 	return nil
+}
+
+// ScoreExtensions is required for framework.ScorePlugin, and can return nil if it's not used.
+// However, we do use it, to randomize scores.
+func (e *AutoscaleEnforcer) ScoreExtensions() framework.ScoreExtensions {
+	if e.state.conf.RandomizeScores {
+		return e
+	} else {
+		return nil
+	}
 }
 
 // Reserve signals to our plugin that a particular pod will (probably) be bound to a node, giving us

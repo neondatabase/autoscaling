@@ -25,6 +25,10 @@ data:
         "unhealthyAfterSilenceDurationSeconds": 20,
         "unhealthyStartupGracePeriodSeconds": 20
       },
+      "monitor": {
+          "responseTimeoutSeconds": 5,
+          "connectionTimeoutSeconds": 4
+      },
       "metrics": {
         "loadMetricPrefix": "host_",
         "requestTimeoutSeconds": 2,

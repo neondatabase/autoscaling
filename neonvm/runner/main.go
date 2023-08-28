@@ -544,7 +544,8 @@ func main() {
 	}
 
 	// cpu details
-	if vmSpec.EnableAcceleration && checkKVM() {
+	// NB: EnableAcceleration guaranteed non-nil because the k8s API server sets the default for us.
+	if *vmSpec.EnableAcceleration && checkKVM() {
 		logger.Info("using KVM acceleration")
 		qemuCmd = append(qemuCmd, "-enable-kvm")
 	} else {

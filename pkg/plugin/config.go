@@ -41,6 +41,10 @@ type Config struct {
 	// version handled.
 	SchedulerName string `json:"schedulerName"`
 
+	// RandomizeScores, if true, will cause the scheduler to score a node with a random number in
+	// the range [minScore + 1, trueScore], instead of the trueScore
+	RandomizeScores bool `json:"randomizeScores"`
+
 	// MigrationDeletionRetrySeconds gives the duration, in seconds, we should wait between retrying
 	// a failed attempt to delete a VirtualMachineMigration that's finished.
 	MigrationDeletionRetrySeconds uint `json:"migrationDeletionRetrySeconds"`
@@ -54,6 +58,10 @@ type Config struct {
 	// K8sNodeGroupLabel, if provided, gives the label to use when recording k8s node groups in the
 	// metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
 	K8sNodeGroupLabel string `json:"k8sNodeGroupLabel"`
+
+	// K8sAvailabilityZoneLabel, if provided, gives the label to use when recording nodes'
+	// availability zones in the metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
+	K8sAvailabilityZoneLabel string `json:"k8sAvailabilityZoneLabel"`
 
 	// IgnoreNamespaces, if provided, gives a list of namespaces that the plugin should completely
 	// ignore, as if pods from those namespaces do not exist.
@@ -82,6 +90,28 @@ type nodeConfig struct {
 	Cpu         resourceConfig `json:"cpu"`
 	Memory      resourceConfig `json:"memory"`
 	ComputeUnit api.Resources  `json:"computeUnit"`
+
+	// Details about node scoring:
+	// See also: https://www.desmos.com/calculator/wg8s0yn63s
+	// In the desmos, the value f(x,s) gives the score (from 0 to 1) of a node that's x amount full
+	// (where x is a fraction from 0 to 1), with a total size that is equal to the maximum size node
+	// times s (i.e. s (or: "scale") gives the ratio between this nodes's size and the biggest one).
+
+	// MinUsageScore gives the ratio of the score at the minimum usage (i.e. 0) relative to the
+	// score at the midpoint, which will have the maximum.
+	//
+	// This corresponds to y₀ in the desmos link above.
+	MinUsageScore float64 `json:"minUsageScore"`
+	// MaxUsageScore gives the ratio of the score at the maximum usage (i.e. full) relative to the
+	// score at the midpoint, which will have the maximum.
+	//
+	// This corresponds to y₁ in the desmos link above.
+	MaxUsageScore float64 `json:"maxUsageScore"`
+	// ScorePeak gives the fraction at which the "target" or highest score should be, with the score
+	// sloping down on either side towards MinUsageScore at 0 and MaxUsageScore at 1.
+	//
+	// This corresponds to xₚ in the desmos link.
+	ScorePeak float64 `json:"scorePeak"`
 }
 
 // resourceConfig configures the amount of a particular resource we're willing to allocate to VMs,
@@ -161,6 +191,14 @@ func (c *nodeConfig) validate() (string, error) {
 	}
 	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
 		return "computeUnit", err
+	}
+
+	if c.MinUsageScore < 0 || c.MinUsageScore > 1 {
+		return "minUsageScore", errors.New("value must be between 0 and 1, inclusive")
+	} else if c.MaxUsageScore < 0 || c.MaxUsageScore > 1 {
+		return "maxUsageScore", errors.New("value must be between 0 and 1, inclusive")
+	} else if c.ScorePeak < 0 || c.ScorePeak > 1 {
+		return "scorePeak", errors.New("value must be between 0 and 1, inclusive")
 	}
 
 	return "", nil
