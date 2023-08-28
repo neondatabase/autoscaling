@@ -499,7 +499,7 @@ func main() {
 				logger.Fatal("Failed to resize rootDisk", zap.Error(err))
 			}
 		} else {
-			logger.Info(fmt.Sprintf("rootDisk.size (%s) is greater than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
+			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
 		}
 	}
 
@@ -718,7 +718,7 @@ func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cg
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
-		logger.Info("shut down down cpu_change server", zap.Error(err))
+		logger.Info("shut down cpu_change server", zap.Error(err))
 	}
 }
 
@@ -1017,7 +1017,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	}
 	ipPod, ipVm, mask, err := calcIPs(cidr)
 	if err != nil {
-		logger.Fatal("could not parse IP: %s", zap.Error(err))
+		logger.Fatal("could not parse IP", zap.Error(err))
 		return nil, err
 	}
 	bridgeAddr := &netlink.Addr{
