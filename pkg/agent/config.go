@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/tychoish/fun/ers"
+
 	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/tychoish/fun/ers"
 )
 
 type Config struct {
