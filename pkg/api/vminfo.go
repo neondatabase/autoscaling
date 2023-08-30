@@ -4,10 +4,9 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 
-	"github.com/tychoish/fun/erc"
+	"github.com/tychoish/fun/ers"
 	"go.uber.org/zap"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -244,30 +243,32 @@ type ResourceBounds struct {
 // Validate checks that the ScalingBounds are all reasonable values - all fields initialized and
 // non-zero.
 func (b ScalingBounds) Validate(memSlotSize *resource.Quantity) error {
-	ec := &erc.Collector{}
-
-	b.Min.validate(ec, ".min", memSlotSize)
-	b.Max.validate(ec, ".max", memSlotSize)
-
-	return ec.Resolve()
+	// ers.Join is nil if all of its arguments are nil:
+	return ers.Join(
+		// these validation functions  return errors that are
+		// ers.Stack objects; ers.Join combines/flattens these
+		// into a single stack.
+		b.Min.validate(".min", memSlotSize),
+		b.Max.validate(".max", memSlotSize),
+	)
 }
 
 // TODO: This could be made better - see:
 // https://github.com/neondatabase/autoscaling/pull/190#discussion_r1169405645
-func (b ResourceBounds) validate(ec *erc.Collector, path string, memSlotSize *resource.Quantity) {
-	errAt := func(field string, err error) error {
-		return fmt.Errorf("error at %s%s: %w", path, field, err)
-	}
+func (b ResourceBounds) validate(path string, memSlotSize *resource.Quantity) error {
+	es := &ers.Stack{}
 
-	if b.CPU.IsZero() {
-		ec.Add(errAt(".cpu", errors.New("must be set to a non-zero value")))
-	}
+	// ers.Whenf is nil if the condition is false; also does not
+	// resolve/format the string unless the condition is true.
+	es.Push(ers.Whenf(b.CPU.IsZero(), "%s.cpu: must have a non-zero value", path))
+	es.Push(ers.Whenf(b.Mem.IsZero() || b.Mem.Value() < 0),
+		"%s.mem: must have value greater than zero", path)
+	es.Push(ers.Whenf(Mem.Value()%memSlotSize.Value() != 0,
+		"%s.mem: must be divisiable by VM memory slot size %s", memSlotSize))
 
-	if b.Mem.IsZero() || b.Mem.Value() < 0 {
-		ec.Add(errAt(".mem", errors.New("must be set to a value greater than zero")))
-	} else if b.Mem.Value()%memSlotSize.Value() != 0 {
-		ec.Add(errAt(".mem", fmt.Errorf("must be divisible by VM memory slot size %s", memSlotSize)))
-	}
+	// ers.Stack is always error, and is non-nil here: calling
+	// resolve returns nil if none of the above are errors:
+	return es.Resolve()
 }
 
 // ScalingConfig provides bits of configuration for how the autoscaler-agent makes scaling decisions
@@ -285,20 +286,19 @@ type ScalingConfig struct {
 }
 
 func (c *ScalingConfig) Validate() error {
-	ec := &erc.Collector{}
+	es := &ers.Stack{}
 
 	// Check c.loadAverageFractionTarget is between 0 and 2. We don't
-	// *strictly* need the upper
-	// bound, but it's a good safety check.
-	erc.Whenf(ec, c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
-	erc.Whenf(ec, c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget")
+	// *strictly* need the upper bound, but it's a good safety check.
+	es.Push(ers.Whenf(c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget"))
+	es.Push(ers.Whenf(c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget"))
 
 	// Make sure c.MemoryUsageFractionTarget is between 0 and 1
-	erc.Whenf(ec, c.MemoryUsageFractionTarget < 0.0, "%s must be set to value >= 0", ".memoryUsageFractionTarget")
-	erc.Whenf(ec, c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget")
+	es.Push(ers.Whenf(c.MemoryUsageFractionTarget < 0.0, "%s must be set to value >= 0", ".memoryUsageFractionTarget"))
+	es.Push(ers.Whenf(c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget"))
 
 	// heads-up! some functions elsewhere depend on the concrete return type of this function.
-	return ec.Resolve()
+	return es.Resolve()
 }
 
 // the reason we have custom formatting for VmInfo is because without it, the formatting of memory

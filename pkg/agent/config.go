@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tychoish/fun/erc"
-
 	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/tychoish/fun/ers"
 )
 
 type Config struct {
@@ -135,43 +134,41 @@ func ReadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	ec := &erc.Collector{}
-
 	const (
 		emptyTmpl = "field %q cannot be empty"
 		zeroTmpl  = "field %q cannot be zero"
 	)
 
-	erc.Whenf(ec, c.Billing != nil && c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.PushEverySeconds == 0, zeroTmpl, ".billing.pushEverySeconds")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.PushRequestTimeoutSeconds == 0, zeroTmpl, ".billing.pushRequestTimeoutSeconds")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.MaxBatchSize == 0, zeroTmpl, ".billing.maxBatchSize")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.URL == "", emptyTmpl, ".billing.url")
-	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
-	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
-	erc.Whenf(ec, c.Informant.DownscaleTimeoutSeconds == 0, zeroTmpl, ".informant.downscaleTimeoutSeconds")
-	erc.Whenf(ec, c.Informant.RegisterRetrySeconds == 0, zeroTmpl, ".informant.registerRetrySeconds")
-	erc.Whenf(ec, c.Informant.RegisterTimeoutSeconds == 0, zeroTmpl, ".informant.registerTimeoutSeconds")
-	erc.Whenf(ec, c.Informant.RequestTimeoutSeconds == 0, zeroTmpl, ".informant.requestTimeoutSeconds")
-	erc.Whenf(ec, c.Informant.RetryServerMinWaitSeconds == 0, zeroTmpl, ".informant.retryServerMinWaitSeconds")
-	erc.Whenf(ec, c.Informant.RetryServerNormalWaitSeconds == 0, zeroTmpl, ".informant.retryServerNormalWaitSeconds")
-	erc.Whenf(ec, c.Informant.ServerPort == 0, zeroTmpl, ".informant.serverPort")
-	erc.Whenf(ec, c.Informant.CallbackPort == 0, zeroTmpl, ".informant.callbackPort")
-	erc.Whenf(ec, c.Informant.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".informant.unhealthyAfterSilenceDurationSeconds")
-	erc.Whenf(ec, c.Informant.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".informant.unhealthyStartupGracePeriodSeconds")
-	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
-	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
-	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
-	erc.Whenf(ec, c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds")
-	erc.Whenf(ec, c.Monitor.ConnectionTimeoutSeconds == 0, zeroTmpl, ".monitor.connectionTimeoutSeconds")
-	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
-	ec.Add(c.Scaling.DefaultConfig.Validate())
-	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
-	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
-	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
-
-	return ec.Resolve()
+	return ers.Join(
+		ers.Whenf(c.Billing != nil && c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName"),
+		ers.Whenf(c.Billing != nil && c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName"),
+		ers.Whenf(c.Billing != nil && c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds"),
+		ers.Whenf(c.Billing != nil && c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds"),
+		ers.Whenf(c.Billing != nil && c.Billing.PushEverySeconds == 0, zeroTmpl, ".billing.pushEverySeconds"),
+		ers.Whenf(c.Billing != nil && c.Billing.PushRequestTimeoutSeconds == 0, zeroTmpl, ".billing.pushRequestTimeoutSeconds"),
+		ers.Whenf(c.Billing != nil && c.Billing.MaxBatchSize == 0, zeroTmpl, ".billing.maxBatchSize"),
+		ers.Whenf(c.Billing != nil && c.Billing.URL == "", emptyTmpl, ".billing.url"),
+		ers.Whenf(c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port"),
+		ers.Whenf(c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds"),
+		ers.Whenf(c.Informant.DownscaleTimeoutSeconds == 0, zeroTmpl, ".informant.downscaleTimeoutSeconds"),
+		ers.Whenf(c.Informant.RegisterRetrySeconds == 0, zeroTmpl, ".informant.registerRetrySeconds"),
+		ers.Whenf(c.Informant.RegisterTimeoutSeconds == 0, zeroTmpl, ".informant.registerTimeoutSeconds"),
+		ers.Whenf(c.Informant.RequestTimeoutSeconds == 0, zeroTmpl, ".informant.requestTimeoutSeconds"),
+		ers.Whenf(c.Informant.RetryServerMinWaitSeconds == 0, zeroTmpl, ".informant.retryServerMinWaitSeconds"),
+		ers.Whenf(c.Informant.RetryServerNormalWaitSeconds == 0, zeroTmpl, ".informant.retryServerNormalWaitSeconds"),
+		ers.Whenf(c.Informant.ServerPort == 0, zeroTmpl, ".informant.serverPort"),
+		ers.Whenf(c.Informant.CallbackPort == 0, zeroTmpl, ".informant.callbackPort"),
+		ers.Whenf(c.Informant.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".informant.unhealthyAfterSilenceDurationSeconds"),
+		ers.Whenf(c.Informant.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".informant.unhealthyStartupGracePeriodSeconds"),
+		ers.Whenf(c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix"),
+		ers.Whenf(c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests"),
+		ers.Whenf(c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds"),
+		ers.Whenf(c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds"),
+		ers.Whenf(c.Monitor.ConnectionTimeoutSeconds == 0, zeroTmpl, ".monitor.connectionTimeoutSeconds"),
+		// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
+		c.Scaling.DefaultConfig.Validate(),
+		ers.Whenf(c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort"),
+		ers.Whenf(c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds"),
+		ers.Whenf(c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName"),
+	)
 }
