@@ -261,10 +261,10 @@ func (b ResourceBounds) validate(path string, memSlotSize *resource.Quantity) er
 	// ers.Whenf is nil if the condition is false; also does not
 	// resolve/format the string unless the condition is true.
 	es.Push(ers.Whenf(b.CPU.IsZero(), "%s.cpu: must have a non-zero value", path))
-	es.Push(ers.Whenf(b.Mem.IsZero() || b.Mem.Value() < 0),
-		"%s.mem: must have value greater than zero", path)
-	es.Push(ers.Whenf(Mem.Value()%memSlotSize.Value() != 0,
-		"%s.mem: must be divisiable by VM memory slot size %s", memSlotSize))
+	es.Push(ers.Whenf(b.Mem.IsZero() || b.Mem.Value() < 0,
+		"%s.mem: must have value greater than zero", path))
+	es.Push(ers.Whenf(b.Mem.Value()%memSlotSize.Value() != 0,
+		"%s.mem: must be divisiable by VM memory slot size %s", path, memSlotSize))
 
 	// ers.Stack is always error, and is non-nil here: calling
 	// resolve returns nil if none of the above are errors:
