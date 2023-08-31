@@ -963,6 +963,10 @@ spec:
                       description: EmptyDisk represents a temporary empty qcow2 disk
                         that shares a vm's lifetime.
                       properties:
+                        discard:
+                          description: Discard enables the "discard" mount option
+                            for the filesystem
+                          type: boolean
                         size:
                           anyOf:
                           - type: integer
