@@ -98,6 +98,14 @@ func NewDispatcher(
 		return nil, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
+	// If we return early, make sure we close the websocket
+	connectionOk := false
+	defer func() {
+		if !connectionOk {
+			c.Close(websocket.StatusInternalError, "could not establish protocol")
+		}
+	}()
+
 	versionRange := api.VersionRange[api.MonitorProtoVersion]{
 		Min: MinMonitorProtocolVersion,
 		Max: MaxMonitorProtocolVersion,
@@ -132,6 +140,7 @@ func NewDispatcher(
 		server:            parent,
 		lock:              sync.Mutex{},
 	}
+	connectionOk = true
 	return disp, nil
 }
 
