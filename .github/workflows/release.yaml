@@ -8,6 +8,7 @@ env:
   AGENT_IMAGE: "neondatabase/autoscaler-agent"
   SCHED_IMAGE: "neondatabase/autoscale-scheduler"
   MONITOR_IMAGE: "neondatabase/vm-monitor"
+  VM_MONITOR_BRANCH: "main"
 
   KUSTOMIZE_VERSION:        "4.5.7"
   CONTROLLER_TOOLS_VERSION: "0.10.0"
@@ -132,6 +133,7 @@ jobs:
           tags: ${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
             GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
+            BRANCH=${{ env.VM_MONITOR_BRANCH }}
 
       - name: render kubernetes resources
         uses: stefanprodan/kube-tools@v1
