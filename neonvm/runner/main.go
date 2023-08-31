@@ -68,6 +68,17 @@ const (
 	// in microseconds. Min 1000 microseconds, max 1 second
 	cgroupPeriod     = uint64(100000)
 	cgroupMountPoint = "/sys/fs/cgroup"
+
+	// cpuLimitOvercommitFactor sets the amount above the VM's spec.guest.cpus.use that we set the
+	// QEMU cgroup's CPU limit to. e.g. if cpuLimitOvercommitFactor = 3 and the VM is using 0.5
+	// CPUs, we set the cgroup to limit QEMU+VM to 1.5 CPUs.
+	//
+	// This exists because setting the cgroup exactly equal to the VM's CPU value is overly
+	// pessimistic, results in a lot of unused capacity on the host, and particularly impacts
+	// operations that parallelize between the VM and QEMU, like heavy disk access.
+	//
+	// See also: https://neondb.slack.com/archives/C03TN5G758R/p1693462680623239
+	cpuLimitOvercommitFactor = 4
 )
 
 var (
@@ -210,7 +221,12 @@ func createISO9660runtime(diskPath string, command []string, args []string, env 
 			mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			switch {
 			case disk.EmptyDisk != nil:
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
+				opts := ""
+				if disk.EmptyDisk.Discard {
+					opts = "-o discard"
+				}
+
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
 			case disk.ConfigMap != nil || disk.Secret != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
 			case disk.Tmpfs != nil:
@@ -527,7 +543,11 @@ func main() {
 			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
 				log.Fatalln(err)
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none", disk.Name, dPath))
+			discard := ""
+			if disk.EmptyDisk.Discard {
+				discard = ",discard=unmap"
+			}
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -832,6 +852,8 @@ func getSelfCgroupPath() (string, error) {
 }
 
 func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
+	r *= cpuLimitOvercommitFactor
+
 	isV2 := cgroups.Mode() == cgroups.Unified
 	period := cgroupPeriod
 	// quota may be greater than period if the cgroup is allowed
@@ -885,6 +907,7 @@ func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 		return nil, err
 	}
 	cpu := vmv1.MilliCPU(uint32(quota * 1000 / cgroupPeriod))
+	cpu /= cpuLimitOvercommitFactor
 	return &cpu, nil
 }
 
