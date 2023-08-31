@@ -68,6 +68,17 @@ const (
 	// in microseconds. Min 1000 microseconds, max 1 second
 	cgroupPeriod     = uint64(100000)
 	cgroupMountPoint = "/sys/fs/cgroup"
+
+	// cpuLimitOvercommitFactor sets the amount above the VM's spec.guest.cpus.use that we set the
+	// QEMU cgroup's CPU limit to. e.g. if cpuLimitOvercommitFactor = 3 and the VM is using 0.5
+	// CPUs, we set the cgroup to limit QEMU+VM to 1.5 CPUs.
+	//
+	// This exists because setting the cgroup exactly equal to the VM's CPU value is overly
+	// pessimistic, results in a lot of unused capacity on the host, and particularly impacts
+	// operations that parallelize between the VM and QEMU, like heavy disk access.
+	//
+	// See also: https://neondb.slack.com/archives/C03TN5G758R/p1693462680623239
+	cpuLimitOvercommitFactor = 4
 )
 
 var (
@@ -832,6 +843,8 @@ func getSelfCgroupPath() (string, error) {
 }
 
 func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
+	r *= cpuLimitOvercommitFactor
+
 	isV2 := cgroups.Mode() == cgroups.Unified
 	period := cgroupPeriod
 	// quota may be greater than period if the cgroup is allowed
@@ -885,6 +898,7 @@ func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 		return nil, err
 	}
 	cpu := vmv1.MilliCPU(uint32(quota * 1000 / cgroupPeriod))
+	cpu /= cpuLimitOvercommitFactor
 	return &cpu, nil
 }
 
