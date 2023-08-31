@@ -310,6 +310,8 @@ type DiskSource struct {
 
 type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
+	// Discard enables the "discard" mount option for the filesystem
+	Discard bool `json:"discard,omitempty"`
 }
 
 type TmpfsDiskSource struct {
