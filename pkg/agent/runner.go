@@ -1384,11 +1384,20 @@ func (s *AtomicUpdateState) DesiredVMState(allowDecrease bool) api.Resources {
 	// bound goal by the minimum and maximum resource amounts for the VM
 	result := goal.Min(s.VM.Max()).Max(s.VM.Min())
 
+	// If no decreases are allowed, then we *must* make sure that the VM's usage value has not
+	// decreased, even if it's greater than the VM maximum.
+	//
+	// We can run into situtations like this when VM scale-down on bounds change fails, so we end up
+	// with a usage value greater than the maximum.
+	if !allowDecrease {
+		result = result.Max(s.VM.Using())
+	}
+
 	// Check that the result is sound.
 	//
 	// With the current (naive) implementation, this is trivially ok. In future versions, it might
 	// not be so simple, so it's good to have this integrity check here.
-	if result.HasFieldGreaterThan(s.VM.Max()) {
+	if allowDecrease && result.HasFieldGreaterThan(s.VM.Max()) {
 		panic(fmt.Errorf(
 			"produced invalid desiredVMState: result has field greater than max. this = %+v", *s,
 		))

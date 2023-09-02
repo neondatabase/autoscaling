@@ -37,6 +37,36 @@ func Test_desiredVMState(t *testing.T) {
 			expected:      api.Resources{VCPU: 500, Mem: 2},
 			allowDecrease: true,
 		},
+		{
+			name: "MismatchedApprovedNoScaledown",
+			metrics: api.Metrics{
+				LoadAverage1Min:  0.0, // ordinarily would like to scale down
+				LoadAverage5Min:  0.0,
+				MemoryUsageBytes: 0.0,
+			},
+			vmUsing:          api.Resources{VCPU: 250, Mem: 2},
+			lastApproved:     api.Resources{VCPU: 250, Mem: 1},
+			requestedUpscale: api.MoreResources{Cpu: false, Memory: false},
+
+			// need to scale up because vmUsing is mismatched and otherwise we'd be scaling down.
+			expected:      api.Resources{VCPU: 500, Mem: 2},
+			allowDecrease: false,
+		},
+		{
+			// ref https://github.com/neondatabase/autoscaling/issues/512
+			name: "MismatchedApprovedNoScaledownButVMAtMaximum",
+			metrics: api.Metrics{
+				LoadAverage1Min:  0.0, // ordinarily would like to scale down
+				LoadAverage5Min:  0.0,
+				MemoryUsageBytes: 0.0,
+			},
+			vmUsing:          api.Resources{VCPU: 1000, Mem: 5}, // note: mem greater than maximum. It can happen when scaling bounds change
+			lastApproved:     api.Resources{VCPU: 1000, Mem: 4},
+			requestedUpscale: api.MoreResources{Cpu: false, Memory: false},
+
+			expected:      api.Resources{VCPU: 1000, Mem: 5},
+			allowDecrease: false,
+		},
 	}
 
 	for _, c := range cases {
