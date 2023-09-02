@@ -1420,7 +1420,7 @@ func (s *AtomicUpdateState) DesiredVMState(allowDecrease bool) api.Resources {
 // has previously prevented it from being set to a multiple of the Compute Unit.
 func (s *AtomicUpdateState) computeUnitsBounds() (uint32, uint32) {
 	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is already guaranteed by
-	// the
+	// the checks on the computeUnit that the scheduler provides.
 	minCPUUnits := (uint32(s.VM.Cpu.Use) + uint32(s.ComputeUnit.VCPU) - 1) / uint32(s.ComputeUnit.VCPU)
 	minMemUnits := uint32((s.VM.Mem.Use + s.ComputeUnit.Mem - 1) / s.ComputeUnit.Mem)
 
