@@ -1480,6 +1480,10 @@ spec:
                       description: EmptyDisk represents a temporary empty qcow2 disk
                         that shares a vm's lifetime.
                       properties:
+                        discard:
+                          description: Discard enables the "discard" mount option
+                            for the filesystem
+                          type: boolean
                         size:
                           anyOf:
                           - type: integer
@@ -3703,7 +3707,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.17.4
+        image: neondatabase/neonvm-controller:v0.17.7
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3885,7 +3889,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.17.4
+        image: neondatabase/neonvm-vxlan-controller:v0.17.7
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -3917,7 +3921,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.17.4
+        image: neondatabase/neonvm-vxlan-controller:v0.17.7
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
