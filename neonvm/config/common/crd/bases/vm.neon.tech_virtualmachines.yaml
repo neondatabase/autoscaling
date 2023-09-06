@@ -2516,6 +2516,8 @@ spec:
                 type: string
               service_links:
                 type: boolean
+              serviceAccountName:
+                type: string
               terminationGracePeriodSeconds:
                 default: 5
                 format: int64
