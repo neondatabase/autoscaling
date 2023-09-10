@@ -11,7 +11,7 @@ E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
 # Which branch of neondatabase/neon to pull the vm-monitor from
-VM_MONITOR_BRANCH ?= main
+VM_MONITOR_BRANCH ?= sharnoff/monitor-metrics # TEMPORARY!
 
 # kernel for guests
 VM_KERNEL_VERSION ?= "5.15.80"
