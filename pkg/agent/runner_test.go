@@ -14,7 +14,7 @@ func Test_desiredVMState(t *testing.T) {
 		name string
 
 		// helpers for setting fields of atomicUpdateState:
-		metrics          api.Metrics
+		metrics          agent.VMMetrics
 		vmUsing          api.Resources
 		lastApproved     api.Resources
 		requestedUpscale api.MoreResources
@@ -25,7 +25,7 @@ func Test_desiredVMState(t *testing.T) {
 	}{
 		{
 			name: "BasicScaleup",
-			metrics: api.Metrics{
+			metrics: agent.VMMetrics{
 				LoadAverage1Min:  0.30,
 				LoadAverage5Min:  0.0, // unused
 				MemoryUsageBytes: 0.0,
@@ -39,7 +39,7 @@ func Test_desiredVMState(t *testing.T) {
 		},
 		{
 			name: "MismatchedApprovedNoScaledown",
-			metrics: api.Metrics{
+			metrics: agent.VMMetrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
 				LoadAverage5Min:  0.0,
 				MemoryUsageBytes: 0.0,
@@ -55,7 +55,7 @@ func Test_desiredVMState(t *testing.T) {
 		{
 			// ref https://github.com/neondatabase/autoscaling/issues/512
 			name: "MismatchedApprovedNoScaledownButVMAtMaximum",
-			metrics: api.Metrics{
+			metrics: agent.VMMetrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
 				LoadAverage5Min:  0.0,
 				MemoryUsageBytes: 0.0,

@@ -128,7 +128,7 @@ type Runner struct {
 	// This field is exclusively set by the getMetricsLoop background worker, and will never change
 	// from non-nil to nil. The data behind each pointer is immutable, but the value of the pointer
 	// itself is not.
-	lastMetrics *vmMetrics
+	lastMetrics *VMMetrics
 	// requestedUpscale provides information about any requested upscaling by a VM informant
 	//
 	// This value is reset whenever we start a new informant server
@@ -216,7 +216,7 @@ type Scheduler struct {
 type RunnerState struct {
 	PodIP                 string                `json:"podIP"`
 	VM                    api.VmInfo            `json:"vm"`
-	LastMetrics           *vmMetrics            `json:"lastMetrics"`
+	LastMetrics           *VMMetrics            `json:"lastMetrics"`
 	Scheduler             *SchedulerState       `json:"scheduler"`
 	Server                *InformantServerState `json:"server"`
 	Informant             *api.InformantDesc    `json:"informant"`
@@ -946,8 +946,8 @@ waitForNewScheduler:
 // Lower-level implementation functions //
 //////////////////////////////////////////
 
-// vmMetrics is the internal abstraction over metrics information that we may use for scaling.
-type vmMetrics struct {
+// VMMetrics is the internal abstraction over metrics information that we may use for scaling.
+type VMMetrics struct {
 	LoadAverage1Min      float32  `json:"loadAverage1Min"`
 	LoadAverage5Min      float32  `json:"loadAverage5Min"`
 	MemoryUsageBytes     float32  `json:"memoryUsageBytes"`
@@ -962,7 +962,7 @@ func (r *Runner) doMetricsRequestIfEnabled(
 	logger *zap.Logger,
 	timeout time.Duration,
 	clearNewInformantSignal func(),
-) (*vmMetrics, error) {
+) (*VMMetrics, error) {
 	logger.Info("Attempting metrics request")
 
 	// FIXME: the region where the lock is held should be extracted into a separate method, called
@@ -996,12 +996,12 @@ func (r *Runner) doMetricsRequestIfEnabled(
 		panic(errors.New("r.informant == nil but r.server.mode == InformantServerRunning"))
 	}
 
-	var doRequest func(context.Context) (*vmMetrics, error)
+	var doRequest func(context.Context) (*VMMetrics, error)
 
 	switch {
 	case r.informant.MetricsMethod.Prometheus != nil:
 		url := fmt.Sprintf("http://%s:%d/metrics", r.podIP, r.informant.MetricsMethod.Prometheus.Port)
-		doRequest = func(ctx context.Context) (*vmMetrics, error) {
+		doRequest = func(ctx context.Context) (*VMMetrics, error) {
 			logger.Info("Making metrics request to VM via Prometheus", zap.String("url", url))
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewReader(nil))
@@ -1030,7 +1030,7 @@ func (r *Runner) doMetricsRequestIfEnabled(
 			if err != nil {
 				return nil, fmt.Errorf("Error reading metrics from prometheus output: %w", err)
 			}
-			return &vmMetrics{
+			return &VMMetrics{
 				LoadAverage1Min:      m.LoadAverage1Min,
 				LoadAverage5Min:      m.LoadAverage5Min,
 				MemoryUsageBytes:     m.MemoryUsageBytes,
@@ -1040,7 +1040,7 @@ func (r *Runner) doMetricsRequestIfEnabled(
 	case r.informant.MetricsMethod.Monitor != nil:
 		server := r.server // fetch this so doRequest doesn't go through the runner while unlocked.
 
-		doRequest = func(ctx context.Context) (*vmMetrics, error) {
+		doRequest = func(ctx context.Context) (*VMMetrics, error) {
 			logger.Info("Making metrics request to VM via monitor protocol")
 
 			m, err := server.MonitorMetrics(ctx, logger)
@@ -1048,7 +1048,7 @@ func (r *Runner) doMetricsRequestIfEnabled(
 				return nil, err
 			}
 
-			return &vmMetrics{
+			return &VMMetrics{
 				LoadAverage1Min:      m.LoadAvg1m,
 				LoadAverage5Min:      m.LoadAvg5m,
 				MemoryUsageBytes:     m.MemTotalBytes - m.MemFreeBytes,
@@ -1089,7 +1089,7 @@ const (
 // VM's resources, some validation is already guaranteed by representing the data without pointers.
 type AtomicUpdateState struct {
 	ComputeUnit      api.Resources
-	Metrics          vmMetrics
+	Metrics          VMMetrics
 	VM               api.VmInfo
 	LastApproved     api.Resources
 	RequestedUpscale api.MoreResources
