@@ -22,7 +22,7 @@ import (
 
 const (
 	MinMonitorProtocolVersion api.MonitorProtoVersion = api.MonitorProtoV1_0
-	MaxMonitorProtocolVersion api.MonitorProtoVersion = api.MonitorProtoV1_0
+	MaxMonitorProtocolVersion api.MonitorProtoVersion = api.MonitorProtoV1_1
 )
 
 // This struct represents the result of a dispatcher.Call. Because the SignalSender
@@ -33,6 +33,7 @@ const (
 type MonitorResult struct {
 	Result       *api.DownscaleResult
 	Confirmation *api.UpscaleConfirmation
+	Metrics      *api.MetricsResponse
 	HealthCheck  *api.HealthCheck
 }
 
@@ -239,6 +240,7 @@ type messageHandlerFuncs struct {
 	handleUpscaleRequest      func(api.UpscaleRequest)
 	handleUpscaleConfirmation func(api.UpscaleConfirmation, uint64) error
 	handleDownscaleResult     func(api.DownscaleResult, uint64) error
+	handleMetrics             func(api.MetricsResponse, uint64) error
 	handleMonitorError        func(api.InternalError, uint64) error
 	handleHealthCheck         func(api.HealthCheck, uint64) error
 }
@@ -356,6 +358,12 @@ func (disp *Dispatcher) HandleMessage(
 			return err
 		}
 		return handlers.handleDownscaleResult(res, id)
+	case "MetricsResponse":
+		var metrics api.MetricsResponse
+		if err := unmarshal(&metrics); err != nil {
+			return err
+		}
+		return handlers.handleMetrics(metrics, id)
 	case "InternalError":
 		var monitorErr api.InternalError
 		if err := unmarshal(&monitorErr); err != nil {
@@ -434,11 +442,7 @@ func (disp *Dispatcher) run(ctx context.Context) {
 			logger.Info("monitor confirmed upscale", zap.Uint64("id", id))
 			sender.Send(waiterResult{
 				err: nil,
-				res: &MonitorResult{
-					Confirmation: &api.UpscaleConfirmation{},
-					Result:       nil,
-					HealthCheck:  nil,
-				},
+				res: &MonitorResult{Confirmation: &api.UpscaleConfirmation{}},
 			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
@@ -456,17 +460,30 @@ func (disp *Dispatcher) run(ctx context.Context) {
 			logger.Info("monitor returned downscale result", zap.Uint64("id", id))
 			sender.Send(waiterResult{
 				err: nil,
-				res: &MonitorResult{
-					Result:       &res,
-					Confirmation: nil,
-					HealthCheck:  nil,
-				},
+				res: &MonitorResult{Result: &res},
 			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
 			return nil
 		} else {
 			return handleUnkownMessage("DownscaleResult", id)
+		}
+	}
+	handleMetrics := func(metrics api.MetricsResponse, id uint64) error {
+		disp.lock.Lock()
+		defer disp.lock.Unlock()
+
+		sender, ok := disp.waiters[id]
+		if ok {
+			logger.Info("monitor returned metrics response", zap.Uint64("id", id))
+			sender.Send(waiterResult{
+				err: nil,
+				res: &MonitorResult{Metrics: &metrics},
+			})
+			delete(disp.waiters, id)
+			return nil
+		} else {
+			return handleUnkownMessage("MetricsRepsonse", id)
 		}
 	}
 	handleMonitorError := func(err api.InternalError, id uint64) error {
@@ -502,11 +519,7 @@ func (disp *Dispatcher) run(ctx context.Context) {
 			// Indicate to the receiver that an error occured
 			sender.Send(waiterResult{
 				err: nil,
-				res: &MonitorResult{
-					HealthCheck:  &api.HealthCheck{},
-					Result:       nil,
-					Confirmation: nil,
-				},
+				res: &MonitorResult{HealthCheck: &api.HealthCheck{}},
 			})
 			// Don't forget to delete the waiter
 			delete(disp.waiters, id)
@@ -520,6 +533,7 @@ func (disp *Dispatcher) run(ctx context.Context) {
 		handleUpscaleRequest:      handleUpscaleRequest,
 		handleUpscaleConfirmation: handleUpscaleConfirmation,
 		handleDownscaleResult:     handleDownscaleResult,
+		handleMetrics:             handleMetrics,
 		handleMonitorError:        handleMonitorError,
 		handleHealthCheck:         handleHealthCheck,
 	}

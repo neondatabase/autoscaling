@@ -13,7 +13,7 @@ commit in this repository, possibly unreleased.
 
 | Release | autoscaler-agent | VM monitor |
 |---------|------------------|------------|
-| _Current_ | v1.0 only | v1.0 only |
+| _Current_ | **v1.0-v1.1** | **v1.0-v1.1** |
 | v0.17.0 | v1.0 only | v1.0 only |
 | v0.16.0 | v1.0 only | v1.0 only |
 | v0.15.0 | **v1.0** only | **v1.0** only |

@@ -441,13 +441,22 @@ func (s *InformantServer) RegisterWithInformant(ctx context.Context, logger *zap
 				s.mode = InformantServerRunning
 				s.updatedInformant.Send()
 				if s.runner.server == s {
-					s.runner.informant = &api.InformantDesc{
-						ProtoVersion: MaxInformantProtocolVersion,
-						MetricsMethod: api.InformantMetricsMethod{
+					var metricsMethod api.InformantMetricsMethod
+					if disp.protoVersion >= api.MonitorProtoV1_1 {
+						metricsMethod = api.InformantMetricsMethod{
+							Monitor: &api.MetricsMethodMonitor{},
+						}
+					} else {
+						metricsMethod = api.InformantMetricsMethod{
 							Prometheus: &api.MetricsMethodPrometheus{
 								Port: 9100,
 							},
-						},
+						}
+					}
+
+					s.runner.informant = &api.InformantDesc{
+						ProtoVersion:  MaxInformantProtocolVersion,
+						MetricsMethod: metricsMethod,
 					}
 					s.runner.spawnBackgroundWorker(
 						ctx,
@@ -1241,4 +1250,23 @@ func (s *InformantServer) MonitorDownscale(ctx context.Context, logger *zap.Logg
 	}
 
 	return res.Result, nil
+}
+
+// This method MUST be called while NOT holding s.runner.lock. Locking requestLock is not required,
+// and for this method, not recommended (because it's likely to only make metrics less reliable).
+func (s *InformantServer) MonitorMetrics(ctx context.Context, logger *zap.Logger) (*api.MetricsResponse, error) {
+	timeout := time.Second * time.Duration(s.runner.global.config.Monitor.ResponseTimeoutSeconds)
+
+	res, err := s.dispatcher.Call(ctx, timeout, "", api.MetricsRequest{})
+	if err != nil {
+		s.runner.lock.Lock()
+		defer s.runner.lock.Unlock()
+		s.exit(InformantServerExitStatus{
+			Err:            err,
+			RetryShouldFix: false,
+		})
+		return nil, err
+	}
+
+	return res.Metrics, nil
 }

@@ -486,6 +486,8 @@ type InformantDesc struct {
 type InformantMetricsMethod struct {
 	// Prometheus describes prometheus-format metrics, typically not through the informant itself
 	Prometheus *MetricsMethodPrometheus `json:"prometheus,omitempty"`
+	// Montior describes metrics that are received through direct communication with the vm-monitor
+	Monitor *MetricsMethodMonitor `json:"monitor,omitempty"`
 }
 
 // MetricsMethodPrometheus describes VM informant's metrics in the prometheus format, made available
@@ -493,6 +495,8 @@ type InformantMetricsMethod struct {
 type MetricsMethodPrometheus struct {
 	Port uint16 `json:"port"`
 }
+
+type MetricsMethodMonitor struct{}
 
 // InformantHealthCheckResp is the result of a successful request to a VM informant's /health-check
 // endpoint.
@@ -658,6 +662,18 @@ type DownscaleRequest struct {
 	Target Allocation `json:"target"`
 }
 
+// This type is sent to request metrics information from the monitor
+type MetricsRequest struct{}
+
+type MetricsResponse struct {
+	LoadAvg1m float32 `json:"loadAvg1m"`
+	LoadAvg5m float32 `json:"loadAvg5m"`
+
+	MemTotalBytes     float32 `json:"memTotalBytes"`
+	MemFreeBytes      float32 `json:"memFreeBytes"`
+	MemBuffcacheBytes float32 `json:"memBuffcacheBytes"`
+}
+
 // ** Types shared by informant and monitor **
 
 // This type can be sent by either party whenever they receive a message they
@@ -704,6 +720,8 @@ func SerializeInformantMessage(content any, id uint64) ([]byte, error) {
 		typeStr = "InvalidMessage"
 	case InternalError:
 		typeStr = "InternalError"
+	case MetricsResponse:
+		typeStr = "MetricsResponse"
 	case HealthCheck:
 		typeStr = "HealthCheck"
 	default:
@@ -729,8 +747,17 @@ type MonitorProtoVersion uint32
 const (
 	// MonitorProtoV1_0 represents v1.0 of the agent<->monitor protocol - the initial version.
 	//
-	// Currently the lastest version.
+	// Last used in release version v0.17.8.
 	MonitorProtoV1_0 = iota + 1
+
+	// MonitorProtoV1_1 represents v1.1 of the agent<->monitor protocol
+	//
+	// Changes from v1.1:
+	//
+	// * Adds the metrics request/response message types
+	//
+	// Currently the lastest version.
+	MonitorProtoV1_1
 
 	// latestMonitorProtoVersion represents the latest version of the agent<->Monitor protocol
 	//
@@ -748,6 +775,8 @@ func (v MonitorProtoVersion) String() string {
 		return "<invalid: zero>"
 	case MonitorProtoV1_0:
 		return "v1.0"
+	case MonitorProtoV1_1:
+		return "v1.1"
 	default:
 		diff := v - latestMonitorProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestMonitorProtoVersion, diff)
