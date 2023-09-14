@@ -217,6 +217,7 @@ type RunnerState struct {
 	PodIP                 string                `json:"podIP"`
 	VM                    api.VmInfo            `json:"vm"`
 	LastMetrics           *api.Metrics          `json:"lastMetrics"`
+	RequestedUpscale      api.MoreResources     `json:"requestedUpscale"`
 	Scheduler             *SchedulerState       `json:"scheduler"`
 	Server                *InformantServerState `json:"server"`
 	Informant             *api.InformantDesc    `json:"informant"`
@@ -266,6 +267,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 
 	return &RunnerState{
 		LastMetrics:           r.lastMetrics,
+		RequestedUpscale:      r.requestedUpscale,
 		Scheduler:             scheduler,
 		Server:                serverState,
 		Informant:             r.informant,
