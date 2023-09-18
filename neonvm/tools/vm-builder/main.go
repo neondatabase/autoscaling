@@ -260,6 +260,7 @@ action=/neonvm/bin/powerdown
 	scriptPowerDown = `#!/neonvm/bin/sh
 
 su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+sleep 1
 /neonvm/bin/poweroff
 `
 
