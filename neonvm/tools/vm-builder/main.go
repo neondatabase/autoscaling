@@ -260,6 +260,12 @@ action=/neonvm/bin/powerdown
 	scriptPowerDown = `#!/neonvm/bin/sh
 
 su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+# The poweroff below is the busybox poweroff which goes straight to the kernel, i.e., LINUX_REBOOT_CMD_POWER_OFF / RB_POWER_OFF.
+# Our experiments have shown that, generally, this type of hard shutdown will not FIN/RST existing TCP connections (i.e., state ESTABLISHED).
+# Now, for the particular case of NeonVM, we just did 'pg_ctl stop'.
+# But, the libpagestore.c is currently not explicitly shutting down the TCP connection to pageservers, relying on the kernel
+# to implicitly close the socket on exit.
+# This sleep here is to give the kernel time to send the FIN/RST.
 sleep 1
 /neonvm/bin/poweroff
 `
