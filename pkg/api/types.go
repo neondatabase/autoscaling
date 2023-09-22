@@ -403,7 +403,7 @@ type HealthCheck struct{}
 // - InvalidMessage
 // - InternalError
 // - HealthCheck
-func SerializeAgentMessage(content any, id uint64) ([]byte, error) {
+func SerializeMonitorMessage(content any, id uint64) ([]byte, error) {
 	// The final type that gets sent over the wire
 	type Bundle struct {
 		Content any    `json:"content"`

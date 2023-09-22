@@ -82,14 +82,14 @@ func NewDispatcher(
 	ctx context.Context,
 	logger *zap.Logger,
 	addr string,
-	parent *Runner,
+	runner *Runner,
 	sendUpscaleRequested util.CondChannelSender,
 ) (*Dispatcher, error) {
 	// parent.runner, runner.global, and global.config are immutable so we don't
 	// need to acquire runner.lock here
 	ctx, cancel := context.WithTimeout(
 		ctx,
-		time.Second*time.Duration(parent.global.config.Monitor.ConnectionTimeoutSeconds),
+		time.Second*time.Duration(runner.global.config.Monitor.ConnectionTimeoutSeconds),
 	)
 	defer cancel()
 
@@ -141,7 +141,7 @@ func NewDispatcher(
 		lastTransactionID: atomic.Uint64{}, // Note: initialized to 0, so it's even, as required.
 		logger:            logger.Named("dispatcher"),
 		protoVersion:      version.Version,
-		runner:            parent,
+		runner:            runner,
 		upscaleRequester:  sendUpscaleRequested,
 		lock:              sync.Mutex{},
 	}
@@ -150,15 +150,15 @@ func NewDispatcher(
 }
 
 // Send a message down the connection. Only call this method with types that
-// SerializeAgentMessage can handle.
+// SerializeMonitorMessage can handle.
 func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error {
-	data, err := api.SerializeAgentMessage(message, id)
+	data, err := api.SerializeMonitorMessage(message, id)
 	if err != nil {
 		return fmt.Errorf("error serializing message: %w", err)
 	}
 	// wsjson.Write serializes whatever is passed in, and go serializes []byte
 	// by base64 encoding it, so use RawMessage to avoid serializing to []byte
-	// (done by SerializeAgentMessage), and then base64 encoding again
+	// (done by SerializeMonitorMessage), and then base64 encoding again
 	raw := json.RawMessage(data)
 	disp.logger.Info("sending message to monitor", zap.ByteString("message", raw))
 	return wsjson.Write(ctx, disp.conn, &raw)
@@ -180,7 +180,7 @@ func (disp *Dispatcher) unregisterWaiter(id uint64) {
 }
 
 // Make a request to the monitor and wait for a response. The value passed as message must be a
-// valid value to send to the monitor. See the docs for SerializeAgentMessage for more.
+// valid value to send to the monitor. See the docs for SerializeMonitorMessage for more.
 //
 // This function must NOT be called while holding disp.runner.lock.
 func (disp *Dispatcher) Call(
