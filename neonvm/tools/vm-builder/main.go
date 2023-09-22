@@ -169,10 +169,11 @@ RUN set -e \
 ADD inittab   /neonvm/bin/inittab
 ADD vminit    /neonvm/bin/vminit
 ADD vmstart   /neonvm/bin/vmstart
+ADD vmshutdown /neonvm/bin/vmshutdown
 ADD vmacpi    /neonvm/acpi/vmacpi
 ADD vector.yaml /neonvm/config/vector.yaml
 ADD powerdown /neonvm/bin/powerdown
-RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
+RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown /neonvm/bin/powerdown
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
@@ -231,6 +232,13 @@ else
     /neonvm/bin/echo -n {{range .Cmd}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
 
+/neonvm/bin/cat <<'EOF' >>/neonvm/bin/vmstarter.sh
+
+if [ -e "/neonvm/vmstart_command_finished.fifo" ]; then
+	echo ' ' > /neonvm/vmstart_command_finished.fifo
+fi
+EOF
+
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
 
 /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh
@@ -250,24 +258,18 @@ fi
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
+::shutdown:/neonvm/bin/vmshutdown
 `
 
 	scriptVmAcpi = `
 event=button/power
-action=/neonvm/bin/powerdown
+action=/neonvm/bin/poweroff
 `
 
-	scriptPowerDown = `#!/neonvm/bin/sh
-
+	scriptVmShutdown = `#!/neonvm/bin/sh
+mkfifo /neonvm/vmstart_command_finished.fifo || exit 2
 su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
-# The poweroff below is the busybox poweroff which goes straight to the kernel, i.e., LINUX_REBOOT_CMD_POWER_OFF / RB_POWER_OFF.
-# Our experiments have shown that, generally, this type of hard shutdown will not FIN/RST existing TCP connections (i.e., state ESTABLISHED).
-# Now, for the particular case of NeonVM, we just did 'pg_ctl stop'.
-# But, the libpagestore.c is currently not explicitly shutting down the TCP connection to pageservers, relying on the kernel
-# to implicitly close the socket on exit.
-# This sleep here is to give the kernel time to send the FIN/RST.
-sleep 1
-/neonvm/bin/poweroff
+cat /neonvm/vmstart_command_finished.fifo
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
@@ -556,9 +558,9 @@ func main() {
 	}{
 		{"Dockerfile", dockerfileVmBuilder},
 		{"vmstart", scriptVmStart},
+		{"vmshutdown", scriptVmShutdown},
 		{"inittab", scriptInitTab},
 		{"vmacpi", scriptVmAcpi},
-		{"powerdown", scriptPowerDown},
 		{"vminit", scriptVmInit},
 		{"cgconfig.conf", configCgroup},
 		{"vector.yaml", configVector},

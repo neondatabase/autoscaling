@@ -141,6 +141,13 @@ else
     /neonvm/bin/echo -n {{range .Cmd}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
 
+/neonvm/bin/cat <<'EOF' >>/neonvm/bin/vmstarter.sh
+
+if [ -e "/neonvm/vmstart_command_finished.fifo" ]; then
+	echo ' ' > /neonvm/vmstart_command_finished.fifo
+fi
+EOF
+
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
 
 /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh
@@ -153,16 +160,18 @@ fi
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vmstart
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
+::shutdown:/neonvm/bin/vmshutdown
 `
 
 	scriptVmAcpi = `
 event=button/power
-action=/neonvm/bin/powerdown
+action=/neonvm/bin/poweroff
 `
 
-	scriptPowerDown = `#!/neonvm/bin/sh
-
-/neonvm/bin/poweroff
+	scriptVmShutdown = `#!/neonvm/bin/sh
+mkfifo /neonvm/vmstart_command_finished.fifo || exit 2
+su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+cat /neonvm/vmstart_command_finished.fifo
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
@@ -378,9 +387,9 @@ func main() {
 	}{
 		{"Dockerfile", dockerfileVmBuilder},
 		{"vmstart", scriptVmStart},
+		{"vmshutdown", scriptVmShutdown},
 		{"inittab", scriptInitTab},
 		{"vmacpi", scriptVmAcpi},
-		{"powerdown", scriptPowerDown},
 		{"vminit", scriptVmInit},
 	}
 
