@@ -102,23 +102,34 @@ func NewDispatcher(
 		return nil, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
+	// If we return early, make sure we close the websocket
+	connectionOk := false
+	defer func() {
+		if !connectionOk {
+			c.Close(websocket.StatusInternalError, "could not establish protocol")
+		}
+	}()
+
+	versionRange := api.VersionRange[api.MonitorProtoVersion]{
+		Min: MinMonitorProtocolVersion,
+		Max: MaxMonitorProtocolVersion,
+	}
+	logger.Info("sending protocol version range", zap.Any("range", versionRange))
+
 	// Figure out protocol version
-	err = wsjson.Write(
-		ctx,
-		c,
-		api.VersionRange[api.MonitorProtoVersion]{
-			Min: MinMonitorProtocolVersion,
-			Max: MaxMonitorProtocolVersion,
-		},
-	)
+	err = wsjson.Write(ctx, c, versionRange)
 	if err != nil {
 		return nil, fmt.Errorf("error sending protocol range to monitor: %w", err)
 	}
+
+	logger.Info("reading monitor version response")
 	var version api.MonitorProtocolResponse
 	err = wsjson.Read(ctx, c, &version)
 	if err != nil {
+		logger.Error("failed to read monitor response", zap.Error(err))
 		return nil, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
 	}
+	logger.Info("got monitor version response", zap.Any("response", version))
 	if version.Error != nil {
 		return nil, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
 	}
@@ -134,6 +145,7 @@ func NewDispatcher(
 		upscaleRequester:  sendUpscaleRequested,
 		lock:              sync.Mutex{},
 	}
+	connectionOk = true
 	return disp, nil
 }
 

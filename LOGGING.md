@@ -11,7 +11,7 @@ The following components have been updated to follow this document:
 - [x] autoscaler-agent
 - [x] autoscale-scheduler (scheduler plugin)
 - [ ] neonvm-controlller
-- [ ] neonvm-runner
+- [x] neonvm-runner
 
 ## Common keys
 

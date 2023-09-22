@@ -200,14 +200,15 @@ type Scheduler struct {
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
 type RunnerState struct {
-	PodIP                 string          `json:"podIP"`
-	VM                    api.VmInfo      `json:"vm"`
-	LastMetrics           *api.Metrics    `json:"lastMetrics"`
-	Scheduler             *SchedulerState `json:"scheduler"`
-	ComputeUnit           *api.Resources  `json:"computeUnit"`
-	LastApproved          *api.Resources  `json:"lastApproved"`
-	LastSchedulerError    error           `json:"lastSchedulerError"`
-	BackgroundWorkerCount int64           `json:"backgroundWorkerCount"`
+	PodIP                 string            `json:"podIP"`
+	VM                    api.VmInfo        `json:"vm"`
+	LastMetrics           *api.Metrics      `json:"lastMetrics"`
+	RequestedUpscale      api.MoreResources `json:"requestedUpscale"`
+	Scheduler             *SchedulerState   `json:"scheduler"`
+	ComputeUnit           *api.Resources    `json:"computeUnit"`
+	LastApproved          *api.Resources    `json:"lastApproved"`
+	LastSchedulerError    error             `json:"lastSchedulerError"`
+	BackgroundWorkerCount int64             `json:"backgroundWorkerCount"`
 
 	SchedulerRespondedWithMigration bool `json:"migrationStarted"`
 }
@@ -236,6 +237,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 
 	return &RunnerState{
 		LastMetrics:           r.lastMetrics,
+		RequestedUpscale:      r.requestedUpscale,
 		Scheduler:             scheduler,
 		ComputeUnit:           r.computeUnit,
 		LastApproved:          r.lastApproved,
@@ -882,18 +884,18 @@ const (
 	UpdatedVMInfo       VMUpdateReason = "updated VM info"
 )
 
-// atomicUpdateState holds some pre-validated data for (*Runner).updateVMResources, fetched
+// AtomicUpdateState holds some pre-validated data for (*Runner).updateVMResources, fetched
 // atomically (i.e. all at once, while holding r.lock) with the (*Runner).atomicState method
 //
 // Because atomicState is able to return nil when there isn't yet enough information to update the
 // VM's resources, some validation is already guaranteed by representing the data without pointers.
-type atomicUpdateState struct {
-	computeUnit      api.Resources
-	metrics          api.Metrics
-	vm               api.VmInfo
-	lastApproved     api.Resources
-	requestedUpscale api.MoreResources
-	config           api.ScalingConfig
+type AtomicUpdateState struct {
+	ComputeUnit      api.Resources
+	Metrics          api.Metrics
+	VM               api.VmInfo
+	LastApproved     api.Resources
+	RequestedUpscale api.MoreResources
+	Config           api.ScalingConfig
 }
 
 // updateVMResources is responsible for the high-level logic that orchestrates a single update to
@@ -932,7 +934,7 @@ func (r *Runner) updateVMResources(
 		return nil
 	}
 
-	state, err := func() (*atomicUpdateState, error) {
+	state, err := func() (*AtomicUpdateState, error) {
 		r.lock.Lock()
 		defer r.lock.Unlock()
 
@@ -948,9 +950,9 @@ func (r *Runner) updateVMResources(
 		}
 
 		// Calculate the current and desired state of the VM
-		target = state.desiredVMState(true) // note: this sets the state value in the loop body
+		target = state.DesiredVMState(true) // note: this sets the state value in the loop body
 
-		current := state.vm.Using()
+		current := state.VM.Using()
 		start = current
 
 		msg := "Target VM state is equal to current"
@@ -972,7 +974,7 @@ func (r *Runner) updateVMResources(
 
 		// note: r.atomicState already checks the validity of r.lastApproved - namely that it has no
 		// values less than r.vm.Using().
-		capped = target.Min(state.lastApproved) // note: this sets the state value in the loop body
+		capped = target.Min(state.LastApproved) // note: this sets the state value in the loop body
 
 		return state, nil
 	}()
@@ -985,19 +987,19 @@ func (r *Runner) updateVMResources(
 
 	// If there's an update that can be done immediately, do it! Typically, capped will
 	// represent the resources we'd like to downscale.
-	if capped != state.vm.Using() {
+	if capped != state.VM.Using() {
 		// If our downscale gets rejected, calculate a new target
 		rejectedDownscale := func() (newTarget api.Resources, _ error) {
-			target = state.desiredVMState(false /* don't allow downscaling */)
-			return target.Min(state.lastApproved), nil
+			target = state.DesiredVMState(false /* don't allow downscaling */)
+			return target.Min(state.LastApproved), nil
 		}
 
-		nowUsing, err := r.doVMUpdate(ctx, logger, state.vm.Using(), capped, rejectedDownscale)
+		nowUsing, err := r.doVMUpdate(ctx, logger, state.VM.Using(), capped, rejectedDownscale)
 		if err != nil {
 			return fmt.Errorf("Error doing VM update 1: %w", err)
 		}
 
-		state.vm.SetUsing(*nowUsing)
+		state.VM.SetUsing(*nowUsing)
 	}
 
 	// Fetch the scheduler, to (a) inform it of the current state, and (b) request an
@@ -1033,7 +1035,7 @@ func (r *Runner) updateVMResources(
 		ProtoVersion: PluginProtocolVersion,
 		Pod:          r.podName,
 		Resources:    target,
-		Metrics:      &state.metrics, // FIXME: the metrics here *might* be a little out of date.
+		Metrics:      &state.Metrics, // FIXME: the metrics here *might* be a little out of date.
 	}
 	response, err := sched.DoRequest(ctx, logger, &request)
 	if err != nil {
@@ -1050,7 +1052,7 @@ func (r *Runner) updateVMResources(
 
 	// sched.DoRequest should have validated the permit, meaning that it's not less than the
 	// current resource usage.
-	vmUsing := state.vm.Using()
+	vmUsing := state.VM.Using()
 	if permit.HasFieldLessThan(vmUsing) {
 		panic(errors.New("invalid state: permit less than what's in use"))
 	} else if permit.HasFieldGreaterThan(target) {
@@ -1085,7 +1087,7 @@ func (r *Runner) updateVMResources(
 // getStateForVMUpdate produces the atomicUpdateState for updateVMResources
 //
 // This method MUST be called while holding r.lock.
-func (r *Runner) getStateForVMUpdate(logger *zap.Logger, updateReason VMUpdateReason) *atomicUpdateState {
+func (r *Runner) getStateForVMUpdate(logger *zap.Logger, updateReason VMUpdateReason) *AtomicUpdateState {
 	if r.lastMetrics == nil {
 		if updateReason == UpdatedMetrics {
 			panic(errors.New("invalid state: metrics signalled but r.lastMetrics == nil"))
@@ -1124,19 +1126,19 @@ func (r *Runner) getStateForVMUpdate(logger *zap.Logger, updateReason VMUpdateRe
 		config = *r.vm.ScalingConfig
 	}
 
-	return &atomicUpdateState{
-		computeUnit:      *r.computeUnit,
-		metrics:          *r.lastMetrics,
-		vm:               r.vm,
-		lastApproved:     *r.lastApproved,
-		requestedUpscale: r.requestedUpscale,
-		config:           config,
+	return &AtomicUpdateState{
+		ComputeUnit:      *r.computeUnit,
+		Metrics:          *r.lastMetrics,
+		VM:               r.vm,
+		LastApproved:     *r.lastApproved,
+		RequestedUpscale: r.requestedUpscale,
+		Config:           config,
 	}
 }
 
-// desiredVMState calculates what the resource allocation to the VM should be, given the metrics and
+// DesiredVMState calculates what the resource allocation to the VM should be, given the metrics and
 // current state.
-func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
+func (s *AtomicUpdateState) DesiredVMState(allowDecrease bool) api.Resources {
 	// There's some annoying edge cases that this function has to be able to handle properly. For
 	// the sake of completeness, they are:
 	//
@@ -1165,8 +1167,8 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
 	// average),
 	// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
-	goalCPUs := float64(s.metrics.LoadAverage1Min) / s.config.LoadAverageFractionTarget
-	cpuGoalCU := uint32(math.Round(goalCPUs / s.computeUnit.VCPU.AsFloat64()))
+	goalCPUs := float64(s.Metrics.LoadAverage1Min) / s.Config.LoadAverageFractionTarget
+	cpuGoalCU := uint32(math.Round(goalCPUs / s.ComputeUnit.VCPU.AsFloat64()))
 
 	// For Mem:
 	// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
@@ -1174,8 +1176,8 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	// that to CUs
 	//
 	// NOTE: use uint64 for calculations on bytes as uint32 can overflow
-	memGoalBytes := uint64(math.Round(float64(s.metrics.MemoryUsageBytes) / s.config.MemoryUsageFractionTarget))
-	bytesPerCU := uint64(int64(s.computeUnit.Mem) * s.vm.Mem.SlotSize.Value())
+	memGoalBytes := uint64(math.Round(float64(s.Metrics.MemoryUsageBytes) / s.Config.MemoryUsageFractionTarget))
+	bytesPerCU := uint64(int64(s.ComputeUnit.Mem) * s.VM.Mem.SlotSize.Value())
 	memGoalCU := uint32(memGoalBytes / bytesPerCU)
 
 	goalCU := util.Max(cpuGoalCU, memGoalCU)
@@ -1190,20 +1192,29 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 	}
 
 	// resources for the desired "goal" compute units
-	goal := s.computeUnit.Mul(uint16(goalCU))
+	goal := s.ComputeUnit.Mul(uint16(goalCU))
 
 	// bound goal by the minimum and maximum resource amounts for the VM
-	result := goal.Min(s.vm.Max()).Max(s.vm.Min())
+	result := goal.Min(s.VM.Max()).Max(s.VM.Min())
+
+	// If no decreases are allowed, then we *must* make sure that the VM's usage value has not
+	// decreased, even if it's greater than the VM maximum.
+	//
+	// We can run into situtations like this when VM scale-down on bounds change fails, so we end up
+	// with a usage value greater than the maximum.
+	if !allowDecrease {
+		result = result.Max(s.VM.Using())
+	}
 
 	// Check that the result is sound.
 	//
 	// With the current (naive) implementation, this is trivially ok. In future versions, it might
 	// not be so simple, so it's good to have this integrity check here.
-	if result.HasFieldGreaterThan(s.vm.Max()) {
+	if allowDecrease && result.HasFieldGreaterThan(s.VM.Max()) {
 		panic(fmt.Errorf(
 			"produced invalid desiredVMState: result has field greater than max. this = %+v", *s,
 		))
-	} else if result.HasFieldLessThan(s.vm.Min()) {
+	} else if result.HasFieldLessThan(s.VM.Min()) {
 		panic(fmt.Errorf(
 			"produced invalid desiredVMState: result has field less than min. this = %+v", *s,
 		))
@@ -1220,11 +1231,11 @@ func (s *atomicUpdateState) desiredVMState(allowDecrease bool) api.Resources {
 // divide to a multiple of the Compute Unit, the upper and lower bounds will be different. This can
 // happen when the Compute Unit is changed, or when the VM's maximum or minimum resource allocations
 // has previously prevented it from being set to a multiple of the Compute Unit.
-func (s *atomicUpdateState) computeUnitsBounds() (uint32, uint32) {
+func (s *AtomicUpdateState) computeUnitsBounds() (uint32, uint32) {
 	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is already guaranteed by
-	// the
-	minCPUUnits := (uint32(s.vm.Cpu.Use) + uint32(s.computeUnit.VCPU) - 1) / uint32(s.computeUnit.VCPU)
-	minMemUnits := uint32((s.vm.Mem.Use + s.computeUnit.Mem - 1) / s.computeUnit.Mem)
+	// the checks on the computeUnit that the scheduler provides.
+	minCPUUnits := (uint32(s.VM.Cpu.Use) + uint32(s.ComputeUnit.VCPU) - 1) / uint32(s.ComputeUnit.VCPU)
+	minMemUnits := uint32((s.VM.Mem.Use + s.ComputeUnit.Mem - 1) / s.ComputeUnit.Mem)
 
 	return util.Min(minCPUUnits, minMemUnits), util.Max(minCPUUnits, minMemUnits)
 }
@@ -1236,16 +1247,16 @@ func (s *atomicUpdateState) computeUnitsBounds() (uint32, uint32) {
 //
 // This method does not respect any bounds on Compute Units placed by the VM's maximum or minimum
 // resource allocation.
-func (s *atomicUpdateState) requiredCUForRequestedUpscaling() uint32 {
+func (s *AtomicUpdateState) requiredCUForRequestedUpscaling() uint32 {
 	var required uint32
 
 	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
 
-	if s.requestedUpscale.Cpu {
-		required = util.Max(required, uint32(s.vm.Cpu.Use/s.computeUnit.VCPU)+1)
+	if s.RequestedUpscale.Cpu {
+		required = util.Max(required, uint32(s.VM.Cpu.Use/s.ComputeUnit.VCPU)+1)
 	}
-	if s.requestedUpscale.Memory {
-		required = util.Max(required, uint32(s.vm.Mem.Use/s.computeUnit.Mem)+1)
+	if s.RequestedUpscale.Memory {
+		required = util.Max(required, uint32(s.VM.Mem.Use/s.ComputeUnit.Mem)+1)
 	}
 
 	return required
