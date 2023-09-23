@@ -79,7 +79,7 @@ ADD vminit    /neonvm/bin/vminit
 ADD vmstart   /neonvm/bin/vmstart
 ADD vmacpi    /neonvm/acpi/vmacpi
 ADD powerdown /neonvm/bin/powerdown
-RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
+RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
