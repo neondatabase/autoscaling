@@ -265,8 +265,8 @@ if [ -e /neonvm/vmstart.allowed ]; then
 	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" >2&
 fi
 su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
-# wait for ongoing command to exit
-flock /neonvm/vmstart.lock
+# wait for ongoing command to exit by grabbing the lock
+flock /neonvm/vmstart.lock true
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
