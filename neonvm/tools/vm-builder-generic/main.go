@@ -163,12 +163,16 @@ action=/neonvm/bin/poweroff
 `
 
 	scriptVmShutdown = `#!/neonvm/bin/sh
-	rm /neonvm/vmstart.allowed
-	if [ -e /neonvm/vmstart.allowed ]; then
-		echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" >2&
-	fi
-	# wait for ongoing command to exit by grabbing the lock
-	flock /neonvm/vmstart.lock true
+rm /neonvm/vmstart.allowed
+if [ -e /neonvm/vmstart.allowed ]; then
+	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" 1>&2
+fi
+# wait for ongoing command to exit by grabbing the lock
+if flock /neonvm/vmstart.lock true; then
+	echo "vmstart workload shut down cleanly" 1>&2
+else
+	echo "error: vmshutdown flock failed" 1>&2
+fi
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
