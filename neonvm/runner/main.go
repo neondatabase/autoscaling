@@ -48,9 +48,10 @@ const (
 	kernelPath    = "/vm/kernel/vmlinuz"
 	kernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
-	rootDiskPath    = "/vm/images/rootdisk.qcow2"
-	runtimeDiskPath = "/vm/images/runtime.iso"
-	mountedDiskPath = "/vm/images"
+	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
+	runtimeDiskPath                = "/vm/images/runtime.iso"
+	mountedDiskPath                = "/vm/images"
+	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
 
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
@@ -534,6 +535,7 @@ func main() {
 		"-serial", "stdio",
 		"-msg", "timestamp=on",
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
+		"-qmp", fmt.Sprintf("unix:%s,server,wait=off", qmpUnixSocketForSigtermHandler),
 	}
 
 	// disk details
@@ -635,7 +637,7 @@ func main() {
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go terminateQemuOnSigterm(ctx, logger, vmSpec.QMP, &wg)
+	go terminateQemuOnSigterm(ctx, logger, &wg)
 	wg.Add(1)
 	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
 
@@ -946,7 +948,7 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	}
 }
 
-func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, qmpPort int32, wg *sync.WaitGroup) {
+func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	logger = logger.Named("terminate-qemu-on-sigterm")
 
 	defer wg.Done()
@@ -960,7 +962,7 @@ func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, qmpPort int
 
 	logger.Info("got signal, sending powerdown command to QEMU")
 
-	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("127.0.0.1:%d", qmpPort), 2*time.Second)
+	mon, err := qmp.NewSocketMonitor("unix", qmpUnixSocketForSigtermHandler, 2*time.Second)
 	if err != nil {
 		logger.Error("failed to connect to QEMU monitor", zap.Error(err))
 		return
