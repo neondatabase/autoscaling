@@ -143,17 +143,12 @@ fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
 
-/neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh
-
-# signal vmshutdown that vmstarter.sh has exited
-if [ -e "/neonvm/vmstart_command_finished.fifo" ]; then
-	echo ' ' > /neonvm/vmstart_command_finished.fifo
-fi
-
+flock /neonvm/vmstart.lock -c 'test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh'
 `
 
 	scriptInitTab = `
 ::sysinit:/neonvm/bin/vminit
+::once:/neonvm/bin/touch /neonvm/vmstart.allowed
 ::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
@@ -168,10 +163,12 @@ action=/neonvm/bin/poweroff
 `
 
 	scriptVmShutdown = `#!/neonvm/bin/sh
-mkfifo /neonvm/vmstart_command_finished.fifo || exit 2
-su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
-# wait for vmstart to signal exit of vmstarter.sh
-cat /neonvm/vmstart_command_finished.fifo
+	rm /neonvm/vmstart.allowed
+	if [ -e /neonvm/vmstart.allowed ]; then
+		echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" >2&
+	fi
+	# wait for ongoing command to exit
+	flock /neonvm/vmstart.lock
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
