@@ -148,6 +148,33 @@ sequenceDiagram
     Note over GuestKernel: powers off the machine
 ```
 
+## How It Looks Inside The VM
+
+In a neon.git-compute-image-turned-vm image, running in staging, it looks like this
+
+```
+ps -eHo pid,command | cat
+...
+/neonvm/bin/sh /neonvm/bin/vmstart
+  149     flock /neonvm/vmstart.lock -c test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec postgres /neonvm/bin/sh /neonvm/bin/vmstarter.sh
+  150       /bin/sh -c test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec postgres /neonvm/bin/sh /neonvm/bin/vmstarter.sh
+  151         /neonvm/bin/sh /neonvm/bin/vmstarter.sh
+  152           /usr/local/bin/compute_ctl -D /var/db/postgres/compute/pgdata -b /usr/local/bin/postgres -C postgresql://cloud_admin@127.0.0.1/postgres?options=-c%20default_transaction_read_only=false --remote-ext-config {"bucket":"neon-dev-extensions-us-east-2","region":"us-east-2"} --compute-id compute-long-flower-94034268 --control-plane-uri http://neon-compute-api.aws.neon.build:9096
+  178             /usr/local/bin/postgres -D /var/db/postgres/compute/pgdata
+  182               postgres: checkpointer
+  183               postgres: background writer
+  185               postgres: walwriter
+  186               postgres: autovacuum launcher
+  187               postgres: pg_cron launcher
+  188               postgres: TimescaleDB Background Worker Launcher
+  189               postgres: WAL proposer streaming 0/1FD62B0
+  190               postgres: Local free space monitor
+  191               postgres: logical replication launcher
+  201               postgres: cloud_admin postgres 127.0.0.1(33860) idle
+  204               postgres: cloud_admin postgres ::1(53686) idle
+...
+```
+
 ## TLA+ Model Of Shutdown
 
 The `./shutdown/shutdown.tla` model is a PlusCal specification of the shutdown procedure.
