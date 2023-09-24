@@ -141,16 +141,15 @@ else
     /neonvm/bin/echo -n {{range .Cmd}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
 fi
 
-/neonvm/bin/cat <<'EOF' >>/neonvm/bin/vmstarter.sh
-
-if [ -e "/neonvm/vmstart_command_finished.fifo" ]; then
-	echo ' ' > /neonvm/vmstart_command_finished.fifo
-fi
-EOF
-
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
 
 /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh
+
+# signal vmshutdown that vmstarter.sh has exited
+if [ -e "/neonvm/vmstart_command_finished.fifo" ]; then
+	echo ' ' > /neonvm/vmstart_command_finished.fifo
+fi
+
 `
 
 	scriptInitTab = `
@@ -171,6 +170,7 @@ action=/neonvm/bin/poweroff
 	scriptVmShutdown = `#!/neonvm/bin/sh
 mkfifo /neonvm/vmstart_command_finished.fifo || exit 2
 su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+# wait for vmstart to signal exit of vmstarter.sh
 cat /neonvm/vmstart_command_finished.fifo
 `
 
