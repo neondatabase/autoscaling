@@ -132,13 +132,17 @@ sequenceDiagram
     vmshutdown->>vmstart.allowed: unlink
     deactivate vmstart.allowed
     Note over vmstart.allowed: vmstart's existence check<br/>will fail from here on
-    vmshutdown-)vmstarter.sh: signal to shut down,<br/>e.g., pg_ctl stop
-    Note over vmshutdown: wait until acquired flock,<br/>ensures vmstarter.sh is not running
-    vmshutdown-xflock: try acquire, still held
-    vmstarter.sh->>-flock: exits in<br/>response to signal
+    loop Until we win the flock
+        vmshutdown-xflock: nonblock try acquire fails
+        vmshutdown-)vmstarter.sh: signal to shut down
+    end
+    vmstarter.sh->>-flock: eventually exits in<br/>response to signal
     flock->>-vmstart: exits
-    vmshutdown->>+flock: try acquire, success
+    vmshutdown->>+flock: nonblock try acquire succeeds
     flock->>-vmshutdown: exit immediately
+
+    Note over vmshutdown: we acquired the flock once after removing vmstart.allowed.<br/>This ensures vmstarter.sh is not running.
+
     vmshutdown->>init: exit
 
     Note over init: SIGTERM
