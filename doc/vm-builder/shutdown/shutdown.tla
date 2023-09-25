@@ -44,7 +44,6 @@ end process;
 
 fair process respawn_vmstart = "respawn_vmstart"
 variables
-    debug_shutdown_request_observed = TRUE,
     respawn_current_postgres_pid = NULL
 begin
     init:
@@ -67,7 +66,7 @@ begin
                 vmstarter_sh_running := FALSE;
             else
         respawn_not_allowed:
-                debug_shutdown_request_observed := TRUE;
+                skip;
             end if;
         respawn_flock_exit:
             start_allowed_locked := FALSE;
@@ -129,24 +128,22 @@ end process;
 
 
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "48a3e1a5" /\ chksum(tla) = "2cd9490d")
+\* BEGIN TRANSLATION (chksum(pcal) = "cef566c4" /\ chksum(tla) = "a118bce0")
 \* Label init of process init at line 31 col 5 changed to init_
-\* Label init of process respawn_vmstart at line 51 col 5 changed to init_r
-\* Label init of process postgres at line 81 col 5 changed to init_p
-\* Label init of process vmshutdown at line 114 col 9 changed to init_v
+\* Label init of process respawn_vmstart at line 50 col 5 changed to init_r
+\* Label init of process postgres at line 80 col 5 changed to init_p
+\* Label init of process vmshutdown at line 113 col 9 changed to init_v
 VARIABLES start_allowed, start_allowed_locked, shutdown_signal_received,
           postgres_running, postgres_spawn_pending,
           postgres_shutdown_request_pending, postgres_next_pids,
           postgres_exited_pids, machine_running, vmshutdown_exited,
-          vmstarter_sh_running, pc, debug_shutdown_request_observed,
-          respawn_current_postgres_pid
+          vmstarter_sh_running, pc, respawn_current_postgres_pid
 
 vars == << start_allowed, start_allowed_locked, shutdown_signal_received,
            postgres_running, postgres_spawn_pending,
            postgres_shutdown_request_pending, postgres_next_pids,
            postgres_exited_pids, machine_running, vmshutdown_exited,
-           vmstarter_sh_running, pc, debug_shutdown_request_observed,
-           respawn_current_postgres_pid >>
+           vmstarter_sh_running, pc, respawn_current_postgres_pid >>
 
 ProcSet == {"init"} \cup {"respawn_vmstart"} \cup {"postgres"} \cup {"vmshutdown"}
 
@@ -163,7 +160,6 @@ Init == (* Global variables *)
         /\ vmshutdown_exited = FALSE
         /\ vmstarter_sh_running = FALSE
         (* Process respawn_vmstart *)
-        /\ debug_shutdown_request_observed = TRUE
         /\ respawn_current_postgres_pid = NULL
         /\ pc = [self \in ProcSet |-> CASE self = "init" -> "init_"
                                         [] self = "respawn_vmstart" -> "init_r"
@@ -183,7 +179,6 @@ init_ == /\ pc["init"] = "init_"
                          postgres_shutdown_request_pending, postgres_next_pids,
                          postgres_exited_pids, machine_running,
                          vmshutdown_exited, vmstarter_sh_running,
-                         debug_shutdown_request_observed,
                          respawn_current_postgres_pid >>
 
 wait_for_vmshutdown == /\ pc["init"] = "wait_for_vmshutdown"
@@ -197,7 +192,6 @@ wait_for_vmshutdown == /\ pc["init"] = "wait_for_vmshutdown"
                                        postgres_next_pids,
                                        postgres_exited_pids, machine_running,
                                        vmshutdown_exited, vmstarter_sh_running,
-                                       debug_shutdown_request_observed,
                                        respawn_current_postgres_pid >>
 
 poweroff_to_kernel == /\ pc["init"] = "poweroff_to_kernel"
@@ -209,7 +203,6 @@ poweroff_to_kernel == /\ pc["init"] = "poweroff_to_kernel"
                                       postgres_shutdown_request_pending,
                                       postgres_next_pids, postgres_exited_pids,
                                       vmshutdown_exited, vmstarter_sh_running,
-                                      debug_shutdown_request_observed,
                                       respawn_current_postgres_pid >>
 
 init == init_ \/ wait_for_vmshutdown \/ poweroff_to_kernel
@@ -224,9 +217,7 @@ init_r == /\ pc["respawn_vmstart"] = "init_r"
                           postgres_shutdown_request_pending,
                           postgres_next_pids, postgres_exited_pids,
                           machine_running, vmshutdown_exited,
-                          vmstarter_sh_running,
-                          debug_shutdown_request_observed,
-                          respawn_current_postgres_pid >>
+                          vmstarter_sh_running, respawn_current_postgres_pid >>
 
 respawn_flock_enter == /\ pc["respawn_vmstart"] = "respawn_flock_enter"
                        /\ start_allowed_locked = FALSE
@@ -239,7 +230,6 @@ respawn_flock_enter == /\ pc["respawn_vmstart"] = "respawn_flock_enter"
                                        postgres_next_pids,
                                        postgres_exited_pids, machine_running,
                                        vmshutdown_exited, vmstarter_sh_running,
-                                       debug_shutdown_request_observed,
                                        respawn_current_postgres_pid >>
 
 respawn_check_start_allowed == /\ pc["respawn_vmstart"] = "respawn_check_start_allowed"
@@ -257,7 +247,6 @@ respawn_check_start_allowed == /\ pc["respawn_vmstart"] = "respawn_check_start_a
                                                machine_running,
                                                vmshutdown_exited,
                                                vmstarter_sh_running,
-                                               debug_shutdown_request_observed,
                                                respawn_current_postgres_pid >>
 
 respawn_launch_vmstarter_sh == /\ pc["respawn_vmstart"] = "respawn_launch_vmstarter_sh"
@@ -273,7 +262,6 @@ respawn_launch_vmstarter_sh == /\ pc["respawn_vmstart"] = "respawn_launch_vmstar
                                                postgres_exited_pids,
                                                machine_running,
                                                vmshutdown_exited,
-                                               debug_shutdown_request_observed,
                                                respawn_current_postgres_pid >>
 
 respawn_vmstarter_launch_postgres == /\ pc["respawn_vmstart"] = "respawn_vmstarter_launch_postgres"
@@ -289,8 +277,7 @@ respawn_vmstarter_launch_postgres == /\ pc["respawn_vmstart"] = "respawn_vmstart
                                                      postgres_exited_pids,
                                                      machine_running,
                                                      vmshutdown_exited,
-                                                     vmstarter_sh_running,
-                                                     debug_shutdown_request_observed >>
+                                                     vmstarter_sh_running >>
 
 respawn_vmstarter_wait_postgres == /\ pc["respawn_vmstart"] = "respawn_vmstarter_wait_postgres"
                                    /\ respawn_current_postgres_pid \in postgres_exited_pids
@@ -306,7 +293,6 @@ respawn_vmstarter_wait_postgres == /\ pc["respawn_vmstart"] = "respawn_vmstarter
                                                    machine_running,
                                                    vmshutdown_exited,
                                                    vmstarter_sh_running,
-                                                   debug_shutdown_request_observed,
                                                    respawn_current_postgres_pid >>
 
 respawn_vmstarter_sh_exits == /\ pc["respawn_vmstart"] = "respawn_vmstarter_sh_exits"
@@ -322,11 +308,10 @@ respawn_vmstarter_sh_exits == /\ pc["respawn_vmstart"] = "respawn_vmstarter_sh_e
                                               postgres_exited_pids,
                                               machine_running,
                                               vmshutdown_exited,
-                                              debug_shutdown_request_observed,
                                               respawn_current_postgres_pid >>
 
 respawn_not_allowed == /\ pc["respawn_vmstart"] = "respawn_not_allowed"
-                       /\ debug_shutdown_request_observed' = TRUE
+                       /\ TRUE
                        /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_flock_exit"]
                        /\ UNCHANGED << start_allowed, start_allowed_locked,
                                        shutdown_signal_received,
@@ -347,7 +332,6 @@ respawn_flock_exit == /\ pc["respawn_vmstart"] = "respawn_flock_exit"
                                       postgres_next_pids, postgres_exited_pids,
                                       machine_running, vmshutdown_exited,
                                       vmstarter_sh_running,
-                                      debug_shutdown_request_observed,
                                       respawn_current_postgres_pid >>
 
 respawn_vmstart == init_r \/ respawn_flock_enter
@@ -368,9 +352,7 @@ init_p == /\ pc["postgres"] = "init_p"
                           postgres_shutdown_request_pending,
                           postgres_next_pids, postgres_exited_pids,
                           machine_running, vmshutdown_exited,
-                          vmstarter_sh_running,
-                          debug_shutdown_request_observed,
-                          respawn_current_postgres_pid >>
+                          vmstarter_sh_running, respawn_current_postgres_pid >>
 
 postgres_wait_to_be_launched == /\ pc["postgres"] = "postgres_wait_to_be_launched"
                                 /\ ~machine_running \/ postgres_spawn_pending /= NULL
@@ -390,7 +372,6 @@ postgres_wait_to_be_launched == /\ pc["postgres"] = "postgres_wait_to_be_launche
                                                 machine_running,
                                                 vmshutdown_exited,
                                                 vmstarter_sh_running,
-                                                debug_shutdown_request_observed,
                                                 respawn_current_postgres_pid >>
 
 postgres_await_shutdown_or_crash == /\ pc["postgres"] = "postgres_await_shutdown_or_crash"
@@ -410,7 +391,6 @@ postgres_await_shutdown_or_crash == /\ pc["postgres"] = "postgres_await_shutdown
                                                     machine_running,
                                                     vmshutdown_exited,
                                                     vmstarter_sh_running,
-                                                    debug_shutdown_request_observed,
                                                     respawn_current_postgres_pid >>
 
 halt == /\ pc["postgres"] = "halt"
@@ -422,7 +402,6 @@ halt == /\ pc["postgres"] = "halt"
                         postgres_shutdown_request_pending, postgres_next_pids,
                         postgres_exited_pids, machine_running,
                         vmshutdown_exited, vmstarter_sh_running,
-                        debug_shutdown_request_observed,
                         respawn_current_postgres_pid >>
 
 postgres == init_p \/ postgres_wait_to_be_launched
@@ -437,9 +416,7 @@ init_v == /\ pc["vmshutdown"] = "init_v"
                           postgres_shutdown_request_pending,
                           postgres_next_pids, postgres_exited_pids,
                           machine_running, vmshutdown_exited,
-                          vmstarter_sh_running,
-                          debug_shutdown_request_observed,
-                          respawn_current_postgres_pid >>
+                          vmstarter_sh_running, respawn_current_postgres_pid >>
 
 vmshutdown_inhibit_new_starts == /\ pc["vmshutdown"] = "vmshutdown_inhibit_new_starts"
                                  /\ start_allowed' = FALSE
@@ -454,7 +431,6 @@ vmshutdown_inhibit_new_starts == /\ pc["vmshutdown"] = "vmshutdown_inhibit_new_s
                                                  machine_running,
                                                  vmshutdown_exited,
                                                  vmstarter_sh_running,
-                                                 debug_shutdown_request_observed,
                                                  respawn_current_postgres_pid >>
 
 vmshutdown_pg_ctl_stop == /\ pc["vmshutdown"] = "vmshutdown_pg_ctl_stop"
@@ -471,7 +447,6 @@ vmshutdown_pg_ctl_stop == /\ pc["vmshutdown"] = "vmshutdown_pg_ctl_stop"
                                           postgres_exited_pids,
                                           machine_running, vmshutdown_exited,
                                           vmstarter_sh_running,
-                                          debug_shutdown_request_observed,
                                           respawn_current_postgres_pid >>
 
 vmshutdown_wait_for_running_command == /\ pc["vmshutdown"] = "vmshutdown_wait_for_running_command"
@@ -488,7 +463,6 @@ vmshutdown_wait_for_running_command == /\ pc["vmshutdown"] = "vmshutdown_wait_fo
                                                        machine_running,
                                                        vmshutdown_exited,
                                                        vmstarter_sh_running,
-                                                       debug_shutdown_request_observed,
                                                        respawn_current_postgres_pid >>
 
 vmshutdown_done == /\ pc["vmshutdown"] = "vmshutdown_done"
@@ -501,7 +475,6 @@ vmshutdown_done == /\ pc["vmshutdown"] = "vmshutdown_done"
                                    postgres_shutdown_request_pending,
                                    postgres_next_pids, postgres_exited_pids,
                                    machine_running, vmstarter_sh_running,
-                                   debug_shutdown_request_observed,
                                    respawn_current_postgres_pid >>
 
 vmshutdown == init_v \/ vmshutdown_inhibit_new_starts
@@ -533,5 +506,5 @@ RespawnBeforeShutdownCanRestartWithoutPendingShutdown == TRUE \* TODO: how to ex
 
 =============================================================================
 \* Modification History
-\* Last modified Mon Sep 25 10:28:09 CEST 2023 by cs
+\* Last modified Mon Sep 25 11:17:51 CEST 2023 by cs
 \* Created Sun Sep 24 12:17:50 CEST 2023 by cs
