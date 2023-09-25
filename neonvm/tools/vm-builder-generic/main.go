@@ -77,9 +77,9 @@ RUN set -e \
 ADD inittab   /neonvm/bin/inittab
 ADD vminit    /neonvm/bin/vminit
 ADD vmstart   /neonvm/bin/vmstart
+ADD vmshutdown /neonvm/bin/vmshutdown
 ADD vmacpi    /neonvm/acpi/vmacpi
-ADD powerdown /neonvm/bin/powerdown
-RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
+RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
@@ -143,26 +143,37 @@ fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
 
-/neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh
+flock /neonvm/vmstart.lock -c 'test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh'
 `
 
 	scriptInitTab = `
 ::sysinit:/neonvm/bin/vminit
+::once:/neonvm/bin/touch /neonvm/vmstart.allowed
 ::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vmstart
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
+::shutdown:/neonvm/bin/vmshutdown
 `
 
 	scriptVmAcpi = `
 event=button/power
-action=/neonvm/bin/powerdown
+action=/neonvm/bin/poweroff
 `
 
-	scriptPowerDown = `#!/neonvm/bin/sh
-
-/neonvm/bin/poweroff
+	scriptVmShutdown = `#!/neonvm/bin/sh
+rm /neonvm/vmstart.allowed
+if [ -e /neonvm/vmstart.allowed ]; then
+	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" 1>&2
+fi
+# we inhibited new command starts, but there may still be a command running
+while ! /neonvm/bin/flock -n /neonvm/vmstart.lock true; do
+	# TODO: should be sufficient to keep track of the vmstarter.sh pid and signal it.
+	echo "Warning: no generic mechanism to signal graceful shutdown request to vmstarter.sh" 1>&2
+	exit 2
+done
+echo "vmstart workload shut down cleanly" 1>&2
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
@@ -378,9 +389,9 @@ func main() {
 	}{
 		{"Dockerfile", dockerfileVmBuilder},
 		{"vmstart", scriptVmStart},
+		{"vmshutdown", scriptVmShutdown},
 		{"inittab", scriptInitTab},
 		{"vmacpi", scriptVmAcpi},
-		{"powerdown", scriptPowerDown},
 		{"vminit", scriptVmInit},
 	}
 
