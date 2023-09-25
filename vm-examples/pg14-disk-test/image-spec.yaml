@@ -63,7 +63,7 @@ build: |
   RUN cargo clean --release --manifest-path neon/libs/vm_monitor/Cargo.toml
 
   # Build the allocation tester:
-  FROM alpine:3.16 AS allocate-loop-builder
+  FROM alpine:3.18 AS allocate-loop-builder
   RUN set -e \
       && apk add gcc musl-dev
   COPY allocate-loop.c allocate-loop.c

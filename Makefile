@@ -191,7 +191,7 @@ docker-build-pg14-disk-test: bin/vm-builder ## Build a VM image for testing
 	    chmod uga+rw 'vm-examples/pg14-disk-test/ssh_id_rsa' 'vm-examples/pg14-disk-test/ssh_id_rsa.pub'; \
 	fi
 
-	./bin/vm-builder -src alpine:3.16 -dst $(PG14_DISK_TEST_IMG) -spec vm-examples/pg14-disk-test/image-spec.yaml
+	./bin/vm-builder -src alpine:3.18 -dst $(PG14_DISK_TEST_IMG) -spec vm-examples/pg14-disk-test/image-spec.yaml
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.

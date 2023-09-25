@@ -98,7 +98,7 @@ CONTAINER_CFG='
         '"$NODE_SELECTOR"'
         "containers": [{
             "name": "'"ssh-$vm_name"'",
-            "image": "alpine:3.16",
+            "image": "alpine:3.18",
             "args": [
                 "/bin/sh",
                 "-c",

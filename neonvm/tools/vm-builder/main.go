@@ -24,7 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
+// vm-builder --src alpine:3.18 --dst vm-alpine:dev --file vm-alpine.qcow2
 
 var (
 	//go:embed files/Dockerfile.img
@@ -46,8 +46,8 @@ var (
 var (
 	Version string
 
-	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.18`)
+	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.18`)
 	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
 	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
 	specFile  = flag.String("spec", "", `File containing additional customization: --spec=spec.yaml`)

@@ -7,13 +7,12 @@ FROM {{.RootDiskImage}} AS rootdisk
 USER root
 {{.SpecMerge}}
 
-FROM alpine:3.16 AS vm-runtime
+FROM alpine:3.18 AS vm-runtime
 # add busybox
-ENV BUSYBOX_VERSION 1.35.0
 RUN set -e \
 	&& mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config \
-	&& wget -q https://busybox.net/downloads/binaries/${BUSYBOX_VERSION}-x86_64-linux-musl/busybox -O /neonvm/bin/busybox \
-	&& chmod +x /neonvm/bin/busybox \
+	&& apk add --no-cache --no-progress --quiet busybox \
+	&& cp -f /bin/busybox /neonvm/bin/busybox \
 	&& /neonvm/bin/busybox --install -s /neonvm/bin
 
 # add udevd and agetty (with shared libs)
@@ -36,12 +35,12 @@ RUN set -e \
 	&& mkdir -p /neonvm/lib \
 	&& cp -f /lib/ld-musl-x86_64.so.1  /neonvm/lib/ \
 	&& cp -f /lib/libblkid.so.1.1.0    /neonvm/lib/libblkid.so.1 \
-	&& cp -f /lib/libcrypto.so.1.1     /neonvm/lib/ \
-	&& cp -f /lib/libkmod.so.2.3.7     /neonvm/lib/libkmod.so.2 \
+	&& cp -f /lib/libcrypto.so.3       /neonvm/lib/ \
+	&& cp -f /lib/libkmod.so.2.4.0     /neonvm/lib/libkmod.so.2 \
 	&& cp -f /lib/libudev.so.1.6.3     /neonvm/lib/libudev.so.1 \
-	&& cp -f /lib/libz.so.1.2.12       /neonvm/lib/libz.so.1 \
-	&& cp -f /usr/lib/liblzma.so.5.2.5 /neonvm/lib/liblzma.so.5 \
-	&& cp -f /usr/lib/libzstd.so.1.5.2 /neonvm/lib/libzstd.so.1 \
+	&& cp -f /lib/libz.so.1.2.13       /neonvm/lib/libz.so.1 \
+	&& cp -f /usr/lib/liblzma.so.5.4.3 /neonvm/lib/liblzma.so.5 \
+	&& cp -f /usr/lib/libzstd.so.1.5.5 /neonvm/lib/libzstd.so.1 \
 	&& cp -f /lib/libe2p.so.2          /neonvm/lib/libe2p.so.2 \
 	&& cp -f /lib/libext2fs.so.2       /neonvm/lib/libext2fs.so.2 \
 	&& cp -f /lib/libcom_err.so.2      /neonvm/lib/libcom_err.so.2 \
@@ -81,6 +80,6 @@ RUN set -e \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
-FROM alpine:3.16
+FROM alpine:3.18
 RUN apk add --no-cache --no-progress --quiet qemu-img
 COPY --from=builder /disk.qcow2 /
