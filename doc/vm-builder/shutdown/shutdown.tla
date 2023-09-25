@@ -90,12 +90,12 @@ begin
 
         postgres_await_shutdown_or_crash:
 
-            \* crash only if we have pids left
+            \* bound number of crashes to pids left, otherwise we have infinite state space "until" shutdown signal gets delivered
             if Len(postgres_next_pids) > 0 then
                 either
                     await postgres_shutdown_request_pending = postgres_running;
                 or
-                    \* crash
+                    \* crash / exit on its own
                     skip;
                 end either;
             else
