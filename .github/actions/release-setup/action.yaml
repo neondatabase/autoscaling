@@ -1,0 +1,41 @@
+name: "release setup"
+description: "setup for release workflow"
+inputs: {}
+outputs:
+  ca_git_tag:
+    description: "cluster-autoscaler git tag"
+    value: ${{ steps.get_ca_tag.outputs.ca_git_tag }}
+  version:
+    description: "ref_name"
+    value: ${{ steps.get_vcs_info.outputs.version }}
+  git_info:
+    description: "git describe style output"
+    value: ${{ steps.get_vcs_info.outputs.git_info }}
+runs:
+  using: composite
+  steps:
+    - name: get version and git info
+      id: get_vcs_info
+      run: |
+        echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        echo -n "git_info=" >> $GITHUB_OUTPUT
+        # note: --tags enables matching on lightweight (i.e. not annotated) tags, which normally
+        # wouldn't be necessary, except that actions/checkout@v3 does weird things to setup the
+        # repository that means that we actually end up checked out with *just* a lightweight tag
+        # to the tagged commit.
+        git describe --tags --long --dirty >> $GITHUB_OUTPUT
+    - name: get CA base git tag
+      id: get_ca_tag
+      run: |
+        echo -n "ca_git_tag=" >> $GITHUB_OUTPUT
+        cat cluster-autoscaler/ca.tag >> $GITHUB_OUTPUT
+
+    - name: docker - install qemu
+      uses: docker/setup-qemu-action@v2
+    - name: docker - setup buildx
+      uses: docker/setup-buildx-action@v2
+    - name: login to docker hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+        password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
