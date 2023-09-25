@@ -114,13 +114,17 @@ begin
 
     vmshutdown_inhibit_new_starts:
         start_allowed := FALSE; \* rm the vmstart.allowed file on disk
+    vmshutdown_kill_running_command:
+        \* if there was a command running from before vmshutdown_inhibit_new_starts,
+        \* it is holding the lock.
+        if start_allowed_locked = TRUE then \* use trylock to implement this
     vmshutdown_pg_ctl_stop:
-        \* the `if` models signal loss
-        if postgres_running /= NULL then
-            postgres_shutdown_request_pending := postgres_running;
+            \* the `if` models signal loss
+            if postgres_running /= NULL then
+                postgres_shutdown_request_pending := postgres_running;
+            end if;
+            goto vmshutdown_kill_running_command;
         end if;
-    vmshutdown_wait_for_running_command:
-        await start_allowed_locked = FALSE; \* flock the file blocking exclusive; if an existing command is running, this waits until it's completed
     vmshutdown_done:
         vmshutdown_exited := TRUE;
         skip;
@@ -128,7 +132,7 @@ end process;
 
 
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "cef566c4" /\ chksum(tla) = "a118bce0")
+\* BEGIN TRANSLATION (chksum(pcal) = "d013f716" /\ chksum(tla) = "e8963d9a")
 \* Label init of process init at line 31 col 5 changed to init_
 \* Label init of process respawn_vmstart at line 50 col 5 changed to init_r
 \* Label init of process postgres at line 80 col 5 changed to init_p
@@ -420,7 +424,7 @@ init_v == /\ pc["vmshutdown"] = "init_v"
 
 vmshutdown_inhibit_new_starts == /\ pc["vmshutdown"] = "vmshutdown_inhibit_new_starts"
                                  /\ start_allowed' = FALSE
-                                 /\ pc' = [pc EXCEPT !["vmshutdown"] = "vmshutdown_pg_ctl_stop"]
+                                 /\ pc' = [pc EXCEPT !["vmshutdown"] = "vmshutdown_kill_running_command"]
                                  /\ UNCHANGED << start_allowed_locked,
                                                  shutdown_signal_received,
                                                  postgres_running,
@@ -433,12 +437,29 @@ vmshutdown_inhibit_new_starts == /\ pc["vmshutdown"] = "vmshutdown_inhibit_new_s
                                                  vmstarter_sh_running,
                                                  respawn_current_postgres_pid >>
 
+vmshutdown_kill_running_command == /\ pc["vmshutdown"] = "vmshutdown_kill_running_command"
+                                   /\ IF start_allowed_locked = TRUE
+                                         THEN /\ pc' = [pc EXCEPT !["vmshutdown"] = "vmshutdown_pg_ctl_stop"]
+                                         ELSE /\ pc' = [pc EXCEPT !["vmshutdown"] = "vmshutdown_done"]
+                                   /\ UNCHANGED << start_allowed,
+                                                   start_allowed_locked,
+                                                   shutdown_signal_received,
+                                                   postgres_running,
+                                                   postgres_spawn_pending,
+                                                   postgres_shutdown_request_pending,
+                                                   postgres_next_pids,
+                                                   postgres_exited_pids,
+                                                   machine_running,
+                                                   vmshutdown_exited,
+                                                   vmstarter_sh_running,
+                                                   respawn_current_postgres_pid >>
+
 vmshutdown_pg_ctl_stop == /\ pc["vmshutdown"] = "vmshutdown_pg_ctl_stop"
                           /\ IF postgres_running /= NULL
                                 THEN /\ postgres_shutdown_request_pending' = postgres_running
                                 ELSE /\ TRUE
                                      /\ UNCHANGED postgres_shutdown_request_pending
-                          /\ pc' = [pc EXCEPT !["vmshutdown"] = "vmshutdown_wait_for_running_command"]
+                          /\ pc' = [pc EXCEPT !["vmshutdown"] = "vmshutdown_kill_running_command"]
                           /\ UNCHANGED << start_allowed, start_allowed_locked,
                                           shutdown_signal_received,
                                           postgres_running,
@@ -448,22 +469,6 @@ vmshutdown_pg_ctl_stop == /\ pc["vmshutdown"] = "vmshutdown_pg_ctl_stop"
                                           machine_running, vmshutdown_exited,
                                           vmstarter_sh_running,
                                           respawn_current_postgres_pid >>
-
-vmshutdown_wait_for_running_command == /\ pc["vmshutdown"] = "vmshutdown_wait_for_running_command"
-                                       /\ start_allowed_locked = FALSE
-                                       /\ pc' = [pc EXCEPT !["vmshutdown"] = "vmshutdown_done"]
-                                       /\ UNCHANGED << start_allowed,
-                                                       start_allowed_locked,
-                                                       shutdown_signal_received,
-                                                       postgres_running,
-                                                       postgres_spawn_pending,
-                                                       postgres_shutdown_request_pending,
-                                                       postgres_next_pids,
-                                                       postgres_exited_pids,
-                                                       machine_running,
-                                                       vmshutdown_exited,
-                                                       vmstarter_sh_running,
-                                                       respawn_current_postgres_pid >>
 
 vmshutdown_done == /\ pc["vmshutdown"] = "vmshutdown_done"
                    /\ vmshutdown_exited' = TRUE
@@ -478,8 +483,8 @@ vmshutdown_done == /\ pc["vmshutdown"] = "vmshutdown_done"
                                    respawn_current_postgres_pid >>
 
 vmshutdown == init_v \/ vmshutdown_inhibit_new_starts
-                 \/ vmshutdown_pg_ctl_stop
-                 \/ vmshutdown_wait_for_running_command \/ vmshutdown_done
+                 \/ vmshutdown_kill_running_command
+                 \/ vmshutdown_pg_ctl_stop \/ vmshutdown_done
 
 (* Allow infinite stuttering to prevent deadlock on termination. *)
 Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
@@ -506,5 +511,5 @@ RespawnBeforeShutdownCanRestartWithoutPendingShutdown == TRUE \* TODO: how to ex
 
 =============================================================================
 \* Modification History
-\* Last modified Mon Sep 25 11:17:51 CEST 2023 by cs
+\* Last modified Mon Sep 25 11:19:20 CEST 2023 by cs
 \* Created Sun Sep 24 12:17:50 CEST 2023 by cs

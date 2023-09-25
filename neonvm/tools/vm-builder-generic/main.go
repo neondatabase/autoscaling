@@ -167,12 +167,13 @@ rm /neonvm/vmstart.allowed
 if [ -e /neonvm/vmstart.allowed ]; then
 	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" 1>&2
 fi
-# wait for ongoing command to exit by grabbing the lock
-if flock /neonvm/vmstart.lock true; then
-	echo "vmstart workload shut down cleanly" 1>&2
-else
-	echo "error: vmshutdown flock failed" 1>&2
-fi
+# we inhibited new command starts, but there may still be a command running
+while ! /neonvm/bin/flock -n /neonvm/vmstart.lock true; do
+	# TODO: should be sufficient to keep track of the vmstarter.sh pid and signal it.
+	echo "Warning: no generic mechanism to signal graceful shutdown request to vmstarter.sh" 1>&2
+	exit 2
+done
+echo "vmstart workload shut down cleanly" 1>&2
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
