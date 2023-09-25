@@ -38,12 +38,12 @@ begin
     init:
     while ~shutdown_signal_received do
 
-        respawn_lock_and_check_allowed:
+        respawn_flock_enter:
             await start_allowed_locked = FALSE;
             start_allowed_locked := TRUE;
+        respawn_check_start_allowed:
             if start_allowed then
                 vmstart_running := TRUE;
-
         respawn_wait_vmstart_exit:
                 either
                     await pg_ctl_stop_signal;
@@ -53,12 +53,12 @@ begin
                     skip;
                 end either;
                 vmstart_running := FALSE;
-                start_allowed_locked := FALSE;
             else
         respawn_not_allowed:
-                start_allowed_locked := FALSE;
                 debug_shutdown_request_observed := TRUE;
             end if;
+        respawn_flock_exit:
+            start_allowed_locked := FALSE;
     end while;
 
 end process;
@@ -80,7 +80,7 @@ end process;
 
 
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "3197c7f1" /\ chksum(tla) = "feaa39e9")
+\* BEGIN TRANSLATION (chksum(pcal) = "85b7e15a" /\ chksum(tla) = "b50d0c59")
 \* Label init of process init at line 24 col 5 changed to init_
 \* Label init of process respawn_vmstart at line 39 col 5 changed to init_r
 \* Label init of process vmshutdown at line 69 col 9 changed to init_v
@@ -122,45 +122,64 @@ init == init_
 
 init_r == /\ pc["respawn_vmstart"] = "init_r"
           /\ IF ~shutdown_signal_received
-                THEN /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_lock_and_check_allowed"]
+                THEN /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_flock_enter"]
                 ELSE /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "Done"]
           /\ UNCHANGED << start_allowed, start_allowed_locked,
                           pg_ctl_stop_signal, shutdown_signal_received,
                           vmstart_running, debug_shutdown_request_observed >>
 
-respawn_lock_and_check_allowed == /\ pc["respawn_vmstart"] = "respawn_lock_and_check_allowed"
-                                  /\ start_allowed_locked = FALSE
-                                  /\ start_allowed_locked' = TRUE
-                                  /\ IF start_allowed
-                                        THEN /\ vmstart_running' = TRUE
-                                             /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_wait_vmstart_exit"]
-                                        ELSE /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_not_allowed"]
-                                             /\ UNCHANGED vmstart_running
-                                  /\ UNCHANGED << start_allowed,
-                                                  pg_ctl_stop_signal,
-                                                  shutdown_signal_received,
-                                                  debug_shutdown_request_observed >>
+respawn_flock_enter == /\ pc["respawn_vmstart"] = "respawn_flock_enter"
+                       /\ start_allowed_locked = FALSE
+                       /\ start_allowed_locked' = TRUE
+                       /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_check_start_allowed"]
+                       /\ UNCHANGED << start_allowed, pg_ctl_stop_signal,
+                                       shutdown_signal_received,
+                                       vmstart_running,
+                                       debug_shutdown_request_observed >>
+
+respawn_check_start_allowed == /\ pc["respawn_vmstart"] = "respawn_check_start_allowed"
+                               /\ IF start_allowed
+                                     THEN /\ vmstart_running' = TRUE
+                                          /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_wait_vmstart_exit"]
+                                     ELSE /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_not_allowed"]
+                                          /\ UNCHANGED vmstart_running
+                               /\ UNCHANGED << start_allowed,
+                                               start_allowed_locked,
+                                               pg_ctl_stop_signal,
+                                               shutdown_signal_received,
+                                               debug_shutdown_request_observed >>
 
 respawn_wait_vmstart_exit == /\ pc["respawn_vmstart"] = "respawn_wait_vmstart_exit"
                              /\ \/ /\ pg_ctl_stop_signal
                                 \/ /\ TRUE
                              /\ vmstart_running' = FALSE
-                             /\ start_allowed_locked' = FALSE
-                             /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "init_r"]
-                             /\ UNCHANGED << start_allowed, pg_ctl_stop_signal,
+                             /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_flock_exit"]
+                             /\ UNCHANGED << start_allowed,
+                                             start_allowed_locked,
+                                             pg_ctl_stop_signal,
                                              shutdown_signal_received,
                                              debug_shutdown_request_observed >>
 
 respawn_not_allowed == /\ pc["respawn_vmstart"] = "respawn_not_allowed"
-                       /\ start_allowed_locked' = FALSE
                        /\ debug_shutdown_request_observed' = TRUE
-                       /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "init_r"]
-                       /\ UNCHANGED << start_allowed, pg_ctl_stop_signal,
+                       /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "respawn_flock_exit"]
+                       /\ UNCHANGED << start_allowed, start_allowed_locked,
+                                       pg_ctl_stop_signal,
                                        shutdown_signal_received,
                                        vmstart_running >>
 
-respawn_vmstart == init_r \/ respawn_lock_and_check_allowed
+respawn_flock_exit == /\ pc["respawn_vmstart"] = "respawn_flock_exit"
+                      /\ start_allowed_locked' = FALSE
+                      /\ pc' = [pc EXCEPT !["respawn_vmstart"] = "init_r"]
+                      /\ UNCHANGED << start_allowed, pg_ctl_stop_signal,
+                                      shutdown_signal_received,
+                                      vmstart_running,
+                                      debug_shutdown_request_observed >>
+
+respawn_vmstart == init_r \/ respawn_flock_enter
+                      \/ respawn_check_start_allowed
                       \/ respawn_wait_vmstart_exit \/ respawn_not_allowed
+                      \/ respawn_flock_exit
 
 init_v == /\ pc["vmshutdown"] = "init_v"
           /\ shutdown_signal_received
@@ -232,5 +251,5 @@ RespawnBeforeShutdownCanRestartWithoutPendingShutdown == TRUE \* TODO: how to ex
 
 =============================================================================
 \* Modification History
-\* Last modified Sun Sep 24 18:31:33 CEST 2023 by cs
+\* Last modified Mon Sep 25 09:20:10 CEST 2023 by cs
 \* Created Sun Sep 24 12:17:50 CEST 2023 by cs
