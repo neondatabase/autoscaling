@@ -12,7 +12,7 @@ package agent
 //  1. It should be OK to panic, if an error is truly unrecoverable
 //  2. A single Runner's panic shouldn't bring down the entire autoscaler-agent¹
 //  3. We want to expose a State() method to view (almost) all internal state
-//  4. Some high-level actions (e.g., call to Dispatcher; update VM to desired state) require
+//  4. Some high-level actions (e.g., call to vm-monitor; update VM to desired state) require
 //     that we have *at most* one such action running at a time.
 //
 // There are a number of possible solutions to this set of goals. All reasonable solutions require
@@ -24,7 +24,7 @@ package agent
 //     * "track scheduler"
 //     * "get metrics"
 //     * "handle VM resources" - using metrics, calculates target resources level and contacts
-//       scheduler, dispatcher, and NeonVM -- the "scaling" part of "autoscaling".
+//       scheduler, vm-monitor, and NeonVM -- the "scaling" part of "autoscaling".
 //  * Each thread makes *synchronous* HTTP requests while holding the necessary lock to prevent any other
 //    thread from making HTTP requests to the same entity. For example:
 //    * All requests to NeonVM and the scheduler plugin are guarded by Runner.requestLock, which
@@ -132,7 +132,7 @@ type Runner struct {
 	// itself is not.
 	lastMetrics *api.Metrics
 
-	// requestedUpscale provides information about any requested upscaling by the Dispatcher
+	// requestedUpscale provides information about any requested upscaling by the vm-monitor
 	requestedUpscale api.MoreResources
 
 	// scheduler is the current scheduler that we're communicating with, or nil if there isn't one.
