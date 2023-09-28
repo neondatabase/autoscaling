@@ -17,6 +17,7 @@ data:
           "serverPort": 10301,
           "responseTimeoutSeconds": 5,
           "connectionTimeoutSeconds": 4,
+          "connectionRetryMinWaitSeconds": 5,
           "unhealthyAfterSilenceDurationSeconds": 20,
           "unhealthyStartupGracePeriodSeconds": 20,
           "maxHealthCheckSequentialFailuresSeconds": 30
