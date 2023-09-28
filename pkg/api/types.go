@@ -276,9 +276,9 @@ type MigrateResponse struct{}
 
 // MoreResources holds the data associated with a MoreResourcesRequest
 type MoreResources struct {
-	// Cpu is true if the VM monitor is requesting more CPU
+	// Cpu is true if the vm-monitor is requesting more CPU
 	Cpu bool `json:"cpu"`
-	// Memory is true if the VM monitor is requesting more memory
+	// Memory is true if the vm-monitor is requesting more memory
 	Memory bool `json:"memory"`
 }
 

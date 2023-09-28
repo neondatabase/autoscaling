@@ -317,7 +317,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	sendMetricsSignal, recvMetricsSignal := util.NewCondChannelPair()
 	// signal when new schedulers are *registered*
 	sendSchedSignal, recvSchedSignal := util.NewCondChannelPair()
-	// signal when the dispatcher requests upscaling
+	// signal when the vm-monitor requests upscaling
 	sendUpscaleRequested, recvUpscaleRequested := util.NewCondChannelPair()
 
 	logger.Info("Starting background workers")
@@ -599,7 +599,7 @@ func (r *Runner) handleVMResources(
 	}
 }
 
-// connectToMonitorLoop does lifecycle management of the connection to the vm-monitor
+// connectToMonitorLoop does lifecycle management of the (re)connection to the vm-monitor
 func (r *Runner) connectToMonitorLoop(
 	ctx context.Context,
 	logger *zap.Logger,
