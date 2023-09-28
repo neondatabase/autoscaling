@@ -51,7 +51,7 @@ spec:
         port: 5432
       - name: host-metrics
         port: 9100
-      - name: informant
+      - name: monitor
         port: 10301
   extraNetwork:
       enable: true

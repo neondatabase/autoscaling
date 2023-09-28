@@ -49,10 +49,10 @@ A third component, a binary running inside of the VM to (a) handle being upscale
 The scheduler plugin is responsible for handling resource requests from the `autoscaler-agent`,
 capping increases so that node resources aren't overcommitted.
 
-The `autoscaler-agent` periodically reads from a metrics source in the VM (defined by the
-_informant_) and makes scaling decisions about the _desired_ resource allocation. It then
-requests these resources from the scheduler plugin, and submits a patch request for its NeonVM to
-update the resources.
+The `autoscaler-agent` periodically reads from a metrics source in the VM (currently vector's
+`node_exporter`-like functionality) and makes scaling decisions about the _desired_ resource
+allocation. It then requests these resources from the scheduler plugin, and submits a patch request
+for its NeonVM to update the resources.
 
 The VM monitor is responsible for handling all of the resource management functionality inside
 the VM that the `autoscaler-agent` cannot. This constitutes handling upscales (eg. increasing Postgres

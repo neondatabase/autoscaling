@@ -12,10 +12,10 @@ type PromMetrics struct {
 	schedulerRequestedChange resourceChangePair
 	schedulerApprovedChange  resourceChangePair
 
-	informantRequestsOutbound *prometheus.CounterVec
-	informantRequestsInbound  *prometheus.CounterVec
-	informantRequestedChange  resourceChangePair
-	informantApprovedChange   resourceChangePair
+	monitorRequestsOutbound *prometheus.CounterVec
+	monitorRequestsInbound  *prometheus.CounterVec
+	monitorRequestedChange  resourceChangePair
+	monitorApprovedChange   resourceChangePair
 
 	neonvmRequestsOutbound *prometheus.CounterVec
 	neonvmRequestedChange  resourceChangePair
@@ -102,49 +102,49 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 			)),
 		},
 
-		// ---- INFORMANT ----
-		informantRequestsOutbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		// ---- MONITOR ----
+		monitorRequestsOutbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "autoscaling_agent_informant_outbound_requests_total",
-				Help: "Number of attempted HTTP requests to vm-informants by autoscaler-agents",
+				Name: "autoscaling_agent_monitor_outbound_requests_total",
+				Help: "Number of attempted HTTP requests to vm-monitors by autoscaler-agents",
 			},
 			[]string{"endpoint", "code"},
 		)),
-		informantRequestsInbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		monitorRequestsInbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "autoscaling_agent_informant_inbound_requests_total",
-				Help: "Number of HTTP requests from vm-informants received by autoscaler-agents",
+				Name: "autoscaling_agent_monitor_inbound_requests_total",
+				Help: "Number of HTTP requests from vm-monitors received by autoscaler-agents",
 			},
 			[]string{"endpoint", "code"},
 		)),
-		informantRequestedChange: resourceChangePair{
+		monitorRequestedChange: resourceChangePair{
 			cpu: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
-					Name: "autoscaling_agent_informant_requested_cpu_change_total",
-					Help: "Total change in CPU requested from the informant(s)",
+					Name: "autoscaling_agent_monitor_requested_cpu_change_total",
+					Help: "Total change in CPU requested from the vm-monitor(s)",
 				},
 				[]string{directionLabel},
 			)),
 			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
-					Name: "autoscaling_agent_informant_requested_mem_change_total",
-					Help: "Total change in memory (in MiB) requested from the informant(s)",
+					Name: "autoscaling_agent_monitor_requested_mem_change_total",
+					Help: "Total change in memory (in MiB) requested from the vm-monitor(s)",
 				},
 				[]string{directionLabel},
 			)),
 		},
-		informantApprovedChange: resourceChangePair{
+		monitorApprovedChange: resourceChangePair{
 			cpu: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
-					Name: "autoscaling_agent_informant_approved_cpu_change_total",
-					Help: "Total change in CPU approved by the informant(s)",
+					Name: "autoscaling_agent_monitor_approved_cpu_change_total",
+					Help: "Total change in CPU approved by the vm-monitor(s)",
 				},
 				[]string{directionLabel},
 			)),
 			mem: util.RegisterMetric(reg, prometheus.NewCounterVec(
 				prometheus.CounterOpts{
-					Name: "autoscaling_agent_informant_approved_mem_change_total",
-					Help: "Total change in memory (in MiB) approved by the informant(s)",
+					Name: "autoscaling_agent_monitor_approved_mem_change_total",
+					Help: "Total change in memory (in MiB) approved by the vm-monitor(s)",
 				},
 				[]string{directionLabel},
 			)),
@@ -219,9 +219,9 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		// scheduler:
 		metrics.schedulerRequestedChange,
 		metrics.schedulerApprovedChange,
-		// informant:
-		metrics.informantRequestedChange,
-		metrics.informantApprovedChange,
+		// monitor:
+		metrics.monitorRequestedChange,
+		metrics.monitorApprovedChange,
 		// neonvm:
 		metrics.neonvmRequestedChange,
 	}
