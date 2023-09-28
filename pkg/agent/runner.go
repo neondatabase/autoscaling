@@ -1321,7 +1321,7 @@ func (r *Runner) doVMUpdate(
 	// If there's any fields that are being downscaled, request that from the monitor.
 	downscaled := current.Min(target)
 	if downscaled != current {
-		r.recordResourceChange(current, downscaled, r.global.metrics.informantRequestedChange)
+		r.recordResourceChange(current, downscaled, r.global.metrics.monitorRequestedChange)
 
 		resp, err := r.doDownscale(ctx, logger, downscaled)
 		if err != nil {
@@ -1329,7 +1329,7 @@ func (r *Runner) doVMUpdate(
 		}
 
 		if resp.Ok {
-			r.recordResourceChange(current, downscaled, r.global.metrics.informantApprovedChange)
+			r.recordResourceChange(current, downscaled, r.global.metrics.monitorApprovedChange)
 		} else {
 			newTarget, err := rejectedDownscale()
 			if err != nil {
@@ -1419,13 +1419,13 @@ func (r *Runner) doVMUpdate(
 			r.requestedUpscale = r.requestedUpscale.And(upscaled.IncreaseFrom(current).Not())
 		}()
 
-		r.recordResourceChange(downscaled, upscaled, r.global.metrics.informantRequestedChange)
+		r.recordResourceChange(downscaled, upscaled, r.global.metrics.monitorRequestedChange)
 
 		if ok, err := r.doUpscale(ctx, logger, upscaled); err != nil || !ok {
 			return nil, err
 		}
 
-		r.recordResourceChange(downscaled, upscaled, r.global.metrics.informantApprovedChange)
+		r.recordResourceChange(downscaled, upscaled, r.global.metrics.monitorApprovedChange)
 	}
 
 	logger.Info("Updated VM resources", zap.Object("current", current), zap.Object("target", target))

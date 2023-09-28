@@ -325,7 +325,7 @@ func (disp *Dispatcher) Call(
 
 	status := "internal error"
 	defer func() {
-		disp.runner.global.metrics.informantRequestsOutbound.WithLabelValues(messageType, status).Inc()
+		disp.runner.global.metrics.monitorRequestsOutbound.WithLabelValues(messageType, status).Inc()
 	}()
 
 	// register the waiter *before* sending, so that we avoid a potential race where we'd get a
@@ -452,7 +452,7 @@ func (disp *Dispatcher) HandleMessage(
 			// we had some error while handling the message with this ID, and there wasn't a
 			// corresponding waiter. We should make note of this in the metrics:
 			status := fmt.Sprintf("[error: %s]", rootErr)
-			disp.runner.global.metrics.informantRequestsInbound.WithLabelValues(*typeStr, status)
+			disp.runner.global.metrics.monitorRequestsInbound.WithLabelValues(*typeStr, status)
 		}
 
 		// resume panicking if we were before
@@ -547,7 +547,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 
 		// TODO: it shouldn't be this function's responsibility to update metrics.
 		defer func() {
-			disp.runner.global.metrics.informantRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
+			disp.runner.global.metrics.monitorRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
 		}()
 
 		upscaleRequester.Send()
