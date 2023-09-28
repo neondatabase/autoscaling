@@ -8,6 +8,7 @@ on:
 jobs:
   e2e-tests:
     strategy:
+      fail-fast: false
       matrix:
         cluster:
           - k3d
@@ -64,8 +65,11 @@ jobs:
       - run: make ${{ matrix.cluster }}-setup
 
       - run: make deploy
+        timeout-minutes: 10
       - run: make example-vms
+        timeout-minutes: 10
       - run: make e2e
+        timeout-minutes: 15
 
       - name: Get k8s logs and events
         if: always()

@@ -12,19 +12,19 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type InformantInterface interface {
+type MonitorInterface interface {
 	EmptyID() string
-	GetHandle() InformantHandle
+	GetHandle() MonitorHandle
 }
 
-type InformantHandle interface {
+type MonitorHandle interface {
 	ID() string
 	RequestLock() util.ChanMutex
 	Downscale(_ context.Context, _ *zap.Logger, current, target api.Resources) (*api.DownscaleResult, error)
 	Upscale(_ context.Context, _ *zap.Logger, current, target api.Resources) error
 }
 
-func (c *ExecutorCoreWithClients) DoInformantDownscales(ctx context.Context, logger *zap.Logger) {
+func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logger *zap.Logger) {
 	var (
 		updates     util.BroadcastReceiver = c.updates.NewReceiver()
 		requestLock util.ChanMutex         = util.NewChanMutex()
@@ -42,10 +42,10 @@ func (c *ExecutorCoreWithClients) DoInformantDownscales(ctx context.Context, log
 
 	// meant to be called while holding c's lock
 	idUnchanged := func(current string) bool {
-		if h := c.clients.Informant.GetHandle(); h != nil {
+		if h := c.clients.Monitor.GetHandle(); h != nil {
 			return current == h.ID()
 		} else {
-			return current == c.clients.Informant.EmptyID()
+			return current == c.clients.Monitor.EmptyID()
 		}
 	}
 
@@ -63,7 +63,7 @@ func (c *ExecutorCoreWithClients) DoInformantDownscales(ctx context.Context, log
 		}
 
 		// Wait until we're supposed to make a request.
-		if last.actions.InformantDownscale == nil {
+		if last.actions.MonitorDownscale == nil {
 			select {
 			case <-ctx.Done():
 				return
@@ -73,12 +73,12 @@ func (c *ExecutorCoreWithClients) DoInformantDownscales(ctx context.Context, log
 			}
 		}
 
-		action := *last.actions.InformantDownscale
+		action := *last.actions.MonitorDownscale
 
-		informant := c.clients.Informant.GetHandle()
+		monitor := c.clients.Monitor.GetHandle()
 
-		if informant != nil {
-			requestLock = informant.RequestLock()
+		if monitor != nil {
+			requestLock = monitor.RequestLock()
 
 			// Try to acquire the request lock, but if something happens while we're waiting, we'll
 			// abort & retry on the next loop iteration (or maybe not, if last.actions changed).
@@ -95,16 +95,16 @@ func (c *ExecutorCoreWithClients) DoInformantDownscales(ctx context.Context, log
 
 		var startTime time.Time
 		c.update(func(state *core.State) {
-			logger.Info("Starting informant downscale request", zap.Any("action", action))
+			logger.Info("Starting vm-monitor downscale request", zap.Any("action", action))
 			startTime = time.Now()
-			state.Informant().StartingDownscaleRequest(startTime)
+			state.Monitor().StartingDownscaleRequest(startTime)
 		})
 
-		result, err := doSingleInformantDownscaleRequest(ctx, ifaceLogger, informant, action)
+		result, err := doSingleMonitorDownscaleRequest(ctx, ifaceLogger, monitor, action)
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
-			unchanged := idUnchanged(informant.ID())
+			unchanged := idUnchanged(monitor.ID())
 			logFields := []zap.Field{
 				zap.Any("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),
@@ -112,9 +112,9 @@ func (c *ExecutorCoreWithClients) DoInformantDownscales(ctx context.Context, log
 			}
 
 			if err != nil {
-				logger.Error("Informant downscale request failed", append(logFields, zap.Error(err))...)
+				logger.Error("vm-monitor downscale request failed", append(logFields, zap.Error(err))...)
 				if unchanged {
-					state.Informant().DownscaleRequestFailed(endTime)
+					state.Monitor().DownscaleRequestFailed(endTime)
 				}
 				return
 			}
@@ -122,34 +122,34 @@ func (c *ExecutorCoreWithClients) DoInformantDownscales(ctx context.Context, log
 			logFields = append(logFields, zap.Any("response", result))
 
 			if !result.Ok {
-				logger.Warn("Informant denied downscale", logFields...)
+				logger.Warn("vm-monitor denied downscale", logFields...)
 				if unchanged {
-					state.Informant().DownscaleRequestDenied(endTime, action.Target)
+					state.Monitor().DownscaleRequestDenied(endTime, action.Target)
 				}
 			} else {
-				logger.Info("Informant approved downscale", logFields...)
+				logger.Info("vm-monitor approved downscale", logFields...)
 				if unchanged {
-					state.Informant().DownscaleRequestAllowed(endTime, action.Target)
+					state.Monitor().DownscaleRequestAllowed(endTime, action.Target)
 				}
 			}
 		})
 	}
 }
 
-func doSingleInformantDownscaleRequest(
+func doSingleMonitorDownscaleRequest(
 	ctx context.Context,
 	logger *zap.Logger,
-	iface InformantHandle,
-	action core.ActionInformantDownscale,
+	iface MonitorHandle,
+	action core.ActionMonitorDownscale,
 ) (*api.DownscaleResult, error) {
 	if iface == nil {
-		return nil, errors.New("No currently active informant")
+		return nil, errors.New("No currently active vm-monitor connection")
 	}
 
 	return iface.Downscale(ctx, logger, action.Current, action.Target)
 }
 
-func (c *ExecutorCoreWithClients) DoInformantUpscales(ctx context.Context, logger *zap.Logger) {
+func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger *zap.Logger) {
 	var (
 		updates     util.BroadcastReceiver = c.updates.NewReceiver()
 		requestLock util.ChanMutex         = util.NewChanMutex()
@@ -167,10 +167,10 @@ func (c *ExecutorCoreWithClients) DoInformantUpscales(ctx context.Context, logge
 
 	// meant to be called while holding c's lock
 	idUnchanged := func(current string) bool {
-		if h := c.clients.Informant.GetHandle(); h != nil {
+		if h := c.clients.Monitor.GetHandle(); h != nil {
 			return current == h.ID()
 		} else {
-			return current == c.clients.Informant.EmptyID()
+			return current == c.clients.Monitor.EmptyID()
 		}
 	}
 
@@ -188,7 +188,7 @@ func (c *ExecutorCoreWithClients) DoInformantUpscales(ctx context.Context, logge
 		}
 
 		// Wait until we're supposed to make a request.
-		if last.actions.InformantUpscale == nil {
+		if last.actions.MonitorUpscale == nil {
 			select {
 			case <-ctx.Done():
 				return
@@ -198,12 +198,12 @@ func (c *ExecutorCoreWithClients) DoInformantUpscales(ctx context.Context, logge
 			}
 		}
 
-		action := *last.actions.InformantUpscale
+		action := *last.actions.MonitorUpscale
 
-		informant := c.clients.Informant.GetHandle()
+		monitor := c.clients.Monitor.GetHandle()
 
-		if informant != nil {
-			requestLock = informant.RequestLock()
+		if monitor != nil {
+			requestLock = monitor.RequestLock()
 
 			// Try to acquire the request lock, but if something happens while we're waiting, we'll
 			// abort & retry on the next loop iteration (or maybe not, if last.actions changed).
@@ -220,16 +220,16 @@ func (c *ExecutorCoreWithClients) DoInformantUpscales(ctx context.Context, logge
 
 		var startTime time.Time
 		c.update(func(state *core.State) {
-			logger.Info("Starting informant upscale request", zap.Any("action", action))
+			logger.Info("Starting vm-monitor upscale request", zap.Any("action", action))
 			startTime = time.Now()
-			state.Informant().StartingUpscaleRequest(startTime)
+			state.Monitor().StartingUpscaleRequest(startTime)
 		})
 
-		err := doSingleInformantUpscaleRequest(ctx, ifaceLogger, informant, action)
+		err := doSingleMonitorUpscaleRequest(ctx, ifaceLogger, monitor, action)
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
-			unchanged := idUnchanged(informant.ID())
+			unchanged := idUnchanged(monitor.ID())
 			logFields := []zap.Field{
 				zap.Any("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),
@@ -237,29 +237,29 @@ func (c *ExecutorCoreWithClients) DoInformantUpscales(ctx context.Context, logge
 			}
 
 			if err != nil {
-				logger.Error("Informant upscale request failed", append(logFields, zap.Error(err))...)
+				logger.Error("vm-monitor upscale request failed", append(logFields, zap.Error(err))...)
 				if unchanged {
-					state.Informant().UpscaleRequestFailed(endTime)
+					state.Monitor().UpscaleRequestFailed(endTime)
 				}
 				return
 			}
 
-			logger.Info("Informant upscale request successful", logFields...)
+			logger.Info("vm-monitor upscale request successful", logFields...)
 			if unchanged {
-				state.Informant().UpscaleRequestSuccessful(endTime, action.Target)
+				state.Monitor().UpscaleRequestSuccessful(endTime, action.Target)
 			}
 		})
 	}
 }
 
-func doSingleInformantUpscaleRequest(
+func doSingleMonitorUpscaleRequest(
 	ctx context.Context,
 	logger *zap.Logger,
-	iface InformantHandle,
-	action core.ActionInformantUpscale,
+	iface MonitorHandle,
+	action core.ActionMonitorUpscale,
 ) error {
 	if iface == nil {
-		return errors.New("No currently active informant")
+		return errors.New("No currently active vm-monitor connection")
 	}
 
 	return iface.Upscale(ctx, logger, action.Current, action.Target)

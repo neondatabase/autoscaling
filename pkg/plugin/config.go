@@ -7,6 +7,8 @@ import (
 	"math"
 	"os"
 
+	"golang.org/x/exp/slices"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -39,11 +41,38 @@ type Config struct {
 	// version handled.
 	SchedulerName string `json:"schedulerName"`
 
+	// RandomizeScores, if true, will cause the scheduler to score a node with a random number in
+	// the range [minScore + 1, trueScore], instead of the trueScore
+	RandomizeScores bool `json:"randomizeScores"`
+
+	// MigrationDeletionRetrySeconds gives the duration, in seconds, we should wait between retrying
+	// a failed attempt to delete a VirtualMachineMigration that's finished.
+	MigrationDeletionRetrySeconds uint `json:"migrationDeletionRetrySeconds"`
+
 	// DoMigration, if provided, allows VM migration to be disabled
 	//
 	// This flag is intended to be temporary, just until NeonVM supports mgirations and we can
 	// re-enable it.
 	DoMigration *bool `json:"doMigration"`
+
+	// K8sNodeGroupLabel, if provided, gives the label to use when recording k8s node groups in the
+	// metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
+	K8sNodeGroupLabel string `json:"k8sNodeGroupLabel"`
+
+	// K8sAvailabilityZoneLabel, if provided, gives the label to use when recording nodes'
+	// availability zones in the metrics (like for autoscaling_plugin_node_{cpu,mem}_resources_current)
+	K8sAvailabilityZoneLabel string `json:"k8sAvailabilityZoneLabel"`
+
+	// IgnoreNamespaces, if provided, gives a list of namespaces that the plugin should completely
+	// ignore, as if pods from those namespaces do not exist.
+	//
+	// This is specifically designed for our "overprovisioning" namespace, which creates paused pods
+	// to trigger cluster-autoscaler.
+	//
+	// The only exception to this rule is during Filter method calls, where we do still count the
+	// resources from such pods. The reason to do that is so that these overprovisioning pods can be
+	// evicted, which will allow cluster-autoscaler to trigger scale-up.
+	IgnoreNamespaces []string `json:"ignoreNamespaces"`
 
 	// DumpState, if provided, enables a server to dump internal state
 	DumpState *dumpStateConfig `json:"dumpState"`
@@ -61,6 +90,28 @@ type nodeConfig struct {
 	Cpu         resourceConfig `json:"cpu"`
 	Memory      resourceConfig `json:"memory"`
 	ComputeUnit api.Resources  `json:"computeUnit"`
+
+	// Details about node scoring:
+	// See also: https://www.desmos.com/calculator/wg8s0yn63s
+	// In the desmos, the value f(x,s) gives the score (from 0 to 1) of a node that's x amount full
+	// (where x is a fraction from 0 to 1), with a total size that is equal to the maximum size node
+	// times s (i.e. s (or: "scale") gives the ratio between this nodes's size and the biggest one).
+
+	// MinUsageScore gives the ratio of the score at the minimum usage (i.e. 0) relative to the
+	// score at the midpoint, which will have the maximum.
+	//
+	// This corresponds to y₀ in the desmos link above.
+	MinUsageScore float64 `json:"minUsageScore"`
+	// MaxUsageScore gives the ratio of the score at the maximum usage (i.e. full) relative to the
+	// score at the midpoint, which will have the maximum.
+	//
+	// This corresponds to y₁ in the desmos link above.
+	MaxUsageScore float64 `json:"maxUsageScore"`
+	// ScorePeak gives the fraction at which the "target" or highest score should be, with the score
+	// sloping down on either side towards MinUsageScore at 0 and MaxUsageScore at 1.
+	//
+	// This corresponds to xₚ in the desmos link.
+	ScorePeak float64 `json:"scorePeak"`
 }
 
 // resourceConfig configures the amount of a particular resource we're willing to allocate to VMs,
@@ -74,9 +125,6 @@ type resourceConfig struct {
 	// The word "watermark" was originally used by @zoete as a temporary stand-in term during a
 	// meeting, and so it has intentionally been made permanent to spite the concept of "temporary" 😛
 	Watermark float32 `json:"watermark,omitempty"`
-	// System is the absolute amount of the resource allocated to non-user node functions, like
-	// Kubernetes daemons
-	System resource.Quantity `json:"system,omitempty"`
 }
 
 func (c *Config) migrationEnabled() bool {
@@ -115,6 +163,10 @@ func (c *Config) validate() (string, error) {
 		}
 	}
 
+	if c.MigrationDeletionRetrySeconds == 0 {
+		return "migrationDeletionRetrySeconds", errors.New("value must be > 0")
+	}
+
 	return "", nil
 }
 
@@ -131,30 +183,32 @@ func (s *overrideSet) validate() (string, error) {
 }
 
 func (c *nodeConfig) validate() (string, error) {
-	if path, err := c.Cpu.validate(false); err != nil {
+	if path, err := c.Cpu.validate(); err != nil {
 		return fmt.Sprintf("cpu.%s", path), err
 	}
-	if path, err := c.Memory.validate(true); err != nil {
+	if path, err := c.Memory.validate(); err != nil {
 		return fmt.Sprintf("memory.%s", path), err
 	}
 	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
 		return "computeUnit", err
 	}
 
+	if c.MinUsageScore < 0 || c.MinUsageScore > 1 {
+		return "minUsageScore", errors.New("value must be between 0 and 1, inclusive")
+	} else if c.MaxUsageScore < 0 || c.MaxUsageScore > 1 {
+		return "maxUsageScore", errors.New("value must be between 0 and 1, inclusive")
+	} else if c.ScorePeak < 0 || c.ScorePeak > 1 {
+		return "scorePeak", errors.New("value must be between 0 and 1, inclusive")
+	}
+
 	return "", nil
 }
 
-func (c *resourceConfig) validate(isMemory bool) (string, error) {
+func (c *resourceConfig) validate() (string, error) {
 	if c.Watermark <= 0.0 {
 		return "watermark", errors.New("value must be > 0")
 	} else if c.Watermark > 1.0 {
 		return "watermark", errors.New("value must be <= 1")
-	}
-
-	if c.System.Value() <= 0 {
-		return "system", errors.New("value must be > 0")
-	} else if isMemory && c.System.Value() < math.MaxInt64 && c.System.MilliValue()%1000 != 0 {
-		return "system", errors.New("value cannot have milli-precision")
 	}
 
 	return "", nil
@@ -191,6 +245,11 @@ func ReadConfig(path string) (*Config, error) {
 // HELPER METHODS FOR USING CONFIGS //
 //////////////////////////////////////
 
+// ignoredNamespace returns whether items in the namespace should be treated as if they don't exist
+func (c *Config) ignoredNamespace(namespace string) bool {
+	return slices.Contains(c.IgnoreNamespaces, namespace)
+}
+
 // forNode returns the individual nodeConfig for a node with a particular name, taking override
 // settings into account
 func (c *Config) forNode(nodeName string) *nodeConfig {
@@ -206,32 +265,13 @@ func (c *Config) forNode(nodeName string) *nodeConfig {
 }
 
 func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[vmapi.MilliCPU], margin *resource.Quantity, _ error) {
-	// We check both Value and MilliValue here in case the value overflows an int64 when
-	// multiplied by 1000, which is possible if c.Cpu.System is not in units of milli-CPU
-	if c.Cpu.System.Value() > total.Value() || c.Cpu.System.MilliValue() > total.MilliValue() {
-		err := fmt.Errorf("desired system vCPU %v greater than node total %v", &c.Cpu.System, total)
-		return nodeResourceState[vmapi.MilliCPU]{}, nil, err
-	}
+	totalMilli := total.MilliValue()
 
-	totalRounded := total.MilliValue() / 1000
-
-	// system CPU usage isn't measured directly, but as the number of additional *full* CPUs
-	// reserved for system functions *that we'd otherwise have available*.
-	//
-	// So if c.Cpu.System is less than the difference between total.MilliValue() and
-	// 1000*total.Value(), then systemCpus will be zero.
-	systemCpus := totalRounded - (total.MilliValue()-c.Cpu.System.MilliValue())/1000
-
-	reservableCpus := totalRounded - systemCpus
-	unreservableCpuMillis := total.MilliValue() - 1000*reservableCpus
-
-	margin = resource.NewMilliQuantity(unreservableCpuMillis, c.Cpu.System.Format)
-	margin.Sub(c.Cpu.System)
+	margin = resource.NewMilliQuantity(0, total.Format)
 
 	return nodeResourceState[vmapi.MilliCPU]{
-		Total:                vmapi.MilliCPU(totalRounded * 1000),
-		System:               vmapi.MilliCPU(systemCpus * 1000),
-		Watermark:            vmapi.MilliCPU(c.Cpu.Watermark * float32(reservableCpus) * 1000),
+		Total:                vmapi.MilliCPU(totalMilli),
+		Watermark:            vmapi.MilliCPU(c.Cpu.Watermark * float32(totalMilli)),
 		Reserved:             0,
 		Buffer:               0,
 		CapacityPressure:     0,
@@ -243,13 +283,7 @@ func (c *nodeConfig) memoryLimits(
 	total *resource.Quantity,
 	slotSize *resource.Quantity,
 ) (_ nodeResourceState[uint16], margin *resource.Quantity, _ error) {
-	if c.Memory.System.Cmp(*total) == 1 /* if c.Memory.System > total */ {
-		err := fmt.Errorf(
-			"desired system memory %v greater than node total %v",
-			&c.Memory.System, total,
-		)
-		return nodeResourceState[uint16]{}, nil, err
-	} else if slotSize.Cmp(*total) == 1 /* if slotSize > total */ {
+	if slotSize.Cmp(*total) == 1 /* if slotSize > total */ {
 		err := fmt.Errorf("slotSize %v greater than node total %v", slotSize, total)
 		return nodeResourceState[uint16]{}, nil, err
 	}
@@ -260,23 +294,13 @@ func (c *nodeConfig) memoryLimits(
 		return nodeResourceState[uint16]{}, nil, err
 	}
 
-	// systemSlots isn't measured directly, but as the number of additional slots reserved for
-	// system functions *that we'd otherwise have available*.
-	//
-	// So if c.Memory.System is less than the leftover space between totalSlots*slotSize and total,
-	// then systemSlots will be zero.
-	systemSlots := totalSlots - (total.Value()-c.Memory.System.Value())/slotSize.Value()
-
-	reservableSlots := totalSlots - systemSlots
-	unreservable := total.Value() - slotSize.Value()*reservableSlots
+	unreservable := total.Value() - slotSize.Value()*totalSlots
 
 	margin = resource.NewQuantity(unreservable, total.Format)
-	margin.Sub(c.Memory.System)
 
 	return nodeResourceState[uint16]{
 		Total:                uint16(totalSlots),
-		System:               uint16(systemSlots),
-		Watermark:            uint16(c.Memory.Watermark * float32(reservableSlots)),
+		Watermark:            uint16(c.Memory.Watermark * float32(totalSlots)),
 		Reserved:             0,
 		Buffer:               0,
 		CapacityPressure:     0,

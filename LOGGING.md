@@ -10,9 +10,8 @@ The following components have been updated to follow this document:
 
 - [x] autoscaler-agent
 - [x] autoscale-scheduler (scheduler plugin)
-- [x] vm-informant
 - [ ] neonvm-controlller
-- [ ] neonvm-runner
+- [x] neonvm-runner
 
 ## Common keys
 
@@ -48,9 +47,8 @@ the VM's resources, so they share a logger name (`agent.runner.main`).
 
 ## Logger naming conventions
 
-- `component.*` — each component (e.g. "autoscaler-agent", "vm-informant", etc) has logger names
+- `component.*` — each component (e.g. "autoscaler-agent") has logger names
   prefixed with the name of the component
-    - This is necessary so that compute logs can filter out the vm-informant.
 - `*.main` — if the bulk of the logic for something is in one straightforward loop (like
   `autoscaler-agent.runner.main`)
 - `*.klog` — for klog output that's been redirected

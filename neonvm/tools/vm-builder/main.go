@@ -22,16 +22,14 @@ import (
 
 // vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
 
-var entrypointPrefix = []string{"/usr/bin/cgexec", "-g", "memory:neon-postgres"}
-
 const (
 	dockerfileVmBuilder = `
-FROM {{.InformantImage}} as informant
+FROM {{.MonitorImage}} as monitor
 
 # Build cgroup-tools
 #
 # At time of writing (2023-03-14), debian bullseye has a version of cgroup-tools (technically
-# libcgroup) that doesn't support cgroup v2 (version 0.41-11). Unfortunately, the vm-informant
+# libcgroup) that doesn't support cgroup v2 (version 0.41-11). Unfortunately, the vm-monitor
 # requires cgroup v2, so we'll build cgroup-tools ourselves.
 FROM debian:bullseye-slim as libcgroup-builder
 ENV LIBCGROUP_VERSION v2.0.3
@@ -89,7 +87,7 @@ RUN set -e \
 FROM {{.RootDiskImage}} AS rootdisk
 
 USER root
-RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "informant user" --shell /bin/false vm-informant
+RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "monitor user" --shell /bin/false vm-monitor
 
 # tweak nofile limits
 RUN set -e \
@@ -108,7 +106,7 @@ RUN set -e \
 
 USER postgres
 
-COPY --from=informant         /usr/bin/vm-informant /usr/local/bin/vm-informant
+COPY --from=monitor           /usr/bin/vm-monitor /usr/local/bin/vm-monitor
 COPY --from=libcgroup-builder /libcgroup-install/bin/*  /usr/bin/
 COPY --from=libcgroup-builder /libcgroup-install/lib/*  /usr/lib/
 COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
@@ -133,12 +131,14 @@ RUN set -e \
 		su-exec \
 		e2fsprogs-extra \
 		blkid \
+		flock \
 	&& mv /sbin/acpid         /neonvm/bin/ \
 	&& mv /sbin/udevd         /neonvm/bin/ \
 	&& mv /sbin/agetty        /neonvm/bin/ \
 	&& mv /sbin/su-exec       /neonvm/bin/ \
 	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
 	&& mv /sbin/blkid         /neonvm/bin/blkid \
+	&& mv /usr/bin/flock	  /neonvm/bin/flock \
 	&& mkdir -p /neonvm/lib \
 	&& cp -f /lib/ld-musl-x86_64.so.1  /neonvm/lib/ \
 	&& cp -f /lib/libblkid.so.1.1.0    /neonvm/lib/libblkid.so.1 \
@@ -171,10 +171,10 @@ RUN set -e \
 ADD inittab   /neonvm/bin/inittab
 ADD vminit    /neonvm/bin/vminit
 ADD vmstart   /neonvm/bin/vmstart
+ADD vmshutdown /neonvm/bin/vmshutdown
 ADD vmacpi    /neonvm/acpi/vmacpi
 ADD vector.yaml /neonvm/config/vector.yaml
-ADD powerdown /neonvm/bin/powerdown
-RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
+RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
@@ -235,32 +235,42 @@ fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
 
-/neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh
+/neonvm/bin/flock -o /neonvm/vmstart.lock -c 'test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh'
 `
 
 	scriptInitTab = `
 ::sysinit:/neonvm/bin/vminit
 ::sysinit:cgconfigparser -l /etc/cgconfig.conf -s 1664
+::once:/neonvm/bin/touch /neonvm/vmstart.allowed
 ::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/vmstart
-::respawn:su -p vm-informant -c '/usr/local/bin/vm-informant --auto-restart --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
+{{if .EnableMonitor}}
+::respawn:su -p vm-monitor -c 'RUST_LOG=info /usr/local/bin/vm-monitor --addr "0.0.0.0:10301" --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="host=localhost port=5432 dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
+{{end}}
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
 ::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
+::shutdown:/neonvm/bin/vmshutdown
 `
 
 	scriptVmAcpi = `
 event=button/power
-action=/neonvm/bin/powerdown
+action=/neonvm/bin/poweroff
 `
 
-	scriptPowerDown = `#!/neonvm/bin/sh
-
-su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
-/neonvm/bin/poweroff
+	scriptVmShutdown = `#!/neonvm/bin/sh
+rm /neonvm/vmstart.allowed
+if [ -e /neonvm/vmstart.allowed ]; then
+	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" 1>&2
+fi
+# we inhibited new command starts, but there may still be a command running
+while ! /neonvm/bin/flock -n /neonvm/vmstart.lock true; do
+	su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+done
+echo "vmstart workload shut down cleanly" 1>&2
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
@@ -285,6 +295,18 @@ chmod 1777 /dev/shm
 mount -t proc  proc  /proc
 mount -t sysfs sysfs /sys
 mount -t cgroup2 cgroup2 /sys/fs/cgroup
+
+# Allow all users to move processes to/from the root cgroup.
+#
+# This is required in order to be able to 'cgexec' anything, if the entrypoint is not being run as
+# root, because moving tasks betweeen one cgroup and another *requires write access to the
+# cgroup.procs file of the common ancestor*, and because the entrypoint isn't already in a cgroup,
+# any new tasks are automatically placed in the top-level cgroup.
+#
+# This *would* be bad for security, if we relied on cgroups for security; but instead because they
+# are just used for cooperative signaling, this should be mostly ok.
+chmod go+w /sys/fs/cgroup/cgroup.procs
+
 mount -t devpts -o noexec,nosuid       devpts    /dev/pts
 mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
 
@@ -329,7 +351,7 @@ sinks:
 group neon-postgres {
     perm {
         admin {
-            uid = vm-informant;
+            uid = {{.CgroupUID}};
         }
         task {
             gid = users;
@@ -357,18 +379,20 @@ default_pool_size=16
 )
 
 var (
-	Version     string
-	VMInformant string
+	Version   string
+	VMMonitor string
 
-	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
-	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
-	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
-	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
-	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
-	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
-	informant = flag.String("informant", VMInformant, `vm-informant docker image`)
-	fileCache = flag.Bool("enable-file-cache", false, `enables the vm-informant's file cache integration`)
-	version   = flag.Bool("version", false, `Print vm-builder version`)
+	srcImage      = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.16`)
+	dstImage      = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.16`)
+	size          = flag.String("size", "1G", `Size for disk image: --size=1G`)
+	outFile       = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	quiet         = flag.Bool("quiet", false, `Show less output from the docker build process`)
+	forcePull     = flag.Bool("pull", false, `Pull src image even if already present locally`)
+	monitor       = flag.String("monitor", VMMonitor, `vm-monitor docker image`)
+	enableMonitor = flag.Bool("enable-monitor", false, `start the vm-monitor during VM startup`)
+	fileCache     = flag.Bool("enable-file-cache", false, `enables the vm-monitor's file cache integration`)
+	cgroupUID     = flag.String("cgroup-uid", "vm-monitor", `specifies the user that owns the neon-postgres cgroup`)
+	version       = flag.Bool("version", false, `Print vm-builder version`)
 )
 
 type dockerMessage struct {
@@ -419,13 +443,15 @@ func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplSt
 }
 
 type TemplatesContext struct {
-	User           string
-	Entrypoint     []string
-	Cmd            []string
-	Env            []string
-	RootDiskImage  string
-	InformantImage string
-	FileCache      bool
+	User          string
+	Entrypoint    []string
+	Cmd           []string
+	Env           []string
+	RootDiskImage string
+	MonitorImage  string
+	FileCache     bool
+	EnableMonitor bool
+	CgroupUID     string
 }
 
 func main() {
@@ -507,12 +533,14 @@ func main() {
 	}
 
 	tmplArgs := TemplatesContext{
-		Entrypoint:     append(entrypointPrefix, imageSpec.Config.Entrypoint...),
-		Cmd:            imageSpec.Config.Cmd,
-		Env:            imageSpec.Config.Env,
-		RootDiskImage:  *srcImage,
-		InformantImage: *informant,
-		FileCache:      *fileCache,
+		Entrypoint:    imageSpec.Config.Entrypoint,
+		Cmd:           imageSpec.Config.Cmd,
+		Env:           imageSpec.Config.Env,
+		RootDiskImage: *srcImage,
+		MonitorImage:  *monitor,
+		FileCache:     *fileCache,
+		EnableMonitor: *enableMonitor,
+		CgroupUID:     *cgroupUID,
 	}
 
 	if len(imageSpec.Config.User) != 0 {
@@ -531,9 +559,9 @@ func main() {
 	}{
 		{"Dockerfile", dockerfileVmBuilder},
 		{"vmstart", scriptVmStart},
+		{"vmshutdown", scriptVmShutdown},
 		{"inittab", scriptInitTab},
 		{"vmacpi", scriptVmAcpi},
-		{"powerdown", scriptPowerDown},
 		{"vminit", scriptVmInit},
 		{"cgconfig.conf", configCgroup},
 		{"vector.yaml", configVector},

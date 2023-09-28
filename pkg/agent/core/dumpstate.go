@@ -19,23 +19,23 @@ func shallowCopy[T any](ptr *T) *T {
 
 // StateDump provides introspection into the current values of the fields of State
 type StateDump struct {
-	Config    Config             `json:"config"`
-	VM        api.VmInfo         `json:"vm"`
-	Plugin    pluginStateDump    `json:"plugin"`
-	Informant informantStateDump `json:"informant"`
-	NeonVM    neonvmStateDump    `json:"neonvm"`
-	Metrics   *api.Metrics       `json:"metrics"`
+	Config  Config           `json:"config"`
+	VM      api.VmInfo       `json:"vm"`
+	Plugin  pluginStateDump  `json:"plugin"`
+	Monitor monitorStateDump `json:"monitor"`
+	NeonVM  neonvmStateDump  `json:"neonvm"`
+	Metrics *api.Metrics     `json:"metrics"`
 }
 
 // Dump produces a JSON-serializable representation of the State
 func (s *State) Dump() StateDump {
 	return StateDump{
-		Config:    s.config,
-		VM:        s.vm,
-		Plugin:    s.plugin.dump(),
-		Informant: s.informant.dump(),
-		NeonVM:    s.neonvm.dump(),
-		Metrics:   shallowCopy(s.metrics),
+		Config:  s.config,
+		VM:      s.vm,
+		Plugin:  s.plugin.dump(),
+		Monitor: s.monitor.dump(),
+		NeonVM:  s.neonvm.dump(),
+		Metrics: shallowCopy(s.metrics),
 	}
 }
 
@@ -69,17 +69,17 @@ func (s *pluginState) dump() pluginStateDump {
 	}
 }
 
-type informantStateDump struct {
-	Active             bool                         `json:"active"`
-	OngoingRequest     *OngoingInformantRequestDump `json:"ongoingRequest"`
-	RequestedUpscale   *requestedUpscaleDump        `json:"requestedUpscale"`
-	DeniedDownscale    *deniedDownscaleDump         `json:"deniedDownscale"`
-	Approved           *api.Resources               `json:"approved"`
-	DownscaleFailureAt *time.Time                   `json:"downscaleFailureAt"`
-	UpscaleFailureAt   *time.Time                   `json:"upscaleFailureAt"`
+type monitorStateDump struct {
+	Active             bool                       `json:"active"`
+	OngoingRequest     *OngoingMonitorRequestDump `json:"ongoingRequest"`
+	RequestedUpscale   *requestedUpscaleDump      `json:"requestedUpscale"`
+	DeniedDownscale    *deniedDownscaleDump       `json:"deniedDownscale"`
+	Approved           *api.Resources             `json:"approved"`
+	DownscaleFailureAt *time.Time                 `json:"downscaleFailureAt"`
+	UpscaleFailureAt   *time.Time                 `json:"upscaleFailureAt"`
 }
-type OngoingInformantRequestDump struct {
-	Kind informantRequestKind `json:"kind"`
+type OngoingMonitorRequestDump struct {
+	Kind monitorRequestKind `json:"kind"`
 }
 type requestedUpscaleDump struct {
 	At        time.Time         `json:"at"`
@@ -91,7 +91,7 @@ type deniedDownscaleDump struct {
 	Requested api.Resources `json:"requested"`
 }
 
-func (s *informantState) dump() informantStateDump {
+func (s *monitorState) dump() monitorStateDump {
 	var requestedUpscale *requestedUpscaleDump
 	if s.requestedUpscale != nil {
 		requestedUpscale = &requestedUpscaleDump{
@@ -109,14 +109,14 @@ func (s *informantState) dump() informantStateDump {
 		}
 	}
 
-	var ongoingRequest *OngoingInformantRequestDump
+	var ongoingRequest *OngoingMonitorRequestDump
 	if s.ongoingRequest != nil {
-		ongoingRequest = &OngoingInformantRequestDump{
+		ongoingRequest = &OngoingMonitorRequestDump{
 			Kind: s.ongoingRequest.kind,
 		}
 	}
 
-	return informantStateDump{
+	return monitorStateDump{
 		Active:             s.active,
 		OngoingRequest:     ongoingRequest,
 		RequestedUpscale:   requestedUpscale,

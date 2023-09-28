@@ -16,9 +16,9 @@ import (
 )
 
 var (
-	_ executor.PluginInterface    = (*execPluginInterface)(nil)
-	_ executor.NeonVMInterface    = (*execNeonVMInterface)(nil)
-	_ executor.InformantInterface = (*execInformantInterface)(nil)
+	_ executor.PluginInterface  = (*execPluginInterface)(nil)
+	_ executor.NeonVMInterface  = (*execNeonVMInterface)(nil)
+	_ executor.MonitorInterface = (*execMonitorInterface)(nil)
 )
 
 /////////////////////////////////////////////////////////////
@@ -119,46 +119,53 @@ func (iface *execNeonVMInterface) Request(ctx context.Context, logger *zap.Logge
 }
 
 ////////////////////////////////////////////////////
-// Informant-related interface and implementation //
+// Monitor-related interface and implementation //
 ////////////////////////////////////////////////////
 
-type execInformantInterface struct {
-	runner *Runner
-	core   *executor.ExecutorCore
+type execMonitorInterface struct {
+	runner      *Runner
+	core        *executor.ExecutorCore
+	requestLock util.ChanMutex
 }
 
-func makeInformantInterface(r *Runner, core *executor.ExecutorCore) *execInformantInterface {
-	return &execInformantInterface{runner: r, core: core}
+func makeMonitorInterface(r *Runner, core *executor.ExecutorCore) *execMonitorInterface {
+	return &execMonitorInterface{runner: r, core: core, requestLock: util.NewChanMutex()}
 }
 
-// EmptyID implements executor.InformantInterface
-func (iface *execInformantInterface) EmptyID() string {
+// EmptyID implements executor.MonitorInterface
+func (iface *execMonitorInterface) EmptyID() string {
 	return "<none>"
 }
 
-func (iface *execInformantInterface) GetHandle() executor.InformantHandle {
-	server := iface.runner.server.Load()
+func (iface *execMonitorInterface) GetHandle() executor.MonitorHandle {
+	dispatcher := iface.runner.monitor.Load()
 
-	if server == nil || server.ExitStatus() != nil {
+	if dispatcher == nil || dispatcher.Exited() {
 		return nil
 	}
 
-	return &execInformantHandle{server: server}
+	return &execMonitorHandle{
+		runner:      iface.runner,
+		dispatcher:  dispatcher,
+		requestLock: iface.requestLock,
+	}
 }
 
-type execInformantHandle struct {
-	server *InformantServer
+type execMonitorHandle struct {
+	runner      *Runner
+	dispatcher  *Dispatcher
+	requestLock util.ChanMutex
 }
 
-func (h *execInformantHandle) ID() string {
-	return h.server.desc.AgentID.String()
+func (h *execMonitorHandle) ID() string {
+	panic("todo")
 }
 
-func (h *execInformantHandle) RequestLock() util.ChanMutex {
-	return h.server.requestLock
+func (h *execMonitorHandle) RequestLock() util.ChanMutex {
+	return h.requestLock
 }
 
-func (h *execInformantHandle) Downscale(
+func (h *execMonitorHandle) Downscale(
 	ctx context.Context,
 	logger *zap.Logger,
 	current api.Resources,
@@ -167,33 +174,33 @@ func (h *execInformantHandle) Downscale(
 	// Check validity of the message we're sending
 	if target.HasFieldGreaterThan(current) {
 		innerMsg := fmt.Errorf("%+v has field greater than %+v", target, current)
-		panic(fmt.Errorf("(*execInformantHandle).Downscale() called with target greater than current: %w", innerMsg))
+		panic(fmt.Errorf("(*execMonitorHandle).Downscale() called with target greater than current: %w", innerMsg))
 	}
 
-	h.server.runner.recordResourceChange(current, target, h.server.runner.global.metrics.informantRequestedChange)
+	h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorRequestedChange)
 
-	result, err := h.server.Downscale(ctx, logger, target)
+	result, err := doMonitorDownscale(ctx, logger, h.dispatcher, target)
 
 	if err != nil && result.Ok {
-		h.server.runner.recordResourceChange(current, target, h.server.runner.global.metrics.informantApprovedChange)
+		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
 	}
 
 	return result, err
 }
 
-func (h *execInformantHandle) Upscale(ctx context.Context, logger *zap.Logger, current, target api.Resources) error {
+func (h *execMonitorHandle) Upscale(ctx context.Context, logger *zap.Logger, current, target api.Resources) error {
 	// Check validity of the message we're sending
 	if target.HasFieldLessThan(current) {
 		innerMsg := fmt.Errorf("%+v has field less than %+v", target, current)
-		panic(fmt.Errorf("(*execInformantHandle).Upscale() called with target less than current: %w", innerMsg))
+		panic(fmt.Errorf("(*execMonitorHandle).Upscale() called with target less than current: %w", innerMsg))
 	}
 
-	h.server.runner.recordResourceChange(current, target, h.server.runner.global.metrics.informantRequestedChange)
+	h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorRequestedChange)
 
-	err := h.server.Upscale(ctx, logger, target)
+	err := doMonitorUpscale(ctx, logger, h.dispatcher, target)
 
 	if err != nil {
-		h.server.runner.recordResourceChange(current, target, h.server.runner.global.metrics.informantApprovedChange)
+		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
 	}
 
 	return err

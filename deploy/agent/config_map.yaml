@@ -9,23 +9,23 @@ data:
       "scaling": {
         "requestTimeoutSeconds": 10,
         "defaultConfig": {
-          "loadAverageFractionTarget": 0.9
+          "loadAverageFractionTarget": 0.9,
+          "memoryUsageFractionTarget": 0.75
         }
       },
-      "informant": {
-        "serverPort": 10301,
-        "retryServerMinWaitSeconds": 5,
-        "retryServerNormalWaitSeconds": 5,
-        "retryDeniedDownscaleSeconds": 5,
-        "retryFailedRequestSeconds": 3,
-        "registerRetrySeconds": 5,
-        "requestTimeoutSeconds": 1,
-        "registerTimeoutSeconds": 2,
-        "downscaleTimeoutSeconds": 2,
-        "unhealthyAfterSilenceDurationSeconds": 20,
-        "unhealthyStartupGracePeriodSeconds": 20
+      "monitor": {
+          "serverPort": 10301,
+          "responseTimeoutSeconds": 5,
+          "connectionTimeoutSeconds": 4,
+          "connectionRetryMinWaitSeconds": 5,
+          "unhealthyAfterSilenceDurationSeconds": 20,
+          "unhealthyStartupGracePeriodSeconds": 20,
+          "maxHealthCheckSequentialFailuresSeconds": 30,
+          "retryDeniedDownscaleSeconds": 5,
+          "retryFailedRequestSeconds": 3
       },
       "metrics": {
+        "port": 9100,
         "loadMetricPrefix": "host_",
         "requestTimeoutSeconds": 2,
         "secondsBetweenRequests": 5

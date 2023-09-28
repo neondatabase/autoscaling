@@ -13,7 +13,7 @@ package core
 //
 // That said, there's still some tricky semantics we want to maintain. Internally, the
 // autoscaler-agent must be designed around eventual consistency, but the API we expose to the
-// vm-informant is strictly synchonous. As such, there's some subtle logic to make sure that we're
+// vm-monitor is strictly synchonous. As such, there's some subtle logic to make sure that we're
 // not violating our own guarantees.
 //
 // ---
@@ -40,12 +40,12 @@ type Config struct {
 	// plugin, even if nothing's changed.
 	PluginRequestTick time.Duration
 
-	// InformantDeniedDownscaleCooldown gives the time we must wait between making duplicate
-	// downscale requests to the vm-informant where the previous failed.
-	InformantDeniedDownscaleCooldown time.Duration
+	// MonitorDeniedDownscaleCooldown gives the time we must wait between making duplicate
+	// downscale requests to the vm-monitor where the previous failed.
+	MonitorDeniedDownscaleCooldown time.Duration
 
-	// InformantRetryWait gives the amount of time to wait to retry after a *failed* request.
-	InformantRetryWait time.Duration
+	// MonitorRetryWait gives the amount of time to wait to retry after a *failed* request.
+	MonitorRetryWait time.Duration
 
 	// Warn provides an outlet for (*State).Next() to give warnings about conditions that are
 	// impeding its ability to execute. (e.g. "wanted to do X but couldn't because of Y")
@@ -68,8 +68,8 @@ type State struct {
 	// plugin records all state relevant to communications with the scheduler plugin
 	plugin pluginState
 
-	// informant records all state relevant to communications with the vm-informant
-	informant informantState
+	// monitor records all state relevant to communications with the vm-monitor
+	monitor monitorState
 
 	// neonvm records all state relevant to the NeonVM k8s API
 	neonvm neonvmState
@@ -98,15 +98,15 @@ type pluginRequested struct {
 	resources api.Resources
 }
 
-type informantState struct {
-	// active is true iff the agent is currently "confirmed" and not "suspended" by the informant.
+type monitorState struct {
+	// active is true iff the agent is currently "confirmed" and not "suspended" by the monitor.
 	// Otherwise, we shouldn't be making any kind of scaling requests.
 	active bool
 
-	ongoingRequest *ongoingInformantRequest
+	ongoingRequest *ongoingMonitorRequest
 
 	// requestedUpscale, if not nil, stores the most recent *unresolved* upscaling requested by the
-	// vm-informant, along with the time at which it occurred.
+	// vm-monitor, along with the time at which it occurred.
 	requestedUpscale *requestedUpscale
 
 	// deniedDownscale, if not nil, stores the result of the lastest denied /downscale request.
@@ -120,15 +120,15 @@ type informantState struct {
 	upscaleFailureAt   *time.Time
 }
 
-type ongoingInformantRequest struct {
-	kind informantRequestKind
+type ongoingMonitorRequest struct {
+	kind monitorRequestKind
 }
 
-type informantRequestKind string
+type monitorRequestKind string
 
 const (
-	informantRequestKindDownscale informantRequestKind = "downscale"
-	informantRequestKindUpscale   informantRequestKind = "upscale"
+	monitorRequestKindDownscale monitorRequestKind = "downscale"
+	monitorRequestKindUpscale   monitorRequestKind = "upscale"
 )
 
 type requestedUpscale struct {
@@ -160,7 +160,7 @@ func NewState(vm api.VmInfo, config Config) *State {
 			lastRequest:    nil,
 			permit:         nil,
 		},
-		informant: informantState{
+		monitor: monitorState{
 			active:             false,
 			ongoingRequest:     nil,
 			requestedUpscale:   nil,
@@ -185,30 +185,12 @@ func (s *State) NextActions(now time.Time) ActionSet {
 
 	using := s.vm.Using()
 
-	var desiredResources api.Resources
+	desiredResources := s.DesiredResourcesFromMetricsOrRequestedUpscaling()
 
-	if s.informant.active {
-		desiredResources = s.desiredResourcesFromMetricsOrRequestedUpscaling()
-	} else {
-		// If we're not deemed "active" by the informant, then we shouldn't be making any kind of
-		// scaling requests on its behalf.
-		//
-		// We'll still talk to the scheduler to inform it about the current resource usage though,
-		// to mitigate any reliability issues - much of the informant is built (as of 2023-07-09)
-		// under the assumption that we could, in theory, have multiple autoscaler-agents on the
-		// same node at the same time. That's... not really true, so an informant that isn't
-		// "active" is more likely to just be crash-looping due to a bug.
-		//
-		// *In theory* if we had mutliple autoscaler-agents talking to a single informant, this
-		// would be incorrect; we'd override another one's scaling requests. But this should be
-		// fine.
-		desiredResources = using
-	}
-
-	desiredResourcesApprovedByInformant := s.boundResourcesByInformantApproved(desiredResources)
+	desiredResourcesApprovedByMonitor := s.boundResourcesByMonitorApproved(desiredResources)
 	desiredResourcesApprovedByPlugin := s.boundResourcesByPluginApproved(desiredResources)
-	// NB: informant approved provides a lower bound
-	approvedDesiredResources := desiredResourcesApprovedByPlugin.Max(desiredResourcesApprovedByInformant)
+	// NB: monitor approved provides a lower bound
+	approvedDesiredResources := desiredResourcesApprovedByPlugin.Max(desiredResourcesApprovedByMonitor)
 
 	ongoingNeonVMRequest := s.neonvm.ongoingRequested != nil
 
@@ -248,7 +230,7 @@ func (s *State) NextActions(now time.Time) ActionSet {
 			// ... Otherwise, we should try requesting something new form it.
 			actions.PluginRequest = &ActionPluginRequest{
 				LastPermit: s.plugin.permit,
-				Target:     desiredResourcesApprovedByInformant,
+				Target:     desiredResourcesApprovedByMonitor,
 				Metrics:    s.metrics,
 			}
 		}
@@ -285,63 +267,63 @@ func (s *State) NextActions(now time.Time) ActionSet {
 		}
 	}
 
-	// We should make an upscale request to the informant if we've upscaled and the informant
+	// We should make an upscale request to the monitor if we've upscaled and the monitor
 	// doesn't know about it.
-	wantInformantUpscaleRequest := s.informant.approved != nil && *s.informant.approved != desiredResources.Max(*s.informant.approved)
+	wantMonitorUpscaleRequest := s.monitor.approved != nil && *s.monitor.approved != desiredResources.Max(*s.monitor.approved)
 	// However, we may need to wait before retrying (or for any ongoing requests to finish)
-	makeInformantUpscaleRequest := wantInformantUpscaleRequest &&
-		s.informant.active &&
-		s.informant.ongoingRequest == nil &&
-		(s.informant.upscaleFailureAt == nil ||
-			now.Sub(*s.informant.upscaleFailureAt) >= s.config.InformantRetryWait)
-	if wantInformantUpscaleRequest {
-		if makeInformantUpscaleRequest {
-			actions.InformantUpscale = &ActionInformantUpscale{
-				Current: *s.informant.approved,
-				Target:  desiredResources.Max(*s.informant.approved),
+	makeMonitorUpscaleRequest := wantMonitorUpscaleRequest &&
+		s.monitor.active &&
+		s.monitor.ongoingRequest == nil &&
+		(s.monitor.upscaleFailureAt == nil ||
+			now.Sub(*s.monitor.upscaleFailureAt) >= s.config.MonitorRetryWait)
+	if wantMonitorUpscaleRequest {
+		if makeMonitorUpscaleRequest {
+			actions.MonitorUpscale = &ActionMonitorUpscale{
+				Current: *s.monitor.approved,
+				Target:  desiredResources.Max(*s.monitor.approved),
 			}
-		} else if !s.informant.active {
+		} else if !s.monitor.active {
 			s.config.Warn("Wanted to send informant upscale request, but not active")
-		} else if s.informant.ongoingRequest != nil && s.informant.ongoingRequest.kind != informantRequestKindUpscale {
-			s.config.Warn("Wanted to send informant upscale request, but waiting other ongoing %s request", s.informant.ongoingRequest.kind)
-		} else if s.informant.ongoingRequest == nil {
+		} else if s.monitor.ongoingRequest != nil && s.monitor.ongoingRequest.kind != monitorRequestKindUpscale {
+			s.config.Warn("Wanted to send informant upscale request, but waiting other ongoing %s request", s.monitor.ongoingRequest.kind)
+		} else if s.monitor.ongoingRequest == nil {
 			s.config.Warn("Wanted to send informant upscale request, but waiting on retry rate limit")
 		}
 	}
 
-	// We should make a downscale request to the informant if we want to downscale but haven't been
+	// We should make a downscale request to the monitor if we want to downscale but haven't been
 	// approved for it.
-	var resourcesForInformantDownscale api.Resources
-	if s.informant.approved != nil {
-		resourcesForInformantDownscale = desiredResources.Min(*s.informant.approved)
+	var resourcesForMonitorDownscale api.Resources
+	if s.monitor.approved != nil {
+		resourcesForMonitorDownscale = desiredResources.Min(*s.monitor.approved)
 	} else {
-		resourcesForInformantDownscale = desiredResources.Min(using)
+		resourcesForMonitorDownscale = desiredResources.Min(using)
 	}
-	wantInformantDownscaleRequest := s.informant.approved != nil && *s.informant.approved != resourcesForInformantDownscale
-	if s.informant.approved == nil && resourcesForInformantDownscale != using {
+	wantMonitorDownscaleRequest := s.monitor.approved != nil && *s.monitor.approved != resourcesForMonitorDownscale
+	if s.monitor.approved == nil && resourcesForMonitorDownscale != using {
 		s.config.Warn("Wanted to send informant downscale request, but haven't yet gotten information about its resources")
 	}
 	// However, we may need to wait before retrying (or for any ongoing requests to finish)
-	makeInformantDownscaleRequest := wantInformantDownscaleRequest &&
-		s.informant.active &&
-		s.informant.ongoingRequest == nil &&
-		(s.informant.deniedDownscale == nil ||
-			s.informant.deniedDownscale.requested != desiredResources.Min(using) ||
-			now.Sub(s.informant.deniedDownscale.at) >= s.config.InformantDeniedDownscaleCooldown) &&
-		(s.informant.downscaleFailureAt == nil ||
-			now.Sub(*s.informant.downscaleFailureAt) >= s.config.InformantRetryWait)
+	makeMonitorDownscaleRequest := wantMonitorDownscaleRequest &&
+		s.monitor.active &&
+		s.monitor.ongoingRequest == nil &&
+		(s.monitor.deniedDownscale == nil ||
+			s.monitor.deniedDownscale.requested != desiredResources.Min(using) ||
+			now.Sub(s.monitor.deniedDownscale.at) >= s.config.MonitorDeniedDownscaleCooldown) &&
+		(s.monitor.downscaleFailureAt == nil ||
+			now.Sub(*s.monitor.downscaleFailureAt) >= s.config.MonitorRetryWait)
 
-	if wantInformantDownscaleRequest {
-		if makeInformantDownscaleRequest {
-			actions.InformantDownscale = &ActionInformantDownscale{
-				Current: *s.informant.approved,
-				Target:  resourcesForInformantDownscale,
+	if wantMonitorDownscaleRequest {
+		if makeMonitorDownscaleRequest {
+			actions.MonitorDownscale = &ActionMonitorDownscale{
+				Current: *s.monitor.approved,
+				Target:  resourcesForMonitorDownscale,
 			}
-		} else if !s.informant.active {
+		} else if !s.monitor.active {
 			s.config.Warn("Wanted to send informant downscale request, but not active")
-		} else if s.informant.ongoingRequest != nil && s.informant.ongoingRequest.kind != informantRequestKindDownscale {
-			s.config.Warn("Wanted to send informant downscale request, but waiting on other ongoing %s request", s.informant.ongoingRequest.kind)
-		} else if s.informant.ongoingRequest == nil {
+		} else if s.monitor.ongoingRequest != nil && s.monitor.ongoingRequest.kind != monitorRequestKindDownscale {
+			s.config.Warn("Wanted to send informant downscale request, but waiting on other ongoing %s request", s.monitor.ongoingRequest.kind)
+		} else if s.monitor.ongoingRequest == nil {
 			s.config.Warn("Wanted to send informant downscale request, but waiting on retry rate limit")
 		}
 	}
@@ -349,7 +331,7 @@ func (s *State) NextActions(now time.Time) ActionSet {
 	// --- and that's all the request types! ---
 
 	// If there's anything waiting, we should also note how long we should wait for.
-	// There's two components we could be waiting on: the scheduler plugin, and the vm-informant.
+	// There's two components we could be waiting on: the scheduler plugin, and the vm-monitor.
 	maximumDuration := time.Duration(int64(uint64(1)<<63 - 1))
 	requiredWait := maximumDuration
 
@@ -365,28 +347,28 @@ func (s *State) NextActions(now time.Time) ActionSet {
 		requiredWait = util.Min(requiredWait, now.Sub(s.plugin.lastRequest.at))
 	}
 
-	// For the vm-informant:
+	// For the vm-monitor:
 	// if we wanted to make EITHER a downscale or upscale request, but we previously couldn't
-	// because of retry timeouts, we should wait for s.config.InformantRetryWait before trying
+	// because of retry timeouts, we should wait for s.config.MonitorRetryWait before trying
 	// again.
 	// OR if we wanted to downscale but got denied, we should wait for
-	// s.config.InformantDownscaleCooldown before retrying.
-	if s.informant.ongoingRequest == nil {
+	// s.config.MonitorDownscaleCooldown before retrying.
+	if s.monitor.ongoingRequest == nil {
 		// Retry upscale on failure
-		if wantInformantUpscaleRequest && s.informant.upscaleFailureAt != nil {
-			if wait := now.Sub(*s.informant.upscaleFailureAt); wait >= s.config.InformantRetryWait {
+		if wantMonitorUpscaleRequest && s.monitor.upscaleFailureAt != nil {
+			if wait := now.Sub(*s.monitor.upscaleFailureAt); wait >= s.config.MonitorRetryWait {
 				requiredWait = util.Min(requiredWait, wait)
 			}
 		}
 		// Retry downscale on failure
-		if wantInformantDownscaleRequest && s.informant.downscaleFailureAt != nil {
-			if wait := now.Sub(*s.informant.downscaleFailureAt); wait >= s.config.InformantRetryWait {
+		if wantMonitorDownscaleRequest && s.monitor.downscaleFailureAt != nil {
+			if wait := now.Sub(*s.monitor.downscaleFailureAt); wait >= s.config.MonitorRetryWait {
 				requiredWait = util.Min(requiredWait, wait)
 			}
 		}
 		// Retry downscale if denied
-		if wantInformantDownscaleRequest && s.informant.deniedDownscale != nil && resourcesForInformantDownscale == s.informant.deniedDownscale.requested {
-			if wait := now.Sub(s.informant.deniedDownscale.at); wait >= s.config.InformantDeniedDownscaleCooldown {
+		if wantMonitorDownscaleRequest && s.monitor.deniedDownscale != nil && resourcesForMonitorDownscale == s.monitor.deniedDownscale.requested {
+			if wait := now.Sub(s.monitor.deniedDownscale.at); wait >= s.config.MonitorDeniedDownscaleCooldown {
 				requiredWait = util.Min(requiredWait, wait)
 			}
 		}
@@ -408,7 +390,7 @@ func (s *State) scalingConfig() api.ScalingConfig {
 	}
 }
 
-func (s *State) desiredResourcesFromMetricsOrRequestedUpscaling() api.Resources {
+func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling() api.Resources {
 	// There's some annoying edge cases that this function has to be able to handle properly. For
 	// the sake of completeness, they are:
 	//
@@ -445,9 +427,9 @@ func (s *State) desiredResourcesFromMetricsOrRequestedUpscaling() api.Resources 
 	// resources for the desired "goal" compute units
 	var goalResources api.Resources
 
-	// If there's no constraints from s.metrics or s.informant.requestedUpscale, then we'd prefer to
+	// If there's no constraints from s.metrics or s.monitor.requestedUpscale, then we'd prefer to
 	// keep things as-is, rather than scaling down (because otherwise goalCU = 0).
-	if s.metrics == nil && s.informant.requestedUpscale == nil {
+	if s.metrics == nil && s.monitor.requestedUpscale == nil {
 		goalResources = s.vm.Using()
 	} else {
 		goalResources = s.plugin.computeUnit.Mul(uint16(goalCU))
@@ -476,12 +458,12 @@ func (s *State) desiredResourcesFromMetricsOrRequestedUpscaling() api.Resources 
 // NB: we could just use s.plugin.computeUnit, but that's sometimes nil. This way, it's clear that
 // it's the caller's responsibility to ensure that s.plugin.computeUnit != nil.
 func (s *State) requiredCUForRequestedUpscaling(computeUnit api.Resources) uint32 {
-	if s.informant.requestedUpscale == nil {
+	if s.monitor.requestedUpscale == nil {
 		return 0
 	}
 
 	var required uint32
-	requested := s.informant.requestedUpscale.requested
+	requested := s.monitor.requestedUpscale.requested
 
 	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
 
@@ -495,10 +477,10 @@ func (s *State) requiredCUForRequestedUpscaling(computeUnit api.Resources) uint3
 	return required
 }
 
-func (s *State) boundResourcesByInformantApproved(resources api.Resources) api.Resources {
+func (s *State) boundResourcesByMonitorApproved(resources api.Resources) api.Resources {
 	var lowerBound api.Resources
-	if s.informant.approved != nil {
-		lowerBound = *s.informant.approved
+	if s.monitor.approved != nil {
+		lowerBound = *s.monitor.approved
 	} else {
 		lowerBound = s.vm.Using()
 	}
@@ -598,17 +580,17 @@ func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) 
 	return nil
 }
 
-// InformantHandle provides write access to the vm-informant pieces of an UpdateState
-type InformantHandle struct {
+// MonitorHandle provides write access to the vm-monitor pieces of an UpdateState
+type MonitorHandle struct {
 	s *State
 }
 
-func (s *State) Informant() InformantHandle {
-	return InformantHandle{s}
+func (s *State) Monitor() MonitorHandle {
+	return MonitorHandle{s}
 }
 
-func (h InformantHandle) Reset() {
-	h.s.informant = informantState{
+func (h MonitorHandle) Reset() {
+	h.s.monitor = monitorState{
 		active:             false,
 		ongoingRequest:     nil,
 		requestedUpscale:   nil,
@@ -619,61 +601,56 @@ func (h InformantHandle) Reset() {
 	}
 }
 
-func (h InformantHandle) Active(active bool) {
-	h.s.informant.active = active
+func (h MonitorHandle) Active(active bool) {
+	h.s.monitor.active = active
 }
 
-func (h InformantHandle) SuccessfullyRegistered() {
-	using := h.s.vm.Using()
-	h.s.informant.approved = &using // TODO: this is racy (although... informant synchronization should help *some* with this?)
-}
-
-func (h InformantHandle) UpscaleRequested(now time.Time, resources api.MoreResources) {
-	h.s.informant.requestedUpscale = &requestedUpscale{
+func (h MonitorHandle) UpscaleRequested(now time.Time, resources api.MoreResources) {
+	h.s.monitor.requestedUpscale = &requestedUpscale{
 		at:        now,
-		base:      h.s.vm.Using(), // TODO: this is racy (maybe the resources were different when the informant originally made the request)
+		base:      h.s.vm.Using(), // TODO: this is racy (maybe the resources were different when the monitor originally made the request)
 		requested: resources,
 	}
 }
 
-func (h InformantHandle) StartingUpscaleRequest(now time.Time) {
-	h.s.informant.ongoingRequest = &ongoingInformantRequest{kind: informantRequestKindUpscale}
-	h.s.informant.upscaleFailureAt = nil
+func (h MonitorHandle) StartingUpscaleRequest(now time.Time) {
+	h.s.monitor.ongoingRequest = &ongoingMonitorRequest{kind: monitorRequestKindUpscale}
+	h.s.monitor.upscaleFailureAt = nil
 }
 
-func (h InformantHandle) UpscaleRequestSuccessful(now time.Time, resources api.Resources) {
-	h.s.informant.ongoingRequest = nil
-	h.s.informant.approved = &resources
+func (h MonitorHandle) UpscaleRequestSuccessful(now time.Time, resources api.Resources) {
+	h.s.monitor.ongoingRequest = nil
+	h.s.monitor.approved = &resources
 }
 
-func (h InformantHandle) UpscaleRequestFailed(now time.Time) {
-	h.s.informant.ongoingRequest = nil
-	h.s.informant.upscaleFailureAt = &now
+func (h MonitorHandle) UpscaleRequestFailed(now time.Time) {
+	h.s.monitor.ongoingRequest = nil
+	h.s.monitor.upscaleFailureAt = &now
 }
 
-func (h InformantHandle) StartingDownscaleRequest(now time.Time) {
-	h.s.informant.ongoingRequest = &ongoingInformantRequest{kind: informantRequestKindDownscale}
-	h.s.informant.downscaleFailureAt = nil
+func (h MonitorHandle) StartingDownscaleRequest(now time.Time) {
+	h.s.monitor.ongoingRequest = &ongoingMonitorRequest{kind: monitorRequestKindDownscale}
+	h.s.monitor.downscaleFailureAt = nil
 }
 
-func (h InformantHandle) DownscaleRequestAllowed(now time.Time, requested api.Resources) {
-	h.s.informant.ongoingRequest = nil
-	h.s.informant.approved = &requested
-	h.s.informant.deniedDownscale = nil
+func (h MonitorHandle) DownscaleRequestAllowed(now time.Time, requested api.Resources) {
+	h.s.monitor.ongoingRequest = nil
+	h.s.monitor.approved = &requested
+	h.s.monitor.deniedDownscale = nil
 }
 
-// Downscale request was successful but the informant denied our request.
-func (h InformantHandle) DownscaleRequestDenied(now time.Time, requested api.Resources) {
-	h.s.informant.ongoingRequest = nil
-	h.s.informant.deniedDownscale = &deniedDownscale{
+// Downscale request was successful but the monitor denied our request.
+func (h MonitorHandle) DownscaleRequestDenied(now time.Time, requested api.Resources) {
+	h.s.monitor.ongoingRequest = nil
+	h.s.monitor.deniedDownscale = &deniedDownscale{
 		at:        now,
 		requested: requested,
 	}
 }
 
-func (h InformantHandle) DownscaleRequestFailed(now time.Time) {
-	h.s.informant.ongoingRequest = nil
-	h.s.informant.downscaleFailureAt = &now
+func (h MonitorHandle) DownscaleRequestFailed(now time.Time) {
+	h.s.monitor.ongoingRequest = nil
+	h.s.monitor.downscaleFailureAt = &now
 }
 
 type NeonVMHandle struct {

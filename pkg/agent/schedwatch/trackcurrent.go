@@ -24,7 +24,7 @@ type SchedulerWatch struct {
 	cmd   chan<- watchCmd
 	using chan<- SchedulerInfo
 
-	stop            util.SignalSender
+	stop            util.SignalSender[struct{}]
 	stopEventStream func()
 }
 
@@ -42,7 +42,7 @@ func (w SchedulerWatch) Using(sched SchedulerInfo) {
 
 func (w SchedulerWatch) Stop() {
 	w.stopEventStream()
-	w.stop.Send()
+	w.stop.Send(struct{}{})
 }
 
 const schedulerNamespace string = "kube-system"
@@ -69,7 +69,7 @@ func WatchSchedulerUpdates(
 	deleted := make(chan SchedulerInfo)
 	cmd := make(chan watchCmd)
 	using := make(chan SchedulerInfo)
-	stopSender, stopListener := util.NewSingleSignalPair()
+	stopSender, stopListener := util.NewSingleSignalPair[struct{}]()
 
 	state := schedulerWatchState{
 		queue:      make([]WatchEvent, 0, 1),
@@ -132,7 +132,7 @@ type schedulerWatchState struct {
 	cmd   <-chan watchCmd
 	using <-chan SchedulerInfo
 
-	stop   util.SignalReceiver
+	stop   util.SignalReceiver[struct{}]
 	logger *zap.Logger
 }
 

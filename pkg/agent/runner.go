@@ -12,7 +12,7 @@ package agent
 //  1. It should be OK to panic, if an error is truly unrecoverable
 //  2. A single Runner's panic shouldn't bring down the entire autoscaler-agent¹
 //  3. We want to expose a State() method to view (almost) all internal state
-//  4. Some high-level actions (e.g., HTTP request to Informant; update VM to desired state) require
+//  4. Some high-level actions (e.g., call to vm-monitor; update VM to desired state) require
 //     that we have *at most* one such action running at a time.
 //
 // There are a number of possible solutions to this set of goals. All reasonable solutions require
@@ -24,9 +24,7 @@ package agent
 //     * "track scheduler"
 //     * "get metrics"
 //     * "handle VM resources" - using metrics, calculates target resources level and contacts
-//       scheduler, informant, and NeonVM -- the "scaling" part of "autoscaling".
-//     * "informant server loop" - keeps Runner.informant and Runner.server up-to-date.
-//     * ... and a few more.
+//       scheduler, vm-monitor, and NeonVM -- the "scaling" part of "autoscaling".
 //  * Each thread makes *synchronous* HTTP requests while holding the necessary lock to prevent any other
 //    thread from making HTTP requests to the same entity. For example:
 //    * All requests to NeonVM and the scheduler plugin are guarded by Runner.requestLock, which
@@ -84,7 +82,7 @@ type Runner struct {
 	global *agentState
 	// status provides the high-level status of the Runner. Reading or updating the status requires
 	// holding podStatus.lock. Updates are typically done handled by the setStatus method.
-	status *podStatus
+	status *lockedPodStatus
 
 	// shutdown provides a clean way to trigger all background Runner threads to shut down. shutdown
 	// is set exactly once, by (*Runner).Run
@@ -134,15 +132,9 @@ type Runner struct {
 	// Each scheduler's info field is immutable. When a scheduler is replaced, only the pointer
 	// value here is updated; the original Scheduler remains unchanged.
 	scheduler atomic.Pointer[Scheduler]
-	server    atomic.Pointer[InformantServer]
-	// informant holds the most recent InformantDesc that an InformantServer has received in its
-	// normal operation. If there has been at least one InformantDesc received, this field will not
-	// be nil.
-	//
-	// This field really should not be used except for providing RunnerState. The correct interface
-	// is through server.Informant(), which does all the appropriate error handling if the
-	// connection to the informant is not in a suitable state.
-	informant *api.InformantDesc
+	// monitor, if non nil, stores the current Dispatcher in use for communicating with the
+	// vm-monitor
+	monitor atomic.Pointer[Dispatcher]
 	// computeUnit is the latest Compute Unit reported by a scheduler. It may be nil, if we haven't
 	// been able to contact one yet.
 	//
@@ -156,12 +148,6 @@ type Runner struct {
 	// lastSchedulerError provides the error that occurred - if any - during the most recent request
 	// to the current scheduler. This field is not nil only when scheduler is not nil.
 	lastSchedulerError error
-
-	// lastInformantError provides the error that occurred - if any - during the most recent request
-	// to the VM informant.
-	//
-	// This field MUST NOT be updated without holding BOTH lock AND server.requestLock.
-	lastInformantError error
 
 	// backgroundWorkerCount tracks the current number of background workers. It is exclusively
 	// updated by r.spawnBackgroundWorker
@@ -205,22 +191,19 @@ type Scheduler struct {
 
 	// fatal is used for signalling that fatalError has been set (and so we should look for a new
 	// scheduler)
-	fatal util.SignalSender
+	fatal util.SignalSender[struct{}]
 }
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
 type RunnerState struct {
-	PodIP                 string                `json:"podIP"`
-	VM                    api.VmInfo            `json:"vm"`
-	LastMetrics           *api.Metrics          `json:"lastMetrics"`
-	Scheduler             *SchedulerState       `json:"scheduler"`
-	Server                *InformantServerState `json:"server"`
-	Informant             *api.InformantDesc    `json:"informant"`
-	ComputeUnit           *api.Resources        `json:"computeUnit"`
-	LastApproved          *api.Resources        `json:"lastApproved"`
-	LastSchedulerError    error                 `json:"lastSchedulerError"`
-	LastInformantError    error                 `json:"lastInformantError"`
-	BackgroundWorkerCount int64                 `json:"backgroundWorkerCount"`
+	PodIP                 string          `json:"podIP"`
+	VM                    api.VmInfo      `json:"vm"`
+	LastMetrics           *api.Metrics    `json:"lastMetrics"`
+	Scheduler             *SchedulerState `json:"scheduler"`
+	ComputeUnit           *api.Resources  `json:"computeUnit"`
+	LastApproved          *api.Resources  `json:"lastApproved"`
+	LastSchedulerError    error           `json:"lastSchedulerError"`
+	BackgroundWorkerCount int64           `json:"backgroundWorkerCount"`
 
 	SchedulerRespondedWithMigration bool `json:"migrationStarted"`
 }
@@ -247,28 +230,12 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 		}
 	}
 
-	var serverState *InformantServerState
-	if server := r.server.Load(); server != nil {
-		serverState = &InformantServerState{
-			Desc:            server.desc,
-			SeqNum:          server.seqNum,
-			ReceivedIDCheck: server.receivedIDCheck,
-			MadeContact:     server.madeContact,
-			ProtoVersion:    server.protoVersion,
-			Mode:            server.mode,
-			ExitStatus:      server.exitStatus.Load(),
-		}
-	}
-
 	return &RunnerState{
 		LastMetrics:           r.lastMetrics,
 		Scheduler:             scheduler,
-		Server:                serverState,
-		Informant:             r.informant,
 		ComputeUnit:           r.computeUnit,
 		LastApproved:          r.lastApproved,
 		LastSchedulerError:    r.lastSchedulerError,
-		LastInformantError:    r.lastInformantError,
 		VM:                    r.vm,
 		PodIP:                 r.podIP,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
@@ -283,12 +250,13 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 		defer func() {
 			if err := recover(); err != nil {
 				now := time.Now()
-				r.setStatus(func(stat *podStatus) {
+				r.status.update(r.global, func(stat podStatus) podStatus {
 					stat.endState = &podStatusEndState{
 						ExitKind: podStatusExitPanicked,
 						Error:    fmt.Errorf("Runner %v panicked: %v", r.vm.NamespacedName(), err),
 						Time:     now,
 					}
+					return stat
 				})
 			}
 
@@ -303,12 +271,13 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 			exitKind = podStatusExitErrored
 			r.global.metrics.runnerFatalErrors.Inc()
 		}
-		r.setStatus(func(stat *podStatus) {
+		r.status.update(r.global, func(stat podStatus) podStatus {
 			stat.endState = &podStatusEndState{
 				ExitKind: exitKind,
 				Error:    err,
 				Time:     endTime,
 			}
+			return stat
 		})
 
 		if err != nil {
@@ -317,12 +286,6 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 			logger.Info("Ended without error")
 		}
 	}()
-}
-
-func (r *Runner) setStatus(with func(*podStatus)) {
-	r.status.mu.Lock()
-	defer r.status.mu.Unlock()
-	with(r.status)
 }
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
@@ -349,10 +312,10 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	coreExecLogger := execLogger.Named("core")
 	executorCore := executor.NewExecutorCore(coreExecLogger.Named("state"), r.vm, executor.Config{
-		DefaultScalingConfig:             r.global.config.Scaling.DefaultConfig,
-		PluginRequestTick:                time.Second * time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds),
-		InformantDeniedDownscaleCooldown: time.Second * time.Duration(r.global.config.Informant.RetryDeniedDownscaleSeconds),
-		InformantRetryWait:               time.Second * time.Duration(r.global.config.Informant.RetryFailedRequestSeconds),
+		DefaultScalingConfig:           r.global.config.Scaling.DefaultConfig,
+		PluginRequestTick:              time.Second * time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds),
+		MonitorDeniedDownscaleCooldown: time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
+		MonitorRetryWait:               time.Second * time.Duration(r.global.config.Monitor.RetryFailedRequestSeconds),
 		Warn: func(msg string, args ...any) {
 			coreExecLogger.Warn(fmt.Sprintf(msg, args...))
 		},
@@ -360,13 +323,13 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	pluginIface := makePluginInterface(r, executorCore)
 	neonvmIface := makeNeonVMInterface(r)
-	informantIface := makeInformantInterface(r, executorCore)
+	monitorIface := makeMonitorInterface(r, executorCore)
 
 	// "ecwc" stands for "ExecutorCoreWithClients"
 	ecwc := executorCore.WithClients(executor.ClientSet{
-		Plugin:    pluginIface,
-		NeonVM:    neonvmIface,
-		Informant: informantIface,
+		Plugin:  pluginIface,
+		NeonVM:  neonvmIface,
+		Monitor: monitorIface,
 	})
 
 	logger.Info("Starting background workers")
@@ -375,6 +338,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
 	reqDeadlockChecker := r.requestLock.DeadlockChecker(5*time.Second, time.Second)
 
+	r.spawnBackgroundWorker(ctx, logger, "podStatus updater", func(c context.Context, l *zap.Logger) {
+		r.status.periodicallyRefreshState(c, l, r.global)
+	})
 	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (main)", ignoreLogger(mainDeadlockChecker))
 	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (request lock)", ignoreLogger(reqDeadlockChecker))
 	r.spawnBackgroundWorker(ctx, logger, "track scheduler", func(c context.Context, l *zap.Logger) {
@@ -382,40 +348,29 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			ecwc.Updater().NewScheduler(withLock)
 		})
 	})
-	sendInformantUpd, recvInformantUpd := util.NewCondChannelPair()
 	r.spawnBackgroundWorker(ctx, logger, "get metrics", func(c context.Context, l *zap.Logger) {
-		r.getMetricsLoop(c, l, recvInformantUpd, func(metrics api.Metrics, withLock func()) {
+		r.getMetricsLoop(c, l, func(metrics api.Metrics, withLock func()) {
 			ecwc.Updater().UpdateMetrics(metrics, withLock)
 		})
 	})
-	r.spawnBackgroundWorker(ctx, logger, "informant server loop", func(c context.Context, l *zap.Logger) {
-		r.serveInformantLoop(
-			c,
-			l,
-			informantStateCallbacks{
-				resetInformant: func(withLock func()) {
-					ecwc.Updater().ResetInformant(withLock)
-				},
-				upscaleRequested: func(request api.MoreResources, withLock func()) {
-					ecwc.Updater().UpscaleRequested(request, withLock)
-				},
-				registered: func(active bool, withLock func()) {
-					ecwc.Updater().InformantRegistered(active, func() {
-						sendInformantUpd.Send()
-						withLock()
-					})
-				},
-				setActive: func(active bool, withLock func()) {
-					ecwc.Updater().InformantActive(active, withLock)
-				},
+	r.spawnBackgroundWorker(ctx, logger.Named("vm-monitor"), "vm-monitor reconnection loop", func(c context.Context, l *zap.Logger) {
+		r.connectToMonitorLoop(c, l, monitorStateCallbacks{
+			reset: func(withLock func()) {
+				ecwc.Updater().ResetMonitor(withLock)
 			},
-		)
+			upscaleRequested: func(request api.MoreResources, withLock func()) {
+				ecwc.Updater().UpscaleRequested(request, withLock)
+			},
+			setActive: func(active bool, withLock func()) {
+				ecwc.Updater().MonitorActive(active, withLock)
+			},
+		})
 	})
 	r.spawnBackgroundWorker(ctx, execLogger.Named("sleeper"), "executor: sleeper", ecwc.DoSleeper)
 	r.spawnBackgroundWorker(ctx, execLogger.Named("plugin"), "executor: plugin", ecwc.DoPluginRequests)
 	r.spawnBackgroundWorker(ctx, execLogger.Named("neonvm"), "executor: neonvm", ecwc.DoNeonVMRequests)
-	r.spawnBackgroundWorker(ctx, execLogger.Named("informant-downscale"), "executor: informant downscale", ecwc.DoInformantDownscales)
-	r.spawnBackgroundWorker(ctx, execLogger.Named("informant-upscale"), "executor: informant upscale", ecwc.DoInformantUpscales)
+	r.spawnBackgroundWorker(ctx, execLogger.Named("vm-monitor-downscale"), "executor: vm-monitor downscale", ecwc.DoMonitorDownscales)
+	r.spawnBackgroundWorker(ctx, execLogger.Named("vm-monitor-upscale"), "executor: vm-monitor upscale", ecwc.DoMonitorUpscales)
 
 	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
 	// pod was deleted, or the autoscaler-agent is exiting.
@@ -494,7 +449,6 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, logger *zap.Logger, 
 func (r *Runner) getMetricsLoop(
 	ctx context.Context,
 	logger *zap.Logger,
-	updatedInformant util.CondChannelReceiver,
 	newMetrics func(metrics api.Metrics, withLock func()),
 ) {
 	timeout := time.Second * time.Duration(r.global.config.Metrics.RequestTimeoutSeconds)
@@ -504,7 +458,7 @@ func (r *Runner) getMetricsLoop(
 	minWaitDuration := time.Second
 
 	for {
-		metrics, err := r.doMetricsRequestIfEnabled(ctx, logger, timeout, updatedInformant.Consume)
+		metrics, err := r.doMetricsRequest(ctx, logger, timeout)
 		if err != nil {
 			logger.Error("Error making metrics request", zap.Error(err))
 			goto next
@@ -526,158 +480,121 @@ func (r *Runner) getMetricsLoop(
 		case <-minWait:
 		}
 
-		// After waiting for the required minimum, allow shortcutting the normal wait if the
-		// informant was updated
 		select {
 		case <-ctx.Done():
 			return
-		case <-updatedInformant.Recv():
-			logger.Info("Shortcutting normal metrics wait because informant was updated")
 		case <-waitBetween:
 		}
-
 	}
 }
 
-type informantStateCallbacks struct {
-	resetInformant   func(withLock func())
+type monitorStateCallbacks struct {
+	reset            func(withLock func())
 	upscaleRequested func(request api.MoreResources, withLock func())
-	registered       func(active bool, withLock func())
 	setActive        func(active bool, withLock func())
 }
 
-// serveInformantLoop repeatedly creates an InformantServer to handle communications with the VM
-// informant
-//
-// This function directly sets the value of r.server and indirectly sets r.informant.
-func (r *Runner) serveInformantLoop(
+// connectToMonitorLoop does lifecycle management of the (re)connection to the vm-monitor
+func (r *Runner) connectToMonitorLoop(
 	ctx context.Context,
 	logger *zap.Logger,
-	callbacks informantStateCallbacks,
+	callbacks monitorStateCallbacks,
 ) {
-	// variables set & accessed across loop iterations
-	var (
-		normalRetryWait <-chan time.Time
-		minRetryWait    <-chan time.Time
-		lastStart       time.Time
-	)
+	addr := fmt.Sprintf("ws://%s:%d/monitor", r.podIP, r.global.config.Monitor.ServerPort)
 
-	// Loop-invariant duration constants
-	minWait := time.Second * time.Duration(r.global.config.Informant.RetryServerMinWaitSeconds)
-	normalWait := time.Second * time.Duration(r.global.config.Informant.RetryServerNormalWaitSeconds)
-	retryRegister := time.Second * time.Duration(r.global.config.Informant.RegisterRetrySeconds)
+	minWait := time.Second * time.Duration(r.global.config.Monitor.ConnectionRetryMinWaitSeconds)
+	var lastStart time.Time
 
-retryServer:
-	for {
-		if normalRetryWait != nil {
-			logger.Info("Retrying informant server after delay", zap.Duration("delay", normalWait))
-			select {
-			case <-ctx.Done():
-				return
-			case <-normalRetryWait:
-			}
+	for i := 0; ; i += 1 {
+		// Remove any prior Dispatcher from the Runner
+		if i != 0 {
+			func() {
+				r.lock.Lock()
+				defer r.lock.Unlock()
+				callbacks.reset(func() {
+					r.monitor.Store(nil)
+					logger.Info("Reset previous vm-monitor connection")
+				})
+			}()
 		}
 
-		if minRetryWait != nil {
-			select {
-			case <-minRetryWait:
-				logger.Info("Retrying informant server")
-			default:
+		// If the context was canceled, don't restart
+		if err := ctx.Err(); err != nil {
+			action := "attempt"
+			if i != 0 {
+				action = "retry "
+			}
+			logger.Info(
+				fmt.Sprintf("Aborting vm-monitor connection %s because context is already canceled", action),
+				zap.Error(err),
+			)
+			return
+		}
+
+		// Delayed restart management, long because of friendly logging:
+		if i != 0 {
+			endTime := time.Now()
+			runtime := endTime.Sub(lastStart)
+
+			if runtime > minWait {
 				logger.Info(
-					"Informant server ended quickly. Respecting minimum delay before restart",
-					zap.Duration("activeTime", time.Since(lastStart)), zap.Duration("delay", minWait),
+					"Immediately retrying connection to vm-monitor",
+					zap.String("addr", addr),
+					zap.Duration("totalRuntime", runtime),
 				)
+			} else {
+				delay := minWait - runtime
+				logger.Info(
+					"Connection to vm-monitor was not live for long, retrying after delay",
+					zap.Duration("delay", delay),
+					zap.Duration("totalRuntime", runtime),
+				)
+
 				select {
+				case <-time.After(delay):
+					logger.Info(
+						"Retrying connection to vm-monitor",
+						zap.Duration("delay", delay),
+						zap.Duration("waitTime", time.Since(endTime)),
+						zap.String("addr", addr),
+					)
 				case <-ctx.Done():
+					logger.Info(
+						"Canceling retrying connection to vm-monitor",
+						zap.Duration("delay", delay),
+						zap.Duration("waitTime", time.Since(endTime)),
+						zap.Error(ctx.Err()),
+					)
 					return
-				case <-minRetryWait:
 				}
 			}
+		} else {
+			logger.Info("Connecting to vm-monitor", zap.String("addr", addr))
 		}
 
-		normalRetryWait = nil // only "long wait" if an error occurred
-		minRetryWait = time.After(minWait)
-		lastStart = time.Now()
-
-		server, exited, err := NewInformantServer(ctx, logger, r, callbacks)
-		if ctx.Err() != nil {
-			if err != nil {
-				logger.Warn("Error starting informant server (but context canceled)", zap.Error(err))
-			}
-			return
-		} else if err != nil {
-			normalRetryWait = time.After(normalWait)
-			logger.Error("Error starting informant server", zap.Error(err))
-			continue retryServer
+		dispatcher, err := NewDispatcher(ctx, logger, addr, r, callbacks.upscaleRequested)
+		if err != nil {
+			logger.Error("Failed to connect to vm-monitor", zap.String("addr", addr), zap.Error(err))
+			continue
 		}
 
-		// Update r.server:
+		// Update runner to the new dispatcher
 		func() {
 			r.lock.Lock()
 			defer r.lock.Unlock()
-
-			var kind string
-			if r.server.Load() == nil {
-				kind = "Setting"
-			} else {
-				kind = "Updating"
-			}
-
-			logger.Info(fmt.Sprintf("%s initial informant server", kind), zap.Object("server", server.desc))
-			r.server.Store(server)
+			callbacks.setActive(true, func() {
+				r.monitor.Store(dispatcher)
+				logger.Info("Connected to vm-monitor")
+			})
 		}()
 
-		logger.Info("Registering with informant")
+		// Wait until the dispatcher is no longer running, either due to error or because the
+		// root-level Runner context was canceled.
+		<-dispatcher.ExitSignal()
 
-		// Try to register with the informant:
-	retryRegister:
-		for {
-			err := server.RegisterWithInformant(ctx, logger)
-			if err == nil {
-				break // all good; wait for the server to finish.
-			} else if ctx.Err() != nil {
-				if err != nil {
-					logger.Warn("Error registering with informant (but context cancelled)", zap.Error(err))
-				}
-				return
-			}
-
-			logger.Warn("Error registering with informant", zap.Error(err))
-
-			// Server exited; can't just retry registering.
-			if server.ExitStatus() != nil {
-				normalRetryWait = time.After(normalWait)
-				continue retryServer
-			}
-
-			// Wait before retrying registering
-			logger.Info("Retrying registering with informant after delay", zap.Duration("delay", retryRegister))
-			select {
-			case <-time.After(retryRegister):
-				continue retryRegister
-			case <-ctx.Done():
-				return
-			}
+		if err := dispatcher.ExitError(); err != nil {
+			logger.Error("Dispatcher for vm-monitor connection exited due to error", zap.Error(err))
 		}
-
-		// Wait for the server to finish
-		select {
-		case <-ctx.Done():
-			return
-		case <-exited.Recv():
-		}
-
-		// Server finished
-		exitStatus := server.ExitStatus()
-		if exitStatus == nil {
-			panic(errors.New("Informant server signalled end but ExitStatus() == nil"))
-		}
-
-		if !exitStatus.RetryShouldFix {
-			normalRetryWait = time.After(normalWait)
-		}
-
-		continue retryServer
 	}
 }
 
@@ -696,7 +613,7 @@ func (r *Runner) trackSchedulerLoop(
 		minWait     time.Duration    = 5 * time.Second // minimum time we have to wait between scheduler starts
 		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
 		currentInfo schedwatch.SchedulerInfo
-		fatal       util.SignalReceiver
+		fatal       util.SignalReceiver[struct{}]
 		failed      bool
 	)
 
@@ -714,7 +631,7 @@ startScheduler:
 	failed = false
 
 	// Set the current scheduler
-	fatal = func() util.SignalReceiver {
+	fatal = func() util.SignalReceiver[struct{}] {
 		logger := logger.With(zap.Object("scheduler", currentInfo))
 
 		verb := "Setting"
@@ -722,7 +639,7 @@ startScheduler:
 			verb = "Updating"
 		}
 
-		sendFatal, recvFatal := util.NewSingleSignalPair()
+		sendFatal, recvFatal := util.NewSingleSignalPair[struct{}]()
 
 		sched := &Scheduler{
 			runner:     r,
@@ -830,65 +747,13 @@ waitForNewScheduler:
 // Lower-level implementation functions //
 //////////////////////////////////////////
 
-// doMetricsRequestIfEnabled makes a single metrics request to the VM informant, returning it
-//
-// This method expects that the Runner is not locked.
-func (r *Runner) doMetricsRequestIfEnabled(
+// doMetricsRequest makes a single metrics request to the VM
+func (r *Runner) doMetricsRequest(
 	ctx context.Context,
 	logger *zap.Logger,
 	timeout time.Duration,
-	clearNewInformantSignal func(),
 ) (*api.Metrics, error) {
-	logger.Info("Attempting metrics request")
-
-	// FIXME: the region where the lock is held should be extracted into a separate method, called
-	// something like buildMetricsRequest().
-
-	r.lock.Lock()
-	locked := true
-	defer func() {
-		if locked {
-			r.lock.Unlock()
-		}
-	}()
-
-	// Only clear the signal once we've locked, so that we're not racing.
-	//
-	// We don't *need* to do this, but its only cost is a small amount of code complexity, and it's
-	// nice to have have the guarantees around not racing.
-	clearNewInformantSignal()
-
-	if server := r.server.Load(); server == nil || server.mode != InformantServerRunning {
-		var state = "unset"
-		if server != nil {
-			state = string(server.mode)
-		}
-
-		logger.Info(fmt.Sprintf("Cannot make metrics request because informant server is %s", state))
-		return nil, nil
-	}
-
-	if r.informant == nil {
-		panic(errors.New("r.informant == nil but r.server.mode == InformantServerRunning"))
-	}
-
-	var url string
-	var handle func(body []byte) (*api.Metrics, error)
-
-	switch {
-	case r.informant.MetricsMethod.Prometheus != nil:
-		url = fmt.Sprintf("http://%s:%d/metrics", r.podIP, r.informant.MetricsMethod.Prometheus.Port)
-		handle = func(body []byte) (*api.Metrics, error) {
-			m, err := api.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
-			if err != nil {
-				err = fmt.Errorf("Error reading metrics from prometheus output: %w", err)
-			}
-			return &m, err
-		}
-	default:
-		// Ok to panic here because this should be handled by the informant server
-		panic(errors.New("server's InformantDesc has unknown metrics method"))
-	}
+	url := fmt.Sprintf("http://%s:%d/metrics", r.podIP, r.global.config.Metrics.Port)
 
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -897,10 +762,6 @@ func (r *Runner) doMetricsRequestIfEnabled(
 	if err != nil {
 		panic(fmt.Errorf("Error constructing metrics request to %q: %w", url, err))
 	}
-
-	// Unlock while we perform the request:
-	locked = false
-	r.lock.Unlock()
 
 	logger.Info("Making metrics request to VM", zap.String("url", url))
 
@@ -921,7 +782,12 @@ func (r *Runner) doMetricsRequestIfEnabled(
 		return nil, fmt.Errorf("Unsuccessful response status %d: %s", resp.StatusCode, string(body))
 	}
 
-	return handle(body)
+	m, err := api.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading metrics from prometheus output: %w", err)
+	}
+
+	return &m, nil
 }
 
 func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) error {
@@ -988,6 +854,44 @@ func (r *Runner) recordResourceChange(current, target api.Resources, metrics res
 
 		metrics.mem.WithLabelValues(direction).Add(floatMB)
 	}
+}
+
+func doMonitorDownscale(
+	ctx context.Context,
+	logger *zap.Logger,
+	dispatcher *Dispatcher,
+	target api.Resources,
+) (*api.DownscaleResult, error) {
+	r := dispatcher.runner
+	rawResources := target.ConvertToAllocation(r.vm.Mem.SlotSize)
+
+	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
+
+	res, err := dispatcher.Call(ctx, logger, timeout, "DownscaleRequest", api.DownscaleRequest{
+		Target: rawResources,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return res.Result, nil
+}
+
+func doMonitorUpscale(
+	ctx context.Context,
+	logger *zap.Logger,
+	dispatcher *Dispatcher,
+	target api.Resources,
+) error {
+	r := dispatcher.runner
+	rawResources := target.ConvertToAllocation(r.vm.Mem.SlotSize)
+
+	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
+
+	_, err := dispatcher.Call(ctx, logger, timeout, "UpscaleNotification", api.UpscaleNotification{
+		Granted: rawResources,
+	})
+	return err
 }
 
 // DoRequest sends a request to the scheduler and does not validate the response.

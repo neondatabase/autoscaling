@@ -146,7 +146,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	// the initial list
 	opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
 
-	sendStop, stopSignal := util.NewSingleSignalPair()
+	sendStop, stopSignal := util.NewSingleSignalPair[struct{}]()
 
 	store := Store[T]{
 		mutex:         sync.Mutex{},
@@ -356,6 +356,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					retryAfter := config.RetryRelistAfter.Random()
 					logger.Info("Retrying relist after delay", zap.Duration("delay", retryAfter))
 
+					store.failing.Store(true)
 					config.Metrics.failing()
 
 					select {
@@ -371,6 +372,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					}
 				}
 
+				store.failing.Store(false)
 				config.Metrics.unfailing()
 
 				// err == nil, process relistList
@@ -452,6 +454,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					retryAfter := config.RetryWatchAfter.Random()
 					logger.Info("Retrying re-watch after delay", zap.Duration("delay", retryAfter))
 
+					store.failing.Store(true)
 					config.Metrics.failing()
 
 					select {
@@ -468,6 +471,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				}
 
 				// err == nil
+				store.failing.Store(false)
 				config.Metrics.unfailing()
 				break newWatcher
 			}
@@ -554,8 +558,9 @@ type Store[T any] struct {
 	nextIndexID uint64
 	indexes     map[uint64]Index[T]
 
-	stopSignal util.SignalSender
+	stopSignal util.SignalSender[struct{}]
 	stopped    atomic.Bool
+	failing    atomic.Bool
 }
 
 // Relist triggers re-listing the WatchStore, returning a channel that will be closed once the
@@ -573,8 +578,12 @@ func (w *Store[T]) Relist() <-chan struct{} {
 }
 
 func (w *Store[T]) Stop() {
-	w.stopSignal.Send()
+	w.stopSignal.Send(struct{}{})
 	w.stopped.Store(true)
+}
+
+func (w *Store[T]) Failing() bool {
+	return w.failing.Load()
 }
 
 func (w *Store[T]) Stopped() bool {

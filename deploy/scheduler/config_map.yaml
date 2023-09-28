@@ -27,9 +27,12 @@ data:
     {
       "memBlockSize": "1Gi",
       "nodeDefaults": {
-        "cpu": { "watermark": 0.7, "system": "500m" },
-        "memory": { "watermark": 0.7, "system": "0.5Gi" },
-        "computeUnit": { "vCPUs": 0.25, "mem": 1 }
+        "cpu": { "watermark": 0.9 },
+        "memory": { "watermark": 0.9 },
+        "computeUnit": { "vCPUs": 0.25, "mem": 1 },
+        "minUsageScore": 0.5,
+        "maxUsageScore": 0,
+        "scorePeak": 0.8
       },
       "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
@@ -37,5 +40,7 @@ data:
         "port": 10298,
         "timeoutSeconds": 5
       },
-      "doMigration": false
+      "migrationDeletionRetrySeconds": 5,
+      "doMigration": false,
+      "randomizeScores": true
     }

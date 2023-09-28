@@ -19,12 +19,14 @@ import (
 )
 
 type Config struct {
-	URL                  string `json:"url"`
-	CPUMetricName        string `json:"cpuMetricName"`
-	ActiveTimeMetricName string `json:"activeTimeMetricName"`
-	CollectEverySeconds  uint   `json:"collectEverySeconds"`
-	PushEverySeconds     uint   `json:"pushEverySeconds"`
-	PushTimeoutSeconds   uint   `json:"pushTimeoutSeconds"`
+	URL                       string `json:"url"`
+	CPUMetricName             string `json:"cpuMetricName"`
+	ActiveTimeMetricName      string `json:"activeTimeMetricName"`
+	CollectEverySeconds       uint   `json:"collectEverySeconds"`
+	AccumulateEverySeconds    uint   `json:"accumulateEverySeconds"`
+	PushEverySeconds          uint   `json:"pushEverySeconds"`
+	PushRequestTimeoutSeconds uint   `json:"pushRequestTimeoutSeconds"`
+	MaxBatchSize              uint   `json:"maxBatchSize"`
 }
 
 type metricsState struct {
@@ -85,8 +87,8 @@ func RunBillingMetricsCollector(
 	defer collectTicker.Stop()
 	// Offset by half a second, so it's a bit more deterministic.
 	time.Sleep(500 * time.Millisecond)
-	pushTicker := time.NewTicker(time.Second * time.Duration(conf.PushEverySeconds))
-	defer pushTicker.Stop()
+	accumulateTicker := time.NewTicker(time.Second * time.Duration(conf.AccumulateEverySeconds))
+	defer accumulateTicker.Stop()
 
 	state := metricsState{
 		historical:      make(map[metricsKey]vmMetricsHistory),
@@ -95,8 +97,25 @@ func RunBillingMetricsCollector(
 		pushWindowStart: time.Now(),
 	}
 
-	state.collect(conf, store, metrics)
-	batch := client.NewBatch()
+	queueWriter, queueReader := newEventQueue[*billing.IncrementalEvent](metrics.queueSizeCurrent)
+
+	// Start the sender
+	signalDone, thisThreadFinished := util.NewCondChannelPair()
+	defer signalDone.Send()
+	sender := eventSender{
+		client:            client,
+		config:            conf,
+		metrics:           metrics,
+		queue:             queueReader,
+		collectorFinished: thisThreadFinished,
+		lastSendDuration:  0,
+	}
+	go sender.senderLoop(logger.Named("send"))
+
+	// The rest of this function is to do with collection
+	logger = logger.Named("collect")
+
+	state.collect(logger, conf, store, metrics)
 
 	for {
 		select {
@@ -106,40 +125,17 @@ func RunBillingMetricsCollector(
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
-			state.collect(conf, store, metrics)
-		case <-pushTicker.C:
+			state.collect(logger, conf, store, metrics)
+		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
-			state.drainAppendToBatch(logger, conf, batch)
-			metrics.batchSizeCurrent.Set(float64(batch.Count()))
-			logger.Info("Pushing billing events", zap.Int("count", batch.Count()))
-			_ = logger.Sync() // Sync before making the network request, so we guarantee logs for the action
-			if err := pushBillingEvents(conf, batch); err != nil {
-				metrics.sendErrorsTotal.Inc()
-				logger.Error("Failed to push billing events", zap.Error(err))
-				continue
-			}
-			// Sending was successful; clear the batch.
-			//
-			// Don't reset metrics.batchSizeCurrent because it stores the *most recent* batch size.
-			// (The "current" suffix refers to the fact the metric is a gague, not a counter)
-			batch = client.NewBatch()
+			state.drainEnqueue(logger, conf, client.Hostname(), queueWriter)
 		case <-backgroundCtx.Done():
-			// If we're being shut down, push the latests events we have before returning.
-			logger.Info("Creating final billing batch")
-			state.drainAppendToBatch(logger, conf, batch)
-			metrics.batchSizeCurrent.Set(float64(batch.Count()))
-			logger.Info("Pushing final billing events", zap.Int("count", batch.Count()))
-			_ = logger.Sync() // Sync before making the network request, so we guarantee logs for the action
-			if err := pushBillingEvents(conf, batch); err != nil {
-				metrics.sendErrorsTotal.Inc()
-				logger.Error("Failed to push billing events", zap.Error(err))
-			}
 			return
 		}
 	}
 }
 
-func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromMetrics) {
+func (s *metricsState) collect(logger *zap.Logger, conf *Config, store VMStoreForNode, metrics PromMetrics) {
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
@@ -147,9 +143,14 @@ func (s *metricsState) collect(conf *Config, store VMStoreForNode, metrics PromM
 
 	old := s.present
 	s.present = make(map[metricsKey]vmMetricsInstant)
-	vmsOnThisNode := store.ListIndexed(func(i *VMNodeIndex) []*vmapi.VirtualMachine {
-		return i.List()
-	})
+	var vmsOnThisNode []*vmapi.VirtualMachine
+	if store.Failing() {
+		logger.Error("VM store is currently stopped. No events will be recorded")
+	} else {
+		vmsOnThisNode = store.ListIndexed(func(i *VMNodeIndex) []*vmapi.VirtualMachine {
+			return i.List()
+		})
+	}
 	for _, vm := range vmsOnThisNode {
 		endpointID, isEndpoint := vm.Labels[EndpointLabel]
 		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
@@ -248,9 +249,10 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
-func logAddedEvent(logger *zap.Logger, event billing.IncrementalEvent) billing.IncrementalEvent {
+func logAddedEvent(logger *zap.Logger, event *billing.IncrementalEvent) *billing.IncrementalEvent {
 	logger.Info(
 		"Adding event to batch",
+		zap.String("IdempotencyKey", event.IdempotencyKey),
 		zap.String("EndpointID", event.EndpointID),
 		zap.String("MetricName", event.MetricName),
 		zap.Int("Value", event.Value),
@@ -258,42 +260,35 @@ func logAddedEvent(logger *zap.Logger, event billing.IncrementalEvent) billing.I
 	return event
 }
 
-// drainAppendToBatch clears the current history, adding it as events to the batch
-func (s *metricsState) drainAppendToBatch(logger *zap.Logger, conf *Config, batch *billing.Batch) {
+// drainEnqueue clears the current history, adding it as events to the queue
+func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname string, queue eventQueuePusher[*billing.IncrementalEvent]) {
 	now := time.Now()
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
 
-		batch.AddIncrementalEvent(logAddedEvent(logger, billing.IncrementalEvent{
+		queue.enqueue(logAddedEvent(logger, billing.Enrich(hostname, &billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
-			Type:           "", // set in batch method
-			IdempotencyKey: "", // set in batch method
+			Type:           "", // set by billing.Enrich
+			IdempotencyKey: "", // set by billing.Enrich
 			EndpointID:     key.endpointID,
 			// TODO: maybe we should store start/stop time in the vmMetricsHistory object itself?
 			// That way we can be aligned to collection, rather than pushing.
 			StartTime: s.pushWindowStart,
 			StopTime:  now,
 			Value:     int(math.Round(history.total.cpu)),
-		}))
-		batch.AddIncrementalEvent(logAddedEvent(logger, billing.IncrementalEvent{
+		})))
+		queue.enqueue(logAddedEvent(logger, billing.Enrich(hostname, &billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
-			Type:           "", // set in batch method
-			IdempotencyKey: "", // set in batch method
+			Type:           "", // set by billing.Enrich
+			IdempotencyKey: "", // set by billing.Enrich
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
 			Value:          int(math.Round(history.total.activeTime.Seconds())),
-		}))
+		})))
 	}
 
 	s.pushWindowStart = now
 	s.historical = make(map[metricsKey]vmMetricsHistory)
-}
-
-func pushBillingEvents(conf *Config, batch *billing.Batch) error {
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*time.Duration(conf.PushTimeoutSeconds))
-	defer cancel()
-
-	return batch.Send(ctx)
 }

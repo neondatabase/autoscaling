@@ -69,11 +69,12 @@ type VirtualMachineSpec struct {
 	// +optional
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds"`
 
-	NodeSelector  map[string]string           `json:"nodeSelector,omitempty"`
-	Affinity      *corev1.Affinity            `json:"affinity,omitempty"`
-	Tolerations   []corev1.Toleration         `json:"tolerations,omitempty"`
-	SchedulerName string                      `json:"schedulerName,omitempty"`
-	PodResources  corev1.ResourceRequirements `json:"podResources,omitempty"`
+	NodeSelector       map[string]string           `json:"nodeSelector,omitempty"`
+	Affinity           *corev1.Affinity            `json:"affinity,omitempty"`
+	Tolerations        []corev1.Toleration         `json:"tolerations,omitempty"`
+	SchedulerName      string                      `json:"schedulerName,omitempty"`
+	ServiceAccountName string                      `json:"serviceAccountName,omitempty"`
+	PodResources       corev1.ResourceRequirements `json:"podResources,omitempty"`
 
 	// +kubebuilder:default:=Always
 	// +optional
@@ -82,6 +83,8 @@ type VirtualMachineSpec struct {
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
 	Guest Guest `json:"guest"`
+
+	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
 
 	// List of disk that can be mounted by virtual machine.
 	// +optional
@@ -97,7 +100,7 @@ type VirtualMachineSpec struct {
 	// Use KVM acceleation
 	// +kubebuilder:default:=true
 	// +optional
-	EnableAcceleration bool `json:"enableAcceleration"`
+	EnableAcceleration *bool `json:"enableAcceleration,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
@@ -308,6 +311,8 @@ type DiskSource struct {
 
 type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
+	// Discard enables the "discard" mount option for the filesystem
+	Discard bool `json:"discard,omitempty"`
 }
 
 type TmpfsDiskSource struct {

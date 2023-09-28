@@ -31,9 +31,9 @@ type ExecutorCore struct {
 }
 
 type ClientSet struct {
-	Plugin    PluginInterface
-	NeonVM    NeonVMInterface
-	Informant InformantInterface
+	Plugin  PluginInterface
+	NeonVM  NeonVMInterface
+	Monitor MonitorInterface
 }
 
 func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config core.Config) *ExecutorCore {
@@ -123,33 +123,23 @@ func (c ExecutorCoreUpdater) SchedulerGone(withLock func()) {
 	})
 }
 
-func (c ExecutorCoreUpdater) ResetInformant(withLock func()) {
+func (c ExecutorCoreUpdater) ResetMonitor(withLock func()) {
 	c.core.update(func(state *core.State) {
-		state.Informant().Reset()
+		state.Monitor().Reset()
 		withLock()
 	})
 }
 
 func (c ExecutorCoreUpdater) UpscaleRequested(resources api.MoreResources, withLock func()) {
 	c.core.update(func(state *core.State) {
-		state.Informant().UpscaleRequested(time.Now(), resources)
+		state.Monitor().UpscaleRequested(time.Now(), resources)
 		withLock()
 	})
 }
 
-func (c ExecutorCoreUpdater) InformantRegistered(active bool, withLock func()) {
+func (c ExecutorCoreUpdater) MonitorActive(active bool, withLock func()) {
 	c.core.update(func(state *core.State) {
-		state.Informant().SuccessfullyRegistered()
-		if active {
-			state.Informant().Active(active)
-		}
-		withLock()
-	})
-}
-
-func (c ExecutorCoreUpdater) InformantActive(active bool, withLock func()) {
-	c.core.update(func(state *core.State) {
-		state.Informant().Active(active)
+		state.Monitor().Active(active)
 		withLock()
 	})
 }

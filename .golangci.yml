@@ -9,7 +9,7 @@ run:
 issues:
   exclude:
     # ChanMutex contains only a channel, which *is* safe to copy
-    - 'copylocks: return copies lock value: github\.com/neondatabase/autoscaling/pkg/util\.ChanMutex'
+    - 'copylocks: .* copies lock value.*: github\.com/neondatabase/autoscaling/pkg/util\.ChanMutex'
 
 output:
   format: colored-line-number
@@ -54,8 +54,8 @@ linters-settings:
     exclude:
       - '^net/http\.(Client|Server)'
       - '^net\.TCPAddr$'
-      # metav1.{CreateOptions,GetOptions,ListOptions,WatchOptions,PatchOptions}
-      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch)Options$'
+      # metav1.{CreateOptions,GetOptions,ListOptions,WatchOptions,PatchOptions,DeleteOptions}
+      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch|Delete)Options$'
       - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.ObjectMeta$'
       - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
       - '^github.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'

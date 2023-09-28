@@ -32,29 +32,29 @@ awk '/#\+BEGIN_SRC/{flag=1;next}/#\+END_SRC/{flag=0}flag' ARCHITECTURE-network-d
                   |                      +---------|  autoscaler agent  |
                   |                                |                    |
                   |                                | (one per K8s node) |
-                  |                                +-----------------*--+
-                  |                                  |           |   ^ random port
-                  |                                  |           |   |  (per VM)
-                  |                                  |           |   |
-+=================|==================================|===========|===|======+
-: K8s pod         |                                  |           |   |      :
-:             QMP |                                  |           |   |      :
-:           20183 V                                  |           |   |      :
-: +---------------*----------------------------------|-----------|---|---+  :
-: |                                                  |           |   |   |  :
-: | QEMU process                                     |           |   |   |  :
-: |                                                  |           |   |   |  :
-: |                                                  |           |   |   |  :
-: |            compute_ctl    postgres       metrics | informant |   |   |  :
-: |               mgmt API    postgres    prometheus | informant |   |   |  :
-: |                   3080        5432          9100 V     10301 V   |   |  :
+                  |                                +--------------------+
+                  |                                  |           |
+                  |                                  |           |    
+                  |                                  |           |    
++=================|==================================|===========|==========+
+: K8s pod         |                                  |           |          :
+:             QMP |                                  |           |          :
+:           20183 V                                  |           |          :
+: +---------------*----------------------------------|-----------|-------+  :
+: |                                                  |           |       |  :
+: | QEMU process                                     |           |       |  :
+: |                                                  |           |       |  :
+: |                                                  |           |       |  :
+: |            compute_ctl    postgres       metrics |   monitor |       |  :
+: |               mgmt API    postgres    prometheus | websocket |       |  :
+: |                   3080        5432          9100 V     10301 V       |  :
 : +------------------------*-----------*-------------*-----------*-------+  :
 : | VM                                                                   |  :
 : |                                                                      |  :
 : | Inside the VM runs:                                                  |  :
 : |    - compute_ctl (listens on port 3080)                              |  :
+: |    - VM monitor (port 10301 via websocket)                           |  :
 : |    - Postgres (port 5432)                                            |  :
-: |    - VM informant (port 10301)                                       |  :
 : |    - vector (metrics on port 9100)                                   |  :
 : |                                                                      |  :
 : +----------------------------------------------------------------------+  :

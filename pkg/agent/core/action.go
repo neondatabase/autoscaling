@@ -7,11 +7,11 @@ import (
 )
 
 type ActionSet struct {
-	Wait               *ActionWait               `json:"wait,omitempty"`
-	PluginRequest      *ActionPluginRequest      `json:"pluginRequest,omitempty"`
-	NeonVMRequest      *ActionNeonVMRequest      `json:"neonvmRequest,omitempty"`
-	InformantDownscale *ActionInformantDownscale `json:"informantDownscale,omitempty"`
-	InformantUpscale   *ActionInformantUpscale   `json:"informantUpscale,omitempty"`
+	Wait             *ActionWait             `json:"wait,omitempty"`
+	PluginRequest    *ActionPluginRequest    `json:"pluginRequest,omitempty"`
+	NeonVMRequest    *ActionNeonVMRequest    `json:"neonvmRequest,omitempty"`
+	MonitorDownscale *ActionMonitorDownscale `json:"monitorDownscale,omitempty"`
+	MonitorUpscale   *ActionMonitorUpscale   `json:"monitorUpscale,omitempty"`
 }
 
 type ActionWait struct {
@@ -29,12 +29,12 @@ type ActionNeonVMRequest struct {
 	Target  api.Resources `json:"target"`
 }
 
-type ActionInformantDownscale struct {
+type ActionMonitorDownscale struct {
 	Current api.Resources `json:"current"`
 	Target  api.Resources `json:"target"`
 }
 
-type ActionInformantUpscale struct {
+type ActionMonitorUpscale struct {
 	Current api.Resources `json:"current"`
 	Target  api.Resources `json:"target"`
 }

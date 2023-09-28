@@ -1,5 +1,5 @@
-FROM vm-informant:dev as informant
-# ^ don't do anything with this; we just want it around for later use.
+FROM vm-monitor:dev as monitor
+# ^ don't do anything with these; we just want it around for later use.
 
 FROM postgres:15-bullseye
 
@@ -18,9 +18,7 @@ RUN set -e \
 ADD cgconfig.conf /etc/cgconfig.conf
 RUN echo '::sysinit:/usr/sbin/cgconfigparser -l /etc/cgconfig.conf -s 1664' >> /etc/inittab
 
-# Add the vm-informant
-COPY --from=informant /usr/bin/vm-informant /bin/vm-informant
-RUN adduser vm-informant --disabled-password --no-create-home
-# note: Use 'respawn' and '--auto-restart' so that the logs are noisy if the arguments are bad,
-# but we still have proper handling around cgroups, etc.
-RUN echo "::respawn:su vm-informant -c '/bin/vm-informant --auto-restart --cgroup=neon-test'" >> /etc/inittab
+# Add the vm-monitor
+COPY --from=monitor /usr/bin/vm-monitor /bin/vm-monitor 
+RUN adduser vm-monitor --disabled-password --no-create-home
+RUN echo "::respawn:su vm-monitor -c 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test'" >> /etc/inittab
