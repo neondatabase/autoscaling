@@ -48,8 +48,9 @@ type Dispatcher struct {
 	// message and will send it down the SignalSender so the original sender can use it.
 	waiters map[uint64]util.SignalSender[waiterResult]
 
-	// lock guards mutating the waiters field. conn, exit, and nextTransactionID
-	// are all thread safe. server and protoVersion are never modified.
+	// lock guards mutating the waiters, exitError, and (closing) exitSignal field.
+	// conn and lastTransactionID are all thread safe.
+	// runner, exit, and protoVersion are never modified.
 	lock sync.Mutex
 
 	// The runner that this dispatcher is part of
@@ -399,25 +400,25 @@ func (disp *Dispatcher) HandleMessage(
 	// avoids this, and we manually deserialize later
 	var message json.RawMessage
 	if err := wsjson.Read(ctx, disp.conn, &message); err != nil {
-		return fmt.Errorf("error receiving message: %w", err)
+		return fmt.Errorf("Error receiving message: %w", err)
 	}
 	logger.Info("(pre-decoding): received a message", zap.ByteString("message", message))
 
 	var unstructured map[string]interface{}
 	if err := json.Unmarshal(message, &unstructured); err != nil {
-		return fmt.Errorf("error deserializing message: %q", string(message))
+		return fmt.Errorf("Error deserializing message: %q", string(message))
 	}
 
 	typeStr, err := extractField[string](unstructured, "type")
 	if err != nil {
-		return fmt.Errorf("error extracting 'type' field: %w", err)
+		return fmt.Errorf("Error extracting 'type' field: %w", err)
 	}
 
 	// go thinks all json numbers are float64 so we first deserialize to that to
 	// avoid the type error, then cast to uint64
 	f, err := extractField[float64](unstructured, "id")
 	if err != nil {
-		return fmt.Errorf("error extracting 'id field: %w", err)
+		return fmt.Errorf("Error extracting 'id field: %w", err)
 	}
 	id := uint64(*f)
 
@@ -464,8 +465,8 @@ func (disp *Dispatcher) HandleMessage(
 	// Helper function to handle common unmarshalling logic
 	unmarshal := func(value any) error {
 		if err := json.Unmarshal(message, value); err != nil {
-			rootErr = errors.New("failed unmarshaling JSON")
-			err := fmt.Errorf("error unmarshaling %s: %w", *typeStr, err)
+			rootErr = errors.New("Failed unmarshaling JSON")
+			err := fmt.Errorf("Error unmarshaling %s: %w", *typeStr, err)
 			logger.Error(rootErr.Error(), zap.Error(err))
 			// we're already on the error path anyways
 			_ = disp.send(ctx, logger, id, api.InvalidMessage{Error: err.Error()})
@@ -512,27 +513,27 @@ func (disp *Dispatcher) HandleMessage(
 		if err := unmarshal(&warning); err != nil {
 			return err
 		}
-		logger.Warn("received notification we sent an invalid message", zap.Any("warning", warning))
+		logger.Warn("Received notification we sent an invalid message", zap.Any("warning", warning))
 		return nil
 	default:
-		rootErr = errors.New("received unknown message type")
+		rootErr = errors.New("Received unknown message type")
 		return disp.send(
 			ctx,
 			logger,
 			id,
-			api.InvalidMessage{Error: fmt.Sprintf("received message of unknown type: %q", *typeStr)},
+			api.InvalidMessage{Error: fmt.Sprintf("Received message of unknown type: %q", *typeStr)},
 		)
 	}
 }
 
 // Long running function that orchestrates all requests/responses.
 func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester util.CondChannelSender) {
-	logger.Info("starting message handler")
+	logger.Info("Starting message handler")
 
 	// Utility for logging + returning an error when we get a message with an
 	// id we're unaware of. Note: unknownMessage is not a message type.
 	handleUnkownMessage := func(messageType string, id uint64) error {
-		fmtString := "received %s with id %d but no record of previous message with that id"
+		fmtString := "Received %s with id %d but no record of previous message with that id"
 		msg := fmt.Sprintf(fmtString, messageType, id)
 		logger.Warn(msg, zap.Uint64("id", id))
 		return disp.send(ctx, logger, id, api.InvalidMessage{Error: msg})
@@ -570,7 +571,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 
 		sender, ok := disp.waiters[id]
 		if ok {
-			logger.Info("monitor confirmed upscale", zap.Uint64("id", id))
+			logger.Info("vm-monitor confirmed upscale", zap.Uint64("id", id))
 			sender.Send(waiterResult{
 				err: nil,
 				res: &MonitorResult{
@@ -592,7 +593,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 
 		sender, ok := disp.waiters[id]
 		if ok {
-			logger.Info("monitor returned downscale result", zap.Uint64("id", id))
+			logger.Info("vm-monitor returned downscale result", zap.Uint64("id", id), zap.Any("result", res))
 			sender.Send(waiterResult{
 				err: nil,
 				res: &MonitorResult{
@@ -615,13 +616,13 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Warn(
-				"monitor experienced an internal error",
-				zap.String("error", err.Error),
+				"vm-monitor experienced an internal error",
 				zap.Uint64("id", id),
+				zap.String("error", err.Error),
 			)
 			// Indicate to the receiver that an error occured
 			sender.Send(waiterResult{
-				err: errors.New("monitor internal error"),
+				err: errors.New("vm-monitor internal error"),
 				res: nil,
 			})
 			// Don't forget to delete the waiter
@@ -637,7 +638,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 
 		sender, ok := disp.waiters[id]
 		if ok {
-			logger.Info("monitor responded to health check", zap.Uint64("id", id))
+			logger.Info("vm-monitor responded to health check", zap.Uint64("id", id))
 			// Indicate to the receiver that an error occured
 			sender.Send(waiterResult{
 				err: nil,
