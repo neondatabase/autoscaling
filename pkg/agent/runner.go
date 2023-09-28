@@ -58,7 +58,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"nhooyr.io/websocket"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -80,9 +79,6 @@ const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV2_0
 // It primarily operates as a source of shared data for a number of long-running tasks. For
 // additional general information, refer to the comment at the top of this file.
 type Runner struct {
-	// Set in (*Runner).Run()
-	dispatcher *Dispatcher
-
 	global *agentState
 	// status provides the high-level status of the Runner. Reading or updating the status requires
 	// holding podStatus.lock. Updates are typically done handled by the setStatus method.
@@ -139,6 +135,9 @@ type Runner struct {
 	// Each scheduler's info field is immutable. When a scheduler is replaced, only the pointer
 	// value here is updated; the original Scheduler remains unchanged.
 	scheduler *Scheduler
+	// monitor, if non nil, stores the current Dispatcher in use for communicating with the
+	// vm-monitor
+	monitor *Dispatcher
 	// computeUnit is the latest Compute Unit reported by a scheduler. It may be nil, if we haven't
 	// been able to contact one yet.
 	//
@@ -254,15 +253,6 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 	go func() {
 		// Gracefully handle panics, plus trigger restart
 		defer func() {
-			// Since the dispatcher form a reference cycle, the dispatcher's finalizer may not
-			// get run, and thus its connection might not be closed. This is not a massive issue
-			// as the monitor will just kill the connection when it gets a new one, but explicitly
-			// closing the connection might make the event timeline easier to understand.
-			if r.dispatcher != nil {
-				logger.Info("runner lifecycle ended -> closing dispatcher connection")
-				r.dispatcher.conn.Close(websocket.StatusInternalError, "runner lifecycle ended")
-			}
-
 			if err := recover(); err != nil {
 				now := time.Now()
 				r.status.update(r.global, func(stat podStatus) podStatus {
@@ -330,19 +320,6 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	// signal when the dispatcher requests upscaling
 	sendUpscaleRequested, recvUpscaleRequested := util.NewCondChannelPair()
 
-	addr := fmt.Sprintf(
-		"ws://%s:%d/monitor",
-		r.podIP,
-		r.global.config.Monitor.ServerPort,
-	)
-	dispatcher, err := NewDispatcher(ctx, logger, addr, r, sendUpscaleRequested)
-	if err != nil {
-		logger.Error("failed to create new dispatcher", zap.Error(err))
-		return err
-	}
-	go dispatcher.run(ctx)
-	r.dispatcher = dispatcher
-
 	logger.Info("Starting background workers")
 
 	// FIXME: make these timeouts/delays separately defined constants, or configurable
@@ -363,8 +340,8 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	r.spawnBackgroundWorker(ctx, logger, "handle VM resources", func(c context.Context, l *zap.Logger) {
 		r.handleVMResources(c, l, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal, vmInfoUpdated)
 	})
-	r.spawnBackgroundWorker(ctx, logger, "monitor health-checker", func(c context.Context, l *zap.Logger) {
-		r.doHealthChecks(c, l)
+	r.spawnBackgroundWorker(ctx, logger.Named("vm-monitor"), "vm-monitor reconnection loop", func(c context.Context, l *zap.Logger) {
+		r.connectToMonitorLoop(c, l, sendUpscaleRequested)
 	})
 
 	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
@@ -436,26 +413,6 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, logger *zap.Logger, 
 	}()
 }
 
-// doHealthChecks sends an api.HealthCheck to the monitor every 5 seconds
-func (r *Runner) doHealthChecks(ctx context.Context, logger *zap.Logger) {
-	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
-	// FIXME: make this duration configurable
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		_, err := r.dispatcher.Call(ctx, timeout, "HealthCheck", api.HealthCheck{})
-		if err != nil {
-			logger.Warn("monitor health check failed", zap.Error(err))
-		}
-	}
-}
-
 // getMetricsLoop repeatedly attempts to fetch metrics from the VM
 //
 // Every time metrics are successfully fetched, the value of r.lastMetrics is updated and newMetrics
@@ -473,7 +430,7 @@ func (r *Runner) getMetricsLoop(
 	minWaitDuration := time.Second
 
 	for {
-		metrics, err := r.doMetricsRequestIfEnabled(ctx, logger, timeout)
+		metrics, err := r.doMetricsRequest(ctx, logger, timeout)
 		if err != nil {
 			logger.Error("Error making metrics request", zap.Error(err))
 			goto next
@@ -642,6 +599,102 @@ func (r *Runner) handleVMResources(
 	}
 }
 
+// connectToMonitorLoop does lifecycle management of the connection to the vm-monitor
+func (r *Runner) connectToMonitorLoop(
+	ctx context.Context,
+	logger *zap.Logger,
+	upscaleRequested util.CondChannelSender,
+) {
+	addr := fmt.Sprintf("ws://%s:%d/monitor", r.podIP, r.global.config.Monitor.ServerPort)
+
+	minWait := time.Second * time.Duration(r.global.config.Monitor.ConnectionRetryMinWaitSeconds)
+	var lastStart time.Time
+
+	for i := 0; ; i += 1 {
+		// Remove any prior Dispatcher from the Runner
+		func() {
+			r.lock.Lock()
+			defer r.lock.Unlock()
+			r.monitor = nil
+		}()
+
+		// If the context was canceled, don't restart
+		if err := ctx.Err(); err != nil {
+			action := "attempt"
+			if i != 0 {
+				action = "retry "
+			}
+			logger.Info(
+				fmt.Sprintf("Aborting vm-monitor connection %s because context is already canceled", action),
+				zap.Error(err),
+			)
+			return
+		}
+
+		// Delayed restart management, long because of friendly logging:
+		if i != 0 {
+			endTime := time.Now()
+			runtime := endTime.Sub(lastStart)
+
+			if runtime > minWait {
+				logger.Info(
+					"Immediately retrying connection to vm-monitor",
+					zap.String("addr", addr),
+					zap.Duration("totalRuntime", runtime),
+				)
+			} else {
+				delay := minWait - runtime
+				logger.Info(
+					"Connection to vm-monitor was not live for long, retrying after delay",
+					zap.Duration("delay", delay),
+					zap.Duration("totalRuntime", runtime),
+				)
+
+				select {
+				case <-time.After(delay):
+					logger.Info(
+						"Retrying connection to vm-monitor",
+						zap.Duration("delay", delay),
+						zap.Duration("waitTime", time.Since(endTime)),
+						zap.String("addr", addr),
+					)
+				case <-ctx.Done():
+					logger.Info(
+						"Canceling retrying connection to vm-monitor",
+						zap.Duration("delay", delay),
+						zap.Duration("waitTime", time.Since(endTime)),
+						zap.Error(ctx.Err()),
+					)
+					return
+				}
+			}
+		} else {
+			logger.Info("Connecting to vm-monitor", zap.String("addr", addr))
+		}
+
+		dispatcher, err := NewDispatcher(ctx, logger, addr, r, upscaleRequested)
+		if err != nil {
+			logger.Error("Failed to connect to vm-monitor", zap.String("addr", addr), zap.Error(err))
+			continue
+		}
+
+		// Update runner to the new dispatcher
+		func() {
+			r.lock.Lock()
+			defer r.lock.Unlock()
+			r.monitor = dispatcher
+		}()
+
+		// Wait until the dispatcher is no longer running, either due to error or because the
+		// root-level Runner context was canceled.
+		<-dispatcher.ExitSignal()
+
+		if err := dispatcher.ExitError(); err != nil {
+			logger.Error("Dispatcher for vm-monitor connection exited due to error", zap.Error(err))
+		}
+	}
+}
+
 // trackSchedulerLoop listens on the schedulerWatch, keeping r.scheduler up-to-date and signalling
 // on registeredScheduler whenever a new Scheduler is successfully registered
 func (r *Runner) trackSchedulerLoop(
@@ -806,38 +859,13 @@ waitForNewScheduler:
 // Lower-level implementation functions //
 //////////////////////////////////////////
 
-// doMetricsRequestIfEnabled makes a single metrics request
-//
-// This method expects that the Runner is not locked.
-func (r *Runner) doMetricsRequestIfEnabled(
+// doMetricsRequest makes a single metrics request to the VM
+func (r *Runner) doMetricsRequest(
 	ctx context.Context,
 	logger *zap.Logger,
 	timeout time.Duration,
 ) (*api.Metrics, error) {
-	logger.Info("Attempting metrics request")
-
-	// FIXME: the region where the lock is held should be extracted into a separate method, called
-	// something like buildMetricsRequest().
-
-	r.lock.Lock()
-	locked := true
-	defer func() {
-		if locked {
-			r.lock.Unlock()
-		}
-	}()
-
-	var url string
-	var handle func(body []byte) (*api.Metrics, error)
-
-	url = fmt.Sprintf("http://%s:%d/metrics", r.podIP, 9100)
-	handle = func(body []byte) (*api.Metrics, error) {
-		m, err := api.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
-		if err != nil {
-			err = fmt.Errorf("Error reading metrics from prometheus output: %w", err)
-		}
-		return &m, err
-	}
+	url := fmt.Sprintf("http://%s:%d/metrics", r.podIP, r.global.config.Metrics.Port)
 
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -846,10 +874,6 @@ func (r *Runner) doMetricsRequestIfEnabled(
 	if err != nil {
 		panic(fmt.Errorf("Error constructing metrics request to %q: %w", url, err))
 	}
-
-	// Unlock while we perform the request:
-	locked = false
-	r.lock.Unlock()
 
 	logger.Info("Making metrics request to VM", zap.String("url", url))
 
@@ -870,7 +894,12 @@ func (r *Runner) doMetricsRequestIfEnabled(
 		return nil, fmt.Errorf("Unsuccessful response status %d: %s", resp.StatusCode, string(body))
 	}
 
-	return handle(body)
+	m, err := api.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading metrics from prometheus output: %w", err)
+	}
+
+	return &m, nil
 }
 
 // VMUpdateReason provides context to (*Runner).updateVMResources about why an update to the VM's
@@ -1442,9 +1471,19 @@ func (r *Runner) doDownscale(ctx context.Context, logger *zap.Logger, to api.Res
 	cpu := rawResources.Cpu
 	mem := rawResources.Mem
 
+	dispatcher := func() *Dispatcher {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+		return r.monitor
+	}()
+
+	if dispatcher == nil {
+		return nil, errors.New("No active connection to vm-monitor")
+	}
+
 	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
 
-	res, err := r.dispatcher.Call(ctx, timeout, "DownscaleRequest", api.DownscaleRequest{
+	res, err := dispatcher.Call(ctx, logger, timeout, "DownscaleRequest", api.DownscaleRequest{
 		Target: api.Allocation{Cpu: cpu, Mem: mem},
 	})
 	if err != nil {
@@ -1461,9 +1500,19 @@ func (r *Runner) doUpscale(ctx context.Context, logger *zap.Logger, to api.Resou
 	cpu := rawResources.Cpu
 	mem := rawResources.Mem
 
+	dispatcher := func() *Dispatcher {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+		return r.monitor
+	}()
+
+	if dispatcher == nil {
+		return false, errors.New("No active connection to vm-monitor")
+	}
+
 	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
 
-	_, err := r.dispatcher.Call(ctx, timeout, "UpscaleNotification", api.UpscaleNotification{
+	_, err := dispatcher.Call(ctx, logger, timeout, "UpscaleNotification", api.UpscaleNotification{
 		Granted: api.Allocation{Cpu: cpu, Mem: mem},
 	})
 	if err != nil {

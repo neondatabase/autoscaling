@@ -48,12 +48,17 @@ type Dispatcher struct {
 	// message and will send it down the SignalSender so the original sender can use it.
 	waiters map[uint64]util.SignalSender[waiterResult]
 
-	// lock guards mutating the waiters field. conn, logger, and nextTransactionID
+	// lock guards mutating the waiters field. conn, exit, and nextTransactionID
 	// are all thread safe. server and protoVersion are never modified.
 	lock sync.Mutex
 
 	// The runner that this dispatcher is part of
 	runner *Runner
+
+	exit func(status websocket.StatusCode, err error)
+
+	exitError  error
+	exitSignal chan struct{}
 
 	// lastTransactionID is the last transaction id. When we need a new one
 	// we simply bump it and take the new number.
@@ -63,11 +68,6 @@ type Dispatcher struct {
 	// odd ones. So generating a new value is done by adding 2.
 	lastTransactionID atomic.Uint64
 
-	// A sender on which to signal an upscale request
-	upscaleRequester util.CondChannelSender
-
-	logger *zap.Logger
-
 	protoVersion api.MonitorProtoVersion
 }
 
@@ -76,37 +76,140 @@ type waiterResult struct {
 	res *MonitorResult
 }
 
-// Create a new Dispatcher, establishing a connection with the agent.
-// Note that this does not immediately start the Dispatcher. Call Run() to start it.
+// Create a new Dispatcher, establishing a connection with the vm-monitor and setting up all the
+// background threads to manage the connection.
 func NewDispatcher(
 	ctx context.Context,
 	logger *zap.Logger,
 	addr string,
 	runner *Runner,
 	sendUpscaleRequested util.CondChannelSender,
-) (*Dispatcher, error) {
-	// parent.runner, runner.global, and global.config are immutable so we don't
-	// need to acquire runner.lock here
-	ctx, cancel := context.WithTimeout(
-		ctx,
-		time.Second*time.Duration(runner.global.config.Monitor.ConnectionTimeoutSeconds),
-	)
+) (_finalDispatcher *Dispatcher, _ error) {
+	// Create a new root-level context for this Dispatcher so that we can cancel if need be
+	ctx, cancelRootContext := context.WithCancel(ctx)
+	defer func() {
+		// cancel on failure or panic
+		if _finalDispatcher == nil {
+			cancelRootContext()
+		}
+	}()
+
+	connectTimeout := time.Second * time.Duration(runner.global.config.Monitor.ConnectionTimeoutSeconds)
+	conn, protoVersion, err := connectToMonitor(ctx, logger, addr, connectTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	disp := &Dispatcher{
+		conn:              conn,
+		waiters:           make(map[uint64]util.SignalSender[waiterResult]),
+		runner:            runner,
+		lock:              sync.Mutex{},
+		exit:              nil, // set below
+		exitError:         nil,
+		exitSignal:        make(chan struct{}),
+		lastTransactionID: atomic.Uint64{}, // Note: initialized to 0, so it's even, as required.
+		protoVersion:      *protoVersion,
+	}
+	disp.exit = func(status websocket.StatusCode, err error) {
+		disp.lock.Lock()
+		defer disp.lock.Unlock()
+
+		if disp.Exited() {
+			return
+		}
+
+		close(disp.exitSignal)
+		disp.exitError = err
+		cancelRootContext()
+
+		var closeReason string
+		if err != nil {
+			closeReason = err.Error()
+		} else {
+			closeReason = "normal exit"
+		}
+
+		// Run the actual websocket closing in a separate goroutine so we don't block while holding
+		// the lock. It can take up to 10s to close:
+		//
+		// > [Close] will write a WebSocket close frame with a timeout of 5s and then wait 5s for
+		// > the peer to send a close frame.
+		//
+		// This *potentially* runs us into race issues, but those are probably less bad to deal
+		// with, tbh.
+		go disp.conn.Close(status, closeReason)
+	}
+
+	go func() {
+		<-ctx.Done()
+		disp.exit(websocket.StatusNormalClosure, nil)
+	}()
+
+	msgHandlerLogger := logger.Named("message-handler")
+	runner.spawnBackgroundWorker(ctx, msgHandlerLogger, "vm-monitor message handler", func(c context.Context, l *zap.Logger) {
+		disp.run(c, l, sendUpscaleRequested)
+	})
+	runner.spawnBackgroundWorker(ctx, logger.Named("health-checks"), "vm-monitor health checks", func(ctx context.Context, logger *zap.Logger) {
+		timeout := time.Second * time.Duration(runner.global.config.Monitor.ResponseTimeoutSeconds)
+		// FIXME: make this duration configurable
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		// on the 3rd failed health check in a row, trigger restart
+		sequentialFailureCount := 0
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			_, err := disp.Call(ctx, logger, timeout, "HealthCheck", api.HealthCheck{})
+			if err != nil {
+				sequentialFailureCount += 1
+				logger.Warn("vm-monitor health check failed", zap.Error(err))
+
+				if sequentialFailureCount >= 3 {
+					err := fmt.Errorf("vm-monitor failed %d health checks in a row", sequentialFailureCount)
+					logger.Error(fmt.Sprintf("%s, triggering connection restart", err.Error()))
+					disp.exit(websocket.StatusInternalError, err)
+				}
+			} else {
+				sequentialFailureCount = 0
+			}
+		}
+	})
+	return disp, nil
+}
+
+func connectToMonitor(
+	ctx context.Context,
+	logger *zap.Logger,
+	addr string,
+	timeout time.Duration,
+) (_ *websocket.Conn, _ *api.MonitorProtoVersion, finalErr error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	logger.Info("connecting via websocket", zap.String("addr", addr))
+	logger.Info("Connecting to vm-monitor via websocket", zap.String("addr", addr))
 
 	// We do not need to close the response body according to docs.
 	// Doing so causes memory bugs.
 	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
 	if err != nil {
-		return nil, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
+		return nil, nil, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
 	// If we return early, make sure we close the websocket
-	connectionOk := false
+	var failureReason websocket.StatusCode
 	defer func() {
-		if !connectionOk {
-			c.Close(websocket.StatusInternalError, "could not establish protocol")
+		if finalErr != nil {
+			if failureReason == 0 {
+				failureReason = websocket.StatusInternalError
+			}
+			c.Close(failureReason, finalErr.Error())
 		}
 	}()
 
@@ -114,44 +217,61 @@ func NewDispatcher(
 		Min: MinMonitorProtocolVersion,
 		Max: MaxMonitorProtocolVersion,
 	}
-	logger.Info("sending protocol version range", zap.Any("range", versionRange))
+	logger.Info("Sending protocol version range", zap.Any("range", versionRange))
 
 	// Figure out protocol version
 	err = wsjson.Write(ctx, c, versionRange)
 	if err != nil {
-		return nil, fmt.Errorf("error sending protocol range to monitor: %w", err)
+		return nil, nil, fmt.Errorf("error sending protocol range to monitor: %w", err)
 	}
 
-	logger.Info("reading monitor version response")
-	var version api.MonitorProtocolResponse
-	err = wsjson.Read(ctx, c, &version)
+	logger.Info("Reading monitor version response")
+	var resp api.MonitorProtocolResponse
+	err = wsjson.Read(ctx, c, &resp)
 	if err != nil {
-		logger.Error("failed to read monitor response", zap.Error(err))
-		return nil, fmt.Errorf("error reading monitor response during protocol handshake: %w", err)
+		logger.Error("Failed to read monitor response", zap.Error(err))
+		failureReason = websocket.StatusProtocolError
+		return nil, nil, fmt.Errorf("Error reading vm-monitor response during protocol handshake: %w", err)
 	}
-	logger.Info("got monitor version response", zap.Any("response", version))
-	if version.Error != nil {
-		return nil, fmt.Errorf("monitor returned error during protocol handshake: %q", *version.Error)
-	}
-	logger.Info("negotiated protocol version with monitor", zap.String("version", version.Version.String()))
 
-	disp := &Dispatcher{
-		conn:              c,
-		waiters:           make(map[uint64]util.SignalSender[waiterResult]),
-		lastTransactionID: atomic.Uint64{}, // Note: initialized to 0, so it's even, as required.
-		logger:            logger.Named("dispatcher"),
-		protoVersion:      version.Version,
-		runner:            runner,
-		upscaleRequester:  sendUpscaleRequested,
-		lock:              sync.Mutex{},
+	logger.Info("Got monitor version response", zap.Any("response", resp))
+	if resp.Error != nil {
+		logger.Error("Got error response from vm-monitor", zap.Any("response", resp), zap.String("error", *resp.Error))
+		failureReason = websocket.StatusProtocolError
+		return nil, nil, fmt.Errorf("Monitor returned error during protocol handshake: %q", *resp.Error)
 	}
-	connectionOk = true
-	return disp, nil
+
+	logger.Info("negotiated protocol version with monitor", zap.Any("response", resp), zap.String("version", resp.Version.String()))
+	return c, &resp.Version, nil
+}
+
+// ExitSignal returns a channel that is closed when the Dispatcher is no longer running
+func (disp *Dispatcher) ExitSignal() <-chan struct{} {
+	return disp.exitSignal
+}
+
+// Exited returns whether the Dispatcher is no longer running
+//
+// Exited will return true iff the channel returned by ExitSignal is closed.
+func (disp *Dispatcher) Exited() bool {
+	select {
+	case <-disp.exitSignal:
+		return true
+	default:
+		return false
+	}
+}
+
+// ExitError returns the error that caused the dispatcher to exit, if there was one
+func (disp *Dispatcher) ExitError() error {
+	disp.lock.Lock()
+	defer disp.lock.Unlock()
+	return disp.exitError
 }
 
 // Send a message down the connection. Only call this method with types that
 // SerializeMonitorMessage can handle.
-func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error {
+func (disp *Dispatcher) send(ctx context.Context, logger *zap.Logger, id uint64, message any) error {
 	data, err := api.SerializeMonitorMessage(message, id)
 	if err != nil {
 		return fmt.Errorf("error serializing message: %w", err)
@@ -160,7 +280,7 @@ func (disp *Dispatcher) send(ctx context.Context, id uint64, message any) error 
 	// by base64 encoding it, so use RawMessage to avoid serializing to []byte
 	// (done by SerializeMonitorMessage), and then base64 encoding again
 	raw := json.RawMessage(data)
-	disp.logger.Info("sending message to monitor", zap.ByteString("message", raw))
+	logger.Info("sending message to monitor", zap.ByteString("message", raw))
 	return wsjson.Write(ctx, disp.conn, &raw)
 }
 
@@ -185,6 +305,7 @@ func (disp *Dispatcher) unregisterWaiter(id uint64) {
 // This function must NOT be called while holding disp.runner.lock.
 func (disp *Dispatcher) Call(
 	ctx context.Context,
+	logger *zap.Logger,
 	timeout time.Duration,
 	messageType string,
 	message any,
@@ -200,9 +321,9 @@ func (disp *Dispatcher) Call(
 	// register the waiter *before* sending, so that we avoid a potential race where we'd get a
 	// reply to the message before being ready to receive it.
 	disp.registerWaiter(id, sender)
-	err := disp.send(ctx, id, message)
+	err := disp.send(ctx, logger, id, message)
 	if err != nil {
-		disp.logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
+		logger.Error("failed to send message", zap.Any("message", message), zap.Error(err))
 		disp.unregisterWaiter(id)
 		status = "[error: failed to send]"
 		return nil, err
@@ -335,8 +456,9 @@ func (disp *Dispatcher) HandleMessage(
 		if err := json.Unmarshal(message, value); err != nil {
 			rootErr = errors.New("failed unmarshaling JSON")
 			err := fmt.Errorf("error unmarshaling %s: %w", *typeStr, err)
+			logger.Error(rootErr.Error(), zap.Error(err))
 			// we're already on the error path anyways
-			_ = disp.send(ctx, id, api.InvalidMessage{Error: err.Error()})
+			_ = disp.send(ctx, logger, id, api.InvalidMessage{Error: err.Error()})
 			return err
 		}
 
@@ -380,12 +502,13 @@ func (disp *Dispatcher) HandleMessage(
 		if err := unmarshal(&warning); err != nil {
 			return err
 		}
-		disp.logger.Warn("received notification we sent an invalid message", zap.Any("warning", warning))
+		logger.Warn("received notification we sent an invalid message", zap.Any("warning", warning))
 		return nil
 	default:
 		rootErr = errors.New("received unknown message type")
 		return disp.send(
 			ctx,
+			logger,
 			id,
 			api.InvalidMessage{Error: fmt.Sprintf("received message of unknown type: %q", *typeStr)},
 		)
@@ -393,8 +516,7 @@ func (disp *Dispatcher) HandleMessage(
 }
 
 // Long running function that orchestrates all requests/responses.
-func (disp *Dispatcher) run(ctx context.Context) {
-	logger := disp.logger.Named("message-handler")
+func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester util.CondChannelSender) {
 	logger.Info("starting message handler")
 
 	// Utility for logging + returning an error when we get a message with an
@@ -403,7 +525,7 @@ func (disp *Dispatcher) run(ctx context.Context) {
 		fmtString := "received %s with id %d but no record of previous message with that id"
 		msg := fmt.Sprintf(fmtString, messageType, id)
 		logger.Warn(msg, zap.Uint64("id", id))
-		return disp.send(ctx, id, api.InvalidMessage{Error: msg})
+		return disp.send(ctx, logger, id, api.InvalidMessage{Error: msg})
 	}
 
 	// Does not take a message id because we don't know when the agent will
@@ -418,7 +540,7 @@ func (disp *Dispatcher) run(ctx context.Context) {
 			disp.runner.global.metrics.informantRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
 		}()
 
-		disp.upscaleRequester.Send()
+		upscaleRequester.Send()
 
 		resourceReq := api.MoreResources{
 			Cpu:    false,
@@ -532,24 +654,20 @@ func (disp *Dispatcher) run(ctx context.Context) {
 	}
 
 	for {
-		err := disp.HandleMessage(
-			ctx,
-			logger,
-			handlers,
-		)
+		err := disp.HandleMessage(ctx, logger, handlers)
 		if err != nil {
 			if ctx.Err() != nil {
 				// The context is already cancelled, so this error is mostly likely
 				// expected. For example, if the context is cancelled because the
 				// runner exited, we should expect to fail to read off the connection,
 				// which is closed by the server exit.
-				logger.Warn("context is already cancelled, but received an error", zap.Error(err))
+				logger.Warn("Error handling message", zap.Error(err))
 			} else {
-				logger.Error(
-					"error handling message + context was not cancelled -> panicking",
-					zap.Error(err),
-				)
-				panic(err)
+				logger.Error("Error handling message, shutting down connection", zap.Error(err))
+				err = fmt.Errorf("Error handling message: %w", err)
+				// note: in theory we *could* be more descriptive with these statuses, but the only
+				// consumer of this API is the vm-monitor, and it doesn't check those.
+				disp.exit(websocket.StatusInternalError, err)
 			}
 			return
 		}
