@@ -3414,6 +3414,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/part-of: neonvm
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
   name: neonvm-virtualmachine-editor-role
 rules:
 - apiGroups:
@@ -3445,6 +3447,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/part-of: neonvm
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
   name: neonvm-virtualmachine-viewer-role
 rules:
 - apiGroups:
@@ -3472,6 +3477,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/part-of: neonvm
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
   name: neonvm-virtualmachinemigration-editor-role
 rules:
 - apiGroups:
@@ -3503,6 +3510,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/part-of: neonvm
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
   name: neonvm-virtualmachinemigration-viewer-role
 rules:
 - apiGroups:
@@ -3709,7 +3719,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.17.11-pre1
+        image: neondatabase/neonvm-controller:v0.17.12
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3891,7 +3901,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.17.11-pre1
+        image: neondatabase/neonvm-vxlan-controller:v0.17.12
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -3923,7 +3933,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.17.11-pre1
+        image: neondatabase/neonvm-vxlan-controller:v0.17.12
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:

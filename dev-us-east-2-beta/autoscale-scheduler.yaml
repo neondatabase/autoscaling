@@ -124,7 +124,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.17.7
+        image: neondatabase/autoscale-scheduler:v0.17.12
         livenessProbe:
           httpGet:
             path: /healthz
