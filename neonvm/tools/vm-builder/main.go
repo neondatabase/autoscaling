@@ -131,12 +131,14 @@ RUN set -e \
 		su-exec \
 		e2fsprogs-extra \
 		blkid \
+		flock \
 	&& mv /sbin/acpid         /neonvm/bin/ \
 	&& mv /sbin/udevd         /neonvm/bin/ \
 	&& mv /sbin/agetty        /neonvm/bin/ \
 	&& mv /sbin/su-exec       /neonvm/bin/ \
 	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
 	&& mv /sbin/blkid         /neonvm/bin/blkid \
+	&& mv /usr/bin/flock	  /neonvm/bin/flock \
 	&& mkdir -p /neonvm/lib \
 	&& cp -f /lib/ld-musl-x86_64.so.1  /neonvm/lib/ \
 	&& cp -f /lib/libblkid.so.1.1.0    /neonvm/lib/libblkid.so.1 \
@@ -233,7 +235,7 @@ fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
 
-flock /neonvm/vmstart.lock -c 'test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh'
+/neonvm/bin/flock -o /neonvm/vmstart.lock -c 'test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh'
 `
 
 	scriptInitTab = `
