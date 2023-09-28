@@ -96,15 +96,12 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 fmt: ## Run go fmt against code.
 	go fmt ./...
 
-.PHONY: vet
-vet: ## Run go vet against code.
-	# `go vet` requires gcc
-	# ref https://github.com/golang/go/issues/56755
-	CGO_ENABLED=0 go vet ./...
-
+.PHONY: lint
+lint: ## Run golangci-lint against code.
+	golangci-lint run
 
 .PHONY: test
-test: fmt vet envtest ## Run tests.
+test: fmt envtest ## Run tests.
 	# chmodding KUBEBUILDER_ASSETS dir to make it deletable by owner,
 	# otherwise it fails with actions/checkout on self-hosted GitHub runners
 	# 	ref: https://github.com/kubernetes-sigs/controller-runtime/pull/2245
@@ -116,7 +113,7 @@ test: fmt vet envtest ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
+build: fmt bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
 	go build -o bin/runner           neonvm/runner/main.go
@@ -130,7 +127,7 @@ bin/vm-builder-generic: ## Build vm-builder-generic binary.
 	CGO_ENABLED=0 go build -o bin/vm-builder-generic  neonvm/tools/vm-builder-generic/main.go
 
 .PHONY: run
-run: fmt vet ## Run a controller from your host.
+run: fmt ## Run a controller from your host.
 	go run ./neonvm/main.go
 
 .PHONY: vm-monitor
