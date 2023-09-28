@@ -178,6 +178,12 @@ func NewDispatcher(
 				}
 			} else {
 				sequentialFailureCount = 0
+
+				runner.status.update(runner.global, func(s podStatus) podStatus {
+					now := time.Now()
+					s.lastSuccessfulMonitorComm = &now
+					return s
+				})
 			}
 		}
 	})
