@@ -37,6 +37,9 @@ type MonitorConfig struct {
 	// longer excuse total VM monitor failures - i.e. when unhealthyAfterSilenceDurationSeconds
 	// kicks in.
 	UnhealthyStartupGracePeriodSeconds uint `json:"unhealthyStartupGracePeriodSeconds"`
+	// MaxHealthCheckSequentialFailuresSeconds gives the duration, in seconds, after which we
+	// should restart the connection to the vm-monitor if health checks aren't succeeding.
+	MaxHealthCheckSequentialFailuresSeconds uint `json:"maxHealthCheckSequentialFailuresSeconds"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
@@ -132,6 +135,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Monitor.ServerPort == 0, zeroTmpl, ".monitor.serverPort")
 	erc.Whenf(ec, c.Monitor.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".monitor.unhealthyAfterSilenceDurationSeconds")
 	erc.Whenf(ec, c.Monitor.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".monitor.unhealthyStartupGracePeriodSeconds")
+	erc.Whenf(ec, c.Monitor.MaxHealthCheckSequentialFailuresSeconds == 0, zeroTmpl, ".monitor.maxHealthCheckSequentialFailuresSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.Validate())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")

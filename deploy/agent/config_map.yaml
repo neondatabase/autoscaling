@@ -18,7 +18,8 @@ data:
           "responseTimeoutSeconds": 5,
           "connectionTimeoutSeconds": 4,
           "unhealthyAfterSilenceDurationSeconds": 20,
-          "unhealthyStartupGracePeriodSeconds": 20
+          "unhealthyStartupGracePeriodSeconds": 20,
+          "maxHealthCheckSequentialFailuresSeconds": 30
       },
       "metrics": {
         "port": 9100,

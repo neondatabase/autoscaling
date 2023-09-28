@@ -156,8 +156,9 @@ func NewDispatcher(
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 
-		// on the 3rd failed health check in a row, trigger restart
-		sequentialFailureCount := 0
+		// if we've had sequential failures for more than
+		var firstSequentialFailure *time.Time
+		continuedFailureAbortTimeout := time.Second * time.Duration(runner.global.config.Monitor.MaxHealthCheckSequentialFailuresSeconds)
 
 		for {
 			select {
@@ -168,16 +169,19 @@ func NewDispatcher(
 
 			_, err := disp.Call(ctx, logger, timeout, "HealthCheck", api.HealthCheck{})
 			if err != nil {
-				sequentialFailureCount += 1
 				logger.Warn("vm-monitor health check failed", zap.Error(err))
 
-				if sequentialFailureCount >= 3 {
-					err := fmt.Errorf("vm-monitor failed %d health checks in a row", sequentialFailureCount)
+				if firstSequentialFailure == nil {
+					now := time.Now()
+					firstSequentialFailure = &now
+				} else if since := time.Since(*firstSequentialFailure); since > continuedFailureAbortTimeout {
+					err := fmt.Errorf("vm-monitor has been failing health checks for at least %s", continuedFailureAbortTimeout)
 					logger.Error(fmt.Sprintf("%s, triggering connection restart", err.Error()))
 					disp.exit(websocket.StatusInternalError, err)
 				}
 			} else {
-				sequentialFailureCount = 0
+				// health check was successful, so reset the sequential failures count
+				firstSequentialFailure = nil
 
 				runner.status.update(runner.global, func(s podStatus) podStatus {
 					now := time.Now()
