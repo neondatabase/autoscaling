@@ -10,7 +10,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-func Test_desiredVMState(t *testing.T) {
+func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 	cases := []struct {
 		name string
 

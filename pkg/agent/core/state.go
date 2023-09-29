@@ -404,25 +404,52 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling() api.Resources 
 	// ---
 	//
 	// Broadly, the implementation works like this:
-	// 1. Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
+	// For CPU:
+	// Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
+	//
+	// For Memory:
+	// Based on memory usage, calculate the VM's desired memory allocation and extrapolate a
+	// goal number of CUs from that.
+	//
+	// 1. Take the maximum of these two goal CUs to create a unified goal CU
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
-	// If we don't know
+	// if we don't know what the compute unit is, don't do anything.
 	if s.plugin.computeUnit == nil {
 		return s.vm.Using()
 	}
 
 	var goalCU uint32
 	if s.metrics != nil {
+		// For CPU:
 		// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
 		// average),
-		// which we can get by dividing LA by LAFT.
-		goalCU = uint32(math.Round(float64(s.metrics.LoadAverage1Min) / s.scalingConfig().LoadAverageFractionTarget))
+		// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
+		goalCPUs := float64(s.metrics.LoadAverage1Min) / s.scalingConfig().LoadAverageFractionTarget
+		cpuGoalCU := uint32(math.Round(goalCPUs / s.plugin.computeUnit.VCPU.AsFloat64()))
+
+		// For Mem:
+		// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
+		// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
+		// that to CUs
+		//
+		// NOTE: use uint64 for calculations on bytes as uint32 can overflow
+		memGoalBytes := uint64(math.Round(float64(s.metrics.MemoryUsageBytes) / s.scalingConfig().MemoryUsageFractionTarget))
+		bytesPerCU := uint64(int64(s.plugin.computeUnit.Mem) * s.vm.Mem.SlotSize.Value())
+		memGoalCU := uint32(memGoalBytes / bytesPerCU)
+
+		goalCU = util.Max(cpuGoalCU, memGoalCU)
 	}
 
 	// Update goalCU based on any requested upscaling
 	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling(*s.plugin.computeUnit))
+
+	// // new CU must be >= current CU if !allowDecrease
+	// if !allowDecrease {
+	// 	_, upperBoundCU := s.computeUnitsBounds()
+	// 	goalCU = util.Max(goalCU, upperBoundCU)
+	// }
 
 	// resources for the desired "goal" compute units
 	var goalResources api.Resources
@@ -435,20 +462,30 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling() api.Resources 
 		goalResources = s.plugin.computeUnit.Mul(uint16(goalCU))
 	}
 
-	// bound goal by the minimum and maximum resource amounts for the VM
+	// bound goalResources by the minimum and maximum resource amounts for the VM
 	result := goalResources.Min(s.vm.Max()).Max(s.vm.Min())
+
+	// FIXME: re-enable this logic.
+	// // If no decreases are allowed, then we *must* make sure that the VM's usage value has not
+	// // decreased, even if it's greater than the VM maximum.
+	// //
+	// // We can run into situtations like this when VM scale-down on bounds change fails, so we end up
+	// // with a usage value greater than the maximum.
+	// if !allowDecrease {
+	// 	result = result.Max(s.VM.Using())
+	// }
 
 	// Check that the result is sound.
 	//
 	// With the current (naive) implementation, this is trivially ok. In future versions, it might
 	// not be so simple, so it's good to have this integrity check here.
-	if result.HasFieldGreaterThan(s.vm.Max()) {
+	if /* FIXME: re-enable: allowDecrease && */ result.HasFieldGreaterThan(s.vm.Max()) {
 		panic(fmt.Errorf(
-			"produced invalid desiredVMState: result has field greater than max. this = %+v", s,
+			"produced invalid desired state: result has field greater than max. this = %+v", *s,
 		))
 	} else if result.HasFieldLessThan(s.vm.Min()) {
 		panic(fmt.Errorf(
-			"produced invalid desiredVMState: result has field less than min. this = %+v", s,
+			"produced invalid desired state: result has field less than min. this = %+v", *s,
 		))
 	}
 
