@@ -15,9 +15,10 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		name string
 
 		// helpers for setting fields (ish) of State:
-		metrics          api.Metrics
-		vmUsing          api.Resources
-		requestedUpscale api.MoreResources
+		metrics           api.Metrics
+		vmUsing           api.Resources
+		schedulerApproved api.Resources
+		requestedUpscale  api.MoreResources
 
 		// expected output from (*State).DesiredResourcesFromMetricsOrRequestedUpscaling()
 		expected api.Resources
@@ -29,8 +30,9 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				LoadAverage5Min:  0.0, // unused
 				MemoryUsageBytes: 0.0,
 			},
-			vmUsing:          api.Resources{VCPU: 250, Mem: 1},
-			requestedUpscale: api.MoreResources{Cpu: false, Memory: false},
+			vmUsing:           api.Resources{VCPU: 250, Mem: 1},
+			schedulerApproved: api.Resources{VCPU: 250, Mem: 1},
+			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
 
 			expected: api.Resources{VCPU: 500, Mem: 2},
 		},
@@ -70,10 +72,25 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			},
 		)
 
-		// set the metrics
-		state.UpdateMetrics(c.metrics)
+		computeUnit := api.Resources{VCPU: 250, Mem: 1}
 
 		t.Run(c.name, func(t *testing.T) {
+			// set the metrics
+			state.UpdateMetrics(c.metrics)
+
+			// set the compute unit and lastApproved by simulating a scheduler request/response
+			state.Plugin().NewScheduler()
+			state.Plugin().StartingRequest(time.Now(), c.schedulerApproved)
+			err := state.Plugin().RequestSuccessful(time.Now(), api.PluginResponse{
+				Permit:      c.schedulerApproved,
+				Migrate:     nil,
+				ComputeUnit: computeUnit,
+			})
+			if err != nil {
+				t.Errorf("state.Plugin().RequestSuccessful() failed: %s", err)
+				return
+			}
+
 			actual := state.DesiredResourcesFromMetricsOrRequestedUpscaling()
 			if actual != c.expected {
 				t.Errorf("expected output %+v but got %+v", c.expected, actual)
