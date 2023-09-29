@@ -65,6 +65,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	patchutil "github.com/neondatabase/autoscaling/pkg/util/patch"
 )
 
 // PluginProtocolVersion is the current version of the agent<->scheduler plugin in use by this
@@ -1353,12 +1354,12 @@ func (r *Runner) doVMUpdate(
 	r.recordResourceChange(current, target, r.global.metrics.neonvmRequestedChange)
 
 	// Make the NeonVM request
-	patches := []util.JSONPatch{{
-		Op:    util.PatchReplace,
+	patches := []patchutil.Operation{{
+		Op:    patchutil.OpReplace,
 		Path:  "/spec/guest/cpus/use",
 		Value: target.VCPU.ToResourceQuantity(),
 	}, {
-		Op:    util.PatchReplace,
+		Op:    patchutil.OpReplace,
 		Path:  "/spec/guest/memorySlots/use",
 		Value: target.Mem,
 	}}
