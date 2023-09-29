@@ -503,13 +503,13 @@ func (s *State) requiredCUForRequestedUpscaling(computeUnit api.Resources) uint3
 	var required uint32
 	requested := s.monitor.requestedUpscale.requested
 
-	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
+	// note: 1 + floor(x / M) gives the minimum integer value greater than x / M.
 
 	if requested.Cpu {
-		required = util.Max(required, uint32(s.vm.Cpu.Use/computeUnit.VCPU)+1)
+		required = util.Max(required, 1+uint32(s.vm.Cpu.Use/computeUnit.VCPU))
 	}
 	if requested.Memory {
-		required = util.Max(required, uint32(s.vm.Mem.Use/computeUnit.Mem)+1)
+		required = util.Max(required, 1+uint32(s.vm.Mem.Use/computeUnit.Mem))
 	}
 
 	return required
