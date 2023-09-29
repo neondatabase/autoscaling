@@ -5,9 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/exp/slices"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -156,4 +159,263 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			}
 		})
 	}
+}
+
+type initialStateParams struct {
+	computeUnit api.Resources
+	minCU       uint16
+	maxCU       uint16
+}
+
+type initialStateOpt struct {
+	preCreate  func(*initialStateParams)
+	postCreate func(*api.VmInfo, *core.Config)
+}
+
+func withComputeUnit(cu api.Resources) (o initialStateOpt) {
+	o.preCreate = func(p *initialStateParams) { p.computeUnit = cu }
+	return
+}
+
+func withSizeRange(minCU, maxCU uint16) (o initialStateOpt) {
+	o.preCreate = func(p *initialStateParams) {
+		p.minCU = minCU
+		p.maxCU = maxCU
+	}
+	return
+}
+
+func withVMUsing(res api.Resources) (o initialStateOpt) {
+	o.postCreate = func(vm *api.VmInfo, _ *core.Config) {
+		vm.Cpu.Use = res.VCPU
+		vm.Mem.Use = res.Mem
+	}
+	return
+}
+
+func withStoredWarnings(warnings *[]string) (o initialStateOpt) {
+	o.postCreate = func(_ *api.VmInfo, config *core.Config) {
+		config.Warn = func(format string, args ...any) {
+			*warnings = append(*warnings, fmt.Sprintf(format, args...))
+		}
+	}
+	return
+}
+
+func createInitialState(opts ...initialStateOpt) *core.State {
+	pre := initialStateParams{
+		computeUnit: api.Resources{VCPU: 250, Mem: 1},
+		minCU:       1,
+		maxCU:       4,
+	}
+	for _, o := range opts {
+		if o.preCreate != nil {
+			o.preCreate(&pre)
+		}
+	}
+
+	vm := api.VmInfo{
+		Name:      "test",
+		Namespace: "test",
+		Cpu: api.VmCpuInfo{
+			Min: vmapi.MilliCPU(pre.minCU) * pre.computeUnit.VCPU,
+			Use: vmapi.MilliCPU(pre.minCU) * pre.computeUnit.VCPU,
+			Max: vmapi.MilliCPU(pre.maxCU) * pre.computeUnit.VCPU,
+		},
+		Mem: api.VmMemInfo{
+			SlotSize: resource.NewQuantity(1<<30 /* 1 Gi */, resource.BinarySI),
+			Min:      pre.minCU * pre.computeUnit.Mem,
+			Use:      pre.minCU * pre.computeUnit.Mem,
+			Max:      pre.maxCU * pre.computeUnit.Mem,
+		},
+		ScalingConfig:  nil,
+		AlwaysMigrate:  false,
+		ScalingEnabled: true,
+	}
+
+	config := core.Config{
+		DefaultScalingConfig: api.ScalingConfig{
+			LoadAverageFractionTarget: 0.5,
+			MemoryUsageFractionTarget: 0.5,
+		},
+		PluginRequestTick:              5 * time.Second,
+		MonitorDeniedDownscaleCooldown: 5 * time.Second,
+		MonitorRetryWait:               5 * time.Second,
+		Warn:                           func(string, ...any) {},
+	}
+
+	for _, o := range opts {
+		if o.postCreate != nil {
+			o.postCreate(&vm, &config)
+		}
+	}
+
+	return core.NewState(vm, config)
+}
+
+type fakeClock struct {
+	base time.Time
+	now  time.Time
+}
+
+func newFakeClock() *fakeClock {
+	base, err := time.Parse(time.RFC3339, "2000-01-01T00:00:00Z") // a nice round number, to make things easier
+	if err != nil {
+		panic(err)
+	}
+
+	return &fakeClock{base: base, now: base}
+}
+
+func (c *fakeClock) inc(duration time.Duration) {
+	c.now = c.now.Add(duration)
+}
+
+func (c *fakeClock) elapsed() time.Duration {
+	return c.now.Sub(c.base)
+}
+
+func Test_NextActions(t *testing.T) {
+	simulateInitialSchedulerRequest := func(t *testing.T, state *core.State, clock *fakeClock, reqTime time.Duration) {
+		state.Plugin().NewScheduler()
+
+		actions := state.NextActions(clock.now)
+		assert.NotNil(t, actions.PluginRequest)
+		action := actions.PluginRequest
+		assert.Nil(t, action.LastPermit)
+		state.Plugin().StartingRequest(clock.now, action.Target)
+		clock.inc(reqTime)
+		assert.NoError(t, state.Plugin().RequestSuccessful(clock.now, api.PluginResponse{
+			Permit:      action.Target,
+			Migrate:     nil,
+			ComputeUnit: api.Resources{VCPU: 250, Mem: 1}, // TODO: make this configurable... somehow.
+		}))
+	}
+
+	// Thorough checks of a relatively simple flow
+	t.Run("BasicScaleupFlow", func(t *testing.T) {
+		warnings := []string{}
+		clock := newFakeClock()
+		state := createInitialState(
+			withStoredWarnings(&warnings),
+		)
+
+		hundredMillis := 100 * time.Millisecond
+
+		state.Plugin().NewScheduler()
+		state.Monitor().Active(true)
+
+		simulateInitialSchedulerRequest(t, state, clock, hundredMillis)
+		assert.Equal(t, warnings, []string{"Can't determine desired resources because compute unit hasn't been set yet"})
+		warnings = nil // reset
+
+		clock.inc(hundredMillis)
+		metrics := api.Metrics{
+			LoadAverage1Min:  0.3,
+			LoadAverage5Min:  0.0, // unused
+			MemoryUsageBytes: 0.0,
+		}
+		state.UpdateMetrics(metrics)
+
+		// double-check that we agree about the desired resources
+		assert.Equal(
+			t,
+			api.Resources{VCPU: 500, Mem: 2},
+			state.DesiredResourcesFromMetricsOrRequestedUpscaling(clock.now),
+		)
+
+		// Now that the initial scheduler request is done, and we have metrics that indicate
+		// scale-up would be a good idea, we should be contacting the scheduler to get approval.
+		actions := state.NextActions(clock.now)
+		assert.Equal(t, core.ActionSet{
+			PluginRequest: &core.ActionPluginRequest{
+				LastPermit: &api.Resources{VCPU: 250, Mem: 1},
+				Target:     api.Resources{VCPU: 500, Mem: 2},
+				Metrics:    &metrics,
+			},
+			// shouldn't have anything to say to the other components
+			NeonVMRequest:    nil,
+			MonitorDownscale: nil,
+			MonitorUpscale:   nil,
+			Wait:             nil, // and, don't need to wait because plugin should be ongoing
+		}, actions)
+		assert.Empty(t, warnings)
+		// start the request:
+		state.Plugin().StartingRequest(clock.now, actions.PluginRequest.Target)
+		clock.inc(hundredMillis)
+		// should have nothing more to do; waiting on plugin request to come back
+		assert.Equal(t, core.ActionSet{
+			Wait:             nil,
+			PluginRequest:    nil,
+			NeonVMRequest:    nil,
+			MonitorDownscale: nil,
+			MonitorUpscale:   nil,
+		}, state.NextActions(clock.now))
+		assert.Empty(t, warnings)
+		assert.NoError(t, state.Plugin().RequestSuccessful(clock.now, api.PluginResponse{
+			Permit:      api.Resources{VCPU: 500, Mem: 2},
+			Migrate:     nil,
+			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
+		}))
+		assert.Empty(t, warnings)
+		assert.Equal(t, clock.elapsed(), 2*hundredMillis)
+
+		// Scheduler approval is done, now we should be making the request to NeonVM
+		actions = state.NextActions(clock.now)
+		assert.Equal(t, core.ActionSet{
+			PluginRequest: nil,
+			NeonVMRequest: &core.ActionNeonVMRequest{
+				Current: api.Resources{VCPU: 250, Mem: 1},
+				Target:  api.Resources{VCPU: 500, Mem: 2},
+			},
+			MonitorDownscale: nil,
+			MonitorUpscale:   nil,
+			Wait:             nil, // don't need to wait because NeonVM should be ongoing
+		}, actions)
+		assert.Empty(t, warnings)
+		// start the request:
+		state.NeonVM().StartingRequest(clock.now, actions.NeonVMRequest.Target)
+		clock.inc(hundredMillis)
+		// should have nothing more to do; waiting on NeonVM request to come back
+		assert.Equal(t, core.ActionSet{
+			Wait:             nil,
+			PluginRequest:    nil,
+			NeonVMRequest:    nil,
+			MonitorDownscale: nil,
+			MonitorUpscale:   nil,
+		}, state.NextActions(clock.now))
+		assert.Empty(t, warnings)
+		state.NeonVM().RequestSuccessful(clock.now)
+		assert.Empty(t, warnings)
+		assert.Equal(t, clock.elapsed(), 3*hundredMillis)
+
+		// NeonVM change is done, now we should finish by notifying the vm-monitor
+		actions = state.NextActions(clock.now)
+		assert.Equal(t, core.ActionSet{
+			PluginRequest:    nil,
+			NeonVMRequest:    nil,
+			MonitorDownscale: nil,
+			MonitorUpscale: &core.ActionMonitorUpscale{
+				Current: api.Resources{VCPU: 250, Mem: 1},
+				Target:  api.Resources{VCPU: 500, Mem: 2},
+			},
+			Wait: nil, // don't need to wait because monitor request should be ongoing
+		}, actions)
+		assert.Empty(t, warnings)
+		// start the request:
+		state.Monitor().StartingUpscaleRequest(clock.now)
+		clock.inc(hundredMillis)
+		// should have nothing more to do; waiting on vm-monitor request to come back
+		assert.Equal(t, core.ActionSet{
+			Wait:             nil,
+			PluginRequest:    nil,
+			NeonVMRequest:    nil,
+			MonitorDownscale: nil,
+			MonitorUpscale:   nil,
+		}, state.NextActions(clock.now))
+		assert.Empty(t, warnings)
+		state.Monitor().UpscaleRequestSuccessful(clock.now, actions.MonitorUpscale.Target)
+		assert.Empty(t, warnings)
+		assert.Equal(t, clock.elapsed(), 4*hundredMillis)
+	})
 }
