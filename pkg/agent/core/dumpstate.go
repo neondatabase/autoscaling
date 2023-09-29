@@ -88,6 +88,7 @@ type requestedUpscaleDump struct {
 }
 type deniedDownscaleDump struct {
 	At        time.Time     `json:"at"`
+	Current   api.Resources `json:"current"`
 	Requested api.Resources `json:"requested"`
 }
 
@@ -105,6 +106,7 @@ func (s *monitorState) dump() monitorStateDump {
 	if s.deniedDownscale != nil {
 		deniedDownscale = &deniedDownscaleDump{
 			At:        s.deniedDownscale.at,
+			Current:   s.deniedDownscale.current,
 			Requested: s.deniedDownscale.requested,
 		}
 	}

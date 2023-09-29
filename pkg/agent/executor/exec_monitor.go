@@ -124,7 +124,7 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 			if !result.Ok {
 				logger.Warn("vm-monitor denied downscale", logFields...)
 				if unchanged {
-					state.Monitor().DownscaleRequestDenied(endTime, action.Target)
+					state.Monitor().DownscaleRequestDenied(endTime, action.Current, action.Target)
 				}
 			} else {
 				logger.Info("vm-monitor approved downscale", logFields...)

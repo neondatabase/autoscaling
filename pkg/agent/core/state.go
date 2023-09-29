@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -139,6 +141,7 @@ type requestedUpscale struct {
 
 type deniedDownscale struct {
 	at        time.Time
+	current   api.Resources
 	requested api.Resources
 }
 
@@ -185,7 +188,7 @@ func (s *State) NextActions(now time.Time) ActionSet {
 
 	using := s.vm.Using()
 
-	desiredResources := s.DesiredResourcesFromMetricsOrRequestedUpscaling()
+	desiredResources := s.DesiredResourcesFromMetricsOrRequestedUpscaling(now)
 
 	desiredResourcesApprovedByMonitor := s.boundResourcesByMonitorApproved(desiredResources)
 	desiredResourcesApprovedByPlugin := s.boundResourcesByPluginApproved(desiredResources)
@@ -390,7 +393,7 @@ func (s *State) scalingConfig() api.ScalingConfig {
 	}
 }
 
-func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling() api.Resources {
+func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) api.Resources {
 	// There's some annoying edge cases that this function has to be able to handle properly. For
 	// the sake of completeness, they are:
 	//
@@ -443,21 +446,19 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling() api.Resources 
 		goalCU = util.Max(cpuGoalCU, memGoalCU)
 	}
 
-	// Update goalCU based on any requested upscaling
+	// Update goalCU based on any requested upscaling or downscaling that was previously denied
 	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling(*s.plugin.computeUnit))
-
-	// // new CU must be >= current CU if !allowDecrease
-	// if !allowDecrease {
-	// 	_, upperBoundCU := s.computeUnitsBounds()
-	// 	goalCU = util.Max(goalCU, upperBoundCU)
-	// }
+	deniedDownscaleInEffect := s.deniedDownscaleInEffect(now)
+	if deniedDownscaleInEffect {
+		goalCU = util.Max(goalCU, s.requiredCUForDeniedDownscale(*s.plugin.computeUnit, s.monitor.deniedDownscale.requested))
+	}
 
 	// resources for the desired "goal" compute units
 	var goalResources api.Resources
 
 	// If there's no constraints from s.metrics or s.monitor.requestedUpscale, then we'd prefer to
 	// keep things as-is, rather than scaling down (because otherwise goalCU = 0).
-	if s.metrics == nil && s.monitor.requestedUpscale == nil {
+	if s.metrics == nil && s.monitor.requestedUpscale == nil && !deniedDownscaleInEffect {
 		goalResources = s.vm.Using()
 	} else {
 		goalResources = s.plugin.computeUnit.Mul(uint16(goalCU))
@@ -466,21 +467,29 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling() api.Resources 
 	// bound goalResources by the minimum and maximum resource amounts for the VM
 	result := goalResources.Min(s.vm.Max()).Max(s.vm.Min())
 
-	// FIXME: re-enable this logic.
-	// // If no decreases are allowed, then we *must* make sure that the VM's usage value has not
-	// // decreased, even if it's greater than the VM maximum.
-	// //
-	// // We can run into situtations like this when VM scale-down on bounds change fails, so we end up
-	// // with a usage value greater than the maximum.
-	// if !allowDecrease {
-	// 	result = result.Max(s.VM.Using())
-	// }
+	// ... but if we aren't allowed to downscale, then we *must* make sure that the VM's usage value
+	// won't decrease to the previously denied amount, even if it's greater than the maximum.
+	//
+	// We can run into siutations like this when VM scale-down on bounds change fails, so we end up
+	// with a usage value greater than the maximum.
+	//
+	// It's not a great situation to be in, but it's easier to make the policy "give the users a
+	// little extra if we mess up" than "oops we OOM-killed your DB, hope you weren't doing anything".
+	if deniedDownscaleInEffect {
+		// roughly equivalent to "result >= s.monitor.deniedDownscale.requested"
+		if !result.HasFieldGreaterThan(s.monitor.deniedDownscale.requested) {
+			// This can only happen if s.vm.Max() is less than goalResources, because otherwise this
+			// would have been factored into goalCU, affecting goalResources. Hence, the warning.
+			s.config.Warn("Can't decrease desired resources to within VM maximum because of vm-monitor previously denied downscale request")
+		}
+		result = result.Max(s.minRequiredResourcesForDeniedDownscale(*s.plugin.computeUnit, *s.monitor.deniedDownscale))
+	}
 
 	// Check that the result is sound.
 	//
 	// With the current (naive) implementation, this is trivially ok. In future versions, it might
 	// not be so simple, so it's good to have this integrity check here.
-	if /* FIXME: re-enable: allowDecrease && */ result.HasFieldGreaterThan(s.vm.Max()) {
+	if !deniedDownscaleInEffect && result.HasFieldGreaterThan(s.vm.Max()) {
 		panic(fmt.Errorf(
 			"produced invalid desired state: result has field greater than max. this = %+v", *s,
 		))
@@ -513,6 +522,37 @@ func (s *State) requiredCUForRequestedUpscaling(computeUnit api.Resources) uint3
 	}
 
 	return required
+}
+
+func (s *State) deniedDownscaleInEffect(now time.Time) bool {
+	return s.monitor.deniedDownscale != nil &&
+		// Previous denied downscaling attempts are in effect until the cooldown expires
+		now.Before(s.monitor.deniedDownscale.at.Add(s.config.MonitorDeniedDownscaleCooldown))
+}
+
+// NB: like requiredCUForRequestedUpscaling, we make the caller provide the values so that it's
+// more clear that it's the caller's responsibility to ensure the values are non-nil.
+func (s *State) requiredCUForDeniedDownscale(computeUnit, deniedResources api.Resources) uint32 {
+	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
+	requiredFromCPU := 1 + uint32(deniedResources.VCPU/computeUnit.VCPU)
+	requiredFromMem := 1 + uint32(deniedResources.Mem/computeUnit.Mem)
+
+	return util.Max(requiredFromCPU, requiredFromMem)
+}
+
+func (s *State) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources, denied deniedDownscale) api.Resources {
+	var res api.Resources
+
+	if denied.requested.VCPU < denied.current.VCPU {
+		// increase the value by one CU's worth
+		res.VCPU = computeUnit.VCPU * vmapi.MilliCPU(1+uint32(denied.requested.VCPU/computeUnit.VCPU))
+	}
+
+	if denied.requested.Mem < denied.current.Mem {
+		res.Mem = computeUnit.Mem * (1 + uint16(denied.requested.Mem/computeUnit.Mem))
+	}
+
+	return res
 }
 
 func (s *State) boundResourcesByMonitorApproved(resources api.Resources) api.Resources {
@@ -678,10 +718,11 @@ func (h MonitorHandle) DownscaleRequestAllowed(now time.Time, requested api.Reso
 }
 
 // Downscale request was successful but the monitor denied our request.
-func (h MonitorHandle) DownscaleRequestDenied(now time.Time, requested api.Resources) {
+func (h MonitorHandle) DownscaleRequestDenied(now time.Time, current, requested api.Resources) {
 	h.s.monitor.ongoingRequest = nil
 	h.s.monitor.deniedDownscale = &deniedDownscale{
 		at:        now,
+		current:   current,
 		requested: requested,
 	}
 }
