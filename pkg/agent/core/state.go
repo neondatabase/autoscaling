@@ -57,7 +57,7 @@ type Config struct {
 // State holds all of the necessary internal state for a VM in order to make scaling
 // decisions
 type State struct {
-	// ANY CHANGED FIELDS MUST BE UPDATED IN dump.go AS WELL
+	// ANY CHANGED FIELDS MUST BE UPDATED IN dumpstate.go AS WELL
 
 	config Config
 
