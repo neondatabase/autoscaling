@@ -417,6 +417,7 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling() api.Resources 
 
 	// if we don't know what the compute unit is, don't do anything.
 	if s.plugin.computeUnit == nil {
+		s.config.Warn("Can't determine desired resources because compute unit hasn't been set yet")
 		return s.vm.Using()
 	}
 
@@ -569,7 +570,7 @@ func (h PluginHandle) SchedulerGone() {
 	h.s.plugin = pluginState{
 		alive:          false,
 		ongoingRequest: false,
-		computeUnit:    nil,
+		computeUnit:    h.s.plugin.computeUnit,
 		lastRequest:    nil,
 		permit:         h.s.plugin.permit, // Keep this; trust the previous scheduler.
 	}
