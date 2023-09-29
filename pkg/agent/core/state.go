@@ -456,9 +456,9 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) a
 	// resources for the desired "goal" compute units
 	var goalResources api.Resources
 
-	// If there's no constraints from s.metrics or s.monitor.requestedUpscale, then we'd prefer to
-	// keep things as-is, rather than scaling down (because otherwise goalCU = 0).
-	if s.metrics == nil && s.monitor.requestedUpscale == nil && !deniedDownscaleInEffect {
+	// If there's no constraints and s.metrics is nil, then we'll end up with goalCU = 0.
+	// But if we have no metrics, we'd prefer to keep things as-is, rather than scaling down.
+	if s.metrics == nil && goalCU == 0 {
 		goalResources = s.vm.Using()
 	} else {
 		goalResources = s.plugin.computeUnit.Mul(uint16(goalCU))
