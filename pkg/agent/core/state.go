@@ -291,11 +291,11 @@ func (s *State) NextActions(now time.Time) ActionSet {
 				Target:  desiredResources.Max(*s.monitor.approved),
 			}
 		} else if !s.monitor.active {
-			s.config.Warn("Wanted to send informant upscale request, but not active")
+			s.config.Warn("Wanted to send vm-monitor upscale request, but not active")
 		} else if s.monitor.ongoingRequest != nil && s.monitor.ongoingRequest.kind != monitorRequestKindUpscale {
-			s.config.Warn("Wanted to send informant upscale request, but waiting other ongoing %s request", s.monitor.ongoingRequest.kind)
+			s.config.Warn("Wanted to send vm-monitor upscale request, but waiting other ongoing %s request", s.monitor.ongoingRequest.kind)
 		} else if s.monitor.ongoingRequest == nil {
-			s.config.Warn("Wanted to send informant upscale request, but waiting on retry rate limit")
+			s.config.Warn("Wanted to send vm-monitor upscale request, but waiting on retry rate limit")
 		}
 	}
 
@@ -309,7 +309,7 @@ func (s *State) NextActions(now time.Time) ActionSet {
 	}
 	wantMonitorDownscaleRequest := s.monitor.approved != nil && *s.monitor.approved != resourcesForMonitorDownscale
 	if s.monitor.approved == nil && resourcesForMonitorDownscale != using {
-		s.config.Warn("Wanted to send informant downscale request, but haven't yet gotten information about its resources")
+		s.config.Warn("Wanted to send vm-monitor downscale request, but haven't yet gotten information about its resources")
 	}
 	// However, we may need to wait before retrying (or for any ongoing requests to finish)
 	makeMonitorDownscaleRequest := wantMonitorDownscaleRequest &&
@@ -328,11 +328,11 @@ func (s *State) NextActions(now time.Time) ActionSet {
 				Target:  resourcesForMonitorDownscale,
 			}
 		} else if !s.monitor.active {
-			s.config.Warn("Wanted to send informant downscale request, but not active")
+			s.config.Warn("Wanted to send vm-monitor downscale request, but not active")
 		} else if s.monitor.ongoingRequest != nil && s.monitor.ongoingRequest.kind != monitorRequestKindDownscale {
-			s.config.Warn("Wanted to send informant downscale request, but waiting on other ongoing %s request", s.monitor.ongoingRequest.kind)
+			s.config.Warn("Wanted to send vm-monitor downscale request, but waiting on other ongoing %s request", s.monitor.ongoingRequest.kind)
 		} else if s.monitor.ongoingRequest == nil {
-			s.config.Warn("Wanted to send informant downscale request, but waiting on retry rate limit")
+			s.config.Warn("Wanted to send vm-monitor downscale request, but waiting on retry rate limit")
 		}
 	}
 
