@@ -61,6 +61,10 @@ type State struct {
 
 	config Config
 
+	// unused. Exists to make it easier to add print debugging (via .config.Warn) for a single call
+	// to NextActions.
+	debug bool
+
 	// vm gives the current state of the VM - or at least, the state of the fields we care about.
 	//
 	// NB: any contents behind pointers in vm are immutable. Any time the field is updated, we
@@ -155,6 +159,7 @@ type neonvmState struct {
 func NewState(vm api.VmInfo, config Config) *State {
 	return &State{
 		config: config,
+		debug:  false,
 		vm:     vm,
 		plugin: pluginState{
 			alive:          false,
@@ -578,6 +583,10 @@ func (s *State) boundResourcesByPluginApproved(resources api.Resources) api.Reso
 //////////////////////////////////////////
 // PUBLIC FUNCTIONS TO UPDATE THE STATE //
 //////////////////////////////////////////
+
+func (s *State) Debug(enabled bool) {
+	s.debug = enabled
+}
 
 func (s *State) UpdatedVM(vm api.VmInfo) {
 	s.vm = vm
