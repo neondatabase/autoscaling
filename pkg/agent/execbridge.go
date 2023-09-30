@@ -144,7 +144,7 @@ type execMonitorHandle struct {
 }
 
 func (h *execMonitorHandle) ID() string {
-	panic("todo")
+	return h.dispatcher.UniqueID()
 }
 
 func (h *execMonitorHandle) Downscale(
