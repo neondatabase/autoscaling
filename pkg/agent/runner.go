@@ -125,34 +125,6 @@ type Scheduler struct {
 
 	// info holds the immutable information we use to connect to and describe the scheduler
 	info schedwatch.SchedulerInfo
-
-	// registered is true only once a call to this Scheduler's Register() method has been made
-	//
-	// All methods that make a request to the scheduler will first call Register() if registered is
-	// false.
-	//
-	// This field MUST NOT be updated without holding BOTH runner.requestLock AND runner.lock
-	//
-	// This field MAY be read while holding EITHER runner.requestLock OR runner.lock.
-	registered bool
-
-	// fatalError is non-nil if an error occurred while communicating with the scheduler that we
-	// cannot recover from.
-	//
-	// Examples of fatal errors:
-	//
-	// * HTTP response status 4XX or 5XX - we don't know the plugin's state
-	// * Semantically invalid response - either a logic error occurred, or the plugin's state
-	//   doesn't match ours
-	//
-	// This field MUST NOT be updated without holding BOTH runner.requestLock AND runner.lock.
-	//
-	// This field MAY be read while holding EITHER runner.requestLock OR runner.lock.
-	fatalError error
-
-	// fatal is used for signalling that fatalError has been set (and so we should look for a new
-	// scheduler)
-	fatal util.SignalSender[struct{}]
 }
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
@@ -165,9 +137,7 @@ type RunnerState struct {
 
 // SchedulerState is the state of a Scheduler, constructed as part of a Runner's State Method
 type SchedulerState struct {
-	Info       schedwatch.SchedulerInfo `json:"info"`
-	Registered bool                     `json:"registered"`
-	FatalError error                    `json:"fatalError"`
+	Info schedwatch.SchedulerInfo `json:"info"`
 }
 
 func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
@@ -179,9 +149,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	var scheduler *SchedulerState
 	if sched := r.scheduler.Load(); sched != nil {
 		scheduler = &SchedulerState{
-			Info:       sched.info,
-			Registered: sched.registered,
-			FatalError: sched.fatalError,
+			Info: sched.info,
 		}
 	}
 
@@ -588,8 +556,6 @@ func (r *Runner) trackSchedulerLoop(
 		minWait     time.Duration    = 5 * time.Second // minimum time we have to wait between scheduler starts
 		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
 		currentInfo schedwatch.SchedulerInfo
-		fatal       util.SignalReceiver[struct{}]
-		failed      bool
 	)
 
 	if init == nil {
@@ -603,50 +569,35 @@ startScheduler:
 
 	lastStart = time.Now()
 	okForNew = time.After(minWait)
-	failed = false
 
 	// Set the current scheduler
-	fatal = func() util.SignalReceiver[struct{}] {
-		logger := logger.With(zap.Object("scheduler", currentInfo))
-
+	{
 		verb := "Setting"
 		if init == nil || init.UID != currentInfo.UID {
 			verb = "Updating"
 		}
 
-		sendFatal, recvFatal := util.NewSingleSignalPair[struct{}]()
-
 		sched := &Scheduler{
-			runner:     r,
-			info:       currentInfo,
-			registered: false,
-			fatalError: nil,
-			fatal:      sendFatal,
+			runner: r,
+			info:   currentInfo,
 		}
 
-		r.lock.Lock()
-		defer r.lock.Unlock()
+		func() {
+			r.lock.Lock()
+			defer r.lock.Unlock()
 
-		newScheduler(func() {
-			r.scheduler.Store(sched)
-			logger.Info(fmt.Sprintf("%s scheduler pod", verb))
-		})
+			newScheduler(func() {
+				r.scheduler.Store(sched)
+				logger.Info(fmt.Sprintf("%s scheduler pod", verb), zap.Object("scheduler", currentInfo))
+			})
+		}()
+	}
 
-		return recvFatal
-	}()
-
-	// Start watching for the current scheduler to be deleted or have fatally errored
+	// Start watching for the current scheduler to be deleted
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-fatal.Recv():
-			logger.Info(
-				"Waiting for new scheduler because current fatally errored",
-				zap.Object("scheduler", currentInfo),
-			)
-			failed = true
-			goto waitForNewScheduler
 		case info := <-schedulerWatch.Deleted:
 			matched := func() bool {
 				r.lock.Lock()
@@ -686,16 +637,9 @@ waitForNewScheduler:
 		select {
 		case <-okForNew:
 		default:
-			var endingMode string
-			if failed {
-				endingMode = "failed"
-			} else {
-				endingMode = "ended"
-			}
-
 			// Not ready yet; let's log something about it:
 			logger.Info(
-				fmt.Sprintf("Scheduler %s quickly. Respecting minimum delay before switching to a new one", endingMode),
+				"Scheduler ended quickly. Respecting minimum delay before switching to a new one",
 				zap.Duration("activeTime", time.Since(lastStart)), zap.Duration("delay", minWait),
 			)
 			select {
