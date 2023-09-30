@@ -14,7 +14,6 @@ import (
 
 type PluginInterface interface {
 	EmptyID() string
-	RequestLock() util.ChanMutex
 	GetHandle() PluginHandle
 }
 
@@ -26,18 +25,8 @@ type PluginHandle interface {
 func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *zap.Logger) {
 	var (
 		updates     util.BroadcastReceiver = c.updates.NewReceiver()
-		requestLock util.ChanMutex         = c.clients.Plugin.RequestLock()
 		ifaceLogger *zap.Logger            = logger.Named("client")
 	)
-
-	holdingRequestLock := false
-	releaseRequestLockIfHolding := func() {
-		if holdingRequestLock {
-			requestLock.Unlock()
-			holdingRequestLock = false
-		}
-	}
-	defer releaseRequestLockIfHolding()
 
 	idUnchanged := func(current string) bool {
 		if h := c.clients.Plugin.GetHandle(); h != nil {
@@ -49,8 +38,6 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 
 	last := c.getActions()
 	for {
-		releaseRequestLockIfHolding()
-
 		// Always receive an update if there is one. This helps with reliability (better guarantees
 		// about not missing updates) and means that the switch statements can be simpler.
 		select {
@@ -74,19 +61,6 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		action := *last.actions.PluginRequest
 
 		pluginIface := c.clients.Plugin.GetHandle()
-
-		// Try to acquire the request lock, but if something happens while we're waiting, we'll
-		// abort & retry on the next loop iteration (or maybe not, if last.actions changed).
-		// FIXME: remove request lock
-		select {
-		case <-ctx.Done():
-			return
-		case <-updates.Wait():
-			// NB: don't .Awake(); allow that to be handled at the top of the loop.
-			continue
-		case <-requestLock.WaitLock():
-			holdingRequestLock = true
-		}
 
 		// update the state to indicate that the request is starting.
 		var startTime time.Time

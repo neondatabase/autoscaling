@@ -12,7 +12,6 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 var (
@@ -37,11 +36,6 @@ func makePluginInterface(r *Runner, core *executor.ExecutorCore) *execPluginInte
 // EmptyID implements executor.PluginInterface
 func (iface *execPluginInterface) EmptyID() string {
 	return "<none>"
-}
-
-// RequestLock implements executor.PluginInterface
-func (iface *execPluginInterface) RequestLock() util.ChanMutex {
-	return iface.runner.requestLock
 }
 
 // GetHandle implements executor.PluginInterface
@@ -101,11 +95,6 @@ func makeNeonVMInterface(r *Runner) *execNeonVMInterface {
 	return &execNeonVMInterface{runner: r}
 }
 
-// RequestLock implements executor.NeonVMInterface
-func (iface *execNeonVMInterface) RequestLock() util.ChanMutex {
-	return iface.runner.requestLock
-}
-
 // Request implements executor.NeonVMInterface
 func (iface *execNeonVMInterface) Request(ctx context.Context, logger *zap.Logger, current, target api.Resources) error {
 	iface.runner.recordResourceChange(current, target, iface.runner.global.metrics.neonvmRequestedChange)
@@ -123,13 +112,12 @@ func (iface *execNeonVMInterface) Request(ctx context.Context, logger *zap.Logge
 ////////////////////////////////////////////////////
 
 type execMonitorInterface struct {
-	runner      *Runner
-	core        *executor.ExecutorCore
-	requestLock util.ChanMutex
+	runner *Runner
+	core   *executor.ExecutorCore
 }
 
 func makeMonitorInterface(r *Runner, core *executor.ExecutorCore) *execMonitorInterface {
-	return &execMonitorInterface{runner: r, core: core, requestLock: util.NewChanMutex()}
+	return &execMonitorInterface{runner: r, core: core}
 }
 
 // EmptyID implements executor.MonitorInterface
@@ -145,24 +133,18 @@ func (iface *execMonitorInterface) GetHandle() executor.MonitorHandle {
 	}
 
 	return &execMonitorHandle{
-		runner:      iface.runner,
-		dispatcher:  dispatcher,
-		requestLock: iface.requestLock,
+		runner:     iface.runner,
+		dispatcher: dispatcher,
 	}
 }
 
 type execMonitorHandle struct {
-	runner      *Runner
-	dispatcher  *Dispatcher
-	requestLock util.ChanMutex
+	runner     *Runner
+	dispatcher *Dispatcher
 }
 
 func (h *execMonitorHandle) ID() string {
 	panic("todo")
-}
-
-func (h *execMonitorHandle) RequestLock() util.ChanMutex {
-	return h.requestLock
 }
 
 func (h *execMonitorHandle) Downscale(
