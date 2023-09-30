@@ -97,7 +97,7 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		c.update(func(state *core.State) {
 			logger.Info("Starting vm-monitor downscale request", zap.Any("action", action))
 			startTime = time.Now()
-			state.Monitor().StartingDownscaleRequest(startTime)
+			state.Monitor().StartingDownscaleRequest(startTime, action.Target)
 		})
 
 		result, err := doSingleMonitorDownscaleRequest(ctx, ifaceLogger, monitor, action)
@@ -124,12 +124,12 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 			if !result.Ok {
 				logger.Warn("vm-monitor denied downscale", logFields...)
 				if unchanged {
-					state.Monitor().DownscaleRequestDenied(endTime, action.Current, action.Target)
+					state.Monitor().DownscaleRequestDenied(endTime)
 				}
 			} else {
 				logger.Info("vm-monitor approved downscale", logFields...)
 				if unchanged {
-					state.Monitor().DownscaleRequestAllowed(endTime, action.Target)
+					state.Monitor().DownscaleRequestAllowed(endTime)
 				}
 			}
 		})
@@ -222,7 +222,7 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 		c.update(func(state *core.State) {
 			logger.Info("Starting vm-monitor upscale request", zap.Any("action", action))
 			startTime = time.Now()
-			state.Monitor().StartingUpscaleRequest(startTime)
+			state.Monitor().StartingUpscaleRequest(startTime, action.Target)
 		})
 
 		err := doSingleMonitorUpscaleRequest(ctx, ifaceLogger, monitor, action)
@@ -246,7 +246,7 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 
 			logger.Info("vm-monitor upscale request successful", logFields...)
 			if unchanged {
-				state.Monitor().UpscaleRequestSuccessful(endTime, action.Target)
+				state.Monitor().UpscaleRequestSuccessful(endTime)
 			}
 		})
 	}

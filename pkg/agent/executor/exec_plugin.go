@@ -77,6 +77,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 
 		// Try to acquire the request lock, but if something happens while we're waiting, we'll
 		// abort & retry on the next loop iteration (or maybe not, if last.actions changed).
+		// FIXME: remove request lock
 		select {
 		case <-ctx.Done():
 			return

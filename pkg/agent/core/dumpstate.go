@@ -70,7 +70,6 @@ func (s *pluginState) dump() pluginStateDump {
 }
 
 type monitorStateDump struct {
-	Active             bool                       `json:"active"`
 	OngoingRequest     *OngoingMonitorRequestDump `json:"ongoingRequest"`
 	RequestedUpscale   *requestedUpscaleDump      `json:"requestedUpscale"`
 	DeniedDownscale    *deniedDownscaleDump       `json:"deniedDownscale"`
@@ -79,7 +78,8 @@ type monitorStateDump struct {
 	UpscaleFailureAt   *time.Time                 `json:"upscaleFailureAt"`
 }
 type OngoingMonitorRequestDump struct {
-	Kind monitorRequestKind `json:"kind"`
+	Kind      monitorRequestKind `json:"kind"`
+	Requested api.Resources      `json:"resources"`
 }
 type requestedUpscaleDump struct {
 	At        time.Time         `json:"at"`
@@ -114,12 +114,12 @@ func (s *monitorState) dump() monitorStateDump {
 	var ongoingRequest *OngoingMonitorRequestDump
 	if s.ongoingRequest != nil {
 		ongoingRequest = &OngoingMonitorRequestDump{
-			Kind: s.ongoingRequest.kind,
+			Kind:      s.ongoingRequest.kind,
+			Requested: s.ongoingRequest.requested,
 		}
 	}
 
 	return monitorStateDump{
-		Active:             s.active,
 		OngoingRequest:     ongoingRequest,
 		RequestedUpscale:   requestedUpscale,
 		DeniedDownscale:    deniedDownscale,

@@ -34,6 +34,7 @@ data:
         "schedulerName": "autoscale-scheduler",
         "requestTimeoutSeconds": 2,
         "requestAtLeastEverySeconds": 5,
+        "retryDeniedUpscaleSeconds": 2,
         "requestPort": 10299
       },
       "dumpState": {

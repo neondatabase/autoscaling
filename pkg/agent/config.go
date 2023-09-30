@@ -93,6 +93,9 @@ type SchedulerConfig struct {
 	// RequestAtLeastEverySeconds gives the maximum duration we should go without attempting a
 	// request to the scheduler, even if nothing's changed.
 	RequestAtLeastEverySeconds uint `json:"requestAtLeastEverySeconds"`
+	// RetryDeniedUpscaleSeconds gives the duration, in seconds, that we must wait before resending
+	// a request for resources that were not approved
+	RetryDeniedUpscaleSeconds uint `json:"retryDeniedUpscaleSeconds"`
 	// RequestPort defines the port to access the scheduler's ✨special✨ API with
 	RequestPort uint16 `json:"requestPort"`
 }
@@ -153,6 +156,8 @@ func (c *Config) validate() error {
 	ec.Add(c.Scaling.DefaultConfig.Validate())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
 	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Scheduler.RequestAtLeastEverySeconds == 0, zeroTmpl, ".scheduler.requestAtLeastEverySeconds")
+	erc.Whenf(ec, c.Scheduler.RetryDeniedUpscaleSeconds == 0, zeroTmpl, ".scheduler.retryDeniedUpscaleSeconds")
 	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
 
 	return ec.Resolve()

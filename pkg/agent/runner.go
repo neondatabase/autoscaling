@@ -314,6 +314,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	executorCore := executor.NewExecutorCore(coreExecLogger.Named("state"), r.vm, executor.Config{
 		DefaultScalingConfig:           r.global.config.Scaling.DefaultConfig,
 		PluginRequestTick:              time.Second * time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds),
+		PluginDeniedRetryWait:          time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
 		MonitorDeniedDownscaleCooldown: time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
 		MonitorRetryWait:               time.Second * time.Duration(r.global.config.Monitor.RetryFailedRequestSeconds),
 		Warn: func(msg string, args ...any) {
