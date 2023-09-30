@@ -71,7 +71,14 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 			state.Monitor().StartingDownscaleRequest(startTime, action.Target)
 		})
 
-		result, err := doSingleMonitorDownscaleRequest(ctx, ifaceLogger, monitor, action)
+		var result *api.DownscaleResult
+		var err error
+
+		if monitor != nil {
+			result, err = monitor.Downscale(ctx, ifaceLogger, action.Current, action.Target)
+		} else {
+			err = errors.New("No currently active vm-monitor connection")
+		}
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
@@ -105,19 +112,6 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 			}
 		})
 	}
-}
-
-func doSingleMonitorDownscaleRequest(
-	ctx context.Context,
-	logger *zap.Logger,
-	iface MonitorHandle,
-	action core.ActionMonitorDownscale,
-) (*api.DownscaleResult, error) {
-	if iface == nil {
-		return nil, errors.New("No currently active vm-monitor connection")
-	}
-
-	return iface.Downscale(ctx, logger, action.Current, action.Target)
 }
 
 func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger *zap.Logger) {
@@ -168,7 +162,12 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 			state.Monitor().StartingUpscaleRequest(startTime, action.Target)
 		})
 
-		err := doSingleMonitorUpscaleRequest(ctx, ifaceLogger, monitor, action)
+		var err error
+		if monitor != nil {
+			err = monitor.Upscale(ctx, ifaceLogger, action.Current, action.Target)
+		} else {
+			err = errors.New("No currently active vm-monitor connection")
+		}
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
@@ -193,17 +192,4 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 			}
 		})
 	}
-}
-
-func doSingleMonitorUpscaleRequest(
-	ctx context.Context,
-	logger *zap.Logger,
-	iface MonitorHandle,
-	action core.ActionMonitorUpscale,
-) error {
-	if iface == nil {
-		return errors.New("No currently active vm-monitor connection")
-	}
-
-	return iface.Upscale(ctx, logger, action.Current, action.Target)
 }

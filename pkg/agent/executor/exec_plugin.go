@@ -70,7 +70,14 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 			state.Plugin().StartingRequest(startTime, action.Target)
 		})
 
-		resp, err := doSinglePluginRequest(ctx, ifaceLogger, pluginIface, action)
+		var resp *api.PluginResponse
+		var err error
+
+		if pluginIface != nil {
+			resp, err = pluginIface.Request(ctx, ifaceLogger, action.LastPermit, action.Target, action.Metrics)
+		} else {
+			err = errors.New("No currently enabled plugin handle")
+		}
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
@@ -97,17 +104,4 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 			}
 		})
 	}
-}
-
-func doSinglePluginRequest(
-	ctx context.Context,
-	logger *zap.Logger,
-	iface PluginHandle,
-	action core.ActionPluginRequest,
-) (*api.PluginResponse, error) {
-	if iface == nil {
-		return nil, errors.New("No currently enabled plugin handle")
-	}
-
-	return iface.Request(ctx, logger, action.LastPermit, action.Target, action.Metrics)
 }
