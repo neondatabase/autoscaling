@@ -782,6 +782,10 @@ func (s *State) Debug(enabled bool) {
 }
 
 func (s *State) UpdatedVM(vm api.VmInfo) {
+	// FIXME: overriding this is required right now because we trust that a successful request to
+	// NeonVM means the VM was already updated, which... isn't true, and otherwise we could run into
+	// sync issues.
+	vm.SetUsing(s.vm.Using())
 	s.vm = vm
 }
 

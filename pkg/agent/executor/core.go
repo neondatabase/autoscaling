@@ -90,6 +90,16 @@ func (c *ExecutorCore) update(with func(*core.State)) {
 	with(c.core)
 }
 
+// may change in the future
+type StateDump = core.StateDump
+
+// StateDump copies and returns the current state inside the executor
+func (c *ExecutorCore) StateDump() StateDump {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.core.Dump()
+}
+
 // Updater returns a handle on the object used for making external changes to the ExecutorCore,
 // beyond what's provided by the various client (ish) interfaces
 func (c *ExecutorCore) Updater() ExecutorCoreUpdater {
@@ -104,6 +114,13 @@ type ExecutorCoreUpdater struct {
 func (c ExecutorCoreUpdater) UpdateMetrics(metrics api.Metrics, withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.UpdateMetrics(metrics)
+		withLock()
+	})
+}
+
+func (c ExecutorCoreUpdater) UpdatedVM(vm api.VmInfo, withLock func()) {
+	c.core.update(func(state *core.State) {
+		state.UpdatedVM(vm)
 		withLock()
 	})
 }
