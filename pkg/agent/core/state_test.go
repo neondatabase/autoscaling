@@ -173,27 +173,6 @@ type initialStateOpt struct {
 	postCreate func(*api.VmInfo, *core.Config)
 }
 
-func withComputeUnit(cu api.Resources) (o initialStateOpt) {
-	o.preCreate = func(p *initialStateParams) { p.computeUnit = cu }
-	return
-}
-
-func withSizeRange(minCU, maxCU uint16) (o initialStateOpt) {
-	o.preCreate = func(p *initialStateParams) {
-		p.minCU = minCU
-		p.maxCU = maxCU
-	}
-	return
-}
-
-func withVMUsing(res api.Resources) (o initialStateOpt) {
-	o.postCreate = func(vm *api.VmInfo, _ *core.Config) {
-		vm.Cpu.Use = res.VCPU
-		vm.Mem.Use = res.Mem
-	}
-	return
-}
-
 func withStoredWarnings(warnings *[]string) (o initialStateOpt) {
 	o.postCreate = func(_ *api.VmInfo, config *core.Config) {
 		config.Warn = func(format string, args ...any) {
