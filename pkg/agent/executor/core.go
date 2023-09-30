@@ -73,6 +73,7 @@ func (c *ExecutorCore) getActions() timedActions {
 		now := time.Now()
 		c.stateLogger.Info("Recalculating ActionSet", zap.Time("now", now), zap.Any("state", c.core.Dump()))
 		c.actions = &timedActions{calculatedAt: now, actions: c.core.NextActions(now)}
+		c.stateLogger.Info("New ActionSet", zap.Time("now", now), zap.Any("actions", c.actions.actions))
 	}
 
 	return *c.actions
