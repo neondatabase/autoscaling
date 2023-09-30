@@ -10,8 +10,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	helpers "github.com/neondatabase/autoscaling/pkg/agent/core/testhelpers"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -163,78 +161,6 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 	}
 }
 
-type initialStateParams struct {
-	computeUnit api.Resources
-	minCU       uint16
-	maxCU       uint16
-}
-
-type initialStateOpt struct {
-	preCreate  func(*initialStateParams)
-	postCreate func(*api.VmInfo, *core.Config)
-}
-
-func withStoredWarnings(warnings *[]string) (o initialStateOpt) {
-	o.postCreate = func(_ *api.VmInfo, config *core.Config) {
-		config.Warn = func(format string, args ...any) {
-			*warnings = append(*warnings, fmt.Sprintf(format, args...))
-		}
-	}
-	return
-}
-
-func createInitialState(opts ...initialStateOpt) *core.State {
-	pre := initialStateParams{
-		computeUnit: api.Resources{VCPU: 250, Mem: 1},
-		minCU:       1,
-		maxCU:       4,
-	}
-	for _, o := range opts {
-		if o.preCreate != nil {
-			o.preCreate(&pre)
-		}
-	}
-
-	vm := api.VmInfo{
-		Name:      "test",
-		Namespace: "test",
-		Cpu: api.VmCpuInfo{
-			Min: vmapi.MilliCPU(pre.minCU) * pre.computeUnit.VCPU,
-			Use: vmapi.MilliCPU(pre.minCU) * pre.computeUnit.VCPU,
-			Max: vmapi.MilliCPU(pre.maxCU) * pre.computeUnit.VCPU,
-		},
-		Mem: api.VmMemInfo{
-			SlotSize: resource.NewQuantity(1<<30 /* 1 Gi */, resource.BinarySI),
-			Min:      pre.minCU * pre.computeUnit.Mem,
-			Use:      pre.minCU * pre.computeUnit.Mem,
-			Max:      pre.maxCU * pre.computeUnit.Mem,
-		},
-		ScalingConfig:  nil,
-		AlwaysMigrate:  false,
-		ScalingEnabled: true,
-	}
-
-	config := core.Config{
-		DefaultScalingConfig: api.ScalingConfig{
-			LoadAverageFractionTarget: 0.5,
-			MemoryUsageFractionTarget: 0.5,
-		},
-		PluginRequestTick:              5 * time.Second,
-		PluginDeniedRetryWait:          2 * time.Second,
-		MonitorDeniedDownscaleCooldown: 5 * time.Second,
-		MonitorRetryWait:               3 * time.Second,
-		Warn:                           func(string, ...any) {},
-	}
-
-	for _, o := range opts {
-		if o.postCreate != nil {
-			o.postCreate(&vm, &config)
-		}
-	}
-
-	return core.NewState(vm, config)
-}
-
 func Test_NextActions(t *testing.T) {
 	simulateInitialSchedulerRequest := func(t *testing.T, state *core.State, clock *helpers.FakeClock, reqTime time.Duration) {
 		state.Plugin().NewScheduler()
@@ -256,8 +182,8 @@ func Test_NextActions(t *testing.T) {
 	t.Run("BasicScaleupAndDownFlow", func(t *testing.T) {
 		warnings := []string{}
 		clock := helpers.NewFakeClock()
-		state := createInitialState(
-			withStoredWarnings(&warnings),
+		state := helpers.CreateInitialState(
+			helpers.WithStoredWarnings(&warnings),
 		)
 
 		hundredMillis := 100 * time.Millisecond
