@@ -205,15 +205,11 @@ func Test_NextActions(t *testing.T) {
 		a.WithWarnings("Can't determine desired resources because compute unit hasn't been set yet").
 			Call(updateActions).
 			Equals(core.ActionSet{
-				Wait: nil,
 				PluginRequest: &core.ActionPluginRequest{
 					LastPermit: nil,
 					Target:     api.Resources{VCPU: 250, Mem: 1},
 					Metrics:    nil,
 				},
-				NeonVMRequest:    nil,
-				MonitorDownscale: nil,
-				MonitorUpscale:   nil,
 			})
 		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
 		clock.Inc(hundredMillis).AssertEquals(1 * hundredMillis)
@@ -238,28 +234,17 @@ func Test_NextActions(t *testing.T) {
 		// Now that the initial scheduler request is done, and we have metrics that indicate
 		// scale-up would be a good idea, we should be contacting the scheduler to get approval.
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: nil,
 			PluginRequest: &core.ActionPluginRequest{
 				LastPermit: &api.Resources{VCPU: 250, Mem: 1},
 				Target:     api.Resources{VCPU: 500, Mem: 2},
 				Metrics:    &lastMetrics,
 			},
-			// shouldn't have anything to say to the other components
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 		// start the request:
 		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
 		clock.Inc(hundredMillis)
 		// should have nothing more to do; waiting on plugin request to come back
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait:             nil,
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
-		})
+		a.Call(updateActions).Equals(core.ActionSet{})
 		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 			Permit:      api.Resources{VCPU: 500, Mem: 2},
 			Migrate:     nil,
@@ -275,13 +260,10 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - hundredMillis,
 			},
-			PluginRequest: nil,
 			NeonVMRequest: &core.ActionNeonVMRequest{
 				Current: api.Resources{VCPU: 250, Mem: 1},
 				Target:  api.Resources{VCPU: 500, Mem: 2},
 			},
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 		// start the request:
 		a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
@@ -291,10 +273,6 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 2*hundredMillis,
 			},
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 		a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
@@ -303,9 +281,6 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 2*hundredMillis, // same as previous, clock hasn't changed
 			},
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
 			MonitorUpscale: &core.ActionMonitorUpscale{
 				Current: api.Resources{VCPU: 250, Mem: 1},
 				Target:  api.Resources{VCPU: 500, Mem: 2},
@@ -319,10 +294,6 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 3*hundredMillis,
 			},
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 		a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
 
@@ -332,10 +303,6 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 3*hundredMillis, // same as previous, clock hasn't changed
 			},
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 
 		// ---- Scaledown !!! ----
@@ -358,13 +325,10 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 4*hundredMillis,
 			},
-			PluginRequest: nil,
-			NeonVMRequest: nil,
 			MonitorDownscale: &core.ActionMonitorDownscale{
 				Current: api.Resources{VCPU: 500, Mem: 2},
 				Target:  api.Resources{VCPU: 250, Mem: 1},
 			},
-			MonitorUpscale: nil,
 		})
 		a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), actions.MonitorDownscale.Target)
 		clock.Inc(hundredMillis).AssertEquals(7 * hundredMillis)
@@ -373,10 +337,6 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 5*hundredMillis,
 			},
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 		a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
 
@@ -385,13 +345,10 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 5*hundredMillis, // same as previous, clock hasn't changed
 			},
-			PluginRequest: nil,
 			NeonVMRequest: &core.ActionNeonVMRequest{
 				Current: api.Resources{VCPU: 500, Mem: 2},
 				Target:  api.Resources{VCPU: 250, Mem: 1},
 			},
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 		a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
 		clock.Inc(hundredMillis).AssertEquals(8 * hundredMillis)
@@ -400,36 +357,22 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 6*hundredMillis,
 			},
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 		a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
 		// Request to NeonVM completed, it's time to inform the scheduler plugin:
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: nil,
 			PluginRequest: &core.ActionPluginRequest{
 				LastPermit: &api.Resources{VCPU: 500, Mem: 2},
 				Target:     api.Resources{VCPU: 250, Mem: 1},
 				Metrics:    &lastMetrics,
 			},
 			// shouldn't have anything to say to the other components
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
 		clock.Inc(hundredMillis).AssertEquals(9 * hundredMillis)
 		// should have nothing more to do; waiting on plugin request to come back
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait:             nil, // and don't need to wait, because plugin req is ongoing
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
-		})
+		a.Call(updateActions).Equals(core.ActionSet{})
 		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 			Permit:      api.Resources{VCPU: 250, Mem: 1},
 			Migrate:     nil,
@@ -441,10 +384,6 @@ func Test_NextActions(t *testing.T) {
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - hundredMillis, // request that just finished was started 100ms ago
 			},
-			PluginRequest:    nil,
-			NeonVMRequest:    nil,
-			MonitorDownscale: nil,
-			MonitorUpscale:   nil,
 		})
 	})
 }
