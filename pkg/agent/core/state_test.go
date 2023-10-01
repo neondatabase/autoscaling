@@ -188,191 +188,189 @@ func duration(s string) time.Duration {
 	return d
 }
 
-func Test_NextActions(t *testing.T) {
-	// Thorough checks of a relatively simple flow
-	t.Run("BasicScaleupAndDownFlow", func(t *testing.T) {
-		a := helpers.NewAssert(t)
+// Thorough checks of a relatively simple flow
+func TestBasicScaleUpAndDownFlow(t *testing.T) {
+	a := helpers.NewAssert(t)
 
-		clock := helpers.NewFakeClock(t)
-		state := helpers.CreateInitialState(
-			DefaultInitialStateConfig,
-			helpers.WithStoredWarnings(a.StoredWarnings()),
-		)
+	clock := helpers.NewFakeClock(t)
+	state := helpers.CreateInitialState(
+		DefaultInitialStateConfig,
+		helpers.WithStoredWarnings(a.StoredWarnings()),
+	)
 
-		var actions core.ActionSet
-		updateActions := func() core.ActionSet {
-			actions = state.NextActions(clock.Now())
-			return actions
-		}
+	var actions core.ActionSet
+	updateActions := func() core.ActionSet {
+		actions = state.NextActions(clock.Now())
+		return actions
+	}
 
-		clockTick := func() helpers.Elapsed {
-			return clock.Inc(100 * time.Millisecond)
-		}
+	clockTick := func() helpers.Elapsed {
+		return clock.Inc(100 * time.Millisecond)
+	}
 
-		state.Plugin().NewScheduler()
-		state.Monitor().Active(true)
+	state.Plugin().NewScheduler()
+	state.Monitor().Active(true)
 
-		// Send initial scheduler request:
-		a.WithWarnings("Can't determine desired resources because compute unit hasn't been set yet").
-			Call(updateActions).
-			Equals(core.ActionSet{
-				PluginRequest: &core.ActionPluginRequest{
-					LastPermit: nil,
-					Target:     api.Resources{VCPU: 250, Mem: 1},
-					Metrics:    nil,
-				},
-			})
-		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
-		clockTick().AssertEquals(duration("0.1s"))
-		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
-			Permit:      actions.PluginRequest.Target,
-			Migrate:     nil,
-			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
-		})
-
-		clockTick().AssertEquals(duration("0.2s"))
-		lastMetrics := api.Metrics{
-			LoadAverage1Min:  0.3,
-			LoadAverage5Min:  0.0, // unused
-			MemoryUsageBytes: 0.0,
-		}
-		a.Do(state.UpdateMetrics, lastMetrics)
-		// double-check that we agree about the desired resources
-		a.Call(state.DesiredResourcesFromMetricsOrRequestedUpscaling, clock.Now()).
-			Equals(api.Resources{VCPU: 500, Mem: 2}, helpers.Nil[*time.Duration]())
-
-		// Now that the initial scheduler request is done, and we have metrics that indicate
-		// scale-up would be a good idea, we should be contacting the scheduler to get approval.
-		a.Call(updateActions).Equals(core.ActionSet{
+	// Send initial scheduler request:
+	a.WithWarnings("Can't determine desired resources because compute unit hasn't been set yet").
+		Call(updateActions).
+		Equals(core.ActionSet{
 			PluginRequest: &core.ActionPluginRequest{
-				LastPermit: &api.Resources{VCPU: 250, Mem: 1},
-				Target:     api.Resources{VCPU: 500, Mem: 2},
-				Metrics:    &lastMetrics,
-			},
-		})
-		// start the request:
-		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
-		clockTick().AssertEquals(duration("0.3s"))
-		// should have nothing more to do; waiting on plugin request to come back
-		a.Call(updateActions).Equals(core.ActionSet{})
-		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
-			Permit:      api.Resources{VCPU: 500, Mem: 2},
-			Migrate:     nil,
-			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
-		})
-
-		// Scheduler approval is done, now we should be making the request to NeonVM
-		a.Call(updateActions).Equals(core.ActionSet{
-			// expected to make a scheduler request every 5s; it's been 100ms since the last one, so
-			// if the NeonVM request didn't come back in time, we'd need to get woken up to start
-			// the next scheduler request.
-			Wait: &core.ActionWait{Duration: duration("4.9s")},
-			NeonVMRequest: &core.ActionNeonVMRequest{
-				Current: api.Resources{VCPU: 250, Mem: 1},
-				Target:  api.Resources{VCPU: 500, Mem: 2},
-			},
-		})
-		// start the request:
-		a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
-		clockTick().AssertEquals(duration("0.4s"))
-		// should have nothing more to do; waiting on NeonVM request to come back
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.8s")},
-		})
-		a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-
-		// NeonVM change is done, now we should finish by notifying the vm-monitor
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.8s")}, // same as previous, clock hasn't changed
-			MonitorUpscale: &core.ActionMonitorUpscale{
-				Current: api.Resources{VCPU: 250, Mem: 1},
-				Target:  api.Resources{VCPU: 500, Mem: 2},
-			},
-		})
-		// start the request:
-		a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), actions.MonitorUpscale.Target)
-		clockTick().AssertEquals(duration("0.5s"))
-		// should have nothing more to do; waiting on vm-monitor request to come back
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.7s")},
-		})
-		a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
-
-		// And now, double-check that there's no sneaky follow-up actions before we change the
-		// metrics
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.7s")}, // same as previous, clock hasn't changed
-		})
-
-		// ---- Scaledown !!! ----
-
-		clockTick().AssertEquals(duration("0.6s"))
-
-		// Set metrics back so that desired resources should now be zero
-		lastMetrics = api.Metrics{
-			LoadAverage1Min:  0.0,
-			LoadAverage5Min:  0.0, // unused
-			MemoryUsageBytes: 0.0,
-		}
-		a.Do(state.UpdateMetrics, lastMetrics)
-		// double-check that we agree about the new desired resources
-		a.Call(state.DesiredResourcesFromMetricsOrRequestedUpscaling, clock.Now()).
-			Equals(api.Resources{VCPU: 250, Mem: 1}, helpers.Nil[*time.Duration]())
-
-		// First step in downscaling is getting approval from the vm-monitor:
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.6s")},
-			MonitorDownscale: &core.ActionMonitorDownscale{
-				Current: api.Resources{VCPU: 500, Mem: 2},
-				Target:  api.Resources{VCPU: 250, Mem: 1},
-			},
-		})
-		a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), actions.MonitorDownscale.Target)
-		clockTick().AssertEquals(duration("0.7s"))
-		// should have nothing more to do; waiting on vm-monitor request to come back
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.5s")},
-		})
-		a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
-
-		// After getting approval from the vm-monitor, we make the request to NeonVM to carry it out
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.5s")}, // same as previous, clock hasn't changed
-			NeonVMRequest: &core.ActionNeonVMRequest{
-				Current: api.Resources{VCPU: 500, Mem: 2},
-				Target:  api.Resources{VCPU: 250, Mem: 1},
-			},
-		})
-		a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
-		clockTick().AssertEquals(duration("0.8s"))
-		// should have nothing more to do; waiting on NeonVM request to come back
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.4s")},
-		})
-		a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-
-		// Request to NeonVM completed, it's time to inform the scheduler plugin:
-		a.Call(updateActions).Equals(core.ActionSet{
-			PluginRequest: &core.ActionPluginRequest{
-				LastPermit: &api.Resources{VCPU: 500, Mem: 2},
+				LastPermit: nil,
 				Target:     api.Resources{VCPU: 250, Mem: 1},
-				Metrics:    &lastMetrics,
+				Metrics:    nil,
 			},
-			// shouldn't have anything to say to the other components
 		})
-		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
-		clockTick().AssertEquals(duration("0.9s"))
-		// should have nothing more to do; waiting on plugin request to come back
-		a.Call(updateActions).Equals(core.ActionSet{})
-		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
-			Permit:      api.Resources{VCPU: 250, Mem: 1},
-			Migrate:     nil,
-			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
-		})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
+	clockTick().AssertEquals(duration("0.1s"))
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      actions.PluginRequest.Target,
+		Migrate:     nil,
+		ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
+	})
 
-		// Finally, check there's no leftover actions:
-		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{Duration: duration("4.9s")}, // request that just finished was started 100ms ago
-		})
+	clockTick().AssertEquals(duration("0.2s"))
+	lastMetrics := api.Metrics{
+		LoadAverage1Min:  0.3,
+		LoadAverage5Min:  0.0, // unused
+		MemoryUsageBytes: 0.0,
+	}
+	a.Do(state.UpdateMetrics, lastMetrics)
+	// double-check that we agree about the desired resources
+	a.Call(state.DesiredResourcesFromMetricsOrRequestedUpscaling, clock.Now()).
+		Equals(api.Resources{VCPU: 500, Mem: 2}, helpers.Nil[*time.Duration]())
+
+	// Now that the initial scheduler request is done, and we have metrics that indicate
+	// scale-up would be a good idea, we should be contacting the scheduler to get approval.
+	a.Call(updateActions).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit: &api.Resources{VCPU: 250, Mem: 1},
+			Target:     api.Resources{VCPU: 500, Mem: 2},
+			Metrics:    &lastMetrics,
+		},
+	})
+	// start the request:
+	a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
+	clockTick().AssertEquals(duration("0.3s"))
+	// should have nothing more to do; waiting on plugin request to come back
+	a.Call(updateActions).Equals(core.ActionSet{})
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      api.Resources{VCPU: 500, Mem: 2},
+		Migrate:     nil,
+		ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
+	})
+
+	// Scheduler approval is done, now we should be making the request to NeonVM
+	a.Call(updateActions).Equals(core.ActionSet{
+		// expected to make a scheduler request every 5s; it's been 100ms since the last one, so
+		// if the NeonVM request didn't come back in time, we'd need to get woken up to start
+		// the next scheduler request.
+		Wait: &core.ActionWait{Duration: duration("4.9s")},
+		NeonVMRequest: &core.ActionNeonVMRequest{
+			Current: api.Resources{VCPU: 250, Mem: 1},
+			Target:  api.Resources{VCPU: 500, Mem: 2},
+		},
+	})
+	// start the request:
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
+	clockTick().AssertEquals(duration("0.4s"))
+	// should have nothing more to do; waiting on NeonVM request to come back
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.8s")},
+	})
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+
+	// NeonVM change is done, now we should finish by notifying the vm-monitor
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.8s")}, // same as previous, clock hasn't changed
+		MonitorUpscale: &core.ActionMonitorUpscale{
+			Current: api.Resources{VCPU: 250, Mem: 1},
+			Target:  api.Resources{VCPU: 500, Mem: 2},
+		},
+	})
+	// start the request:
+	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), actions.MonitorUpscale.Target)
+	clockTick().AssertEquals(duration("0.5s"))
+	// should have nothing more to do; waiting on vm-monitor request to come back
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.7s")},
+	})
+	a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
+
+	// And now, double-check that there's no sneaky follow-up actions before we change the
+	// metrics
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.7s")}, // same as previous, clock hasn't changed
+	})
+
+	// ---- Scaledown !!! ----
+
+	clockTick().AssertEquals(duration("0.6s"))
+
+	// Set metrics back so that desired resources should now be zero
+	lastMetrics = api.Metrics{
+		LoadAverage1Min:  0.0,
+		LoadAverage5Min:  0.0, // unused
+		MemoryUsageBytes: 0.0,
+	}
+	a.Do(state.UpdateMetrics, lastMetrics)
+	// double-check that we agree about the new desired resources
+	a.Call(state.DesiredResourcesFromMetricsOrRequestedUpscaling, clock.Now()).
+		Equals(api.Resources{VCPU: 250, Mem: 1}, helpers.Nil[*time.Duration]())
+
+	// First step in downscaling is getting approval from the vm-monitor:
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.6s")},
+		MonitorDownscale: &core.ActionMonitorDownscale{
+			Current: api.Resources{VCPU: 500, Mem: 2},
+			Target:  api.Resources{VCPU: 250, Mem: 1},
+		},
+	})
+	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), actions.MonitorDownscale.Target)
+	clockTick().AssertEquals(duration("0.7s"))
+	// should have nothing more to do; waiting on vm-monitor request to come back
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.5s")},
+	})
+	a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
+
+	// After getting approval from the vm-monitor, we make the request to NeonVM to carry it out
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.5s")}, // same as previous, clock hasn't changed
+		NeonVMRequest: &core.ActionNeonVMRequest{
+			Current: api.Resources{VCPU: 500, Mem: 2},
+			Target:  api.Resources{VCPU: 250, Mem: 1},
+		},
+	})
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
+	clockTick().AssertEquals(duration("0.8s"))
+	// should have nothing more to do; waiting on NeonVM request to come back
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.4s")},
+	})
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+
+	// Request to NeonVM completed, it's time to inform the scheduler plugin:
+	a.Call(updateActions).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit: &api.Resources{VCPU: 500, Mem: 2},
+			Target:     api.Resources{VCPU: 250, Mem: 1},
+			Metrics:    &lastMetrics,
+		},
+		// shouldn't have anything to say to the other components
+	})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
+	clockTick().AssertEquals(duration("0.9s"))
+	// should have nothing more to do; waiting on plugin request to come back
+	a.Call(updateActions).Equals(core.ActionSet{})
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      api.Resources{VCPU: 250, Mem: 1},
+		Migrate:     nil,
+		ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
+	})
+
+	// Finally, check there's no leftover actions:
+	a.Call(updateActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.9s")}, // request that just finished was started 100ms ago
 	})
 }
