@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/neondatabase/autoscaling/pkg/agent/core"
 )
 
 type Assert struct {
@@ -44,18 +41,6 @@ func (a Assert) StoredWarnings() *[]string {
 func (a Assert) WithWarnings(warnings ...string) Assert {
 	a.tinfo.expectedWarnings = warnings
 	return a
-}
-
-// NextActions calls core.NextActions() and checks that the value matches expected, returning it
-func (a Assert) NextActions(state *core.State, now time.Time, expected core.ActionSet) core.ActionSet {
-	actions := state.NextActions(now)
-	assert.Equal(a.t, expected, actions)
-	assert.Equal(a.t, a.tinfo.expectedWarnings, *a.storedWarnings)
-	if a.t.Failed() {
-		a.t.FailNow()
-	}
-	*a.storedWarnings = nil
-	return actions
 }
 
 // Nil returns a type-erased zero value of T, typically for use when a typed nil is necessary
@@ -159,4 +144,5 @@ func (f PreparedFunctionCall) Equals(expected ...any) {
 	if f.a.t.Failed() {
 		f.a.t.FailNow()
 	}
+	*f.a.storedWarnings = nil
 }
