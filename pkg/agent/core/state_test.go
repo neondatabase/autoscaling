@@ -179,6 +179,15 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 	},
 }
 
+// helper function to parse a duration
+func duration(s string) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		panic(fmt.Errorf("failed to parse duration: %w", err))
+	}
+	return d
+}
+
 func Test_NextActions(t *testing.T) {
 	// Thorough checks of a relatively simple flow
 	t.Run("BasicScaleupAndDownFlow", func(t *testing.T) {
@@ -196,7 +205,9 @@ func Test_NextActions(t *testing.T) {
 			return actions
 		}
 
-		hundredMillis := 100 * time.Millisecond
+		clockTick := func() helpers.Elapsed {
+			return clock.Inc(100 * time.Millisecond)
+		}
 
 		state.Plugin().NewScheduler()
 		state.Monitor().Active(true)
@@ -212,21 +223,20 @@ func Test_NextActions(t *testing.T) {
 				},
 			})
 		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
-		clock.Inc(hundredMillis).AssertEquals(1 * hundredMillis)
+		clockTick().AssertEquals(duration("0.1s"))
 		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 			Permit:      actions.PluginRequest.Target,
 			Migrate:     nil,
 			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
 		})
 
-		clock.Inc(hundredMillis)
+		clockTick().AssertEquals(duration("0.2s"))
 		lastMetrics := api.Metrics{
 			LoadAverage1Min:  0.3,
 			LoadAverage5Min:  0.0, // unused
 			MemoryUsageBytes: 0.0,
 		}
 		a.Do(state.UpdateMetrics, lastMetrics)
-		clock.Elapsed().AssertEquals(2 * hundredMillis)
 		// double-check that we agree about the desired resources
 		a.Call(state.DesiredResourcesFromMetricsOrRequestedUpscaling, clock.Now()).
 			Equals(api.Resources{VCPU: 500, Mem: 2}, helpers.Nil[*time.Duration]())
@@ -242,7 +252,7 @@ func Test_NextActions(t *testing.T) {
 		})
 		// start the request:
 		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
-		clock.Inc(hundredMillis)
+		clockTick().AssertEquals(duration("0.3s"))
 		// should have nothing more to do; waiting on plugin request to come back
 		a.Call(updateActions).Equals(core.ActionSet{})
 		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
@@ -250,16 +260,13 @@ func Test_NextActions(t *testing.T) {
 			Migrate:     nil,
 			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
 		})
-		clock.Elapsed().AssertEquals(3 * hundredMillis)
 
 		// Scheduler approval is done, now we should be making the request to NeonVM
 		a.Call(updateActions).Equals(core.ActionSet{
 			// expected to make a scheduler request every 5s; it's been 100ms since the last one, so
 			// if the NeonVM request didn't come back in time, we'd need to get woken up to start
 			// the next scheduler request.
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - hundredMillis,
-			},
+			Wait: &core.ActionWait{Duration: duration("4.9s")},
 			NeonVMRequest: &core.ActionNeonVMRequest{
 				Current: api.Resources{VCPU: 250, Mem: 1},
 				Target:  api.Resources{VCPU: 500, Mem: 2},
@@ -267,20 +274,16 @@ func Test_NextActions(t *testing.T) {
 		})
 		// start the request:
 		a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
-		clock.Inc(hundredMillis).AssertEquals(4 * hundredMillis)
+		clockTick().AssertEquals(duration("0.4s"))
 		// should have nothing more to do; waiting on NeonVM request to come back
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - 2*hundredMillis,
-			},
+			Wait: &core.ActionWait{Duration: duration("4.8s")},
 		})
 		a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
 		// NeonVM change is done, now we should finish by notifying the vm-monitor
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - 2*hundredMillis, // same as previous, clock hasn't changed
-			},
+			Wait: &core.ActionWait{Duration: duration("4.8s")}, // same as previous, clock hasn't changed
 			MonitorUpscale: &core.ActionMonitorUpscale{
 				Current: api.Resources{VCPU: 250, Mem: 1},
 				Target:  api.Resources{VCPU: 500, Mem: 2},
@@ -288,26 +291,22 @@ func Test_NextActions(t *testing.T) {
 		})
 		// start the request:
 		a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), actions.MonitorUpscale.Target)
-		clock.Inc(hundredMillis).AssertEquals(5 * hundredMillis)
+		clockTick().AssertEquals(duration("0.5s"))
 		// should have nothing more to do; waiting on vm-monitor request to come back
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - 3*hundredMillis,
-			},
+			Wait: &core.ActionWait{Duration: duration("4.7s")},
 		})
 		a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
 
 		// And now, double-check that there's no sneaky follow-up actions before we change the
 		// metrics
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - 3*hundredMillis, // same as previous, clock hasn't changed
-			},
+			Wait: &core.ActionWait{Duration: duration("4.7s")}, // same as previous, clock hasn't changed
 		})
 
 		// ---- Scaledown !!! ----
 
-		clock.Inc(hundredMillis).AssertEquals(6 * hundredMillis)
+		clockTick().AssertEquals(duration("0.6s"))
 
 		// Set metrics back so that desired resources should now be zero
 		lastMetrics = api.Metrics{
@@ -322,41 +321,33 @@ func Test_NextActions(t *testing.T) {
 
 		// First step in downscaling is getting approval from the vm-monitor:
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - 4*hundredMillis,
-			},
+			Wait: &core.ActionWait{Duration: duration("4.6s")},
 			MonitorDownscale: &core.ActionMonitorDownscale{
 				Current: api.Resources{VCPU: 500, Mem: 2},
 				Target:  api.Resources{VCPU: 250, Mem: 1},
 			},
 		})
 		a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), actions.MonitorDownscale.Target)
-		clock.Inc(hundredMillis).AssertEquals(7 * hundredMillis)
+		clockTick().AssertEquals(duration("0.7s"))
 		// should have nothing more to do; waiting on vm-monitor request to come back
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - 5*hundredMillis,
-			},
+			Wait: &core.ActionWait{Duration: duration("4.5s")},
 		})
 		a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
 
 		// After getting approval from the vm-monitor, we make the request to NeonVM to carry it out
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - 5*hundredMillis, // same as previous, clock hasn't changed
-			},
+			Wait: &core.ActionWait{Duration: duration("4.5s")}, // same as previous, clock hasn't changed
 			NeonVMRequest: &core.ActionNeonVMRequest{
 				Current: api.Resources{VCPU: 500, Mem: 2},
 				Target:  api.Resources{VCPU: 250, Mem: 1},
 			},
 		})
 		a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
-		clock.Inc(hundredMillis).AssertEquals(8 * hundredMillis)
+		clockTick().AssertEquals(duration("0.8s"))
 		// should have nothing more to do; waiting on NeonVM request to come back
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - 6*hundredMillis,
-			},
+			Wait: &core.ActionWait{Duration: duration("4.4s")},
 		})
 		a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
@@ -370,7 +361,7 @@ func Test_NextActions(t *testing.T) {
 			// shouldn't have anything to say to the other components
 		})
 		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
-		clock.Inc(hundredMillis).AssertEquals(9 * hundredMillis)
+		clockTick().AssertEquals(duration("0.9s"))
 		// should have nothing more to do; waiting on plugin request to come back
 		a.Call(updateActions).Equals(core.ActionSet{})
 		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
@@ -381,9 +372,7 @@ func Test_NextActions(t *testing.T) {
 
 		// Finally, check there's no leftover actions:
 		a.Call(updateActions).Equals(core.ActionSet{
-			Wait: &core.ActionWait{
-				Duration: 5*time.Second - hundredMillis, // request that just finished was started 100ms ago
-			},
+			Wait: &core.ActionWait{Duration: duration("4.9s")}, // request that just finished was started 100ms ago
 		})
 	})
 }
