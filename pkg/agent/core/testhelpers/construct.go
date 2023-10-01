@@ -63,6 +63,7 @@ func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *cor
 
 func WithStoredWarnings(warnings *[]string) InitialStateOpt {
 	return InitialStateOpt{
+		postCreate: nil,
 		preCreate: func(c *InitialStateConfig) {
 			c.Core.Warn = func(format string, args ...any) {
 				*warnings = append(*warnings, fmt.Sprintf(format, args...))
