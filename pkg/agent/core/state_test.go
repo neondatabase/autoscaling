@@ -161,6 +161,25 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 	}
 }
 
+var DefaultInitialStateConfig = helpers.InitialStateConfig{
+	ComputeUnit:    api.Resources{VCPU: 250, Mem: 1},
+	MemorySlotSize: resource.MustParse("1Gi"),
+
+	MinCU: 1,
+	MaxCU: 4,
+	Core: core.Config{
+		DefaultScalingConfig: api.ScalingConfig{
+			LoadAverageFractionTarget: 0.5,
+			MemoryUsageFractionTarget: 0.5,
+		},
+		PluginRequestTick:              5 * time.Second,
+		PluginDeniedRetryWait:          2 * time.Second,
+		MonitorDeniedDownscaleCooldown: 5 * time.Second,
+		MonitorRetryWait:               3 * time.Second,
+		Warn:                           func(string, ...any) {},
+	},
+}
+
 func Test_NextActions(t *testing.T) {
 	simulateInitialSchedulerRequest := func(t *testing.T, state *core.State, clock *helpers.FakeClock, reqTime time.Duration) {
 		state.Plugin().NewScheduler()
@@ -183,6 +202,7 @@ func Test_NextActions(t *testing.T) {
 		warnings := []string{}
 		clock := helpers.NewFakeClock()
 		state := helpers.CreateInitialState(
+			DefaultInitialStateConfig,
 			helpers.WithStoredWarnings(&warnings),
 		)
 

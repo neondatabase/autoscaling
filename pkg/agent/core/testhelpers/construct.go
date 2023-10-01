@@ -2,7 +2,6 @@ package testhelpers
 
 import (
 	"fmt"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -12,38 +11,25 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-var DefaultConfig = core.Config{
-	DefaultScalingConfig: api.ScalingConfig{
-		LoadAverageFractionTarget: 0.5,
-		MemoryUsageFractionTarget: 0.5,
-	},
-	PluginRequestTick:              5 * time.Second,
-	PluginDeniedRetryWait:          2 * time.Second,
-	MonitorDeniedDownscaleCooldown: 5 * time.Second,
-	MonitorRetryWait:               3 * time.Second,
-	Warn:                           func(string, ...any) {},
+type InitialStateConfig struct {
+	ComputeUnit    api.Resources
+	MemorySlotSize resource.Quantity
+
+	MinCU uint16
+	MaxCU uint16
+
+	Core core.Config
 }
 
 type InitialStateOpt struct {
-	preCreate  func(*initialStateParams)
-	postCreate func(*api.VmInfo, *core.Config)
+	preCreate  func(*InitialStateConfig)
+	postCreate func(*api.VmInfo)
 }
 
-type initialStateParams struct {
-	computeUnit api.Resources
-	minCU       uint16
-	maxCU       uint16
-}
-
-func CreateInitialState(opts ...InitialStateOpt) *core.State {
-	pre := initialStateParams{
-		computeUnit: api.Resources{VCPU: 250, Mem: 1},
-		minCU:       1,
-		maxCU:       4,
-	}
+func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *core.State {
 	for _, o := range opts {
 		if o.preCreate != nil {
-			o.preCreate(&pre)
+			o.preCreate(&config)
 		}
 	}
 
@@ -51,47 +37,34 @@ func CreateInitialState(opts ...InitialStateOpt) *core.State {
 		Name:      "test",
 		Namespace: "test",
 		Cpu: api.VmCpuInfo{
-			Min: vmapi.MilliCPU(pre.minCU) * pre.computeUnit.VCPU,
-			Use: vmapi.MilliCPU(pre.minCU) * pre.computeUnit.VCPU,
-			Max: vmapi.MilliCPU(pre.maxCU) * pre.computeUnit.VCPU,
+			Min: vmapi.MilliCPU(config.MinCU) * config.ComputeUnit.VCPU,
+			Use: vmapi.MilliCPU(config.MinCU) * config.ComputeUnit.VCPU,
+			Max: vmapi.MilliCPU(config.MaxCU) * config.ComputeUnit.VCPU,
 		},
 		Mem: api.VmMemInfo{
-			SlotSize: resource.NewQuantity(1<<30 /* 1 Gi */, resource.BinarySI),
-			Min:      pre.minCU * pre.computeUnit.Mem,
-			Use:      pre.minCU * pre.computeUnit.Mem,
-			Max:      pre.maxCU * pre.computeUnit.Mem,
+			SlotSize: &config.MemorySlotSize,
+			Min:      config.MinCU * config.ComputeUnit.Mem,
+			Use:      config.MinCU * config.ComputeUnit.Mem,
+			Max:      config.MaxCU * config.ComputeUnit.Mem,
 		},
 		ScalingConfig:  nil,
 		AlwaysMigrate:  false,
 		ScalingEnabled: true,
 	}
 
-	config := core.Config{
-		DefaultScalingConfig: api.ScalingConfig{
-			LoadAverageFractionTarget: 0.5,
-			MemoryUsageFractionTarget: 0.5,
-		},
-		PluginRequestTick:              5 * time.Second,
-		PluginDeniedRetryWait:          2 * time.Second,
-		MonitorDeniedDownscaleCooldown: 5 * time.Second,
-		MonitorRetryWait:               3 * time.Second,
-		Warn:                           func(string, ...any) {},
-	}
-
 	for _, o := range opts {
 		if o.postCreate != nil {
-			o.postCreate(&vm, &config)
+			o.postCreate(&vm)
 		}
 	}
 
-	return core.NewState(vm, config)
+	return core.NewState(vm, config.Core)
 }
 
 func WithStoredWarnings(warnings *[]string) InitialStateOpt {
 	return InitialStateOpt{
-		preCreate: nil,
-		postCreate: func(_ *api.VmInfo, config *core.Config) {
-			config.Warn = func(format string, args ...any) {
+		preCreate: func(c *InitialStateConfig) {
+			c.Core.Warn = func(format string, args ...any) {
 				*warnings = append(*warnings, fmt.Sprintf(format, args...))
 			}
 		},
