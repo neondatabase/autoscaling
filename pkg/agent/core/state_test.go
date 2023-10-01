@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slices"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -181,29 +180,14 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 }
 
 func Test_NextActions(t *testing.T) {
-	simulateInitialSchedulerRequest := func(t *testing.T, state *core.State, clock *helpers.FakeClock, reqTime time.Duration) {
-		state.Plugin().NewScheduler()
-
-		actions := state.NextActions(clock.Now())
-		require.NotNil(t, actions.PluginRequest)
-		action := actions.PluginRequest
-		require.Nil(t, action.LastPermit)
-		state.Plugin().StartingRequest(clock.Now(), action.Target)
-		clock.Inc(reqTime)
-		require.NoError(t, state.Plugin().RequestSuccessful(clock.Now(), api.PluginResponse{
-			Permit:      action.Target,
-			Migrate:     nil,
-			ComputeUnit: api.Resources{VCPU: 250, Mem: 1}, // TODO: make this configurable... somehow.
-		}))
-	}
-
 	// Thorough checks of a relatively simple flow
 	t.Run("BasicScaleupAndDownFlow", func(t *testing.T) {
-		warnings := []string{}
-		clock := helpers.NewFakeClock()
+		a := helpers.NewAssert(t)
+
+		clock := helpers.NewFakeClock(t)
 		state := helpers.CreateInitialState(
 			DefaultInitialStateConfig,
-			helpers.WithStoredWarnings(&warnings),
+			helpers.WithStoredWarnings(a.StoredWarnings()),
 		)
 
 		hundredMillis := 100 * time.Millisecond
@@ -211,62 +195,74 @@ func Test_NextActions(t *testing.T) {
 		state.Plugin().NewScheduler()
 		state.Monitor().Active(true)
 
-		simulateInitialSchedulerRequest(t, state, clock, hundredMillis)
-		require.Equal(t, warnings, []string{"Can't determine desired resources because compute unit hasn't been set yet"})
-		warnings = nil // reset
+		// Send initial scheduler request:
+		actions := a.
+			WithWarnings("Can't determine desired resources because compute unit hasn't been set yet").
+			NextActions(state, clock.Now(), core.ActionSet{
+				Wait: nil,
+				PluginRequest: &core.ActionPluginRequest{
+					LastPermit: nil,
+					Target:     api.Resources{VCPU: 250, Mem: 1},
+					Metrics:    nil,
+				},
+				NeonVMRequest:    nil,
+				MonitorDownscale: nil,
+				MonitorUpscale:   nil,
+			})
+		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
+		clock.Inc(hundredMillis).AssertEquals(1 * hundredMillis)
+		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+			Permit:      actions.PluginRequest.Target,
+			Migrate:     nil,
+			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
+		})
 
 		clock.Inc(hundredMillis)
-		metrics := api.Metrics{
+		lastMetrics := api.Metrics{
 			LoadAverage1Min:  0.3,
 			LoadAverage5Min:  0.0, // unused
 			MemoryUsageBytes: 0.0,
 		}
-		state.UpdateMetrics(metrics)
-		require.Equal(t, clock.Elapsed(), 2*hundredMillis)
+		a.Do(state.UpdateMetrics, lastMetrics)
+		clock.Elapsed().AssertEquals(2 * hundredMillis)
 		// double-check that we agree about the desired resources
-		desiredResources, _ := state.DesiredResourcesFromMetricsOrRequestedUpscaling(clock.Now())
-		require.Equal(t, api.Resources{VCPU: 500, Mem: 2}, desiredResources)
-		require.Empty(t, warnings)
+		a.Call(state.DesiredResourcesFromMetricsOrRequestedUpscaling, clock.Now()).
+			Equals(api.Resources{VCPU: 500, Mem: 2}, helpers.Nil[*time.Duration]())
 
 		// Now that the initial scheduler request is done, and we have metrics that indicate
 		// scale-up would be a good idea, we should be contacting the scheduler to get approval.
-		actions := state.NextActions(clock.Now())
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: nil,
 			PluginRequest: &core.ActionPluginRequest{
 				LastPermit: &api.Resources{VCPU: 250, Mem: 1},
 				Target:     api.Resources{VCPU: 500, Mem: 2},
-				Metrics:    &metrics,
+				Metrics:    &lastMetrics,
 			},
 			// shouldn't have anything to say to the other components
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, actions)
-		require.Empty(t, warnings)
+		})
 		// start the request:
-		state.Plugin().StartingRequest(clock.Now(), actions.PluginRequest.Target)
+		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
 		clock.Inc(hundredMillis)
 		// should have nothing more to do; waiting on plugin request to come back
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait:             nil,
 			PluginRequest:    nil,
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, state.NextActions(clock.Now()))
-		require.Empty(t, warnings)
-		require.NoError(t, state.Plugin().RequestSuccessful(clock.Now(), api.PluginResponse{
+		})
+		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 			Permit:      api.Resources{VCPU: 500, Mem: 2},
 			Migrate:     nil,
 			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
-		}))
-		require.Empty(t, warnings)
-		require.Equal(t, clock.Elapsed(), 3*hundredMillis)
+		})
+		clock.Elapsed().AssertEquals(3 * hundredMillis)
 
 		// Scheduler approval is done, now we should be making the request to NeonVM
-		actions = state.NextActions(clock.Now())
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			// expected to make a scheduler request every 5s; it's been 100ms since the last one, so
 			// if the NeonVM request didn't come back in time, we'd need to get woken up to start
 			// the next scheduler request.
@@ -280,13 +276,12 @@ func Test_NextActions(t *testing.T) {
 			},
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, actions)
-		require.Empty(t, warnings)
+		})
 		// start the request:
-		state.NeonVM().StartingRequest(clock.Now(), actions.NeonVMRequest.Target)
-		clock.Inc(hundredMillis)
+		a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
+		clock.Inc(hundredMillis).AssertEquals(4 * hundredMillis)
 		// should have nothing more to do; waiting on NeonVM request to come back
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 2*hundredMillis,
 			},
@@ -294,15 +289,11 @@ func Test_NextActions(t *testing.T) {
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, state.NextActions(clock.Now()))
-		require.Empty(t, warnings)
-		state.NeonVM().RequestSuccessful(clock.Now())
-		require.Empty(t, warnings)
-		require.Equal(t, clock.Elapsed(), 4*hundredMillis)
+		})
+		a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
 		// NeonVM change is done, now we should finish by notifying the vm-monitor
-		actions = state.NextActions(clock.Now())
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 2*hundredMillis, // same as previous, clock hasn't changed
 			},
@@ -313,13 +304,12 @@ func Test_NextActions(t *testing.T) {
 				Current: api.Resources{VCPU: 250, Mem: 1},
 				Target:  api.Resources{VCPU: 500, Mem: 2},
 			},
-		}, actions)
-		require.Empty(t, warnings)
+		})
 		// start the request:
-		state.Monitor().StartingUpscaleRequest(clock.Now(), actions.MonitorUpscale.Target)
-		clock.Inc(hundredMillis)
+		a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), actions.MonitorUpscale.Target)
+		clock.Inc(hundredMillis).AssertEquals(5 * hundredMillis)
 		// should have nothing more to do; waiting on vm-monitor request to come back
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 3*hundredMillis,
 			},
@@ -327,16 +317,12 @@ func Test_NextActions(t *testing.T) {
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, state.NextActions(clock.Now()))
-		require.Empty(t, warnings)
-		state.Monitor().UpscaleRequestSuccessful(clock.Now())
-		require.Empty(t, warnings)
-		require.Equal(t, clock.Elapsed(), 5*hundredMillis)
+		})
+		a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
 
 		// And now, double-check that there's no sneaky follow-up actions before we change the
 		// metrics
-		actions = state.NextActions(clock.Now())
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 3*hundredMillis, // same as previous, clock hasn't changed
 			},
@@ -344,29 +330,25 @@ func Test_NextActions(t *testing.T) {
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, actions)
-		require.Empty(t, warnings)
+		})
 
 		// ---- Scaledown !!! ----
 
-		clock.Inc(hundredMillis)
-		require.Equal(t, clock.Elapsed(), 6*hundredMillis)
+		clock.Inc(hundredMillis).AssertEquals(6 * hundredMillis)
 
 		// Set metrics back so that desired resources should now be zero
-		metrics = api.Metrics{
+		lastMetrics = api.Metrics{
 			LoadAverage1Min:  0.0,
 			LoadAverage5Min:  0.0, // unused
 			MemoryUsageBytes: 0.0,
 		}
-		state.UpdateMetrics(metrics)
+		a.Do(state.UpdateMetrics, lastMetrics)
 		// double-check that we agree about the new desired resources
-		desiredResources, _ = state.DesiredResourcesFromMetricsOrRequestedUpscaling(clock.Now())
-		require.Equal(t, api.Resources{VCPU: 250, Mem: 1}, desiredResources)
-		require.Empty(t, warnings)
+		a.Call(state.DesiredResourcesFromMetricsOrRequestedUpscaling, clock.Now()).
+			Equals(api.Resources{VCPU: 250, Mem: 1}, helpers.Nil[*time.Duration]())
 
 		// First step in downscaling is getting approval from the vm-monitor:
-		actions = state.NextActions(clock.Now())
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 4*hundredMillis,
 			},
@@ -377,12 +359,11 @@ func Test_NextActions(t *testing.T) {
 				Target:  api.Resources{VCPU: 250, Mem: 1},
 			},
 			MonitorUpscale: nil,
-		}, actions)
-		require.Empty(t, warnings)
-		state.Monitor().StartingDownscaleRequest(clock.Now(), actions.MonitorDownscale.Target)
-		clock.Inc(hundredMillis)
+		})
+		a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), actions.MonitorDownscale.Target)
+		clock.Inc(hundredMillis).AssertEquals(7 * hundredMillis)
 		// should have nothing more to do; waiting on vm-monitor request to come back
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 5*hundredMillis,
 			},
@@ -390,15 +371,11 @@ func Test_NextActions(t *testing.T) {
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, state.NextActions(clock.Now()))
-		require.Empty(t, warnings)
-		state.Monitor().DownscaleRequestAllowed(clock.Now())
-		require.Empty(t, warnings)
-		require.Equal(t, clock.Elapsed(), 7*hundredMillis)
+		})
+		a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
 
 		// After getting approval from the vm-monitor, we make the request to NeonVM to carry it out
-		actions = state.NextActions(clock.Now())
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 5*hundredMillis, // same as previous, clock hasn't changed
 			},
@@ -409,12 +386,11 @@ func Test_NextActions(t *testing.T) {
 			},
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, actions)
-		require.Empty(t, warnings)
-		state.NeonVM().StartingRequest(clock.Now(), actions.NeonVMRequest.Target)
-		clock.Inc(hundredMillis)
+		})
+		a.Do(state.NeonVM().StartingRequest, clock.Now(), actions.NeonVMRequest.Target)
+		clock.Inc(hundredMillis).AssertEquals(8 * hundredMillis)
 		// should have nothing more to do; waiting on NeonVM request to come back
-		require.Equal(t, core.ActionSet{
+		a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - 6*hundredMillis,
 			},
@@ -422,49 +398,40 @@ func Test_NextActions(t *testing.T) {
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, state.NextActions(clock.Now()))
-		require.Empty(t, warnings)
-		state.NeonVM().RequestSuccessful(clock.Now())
-		require.Empty(t, warnings)
-		require.Equal(t, clock.Elapsed(), 8*hundredMillis)
+		})
+		a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
 		// Request to NeonVM completed, it's time to inform the scheduler plugin:
-		actions = state.NextActions(clock.Now())
-		require.Equal(t, core.ActionSet{
+		actions = a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: nil,
 			PluginRequest: &core.ActionPluginRequest{
 				LastPermit: &api.Resources{VCPU: 500, Mem: 2},
 				Target:     api.Resources{VCPU: 250, Mem: 1},
-				Metrics:    &metrics,
+				Metrics:    &lastMetrics,
 			},
 			// shouldn't have anything to say to the other components
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, actions)
-		require.Empty(t, warnings)
-		state.Plugin().StartingRequest(clock.Now(), actions.PluginRequest.Target)
-		clock.Inc(hundredMillis)
+		})
+		a.Do(state.Plugin().StartingRequest, clock.Now(), actions.PluginRequest.Target)
+		clock.Inc(hundredMillis).AssertEquals(9 * hundredMillis)
 		// should have nothing more to do; waiting on plugin request to come back
-		require.Equal(t, core.ActionSet{
+		a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait:             nil, // and don't need to wait, because plugin req is ongoing
 			PluginRequest:    nil,
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, state.NextActions(clock.Now()))
-		require.Empty(t, warnings)
-		require.NoError(t, state.Plugin().RequestSuccessful(clock.Now(), api.PluginResponse{
+		})
+		a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 			Permit:      api.Resources{VCPU: 250, Mem: 1},
 			Migrate:     nil,
 			ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
-		}))
-		require.Empty(t, warnings)
-		require.Equal(t, clock.Elapsed(), 9*hundredMillis)
+		})
 
 		// Finally, check there's no leftover actions:
-		actions = state.NextActions(clock.Now())
-		require.Equal(t, core.ActionSet{
+		a.NextActions(state, clock.Now(), core.ActionSet{
 			Wait: &core.ActionWait{
 				Duration: 5*time.Second - hundredMillis, // request that just finished was started 100ms ago
 			},
@@ -472,7 +439,6 @@ func Test_NextActions(t *testing.T) {
 			NeonVMRequest:    nil,
 			MonitorDownscale: nil,
 			MonitorUpscale:   nil,
-		}, actions)
-		require.Empty(t, warnings)
+		})
 	})
 }
