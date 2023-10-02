@@ -56,6 +56,8 @@ linters-settings:
       - '^github.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'
       - '^github\.com/containerd/cgroups/v3/cgroup2\.(Resources|Memory)'
       - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
+      - '^github\.com/neondatabase/autoscaling/pkg/util\.JSONPatch$'
+      - '^github\.com/neondatabase/autoscaling/pkg/util/watch\.HandlerFuncs$'
       # vmapi.{VirtualMachine,VirtualMachineSpec,VirtualMachineMigration,VirtualMachineMigrationSpec}
       - '^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.VirtualMachine(Migration)?(Spec)?$'
 
