@@ -27,8 +27,10 @@ This isn't the only architecture document. You may also want to look at:
 
 * [`pkg/plugin/ARCHITECTURE.md`](pkg/plugin/ARCHITECTURE.md) — detail on the implementation of the
   scheduler plugin
-* [`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor) -
-where the (VM) monitor, an autoscaling component that manages a Postgres, lives.
+* [`neondatabase/neon/.../vm_monitor`] (a different repo) — where the vm-monitor, an autoscaling
+  component running _inside_ each VM lives.
+
+[`neondatabase/neon/.../vm_monitor`]: https://github.com/neondatabase/neon/tree/main/libs/vm_monitor
 
 ## High-level overview
 
