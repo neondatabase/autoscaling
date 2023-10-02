@@ -12,12 +12,12 @@ import (
 )
 
 type Config struct {
-	DumpState *DumpStateConfig `json:"dumpState"`
 	Scaling   ScalingConfig    `json:"scaling"`
 	Metrics   MetricsConfig    `json:"metrics"`
 	Scheduler SchedulerConfig  `json:"scheduler"`
 	Monitor   MonitorConfig    `json:"monitor"`
 	Billing   *billing.Config  `json:"billing,omitempty"`
+	DumpState *DumpStateConfig `json:"dumpState"`
 }
 
 type MonitorConfig struct {
