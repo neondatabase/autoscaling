@@ -2,6 +2,7 @@ package testhelpers
 
 import (
 	"fmt"
+	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -23,7 +24,7 @@ type InitialStateConfig struct {
 
 type InitialStateOpt struct {
 	preCreate  func(*InitialStateConfig)
-	postCreate func(*api.VmInfo)
+	postCreate func(InitialStateConfig, *api.VmInfo)
 }
 
 func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *core.State {
@@ -54,7 +55,7 @@ func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *cor
 
 	for _, o := range opts {
 		if o.postCreate != nil {
-			o.postCreate(&vm)
+			o.postCreate(config, &vm)
 		}
 	}
 
@@ -65,9 +66,52 @@ func WithStoredWarnings(warnings *[]string) InitialStateOpt {
 	return InitialStateOpt{
 		postCreate: nil,
 		preCreate: func(c *InitialStateConfig) {
+			warn := c.Core.Warn
 			c.Core.Warn = func(format string, args ...any) {
 				*warnings = append(*warnings, fmt.Sprintf(format, args...))
+				warn(format, args...)
 			}
 		},
+	}
+}
+
+func WithTestingLogfWarnings(t *testing.T) InitialStateOpt {
+	return InitialStateOpt{
+		postCreate: nil,
+		preCreate: func(c *InitialStateConfig) {
+			warn := c.Core.Warn
+			c.Core.Warn = func(format string, args ...any) {
+				t.Logf(format, args...)
+				warn(format, args...)
+			}
+		},
+	}
+}
+
+func WithMinMaxCU(minCU, maxCU uint16) InitialStateOpt {
+	return InitialStateOpt{
+		preCreate: func(c *InitialStateConfig) {
+			c.MinCU = minCU
+			c.MaxCU = maxCU
+		},
+		postCreate: nil,
+	}
+}
+
+func WithInitialCU(cu uint16) InitialStateOpt {
+	return InitialStateOpt{
+		preCreate: nil,
+		postCreate: func(c InitialStateConfig, vm *api.VmInfo) {
+			vm.SetUsing(c.ComputeUnit.Mul(cu))
+		},
+	}
+}
+
+func WithConfigSetting(f func(*core.Config)) InitialStateOpt {
+	return InitialStateOpt{
+		preCreate: func(c *InitialStateConfig) {
+			f(&c.Core)
+		},
+		postCreate: nil,
 	}
 }

@@ -26,7 +26,7 @@ func NewAssert(t *testing.T) Assert {
 		t:              t,
 		storedWarnings: &[]string{},
 		tinfo: transactionInfo{
-			expectedWarnings: nil,
+			expectedWarnings: []string{},
 		},
 	}
 }
@@ -144,5 +144,5 @@ func (f PreparedFunctionCall) Equals(expected ...any) {
 	if f.a.t.Failed() {
 		f.a.t.FailNow()
 	}
-	*f.a.storedWarnings = nil
+	*f.a.storedWarnings = []string{}
 }
