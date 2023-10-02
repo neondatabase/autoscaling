@@ -24,8 +24,10 @@ type ExecutorCore struct {
 
 	stateLogger *zap.Logger
 
-	core    *core.State
-	actions *timedActions
+	core *core.State
+
+	actions       *timedActions
+	lastActionsID timedActionsID
 
 	updates *util.Broadcaster
 }
@@ -38,11 +40,12 @@ type ClientSet struct {
 
 func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config core.Config) *ExecutorCore {
 	return &ExecutorCore{
-		mu:          sync.Mutex{},
-		stateLogger: stateLogger,
-		core:        core.NewState(vm, config),
-		actions:     nil, // (*ExecutorCore).getActions() checks if this is nil
-		updates:     util.NewBroadcaster(),
+		mu:            sync.Mutex{},
+		stateLogger:   stateLogger,
+		core:          core.NewState(vm, config),
+		actions:       nil, // (*ExecutorCore).getActions() checks if this is nil
+		lastActionsID: -1,
+		updates:       util.NewBroadcaster(),
 	}
 }
 
@@ -59,7 +62,10 @@ func (c *ExecutorCore) WithClients(clients ClientSet) ExecutorCoreWithClients {
 	}
 }
 
+type timedActionsID int64
+
 type timedActions struct {
+	id           timedActionsID
 	calculatedAt time.Time
 	actions      core.ActionSet
 }
@@ -69,10 +75,13 @@ func (c *ExecutorCore) getActions() timedActions {
 	defer c.mu.Unlock()
 
 	if c.actions == nil {
+		id := c.lastActionsID + 1
+
 		// NOTE: Even though we cache the actions generated using time.Now(), it's *generally* ok.
 		now := time.Now()
 		c.stateLogger.Info("Recalculating ActionSet", zap.Time("now", now), zap.Any("state", c.core.Dump()))
-		c.actions = &timedActions{calculatedAt: now, actions: c.core.NextActions(now)}
+		c.actions = &timedActions{id: id, calculatedAt: now, actions: c.core.NextActions(now)}
+		c.lastActionsID = id
 		c.stateLogger.Info("New ActionSet", zap.Time("now", now), zap.Any("actions", c.actions.actions))
 	}
 
@@ -88,6 +97,24 @@ func (c *ExecutorCore) update(with func(*core.State)) {
 	c.updates.Broadcast()
 	c.actions = nil
 	with(c.core)
+}
+
+// updateIfActionsUnchanged is like update, but if the actions have been changed, then the function
+// is not called and this returns false.
+//
+// Otherwise, if the actions are up-to-date, then this is equivalent to c.update(with), and returns true.
+func (c *ExecutorCore) updateIfActionsUnchanged(actions timedActions, with func(*core.State)) (updated bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if actions.id != c.lastActionsID {
+		return false
+	}
+
+	c.updates.Broadcast()
+	c.actions = nil
+	with(c.core)
+	return true
 }
 
 // may change in the future

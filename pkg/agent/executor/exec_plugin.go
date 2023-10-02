@@ -36,39 +36,31 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		}
 	}
 
-	last := c.getActions()
 	for {
-		// Always receive an update if there is one. This helps with reliability (better guarantees
-		// about not missing updates) and means that the switch statements can be simpler.
+		// Wait until the state's changed, or we're done.
 		select {
+		case <-ctx.Done():
+			return
 		case <-updates.Wait():
-			updates.Awake()
-			last = c.getActions()
-		default:
 		}
 
-		// Wait until we're supposed to make a request.
+		last := c.getActions()
 		if last.actions.PluginRequest == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-updates.Wait():
-				// NB: don't .Awake(); allow that to be handled at the top of the loop.
-				continue
-			}
+			continue // nothing to do; wait until the state changes.
 		}
 
+		var startTime time.Time
+		var pluginIface PluginHandle
 		action := *last.actions.PluginRequest
 
-		pluginIface := c.clients.Plugin.GetHandle()
-
-		// update the state to indicate that the request is starting.
-		var startTime time.Time
-		c.update(func(state *core.State) {
+		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
 			logger.Info("Starting plugin request", zap.Any("action", action))
 			startTime = time.Now()
+			pluginIface = c.clients.Plugin.GetHandle()
 			state.Plugin().StartingRequest(startTime, action.Target)
-		})
+		}); !updated {
+			continue // state has changed, retry.
+		}
 
 		var resp *api.PluginResponse
 		var err error

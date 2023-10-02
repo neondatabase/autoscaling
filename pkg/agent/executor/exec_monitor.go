@@ -38,51 +38,44 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		}
 	}
 
-	last := c.getActions()
 	for {
-		// Always receive an update if there is one. This helps with reliability (better guarantees
-		// about not missing updates) and means that the switch statements can be simpler.
+		// Wait until the state's changed, or we're done.
 		select {
+		case <-ctx.Done():
+			return
 		case <-updates.Wait():
-			updates.Awake()
-			last = c.getActions()
-		default:
 		}
 
-		// Wait until we're supposed to make a request.
+		last := c.getActions()
 		if last.actions.MonitorDownscale == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-updates.Wait():
-				// NB: don't .Awake(); allow that to be handled at the top of the loop.
-				continue
-			}
+			continue // nothing to do; wait until the state changes.
 		}
-
-		action := *last.actions.MonitorDownscale
-
-		monitor := c.clients.Monitor.GetHandle()
 
 		var startTime time.Time
-		c.update(func(state *core.State) {
+		var monitorIface MonitorHandle
+		action := *last.actions.MonitorDownscale
+
+		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
 			logger.Info("Starting vm-monitor downscale request", zap.Any("action", action))
 			startTime = time.Now()
+			monitorIface = c.clients.Monitor.GetHandle()
 			state.Monitor().StartingDownscaleRequest(startTime, action.Target)
-		})
+		}); !updated {
+			continue // state has changed, retry.
+		}
 
 		var result *api.DownscaleResult
 		var err error
 
-		if monitor != nil {
-			result, err = monitor.Downscale(ctx, ifaceLogger, action.Current, action.Target)
+		if monitorIface != nil {
+			result, err = monitorIface.Downscale(ctx, ifaceLogger, action.Current, action.Target)
 		} else {
 			err = errors.New("No currently active vm-monitor connection")
 		}
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
-			unchanged := idUnchanged(monitor.ID())
+			unchanged := idUnchanged(monitorIface.ID())
 			logFields := []zap.Field{
 				zap.Any("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),
@@ -129,49 +122,42 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 		}
 	}
 
-	last := c.getActions()
 	for {
-		// Always receive an update if there is one. This helps with reliability (better guarantees
-		// about not missing updates) and means that the switch statements can be simpler.
+		// Wait until the state's changed, or we're done.
 		select {
+		case <-ctx.Done():
+			return
 		case <-updates.Wait():
-			updates.Awake()
-			last = c.getActions()
-		default:
 		}
 
-		// Wait until we're supposed to make a request.
+		last := c.getActions()
 		if last.actions.MonitorUpscale == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-updates.Wait():
-				// NB: don't .Awake(); allow that to be handled at the top of the loop.
-				continue
-			}
+			continue // nothing to do; wait until the state changes.
 		}
-
-		action := *last.actions.MonitorUpscale
-
-		monitor := c.clients.Monitor.GetHandle()
 
 		var startTime time.Time
-		c.update(func(state *core.State) {
+		var monitorIface MonitorHandle
+		action := *last.actions.MonitorUpscale
+
+		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
 			logger.Info("Starting vm-monitor upscale request", zap.Any("action", action))
 			startTime = time.Now()
+			monitorIface = c.clients.Monitor.GetHandle()
 			state.Monitor().StartingUpscaleRequest(startTime, action.Target)
-		})
+		}); !updated {
+			continue // state has changed, retry.
+		}
 
 		var err error
-		if monitor != nil {
-			err = monitor.Upscale(ctx, ifaceLogger, action.Current, action.Target)
+		if monitorIface != nil {
+			err = monitorIface.Upscale(ctx, ifaceLogger, action.Current, action.Target)
 		} else {
 			err = errors.New("No currently active vm-monitor connection")
 		}
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
-			unchanged := idUnchanged(monitor.ID())
+			unchanged := idUnchanged(monitorIface.ID())
 			logFields := []zap.Field{
 				zap.Any("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),

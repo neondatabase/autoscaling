@@ -21,36 +21,29 @@ func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *
 		ifaceLogger *zap.Logger            = logger.Named("client")
 	)
 
-	last := c.getActions()
 	for {
-		// Always receive an update if there is one. This helps with reliability (better guarantees
-		// about not missing updates) and means that the switch statements can be simpler.
+		// Wait until the state's changed, or we're done.
 		select {
+		case <-ctx.Done():
+			return
 		case <-updates.Wait():
-			updates.Awake()
-			last = c.getActions()
-		default:
 		}
 
-		// Wait until we're supposed to make a request.
+		last := c.getActions()
 		if last.actions.NeonVMRequest == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-updates.Wait():
-				// NB: don't .Awake(); allow that to be handled at the top of the loop.
-				continue
-			}
+			continue // nothing to do; wait until the state changes.
 		}
-
-		action := *last.actions.NeonVMRequest
 
 		var startTime time.Time
-		c.update(func(state *core.State) {
+		action := *last.actions.NeonVMRequest
+
+		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
 			logger.Info("Starting NeonVM request", zap.Any("action", action))
 			startTime = time.Now()
 			state.NeonVM().StartingRequest(startTime, action.Target)
-		})
+		}); !updated {
+			continue // state has changed, retry.
+		}
 
 		err := c.clients.NeonVM.Request(ctx, ifaceLogger, action.Current, action.Target)
 		endTime := time.Now()
