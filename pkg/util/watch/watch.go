@@ -157,6 +157,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		indexes:       make(map[uint64]Index[T]),
 		stopSignal:    sendStop,
 		stopped:       atomic.Bool{},
+		failing:       atomic.Bool{},
 	}
 
 	items := accessors.Items(initialList)
