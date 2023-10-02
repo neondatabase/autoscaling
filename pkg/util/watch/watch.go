@@ -149,12 +149,15 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	sendStop, stopSignal := util.NewSingleSignalPair[struct{}]()
 
 	store := Store[T]{
+		mutex:         sync.Mutex{},
 		objects:       make(map[types.UID]*T),
 		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
 		nextIndexID:   0,
 		indexes:       make(map[uint64]Index[T]),
 		stopSignal:    sendStop,
+		stopped:       atomic.Bool{},
+		failing:       atomic.Bool{},
 	}
 
 	items := accessors.Items(initialList)

@@ -273,6 +273,7 @@ func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[v
 		Total:                vmapi.MilliCPU(totalMilli),
 		Watermark:            vmapi.MilliCPU(c.Cpu.Watermark * float32(totalMilli)),
 		Reserved:             0,
+		Buffer:               0,
 		CapacityPressure:     0,
 		PressureAccountedFor: 0,
 	}, margin, nil
@@ -301,6 +302,7 @@ func (c *nodeConfig) memoryLimits(
 		Total:                uint16(totalSlots),
 		Watermark:            uint16(c.Memory.Watermark * float32(totalSlots)),
 		Reserved:             0,
+		Buffer:               0,
 		CapacityPressure:     0,
 		PressureAccountedFor: 0,
 	}, margin, nil
