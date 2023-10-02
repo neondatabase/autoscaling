@@ -233,9 +233,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	clockTick := func() helpers.Elapsed {
 		return clock.Inc(100 * time.Millisecond)
 	}
-	resForCU := func(cu uint16) api.Resources {
-		return DefaultComputeUnit.Mul(cu)
-	}
+	resForCU := DefaultComputeUnit.Mul
 
 	state := helpers.CreateInitialState(
 		DefaultInitialStateConfig,
@@ -473,9 +471,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	clockTick := func() helpers.Elapsed {
 		return clock.Inc(clockTickDuration)
 	}
-	resForCU := func(cu uint16) api.Resources {
-		return DefaultComputeUnit.Mul(cu)
-	}
+	resForCU := DefaultComputeUnit.Mul
 
 	state := helpers.CreateInitialState(
 		DefaultInitialStateConfig,
