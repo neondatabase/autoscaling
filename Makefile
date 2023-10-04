@@ -248,12 +248,16 @@ kernel: ## Build linux kernel.
 		--file neonvm/hack/Dockerfile.kernel-builder \
 		neonvm/hack
 
+.PHONY: check-local-context
+check-local-context: ## Asserts that the current kubectl context is pointing at k3d or kind, to avoid accidentally applying to prod
+	if [ "$$($(KUBECTL) config current-context)" != 'k3d-neonvm' ] && [ "$$($(KUBECTL) config current-context)" != 'kind-kind' ]; then echo "kubectl context is not pointing to local k3d or kind cluster (must be k3d-neonvm or kind-kind)"; fi
+
 .PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+install: check-local-context manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build neonvm/config/common/crd | kubectl apply -f -
 
 .PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
+uninstall: check-local-context manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build neonvm/config/common/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 BUILDTS := $(shell date +%s)
@@ -300,7 +304,7 @@ render-release: $(RENDERED) kustomize
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
 .PHONY: deploy
-deploy: load-images manifests render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: check-local-context load-images manifests render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
 	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
@@ -326,7 +330,7 @@ example-vms: docker-build-examples kind k3d kubectl ## Build and push the testin
 	@if [ $$($(KUBECTL) config current-context) = kind-kind ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name kind; fi
 
 .PHONY: pg14-disk-test
-pg14-disk-test: docker-build-pg14-disk-test kind k3d kubectl ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
+pg14-disk-test: check-local-context docker-build-pg14-disk-test kind k3d kubectl ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
 	$(KUBECTL) create secret generic vm-ssh --from-file=private-key=vm-examples/pg14-disk-test/ssh_id_rsa || true
 	@if [ $$($(KUBECTL) config current-context) = k3d-neonvm ]; then $(K3D) image import $(PG14_DISK_TEST_IMG) --cluster neonvm --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-kind ]; then $(KIND) load docker-image $(PG14_DISK_TEST_IMG) --name kind; fi
@@ -462,5 +466,5 @@ $(K3D): $(LOCALBIN)
 	@test -s $(LOCALBIN)/k3d || { curl -sfSLo $(K3D)  https://github.com/k3d-io/k3d/releases/download/$(K3D_VERSION)/k3d-$(GOOS)-$(GOARCH) && chmod +x $(K3D); }
 
 .PHONY: cert-manager
-cert-manager: kubectl ## install cert-manager to cluster
+cert-manager: check-local-context kubectl ## install cert-manager to cluster
 	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
