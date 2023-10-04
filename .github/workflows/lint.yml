@@ -65,3 +65,13 @@ jobs:
             exit 1
           fi
 
+  codespell:
+    name: check spelling with codespell
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: codespell-project/actions-codespell@94259cd8be02ad2903ba34a22d9c13de21a74461 # v2.0
+        with:
+          check_hidden: true
+          skip: go.sum,*.patch # '*.patch' references cluster-autoscaler/ca.patch, but somehow skipping directly doesn't work...
