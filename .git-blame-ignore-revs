@@ -1,4 +1,4 @@
-# "style: function formatting (#46)" - changes formatting of function params, exculsively from
+# "style: function formatting (#46)" - changes formatting of function params, exclusively from
 # single-line to multi-line
 f8fb06a1565599c3d44a1951c7a50b6c065cdb96
 # "intermediate commit: de-indent some blocks (#113)" - factored out of #113 to make blame clear.

@@ -422,7 +422,7 @@ func QmpUnplugMemory(ip string, port int32) error {
 			merr = errors.Join(merr, err)
 			continue
 		}
-		// succesfully deleted memory device
+		// successfully deleted memory device
 		break
 	}
 	if i >= 0 {

@@ -346,7 +346,7 @@ func (s *agentState) loggerForRunner(vmName, podName util.NamespacedName) *zap.L
 func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string, restartCount int) *Runner {
 	return &Runner{
 		global:                          s,
-		status:                          nil, // set by calller
+		status:                          nil, // set by caller
 		schedulerRespondedWithMigration: false,
 
 		shutdown:         nil, // set by (*Runner).Run

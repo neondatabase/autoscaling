@@ -44,7 +44,7 @@ type Dispatcher struct {
 
 	// When someone sends a message, the dispatcher will attach a transaction id
 	// to it so that it knows when a response is back. When it receives a message
-	// with the same transaction id, it knows that that is the repsonse to the original
+	// with the same transaction id, it knows that that is the response to the original
 	// message and will send it down the SignalSender so the original sender can use it.
 	waiters map[uint64]util.SignalSender[waiterResult]
 
@@ -620,7 +620,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 				zap.Uint64("id", id),
 				zap.String("error", err.Error),
 			)
-			// Indicate to the receiver that an error occured
+			// Indicate to the receiver that an error occurred
 			sender.Send(waiterResult{
 				err: errors.New("vm-monitor internal error"),
 				res: nil,
@@ -639,7 +639,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("vm-monitor responded to health check", zap.Uint64("id", id))
-			// Indicate to the receiver that an error occured
+			// Indicate to the receiver that an error occurred
 			sender.Send(waiterResult{
 				err: nil,
 				res: &MonitorResult{

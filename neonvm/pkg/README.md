@@ -1,6 +1,6 @@
 ## IP address management example
 
-### Creat Netwrok Attachment Definition
+### Creat Network Attachment Definition
 
 ```console
 kubectl apply -f ipam-demo-nad.yaml
@@ -12,7 +12,7 @@ kubectl apply -f ipam-demo-nad.yaml
 go run ipam-demo.go
 ```
 
-### Delete Netwrok Attachment Definition
+### Delete Network Attachment Definition
 
 ```console
 kubectl delete -f ipam-demo-nad.yaml

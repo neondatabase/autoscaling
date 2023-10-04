@@ -239,7 +239,7 @@ simply returns with an ack.
 
 There are two additional messages types that either party may send:
 - `InvalidMessage`: sent when either party fails to deserialize a message it received
-- `InternalError`: used to indicate that an error occured while processing a request,
+- `InternalError`: used to indicate that an error occurred while processing a request,
   for example, if the monitor errors while trying to downscale
 
 ## Footguns

@@ -505,7 +505,7 @@ func (r *Runner) handleVMResources(
 			if !newVMInfo.ScalingEnabled {
 				// This shouldn't happen because any update to the VM object that has
 				// ScalingEnabled=false should get translated into a "deletion" so the runner stops.
-				// So we shoudln't get an "update" event, and if we do, something's gone very wrong.
+				// So we shouldn't get an "update" event, and if we do, something's gone very wrong.
 				panic("explicit VM update given but scaling is disabled")
 			}
 
@@ -1229,7 +1229,7 @@ func (s *AtomicUpdateState) DesiredVMState(allowDecrease bool) api.Resources {
 	// If no decreases are allowed, then we *must* make sure that the VM's usage value has not
 	// decreased, even if it's greater than the VM maximum.
 	//
-	// We can run into situtations like this when VM scale-down on bounds change fails, so we end up
+	// We can run into situations like this when VM scale-down on bounds change fails, so we end up
 	// with a usage value greater than the maximum.
 	if !allowDecrease {
 		result = result.Max(s.VM.Using())
