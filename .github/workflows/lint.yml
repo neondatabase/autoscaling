@@ -1,4 +1,4 @@
-name: go lint
+name: lints
 on:
   pull_request:
     branches:
@@ -28,9 +28,20 @@ jobs:
           skip-pkg-cache: true
           skip-build-cache: true
 
+  check-go-mod-tidy:
+    name: check go mod tidy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
       - name: go mod tidy
         run: |
           go mod tidy
+      - name: check diff
+        run: |
           if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
             git ls-files --exclude-standard --others .
             git diff .
@@ -38,9 +49,17 @@ jobs:
             exit 1
           fi
 
+  manifests:
+    name: check generated manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v3
       - name: make manifests
         run: |
           make manifests
+      - name: check diff
+        run: |
           if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
             git ls-files --exclude-standard --others .
             git diff .
