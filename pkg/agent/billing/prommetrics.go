@@ -15,7 +15,7 @@ type PromMetrics struct {
 	vmsCurrent        *prometheus.GaugeVec
 	queueSizeCurrent  prometheus.Gauge
 	lastSendDuration  prometheus.Gauge
-	sendErrorsTotal   prometheus.Counter
+	sendErrorsTotal   *prometheus.CounterVec
 }
 
 func NewPromMetrics() PromMetrics {
@@ -46,11 +46,12 @@ func NewPromMetrics() PromMetrics {
 				Help: "Duration, in seconds, that it took to send the latest set of billing events (or current time if ongoing)",
 			},
 		),
-		sendErrorsTotal: prometheus.NewCounter(
+		sendErrorsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_billing_send_errors_total",
 				Help: "Total errors from attempting to send billing events",
 			},
+			[]string{"cause"},
 		),
 	}
 }

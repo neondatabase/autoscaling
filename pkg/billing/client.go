@@ -67,27 +67,59 @@ func Send[E Event](ctx context.Context, client Client, traceID TraceID, events [
 		Events []E `json:"events"`
 	}{Events: events})
 	if err != nil {
-		return err
+		return JSONError{Err: err}
 	}
 
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/usage_events", client.BaseURL), bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return RequestError{Err: err}
 	}
 	r.Header.Set("content-type", "application/json")
 	r.Header.Set("x-trace-id", string(traceID))
 
 	resp, err := client.httpc.Do(r)
 	if err != nil {
-		return err
+		return RequestError{Err: err}
 	}
 	defer resp.Body.Close()
 
 	// theoretically if wanted/needed, we should use an http handler that
 	// does the retrying, to avoid writing that logic here.
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("got code %d, posting %d events", resp.StatusCode, len(events))
+		return UnexpectedStatusCodeError{StatusCode: resp.StatusCode}
 	}
 
 	return nil
+}
+
+type JSONError struct {
+	Err error
+}
+
+func (e JSONError) Error() string {
+	return fmt.Sprintf("Error marshaling events: %s", e.Err.Error())
+}
+
+func (e JSONError) Unwrap() error {
+	return e.Err
+}
+
+type RequestError struct {
+	Err error
+}
+
+func (e RequestError) Error() string {
+	return fmt.Sprintf("Error making request: %s", e.Err.Error())
+}
+
+func (e RequestError) Unwrap() error {
+	return e.Err
+}
+
+type UnexpectedStatusCodeError struct {
+	StatusCode int
+}
+
+func (e UnexpectedStatusCodeError) Error() string {
+	return fmt.Sprintf("Unexpected HTTP status code %d", e.StatusCode)
 }
