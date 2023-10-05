@@ -9,6 +9,8 @@ metadata:
     app.kubernetes.io/created-by: neonvm
     app.kubernetes.io/part-of: neonvm
     app.kubernetes.io/managed-by: kustomize
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
   name: virtualmachinemigration-editor-role
 rules:
 - apiGroups:

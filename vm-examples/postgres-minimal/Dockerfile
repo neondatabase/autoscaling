@@ -1,4 +1,3 @@
-FROM vm-informant:dev as informant
 FROM vm-monitor:dev as monitor
 # ^ don't do anything with these; we just want it around for later use.
 
@@ -19,10 +18,7 @@ RUN set -e \
 ADD cgconfig.conf /etc/cgconfig.conf
 RUN echo '::sysinit:/usr/sbin/cgconfigparser -l /etc/cgconfig.conf -s 1664' >> /etc/inittab
 
-# Add the vm-informant
-COPY --from=informant /usr/bin/vm-informant /bin/vm-informant
 # Add the vm-monitor
 COPY --from=monitor /usr/bin/vm-monitor /bin/vm-monitor 
-RUN adduser vm-informant --disabled-password --no-create-home
-RUN echo "::respawn:su vm-informant -c 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test'" >> /etc/inittab
-RUN echo "::respawn:su vm-informant -c '/bin/vm-informant'" >> /etc/inittab
+RUN adduser vm-monitor --disabled-password --no-create-home
+RUN echo "::respawn:su vm-monitor -c 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test'" >> /etc/inittab

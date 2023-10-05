@@ -13,11 +13,33 @@ import (
 
 type Config struct {
 	Scaling   ScalingConfig    `json:"scaling"`
-	Informant InformantConfig  `json:"informant"`
 	Metrics   MetricsConfig    `json:"metrics"`
 	Scheduler SchedulerConfig  `json:"scheduler"`
+	Monitor   MonitorConfig    `json:"monitor"`
 	Billing   *billing.Config  `json:"billing,omitempty"`
 	DumpState *DumpStateConfig `json:"dumpState"`
+}
+
+type MonitorConfig struct {
+	ResponseTimeoutSeconds uint `json:"responseTimeoutSeconds"`
+	// ConnectionTimeoutSeconds gives how long we may take to connect to the
+	// monitor before cancelling.
+	ConnectionTimeoutSeconds uint `json:"connectionTimeoutSeconds"`
+	// ConnectionRetryMinWaitSeconds gives the minimum amount of time we must wait between attempts
+	// to connect to the vm-monitor, regardless of whether they're successful.
+	ConnectionRetryMinWaitSeconds uint `json:"connectionRetryMinWaitSeconds"`
+	// ServerPort is the port that the dispatcher serves from
+	ServerPort uint16 `json:"serverPort"`
+	// UnhealthyAfterSilenceDurationSeconds gives the duration, in seconds, after which failing to
+	// receive a successful request from the monitor indicates that it is probably unhealthy.
+	UnhealthyAfterSilenceDurationSeconds uint `json:"unhealthyAfterSilenceDurationSeconds"`
+	// UnhealthyStartupGracePeriodSeconds gives the duration, in seconds, after which we will no
+	// longer excuse total VM monitor failures - i.e. when unhealthyAfterSilenceDurationSeconds
+	// kicks in.
+	UnhealthyStartupGracePeriodSeconds uint `json:"unhealthyStartupGracePeriodSeconds"`
+	// MaxHealthCheckSequentialFailuresSeconds gives the duration, in seconds, after which we
+	// should restart the connection to the vm-monitor if health checks aren't succeeding.
+	MaxHealthCheckSequentialFailuresSeconds uint `json:"maxHealthCheckSequentialFailuresSeconds"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
@@ -38,50 +60,10 @@ type ScalingConfig struct {
 	DefaultConfig api.ScalingConfig `json:"defaultConfig"`
 }
 
-type InformantConfig struct {
-	// ServerPort is the port that the VM informant serves from
-	ServerPort uint16 `json:"serverPort"`
-
-	// CallbackPort is the port that the agent listens on for informant -> agent requests
-	CallbackPort int `json:"callbackPort"`
-
-	// RetryServerMinWaitSeconds gives the minimum duration, in seconds, that we must wait between the
-	// start of one InformantServer and the next
-	//
-	// This "minimum wait" is only used when thethe
-	RetryServerMinWaitSeconds uint `json:"retryServerMinWaitSeconds"`
-	// RetryServerNormalWaitSeconds gives the typical duration, in seconds, that we wait between an
-	// InformantServer failing and our retry.
-	RetryServerNormalWaitSeconds uint `json:"retryServerNormalWaitSeconds"`
-	// RegisterRetrySeconds gives the duration, in seconds, to wait between retrying a failed
-	// register request.
-	RegisterRetrySeconds uint `json:"registerRetrySeconds"`
-
-	// RequestTimeoutSeconds gives the timeout for any individual request to the informant, except
-	// for those with separately-defined values below.
-	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	// RegisterTimeoutSeconds gives the timeout duration, in seconds, for a register request.
-	//
-	// This is a separate field from RequestTimeoutSeconds because registering may require that the
-	// informant suspend a previous agent, which could take longer.
-	RegisterTimeoutSeconds uint `json:"registerTimeoutSeconds"`
-	// DownscaleTimeoutSeconds gives the timeout duration, in seconds, for a downscale request.
-	//
-	// This is a separate field from RequestTimeoutSeconds it's possible that downscaling may
-	// require some non-trivial work that we want to allow to complete.
-	DownscaleTimeoutSeconds uint `json:"downscaleTimeoutSeconds"`
-
-	// UnhealthyAfterSilenceDurationSeconds gives the duration, in seconds, after which failing to
-	// receive a successful request from the informant indicates that it is probably unhealthy.
-	UnhealthyAfterSilenceDurationSeconds uint `json:"unhealthyAfterSilenceDurationSeconds"`
-	// UnhealthyStartupGracePeriodSeconds gives the duration, in seconds, after which we will no
-	// longer excuse total VM informant failures - i.e. when unhealthyAfterSilenceDurationSeconds
-	// kicks in.
-	UnhealthyStartupGracePeriodSeconds uint `json:"unhealthyStartupGracePeriodSeconds"`
-}
-
 // MetricsConfig defines a few parameters for metrics requests to the VM
 type MetricsConfig struct {
+	// Port is the port that VMs are expected to provide metrics on
+	Port uint16 `json:"port"`
 	// LoadMetricPrefix is the prefix at the beginning of the load metrics that we use. For
 	// node_exporter, this is "node_", and for vector it's "host_"
 	LoadMetricPrefix string `json:"loadMetricPrefix"`
@@ -144,19 +126,17 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Billing != nil && c.Billing.URL == "", emptyTmpl, ".billing.url")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
-	erc.Whenf(ec, c.Informant.DownscaleTimeoutSeconds == 0, zeroTmpl, ".informant.downscaleTimeoutSeconds")
-	erc.Whenf(ec, c.Informant.RegisterRetrySeconds == 0, zeroTmpl, ".informant.registerRetrySeconds")
-	erc.Whenf(ec, c.Informant.RegisterTimeoutSeconds == 0, zeroTmpl, ".informant.registerTimeoutSeconds")
-	erc.Whenf(ec, c.Informant.RequestTimeoutSeconds == 0, zeroTmpl, ".informant.requestTimeoutSeconds")
-	erc.Whenf(ec, c.Informant.RetryServerMinWaitSeconds == 0, zeroTmpl, ".informant.retryServerMinWaitSeconds")
-	erc.Whenf(ec, c.Informant.RetryServerNormalWaitSeconds == 0, zeroTmpl, ".informant.retryServerNormalWaitSeconds")
-	erc.Whenf(ec, c.Informant.ServerPort == 0, zeroTmpl, ".informant.serverPort")
-	erc.Whenf(ec, c.Informant.CallbackPort == 0, zeroTmpl, ".informant.callbackPort")
-	erc.Whenf(ec, c.Informant.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".informant.unhealthyAfterSilenceDurationSeconds")
-	erc.Whenf(ec, c.Informant.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".informant.unhealthyStartupGracePeriodSeconds")
+	erc.Whenf(ec, c.Metrics.Port == 0, zeroTmpl, ".metrics.port")
 	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
 	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds")
+	erc.Whenf(ec, c.Monitor.ConnectionTimeoutSeconds == 0, zeroTmpl, ".monitor.connectionTimeoutSeconds")
+	erc.Whenf(ec, c.Monitor.ConnectionRetryMinWaitSeconds == 0, zeroTmpl, ".monitor.connectionRetryMinWaitSeconds")
+	erc.Whenf(ec, c.Monitor.ServerPort == 0, zeroTmpl, ".monitor.serverPort")
+	erc.Whenf(ec, c.Monitor.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".monitor.unhealthyAfterSilenceDurationSeconds")
+	erc.Whenf(ec, c.Monitor.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".monitor.unhealthyStartupGracePeriodSeconds")
+	erc.Whenf(ec, c.Monitor.MaxHealthCheckSequentialFailuresSeconds == 0, zeroTmpl, ".monitor.maxHealthCheckSequentialFailuresSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.Validate())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")

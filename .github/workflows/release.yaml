@@ -7,8 +7,8 @@ on:
 env:
   AGENT_IMAGE: "neondatabase/autoscaler-agent"
   SCHED_IMAGE: "neondatabase/autoscale-scheduler"
-  INFORMANT_IMAGE: "neondatabase/vm-informant"
   MONITOR_IMAGE: "neondatabase/vm-monitor"
+  VM_MONITOR_BRANCH: "main"
 
   KUSTOMIZE_VERSION:        "4.5.7"
   CONTROLLER_TOOLS_VERSION: "0.10.0"
@@ -53,7 +53,6 @@ jobs:
       - name: build binaries
         run: |
           make \
-            VM_INFORMANT_IMG=${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} \
             VM_MONITOR_IMG=${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }} \
             build
 
@@ -124,17 +123,6 @@ jobs:
           build-args: |
             GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
 
-      - name: build and push vm-informant image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          file: build/vm-informant/Dockerfile
-          tags: ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args: |
-            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
-
       - name: build and push vm-monitor image
         uses: docker/build-push-action@v3
         with:
@@ -145,6 +133,7 @@ jobs:
           tags: ${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
           build-args: |
             GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
+            BRANCH=${{ env.VM_MONITOR_BRANCH }}
 
       - name: render kubernetes resources
         uses: stefanprodan/kube-tools@v1
@@ -165,15 +154,8 @@ jobs:
             kustomize build deploy/scheduler > rendered_manifests/autoscale-scheduler.yaml
             kustomize build deploy/agent > rendered_manifests/autoscaler-agent.yaml
 
-      # Because we want a docker image for the VM informant, the easiest way for us to also provide
+      # Because we want a docker image for the VM monitor, the easiest way for us to also provide
       # a binary is by just extracting it from the container image itself.
-      - name: extract vm-informant binary
-        run: |
-          ID=$(docker create ${{ env.INFORMANT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }})
-          docker cp $ID:/usr/bin/vm-informant bin/vm-informant
-          docker rm -f $ID
-
-      # Same situation as with informant
       - name: extract vm-monitor binary
         run: |
           ID=$(docker create ${{ env.MONITOR_IMAGE }}:${{ steps.get_vcs_info.outputs.version }})
@@ -196,7 +178,6 @@ jobs:
           files: |
             bin/vm-builder
             bin/vm-builder-generic
-            bin/vm-informant
             bin/vm-monitor
             rendered_manifests/autoscale-scheduler.yaml
             rendered_manifests/autoscaler-agent.yaml

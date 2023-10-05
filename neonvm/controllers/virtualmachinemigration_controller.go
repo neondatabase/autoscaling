@@ -109,7 +109,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			if err := r.Update(ctx, migration); err != nil {
 				return ctrl.Result{}, err
 			}
-			// stop this reconcilation cycle, new will be triggered as Migration updated
+			// stop this reconciliation cycle, new will be triggered as Migration updated
 			return ctrl.Result{}, nil
 		}
 	} else {
@@ -158,7 +158,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			log.Info("Failed to add owner to Migration", "error", err)
 			return ctrl.Result{}, err
 		}
-		// stop this reconcilation cycle, new will be triggered as Migration updated
+		// stop this reconciliation cycle, new will be triggered as Migration updated
 		return ctrl.Result{}, nil
 	}
 
@@ -331,7 +331,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		case corev1.PodUnknown:
 			message := fmt.Sprintf("Target Pod (%s) in Unknown phase", targetRunner.Name)
 			log.Info(message)
-			r.Recorder.Event(migration, "Warning", "Unknow", message)
+			r.Recorder.Event(migration, "Warning", "Unknown", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachineMigration,
 					Status:  metav1.ConditionUnknown,
@@ -371,7 +371,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 
 		// retrieve migration statistics
-		migrationInfo, err := QmpGetMigrationInfo(vm)
+		migrationInfo, err := QmpGetMigrationInfo(QmpAddr(vm))
 		if err != nil {
 			log.Error(err, "Failed to get migration info")
 			return ctrl.Result{}, err
@@ -475,7 +475,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		// seems migration still going on, just update status with migration progress once per second
 		time.Sleep(time.Second)
 		// re-retrieve migration statistics
-		migrationInfo, err = QmpGetMigrationInfo(vm)
+		migrationInfo, err = QmpGetMigrationInfo(QmpAddr(vm))
 		if err != nil {
 			log.Error(err, "Failed to re-get migration info")
 			return ctrl.Result{}, err
@@ -529,7 +529,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			migration.Status.SourcePodIP = ""
 			return r.updateMigrationStatus(ctx, migration)
 		}
-		// all done, stop reconcilation
+		// all done, stop reconciliation
 		return ctrl.Result{}, nil
 
 	case vmv1.VmmFailed:
@@ -542,12 +542,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				return ctrl.Result{}, err
 			}
 		}
-		// all done, stop reconcilation
+		// all done, stop reconciliation
 		return ctrl.Result{}, nil
 
 	default:
 		// not sure what to do, so try rqueue
-		log.Info("Requeuing cuurent request")
+		log.Info("Requeuing current request")
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
@@ -576,7 +576,7 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 
 		// try to cancel migration
 		log.Info("Canceling migration")
-		if err := QmpCancelMigration(vm); err != nil {
+		if err := QmpCancelMigration(QmpAddr(vm)); err != nil {
 			// inform about error but not return error to avoid stuckness in reconciliation cycle
 			log.Error(err, "Migration canceling failed")
 		}

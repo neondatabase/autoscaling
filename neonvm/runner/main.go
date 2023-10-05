@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"log"
 	"math"
 	"net"
 	"os"
@@ -36,6 +35,7 @@ import (
 	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
+	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -48,9 +48,10 @@ const (
 	kernelPath    = "/vm/kernel/vmlinuz"
 	kernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
-	rootDiskPath    = "/vm/images/rootdisk.qcow2"
-	runtimeDiskPath = "/vm/images/runtime.iso"
-	mountedDiskPath = "/vm/images"
+	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
+	runtimeDiskPath                = "/vm/images/runtime.iso"
+	mountedDiskPath                = "/vm/images"
+	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
 
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
@@ -68,6 +69,17 @@ const (
 	// in microseconds. Min 1000 microseconds, max 1 second
 	cgroupPeriod     = uint64(100000)
 	cgroupMountPoint = "/sys/fs/cgroup"
+
+	// cpuLimitOvercommitFactor sets the amount above the VM's spec.guest.cpus.use that we set the
+	// QEMU cgroup's CPU limit to. e.g. if cpuLimitOvercommitFactor = 3 and the VM is using 0.5
+	// CPUs, we set the cgroup to limit QEMU+VM to 1.5 CPUs.
+	//
+	// This exists because setting the cgroup exactly equal to the VM's CPU value is overly
+	// pessimistic, results in a lot of unused capacity on the host, and particularly impacts
+	// operations that parallelize between the VM and QEMU, like heavy disk access.
+	//
+	// See also: https://neondb.slack.com/archives/C03TN5G758R/p1693462680623239
+	cpuLimitOvercommitFactor = 4
 )
 
 var (
@@ -210,7 +222,14 @@ func createISO9660runtime(diskPath string, command []string, args []string, env 
 			mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			switch {
 			case disk.EmptyDisk != nil:
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
+				opts := ""
+				if disk.EmptyDisk.Discard {
+					opts = "-o discard"
+				}
+
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
+				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
 			case disk.ConfigMap != nil || disk.Secret != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
 			case disk.Tmpfs != nil:
@@ -330,7 +349,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 	return nil
 }
 
-func createISO9660FromPath(diskName string, diskPath string, contentPath string) error {
+func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string, contentPath string) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
@@ -370,7 +389,7 @@ func createISO9660FromPath(diskName string, diskPath string, contentPath string)
 			continue
 		}
 
-		log.Printf("adding file: %s", outputPath)
+		logger.Info("adding file to ISO9660 disk", zap.String("path", outputPath))
 		fileToAdd, err := os.Open(fileName)
 		if err != nil {
 			return err
@@ -427,6 +446,8 @@ func checkDevTun() bool {
 }
 
 func main() {
+	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
+
 	var vmSpecDump string
 	var vmStatusDump string
 	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
@@ -435,25 +456,25 @@ func main() {
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
 	if !ok {
-		log.Fatalf("environment variable K8S_POD_NAME missing")
+		logger.Fatal("environment variable K8S_POD_NAME missing")
 	}
 
 	vmSpecJson, err := base64.StdEncoding.DecodeString(vmSpecDump)
 	if err != nil {
-		log.Fatalf("Failed to decode VirtualMachine Spec dump: %s", err)
+		logger.Fatal("Failed to decode VirtualMachine Spec dump", zap.Error(err))
 	}
 	vmStatusJson, err := base64.StdEncoding.DecodeString(vmStatusDump)
 	if err != nil {
-		log.Fatalf("Failed to decode VirtualMachine Status dump: %s", err)
+		logger.Fatal("Failed to decode VirtualMachine Status dump", zap.Error(err))
 	}
 
 	vmSpec := &vmv1.VirtualMachineSpec{}
 	if err := json.Unmarshal(vmSpecJson, vmSpec); err != nil {
-		log.Fatalf("Failed to unmarshal VM Spec: %s", err)
+		logger.Fatal("Failed to unmarshal VM spec", zap.Error(err))
 	}
 	vmStatus := &vmv1.VirtualMachineStatus{}
 	if err := json.Unmarshal(vmStatusJson, vmStatus); err != nil {
-		log.Fatalf("Failed to unmarshal VM Status: %s", err)
+		logger.Fatal("Failed to unmarshal VM Status", zap.Error(err))
 	}
 
 	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
@@ -473,7 +494,7 @@ func main() {
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
-		log.Fatalln(err)
+		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 
 	// resize rootDisk image of size specified and new size more than current
@@ -483,7 +504,7 @@ func main() {
 	// get current disk size by qemu-img info command
 	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
-		log.Fatalf("could not get root image size: %s", err)
+		logger.Fatal("could not get root image size", zap.Error(err))
 	}
 	imageSize := QemuImgOutputPartial{}
 	json.Unmarshal(qemuImgOut, &imageSize)
@@ -492,12 +513,12 @@ func main() {
 	// going to resize
 	if !vmSpec.Guest.RootDisk.Size.IsZero() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
-			log.Printf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String())
+			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
 			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
-				log.Fatal(err)
+				logger.Fatal("Failed to resize rootDisk", zap.Error(err))
 			}
 		} else {
-			log.Printf("rootDisk.size (%s) should be more than size in image (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String())
+			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
 		}
 	}
 
@@ -514,6 +535,7 @@ func main() {
 		"-serial", "stdio",
 		"-msg", "timestamp=on",
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
+		"-qmp", fmt.Sprintf("unix:%s,server,wait=off", qmpUnixSocketForSigtermHandler),
 	}
 
 	// disk details
@@ -522,18 +544,22 @@ func main() {
 	for _, disk := range vmSpec.Disks {
 		switch {
 		case disk.EmptyDisk != nil:
-			log.Printf("creating QCOW2 image '%s' with empty ext4 filesystem", disk.Name)
+			logger.Info("creating QCOW2 image with empty ext4 filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
-				log.Fatalln(err)
+				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none", disk.Name, dPath))
+			discard := ""
+			if disk.EmptyDisk.Discard {
+				discard = ",discard=unmap"
+			}
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
-			log.Printf("creating iso9660 image '%s' for '%s' from path '%s'", dPath, disk.Name, mnt)
-			if err := createISO9660FromPath(disk.Name, dPath, mnt); err != nil {
-				log.Fatalln(err)
+			logger.Info("creating iso9660 image", zap.String("diskPath", dPath), zap.String("diskName", disk.Name), zap.String("mountPath", mnt))
+			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
+				logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
 		default:
@@ -542,9 +568,12 @@ func main() {
 	}
 
 	// cpu details
-	if vmSpec.EnableAcceleration && checkKVM() {
-		log.Println("using KVM acceleration")
+	// NB: EnableAcceleration guaranteed non-nil because the k8s API server sets the default for us.
+	if *vmSpec.EnableAcceleration && checkKVM() {
+		logger.Info("using KVM acceleration")
 		qemuCmd = append(qemuCmd, "-enable-kvm")
+	} else {
+		logger.Warn("not using KVM acceleration")
 	}
 	qemuCmd = append(qemuCmd, "-cpu", "max")
 	qemuCmd = append(qemuCmd, "-smp", strings.Join(cpus, ","))
@@ -553,9 +582,9 @@ func main() {
 	qemuCmd = append(qemuCmd, "-m", strings.Join(memory, ","))
 
 	// default (pod) net details
-	macDefault, err := defaultNetwork(defaultNetworkCIDR, vmSpec.Guest.Ports)
+	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
 	if err != nil {
-		log.Fatalf("can not setup default network: %s", err)
+		logger.Fatal("cannot set up default network", zap.Error(err))
 	}
 	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,script=no,downscript=no,vhost=on", defaultNetworkTapName))
 	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
@@ -564,7 +593,7 @@ func main() {
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
 		macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface)
 		if err != nil {
-			log.Fatalf("can not setup overlay network: %s", err)
+			logger.Fatal("cannot set up overlay network", zap.Error(err))
 		}
 		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
 		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
@@ -583,9 +612,9 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	selfCgroupPath, err := getSelfCgroupPath()
+	selfCgroupPath, err := getSelfCgroupPath(logger)
 	if err != nil {
-		log.Fatalf("Failed to get self cgroup path: %s", err)
+		logger.Fatal("Failed to get self cgroup path", zap.Error(err))
 	}
 	// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
 	// that the cgroup '/neonvm-qemu-...' still works.
@@ -599,38 +628,40 @@ func main() {
 	// be equal to the source pod, not this one, which may be... somewhat confusing.
 	cgroupPath := fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
 
-	log.Printf("Using QEMU cgroup path %q", cgroupPath)
+	logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
 
-	if err := setCgroupLimit(qemuCPUs.use, cgroupPath); err != nil {
-		log.Fatalf("Failed to set cgroup limit: %s", err)
+	if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
+		logger.Fatal("Failed to set cgroup limit", zap.Error(err))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go terminateQemuOnSigterm(ctx, vmSpec.QMP, &wg)
+	go terminateQemuOnSigterm(ctx, logger, &wg)
 	wg.Add(1)
-	go listenForCPUChanges(ctx, vmSpec.RunnerPort, cgroupPath, &wg)
+	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
 
 	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
-	log.Printf("using cgexec args: %v", args)
+	logger.Info("calling cgexec", zap.Strings("args", args))
 	if err := execFg("cgexec", args...); err != nil {
-		log.Printf("Qemu exited: %s", err)
+		logger.Error("QEMU exited with error", zap.Error(err))
+	} else {
+		logger.Info("QEMU exited without error")
 	}
 
 	cancel()
 	wg.Wait()
 }
 
-func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) {
+func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "POST" {
-		log.Printf("unexpected method: %s", r.Method)
+		logger.Error("unexpected method", zap.String("method", r.Method))
 		w.WriteHeader(400)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("could not read body: %s", err)
+		logger.Error("could not read body", zap.Error(err))
 		w.WriteHeader(400)
 		return
 	}
@@ -638,16 +669,16 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	parsed := api.VCPUChange{}
 	err = json.Unmarshal(body, &parsed)
 	if err != nil {
-		log.Printf("could not parse body: %s", err)
+		logger.Error("could not parse body", zap.Error(err))
 		w.WriteHeader(400)
 		return
 	}
 
 	// update cgroup
-	log.Printf("got CPU update %v", parsed.VCPUs.AsFloat64())
-	err = setCgroupLimit(parsed.VCPUs, cgroupPath)
+	logger.Info("got CPU update", zap.Float64("CPU", parsed.VCPUs.AsFloat64()))
+	err = setCgroupLimit(logger, parsed.VCPUs, cgroupPath)
 	if err != nil {
-		log.Printf("could not set cgroup limit: %s", err)
+		logger.Error("could not set cgroup limit", zap.Error(err))
 		w.WriteHeader(500)
 		return
 	}
@@ -655,23 +686,23 @@ func handleCPUChange(w http.ResponseWriter, r *http.Request, cgroupPath string) 
 	w.WriteHeader(200)
 }
 
-func handleCPUCurrent(w http.ResponseWriter, r *http.Request, cgroupPath string) {
+func handleCPUCurrent(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
 	if r.Method != "GET" {
-		log.Printf("unexpected method: %s", r.Method)
+		logger.Error("unexpected method", zap.String("method", r.Method))
 		w.WriteHeader(400)
 		return
 	}
 
 	cpus, err := getCgroupQuota(cgroupPath)
 	if err != nil {
-		log.Printf("could not get cgroup quota: %s", err)
+		logger.Error("could not get cgroup quota", zap.Error(err))
 		w.WriteHeader(500)
 		return
 	}
 	resp := api.VCPUCgroup{VCPUs: *cpus}
 	body, err := json.Marshal(resp)
 	if err != nil {
-		log.Printf("could not marshal body: %s", err)
+		logger.Error("could not marshal body", zap.Error(err))
 		w.WriteHeader(500)
 		return
 	}
@@ -680,14 +711,17 @@ func handleCPUCurrent(w http.ResponseWriter, r *http.Request, cgroupPath string)
 	w.Write(body)
 }
 
-func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg *sync.WaitGroup) {
+func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cgroupPath string, wg *sync.WaitGroup) {
 	defer wg.Done()
 	mux := http.NewServeMux()
+	loggerHandlers := logger.Named("http-handlers")
+	cpuChangeLogger := loggerHandlers.Named("cpu_change")
 	mux.HandleFunc("/cpu_change", func(w http.ResponseWriter, r *http.Request) {
-		handleCPUChange(w, r, cgroupPath)
+		handleCPUChange(cpuChangeLogger, w, r, cgroupPath)
 	})
+	cpuCurrentLogger := loggerHandlers.Named("cpu_current")
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
-		handleCPUCurrent(w, r, cgroupPath)
+		handleCPUCurrent(cpuCurrentLogger, w, r, cgroupPath)
 	})
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
@@ -703,17 +737,17 @@ func listenForCPUChanges(ctx context.Context, port int32, cgroupPath string, wg 
 	select {
 	case err := <-errChan:
 		if errors.Is(err, http.ErrServerClosed) {
-			log.Println("cpu_change server closed")
+			logger.Info("cpu_change server closed")
 		} else if err != nil {
-			log.Fatalf("error starting server: %s", err)
+			logger.Fatal("cpu_change exited with error", zap.Error(err))
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
-		log.Printf("shut down cpu_change server: %v", err)
+		logger.Info("shut down cpu_change server", zap.Error(err))
 	}
 }
 
-func getSelfCgroupPath() (string, error) {
+func getSelfCgroupPath(logger *zap.Logger) (string, error) {
 	// There's some fun stuff here. For general information, refer to `man 7 cgroups` - specifically
 	// the section titled "/proc files" - for "/proc/cgroups" and "/proc/pid/cgroup".
 	//
@@ -776,6 +810,7 @@ func getSelfCgroupPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read /proc/self/cgroup: %w", err)
 	}
+	logger.Info("Read /proc/self/cgroup", zap.String("contents", string(procSelfCgroupContents)))
 
 	// Collect all candidate paths from the lines of the file. If there isn't exactly one,
 	// something's wrong and we should make an error.
@@ -789,7 +824,6 @@ func getSelfCgroupPath() (string, error) {
 		// Split into the three ':'-delimited fields
 		fields := strings.Split(line, ":")
 		if len(fields) != 3 {
-			log.Printf("Contents of /proc/self/cgroup:\n%s", procSelfCgroupContents)
 			return "", fmt.Errorf("line %d of /proc/self/cgroup did not have 3 colon-delimited fields", lineno+1)
 		}
 
@@ -826,17 +860,18 @@ func getSelfCgroupPath() (string, error) {
 		errMsg = "Couldn't find applicable entry in /proc/self/cgroup"
 	}
 
-	log.Printf("Contents of /proc/self/cgroup:\n%s", procSelfCgroupContents)
 	return "", errors.New(errMsg)
 }
 
-func setCgroupLimit(r vmv1.MilliCPU, cgroupPath string) error {
+func setCgroupLimit(logger *zap.Logger, r vmv1.MilliCPU, cgroupPath string) error {
+	r *= cpuLimitOvercommitFactor
+
 	isV2 := cgroups.Mode() == cgroups.Unified
 	period := cgroupPeriod
 	// quota may be greater than period if the cgroup is allowed
 	// to use more than 100% of a CPU.
 	quota := int64(float64(r) / float64(1000) * float64(cgroupPeriod))
-	log.Printf("setting cgroup to %v %v", quota, period)
+	logger.Info(fmt.Sprintf("setting cgroup CPU limit %v %v", quota, period))
 	if isV2 {
 		resources := cgroup2.Resources{
 			CPU: &cgroup2.CPU{
@@ -884,6 +919,7 @@ func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 		return nil, err
 	}
 	cpu := vmv1.MilliCPU(uint32(quota * 1000 / cgroupPeriod))
+	cpu /= cpuLimitOvercommitFactor
 	return &cpu, nil
 }
 
@@ -912,9 +948,11 @@ func processCPUs(cpus vmv1.CPUs) QemuCPUs {
 	}
 }
 
-func terminateQemuOnSigterm(ctx context.Context, qmpPort int32, wg *sync.WaitGroup) {
+func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
+	logger = logger.Named("terminate-qemu-on-sigterm")
+
 	defer wg.Done()
-	log.Println("watching OS signals")
+	logger.Info("watching OS signals")
 	c := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	select {
@@ -922,16 +960,16 @@ func terminateQemuOnSigterm(ctx context.Context, qmpPort int32, wg *sync.WaitGro
 	case <-ctx.Done():
 	}
 
-	log.Println("got signal, sending powerdown command to QEMU")
+	logger.Info("got signal, sending powerdown command to QEMU")
 
-	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("127.0.0.1:%d", qmpPort), 2*time.Second)
+	mon, err := qmp.NewSocketMonitor("unix", qmpUnixSocketForSigtermHandler, 2*time.Second)
 	if err != nil {
-		log.Println(err)
+		logger.Error("failed to connect to QEMU monitor", zap.Error(err))
 		return
 	}
 
 	if err := mon.Connect(); err != nil {
-		log.Println(err)
+		logger.Error("failed to start monitor connection", zap.Error(err))
 		return
 	}
 	defer mon.Disconnect()
@@ -939,11 +977,11 @@ func terminateQemuOnSigterm(ctx context.Context, qmpPort int32, wg *sync.WaitGro
 	qmpcmd := []byte(`{"execute": "system_powerdown"}`)
 	_, err = mon.Run(qmpcmd)
 	if err != nil {
-		log.Println(err)
+		logger.Error("failed to execute system_powerdown command", zap.Error(err))
 		return
 	}
 
-	log.Println("system_powerdown command sent to QEMU")
+	logger.Info("system_powerdown command sent to QEMU")
 
 	return
 }
@@ -986,28 +1024,28 @@ func execFg(name string, arg ...string) error {
 	return nil
 }
 
-func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
+func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// gerenare random MAC for default Guest interface
 	mac, err := mac.GenerateRandMAC()
 	if err != nil {
-		log.Fatalf("could not generate random MAC: %s", err)
+		logger.Fatal("could not generate random MAC", zap.Error(err))
 		return nil, err
 	}
 
 	// create an configure linux bridge
-	log.Printf("setup bridge interface %s", defaultNetworkBridgeName)
+	logger.Info("setup bridge interface", zap.String("name", defaultNetworkBridgeName))
 	bridge := &netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkBridgeName,
 		},
 	}
 	if err := netlink.LinkAdd(bridge); err != nil {
-		log.Fatalf("could not create bridge interface: %s", err)
+		logger.Fatal("could not create bridge interface", zap.Error(err))
 		return nil, err
 	}
 	ipPod, ipVm, mask, err := calcIPs(cidr)
 	if err != nil {
-		log.Fatalf("could not parse IP: %s", err)
+		logger.Fatal("could not parse IP", zap.Error(err))
 		return nil, err
 	}
 	bridgeAddr := &netlink.Addr{
@@ -1017,17 +1055,17 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		},
 	}
 	if err := netlink.AddrAdd(bridge, bridgeAddr); err != nil {
-		log.Fatalf("could not parse IP: %s", err)
+		logger.Fatal("could not parse IP", zap.Error(err))
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(bridge); err != nil {
-		log.Fatalf("could not setup bridge: %s", err)
+		logger.Fatal("could not set up bridge", zap.Error(err))
 		return nil, err
 	}
 
 	// create an configure TAP interface
 	if !checkDevTun() {
-		log.Printf("create /dev/net/tun")
+		logger.Info("create /dev/net/tun")
 		if err := execFg("mkdir", "-p", "/dev/net"); err != nil {
 			return nil, err
 		}
@@ -1039,7 +1077,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		}
 	}
 
-	log.Printf("setup tap interface %s", defaultNetworkTapName)
+	logger.Info("setup tap interface", zap.String("name", defaultNetworkTapName))
 	tap := &netlink.Tuntap{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkTapName,
@@ -1048,35 +1086,35 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 		Flags: netlink.TUNTAP_DEFAULTS,
 	}
 	if err := netlink.LinkAdd(tap); err != nil {
-		log.Printf("could not add tap device: %s", err)
+		logger.Error("could not add tap device", zap.Error(err))
 		return nil, err
 	}
 	if err := netlink.LinkSetMaster(tap, bridge); err != nil {
-		log.Printf("could not setup tap as master: %s", err)
+		logger.Error("could not set up tap as master", zap.Error(err))
 		return nil, err
 	}
 	if err := netlink.LinkSetUp(tap); err != nil {
-		log.Printf("could not setup tap device: %s", err)
+		logger.Error("could not set up tap device", zap.Error(err))
 		return nil, err
 	}
 
 	// setup masquerading outgoing (from VM) traffic
-	log.Println("setup masquerading for outgoing traffic")
+	logger.Info("setup masquerading for outgoing traffic")
 	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
-		log.Printf("could not setup masquerading for outgoing traffic: %s", err)
+		logger.Error("could not setup masquerading for outgoing traffic", zap.Error(err))
 		return nil, err
 	}
 
 	// pass incoming traffic to .Guest.Spec.Ports into VM
 	for _, port := range ports {
-		log.Printf("setup DNAT for incoming traffic, port %d", port.Port)
+		logger.Info(fmt.Sprintf("setup DNAT for incoming traffic, port %d", port.Port))
 		iptablesArgs := []string{
 			"-t", "nat", "-A", "PREROUTING",
 			"-i", "eth0", "-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
 			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
-			log.Printf("could not setup DNAT for incoming traffic: %s", err)
+			logger.Error("could not set up DNAT for incoming traffic", zap.Error(err))
 			return nil, err
 		}
 	}
@@ -1084,14 +1122,14 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 	// get dns details from /etc/resolv.conf
 	resolvConf, err := getResolvConf()
 	if err != nil {
-		log.Printf("could not get DNS details: %s", err)
+		logger.Error("could not get DNS details", zap.Error(err))
 		return nil, err
 	}
 	dns := getNameservers(resolvConf.Content, types.IP)[0]
 	dnsSearch := strings.Join(getSearchDomains(resolvConf.Content), ",")
 
 	// prepare dnsmask command line (instead of config file)
-	log.Printf("run dnsmqsq for interface %s", defaultNetworkBridgeName)
+	logger.Info("run dnsmasq for interface", zap.String("name", defaultNetworkBridgeName))
 	dnsMaskCmd := []string{
 		"--port=0",
 		"--bind-interfaces",
@@ -1107,7 +1145,7 @@ func defaultNetwork(cidr string, ports []vmv1.Port) (mac.MAC, error) {
 
 	// run dnsmasq for default Guest interface
 	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
-		log.Printf("could not run dnsmasq: %s", err)
+		logger.Error("could not run dnsmasq", zap.Error(err))
 		return nil, err
 	}
 
