@@ -250,7 +250,7 @@ kernel: ## Build linux kernel.
 
 .PHONY: check-local-context
 check-local-context: ## Asserts that the current kubectl context is pointing at k3d or kind, to avoid accidentally applying to prod
-	if [ "$$($(KUBECTL) config current-context)" != 'k3d-neonvm' ] && [ "$$($(KUBECTL) config current-context)" != 'kind-kind' ]; then echo "kubectl context is not pointing to local k3d or kind cluster (must be k3d-neonvm or kind-kind)"; fi
+	if [ "$$($(KUBECTL) config current-context)" != 'k3d-neonvm' ] && [ "$$($(KUBECTL) config current-context)" != 'kind-kind' ]; then echo "kubectl context is not pointing to local k3d or kind cluster (must be k3d-neonvm or kind-kind)"; exit 1; fi
 
 .PHONY: install
 install: check-local-context manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
