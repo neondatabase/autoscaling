@@ -264,10 +264,14 @@ func logAddedEvent(logger *zap.Logger, event *billing.IncrementalEvent) *billing
 func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname string, queue eventQueuePusher[*billing.IncrementalEvent]) {
 	now := time.Now()
 
+	countInBatch := 0
+	batchSize := 2 * len(s.historical)
+
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
 
-		queue.enqueue(logAddedEvent(logger, billing.Enrich(hostname, &billing.IncrementalEvent{
+		countInBatch += 1
+		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
 			Type:           "", // set by billing.Enrich
 			IdempotencyKey: "", // set by billing.Enrich
@@ -278,7 +282,8 @@ func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname s
 			StopTime:  now,
 			Value:     int(math.Round(history.total.cpu)),
 		})))
-		queue.enqueue(logAddedEvent(logger, billing.Enrich(hostname, &billing.IncrementalEvent{
+		countInBatch += 1
+		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
 			Type:           "", // set by billing.Enrich
 			IdempotencyKey: "", // set by billing.Enrich
