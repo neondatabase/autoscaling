@@ -25,6 +25,8 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
 
 This isn't the only architecture document. You may also want to look at:
 
+* [`pkg/agent/ARCHITECTURE.md`](pkg/agent/ARCHITECTURE.md) — detail on the implementation of the
+    autoscaler-agent
 * [`pkg/plugin/ARCHITECTURE.md`](pkg/plugin/ARCHITECTURE.md) — detail on the implementation of the
   scheduler plugin
 * [`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor) -
