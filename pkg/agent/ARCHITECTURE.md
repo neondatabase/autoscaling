@@ -135,7 +135,7 @@ sequenceDiagram
         executor/->>core/: State updated
         executor/->>core/: Calculate new actions
         executor/->>execbridge.go: Call interfaces to execute actions
-        execbridge.go->>runner.go: Make individaul requests
+        execbridge.go->>runner.go: Make individual requests
     end
 ```
 

@@ -13,7 +13,7 @@ package core
 //
 // That said, there's still some tricky semantics we want to maintain. Internally, the
 // autoscaler-agent must be designed around eventual consistency, but the API we expose to the
-// vm-monitor is strictly synchonous. As such, there's some subtle logic to make sure that we're
+// vm-monitor is strictly synchronous. As such, there's some subtle logic to make sure that we're
 // not violating our own guarantees.
 //
 // ---
@@ -116,7 +116,7 @@ type monitorState struct {
 	// vm-monitor, along with the time at which it occurred.
 	requestedUpscale *requestedUpscale
 
-	// deniedDownscale, if not nil, stores the result of the lastest denied /downscale request.
+	// deniedDownscale, if not nil, stores the result of the latest denied /downscale request.
 	deniedDownscale *deniedDownscale
 
 	// approved stores the most recent Resources associated with either (a) an accepted downscale
@@ -743,7 +743,7 @@ func (s *State) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources
 }
 
 // clampResources uses the directionality of the difference between s.vm.Using() and desired to
-// clamp the desired resources with the uppper *or* lower bound
+// clamp the desired resources with the upper *or* lower bound
 func (s *State) clampResources(
 	current api.Resources,
 	desired api.Resources,
