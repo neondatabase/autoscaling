@@ -60,7 +60,7 @@ type Accessors[L any, T any] struct {
 // Object is implemented by pointers to T, where T is typically the resource that we're
 // actually watching.
 //
-// Example implementors: *corev1.Pod, *corev1.Node
+// Example implementers: *corev1.Pod, *corev1.Node
 type Object[T any] interface {
 	~*T
 	runtime.Object
@@ -494,7 +494,7 @@ func handleEvent[T any, P ~*T](
 	obj := (*T)(ptr)
 
 	// Some of the cases below don't actually require locking the store. Most of the events that we
-	// recieve *do* though, so we're better off doing it here for simplicity.
+	// receive *do* though, so we're better off doing it here for simplicity.
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 

@@ -1,4 +1,4 @@
-# "style: function formatting (#46)" - changes formatting of function params, exculsively from
+# "style: function formatting (#46)" - changes formatting of function params, exclusively from
 # single-line to multi-line
 f8fb06a1565599c3d44a1951c7a50b6c065cdb96
 # "intermediate commit: de-indent some blocks (#113)" - factored out of #113 to make blame clear.
@@ -23,3 +23,5 @@ dd2a6ef105f7e66db78b649710fb38ad15124424
 72792b5c1c874b1a80108454afeb3b9f72cd2c37
 # "intermediate commit: indent plugin Unreserve VM pod logic (#317)" - indent
 d7874af75700c1c5ab671eb6b1c7b66a17a07de4
+# "Fix typos (so codespell is happy) (#542)" - various typo fixes
+b82ad114ddfefb525393d25ce17d88c99739bac9

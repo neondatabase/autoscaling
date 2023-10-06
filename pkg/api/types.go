@@ -383,7 +383,7 @@ type InvalidMessage struct {
 	Error string `json:"error"`
 }
 
-// This type can be sent by either party to signal that an error occured carrying
+// This type can be sent by either party to signal that an error occurred carrying
 // out the other party's request, for example, the monitor erroring while trying
 // to downscale. The receiving party can they log the error or propagate it as they
 // see fit.
@@ -446,7 +446,7 @@ type MonitorProtoVersion uint32
 const (
 	// MonitorProtoV1_0 represents v1.0 of the agent<->monitor protocol - the initial version.
 	//
-	// Currently the lastest version.
+	// Currently the latest version.
 	MonitorProtoV1_0 = iota + 1
 
 	// latestMonitorProtoVersion represents the latest version of the agent<->Monitor protocol
@@ -477,6 +477,6 @@ type MonitorProtocolResponse struct {
 	// Otherwise, will be set to 0 (MonitorProtocolVersion's zero value).
 	Version MonitorProtoVersion `json:"version,omitempty"`
 
-	// Will be nil if no error occured.
+	// Will be nil if no error occurred.
 	Error *string `json:"error,omitempty"`
 }

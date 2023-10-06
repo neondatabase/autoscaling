@@ -103,7 +103,7 @@ $ grep -E -B 3 -A 3 '[<=>]{7}' $tmpdir/cluster-autoscaler/utils/kubernetes/liste
 	"k8s.io/apimachinery/pkg/runtime"
 $
 $ # As always though, you should manually inspect that the changes are still sensible.
-$ <manually resovle conflicts + check the rest of the patch yourself>
+$ <manually resolve conflicts + check the rest of the patch yourself>
 $
 $ # AFTER RESOLVING CONFLICTS:
 $ # If there were any conflicts, reset the repo state (so that `git diff` is correct)

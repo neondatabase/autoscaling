@@ -1423,7 +1423,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 		}
 
-		// If scaling isn't enabled *or* the pod is invovled in an ongoing migration, then we can be
+		// If scaling isn't enabled *or* the pod is involved in an ongoing migration, then we can be
 		// more precise about usage (because scaling is forbidden while migrating).
 		if !vmInfo.ScalingEnabled || migrationName != nil {
 			ps.vCPU.Buffer = 0
