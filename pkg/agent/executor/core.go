@@ -3,8 +3,14 @@ package executor
 // Consumers of pkg/agent/core, implementing the "executors" for each type of action. These are
 // wrapped up into a single ExecutorCore type, which exposes some methods for the various executors.
 //
-// The executors use various abstract interfaces for the scheudler / NeonVM / informant. The
-// implementations of those interfaces are defiend in ifaces.go
+// The executors use various abstract interfaces for the scheduler plugin / NeonVM / vm-monitor, and
+// are defined in exec_*.go. The implementations of those interfaces are defined in execbridge.go.
+//
+// Each of the methods to modify ExecutorCore take 'withLock' as a callback that runs while the lock
+// is held. In general, this is used for logging, so that the log output strictly matches the
+// ordering of the changes to the underlying core.State, which should help with debugging.
+//
+// For more, see pkg/agent/ARCHITECTURE.md.
 
 import (
 	"sync"
@@ -49,6 +55,7 @@ func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config core.Config)
 	}
 }
 
+// ExecutorCoreWithClients wraps ExecutorCore with the various
 type ExecutorCoreWithClients struct {
 	*ExecutorCore
 
@@ -62,14 +69,20 @@ func (c *ExecutorCore) WithClients(clients ClientSet) ExecutorCoreWithClients {
 	}
 }
 
-type timedActionsID int64
-
+// timedActions stores the core.ActionSet in ExecutorCore alongside a unique ID
 type timedActions struct {
-	id           timedActionsID
-	calculatedAt time.Time
-	actions      core.ActionSet
+	// id stores a unique ID associated with the cached actions, so that we can use optimistic
+	// locking to make sure we're never taking an action that is not the *current* recommendation,
+	// because otherwise guaranteeing correctness of core.State is really difficult.
+	//
+	// id is exclusively used by (*ExecutorCore).updateIfActionsUnchanged().
+	id      timedActionsID
+	actions core.ActionSet
 }
 
+type timedActionsID int64
+
+// fetch the currently cached actions, or recalculate if they've since been invalidated
 func (c *ExecutorCore) getActions() timedActions {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -80,7 +93,7 @@ func (c *ExecutorCore) getActions() timedActions {
 		// NOTE: Even though we cache the actions generated using time.Now(), it's *generally* ok.
 		now := time.Now()
 		c.stateLogger.Info("Recalculating ActionSet", zap.Time("now", now), zap.Any("state", c.core.Dump()))
-		c.actions = &timedActions{id: id, calculatedAt: now, actions: c.core.NextActions(now)}
+		c.actions = &timedActions{id: id, actions: c.core.NextActions(now)}
 		c.lastActionsID = id
 		c.stateLogger.Info("New ActionSet", zap.Time("now", now), zap.Any("actions", c.actions.actions))
 	}
@@ -92,8 +105,6 @@ func (c *ExecutorCore) update(with func(*core.State)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// NB: We broadcast the update *before* calling with() because this gets us nicer ordering
-	// guarantees in some cases.
 	c.updates.Broadcast()
 	c.actions = nil
 	with(c.core)
@@ -138,6 +149,8 @@ type ExecutorCoreUpdater struct {
 	core *ExecutorCore
 }
 
+// UpdateMetrics calls (*core.State).UpdateMetrics() on the inner core.State and runs withLock while
+// holding the lock.
 func (c ExecutorCoreUpdater) UpdateMetrics(metrics api.Metrics, withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.UpdateMetrics(metrics)
@@ -145,6 +158,8 @@ func (c ExecutorCoreUpdater) UpdateMetrics(metrics api.Metrics, withLock func())
 	})
 }
 
+// UpdatedVM calls (*core.State).UpdatedVM() on the inner core.State and runs withLock while
+// holding the lock.
 func (c ExecutorCoreUpdater) UpdatedVM(vm api.VmInfo, withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.UpdatedVM(vm)
@@ -152,7 +167,8 @@ func (c ExecutorCoreUpdater) UpdatedVM(vm api.VmInfo, withLock func()) {
 	})
 }
 
-// NewScheduler updates the inner state, calling (*core.State).Plugin().NewScheduler()
+// NewScheduler calls (*core.State).Plugin().NewScheduler() on the inner core.State and runs
+// withLock while holding the lock.
 func (c ExecutorCoreUpdater) NewScheduler(withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.Plugin().NewScheduler()
@@ -160,7 +176,8 @@ func (c ExecutorCoreUpdater) NewScheduler(withLock func()) {
 	})
 }
 
-// SchedulerGone updates the inner state, calling (*core.State).Plugin().SchedulerGone()
+// SchedulerGone calls (*core.State).Plugin().SchedulerGone() on the inner core.State and runs
+// withLock while holding the lock.
 func (c ExecutorCoreUpdater) SchedulerGone(withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.Plugin().SchedulerGone()
@@ -168,6 +185,8 @@ func (c ExecutorCoreUpdater) SchedulerGone(withLock func()) {
 	})
 }
 
+// ResetMonitor calls (*core.State).Monitor().Reset() on the inner core.State and runs withLock
+// while holding the lock.
 func (c ExecutorCoreUpdater) ResetMonitor(withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.Monitor().Reset()
@@ -175,6 +194,8 @@ func (c ExecutorCoreUpdater) ResetMonitor(withLock func()) {
 	})
 }
 
+// UpscaleRequested calls (*core.State).Monitor().UpscaleRequested(...) on the inner core.State and
+// runs withLock while holding the lock.
 func (c ExecutorCoreUpdater) UpscaleRequested(resources api.MoreResources, withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.Monitor().UpscaleRequested(time.Now(), resources)
@@ -182,6 +203,8 @@ func (c ExecutorCoreUpdater) UpscaleRequested(resources api.MoreResources, withL
 	})
 }
 
+// MonitorActive calls (*core.State).Monitor().Active(...) on the inner core.State and runs withLock
+// while holding the lock.
 func (c ExecutorCoreUpdater) MonitorActive(active bool, withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.Monitor().Active(active)

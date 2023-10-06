@@ -123,8 +123,13 @@ type monitorState struct {
 	// request, or (b) a successful upscale notification.
 	approved *api.Resources
 
+	// downscaleFailureAt, if not nil, stores the time at which a downscale request most recently
+	// failed (where "failed" means that some unexpected error occurred, not that it was merely
+	// denied).
 	downscaleFailureAt *time.Time
-	upscaleFailureAt   *time.Time
+	// upscaleFailureAt, if not nil, stores the time at which an upscale request most recently
+	// failed
+	upscaleFailureAt *time.Time
 }
 
 func (ms *monitorState) active() bool {

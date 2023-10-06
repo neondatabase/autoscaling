@@ -2,7 +2,8 @@ package agent
 
 // Implementations of the interfaces used by & defined in pkg/agent/executor
 //
-// This file is essentially the bridge between 'runner.go' and 'executor/'
+// This file is essentially the bridge between 'runner.go' and 'executor/',
+// connecting the latter to the actual implementations in the former.
 
 import (
 	"context"
