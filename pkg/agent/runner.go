@@ -5,43 +5,13 @@ package agent
 // The primary object in this file is the Runner. We create a new Runner for each VM, and the Runner
 // spawns a handful of long-running tasks that share state via the Runner object itself.
 //
-// # General paradigm
+// Each of these tasks is created by (*Runner).spawnBackgroundWorker(), which gracefully handles
+// panics so that it terminates (and restarts) the Runner itself, instead of e.g. taking down the
+// entire autoscaler-agent.
 //
-// At a high level, we're trying to balance a few goals that are in tension with each other:
+// The main entrypoint is (*Runner).Spawn(), which in turn calls (*Runner).Run(), etc.
 //
-//  1. It should be OK to panic, if an error is truly unrecoverable
-//  2. A single Runner's panic shouldn't bring down the entire autoscaler-agent¹
-//  3. We want to expose a State() method to view (almost) all internal state
-//  4. Some high-level actions (e.g., call to vm-monitor; update VM to desired state) require
-//     that we have *at most* one such action running at a time.
-//
-// There are a number of possible solutions to this set of goals. All reasonable solutions require
-// multiple goroutines. Here's what we do:
-//
-//  * Runner acts as a global (per-VM) shared object with its fields guarded by Runner.lock. The
-//    lock is held for as short a duration as possible.
-//  * "Background" threads are responsible for relatively high-level tasks - like:
-//     * "track scheduler"
-//     * "get metrics"
-//     * "handle VM resources" - using metrics, calculates target resources level and contacts
-//       scheduler, vm-monitor, and NeonVM -- the "scaling" part of "autoscaling".
-//  * Each thread makes *synchronous* HTTP requests while holding the necessary lock to prevent any other
-//    thread from making HTTP requests to the same entity. For example:
-//    * All requests to NeonVM and the scheduler plugin are guarded by Runner.requestLock, which
-//      guarantees that we aren't simultaneously telling the scheduler one thing and changing it at
-//      the same time.
-//  * Each "background" thread is spawned by (*Runner).spawnBackgroundWorker(), which appropriately
-//    catches panics and signals the Runner so that the main thread from (*Runner).Run() cleanly
-//    shuts everything down.
-//  * Every significant lock has an associated "deadlock checker" background thread that panics if
-//    it takes too long to acquire the lock.
-//
-// spawnBackgroundWorker guarantees (1) and (2); Runner.lock makes (3) possible; and
-// Runner.requestLock guarantees (4).
-//
-// ---
-// ¹ If we allowed a single Runner to take down the whole autoscaler-agent, it would open up the
-// possibility of crash-looping due to unusual cluster state (e.g., weird values in a NeonVM object)
+// For more information, refer to ARCHITECTURE.md.
 
 import (
 	"bytes"
@@ -386,9 +356,7 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, logger *zap.Logger, 
 
 // getMetricsLoop repeatedly attempts to fetch metrics from the VM
 //
-// Every time metrics are successfully fetched, the value of r.lastMetrics is updated and newMetrics
-// is signalled. The update to r.lastMetrics and signal on newMetrics occur without releasing r.lock
-// in between.
+// Every time metrics are successfully fetched, the value is recorded with newMetrics.
 func (r *Runner) getMetricsLoop(
 	ctx context.Context,
 	logger *zap.Logger,

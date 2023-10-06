@@ -1,6 +1,6 @@
 package core
 
-// Implementation of (*UpdateState).Dump()
+// Implementation of (*State).Dump()
 
 import (
 	"time"
@@ -27,7 +27,7 @@ type StateDump struct {
 	Metrics *api.Metrics     `json:"metrics"`
 }
 
-// Dump produces a JSON-serializable representation of the State
+// Dump produces a JSON-serializable copy of the State
 func (s *State) Dump() StateDump {
 	return StateDump{
 		Config:  s.config,
