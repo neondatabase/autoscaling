@@ -47,6 +47,9 @@ type MonitorConfig struct {
 	// RetryDeniedDownscaleSeconds gives the duration, in seconds, that we must wait before retrying
 	// a downscale request that was previously denied
 	RetryDeniedDownscaleSeconds uint `json:"retryDeniedDownscaleSeconds"`
+	// RequestedUpscaleValidSeconds gives the duration, in seconds, that requested upscaling should
+	// be respected for, before allowing re-downscaling.
+	RequestedUpscaleValidSeconds uint `json:"requestedUpscaleValidSeconds"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
@@ -152,6 +155,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Monitor.MaxHealthCheckSequentialFailuresSeconds == 0, zeroTmpl, ".monitor.maxHealthCheckSequentialFailuresSeconds")
 	erc.Whenf(ec, c.Monitor.RetryFailedRequestSeconds == 0, zeroTmpl, ".monitor.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Monitor.RetryDeniedDownscaleSeconds == 0, zeroTmpl, ".monitor.retryDeniedDownscaleSeconds")
+	erc.Whenf(ec, c.Monitor.RequestedUpscaleValidSeconds == 0, zeroTmpl, ".monitor.requestedUpscaleValidSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.Validate())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")

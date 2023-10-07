@@ -53,6 +53,10 @@ type Config struct {
 	// downscale requests to the vm-monitor where the previous failed.
 	MonitorDeniedDownscaleCooldown time.Duration
 
+	// MonitorRequestedUpscaleValidPeriod gives the duration for which requested upscaling from the
+	// vm-monitor must be respected.
+	MonitorRequestedUpscaleValidPeriod time.Duration
+
 	// MonitorRetryWait gives the amount of time to wait to retry after a *failed* request.
 	MonitorRetryWait time.Duration
 
@@ -640,18 +644,37 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		goalCU = util.Max(cpuGoalCU, memGoalCU)
 	}
 
-	// Update goalCU based on any requested upscaling or downscaling that was previously denied
-	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling(*s.plugin.computeUnit))
+	// Copy the initial value of the goal CU so that we can accurately track whether either
+	// requested upscaling or denied downscaling affected the outcome.
+	// Otherwise as written, it'd be possible to update goalCU from requested upscaling and
+	// incorrectly miss that denied downscaling could have had the same effect.
+	initialGoalCU := goalCU
+
+	var requestedUpscalingAffectedResult bool
+
+	// Update goalCU based on any explicitly requested upscaling
+	timeUntilRequestedUpscalingExpired := s.timeUntilRequestedUpscalingExpired(now)
+	requestedUpscalingInEffect := timeUntilRequestedUpscalingExpired > 0
+	if requestedUpscalingInEffect {
+		reqCU := s.requiredCUForRequestedUpscaling(*s.plugin.computeUnit, *s.monitor.requestedUpscale)
+		if reqCU > initialGoalCU {
+			// FIXME: this isn't quite correct, because if initialGoalCU is already equal to the
+			// maximum goal CU we *could* have, this won't actually have an effect.
+			requestedUpscalingAffectedResult = true
+			goalCU = util.Max(goalCU, reqCU)
+		}
+	}
 
 	var deniedDownscaleAffectedResult bool
 
+	// Update goalCU based on any previously denied downscaling
 	timeUntilDeniedDownscaleExpired := s.timeUntilDeniedDownscaleExpired(now)
 	deniedDownscaleInEffect := timeUntilDeniedDownscaleExpired > 0
 	if deniedDownscaleInEffect {
 		reqCU := s.requiredCUForDeniedDownscale(*s.plugin.computeUnit, s.monitor.deniedDownscale.requested)
-		if reqCU > goalCU {
+		if reqCU > initialGoalCU {
 			deniedDownscaleAffectedResult = true
-			goalCU = reqCU
+			goalCU = util.Max(goalCU, reqCU)
 		}
 	}
 
@@ -706,8 +729,20 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	}
 
 	calculateWaitTime := func(actions ActionSet) *time.Duration {
+		var waiting bool
+		waitTime := time.Duration(int64(1<<63 - 1)) // time.Duration is an int64. As an "unset" value, use the maximum.
+
 		if deniedDownscaleAffectedResult && actions.MonitorDownscale == nil && s.monitor.ongoingRequest == nil {
-			return &timeUntilDeniedDownscaleExpired
+			waitTime = util.Min(waitTime, timeUntilDeniedDownscaleExpired)
+			waiting = true
+		}
+		if requestedUpscalingAffectedResult {
+			waitTime = util.Min(waitTime, timeUntilRequestedUpscalingExpired)
+			waiting = true
+		}
+
+		if waiting {
+			return &waitTime
 		} else {
 			return nil
 		}
@@ -718,23 +753,29 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	return result, calculateWaitTime
 }
 
-// NB: we could just use s.plugin.computeUnit, but that's sometimes nil. This way, it's clear that
-// it's the caller's responsibility to ensure that s.plugin.computeUnit != nil.
-func (s *State) requiredCUForRequestedUpscaling(computeUnit api.Resources) uint32 {
-	if s.monitor.requestedUpscale == nil {
+func (s *State) timeUntilRequestedUpscalingExpired(now time.Time) time.Duration {
+	if s.monitor.requestedUpscale != nil {
+		return s.monitor.requestedUpscale.at.Add(s.config.MonitorRequestedUpscaleValidPeriod).Sub(now)
+	} else {
 		return 0
 	}
+}
 
+// NB: we could just use s.plugin.computeUnit or s.monitor.requestedUpscale from inside the
+// function, but those are sometimes nil. This way, it's clear that it's the caller's responsibility
+// to ensure that the values are non-nil.
+func (s *State) requiredCUForRequestedUpscaling(computeUnit api.Resources, requestedUpscale requestedUpscale) uint32 {
 	var required uint32
-	requested := s.monitor.requestedUpscale.requested
+	requested := requestedUpscale.requested
+	base := requestedUpscale.base
 
 	// note: 1 + floor(x / M) gives the minimum integer value greater than x / M.
 
 	if requested.Cpu {
-		required = util.Max(required, 1+uint32(s.vm.Cpu.Use/computeUnit.VCPU))
+		required = util.Max(required, 1+uint32(base.VCPU/computeUnit.VCPU))
 	}
 	if requested.Memory {
-		required = util.Max(required, 1+uint32(s.vm.Mem.Use/computeUnit.Mem))
+		required = util.Max(required, 1+uint32(base.Mem/computeUnit.Mem))
 	}
 
 	return required
