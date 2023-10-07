@@ -1,8 +1,9 @@
 package testhelpers
 
 import (
-	"fmt"
 	"testing"
+
+	"go.uber.org/zap"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -66,10 +67,12 @@ func WithStoredWarnings(warnings *[]string) InitialStateOpt {
 	return InitialStateOpt{
 		postCreate: nil,
 		preCreate: func(c *InitialStateConfig) {
-			warn := c.Core.Warn
-			c.Core.Warn = func(format string, args ...any) {
-				*warnings = append(*warnings, fmt.Sprintf(format, args...))
-				warn(format, args...)
+			warn := c.Core.Log.Warn
+			c.Core.Log.Warn = func(msg string, fields ...zap.Field) {
+				*warnings = append(*warnings, msg)
+				if warn != nil {
+					warn(msg, fields...)
+				}
 			}
 		},
 	}
@@ -79,10 +82,12 @@ func WithTestingLogfWarnings(t *testing.T) InitialStateOpt {
 	return InitialStateOpt{
 		postCreate: nil,
 		preCreate: func(c *InitialStateConfig) {
-			warn := c.Core.Warn
-			c.Core.Warn = func(format string, args ...any) {
-				t.Logf(format, args...)
-				warn(format, args...)
+			warn := c.Core.Log.Warn
+			c.Core.Log.Warn = func(msg string, fields ...zap.Field) {
+				t.Log(msg)
+				if warn != nil {
+					warn(msg, fields...)
+				}
 			}
 		},
 	}

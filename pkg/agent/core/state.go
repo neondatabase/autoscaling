@@ -27,6 +27,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -54,9 +56,18 @@ type Config struct {
 	// MonitorRetryWait gives the amount of time to wait to retry after a *failed* request.
 	MonitorRetryWait time.Duration
 
-	// Warn provides an outlet for (*State).Next() to give warnings about conditions that are
-	// impeding its ability to execute. (e.g. "wanted to do X but couldn't because of Y")
-	Warn func(string, ...any) `json:"-"`
+	// Log provides an outlet for (*State).NextActions() to give informative messages or warnings
+	// about conditions that are impeding its ability to execute.
+	Log LogConfig `json:"-"`
+}
+
+type LogConfig struct {
+	// Info, if not nil, will be called to log consistent informative information.
+	Info func(string, ...zap.Field)
+	// Warn, if not nil, will be called to log conditions that are impeding the ability to move the
+	// current resources to what's desired.
+	// A typical warning may be something like "wanted to do X but couldn't because of Y".
+	Warn func(string, ...zap.Field)
 }
 
 // State holds all of the necessary internal state for a VM in order to make scaling
@@ -200,6 +211,22 @@ func NewState(vm api.VmInfo, config Config) *State {
 	}
 }
 
+func (s *State) info(msg string, fields ...zap.Field) {
+	if s.config.Log.Info != nil {
+		s.config.Log.Info(msg, fields...)
+	}
+}
+
+func (s *State) warn(msg string, fields ...zap.Field) {
+	if s.config.Log.Warn != nil {
+		s.config.Log.Warn(msg, fields...)
+	}
+}
+
+func (s *State) warnf(msg string, args ...any) {
+	s.warn(fmt.Sprintf(msg, args...))
+}
+
 // NextActions is used to implement the state machine. It's a pure function that *just* indicates
 // what the executor should do.
 func (s *State) NextActions(now time.Time) ActionSet {
@@ -278,7 +305,7 @@ func (s *State) calculatePluginAction(
 	desiredResources api.Resources,
 ) (*ActionPluginRequest, *time.Duration) {
 	logFailureReason := func(reason string) {
-		s.config.Warn("Wanted to make a request to the scheduler plugin, but %s", reason)
+		s.warnf("Wanted to make a request to the scheduler plugin, but %s", reason)
 	}
 
 	// additional resources we want to request OR previous downscaling we need to inform the plugin of
@@ -406,7 +433,7 @@ func (s *State) calculateNeonVMAction(
 		}
 
 		if len(reqs) != 0 {
-			s.config.Warn("Wanted to make a request to NeonVM API, but there's already %s", strings.Join(reqs, " and "))
+			s.warnf("Wanted to make a request to NeonVM API, but there's already %s", strings.Join(reqs, " and "))
 		}
 
 		return nil
@@ -453,7 +480,7 @@ func (s *State) calculateMonitorUpscaleAction(
 		}
 
 		if requestDescription != "" {
-			s.config.Warn("Wanted to send vm-monitor upscale request, but waiting on ongoing %s", requestDescription)
+			s.warnf("Wanted to send vm-monitor upscale request, but waiting on ongoing %s", requestDescription)
 		}
 		return nil, nil
 	}
@@ -462,7 +489,7 @@ func (s *State) calculateMonitorUpscaleAction(
 	if s.monitor.upscaleFailureAt != nil {
 		timeUntilFailureBackoffExpires := s.monitor.upscaleFailureAt.Add(s.config.MonitorRetryWait).Sub(now)
 		if timeUntilFailureBackoffExpires > 0 {
-			s.config.Warn("Wanted to send vm-monitor upscale request, but failed too recently")
+			s.warn("Wanted to send vm-monitor upscale request, but failed too recently")
 			return nil, &timeUntilFailureBackoffExpires
 		}
 	}
@@ -482,7 +509,7 @@ func (s *State) calculateMonitorDownscaleAction(
 	// can't do anything if we don't have an active connection to the vm-monitor
 	if !s.monitor.active() {
 		if desiredResources.HasFieldLessThan(s.vm.Using()) {
-			s.config.Warn("Wanted to send vm-monitor downscale request, but there's no active connection")
+			s.warn("Wanted to send vm-monitor downscale request, but there's no active connection")
 		}
 		return nil, nil
 	}
@@ -511,7 +538,7 @@ func (s *State) calculateMonitorDownscaleAction(
 	// Can't make another request if there's already one ongoing (or if an upscaling request is
 	// planned)
 	if plannedUpscaleRequest {
-		s.config.Warn("Wanted to send vm-monitor downscale request, but waiting on other planned upscale request")
+		s.warn("Wanted to send vm-monitor downscale request, but waiting on other planned upscale request")
 		return nil, nil
 	} else if s.monitor.ongoingRequest != nil {
 		var requestDescription string
@@ -522,7 +549,7 @@ func (s *State) calculateMonitorDownscaleAction(
 		}
 
 		if requestDescription != "" {
-			s.config.Warn("Wanted to send vm-monitor downscale request, but waiting on other ongoing %s", requestDescription)
+			s.warnf("Wanted to send vm-monitor downscale request, but waiting on other ongoing %s", requestDescription)
 		}
 		return nil, nil
 	}
@@ -531,7 +558,7 @@ func (s *State) calculateMonitorDownscaleAction(
 	if s.monitor.downscaleFailureAt != nil {
 		timeUntilFailureBackoffExpires := now.Sub(*s.monitor.downscaleFailureAt)
 		if timeUntilFailureBackoffExpires > 0 {
-			s.config.Warn("Wanted to send vm-monitor downscale request but failed too recently")
+			s.warn("Wanted to send vm-monitor downscale request but failed too recently")
 			return nil, &timeUntilFailureBackoffExpires
 		}
 	}
@@ -587,7 +614,7 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 
 	// if we don't know what the compute unit is, don't do anything.
 	if s.plugin.computeUnit == nil {
-		s.config.Warn("Can't determine desired resources because compute unit hasn't been set yet")
+		s.warn("Can't determine desired resources because compute unit hasn't been set yet")
 		return s.vm.Using(), nil
 	}
 
@@ -655,7 +682,7 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		if !result.HasFieldGreaterThan(s.monitor.deniedDownscale.requested) {
 			// This can only happen if s.vm.Max() is less than goalResources, because otherwise this
 			// would have been factored into goalCU, affecting goalResources. Hence, the warning.
-			s.config.Warn("Can't decrease desired resources to within VM maximum because of vm-monitor previously denied downscale request")
+			s.warn("Can't decrease desired resources to within VM maximum because of vm-monitor previously denied downscale request")
 		}
 		preMaxResult := result
 		result = result.Max(s.minRequiredResourcesForDeniedDownscale(*s.plugin.computeUnit, *s.monitor.deniedDownscale))
@@ -685,6 +712,8 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			return nil
 		}
 	}
+
+	s.info("Calculated desired resources", zap.Object("target", result))
 
 	return result, calculateWaitTime
 }

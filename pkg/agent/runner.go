@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -216,8 +217,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		PluginDeniedRetryWait:          time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
 		MonitorDeniedDownscaleCooldown: time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
 		MonitorRetryWait:               time.Second * time.Duration(r.global.config.Monitor.RetryFailedRequestSeconds),
-		Warn: func(msg string, args ...any) {
-			coreExecLogger.Warn(fmt.Sprintf(msg, args...))
+		Log: core.LogConfig{
+			Info: coreExecLogger.Info,
+			Warn: coreExecLogger.Warn,
 		},
 	})
 

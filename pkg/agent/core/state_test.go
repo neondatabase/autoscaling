@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -113,8 +114,11 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				PluginDeniedRetryWait:          time.Second,
 				MonitorDeniedDownscaleCooldown: time.Second,
 				MonitorRetryWait:               time.Second,
-				Warn: func(format string, args ...any) {
-					warnings = append(warnings, fmt.Sprintf(format, args...))
+				Log: core.LogConfig{
+					Info: nil,
+					Warn: func(msg string, fields ...zap.Field) {
+						warnings = append(warnings, msg)
+					},
 				},
 			},
 		)
@@ -177,7 +181,10 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 		PluginDeniedRetryWait:          2 * time.Second,
 		MonitorDeniedDownscaleCooldown: 5 * time.Second,
 		MonitorRetryWait:               3 * time.Second,
-		Warn:                           func(string, ...any) {},
+		Log: core.LogConfig{
+			Info: nil,
+			Warn: nil,
+		},
 	},
 }
 
