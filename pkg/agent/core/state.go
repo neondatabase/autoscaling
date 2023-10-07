@@ -337,7 +337,7 @@ func (s *State) calculatePluginAction(
 		timeUntilNextRequestTick = s.config.PluginRequestTick - now.Sub(s.plugin.lastRequest.at)
 	}
 
-	timeForRequest := timeUntilNextRequestTick <= 0
+	timeForRequest := timeUntilNextRequestTick <= 0 && s.plugin.alive
 
 	var timeUntilRetryBackoffExpires time.Duration
 	requestPreviouslyDenied := !s.plugin.ongoingRequest &&
@@ -901,7 +901,7 @@ func (h PluginHandle) NewScheduler() {
 	h.s.plugin = pluginState{
 		alive:          true,
 		ongoingRequest: false,
-		computeUnit:    nil,
+		computeUnit:    h.s.plugin.computeUnit, // Keep the previous scheduler's CU unless told otherwise
 		lastRequest:    nil,
 		permit:         h.s.plugin.permit, // Keep this; trust the previous scheduler.
 	}
