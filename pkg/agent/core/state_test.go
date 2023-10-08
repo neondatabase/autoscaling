@@ -168,11 +168,13 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 var DefaultComputeUnit = api.Resources{VCPU: 250, Mem: 1}
 
 var DefaultInitialStateConfig = helpers.InitialStateConfig{
-	ComputeUnit:    DefaultComputeUnit,
-	MemorySlotSize: resource.MustParse("1Gi"),
+	VM: helpers.InitialVmInfoConfig{
+		ComputeUnit:    DefaultComputeUnit,
+		MemorySlotSize: resource.MustParse("1Gi"),
 
-	MinCU: 1,
-	MaxCU: 4,
+		MinCU: 1,
+		MaxCU: 4,
+	},
 	Core: core.Config{
 		DefaultScalingConfig: api.ScalingConfig{
 			LoadAverageFractionTarget: 0.5,
