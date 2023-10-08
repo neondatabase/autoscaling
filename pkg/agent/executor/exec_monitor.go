@@ -79,10 +79,16 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 				zap.Bool("unchanged", unchanged),
 			}
 
+			warnSkipBecauseChanged := func() {
+				logger.Warn("Skipping state update after vm-monitor downscale request because MonitorHandle changed")
+			}
+
 			if err != nil {
 				logger.Error("vm-monitor downscale request failed", append(logFields, zap.Error(err))...)
 				if unchanged {
 					state.Monitor().DownscaleRequestFailed(endTime)
+				} else {
+					warnSkipBecauseChanged()
 				}
 				return
 			}
@@ -93,11 +99,15 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 				logger.Warn("vm-monitor denied downscale", logFields...)
 				if unchanged {
 					state.Monitor().DownscaleRequestDenied(endTime)
+				} else {
+					warnSkipBecauseChanged()
 				}
 			} else {
 				logger.Info("vm-monitor approved downscale", logFields...)
 				if unchanged {
 					state.Monitor().DownscaleRequestAllowed(endTime)
+				} else {
+					warnSkipBecauseChanged()
 				}
 			}
 		})
@@ -158,10 +168,16 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 				zap.Bool("unchanged", unchanged),
 			}
 
+			warnSkipBecauseChanged := func() {
+				logger.Warn("Skipping state update after vm-monitor upscale request because MonitorHandle changed")
+			}
+
 			if err != nil {
 				logger.Error("vm-monitor upscale request failed", append(logFields, zap.Error(err))...)
 				if unchanged {
 					state.Monitor().UpscaleRequestFailed(endTime)
+				} else {
+					warnSkipBecauseChanged()
 				}
 				return
 			}
@@ -169,6 +185,8 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 			logger.Info("vm-monitor upscale request successful", logFields...)
 			if unchanged {
 				state.Monitor().UpscaleRequestSuccessful(endTime)
+			} else {
+				warnSkipBecauseChanged()
 			}
 		})
 	}

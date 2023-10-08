@@ -78,10 +78,16 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 				zap.Bool("unchanged", unchanged),
 			}
 
+			warnSkipBecauseChanged := func() {
+				logger.Warn("Skipping state update after plugin request because PluginHandle changed")
+			}
+
 			if err != nil {
 				logger.Error("Plugin request failed", append(logFields, zap.Error(err))...)
 				if unchanged {
 					state.Plugin().RequestFailed(endTime)
+				} else {
+					warnSkipBecauseChanged()
 				}
 			} else {
 				logFields = append(logFields, zap.Any("response", resp))
@@ -90,6 +96,8 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 					if err := state.Plugin().RequestSuccessful(endTime, *resp); err != nil {
 						logger.Error("Plugin response validation failed", append(logFields, zap.Error(err))...)
 					}
+				} else {
+					warnSkipBecauseChanged()
 				}
 			}
 		})
