@@ -1214,3 +1214,195 @@ func TestSchedulerDownscaleReupscale(t *testing.T) {
 		},
 	})
 }
+
+// Checks that if the VM's min/max bounds change so that the maximum is below the current and
+// desired usage, we try to downscale
+func TestBoundsChangeRequiresDownsale(t *testing.T) {
+	a := helpers.NewAssert(t)
+	clock := helpers.NewFakeClock(t)
+	clockTick := func() helpers.Elapsed {
+		return clock.Inc(100 * time.Millisecond)
+	}
+	resForCU := DefaultComputeUnit.Mul
+
+	state := helpers.CreateInitialState(
+		DefaultInitialStateConfig,
+		helpers.WithStoredWarnings(a.StoredWarnings()),
+		helpers.WithMinMaxCU(1, 3),
+		helpers.WithCurrentCU(2),
+	)
+	nextActions := func() core.ActionSet {
+		return state.NextActions(clock.Now())
+	}
+
+	state.Plugin().NewScheduler()
+	state.Monitor().Active(true)
+
+	// Send initial scheduler request:
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(2))
+
+	clockTick()
+
+	// Set metrics so the desired resources are still 2 CU
+	metrics := api.Metrics{
+		LoadAverage1Min:  0.3,
+		LoadAverage5Min:  0.0,
+		MemoryUsageBytes: 0.0,
+	}
+	a.Do(state.UpdateMetrics, metrics)
+	// Check that we agree about desired resources
+	a.Call(getDesiredResources, state, clock.Now()).
+		Equals(resForCU(2))
+	// Check we've got nothing to do yet
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.8s")},
+	})
+
+	clockTick()
+
+	// Update the VM to set min=max=1 CU
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithCurrentCU(2),
+		helpers.WithMinMaxCU(1, 1),
+	))
+
+	// We should be making a vm-monitor downscaling request
+	// TODO: In the future, we should have a "force-downscale" alternative so the vm-monitor doesn't
+	// get to deny the downscaling.
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.7s")},
+		MonitorDownscale: &core.ActionMonitorDownscale{
+			Current: resForCU(2),
+			Target:  resForCU(1),
+		},
+	})
+	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(1))
+	clockTick()
+	a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
+	// Do NeonVM request for that downscaling
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.6s")},
+		NeonVMRequest: &core.ActionNeonVMRequest{
+			Current: resForCU(2),
+			Target:  resForCU(1),
+		},
+	})
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(1))
+	clockTick()
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+	// Do plugin request for that downscaling:
+	a.Call(nextActions).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit: ptr(resForCU(2)),
+			Target:     resForCU(1),
+			Metrics:    &metrics,
+		},
+	})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
+	clockTick()
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      resForCU(1),
+		Migrate:     nil,
+		ComputeUnit: DefaultComputeUnit,
+	})
+	// And then, we shouldn't need to do anything else:
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.9s")},
+	})
+}
+
+// Checks that if the VM's min/max bounds change so that the minimum is above the current and
+// desired usage, we try to upscale
+func TestBoundsChangeRequiresUpscale(t *testing.T) {
+	a := helpers.NewAssert(t)
+	clock := helpers.NewFakeClock(t)
+	clockTick := func() helpers.Elapsed {
+		return clock.Inc(100 * time.Millisecond)
+	}
+	resForCU := DefaultComputeUnit.Mul
+
+	state := helpers.CreateInitialState(
+		DefaultInitialStateConfig,
+		helpers.WithStoredWarnings(a.StoredWarnings()),
+		helpers.WithMinMaxCU(1, 3),
+		helpers.WithCurrentCU(2),
+	)
+	nextActions := func() core.ActionSet {
+		return state.NextActions(clock.Now())
+	}
+
+	state.Plugin().NewScheduler()
+	state.Monitor().Active(true)
+
+	// Send initial scheduler request:
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(2))
+
+	clockTick()
+
+	// Set metrics so the desired resources are still 2 CU
+	metrics := api.Metrics{
+		LoadAverage1Min:  0.3,
+		LoadAverage5Min:  0.0,
+		MemoryUsageBytes: 0.0,
+	}
+	a.Do(state.UpdateMetrics, metrics)
+	// Check that we agree about desired resources
+	a.Call(getDesiredResources, state, clock.Now()).
+		Equals(resForCU(2))
+	// Check we've got nothing to do yet
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.8s")},
+	})
+
+	clockTick()
+
+	// Update the VM to set min=max=3 CU
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithCurrentCU(2),
+		helpers.WithMinMaxCU(3, 3),
+	))
+
+	// We should be making a plugin request to get upscaling:
+	a.Call(nextActions).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit: ptr(resForCU(2)),
+			Target:     resForCU(3),
+			Metrics:    &metrics,
+		},
+	})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
+	clockTick()
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      resForCU(3),
+		Migrate:     nil,
+		ComputeUnit: DefaultComputeUnit,
+	})
+	// Do NeonVM request for the upscaling
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.9s")},
+		NeonVMRequest: &core.ActionNeonVMRequest{
+			Current: resForCU(2),
+			Target:  resForCU(3),
+		},
+	})
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(3))
+	clockTick()
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+	// Do vm-monitor upscale request
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.8s")},
+		MonitorUpscale: &core.ActionMonitorUpscale{
+			Current: resForCU(2),
+			Target:  resForCU(3),
+		},
+	})
+	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(3))
+	clockTick()
+	a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
+	// And then, we shouldn't need to do anything else:
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.7s")},
+	})
+}
