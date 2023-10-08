@@ -426,9 +426,6 @@ func (r *Runner) getMetricsLoop(
 	timeout := time.Second * time.Duration(r.global.config.Metrics.RequestTimeoutSeconds)
 	waitBetweenDuration := time.Second * time.Duration(r.global.config.Metrics.SecondsBetweenRequests)
 
-	// FIXME: make this configurable
-	minWaitDuration := time.Second
-
 	for {
 		metrics, err := r.doMetricsRequest(ctx, logger, timeout)
 		if err != nil {
@@ -448,19 +445,10 @@ func (r *Runner) getMetricsLoop(
 		}()
 
 	next:
-		waitBetween := time.After(waitBetweenDuration)
-		minWait := time.After(minWaitDuration)
-
 		select {
 		case <-ctx.Done():
 			return
-		case <-minWait:
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-waitBetween:
+		case <-time.After(waitBetweenDuration):
 		}
 	}
 }
