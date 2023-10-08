@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// FakeClock is a small facility that makes it easy to operation on duration since start with
-// relative times.
+// FakeClock is a small facility that makes it easy to operate on duration since start with
+// relative times, rather than absolute times.
 type FakeClock struct {
 	t    *testing.T
 	base time.Time

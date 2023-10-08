@@ -66,7 +66,8 @@ type Config struct {
 }
 
 type LogConfig struct {
-	// Info, if not nil, will be called to log consistent informative information.
+	// Info, if not nil, will be called to provide information during normal functioning.
+	// For example, we log the calculated desired resources on every call to NextActions.
 	Info func(string, ...zap.Field)
 	// Warn, if not nil, will be called to log conditions that are impeding the ability to move the
 	// current resources to what's desired.
@@ -748,7 +749,7 @@ func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		}
 	}
 
-	s.info("Calculated desired resources", zap.Object("target", result))
+	s.info("Calculated desired resources", zap.Object("current", s.vm.Using()), zap.Object("target", result))
 
 	return result, calculateWaitTime
 }
@@ -805,7 +806,6 @@ func (s *State) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources
 	//
 	// phrasing it like this cleanly handles some subtle edge cases when denied.current isn't a
 	// multiple of the compute unit.
-	// FIXME: add test
 	return api.Resources{
 		VCPU: util.Min(denied.current.VCPU, computeUnit.VCPU*vmapi.MilliCPU(1+uint32(denied.requested.VCPU/computeUnit.VCPU))),
 		Mem:  util.Min(denied.current.Mem, computeUnit.Mem*(1+uint16(denied.requested.Mem/computeUnit.Mem))),
@@ -864,7 +864,7 @@ func (s *State) pluginApprovedUpperBound() api.Resources {
 	if s.plugin.permit != nil {
 		return *s.plugin.permit
 	} else {
-		return s.vm.Using() // FIXME: this isn't quite correct; this wouldn't allow down-then-upscale without the scheduler.
+		return s.vm.Using()
 	}
 }
 
@@ -872,6 +872,8 @@ func (s *State) pluginApprovedUpperBound() api.Resources {
 // PUBLIC FUNCTIONS TO UPDATE THE STATE //
 //////////////////////////////////////////
 
+// Debug sets s.debug = enabled. This method is exclusively meant to be used in tests, to make it
+// easier to enable print debugging only for a single call to NextActions, via s.warn() or otherwise.
 func (s *State) Debug(enabled bool) {
 	s.debug = enabled
 }
@@ -880,6 +882,11 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	// FIXME: overriding this is required right now because we trust that a successful request to
 	// NeonVM means the VM was already updated, which... isn't true, and otherwise we could run into
 	// sync issues.
+	// A first-pass solution is possible by reading the values of VirtualMachine.Spec, but the
+	// "proper" solution would read from VirtualMachine.Status, which (at time of writing) isn't
+	// sound. For more, see:
+	// - https://github.com/neondatabase/autoscaling/pull/371#issuecomment-1752110131
+	// - https://github.com/neondatabase/autoscaling/issues/462
 	vm.SetUsing(s.vm.Using())
 	s.vm = vm
 }
@@ -1065,6 +1072,7 @@ func (h NeonVMHandle) RequestSuccessful(now time.Time) {
 	// FIXME: This is actually incorrect; we shouldn't trust that the VM has already been updated
 	// just because the request completed. It takes longer for the reconcile cycle(s) to make the
 	// necessary changes.
+	// See the comments in (*State).UpdatedVM() for more info.
 	h.s.vm.Cpu.Use = resources.VCPU
 	h.s.vm.Mem.Use = resources.Mem
 
