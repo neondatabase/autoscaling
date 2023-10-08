@@ -103,10 +103,10 @@ func (c *ExecutorCore) getActions() timedActions {
 
 		// NOTE: Even though we cache the actions generated using time.Now(), it's *generally* ok.
 		now := time.Now()
-		c.stateLogger.Info("Recalculating ActionSet", zap.Time("now", now), zap.Any("state", c.core.Dump()))
+		c.stateLogger.Debug("Recalculating ActionSet", zap.Time("now", now), zap.Any("state", c.core.Dump()))
 		c.actions = &timedActions{id: id, actions: c.core.NextActions(now)}
 		c.lastActionsID = id
-		c.stateLogger.Info("New ActionSet", zap.Time("now", now), zap.Any("actions", c.actions.actions))
+		c.stateLogger.Debug("New ActionSet", zap.Time("now", now), zap.Any("actions", c.actions.actions))
 	}
 
 	return *c.actions
