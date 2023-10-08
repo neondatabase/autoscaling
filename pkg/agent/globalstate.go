@@ -358,7 +358,7 @@ func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, p
 		executorStateDump: nil, // set by (*Runner).Run
 
 		scheduler: atomic.Pointer[Scheduler]{},
-		monitor:   atomic.Pointer[Dispatcher]{},
+		monitor:   atomic.Pointer[monitorInfo]{},
 
 		backgroundWorkerCount: atomic.Int64{},
 		backgroundPanic:       make(chan error),

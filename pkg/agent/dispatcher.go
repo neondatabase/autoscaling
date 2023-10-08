@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -40,8 +39,6 @@ type MonitorResult struct {
 // The Dispatcher is the main object managing the websocket connection to the
 // monitor. For more information on the protocol, see pkg/api/types.go
 type Dispatcher struct {
-	uniqueID string
-
 	// The underlying connection we are managing
 	conn *websocket.Conn
 
@@ -105,7 +102,6 @@ func NewDispatcher(
 	}
 
 	disp := &Dispatcher{
-		uniqueID:          uuid.NewString(),
 		conn:              conn,
 		waiters:           make(map[uint64]util.SignalSender[waiterResult]),
 		runner:            runner,
@@ -258,12 +254,6 @@ func connectToMonitor(
 
 	logger.Info("negotiated protocol version with monitor", zap.Any("response", resp), zap.String("version", resp.Version.String()))
 	return c, &resp.Version, nil
-}
-
-// UniqueID returns the unique ID assigned to this Dispatcher
-// (it's a UUID)
-func (disp *Dispatcher) UniqueID() string {
-	return disp.uniqueID
 }
 
 // ExitSignal returns a channel that is closed when the Dispatcher is no longer running

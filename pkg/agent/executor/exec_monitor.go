@@ -13,12 +13,12 @@ import (
 )
 
 type MonitorInterface interface {
-	EmptyID() string
+	CurrentGeneration() GenerationNumber
 	GetHandle() MonitorHandle
 }
 
 type MonitorHandle interface {
-	ID() string
+	Generation() GenerationNumber
 	Downscale(_ context.Context, _ *zap.Logger, current, target api.Resources) (*api.DownscaleResult, error)
 	Upscale(_ context.Context, _ *zap.Logger, current, target api.Resources) error
 }
@@ -29,13 +29,9 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		ifaceLogger *zap.Logger            = logger.Named("client")
 	)
 
-	// meant to be called while holding c's lock
-	idUnchanged := func(current string) bool {
-		if h := c.clients.Monitor.GetHandle(); h != nil {
-			return current == h.ID()
-		} else {
-			return current == c.clients.Monitor.EmptyID()
-		}
+	// must be called while holding c's lock
+	generationUnchanged := func(since MonitorHandle) bool {
+		return since.Generation() == c.clients.Monitor.CurrentGeneration()
 	}
 
 	for {
@@ -76,7 +72,7 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
-			unchanged := idUnchanged(monitorIface.ID())
+			unchanged := generationUnchanged(monitorIface)
 			logFields := []zap.Field{
 				zap.Any("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),
@@ -114,13 +110,9 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 		ifaceLogger *zap.Logger            = logger.Named("client")
 	)
 
-	// meant to be called while holding c's lock
-	idUnchanged := func(current string) bool {
-		if h := c.clients.Monitor.GetHandle(); h != nil {
-			return current == h.ID()
-		} else {
-			return current == c.clients.Monitor.EmptyID()
-		}
+	// must be called while holding c's lock
+	generationUnchanged := func(since MonitorHandle) bool {
+		return since.Generation() == c.clients.Plugin.CurrentGeneration()
 	}
 
 	for {
@@ -159,7 +151,7 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
-			unchanged := idUnchanged(monitorIface.ID())
+			unchanged := generationUnchanged(monitorIface)
 			logFields := []zap.Field{
 				zap.Any("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),

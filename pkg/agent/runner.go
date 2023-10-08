@@ -79,7 +79,7 @@ type Runner struct {
 	scheduler atomic.Pointer[Scheduler]
 	// monitor, if non nil, stores the current Dispatcher in use for communicating with the
 	// vm-monitor
-	monitor atomic.Pointer[Dispatcher]
+	monitor atomic.Pointer[monitorInfo]
 
 	// backgroundWorkerCount tracks the current number of background workers. It is exclusively
 	// updated by r.spawnBackgroundWorker
@@ -96,6 +96,8 @@ type Scheduler struct {
 
 	// info holds the immutable information we use to connect to and describe the scheduler
 	info schedwatch.SchedulerInfo
+
+	generation executor.GenerationNumber
 }
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
@@ -229,9 +231,12 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	r.executorStateDump = executorCore.StateDump
 
-	pluginIface := makePluginInterface(r, executorCore)
+	pluginGeneration := executor.NewStoredGenerationNumber()
+	monitorGeneration := executor.NewStoredGenerationNumber()
+
+	pluginIface := makePluginInterface(r, executorCore, pluginGeneration)
 	neonvmIface := makeNeonVMInterface(r)
-	monitorIface := makeMonitorInterface(r, executorCore)
+	monitorIface := makeMonitorInterface(r, executorCore, monitorGeneration)
 
 	// "ecwc" stands for "ExecutorCoreWithClients"
 	ecwc := executorCore.WithClients(executor.ClientSet{
@@ -263,9 +268,13 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		}
 	})
 	r.spawnBackgroundWorker(ctx, logger, "track scheduler", func(c context.Context, l *zap.Logger) {
-		r.trackSchedulerLoop(c, l, scheduler, schedulerWatch, func(withLock func()) {
+		newScheduler := func(withLock func()) {
 			ecwc.Updater().NewScheduler(withLock)
-		})
+		}
+		schedulerGone := func(withLock func()) {
+			ecwc.Updater().SchedulerGone(withLock)
+		}
+		r.trackSchedulerLoop(c, l, scheduler, schedulerWatch, pluginGeneration, newScheduler, schedulerGone)
 	})
 	r.spawnBackgroundWorker(ctx, logger, "get metrics", func(c context.Context, l *zap.Logger) {
 		r.getMetricsLoop(c, l, func(metrics api.Metrics, withLock func()) {
@@ -273,7 +282,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		})
 	})
 	r.spawnBackgroundWorker(ctx, logger.Named("vm-monitor"), "vm-monitor reconnection loop", func(c context.Context, l *zap.Logger) {
-		r.connectToMonitorLoop(c, l, monitorStateCallbacks{
+		r.connectToMonitorLoop(c, l, monitorGeneration, monitorStateCallbacks{
 			reset: func(withLock func()) {
 				ecwc.Updater().ResetMonitor(withLock)
 			},
@@ -393,6 +402,11 @@ func (r *Runner) getMetricsLoop(
 	}
 }
 
+type monitorInfo struct {
+	generation executor.GenerationNumber
+	dispatcher *Dispatcher
+}
+
 type monitorStateCallbacks struct {
 	reset            func(withLock func())
 	upscaleRequested func(request api.MoreResources, withLock func())
@@ -403,6 +417,7 @@ type monitorStateCallbacks struct {
 func (r *Runner) connectToMonitorLoop(
 	ctx context.Context,
 	logger *zap.Logger,
+	generation *executor.StoredGenerationNumber,
 	callbacks monitorStateCallbacks,
 ) {
 	addr := fmt.Sprintf("ws://%s:%d/monitor", r.podIP, r.global.config.Monitor.ServerPort)
@@ -417,6 +432,7 @@ func (r *Runner) connectToMonitorLoop(
 				r.lock.Lock()
 				defer r.lock.Unlock()
 				callbacks.reset(func() {
+					generation.Inc()
 					r.monitor.Store(nil)
 					logger.Info("Reset previous vm-monitor connection")
 				})
@@ -488,7 +504,10 @@ func (r *Runner) connectToMonitorLoop(
 			r.lock.Lock()
 			defer r.lock.Unlock()
 			callbacks.setActive(true, func() {
-				r.monitor.Store(dispatcher)
+				r.monitor.Store(&monitorInfo{
+					generation: generation.Inc(),
+					dispatcher: dispatcher,
+				})
 				logger.Info("Connected to vm-monitor")
 			})
 		}()
@@ -510,7 +529,9 @@ func (r *Runner) trackSchedulerLoop(
 	logger *zap.Logger,
 	init *schedwatch.SchedulerInfo,
 	schedulerWatch schedwatch.SchedulerWatch,
+	generation *executor.StoredGenerationNumber,
 	newScheduler func(withLock func()),
+	schedulerGone func(withLock func()),
 ) {
 	// pre-declare a bunch of variables because we have some gotos here.
 	var (
@@ -539,18 +560,17 @@ startScheduler:
 			verb = "Updating"
 		}
 
-		sched := &Scheduler{
-			runner: r,
-			info:   currentInfo,
-		}
-
 		func() {
 			r.lock.Lock()
 			defer r.lock.Unlock()
 
 			newScheduler(func() {
-				r.scheduler.Store(sched)
 				logger.Info(fmt.Sprintf("%s scheduler pod", verb), zap.Object("scheduler", currentInfo))
+				r.scheduler.Store(&Scheduler{
+					runner:     r,
+					info:       currentInfo,
+					generation: generation.Inc(),
+				})
 			})
 		}()
 	}
@@ -575,12 +595,15 @@ startScheduler:
 					return false
 				}
 
-				logger.Info(
-					"Scheduler pod was deleted. Aborting further communication",
-					zap.Object("scheduler", scheduler.info),
-				)
+				schedulerGone(func() {
+					logger.Info(
+						"Scheduler pod was deleted. Aborting further communication",
+						zap.Object("scheduler", scheduler.info),
+					)
 
-				r.scheduler.Store(nil)
+					generation.Inc()
+					r.scheduler.Store(nil)
+				})
 				return true
 			}()
 

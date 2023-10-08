@@ -13,12 +13,12 @@ import (
 )
 
 type PluginInterface interface {
-	EmptyID() string
+	CurrentGeneration() GenerationNumber
 	GetHandle() PluginHandle
 }
 
 type PluginHandle interface {
-	ID() string
+	Generation() GenerationNumber
 	Request(_ context.Context, _ *zap.Logger, lastPermit *api.Resources, target api.Resources, _ *api.Metrics) (*api.PluginResponse, error)
 }
 
@@ -28,12 +28,9 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		ifaceLogger *zap.Logger            = logger.Named("client")
 	)
 
-	idUnchanged := func(current string) bool {
-		if h := c.clients.Plugin.GetHandle(); h != nil {
-			return current == h.ID()
-		} else {
-			return current == c.clients.Plugin.EmptyID()
-		}
+	// must be called while holding c's lock
+	generationUnchanged := func(since PluginHandle) bool {
+		return since.Generation() == c.clients.Plugin.CurrentGeneration()
 	}
 
 	for {
@@ -74,7 +71,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
-			unchanged := idUnchanged(pluginIface.ID())
+			unchanged := generationUnchanged(pluginIface)
 			logFields := []zap.Field{
 				zap.Any("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),

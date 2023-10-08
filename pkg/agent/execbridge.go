@@ -26,17 +26,21 @@ var (
 /////////////////////////////////////////////////////////////
 
 type execPluginInterface struct {
-	runner *Runner
-	core   *executor.ExecutorCore
+	runner     *Runner
+	core       *executor.ExecutorCore
+	generation *executor.StoredGenerationNumber
 }
 
-func makePluginInterface(r *Runner, core *executor.ExecutorCore) *execPluginInterface {
-	return &execPluginInterface{runner: r, core: core}
+func makePluginInterface(
+	r *Runner,
+	core *executor.ExecutorCore,
+	generation *executor.StoredGenerationNumber,
+) *execPluginInterface {
+	return &execPluginInterface{runner: r, core: core, generation: generation}
 }
 
-// EmptyID implements executor.PluginInterface
-func (iface *execPluginInterface) EmptyID() string {
-	return "<none>"
+func (iface *execPluginInterface) CurrentGeneration() executor.GenerationNumber {
+	return iface.generation.Get()
 }
 
 // GetHandle implements executor.PluginInterface
@@ -58,9 +62,9 @@ type execPluginHandle struct {
 	scheduler *Scheduler
 }
 
-// ID implements executor.PluginHandle
-func (h *execPluginHandle) ID() string {
-	return string(h.scheduler.info.UID)
+// Generation implements executor.PluginHandle
+func (h *execPluginHandle) Generation() executor.GenerationNumber {
+	return h.scheduler.generation
 }
 
 // Request implements executor.PluginHandle
@@ -113,39 +117,43 @@ func (iface *execNeonVMInterface) Request(ctx context.Context, logger *zap.Logge
 ////////////////////////////////////////////////////
 
 type execMonitorInterface struct {
-	runner *Runner
-	core   *executor.ExecutorCore
+	runner     *Runner
+	core       *executor.ExecutorCore
+	generation *executor.StoredGenerationNumber
 }
 
-func makeMonitorInterface(r *Runner, core *executor.ExecutorCore) *execMonitorInterface {
-	return &execMonitorInterface{runner: r, core: core}
+func makeMonitorInterface(
+	r *Runner,
+	core *executor.ExecutorCore,
+	generation *executor.StoredGenerationNumber,
+) *execMonitorInterface {
+	return &execMonitorInterface{runner: r, core: core, generation: generation}
 }
 
-// EmptyID implements executor.MonitorInterface
-func (iface *execMonitorInterface) EmptyID() string {
-	return "<none>"
+func (iface *execMonitorInterface) CurrentGeneration() executor.GenerationNumber {
+	return iface.generation.Get()
 }
 
 func (iface *execMonitorInterface) GetHandle() executor.MonitorHandle {
-	dispatcher := iface.runner.monitor.Load()
+	monitor := iface.runner.monitor.Load()
 
-	if dispatcher == nil || dispatcher.Exited() {
+	if monitor == nil || monitor.dispatcher.Exited() {
 		return nil
 	}
 
 	return &execMonitorHandle{
-		runner:     iface.runner,
-		dispatcher: dispatcher,
+		runner:  iface.runner,
+		monitor: monitor,
 	}
 }
 
 type execMonitorHandle struct {
-	runner     *Runner
-	dispatcher *Dispatcher
+	runner  *Runner
+	monitor *monitorInfo
 }
 
-func (h *execMonitorHandle) ID() string {
-	return h.dispatcher.UniqueID()
+func (h *execMonitorHandle) Generation() executor.GenerationNumber {
+	return h.monitor.generation
 }
 
 func (h *execMonitorHandle) Downscale(
@@ -162,7 +170,7 @@ func (h *execMonitorHandle) Downscale(
 
 	h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorRequestedChange)
 
-	result, err := doMonitorDownscale(ctx, logger, h.dispatcher, target)
+	result, err := doMonitorDownscale(ctx, logger, h.monitor.dispatcher, target)
 
 	if err != nil && result.Ok {
 		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
@@ -180,7 +188,7 @@ func (h *execMonitorHandle) Upscale(ctx context.Context, logger *zap.Logger, cur
 
 	h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorRequestedChange)
 
-	err := doMonitorUpscale(ctx, logger, h.dispatcher, target)
+	err := doMonitorUpscale(ctx, logger, h.monitor.dispatcher, target)
 
 	if err != nil {
 		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
