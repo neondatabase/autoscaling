@@ -25,6 +25,7 @@ type PromMetrics struct {
 	runnerThreadPanics prometheus.Counter
 	runnerStarts       prometheus.Counter
 	runnerRestarts     prometheus.Counter
+	runnerNextActions  prometheus.Counter
 }
 
 type resourceChangePair struct {
@@ -208,6 +209,12 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_runner_restarts",
 				Help: "Number of existing per-VM Runners restarted due to failure",
+			},
+		)),
+		runnerNextActions: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "autosclaing_agent_runner_next_actions_total",
+				Help: "Number of times (*core.State).NextActions() has been called",
 			},
 		)),
 	}

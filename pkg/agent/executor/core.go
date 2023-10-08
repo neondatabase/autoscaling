@@ -23,7 +23,15 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type Config = core.Config
+type Config struct {
+	// OnNextActions is called each time the ExecutorCore calls (*core.State).NextActions() on the
+	// inner state object.
+	//
+	// In practice, this value is set to a callback that increments a metric.
+	OnNextActions func()
+
+	Core core.Config
+}
 
 type ExecutorCore struct {
 	mu sync.Mutex
@@ -34,6 +42,7 @@ type ExecutorCore struct {
 
 	actions       *timedActions
 	lastActionsID timedActionsID
+	onNextActions func()
 
 	updates *util.Broadcaster
 }
@@ -44,13 +53,14 @@ type ClientSet struct {
 	Monitor MonitorInterface
 }
 
-func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config core.Config) *ExecutorCore {
+func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config Config) *ExecutorCore {
 	return &ExecutorCore{
 		mu:            sync.Mutex{},
 		stateLogger:   stateLogger,
-		core:          core.NewState(vm, config),
+		core:          core.NewState(vm, config.Core),
 		actions:       nil, // (*ExecutorCore).getActions() checks if this is nil
 		lastActionsID: -1,
+		onNextActions: config.OnNextActions,
 		updates:       util.NewBroadcaster(),
 	}
 }
@@ -89,6 +99,7 @@ func (c *ExecutorCore) getActions() timedActions {
 
 	if c.actions == nil {
 		id := c.lastActionsID + 1
+		c.onNextActions()
 
 		// NOTE: Even though we cache the actions generated using time.Now(), it's *generally* ok.
 		now := time.Now()

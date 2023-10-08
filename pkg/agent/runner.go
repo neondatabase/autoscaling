@@ -212,15 +212,18 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	coreExecLogger := execLogger.Named("core")
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
-		DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
-		PluginRequestTick:                  time.Second * time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds),
-		PluginDeniedRetryWait:              time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
-		MonitorDeniedDownscaleCooldown:     time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
-		MonitorRequestedUpscaleValidPeriod: time.Second * time.Duration(r.global.config.Monitor.RequestedUpscaleValidSeconds),
-		MonitorRetryWait:                   time.Second * time.Duration(r.global.config.Monitor.RetryFailedRequestSeconds),
-		Log: core.LogConfig{
-			Info: coreExecLogger.Info,
-			Warn: coreExecLogger.Warn,
+		OnNextActions: r.global.metrics.runnerNextActions.Inc,
+		Core: core.Config{
+			DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
+			PluginRequestTick:                  time.Second * time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds),
+			PluginDeniedRetryWait:              time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
+			MonitorDeniedDownscaleCooldown:     time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
+			MonitorRequestedUpscaleValidPeriod: time.Second * time.Duration(r.global.config.Monitor.RequestedUpscaleValidSeconds),
+			MonitorRetryWait:                   time.Second * time.Duration(r.global.config.Monitor.RetryFailedRequestSeconds),
+			Log: core.LogConfig{
+				Info: coreExecLogger.Info,
+				Warn: coreExecLogger.Warn,
+			},
 		},
 	})
 
