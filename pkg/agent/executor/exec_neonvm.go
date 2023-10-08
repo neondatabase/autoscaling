@@ -27,6 +27,7 @@ func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *
 		case <-ctx.Done():
 			return
 		case <-updates.Wait():
+			updates.Awake()
 		}
 
 		last := c.getActions()

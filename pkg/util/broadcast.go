@@ -10,7 +10,7 @@ import (
 func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{
 		mu:   sync.Mutex{},
-		ch:   make(chan struct{}, 1),
+		ch:   make(chan struct{}),
 		sent: 0,
 	}
 }
@@ -34,7 +34,7 @@ func (b *Broadcaster) Broadcast() {
 	defer b.mu.Unlock()
 
 	close(b.ch)
-	b.ch = make(chan struct{}, 1)
+	b.ch = make(chan struct{})
 	b.sent += 1
 }
 

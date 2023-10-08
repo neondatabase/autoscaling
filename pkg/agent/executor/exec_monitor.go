@@ -44,6 +44,7 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		case <-ctx.Done():
 			return
 		case <-updates.Wait():
+			updates.Awake()
 		}
 
 		last := c.getActions()
