@@ -43,9 +43,13 @@ func (iface *execPluginInterface) CurrentGeneration() executor.GenerationNumber 
 	return iface.generation.Get()
 }
 
-// GetHandle implements executor.PluginInterface
+// GetHandle implements executor.PluginInterface, and MUST only be called while holding the
+// executor's lock.
+//
+// The locking requirement is why we're able to get away with an "unsynchronized" read of the value
+// in the runner. For more, see the documentation on Runner.scheduler.
 func (iface *execPluginInterface) GetHandle() executor.PluginHandle {
-	scheduler := iface.runner.scheduler.Load()
+	scheduler := iface.runner.scheduler
 
 	if scheduler == nil {
 		return nil
@@ -134,8 +138,13 @@ func (iface *execMonitorInterface) CurrentGeneration() executor.GenerationNumber
 	return iface.generation.Get()
 }
 
+// GetHandle implements executor.MonitorInterface, and MUST only be called while holding the
+// executor's lock.
+//
+// The locking requirement is why we're able to get away with an "unsynchronized" read of the value
+// in the runner. For more, see the documentation on Runner.monitor.
 func (iface *execMonitorInterface) GetHandle() executor.MonitorHandle {
-	monitor := iface.runner.monitor.Load()
+	monitor := iface.runner.monitor
 
 	if monitor == nil || monitor.dispatcher.Exited() {
 		return nil

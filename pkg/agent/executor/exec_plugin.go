@@ -14,6 +14,8 @@ import (
 
 type PluginInterface interface {
 	CurrentGeneration() GenerationNumber
+	// GetHandle fetches a stable handle for the current scheduler, or nil if there is not one.
+	// This method MUST NOT be called unless holding the executor's lock.
 	GetHandle() PluginHandle
 }
 

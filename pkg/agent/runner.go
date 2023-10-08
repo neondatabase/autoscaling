@@ -76,10 +76,16 @@ type Runner struct {
 	// scheduler is the current scheduler that we're communicating with, or nil if there isn't one.
 	// Each scheduler's info field is immutable. When a scheduler is replaced, only the pointer
 	// value here is updated; the original Scheduler remains unchanged.
-	scheduler atomic.Pointer[Scheduler]
+	//
+	// Additionally, this field MAY ONLY be updated while holding both lock AND the executor's lock,
+	// which means that it may be read when EITHER holding lock OR the executor's lock.
+	scheduler *Scheduler
 	// monitor, if non nil, stores the current Dispatcher in use for communicating with the
-	// vm-monitor
-	monitor atomic.Pointer[monitorInfo]
+	// vm-monitor, alongside a generation number.
+	//
+	// Additionally, this field MAY ONLY be updated while holding both lock AND the executor's lock,
+	// which means that it may be read when EITHER holding lock OR the executor's lock.
+	monitor *monitorInfo
 
 	// backgroundWorkerCount tracks the current number of background workers. It is exclusively
 	// updated by r.spawnBackgroundWorker
@@ -120,9 +126,9 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	defer r.lock.Unlock()
 
 	var scheduler *SchedulerState
-	if sched := r.scheduler.Load(); sched != nil {
+	if r.scheduler != nil {
 		scheduler = &SchedulerState{
-			Info: sched.info,
+			Info: r.scheduler.info,
 		}
 	}
 
@@ -433,7 +439,7 @@ func (r *Runner) connectToMonitorLoop(
 				defer r.lock.Unlock()
 				callbacks.reset(func() {
 					generation.Inc()
-					r.monitor.Store(nil)
+					r.monitor = nil
 					logger.Info("Reset previous vm-monitor connection")
 				})
 			}()
@@ -504,10 +510,10 @@ func (r *Runner) connectToMonitorLoop(
 			r.lock.Lock()
 			defer r.lock.Unlock()
 			callbacks.setActive(true, func() {
-				r.monitor.Store(&monitorInfo{
+				r.monitor = &monitorInfo{
 					generation: generation.Inc(),
 					dispatcher: dispatcher,
-				})
+				}
 				logger.Info("Connected to vm-monitor")
 			})
 		}()
@@ -566,11 +572,11 @@ startScheduler:
 
 			newScheduler(func() {
 				logger.Info(fmt.Sprintf("%s scheduler pod", verb), zap.Object("scheduler", currentInfo))
-				r.scheduler.Store(&Scheduler{
+				r.scheduler = &Scheduler{
 					runner:     r,
 					info:       currentInfo,
 					generation: generation.Inc(),
-				})
+				}
 			})
 		}()
 	}
@@ -585,12 +591,10 @@ startScheduler:
 				r.lock.Lock()
 				defer r.lock.Unlock()
 
-				scheduler := r.scheduler.Load()
-
-				if scheduler.info.UID != info.UID {
+				if r.scheduler.info.UID != info.UID {
 					logger.Info(
 						"Scheduler candidate pod was deleted, but we aren't using it yet",
-						zap.Object("scheduler", scheduler.info), zap.Object("candidate", info),
+						zap.Object("scheduler", r.scheduler.info), zap.Object("candidate", info),
 					)
 					return false
 				}
@@ -598,11 +602,11 @@ startScheduler:
 				schedulerGone(func() {
 					logger.Info(
 						"Scheduler pod was deleted. Aborting further communication",
-						zap.Object("scheduler", scheduler.info),
+						zap.Object("scheduler", r.scheduler.info),
 					)
 
 					generation.Inc()
-					r.scheduler.Store(nil)
+					r.scheduler = nil
 				})
 				return true
 			}()
