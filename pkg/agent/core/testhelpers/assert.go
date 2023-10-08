@@ -10,8 +10,9 @@ import (
 )
 
 type Assert struct {
-	t              *testing.T
-	storedWarnings *[]string
+	t                     *testing.T
+	storedWarnings        *[]string
+	waitingOnPreparedCall *bool
 
 	tinfo transactionInfo
 }
@@ -23,8 +24,9 @@ type transactionInfo struct {
 // NewAssert creates a new Assert object wrapping the provided *testing.T
 func NewAssert(t *testing.T) Assert {
 	return Assert{
-		t:              t,
-		storedWarnings: &[]string{},
+		t:                     t,
+		storedWarnings:        &[]string{},
+		waitingOnPreparedCall: &[]bool{false}[0], // take address of false
 		tinfo: transactionInfo{
 			expectedWarnings: []string{},
 		},
@@ -41,12 +43,6 @@ func (a Assert) StoredWarnings() *[]string {
 func (a Assert) WithWarnings(warnings ...string) Assert {
 	a.tinfo.expectedWarnings = warnings
 	return a
-}
-
-// Nil returns a type-erased zero value of T, typically for use when a typed nil is necessary
-func Nil[T any]() any {
-	var t T
-	return any(t)
 }
 
 // Do calls the function with the provided arguments, checking that no unexpected warnings were
@@ -68,6 +64,10 @@ func (a Assert) NoError(f any, args ...any) {
 //
 // Variadic functions are not supported.
 func (a Assert) Call(f any, args ...any) PreparedFunctionCall {
+	if *a.waitingOnPreparedCall {
+		panic(errors.New("previous Call() constructed but not executed (must use `Do()`, `NoError()`, or `Call().Equals()`)"))
+	}
+
 	fv := reflect.ValueOf(f)
 	fTy := fv.Type()
 	if fTy.Kind() != reflect.Func {
@@ -80,6 +80,8 @@ func (a Assert) Call(f any, args ...any) PreparedFunctionCall {
 	for _, a := range args {
 		argValues = append(argValues, reflect.ValueOf(a))
 	}
+
+	*a.waitingOnPreparedCall = true
 
 	return PreparedFunctionCall{a: a, f: fv, args: argValues}
 }
@@ -94,6 +96,8 @@ type PreparedFunctionCall struct {
 // Equals calls the prepared function, checking that all the return values are equal to what's
 // expected, and that no unexpected warnings were generated.
 func (f PreparedFunctionCall) Equals(expected ...any) {
+	*f.a.waitingOnPreparedCall = false
+
 	fTy := f.f.Type()
 
 	numOut := fTy.NumOut()
