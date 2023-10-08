@@ -56,18 +56,17 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 			startTime = time.Now()
 			pluginIface = c.clients.Plugin.GetHandle()
 			state.Plugin().StartingRequest(startTime, action.Target)
+
+			if pluginIface == nil {
+				panic(errors.New(
+					"core.State asked for plugin request, but Plugin.GetHandle() is nil, so it should be disabled",
+				))
+			}
 		}); !updated {
 			continue // state has changed, retry.
 		}
 
-		var resp *api.PluginResponse
-		var err error
-
-		if pluginIface != nil {
-			resp, err = pluginIface.Request(ctx, ifaceLogger, action.LastPermit, action.Target, action.Metrics)
-		} else {
-			err = errors.New("No currently enabled plugin handle")
-		}
+		resp, err := pluginIface.Request(ctx, ifaceLogger, action.LastPermit, action.Target, action.Metrics)
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {

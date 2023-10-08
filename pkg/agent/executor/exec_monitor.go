@@ -57,18 +57,17 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 			startTime = time.Now()
 			monitorIface = c.clients.Monitor.GetHandle()
 			state.Monitor().StartingDownscaleRequest(startTime, action.Target)
+
+			if monitorIface == nil {
+				panic(errors.New(
+					"core.State asked for vm-monitor downscale request, but Monitor.GetHandle() is nil, so it should be disabled",
+				))
+			}
 		}); !updated {
 			continue // state has changed, retry.
 		}
 
-		var result *api.DownscaleResult
-		var err error
-
-		if monitorIface != nil {
-			result, err = monitorIface.Downscale(ctx, ifaceLogger, action.Current, action.Target)
-		} else {
-			err = errors.New("No currently active vm-monitor connection")
-		}
+		result, err := monitorIface.Downscale(ctx, ifaceLogger, action.Current, action.Target)
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
@@ -148,16 +147,17 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 			startTime = time.Now()
 			monitorIface = c.clients.Monitor.GetHandle()
 			state.Monitor().StartingUpscaleRequest(startTime, action.Target)
+
+			if monitorIface == nil {
+				panic(errors.New(
+					"core.State asked for vm-monitor upscale request, but Monitor.GetHandle() is nil, so it should be disabled",
+				))
+			}
 		}); !updated {
 			continue // state has changed, retry.
 		}
 
-		var err error
-		if monitorIface != nil {
-			err = monitorIface.Upscale(ctx, ifaceLogger, action.Current, action.Target)
-		} else {
-			err = errors.New("No currently active vm-monitor connection")
-		}
+		err := monitorIface.Upscale(ctx, ifaceLogger, action.Current, action.Target)
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {
