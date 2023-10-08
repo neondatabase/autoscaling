@@ -31,7 +31,7 @@ type InitialStateOpt interface {
 	modifyStateConfig(*core.Config)
 }
 
-type InitialVmInfoOpt interface {
+type VmInfoOpt interface {
 	InitialStateOpt
 
 	modifyVmInfoConfig(*InitialVmInfoConfig)
@@ -39,14 +39,14 @@ type InitialVmInfoOpt interface {
 }
 
 func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *core.State {
-	vmOpts := []InitialVmInfoOpt{}
+	vmOpts := []VmInfoOpt{}
 	for _, o := range opts {
-		if vo, ok := o.(InitialVmInfoOpt); ok {
+		if vo, ok := o.(VmInfoOpt); ok {
 			vmOpts = append(vmOpts, vo)
 		}
 	}
 
-	vm := CreateInitialVmInfo(config.VM, vmOpts...)
+	vm := CreateVmInfo(config.VM, vmOpts...)
 
 	for _, o := range opts {
 		o.modifyStateConfig(&config.Core)
@@ -55,7 +55,7 @@ func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *cor
 	return core.NewState(vm, config.Core)
 }
 
-func CreateInitialVmInfo(config InitialVmInfoConfig, opts ...InitialVmInfoOpt) api.VmInfo {
+func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 	for _, o := range opts {
 		o.modifyVmInfoConfig(&config)
 	}
@@ -91,8 +91,8 @@ type vmInfoConfigModifier func(*InitialVmInfoConfig)
 type vmInfoModifier func(InitialVmInfoConfig, *api.VmInfo)
 
 var (
-	_ InitialVmInfoOpt = vmInfoConfigModifier(nil)
-	_ InitialVmInfoOpt = vmInfoModifier(nil)
+	_ VmInfoOpt = vmInfoConfigModifier(nil)
+	_ VmInfoOpt = vmInfoModifier(nil)
 )
 
 func (m coreConfigModifier) modifyStateConfig(c *core.Config) { (func(*core.Config))(m)(c) }
@@ -137,14 +137,14 @@ func WithTestingLogfWarnings(t *testing.T) InitialStateOpt {
 	})
 }
 
-func WithMinMaxCU(minCU, maxCU uint16) InitialStateOpt {
+func WithMinMaxCU(minCU, maxCU uint16) VmInfoOpt {
 	return vmInfoConfigModifier(func(c *InitialVmInfoConfig) {
 		c.MinCU = minCU
 		c.MaxCU = maxCU
 	})
 }
 
-func WithInitialCU(cu uint16) InitialStateOpt {
+func WithCurrentCU(cu uint16) VmInfoOpt {
 	return vmInfoModifier(func(c InitialVmInfoConfig, vm *api.VmInfo) {
 		vm.SetUsing(c.ComputeUnit.Mul(cu))
 	})

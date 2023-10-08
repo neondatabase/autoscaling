@@ -486,7 +486,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		DefaultInitialStateConfig,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithMinMaxCU(1, 8),
-		helpers.WithInitialCU(6), // NOTE: Start at 6 CU, so we're trying to scale down immediately.
+		helpers.WithCurrentCU(6), // NOTE: Start at 6 CU, so we're trying to scale down immediately.
 		helpers.WithConfigSetting(func(c *core.Config) {
 			// values close to the default, so request timing works out a little better.
 			c.PluginRequestTick = duration("6s")
@@ -1023,7 +1023,7 @@ func TestDownscalePivotBack(t *testing.T) {
 			DefaultInitialStateConfig,
 			helpers.WithStoredWarnings(a.StoredWarnings()),
 			helpers.WithMinMaxCU(1, 3),
-			helpers.WithInitialCU(2),
+			helpers.WithCurrentCU(2),
 		)
 
 		state.Plugin().NewScheduler()
@@ -1076,7 +1076,7 @@ func TestSchedulerDownscaleReupscale(t *testing.T) {
 		DefaultInitialStateConfig,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithMinMaxCU(1, 3),
-		helpers.WithInitialCU(2),
+		helpers.WithCurrentCU(2),
 	)
 	nextActions := func() core.ActionSet {
 		return state.NextActions(clock.Now())
