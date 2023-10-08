@@ -84,7 +84,7 @@ func NewDispatcher(
 	logger *zap.Logger,
 	addr string,
 	runner *Runner,
-	sendUpscaleRequested util.CondChannelSender,
+	sendUpscaleRequested func(request api.MoreResources, withLock func()),
 ) (_finalDispatcher *Dispatcher, _ error) {
 	// Create a new root-level context for this Dispatcher so that we can cancel if need be
 	ctx, cancelRootContext := context.WithCancel(ctx)
@@ -527,7 +527,7 @@ func (disp *Dispatcher) HandleMessage(
 }
 
 // Long running function that orchestrates all requests/responses.
-func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester util.CondChannelSender) {
+func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester func(_ api.MoreResources, withLock func())) {
 	logger.Info("Starting message handler")
 
 	// Utility for logging + returning an error when we get a message with an
@@ -543,27 +543,19 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 	// upscale. The monitor will get the result back as a NotifyUpscale message
 	// from us, with a new id.
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
-		disp.runner.lock.Lock()
-		defer disp.runner.lock.Unlock()
-
 		// TODO: it shouldn't be this function's responsibility to update metrics.
 		defer func() {
 			disp.runner.global.metrics.monitorRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
 		}()
-
-		upscaleRequester.Send()
 
 		resourceReq := api.MoreResources{
 			Cpu:    false,
 			Memory: true,
 		}
 
-		logger.Info(
-			"Updating requested upscale",
-			zap.Any("oldRequested", disp.runner.requestedUpscale),
-			zap.Any("newRequested", resourceReq),
-		)
-		disp.runner.requestedUpscale = resourceReq
+		upscaleRequester(resourceReq, func() {
+			logger.Info("Updating requested upscale", zap.Any("requested", resourceReq))
+		})
 	}
 	handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
 		disp.lock.Lock()

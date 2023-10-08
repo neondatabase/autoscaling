@@ -40,6 +40,16 @@ type MonitorConfig struct {
 	// MaxHealthCheckSequentialFailuresSeconds gives the duration, in seconds, after which we
 	// should restart the connection to the vm-monitor if health checks aren't succeeding.
 	MaxHealthCheckSequentialFailuresSeconds uint `json:"maxHealthCheckSequentialFailuresSeconds"`
+
+	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait before retrying a
+	// request that previously failed.
+	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
+	// RetryDeniedDownscaleSeconds gives the duration, in seconds, that we must wait before retrying
+	// a downscale request that was previously denied
+	RetryDeniedDownscaleSeconds uint `json:"retryDeniedDownscaleSeconds"`
+	// RequestedUpscaleValidSeconds gives the duration, in seconds, that requested upscaling should
+	// be respected for, before allowing re-downscaling.
+	RequestedUpscaleValidSeconds uint `json:"requestedUpscaleValidSeconds"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
@@ -83,6 +93,12 @@ type SchedulerConfig struct {
 	//
 	// If zero, requests will have no timeout.
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
+	// RequestAtLeastEverySeconds gives the maximum duration we should go without attempting a
+	// request to the scheduler, even if nothing's changed.
+	RequestAtLeastEverySeconds uint `json:"requestAtLeastEverySeconds"`
+	// RetryDeniedUpscaleSeconds gives the duration, in seconds, that we must wait before resending
+	// a request for resources that were not approved
+	RetryDeniedUpscaleSeconds uint `json:"retryDeniedUpscaleSeconds"`
 	// RequestPort defines the port to access the scheduler's ✨special✨ API with
 	RequestPort uint16 `json:"requestPort"`
 }
@@ -137,10 +153,15 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Monitor.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".monitor.unhealthyAfterSilenceDurationSeconds")
 	erc.Whenf(ec, c.Monitor.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".monitor.unhealthyStartupGracePeriodSeconds")
 	erc.Whenf(ec, c.Monitor.MaxHealthCheckSequentialFailuresSeconds == 0, zeroTmpl, ".monitor.maxHealthCheckSequentialFailuresSeconds")
+	erc.Whenf(ec, c.Monitor.RetryFailedRequestSeconds == 0, zeroTmpl, ".monitor.retryFailedRequestSeconds")
+	erc.Whenf(ec, c.Monitor.RetryDeniedDownscaleSeconds == 0, zeroTmpl, ".monitor.retryDeniedDownscaleSeconds")
+	erc.Whenf(ec, c.Monitor.RequestedUpscaleValidSeconds == 0, zeroTmpl, ".monitor.requestedUpscaleValidSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.Validate())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
 	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Scheduler.RequestAtLeastEverySeconds == 0, zeroTmpl, ".scheduler.requestAtLeastEverySeconds")
+	erc.Whenf(ec, c.Scheduler.RetryDeniedUpscaleSeconds == 0, zeroTmpl, ".scheduler.retryDeniedUpscaleSeconds")
 	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
 
 	return ec.Resolve()

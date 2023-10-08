@@ -5,52 +5,20 @@ package agent
 // The primary object in this file is the Runner. We create a new Runner for each VM, and the Runner
 // spawns a handful of long-running tasks that share state via the Runner object itself.
 //
-// # General paradigm
+// Each of these tasks is created by (*Runner).spawnBackgroundWorker(), which gracefully handles
+// panics so that it terminates (and restarts) the Runner itself, instead of e.g. taking down the
+// entire autoscaler-agent.
 //
-// At a high level, we're trying to balance a few goals that are in tension with each other:
+// The main entrypoint is (*Runner).Spawn(), which in turn calls (*Runner).Run(), etc.
 //
-//  1. It should be OK to panic, if an error is truly unrecoverable
-//  2. A single Runner's panic shouldn't bring down the entire autoscaler-agent¹
-//  3. We want to expose a State() method to view (almost) all internal state
-//  4. Some high-level actions (e.g., call to vm-monitor; update VM to desired state) require
-//     that we have *at most* one such action running at a time.
-//
-// There are a number of possible solutions to this set of goals. All reasonable solutions require
-// multiple goroutines. Here's what we do:
-//
-//  * Runner acts as a global (per-VM) shared object with its fields guarded by Runner.lock. The
-//    lock is held for as short a duration as possible.
-//  * "Background" threads are responsible for relatively high-level tasks - like:
-//     * "track scheduler"
-//     * "get metrics"
-//     * "handle VM resources" - using metrics, calculates target resources level and contacts
-//       scheduler, vm-monitor, and NeonVM -- the "scaling" part of "autoscaling".
-//  * Each thread makes *synchronous* HTTP requests while holding the necessary lock to prevent any other
-//    thread from making HTTP requests to the same entity. For example:
-//    * All requests to NeonVM and the scheduler plugin are guarded by Runner.requestLock, which
-//      guarantees that we aren't simultaneously telling the scheduler one thing and changing it at
-//      the same time.
-//  * Each "background" thread is spawned by (*Runner).spawnBackgroundWorker(), which appropriately
-//    catches panics and signals the Runner so that the main thread from (*Runner).Run() cleanly
-//    shuts everything down.
-//  * Every significant lock has an associated "deadlock checker" background thread that panics if
-//    it takes too long to acquire the lock.
-//
-// spawnBackgroundWorker guarantees (1) and (2); Runner.lock makes (3) possible; and
-// Runner.requestLock guarantees (4).
-//
-// ---
-// ¹ If we allowed a single Runner to take down the whole autoscaler-agent, it would open up the
-// possibility of crash-looping due to unusual cluster state (e.g., weird values in a NeonVM object)
+// For more information, refer to ARCHITECTURE.md.
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -59,9 +27,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/core"
+	"github.com/neondatabase/autoscaling/pkg/agent/executor"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -88,69 +59,33 @@ type Runner struct {
 	// is set exactly once, by (*Runner).Run
 	shutdown context.CancelFunc
 
-	// vm stores some common information about the VM.
-	//
-	// This field MUST NOT be read or updated without holding lock.
-	vm      api.VmInfo
+	vmName  util.NamespacedName
 	podName util.NamespacedName
 	podIP   string
 
-	// schedulerRespondedWithMigration is true iff the scheduler has returned an api.PluginResponse
-	// indicating that it was prompted to start migrating the VM.
-	//
-	// This field MUST NOT be updated without holding BOTH lock and requestLock.
-	//
-	// This field MAY be read while holding EITHER lock or requestLock.
-	schedulerRespondedWithMigration bool
+	memSlotSize *resource.Quantity
 
-	// lock guards the values of all mutable fields. The immutable fields are:
-	// - global
-	// - status
-	// - podName
-	// - podIP
-	// - logger
-	// - backgroundPanic
-	// lock MUST NOT be held while interacting with the network. The appropriate synchronization to
-	// ensure we don't send conflicting requests is provided by requestLock.
+	// lock guards the values of all mutable fields - namely, scheduler and monitor (which may be
+	// read without the lock, but the lock must be acquired to lock them).
 	lock util.ChanMutex
 
-	// requestLock must be held during any request to the scheduler plugin or any patch request to
-	// NeonVM.
-	//
-	// requestLock MUST NOT be held while performing any interactions with the network, apart from
-	// those listed above.
-	requestLock util.ChanMutex
-
-	// lastMetrics stores the most recent metrics we've received from the VM
-	//
-	// This field is exclusively set by the getMetricsLoop background worker, and will never change
-	// from non-nil to nil. The data behind each pointer is immutable, but the value of the pointer
-	// itself is not.
-	lastMetrics *api.Metrics
-
-	// requestedUpscale provides information about any requested upscaling by the vm-monitor
-	requestedUpscale api.MoreResources
+	// executorStateDump is set by (*Runner).Run and provides a way to get the state of the
+	// "executor"
+	executorStateDump func() executor.StateDump
 
 	// scheduler is the current scheduler that we're communicating with, or nil if there isn't one.
 	// Each scheduler's info field is immutable. When a scheduler is replaced, only the pointer
 	// value here is updated; the original Scheduler remains unchanged.
+	//
+	// Additionally, this field MAY ONLY be updated while holding both lock AND the executor's lock,
+	// which means that it may be read when EITHER holding lock OR the executor's lock.
 	scheduler *Scheduler
 	// monitor, if non nil, stores the current Dispatcher in use for communicating with the
-	// vm-monitor
-	monitor *Dispatcher
-	// computeUnit is the latest Compute Unit reported by a scheduler. It may be nil, if we haven't
-	// been able to contact one yet.
+	// vm-monitor, alongside a generation number.
 	//
-	// This field MUST NOT be updated without holding BOTH lock and requestLock.
-	computeUnit *api.Resources
-
-	// lastApproved is the last resource allocation that a scheduler has approved. It may be nil, if
-	// we haven't been able to contact one yet.
-	lastApproved *api.Resources
-
-	// lastSchedulerError provides the error that occurred - if any - during the most recent request
-	// to the current scheduler. This field is not nil only when scheduler is not nil.
-	lastSchedulerError error
+	// Additionally, this field MAY ONLY be updated while holding both lock AND the executor's lock,
+	// which means that it may be read when EITHER holding lock OR the executor's lock.
+	monitor *monitorInfo
 
 	// backgroundWorkerCount tracks the current number of background workers. It is exclusively
 	// updated by r.spawnBackgroundWorker
@@ -168,55 +103,20 @@ type Scheduler struct {
 	// info holds the immutable information we use to connect to and describe the scheduler
 	info schedwatch.SchedulerInfo
 
-	// registered is true only once a call to this Scheduler's Register() method has been made
-	//
-	// All methods that make a request to the scheduler will first call Register() if registered is
-	// false.
-	//
-	// This field MUST NOT be updated without holding BOTH runner.requestLock AND runner.lock
-	//
-	// This field MAY be read while holding EITHER runner.requestLock OR runner.lock.
-	registered bool
-
-	// fatalError is non-nil if an error occurred while communicating with the scheduler that we
-	// cannot recover from.
-	//
-	// Examples of fatal errors:
-	//
-	// * HTTP response status 4XX or 5XX - we don't know the plugin's state
-	// * Semantically invalid response - either a logic error occurred, or the plugin's state
-	//   doesn't match ours
-	//
-	// This field MUST NOT be updated without holding BOTH runner.requestLock AND runner.lock.
-	//
-	// This field MAY be read while holding EITHER runner.requestLock OR runner.lock.
-	fatalError error
-
-	// fatal is used for signalling that fatalError has been set (and so we should look for a new
-	// scheduler)
-	fatal util.SignalSender[struct{}]
+	generation executor.GenerationNumber
 }
 
 // RunnerState is the serializable state of the Runner, extracted by its State method
 type RunnerState struct {
-	PodIP                 string            `json:"podIP"`
-	VM                    api.VmInfo        `json:"vm"`
-	LastMetrics           *api.Metrics      `json:"lastMetrics"`
-	RequestedUpscale      api.MoreResources `json:"requestedUpscale"`
-	Scheduler             *SchedulerState   `json:"scheduler"`
-	ComputeUnit           *api.Resources    `json:"computeUnit"`
-	LastApproved          *api.Resources    `json:"lastApproved"`
-	LastSchedulerError    error             `json:"lastSchedulerError"`
-	BackgroundWorkerCount int64             `json:"backgroundWorkerCount"`
-
-	SchedulerRespondedWithMigration bool `json:"migrationStarted"`
+	PodIP                 string             `json:"podIP"`
+	ExecutorState         executor.StateDump `json:"executorState"`
+	Scheduler             *SchedulerState    `json:"scheduler"`
+	BackgroundWorkerCount int64              `json:"backgroundWorkerCount"`
 }
 
 // SchedulerState is the state of a Scheduler, constructed as part of a Runner's State Method
 type SchedulerState struct {
-	Info       schedwatch.SchedulerInfo `json:"info"`
-	Registered bool                     `json:"registered"`
-	FatalError error                    `json:"fatalError"`
+	Info schedwatch.SchedulerInfo `json:"info"`
 }
 
 func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
@@ -228,24 +128,21 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	var scheduler *SchedulerState
 	if r.scheduler != nil {
 		scheduler = &SchedulerState{
-			Info:       r.scheduler.info,
-			Registered: r.scheduler.registered,
-			FatalError: r.scheduler.fatalError,
+			Info: r.scheduler.info,
 		}
 	}
 
-	return &RunnerState{
-		LastMetrics:           r.lastMetrics,
-		RequestedUpscale:      r.requestedUpscale,
-		Scheduler:             scheduler,
-		ComputeUnit:           r.computeUnit,
-		LastApproved:          r.lastApproved,
-		LastSchedulerError:    r.lastSchedulerError,
-		VM:                    r.vm,
-		PodIP:                 r.podIP,
-		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
+	var executorState *executor.StateDump
+	if r.executorStateDump != nil /* may be nil if r.Run() hasn't fully started yet */ {
+		s := r.executorStateDump()
+		executorState = &s
+	}
 
-		SchedulerRespondedWithMigration: r.schedulerRespondedWithMigration,
+	return &RunnerState{
+		PodIP:                 r.podIP,
+		ExecutorState:         *executorState,
+		Scheduler:             scheduler,
+		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
 	}, nil
 }
 
@@ -258,7 +155,7 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 				r.status.update(r.global, func(stat podStatus) podStatus {
 					stat.endState = &podStatusEndState{
 						ExitKind: podStatusExitPanicked,
-						Error:    fmt.Errorf("Runner %v panicked: %v", r.vm.NamespacedName(), err),
+						Error:    fmt.Errorf("Runner %v panicked: %v", stat.vmInfo.NamespacedName(), err),
 						Time:     now,
 					}
 					return stat
@@ -313,36 +210,101 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		schedulerWatch.Using(*scheduler)
 	}
 
-	// signal when r.lastMetrics is updated
-	sendMetricsSignal, recvMetricsSignal := util.NewCondChannelPair()
-	// signal when new schedulers are *registered*
-	sendSchedSignal, recvSchedSignal := util.NewCondChannelPair()
-	// signal when the vm-monitor requests upscaling
-	sendUpscaleRequested, recvUpscaleRequested := util.NewCondChannelPair()
+	getVmInfo := func() api.VmInfo {
+		r.status.mu.Lock()
+		defer r.status.mu.Unlock()
+		return r.status.vmInfo
+	}
+
+	execLogger := logger.Named("exec")
+
+	coreExecLogger := execLogger.Named("core")
+	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
+		OnNextActions: r.global.metrics.runnerNextActions.Inc,
+		Core: core.Config{
+			DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
+			PluginRequestTick:                  time.Second * time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds),
+			PluginDeniedRetryWait:              time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
+			MonitorDeniedDownscaleCooldown:     time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
+			MonitorRequestedUpscaleValidPeriod: time.Second * time.Duration(r.global.config.Monitor.RequestedUpscaleValidSeconds),
+			MonitorRetryWait:                   time.Second * time.Duration(r.global.config.Monitor.RetryFailedRequestSeconds),
+			Log: core.LogConfig{
+				Info: coreExecLogger.Info,
+				Warn: coreExecLogger.Warn,
+			},
+		},
+	})
+
+	r.executorStateDump = executorCore.StateDump
+
+	pluginGeneration := executor.NewStoredGenerationNumber()
+	monitorGeneration := executor.NewStoredGenerationNumber()
+
+	pluginIface := makePluginInterface(r, executorCore, pluginGeneration)
+	neonvmIface := makeNeonVMInterface(r)
+	monitorIface := makeMonitorInterface(r, executorCore, monitorGeneration)
+
+	// "ecwc" stands for "ExecutorCoreWithClients"
+	ecwc := executorCore.WithClients(executor.ClientSet{
+		Plugin:  pluginIface,
+		NeonVM:  neonvmIface,
+		Monitor: monitorIface,
+	})
 
 	logger.Info("Starting background workers")
 
-	// FIXME: make these timeouts/delays separately defined constants, or configurable
+	// FIXME: make this timeout/delay a separately defined constant, or configurable
 	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
-	reqDeadlockChecker := r.requestLock.DeadlockChecker(5*time.Second, time.Second)
 
+	r.spawnBackgroundWorker(ctx, logger, "deadlock checker", ignoreLogger(mainDeadlockChecker))
 	r.spawnBackgroundWorker(ctx, logger, "podStatus updater", func(c context.Context, l *zap.Logger) {
 		r.status.periodicallyRefreshState(c, l, r.global)
 	})
-	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (main)", ignoreLogger(mainDeadlockChecker))
-	r.spawnBackgroundWorker(ctx, logger, "deadlock checker (request lock)", ignoreLogger(reqDeadlockChecker))
+	r.spawnBackgroundWorker(ctx, logger, "VmInfo updater", func(c context.Context, l *zap.Logger) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-vmInfoUpdated.Recv():
+				vm := getVmInfo()
+				ecwc.Updater().UpdatedVM(vm, func() {
+					l.Info("VmInfo updated", zap.Any("vmInfo", vm))
+				})
+			}
+		}
+	})
 	r.spawnBackgroundWorker(ctx, logger, "track scheduler", func(c context.Context, l *zap.Logger) {
-		r.trackSchedulerLoop(c, l, scheduler, schedulerWatch, sendSchedSignal)
+		newScheduler := func(withLock func()) {
+			ecwc.Updater().NewScheduler(withLock)
+		}
+		schedulerGone := func(withLock func()) {
+			ecwc.Updater().SchedulerGone(withLock)
+		}
+		r.trackSchedulerLoop(c, l, scheduler, schedulerWatch, pluginGeneration, newScheduler, schedulerGone)
 	})
 	r.spawnBackgroundWorker(ctx, logger, "get metrics", func(c context.Context, l *zap.Logger) {
-		r.getMetricsLoop(c, l, sendMetricsSignal)
-	})
-	r.spawnBackgroundWorker(ctx, logger, "handle VM resources", func(c context.Context, l *zap.Logger) {
-		r.handleVMResources(c, l, recvMetricsSignal, recvUpscaleRequested, recvSchedSignal, vmInfoUpdated)
+		r.getMetricsLoop(c, l, func(metrics api.Metrics, withLock func()) {
+			ecwc.Updater().UpdateMetrics(metrics, withLock)
+		})
 	})
 	r.spawnBackgroundWorker(ctx, logger.Named("vm-monitor"), "vm-monitor reconnection loop", func(c context.Context, l *zap.Logger) {
-		r.connectToMonitorLoop(c, l, sendUpscaleRequested)
+		r.connectToMonitorLoop(c, l, monitorGeneration, monitorStateCallbacks{
+			reset: func(withLock func()) {
+				ecwc.Updater().ResetMonitor(withLock)
+			},
+			upscaleRequested: func(request api.MoreResources, withLock func()) {
+				ecwc.Updater().UpscaleRequested(request, withLock)
+			},
+			setActive: func(active bool, withLock func()) {
+				ecwc.Updater().MonitorActive(active, withLock)
+			},
+		})
 	})
+	r.spawnBackgroundWorker(ctx, execLogger.Named("sleeper"), "executor: sleeper", ecwc.DoSleeper)
+	r.spawnBackgroundWorker(ctx, execLogger.Named("plugin"), "executor: plugin", ecwc.DoPluginRequests)
+	r.spawnBackgroundWorker(ctx, execLogger.Named("neonvm"), "executor: neonvm", ecwc.DoNeonVMRequests)
+	r.spawnBackgroundWorker(ctx, execLogger.Named("vm-monitor-downscale"), "executor: vm-monitor downscale", ecwc.DoMonitorDownscales)
+	r.spawnBackgroundWorker(ctx, execLogger.Named("vm-monitor-upscale"), "executor: vm-monitor upscale", ecwc.DoMonitorUpscales)
 
 	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
 	// pod was deleted, or the autoscaler-agent is exiting.
@@ -415,13 +377,11 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, logger *zap.Logger, 
 
 // getMetricsLoop repeatedly attempts to fetch metrics from the VM
 //
-// Every time metrics are successfully fetched, the value of r.lastMetrics is updated and newMetrics
-// is signalled. The update to r.lastMetrics and signal on newMetrics occur without releasing r.lock
-// in between.
+// Every time metrics are successfully fetched, the value is recorded with newMetrics.
 func (r *Runner) getMetricsLoop(
 	ctx context.Context,
 	logger *zap.Logger,
-	newMetrics util.CondChannelSender,
+	newMetrics func(metrics api.Metrics, withLock func()),
 ) {
 	timeout := time.Second * time.Duration(r.global.config.Metrics.RequestTimeoutSeconds)
 	waitBetweenDuration := time.Second * time.Duration(r.global.config.Metrics.SecondsBetweenRequests)
@@ -435,14 +395,9 @@ func (r *Runner) getMetricsLoop(
 			goto next
 		}
 
-		logger.Info("Got metrics", zap.Any("metrics", *metrics))
-
-		func() {
-			r.lock.Lock()
-			defer r.lock.Unlock()
-			r.lastMetrics = metrics
-			newMetrics.Send()
-		}()
+		newMetrics(*metrics, func() {
+			logger.Info("Updated metrics", zap.Any("metrics", *metrics))
+		})
 
 	next:
 		select {
@@ -453,145 +408,23 @@ func (r *Runner) getMetricsLoop(
 	}
 }
 
-// handleVMResources is the primary background worker responsible for updating the desired state of
-// the VM and communicating with the other components to make that happen, if possible.
-//
-// A new desired state is calculated when signalled on updatedMetrics or newScheduler.
-//
-// It may not be obvious at first, so: The reason why we try again when signalled on newScheduler,
-// even though scheduler registration is handled separately, is that we might've had a prior desired
-// increase that wasn't possible at the time (because the scheduler was unavailable) but is now
-// possible, without the metrics being updated.
-func (r *Runner) handleVMResources(
-	ctx context.Context,
-	logger *zap.Logger,
-	updatedMetrics util.CondChannelReceiver,
-	upscaleRequested util.CondChannelReceiver,
-	registeredScheduler util.CondChannelReceiver,
-	vmInfoUpdated util.CondChannelReceiver,
-) {
-	for {
-		var reason VMUpdateReason
+type monitorInfo struct {
+	generation executor.GenerationNumber
+	dispatcher *Dispatcher
+}
 
-		select {
-		case <-ctx.Done():
-			return
-		case <-updatedMetrics.Recv():
-			reason = UpdatedMetrics
-		case <-upscaleRequested.Recv():
-			reason = UpscaleRequested
-		case <-registeredScheduler.Recv():
-			reason = RegisteredScheduler
-		case <-vmInfoUpdated.Recv():
-			// Only actually do the update if something we care about changed:
-			newVMInfo := func() api.VmInfo {
-				r.status.mu.Lock()
-				defer r.status.mu.Unlock()
-				return r.status.vmInfo
-			}()
-
-			if !newVMInfo.ScalingEnabled {
-				// This shouldn't happen because any update to the VM object that has
-				// ScalingEnabled=false should get translated into a "deletion" so the runner stops.
-				// So we shouldn't get an "update" event, and if we do, something's gone very wrong.
-				panic("explicit VM update given but scaling is disabled")
-			}
-
-			// Update r.vm and r.lastApproved (see comment explaining why)
-			if changed := func() (changed bool) {
-				r.lock.Lock()
-				defer r.lock.Unlock()
-
-				if r.vm.Mem.SlotSize.Cmp(*newVMInfo.Mem.SlotSize) != 0 {
-					// VM memory slot sizes can't change at runtime, at time of writing (2023-04-12).
-					// It's worth checking it here though, because something must have gone horribly
-					// wrong elsewhere for the memory slots size to change that it's worth aborting
-					// before anything else goes wrong - and if, in future, we allow them to change,
-					// it's better to panic than have subtly incorrect logic.
-					panic("VM changed memory slot size")
-				}
-
-				// Create vm, which is r.vm with some fields taken from newVMInfo.
-				//
-				// Instead of copying r.vm, we create the entire struct explicitly so that we can
-				// have field exhaustiveness checking make sure that we don't forget anything when
-				// fields are added to api.VmInfo.
-				vm := api.VmInfo{
-					Name:      r.vm.Name,
-					Namespace: r.vm.Namespace,
-					Cpu: api.VmCpuInfo{
-						Min: newVMInfo.Cpu.Min,
-						Use: r.vm.Cpu.Use, // TODO: Eventually we should explicitly take this as input, use newVMInfo
-						Max: newVMInfo.Cpu.Max,
-					},
-					Mem: api.VmMemInfo{
-						Min: newVMInfo.Mem.Min,
-						Use: r.vm.Mem.Use, // TODO: Eventually we should explicitly take this as input, use newVMInfo
-						Max: newVMInfo.Mem.Max,
-
-						SlotSize: r.vm.Mem.SlotSize, // checked for equality above.
-					},
-
-					ScalingConfig:  newVMInfo.ScalingConfig,
-					AlwaysMigrate:  newVMInfo.AlwaysMigrate,
-					ScalingEnabled: newVMInfo.ScalingEnabled, // note: see above, checking newVMInfo.ScalingEnabled != false
-				}
-
-				changed = vm != r.vm
-				r.vm = vm
-
-				// As a final (necessary) precaution, update lastApproved so that it isn't possible
-				// for the scheduler to observe a temporary low upper bound that causes it to
-				// have state that's inconsistent with us (potentially causing overallocation). If
-				// we didn't handle this, the following sequence of actions would cause inconsistent
-				// state:
-				//
-				//   1. VM is at 4 CPU (of max 4), runner & scheduler agree
-				//   2. Scheduler dies
-				//   3. Runner loses contact with scheduler
-				//   4. VM Cpu.Max gets set to 2
-				//   5. Runner observes Cpu.Max = 2 and forces downscale to 2 CPU
-				//   6. New scheduler appears, observes Cpu.Max = 2
-				//   7. VM Cpu.Max gets set to 4
-				//   8. Runner observes Cpu.Max = 4 (lastApproved is still 4)
-				//   <-- INCONSISTENT STATE -->
-				//   9. Scheduler observes Cpu.Max = 4
-				//
-				// If the runner observes the updated state before the scheduler, it's entirely
-				// possible for the runner to make a request that *it* thinks is just informative,
-				// but that the scheduler thinks is requesting more resources. At that point, the
-				// request can unexpectedly fail, or the scheduler can over-allocate, etc.
-				if r.lastApproved != nil {
-					*r.lastApproved = r.lastApproved.Min(vm.Max())
-				}
-
-				return
-			}(); !changed {
-				continue
-			}
-
-			reason = UpdatedVMInfo
-		}
-
-		err := r.updateVMResources(
-			ctx, logger, reason, updatedMetrics.Consume, registeredScheduler.Consume,
-		)
-		if err != nil {
-			if ctx.Err() != nil {
-				logger.Warn("Error updating VM resources (but context already expired)", zap.Error(err))
-				return
-			}
-
-			logger.Error("Error updating VM resources", zap.Error(err))
-		}
-	}
+type monitorStateCallbacks struct {
+	reset            func(withLock func())
+	upscaleRequested func(request api.MoreResources, withLock func())
+	setActive        func(active bool, withLock func())
 }
 
 // connectToMonitorLoop does lifecycle management of the (re)connection to the vm-monitor
 func (r *Runner) connectToMonitorLoop(
 	ctx context.Context,
 	logger *zap.Logger,
-	upscaleRequested util.CondChannelSender,
+	generation *executor.StoredGenerationNumber,
+	callbacks monitorStateCallbacks,
 ) {
 	addr := fmt.Sprintf("ws://%s:%d/monitor", r.podIP, r.global.config.Monitor.ServerPort)
 
@@ -600,11 +433,17 @@ func (r *Runner) connectToMonitorLoop(
 
 	for i := 0; ; i += 1 {
 		// Remove any prior Dispatcher from the Runner
-		func() {
-			r.lock.Lock()
-			defer r.lock.Unlock()
-			r.monitor = nil
-		}()
+		if i != 0 {
+			func() {
+				r.lock.Lock()
+				defer r.lock.Unlock()
+				callbacks.reset(func() {
+					generation.Inc()
+					r.monitor = nil
+					logger.Info("Reset previous vm-monitor connection")
+				})
+			}()
+		}
 
 		// If the context was canceled, don't restart
 		if err := ctx.Err(); err != nil {
@@ -660,7 +499,7 @@ func (r *Runner) connectToMonitorLoop(
 			logger.Info("Connecting to vm-monitor", zap.String("addr", addr))
 		}
 
-		dispatcher, err := NewDispatcher(ctx, logger, addr, r, upscaleRequested)
+		dispatcher, err := NewDispatcher(ctx, logger, addr, r, callbacks.upscaleRequested)
 		if err != nil {
 			logger.Error("Failed to connect to vm-monitor", zap.String("addr", addr), zap.Error(err))
 			continue
@@ -670,7 +509,13 @@ func (r *Runner) connectToMonitorLoop(
 		func() {
 			r.lock.Lock()
 			defer r.lock.Unlock()
-			r.monitor = dispatcher
+			callbacks.setActive(true, func() {
+				r.monitor = &monitorInfo{
+					generation: generation.Inc(),
+					dispatcher: dispatcher,
+				}
+				logger.Info("Connected to vm-monitor")
+			})
 		}()
 
 		// Wait until the dispatcher is no longer running, either due to error or because the
@@ -690,7 +535,9 @@ func (r *Runner) trackSchedulerLoop(
 	logger *zap.Logger,
 	init *schedwatch.SchedulerInfo,
 	schedulerWatch schedwatch.SchedulerWatch,
-	registeredScheduler util.CondChannelSender,
+	generation *executor.StoredGenerationNumber,
+	newScheduler func(withLock func()),
+	schedulerGone func(withLock func()),
 ) {
 	// pre-declare a bunch of variables because we have some gotos here.
 	var (
@@ -698,8 +545,6 @@ func (r *Runner) trackSchedulerLoop(
 		minWait     time.Duration    = 5 * time.Second // minimum time we have to wait between scheduler starts
 		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
 		currentInfo schedwatch.SchedulerInfo
-		fatal       util.SignalReceiver[struct{}]
-		failed      bool
 	)
 
 	if init == nil {
@@ -713,69 +558,34 @@ startScheduler:
 
 	lastStart = time.Now()
 	okForNew = time.After(minWait)
-	failed = false
 
 	// Set the current scheduler
-	fatal = func() util.SignalReceiver[struct{}] {
-		logger := logger.With(zap.Object("scheduler", currentInfo))
-
-		// Print info about a new scheduler, unless this is the first one.
+	{
+		verb := "Setting"
 		if init == nil || init.UID != currentInfo.UID {
-			logger.Info("Updating scheduler pod")
-		}
-
-		sendFatal, recvFatal := util.NewSingleSignalPair[struct{}]()
-
-		sched := &Scheduler{
-			runner:     r,
-			info:       currentInfo,
-			registered: false,
-			fatalError: nil,
-			fatal:      sendFatal,
+			verb = "Updating"
 		}
 
 		func() {
 			r.lock.Lock()
 			defer r.lock.Unlock()
 
-			r.scheduler = sched
-			r.lastSchedulerError = nil
-		}()
-
-		r.spawnBackgroundWorker(ctx, logger, "Scheduler.Register()", func(c context.Context, logger *zap.Logger) {
-			r.requestLock.Lock()
-			defer r.requestLock.Unlock()
-
-			// It's possible for another thread to take responsibility for registering the
-			// scheduler, instead of us. Don't need to double-register.
-			if sched.registered {
-				return
-			}
-
-			if err := sched.Register(c, logger, registeredScheduler.Send); err != nil {
-				if c.Err() != nil {
-					logger.Warn("Error registering with scheduler (but context is done)", zap.Error(err))
-				} else {
-					logger.Error("Error registering with scheduler", zap.Error(err))
+			newScheduler(func() {
+				logger.Info(fmt.Sprintf("%s scheduler pod", verb), zap.Object("scheduler", currentInfo))
+				r.scheduler = &Scheduler{
+					runner:     r,
+					info:       currentInfo,
+					generation: generation.Inc(),
 				}
-			}
-		})
+			})
+		}()
+	}
 
-		return recvFatal
-	}()
-
-	// Start watching for the current scheduler to be deleted or have fatally errored
+	// Start watching for the current scheduler to be deleted
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-fatal.Recv():
-			logger.Info(
-				"Waiting for new scheduler because current fatally errored",
-				zap.Object("scheduler", currentInfo),
-			)
-			failed = true
-			goto waitForNewScheduler
 		case info := <-schedulerWatch.Deleted:
 			matched := func() bool {
 				r.lock.Lock()
@@ -789,12 +599,15 @@ startScheduler:
 					return false
 				}
 
-				logger.Info(
-					"Scheduler pod was deleted. Aborting further communication",
-					zap.Object("scheduler", r.scheduler.info),
-				)
+				schedulerGone(func() {
+					logger.Info(
+						"Scheduler pod was deleted. Aborting further communication",
+						zap.Object("scheduler", r.scheduler.info),
+					)
 
-				r.scheduler = nil
+					generation.Inc()
+					r.scheduler = nil
+				})
 				return true
 			}()
 
@@ -813,16 +626,9 @@ waitForNewScheduler:
 		select {
 		case <-okForNew:
 		default:
-			var endingMode string
-			if failed {
-				endingMode = "failed"
-			} else {
-				endingMode = "ended"
-			}
-
 			// Not ready yet; let's log something about it:
 			logger.Info(
-				fmt.Sprintf("Scheduler %s quickly. Respecting minimum delay before switching to a new one", endingMode),
+				"Scheduler ended quickly. Respecting minimum delay before switching to a new one",
 				zap.Duration("activeTime", time.Since(lastStart)), zap.Duration("delay", minWait),
 			)
 			select {
@@ -890,457 +696,7 @@ func (r *Runner) doMetricsRequest(
 	return &m, nil
 }
 
-// VMUpdateReason provides context to (*Runner).updateVMResources about why an update to the VM's
-// resources has been requested
-type VMUpdateReason string
-
-const (
-	UpdatedMetrics      VMUpdateReason = "metrics"
-	UpscaleRequested    VMUpdateReason = "upscale requested"
-	RegisteredScheduler VMUpdateReason = "scheduler"
-	UpdatedVMInfo       VMUpdateReason = "updated VM info"
-)
-
-// AtomicUpdateState holds some pre-validated data for (*Runner).updateVMResources, fetched
-// atomically (i.e. all at once, while holding r.lock) with the (*Runner).atomicState method
-//
-// Because atomicState is able to return nil when there isn't yet enough information to update the
-// VM's resources, some validation is already guaranteed by representing the data without pointers.
-type AtomicUpdateState struct {
-	ComputeUnit      api.Resources
-	Metrics          api.Metrics
-	VM               api.VmInfo
-	LastApproved     api.Resources
-	RequestedUpscale api.MoreResources
-	Config           api.ScalingConfig
-}
-
-// updateVMResources is responsible for the high-level logic that orchestrates a single update to
-// the VM's resources - or possibly just informing the scheduler that nothing's changed.
-//
-// This method sometimes returns nil if the reason we couldn't perform the update was solely because
-// other information was missing (e.g., we haven't yet contacted a scheduler). In these cases, an
-// appropriate message is logged.
-func (r *Runner) updateVMResources(
-	ctx context.Context,
-	logger *zap.Logger,
-	reason VMUpdateReason,
-	clearUpdatedMetricsSignal func(),
-	clearNewSchedulerSignal func(),
-) error {
-	// Acquiring this lock *may* take a while, so we'll allow it to be interrupted by ctx
-	//
-	// We'll need the lock for access to the scheduler and NeonVM, and holding it across all the
-	// request means that our logic can be a little simpler :)
-	if err := r.requestLock.TryLock(ctx); err != nil {
-		return err
-	}
-	defer r.requestLock.Unlock()
-
-	logger.Info("Updating VM resources", zap.String("reason", string(reason)))
-
-	// state variables
-	var (
-		start  api.Resources // r.vm.Using(), at the time of the start of this function - for metrics.
-		target api.Resources
-		capped api.Resources // target, but capped by r.lastApproved
-	)
-
-	if r.schedulerRespondedWithMigration {
-		logger.Info("Aborting VM resource update because scheduler previously said VM is migrating")
-		return nil
-	}
-
-	state, err := func() (*AtomicUpdateState, error) {
-		r.lock.Lock()
-		defer r.lock.Unlock()
-
-		clearUpdatedMetricsSignal()
-
-		state := r.getStateForVMUpdate(logger, reason)
-		if state == nil {
-			// if state == nil, the reason why we can't do the operation was already logged.
-			return nil, nil
-		} else if r.scheduler != nil && r.scheduler.fatalError != nil {
-			logger.Warn("Unable to update VM resources because scheduler had a prior fatal error")
-			return nil, nil
-		}
-
-		// Calculate the current and desired state of the VM
-		target = state.DesiredVMState(true) // note: this sets the state value in the loop body
-
-		current := state.VM.Using()
-		start = current
-
-		msg := "Target VM state is equal to current"
-		if target != current {
-			msg = "Target VM state different from current"
-		}
-		logger.Info(msg, zap.Object("current", current), zap.Object("target", target))
-
-		// Check if there's resources that can (or must) be updated before talking to the scheduler.
-		//
-		// During typical operation, this only occurs when the target state corresponds to fewer
-		// compute units than the current state. However, this can also happen when:
-		//
-		// * lastApproved and target are both greater than the VM's state; or
-		// * VM's state doesn't match the compute unit and only one resource is being decreased
-		//
-		// To make handling these edge-cases smooth, the code here is more generic than typical
-		// operation requires.
-
-		// note: r.atomicState already checks the validity of r.lastApproved - namely that it has no
-		// values less than r.vm.Using().
-		capped = target.Min(state.LastApproved) // note: this sets the state value in the loop body
-
-		return state, nil
-	}()
-
-	// note: state == nil means that there's some other reason we couldn't do the operation that
-	// was already logged.
-	if err != nil || state == nil {
-		return err
-	}
-
-	// If there's an update that can be done immediately, do it! Typically, capped will
-	// represent the resources we'd like to downscale.
-	if capped != state.VM.Using() {
-		// If our downscale gets rejected, calculate a new target
-		rejectedDownscale := func() (newTarget api.Resources, _ error) {
-			target = state.DesiredVMState(false /* don't allow downscaling */)
-			return target.Min(state.LastApproved), nil
-		}
-
-		nowUsing, err := r.doVMUpdate(ctx, logger, state.VM.Using(), capped, rejectedDownscale)
-		if err != nil {
-			return fmt.Errorf("Error doing VM update 1: %w", err)
-		}
-
-		state.VM.SetUsing(*nowUsing)
-	}
-
-	// Fetch the scheduler, to (a) inform it of the current state, and (b) request an
-	// increase, if we want one.
-	sched := func() *Scheduler {
-		r.lock.Lock()
-		defer r.lock.Unlock()
-
-		clearNewSchedulerSignal()
-		return r.scheduler
-	}()
-
-	// If we can't reach the scheduler, then we've already done everything we can. Emit a
-	// warning and exit. We'll get notified to retry when a new one comes online.
-	if sched == nil {
-		logger.Warn("Unable to complete updating VM resources", zap.Error(errors.New("no scheduler registered")))
-		return nil
-	}
-
-	// If the scheduler isn't registered yet, then either the initial register request failed, or it
-	// hasn't gotten a chance to send it yet.
-	if !sched.registered {
-		if err := sched.Register(ctx, logger, func() {}); err != nil {
-			logger.Error("Error registering with scheduler", zap.Object("scheduler", sched.info), zap.Error(err))
-			logger.Warn("Unable to complete updating VM resources", zap.Error(errors.New("scheduler Register request failed")))
-			return nil
-		}
-	}
-
-	r.recordResourceChange(start, target, r.global.metrics.schedulerRequestedChange)
-
-	request := api.AgentRequest{
-		ProtoVersion: PluginProtocolVersion,
-		Pod:          r.podName,
-		Resources:    target,
-		Metrics:      &state.Metrics, // FIXME: the metrics here *might* be a little out of date.
-	}
-	response, err := sched.DoRequest(ctx, logger, &request)
-	if err != nil {
-		logger.Error("Scheduler request failed", zap.Object("scheduler", sched.info), zap.Error(err))
-		logger.Warn("Unable to complete updating VM resources", zap.Error(errors.New("scheduler request failed")))
-		return nil
-	} else if response.Migrate != nil {
-		// info about migration has already been logged by DoRequest
-		return nil
-	}
-
-	permit := response.Permit
-	r.recordResourceChange(start, permit, r.global.metrics.schedulerApprovedChange)
-
-	// sched.DoRequest should have validated the permit, meaning that it's not less than the
-	// current resource usage.
-	vmUsing := state.VM.Using()
-	if permit.HasFieldLessThan(vmUsing) {
-		panic(errors.New("invalid state: permit less than what's in use"))
-	} else if permit.HasFieldGreaterThan(target) {
-		panic(errors.New("invalid state: permit greater than target"))
-	}
-
-	if permit == vmUsing {
-		if vmUsing != target {
-			logger.Info("Scheduler denied increase, staying at current", zap.Object("current", vmUsing))
-		}
-
-		// nothing to do
-		return nil
-	} else /* permit > vmUsing */ {
-		if permit != target {
-			logger.Warn("Scheduler capped increase to permit", zap.Object("permit", permit))
-		} else {
-			logger.Info("Scheduler allowed increase to permit", zap.Object("permit", permit))
-		}
-
-		rejectedDownscale := func() (newTarget api.Resources, _ error) {
-			panic(errors.New("rejectedDownscale called but request should be increasing, not decreasing"))
-		}
-		if _, err := r.doVMUpdate(ctx, logger, vmUsing, permit, rejectedDownscale); err != nil {
-			return fmt.Errorf("Error doing VM update 2: %w", err)
-		}
-
-		return nil
-	}
-}
-
-// getStateForVMUpdate produces the atomicUpdateState for updateVMResources
-//
-// This method MUST be called while holding r.lock.
-func (r *Runner) getStateForVMUpdate(logger *zap.Logger, updateReason VMUpdateReason) *AtomicUpdateState {
-	if r.lastMetrics == nil {
-		if updateReason == UpdatedMetrics {
-			panic(errors.New("invalid state: metrics signalled but r.lastMetrics == nil"))
-		}
-
-		logger.Warn("Unable to update VM resources because we haven't received metrics yet")
-		return nil
-	} else if r.computeUnit == nil {
-		if updateReason == RegisteredScheduler {
-			// note: the scheduler that was registered might not be the scheduler we just got!
-			// However, r.computeUnit is never supposed to go from non-nil to nil, so that doesn't
-			// actually matter.
-			panic(errors.New("invalid state: registered scheduler signalled but r.computeUnit == nil"))
-		}
-
-		// note: as per the docs on r.computeUnit, this should only occur when we haven't yet talked
-		// to a scheduler.
-		logger.Warn("Unable to update VM resources because r.computeUnit hasn't been set yet")
-		return nil
-	} else if r.lastApproved == nil {
-		panic(errors.New("invalid state: r.computeUnit != nil but r.lastApproved == nil"))
-	}
-
-	// Check that the VM's current usage is <= lastApproved
-	if vmUsing := r.vm.Using(); vmUsing.HasFieldGreaterThan(*r.lastApproved) {
-		// ref <https://github.com/neondatabase/autoscaling/issues/234>
-		logger.Warn(
-			"r.vm has resources greater than r.lastApproved. This should only happen when scaling bounds change",
-			zap.Object("using", vmUsing),
-			zap.Object("lastApproved", *r.lastApproved),
-		)
-	}
-
-	config := r.global.config.Scaling.DefaultConfig
-	if r.vm.ScalingConfig != nil {
-		config = *r.vm.ScalingConfig
-	}
-
-	return &AtomicUpdateState{
-		ComputeUnit:      *r.computeUnit,
-		Metrics:          *r.lastMetrics,
-		VM:               r.vm,
-		LastApproved:     *r.lastApproved,
-		RequestedUpscale: r.requestedUpscale,
-		Config:           config,
-	}
-}
-
-// DesiredVMState calculates what the resource allocation to the VM should be, given the metrics and
-// current state.
-func (s *AtomicUpdateState) DesiredVMState(allowDecrease bool) api.Resources {
-	// There's some annoying edge cases that this function has to be able to handle properly. For
-	// the sake of completeness, they are:
-	//
-	// 1. s.vm.Using() is not a multiple of s.computeUnit
-	// 2. s.vm.Max() is less than s.computeUnit (or: has at least one resource that is)
-	// 3. s.vm.Using() is a fractional multiple of s.computeUnit, but !allowDecrease and rounding up
-	//    is greater than s.vm.Max()
-	// 4. s.vm.Using() is much larger than s.vm.Min() and not a multiple of s.computeUnit, but load
-	//    is low so we should just decrease *anyways*.
-	//
-	// ---
-	//
-	// Broadly, the implementation works like this:
-	// For CPU:
-	// Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
-	//
-	// For Memory:
-	// Based on memory usage, calculate the VM's desired memory allocation and extrapolate a
-	// goal number of CUs from that.
-	//
-	// 1. Take the maximum of these two goal CUs to create a unified goal CU
-	// 2. Cap the goal CU by min/max, etc
-	// 3. that's it!
-
-	// For CPU:
-	// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
-	// average),
-	// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
-	goalCPUs := float64(s.Metrics.LoadAverage1Min) / s.Config.LoadAverageFractionTarget
-	cpuGoalCU := uint32(math.Round(goalCPUs / s.ComputeUnit.VCPU.AsFloat64()))
-
-	// For Mem:
-	// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
-	// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
-	// that to CUs
-	//
-	// NOTE: use uint64 for calculations on bytes as uint32 can overflow
-	memGoalBytes := uint64(math.Round(float64(s.Metrics.MemoryUsageBytes) / s.Config.MemoryUsageFractionTarget))
-	bytesPerCU := uint64(int64(s.ComputeUnit.Mem) * s.VM.Mem.SlotSize.Value())
-	memGoalCU := uint32(memGoalBytes / bytesPerCU)
-
-	goalCU := util.Max(cpuGoalCU, memGoalCU)
-
-	// Update goalCU based on any requested upscaling
-	goalCU = util.Max(goalCU, s.requiredCUForRequestedUpscaling())
-
-	// new CU must be >= current CU if !allowDecrease
-	if !allowDecrease {
-		_, upperBoundCU := s.computeUnitsBounds()
-		goalCU = util.Max(goalCU, upperBoundCU)
-	}
-
-	// resources for the desired "goal" compute units
-	goal := s.ComputeUnit.Mul(uint16(goalCU))
-
-	// bound goal by the minimum and maximum resource amounts for the VM
-	result := goal.Min(s.VM.Max()).Max(s.VM.Min())
-
-	// If no decreases are allowed, then we *must* make sure that the VM's usage value has not
-	// decreased, even if it's greater than the VM maximum.
-	//
-	// We can run into situations like this when VM scale-down on bounds change fails, so we end up
-	// with a usage value greater than the maximum.
-	if !allowDecrease {
-		result = result.Max(s.VM.Using())
-	}
-
-	// Check that the result is sound.
-	//
-	// With the current (naive) implementation, this is trivially ok. In future versions, it might
-	// not be so simple, so it's good to have this integrity check here.
-	if allowDecrease && result.HasFieldGreaterThan(s.VM.Max()) {
-		panic(fmt.Errorf(
-			"produced invalid desiredVMState: result has field greater than max. this = %+v", *s,
-		))
-	} else if result.HasFieldLessThan(s.VM.Min()) {
-		panic(fmt.Errorf(
-			"produced invalid desiredVMState: result has field less than min. this = %+v", *s,
-		))
-	}
-
-	return result
-}
-
-// computeUnitsBounds returns the minimum and maximum number of Compute Units required to fit each
-// resource for the VM's current allocation
-//
-// Under typical operation, this will just return two equal values, both of which are equal to the
-// VM's current number of Compute Units. However, if the VM's resource allocation doesn't cleanly
-// divide to a multiple of the Compute Unit, the upper and lower bounds will be different. This can
-// happen when the Compute Unit is changed, or when the VM's maximum or minimum resource allocations
-// has previously prevented it from being set to a multiple of the Compute Unit.
-func (s *AtomicUpdateState) computeUnitsBounds() (uint32, uint32) {
-	// (x + M-1) / M is equivalent to ceil(x/M), as long as M != 0, which is already guaranteed by
-	// the checks on the computeUnit that the scheduler provides.
-	minCPUUnits := (uint32(s.VM.Cpu.Use) + uint32(s.ComputeUnit.VCPU) - 1) / uint32(s.ComputeUnit.VCPU)
-	minMemUnits := uint32((s.VM.Mem.Use + s.ComputeUnit.Mem - 1) / s.ComputeUnit.Mem)
-
-	return util.Min(minCPUUnits, minMemUnits), util.Max(minCPUUnits, minMemUnits)
-}
-
-// requiredCUForRequestedUpscaling returns the minimum Compute Units required to abide by the
-// requested upscaling, if there is any.
-//
-// If there's no requested upscaling, then this method will return zero.
-//
-// This method does not respect any bounds on Compute Units placed by the VM's maximum or minimum
-// resource allocation.
-func (s *AtomicUpdateState) requiredCUForRequestedUpscaling() uint32 {
-	var required uint32
-
-	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
-
-	if s.RequestedUpscale.Cpu {
-		required = util.Max(required, uint32(s.VM.Cpu.Use/s.ComputeUnit.VCPU)+1)
-	}
-	if s.RequestedUpscale.Memory {
-		required = util.Max(required, uint32(s.VM.Mem.Use/s.ComputeUnit.Mem)+1)
-	}
-
-	return required
-}
-
-// doVMUpdate handles updating the VM's resources from current to target WITHOUT CHECKING WITH THE
-// SCHEDULER. It is the caller's responsibility to ensure that target is not greater than
-// r.lastApproved, and check with the scheduler if necessary.
-//
-// If some resources in target are less than current, and the dispatcher rejects the proposed
-// downscaling, rejectedDownscale will be called. If it returns an error, that error will be
-// returned and the update will be aborted. Otherwise, the returned newTarget will be used.
-//
-// This method MUST be called while holding r.requestLock AND NOT r.lock.
-func (r *Runner) doVMUpdate(
-	ctx context.Context,
-	logger *zap.Logger,
-	current api.Resources,
-	target api.Resources,
-	rejectedDownscale func() (newTarget api.Resources, _ error),
-) (*api.Resources, error) {
-	logger.Info("Attempting VM update", zap.Object("current", current), zap.Object("target", target))
-
-	// helper handling function to reset r.vm to reflect the actual current state. Must not be
-	// called while holding r.lock.
-	resetVMTo := func(amount api.Resources) {
-		r.lock.Lock()
-		defer r.lock.Unlock()
-
-		r.vm.SetUsing(amount)
-	}
-
-	// If there's any fields that are being downscaled, request that from the monitor.
-	downscaled := current.Min(target)
-	if downscaled != current {
-		r.recordResourceChange(current, downscaled, r.global.metrics.monitorRequestedChange)
-
-		resp, err := r.doDownscale(ctx, logger, downscaled)
-		if err != nil {
-			return nil, err
-		}
-
-		if resp.Ok {
-			r.recordResourceChange(current, downscaled, r.global.metrics.monitorApprovedChange)
-		} else {
-			newTarget, err := rejectedDownscale()
-			if err != nil {
-				resetVMTo(current)
-				return nil, err
-			} else if newTarget.HasFieldLessThan(current) {
-				panic(fmt.Errorf(
-					"rejectedDownscale returned new target less than current: %+v has field less than %+v",
-					newTarget, current,
-				))
-			}
-
-			if newTarget != target {
-				logger.Info("VM update: rejected downscale changed target", zap.Object("target", newTarget))
-			}
-
-			target = newTarget
-		}
-	}
-
-	r.recordResourceChange(current, target, r.global.metrics.neonvmRequestedChange)
-
-	// Make the NeonVM request
+func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) error {
 	patches := []util.JSONPatch{{
 		Op:    util.PatchReplace,
 		Path:  "/spec/guest/cpus/use",
@@ -1350,8 +706,6 @@ func (r *Runner) doVMUpdate(
 		Path:  "/spec/guest/memorySlots/use",
 		Value: target.Mem,
 	}}
-
-	logger.Info("Making NeonVM request for resources", zap.Object("target", target), zap.Any("patches", patches))
 
 	patchPayload, err := json.Marshal(patches)
 	if err != nil {
@@ -1365,61 +719,16 @@ func (r *Runner) doVMUpdate(
 	// FIXME: We should check the returned VM object here, in case the values are different.
 	//
 	// Also relevant: <https://github.com/neondatabase/autoscaling/issues/23>
-	_, err = r.global.vmClient.NeonvmV1().VirtualMachines(r.vm.Namespace).
-		Patch(requestCtx, r.vm.Name, ktypes.JSONPatchType, patchPayload, metav1.PatchOptions{})
+	_, err = r.global.vmClient.NeonvmV1().VirtualMachines(r.vmName.Namespace).
+		Patch(requestCtx, r.vmName.Name, ktypes.JSONPatchType, patchPayload, metav1.PatchOptions{})
 
-	// We couldn't update the VM
 	if err != nil {
 		r.global.metrics.neonvmRequestsOutbound.WithLabelValues(fmt.Sprintf("[error: %s]", util.RootError(err))).Inc()
-
-		// If the context was cancelled, we generally don't need to worry about whether setting r.vm
-		// back to current is sound. All operations on this VM are done anyways.
-		if ctx.Err() != nil {
-			resetVMTo(current) // FIXME: yeah, even though the comment above says "don't worry", maybe worry?
-			return nil, fmt.Errorf("Error making VM patch request: %w", err)
-		}
-
-		// Otherwise, something went wrong *in the request itself*. This probably leaves us in an
-		// inconsistent state, so we're best off ending all further operations. The correct way to
-		// fatally error is by panicking - our infra here ensures it won't take down any other
-		// runners.
-		panic(fmt.Errorf("Unexpected VM patch request failure: %w", err))
+		return err
 	}
 
 	r.global.metrics.neonvmRequestsOutbound.WithLabelValues("ok").Inc()
-
-	// We scaled. If we run into an issue around further communications with the monitor, then
-	// it'll be left with an inconsistent state - there's not really anything we can do about that,
-	// unfortunately.
-	resetVMTo(target)
-
-	upscaled := target // we already handled downscaling; only upscaling can be left
-	if upscaled.HasFieldGreaterThan(current) {
-		// Unset fields in r.requestedUpscale if we've handled it.
-		//
-		// Essentially, for each field F, set:
-		//
-		//     r.requestedUpscale.F = r.requestedUpscale && !(upscaled.F > current.F)
-		func() {
-			r.lock.Lock()
-			defer r.lock.Unlock()
-
-			r.requestedUpscale = r.requestedUpscale.And(upscaled.IncreaseFrom(current).Not())
-		}()
-
-		r.recordResourceChange(downscaled, upscaled, r.global.metrics.monitorRequestedChange)
-
-		if ok, err := r.doUpscale(ctx, logger, upscaled); err != nil || !ok {
-			return nil, err
-		}
-
-		r.recordResourceChange(downscaled, upscaled, r.global.metrics.monitorApprovedChange)
-	}
-
-	logger.Info("Updated VM resources", zap.Object("current", current), zap.Object("target", target))
-
-	// Everything successful.
-	return &target, nil
+	return nil
 }
 
 func (r *Runner) recordResourceChange(current, target api.Resources, metrics resourceChangePair) {
@@ -1445,7 +754,7 @@ func (r *Runner) recordResourceChange(current, target api.Resources, metrics res
 		direction := getDirection(target.Mem > current.Mem)
 
 		// Avoid floating-point inaccuracy.
-		byteTotal := r.vm.Mem.SlotSize.Value() * int64(abs.Mem)
+		byteTotal := r.memSlotSize.Value() * int64(abs.Mem)
 		mib := int64(1 << 20)
 		floatMB := float64(byteTotal/mib) + float64(byteTotal%mib)/float64(mib)
 
@@ -1453,121 +762,68 @@ func (r *Runner) recordResourceChange(current, target api.Resources, metrics res
 	}
 }
 
-// This function must NOT be called while holding r.lock.
-func (r *Runner) doDownscale(ctx context.Context, logger *zap.Logger, to api.Resources) (*api.DownscaleResult, error) {
-	rawResources := to.ConvertToAllocation(r.vm.Mem.SlotSize)
-	cpu := rawResources.Cpu
-	mem := rawResources.Mem
-
-	dispatcher := func() *Dispatcher {
-		r.lock.Lock()
-		defer r.lock.Unlock()
-		return r.monitor
-	}()
-
-	if dispatcher == nil {
-		return nil, errors.New("No active connection to vm-monitor")
-	}
+func doMonitorDownscale(
+	ctx context.Context,
+	logger *zap.Logger,
+	dispatcher *Dispatcher,
+	target api.Resources,
+) (*api.DownscaleResult, error) {
+	r := dispatcher.runner
+	rawResources := target.ConvertToAllocation(r.memSlotSize)
 
 	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
 
 	res, err := dispatcher.Call(ctx, logger, timeout, "DownscaleRequest", api.DownscaleRequest{
-		Target: api.Allocation{Cpu: cpu, Mem: mem},
+		Target: rawResources,
 	})
 	if err != nil {
-		logger.Error("monitor failed to downscale", zap.Error(err))
 		return nil, err
 	}
 
 	return res.Result, nil
 }
 
-// This function must NOT be called while holding r.lock.
-func (r *Runner) doUpscale(ctx context.Context, logger *zap.Logger, to api.Resources) (ok bool, _ error) {
-	rawResources := to.ConvertToAllocation(r.vm.Mem.SlotSize)
-	cpu := rawResources.Cpu
-	mem := rawResources.Mem
-
-	dispatcher := func() *Dispatcher {
-		r.lock.Lock()
-		defer r.lock.Unlock()
-		return r.monitor
-	}()
-
-	if dispatcher == nil {
-		return false, errors.New("No active connection to vm-monitor")
-	}
+func doMonitorUpscale(
+	ctx context.Context,
+	logger *zap.Logger,
+	dispatcher *Dispatcher,
+	target api.Resources,
+) error {
+	r := dispatcher.runner
+	rawResources := target.ConvertToAllocation(r.memSlotSize)
 
 	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
 
 	_, err := dispatcher.Call(ctx, logger, timeout, "UpscaleNotification", api.UpscaleNotification{
-		Granted: api.Allocation{Cpu: cpu, Mem: mem},
+		Granted: rawResources,
 	})
-	if err != nil {
-		logger.Error("monitor failed to upscale", zap.Error(err))
-		return false, err
-	}
-	return true, nil
+	return err
 }
 
-// Register performs the initial request required to register with a scheduler
-//
-// This method is called immediately after the Scheduler is created, and may be called
-// subsequent times if the initial request fails.
-//
-// signalOk will be called if the request succeeds, with s.runner.lock held - but only if
-// s.runner.scheduler == s.
-//
-// This method MUST be called while holding s.runner.requestLock AND NOT s.runner.lock
-func (s *Scheduler) Register(ctx context.Context, logger *zap.Logger, signalOk func()) error {
-	metrics, resources := func() (*api.Metrics, api.Resources) {
-		s.runner.lock.Lock()
-		defer s.runner.lock.Unlock()
-
-		return s.runner.lastMetrics, s.runner.vm.Using()
-	}()
-
-	req := api.AgentRequest{
+// DoRequest sends a request to the scheduler and does not validate the response.
+func (s *Scheduler) DoRequest(
+	ctx context.Context,
+	logger *zap.Logger,
+	resources api.Resources,
+	metrics *api.Metrics,
+) (_ *api.PluginResponse, err error) {
+	reqData := &api.AgentRequest{
 		ProtoVersion: PluginProtocolVersion,
 		Pod:          s.runner.podName,
 		Resources:    resources,
 		Metrics:      metrics,
 	}
-	if _, err := s.DoRequest(ctx, logger, &req); err != nil {
-		return err
-	}
 
-	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
-
-	s.registered = true
-	if s.runner.scheduler == s {
-		signalOk()
-	}
-
-	return nil
-}
-
-// SendRequest implements all of the tricky logic for requests sent to the scheduler plugin
-//
-// This method checks:
-// * That the response is semantically valid
-// * That the response matches with the state of s.runner.vm, if s.runner.scheduler == s
-//
-// This method may set:
-//   - s.fatalError
-//   - s.runner.{computeUnit,lastApproved,lastSchedulerError,schedulerRespondedWithMigration},
-//     if s.runner.scheduler == s.
-//
-// This method MAY ALSO call s.runner.shutdown(), if s.runner.scheduler == s.
-//
-// This method MUST be called while holding s.runner.requestLock AND NOT s.runner.lock.
-func (s *Scheduler) DoRequest(ctx context.Context, logger *zap.Logger, reqData *api.AgentRequest) (*api.PluginResponse, error) {
-	logger = logger.With(zap.Object("scheduler", s.info))
+	// make sure we log any error we're returning:
+	defer func() {
+		if err != nil {
+			logger.Error("Scheduler request failed", zap.Error(err))
+		}
+	}()
 
 	reqBody, err := json.Marshal(reqData)
 	if err != nil {
-		return nil, s.handlePreRequestError(fmt.Errorf("Error encoding request JSON: %w", err))
+		return nil, fmt.Errorf("Error encoding request JSON: %w", err)
 	}
 
 	timeout := time.Second * time.Duration(s.runner.global.config.Scaling.RequestTimeoutSeconds)
@@ -1578,17 +834,17 @@ func (s *Scheduler) DoRequest(ctx context.Context, logger *zap.Logger, reqData *
 
 	request, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, s.handlePreRequestError(fmt.Errorf("Error building request to %q: %w", url, err))
+		return nil, fmt.Errorf("Error building request to %q: %w", url, err)
 	}
 	request.Header.Set("content-type", "application/json")
 
-	logger.Info("Sending AgentRequest", zap.Any("request", reqData))
+	logger.Info("Sending request to scheduler", zap.Any("request", reqData))
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		description := fmt.Sprintf("[error doing request: %s]", util.RootError(err))
 		s.runner.global.metrics.schedulerRequests.WithLabelValues(description).Inc()
-		return nil, s.handleRequestError(reqData, fmt.Errorf("Error doing request: %w", err))
+		return nil, fmt.Errorf("Error doing request: %w", err)
 	}
 	defer response.Body.Close()
 
@@ -1596,191 +852,22 @@ func (s *Scheduler) DoRequest(ctx context.Context, logger *zap.Logger, reqData *
 
 	respBody, err := io.ReadAll(response.Body)
 	if err != nil {
-		var handle func(*api.AgentRequest, error) error
-		if response.StatusCode == 200 {
-			handle = s.handleRequestError
-		} else {
-			// if status != 200, fatal for the same reasons as the != 200 check lower down
-			handle = s.handleFatalError
-		}
-
-		return nil, handle(reqData, fmt.Errorf("Error reading body for response: %w", err))
+		return nil, fmt.Errorf("Error reading body for response: %w", err)
 	}
 
 	if response.StatusCode != 200 {
 		// Fatal because 4XX implies our state doesn't match theirs, 5XX means we can't assume
 		// current contents of the state, and anything other than 200, 4XX, or 5XX shouldn't happen
-		return nil, s.handleFatalError(
-			reqData,
-			fmt.Errorf("Received response status %d body %q", response.StatusCode, string(respBody)),
-		)
+		return nil, fmt.Errorf("Received response status %d body %q", response.StatusCode, string(respBody))
 	}
 
 	var respData api.PluginResponse
 	if err := json.Unmarshal(respBody, &respData); err != nil {
 		// Fatal because invalid JSON might also be semantically invalid
-		return nil, s.handleRequestError(reqData, fmt.Errorf("Bad JSON response: %w", err))
+		return nil, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
-	logger.Info("Received PluginResponse", zap.Any("response", respData))
-
-	s.runner.lock.Lock()
-	locked := true
-	defer func() {
-		if locked {
-			s.runner.lock.Unlock()
-		}
-	}()
-
-	if err := s.validatePluginResponse(logger, reqData, &respData); err != nil {
-		// Must unlock before handling because it's required by validatePluginResponse, but
-		// handleFatalError is required not to have it.
-		locked = false
-		s.runner.lock.Unlock()
-
-		// Fatal, because an invalid response indicates mismatched state, so we can't assume
-		// anything about the plugin's state.
-		return nil, s.handleFatalError(reqData, fmt.Errorf("Semantically invalid response: %w", err))
-	}
-
-	// if this scheduler is still current, update all the relevant fields in s.runner
-	if s.runner.scheduler == s {
-		s.runner.computeUnit = &respData.ComputeUnit
-		s.runner.lastApproved = &respData.Permit
-		s.runner.lastSchedulerError = nil
-		if respData.Migrate != nil {
-			logger.Info("Shutting down Runner because scheduler response indicated migration started")
-			s.runner.schedulerRespondedWithMigration = true
-			s.runner.shutdown()
-		}
-	}
+	logger.Info("Received response from scheduler", zap.Any("response", respData))
 
 	return &respData, nil
-}
-
-// validatePluginResponse checks that the PluginResponse is valid for the AgentRequest that was
-// sent.
-//
-// This method will not update any fields in s or s.runner.
-//
-// This method MUST be called while holding s.runner.requestLock AND s.runner.lock.
-func (s *Scheduler) validatePluginResponse(
-	logger *zap.Logger,
-	req *api.AgentRequest,
-	resp *api.PluginResponse,
-) error {
-	isCurrent := s.runner.scheduler == s
-
-	if err := req.Resources.ValidateNonZero(); err != nil {
-		panic(fmt.Errorf("we created an invalid AgentRequest.Resources: %w", err))
-	}
-
-	// Errors from resp alone
-	if err := resp.Permit.ValidateNonZero(); err != nil {
-		return fmt.Errorf("Invalid permit: %w", err)
-	}
-	if err := resp.ComputeUnit.ValidateNonZero(); err != nil {
-		return fmt.Errorf("Invalid compute unit: %w", err)
-	}
-
-	// Errors from resp in connection with the prior request
-	if resp.Permit.HasFieldGreaterThan(req.Resources) {
-		return fmt.Errorf(
-			"Permit has resources greater than request (%+v vs. %+v)",
-			resp.Permit, req.Resources,
-		)
-	}
-
-	// Errors from resp in connection with the prior request AND the VM state
-	if isCurrent {
-		if vmUsing := s.runner.vm.Using(); resp.Permit.HasFieldLessThan(vmUsing) {
-			return fmt.Errorf("Permit has resources less than VM (%+v vs %+v)", resp.Permit, vmUsing)
-		}
-	}
-
-	if !isCurrent && resp.Migrate != nil {
-		logger.Warn("scheduler is no longer current, but its response signalled migration")
-	}
-
-	return nil
-}
-
-// handlePreRequestError appropriately handles updating the Scheduler and its Runner's state to
-// reflect that an error occurred. It returns the error passed to it
-//
-// This method will update s.runner.lastSchedulerError if s.runner.scheduler == s.
-//
-// This method MUST be called while holding s.runner.requestLock AND NOT s.runner.lock.
-func (s *Scheduler) handlePreRequestError(err error) error {
-	if err == nil {
-		panic(errors.New("handlePreRequestError called with nil error"))
-	}
-
-	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
-
-	if s.runner.scheduler == s {
-		s.runner.lastSchedulerError = err
-	}
-
-	return err
-}
-
-// handleRequestError appropriately handles updating the Scheduler and its Runner's state to reflect
-// that an error occurred while making a request. It returns the error passed to it
-//
-// This method will update s.runner.{lastApproved,lastSchedulerError} if s.runner.scheduler == s.
-//
-// This method MUST be called while holding s.runner.requestLock AND NOT s.runner.lock.
-func (s *Scheduler) handleRequestError(req *api.AgentRequest, err error) error {
-	if err == nil {
-		panic(errors.New("handleRequestError called with nil error"))
-	}
-
-	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
-
-	if s.runner.scheduler == s {
-		s.runner.lastSchedulerError = err
-
-		// Because downscaling s.runner.vm must be done before any request that decreases its
-		// resources, any request greater than the current usage must be an increase, which the
-		// scheduler may or may not have approved. So: If we decreased and the scheduler failed, we
-		// can't assume it didn't register the decrease. If we want to increase and the scheduler
-		// failed, we can't assume it *did* register the increase. In both cases, the registered
-		// state for a well-behaved scheduler will be >= our state.
-		//
-		// note: this is also replicated below, in handleFatalError.
-		lastApproved := s.runner.vm.Using()
-		s.runner.lastApproved = &lastApproved
-	}
-
-	return err
-}
-
-// handleError appropriately handles updating the Scheduler and its Runner's state to reflect that
-// a fatal error occurred. It returns the error passed to it
-//
-// This method will update s.runner.{lastApproved,lastSchedulerError} if s.runner.scheduler == s, in
-// addition to s.fatalError.
-//
-// This method MUST be called while holding s.runner.requestLock AND NOT s.runner.lock.
-func (s *Scheduler) handleFatalError(req *api.AgentRequest, err error) error {
-	if err == nil {
-		panic(errors.New("handleFatalError called with nil error"))
-	}
-
-	s.runner.lock.Lock()
-	defer s.runner.lock.Unlock()
-
-	s.fatalError = err
-
-	if s.runner.scheduler == s {
-		s.runner.lastSchedulerError = err
-		// for reasoning on lastApproved, see handleRequestError.
-		lastApproved := s.runner.vm.Using()
-		s.runner.lastApproved = &lastApproved
-	}
-
-	return err
 }

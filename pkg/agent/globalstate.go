@@ -345,24 +345,20 @@ func (s *agentState) loggerForRunner(vmName, podName util.NamespacedName) *zap.L
 // NB: caller must set Runner.status after creation
 func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string, restartCount int) *Runner {
 	return &Runner{
-		global:                          s,
-		status:                          nil, // set by caller
-		schedulerRespondedWithMigration: false,
+		global: s,
+		status: nil, // set by caller
 
-		shutdown:         nil, // set by (*Runner).Run
-		vm:               vmInfo,
-		podName:          podName,
-		podIP:            podIP,
-		lock:             util.NewChanMutex(),
-		requestLock:      util.NewChanMutex(),
-		requestedUpscale: api.MoreResources{Cpu: false, Memory: false},
+		shutdown:    nil, // set by (*Runner).Run
+		vmName:      vmInfo.NamespacedName(),
+		podName:     podName,
+		podIP:       podIP,
+		memSlotSize: vmInfo.Mem.SlotSize,
+		lock:        util.NewChanMutex(),
 
-		lastMetrics:        nil,
-		scheduler:          nil,
-		monitor:            nil,
-		computeUnit:        nil,
-		lastApproved:       nil,
-		lastSchedulerError: nil,
+		executorStateDump: nil, // set by (*Runner).Run
+
+		scheduler: nil,
+		monitor:   nil,
 
 		backgroundWorkerCount: atomic.Int64{},
 		backgroundPanic:       make(chan error),
