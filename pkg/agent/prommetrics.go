@@ -213,7 +213,7 @@ func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Regi
 		)),
 		runnerNextActions: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
-				Name: "autosclaing_agent_runner_next_actions_total",
+				Name: "autoscaling_agent_runner_next_actions_total",
 				Help: "Number of times (*core.State).NextActions() has been called",
 			},
 		)),
