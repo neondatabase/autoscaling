@@ -775,7 +775,6 @@ func TestRequestedUpscale(t *testing.T) {
 	// Have the vm-monitor request upscaling:
 	a.Do(state.Monitor().UpscaleRequested, clock.Now(), api.MoreResources{Cpu: false, Memory: true})
 	// First need to check with the scheduler plugin to get approval for upscaling:
-	state.Debug(true)
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("6s")}, // if nothing else happens, requested upscale expires.
 		PluginRequest: &core.ActionPluginRequest{
@@ -1106,7 +1105,6 @@ func TestSchedulerDownscaleReupscale(t *testing.T) {
 	// Record the scheduler as disconnected
 	state.Plugin().SchedulerGone()
 	// ... and check that there's nothing we can do:
-	state.Debug(true)
 	a.Call(nextActions).Equals(core.ActionSet{})
 
 	clockTick()
