@@ -17,51 +17,48 @@ func (c *ExecutorCore) DoSleeper(ctx context.Context, logger *zap.Logger) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
-	last := c.getActions()
 	for {
 		// Ensure the timer is cleared at the top of the loop
 		if !timer.Stop() {
 			<-timer.C
 		}
 
-		// If NOT waiting for a particular duration:
-		if last.actions.Wait == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-updates.Wait():
-				updates.Awake()
-				last = c.getActions()
-			}
+		// Wait until the state's changed or we're done
+		select {
+		case <-ctx.Done():
+			return
+		case <-updates.Wait():
+			updates.Awake()
 		}
 
-		// If YES waiting for a particular duration
-		if last.actions.Wait != nil {
-			// NB: It's possible for last.calculatedAt to be somewhat out of date. It's *probably*
-			// fine, because we'll be given a notification any time the state has changed, so we
-			// should wake from a select soon enough to get here
-			timer.Reset(last.actions.Wait.Duration)
+		last := c.getActions()
+		if last.actions.Wait == nil {
+			continue // nothing to do; wait until the state changes
+		}
 
+		// NB: It's possible for last.calculatedAt to be somewhat out of date. It's *probably*
+		// fine, because we'll be given a notification any time the state has changed, so we
+		// should wake from a select soon enough to get here
+		timer.Reset(last.actions.Wait.Duration)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-updates.Wait():
+			// Don't consume the event here. Rely on the event to remain at the top of the loop
+			continue
+		case <-timer.C:
 			select {
-			case <-ctx.Done():
-				return
+			// If there's also an update, then let that take preference:
 			case <-updates.Wait():
+				// Same thing as above - don't consume the event here.
+				continue
+			// Otherwise, trigger cache invalidation because we've waited for the requested
+			// amount of time:
+			default:
+				c.update(func(*core.State) {})
 				updates.Awake()
-
 				last = c.getActions()
-			case <-timer.C:
-				select {
-				// If there's also an update, then let that take preference:
-				case <-updates.Wait():
-					updates.Awake()
-					last = c.getActions()
-				// Otherwise, trigger cache invalidation because we've waited for the requested
-				// amount of time:
-				default:
-					c.update(func(*core.State) {})
-					updates.Awake()
-					last = c.getActions()
-				}
 			}
 		}
 	}
