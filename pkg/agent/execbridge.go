@@ -85,7 +85,7 @@ func (h *execPluginHandle) Request(
 
 	resp, err := h.scheduler.DoRequest(ctx, logger, target, metrics)
 
-	if err != nil && lastPermit != nil {
+	if err == nil && lastPermit != nil {
 		h.runner.recordResourceChange(*lastPermit, target, h.runner.global.metrics.schedulerApprovedChange)
 	}
 
@@ -181,7 +181,7 @@ func (h *execMonitorHandle) Downscale(
 
 	result, err := doMonitorDownscale(ctx, logger, h.monitor.dispatcher, target)
 
-	if err != nil && result.Ok {
+	if err == nil && result.Ok {
 		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
 	}
 
@@ -199,7 +199,7 @@ func (h *execMonitorHandle) Upscale(ctx context.Context, logger *zap.Logger, cur
 
 	err := doMonitorUpscale(ctx, logger, h.monitor.dispatcher, target)
 
-	if err != nil {
+	if err == nil {
 		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
 	}
 
