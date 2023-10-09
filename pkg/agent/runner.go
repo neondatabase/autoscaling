@@ -111,12 +111,18 @@ type RunnerState struct {
 	PodIP                 string             `json:"podIP"`
 	ExecutorState         executor.StateDump `json:"executorState"`
 	Scheduler             *SchedulerState    `json:"scheduler"`
+	Monitor               *MonitorState      `json:"monitor"`
 	BackgroundWorkerCount int64              `json:"backgroundWorkerCount"`
 }
 
 // SchedulerState is the state of a Scheduler, constructed as part of a Runner's State Method
 type SchedulerState struct {
 	Info schedwatch.SchedulerInfo `json:"info"`
+}
+
+// Temporary type, to hopefully help with debugging https://github.com/neondatabase/autoscaling/issues/503
+type MonitorState struct {
+	WaitersSize int `json:"waitersSize"`
 }
 
 func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
@@ -132,6 +138,13 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 		}
 	}
 
+	var monitorState *MonitorState
+	if r.monitor != nil {
+		monitorState = &MonitorState{
+			WaitersSize: r.monitor.dispatcher.lenWaiters(),
+		}
+	}
+
 	var executorState *executor.StateDump
 	if r.executorStateDump != nil /* may be nil if r.Run() hasn't fully started yet */ {
 		s := r.executorStateDump()
@@ -142,6 +155,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 		PodIP:                 r.podIP,
 		ExecutorState:         *executorState,
 		Scheduler:             scheduler,
+		Monitor:               monitorState,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
 	}, nil
 }
