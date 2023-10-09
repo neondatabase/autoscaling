@@ -280,6 +280,13 @@ func (disp *Dispatcher) ExitError() error {
 	return disp.exitError
 }
 
+// temporary method to hopefully help with https://github.com/neondatabase/autoscaling/issues/503
+func (disp *Dispatcher) lenWaiters() int {
+	disp.lock.Lock()
+	defer disp.lock.Unlock()
+	return len(disp.waiters)
+}
+
 // Send a message down the connection. Only call this method with types that
 // SerializeMonitorMessage can handle.
 func (disp *Dispatcher) send(ctx context.Context, logger *zap.Logger, id uint64, message any) error {

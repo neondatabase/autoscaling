@@ -141,11 +141,7 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	var monitorState *MonitorState
 	if r.monitor != nil {
 		monitorState = &MonitorState{
-			WaitersSize: func() int {
-				r.monitor.dispatcher.lock.Lock()
-				defer r.monitor.dispatcher.lock.Unlock()
-				return len(r.monitor.dispatcher.waiters)
-			}(),
+			WaitersSize: r.monitor.dispatcher.lenWaiters(),
 		}
 	}
 
