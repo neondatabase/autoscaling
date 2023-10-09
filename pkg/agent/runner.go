@@ -513,6 +513,7 @@ func (r *Runner) connectToMonitorLoop(
 			logger.Info("Connecting to vm-monitor", zap.String("addr", addr))
 		}
 
+		lastStart = time.Now()
 		dispatcher, err := NewDispatcher(ctx, logger, addr, r, callbacks.upscaleRequested)
 		if err != nil {
 			logger.Error("Failed to connect to vm-monitor", zap.String("addr", addr), zap.Error(err))
