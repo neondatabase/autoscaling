@@ -20,7 +20,11 @@ func (c *ExecutorCore) DoSleeper(ctx context.Context, logger *zap.Logger) {
 	for {
 		// Ensure the timer is cleared at the top of the loop
 		if !timer.Stop() {
-			<-timer.C
+			// Clear timer.C only if we haven't already read from it
+			select {
+			case <-timer.C:
+			default:
+			}
 		}
 
 		// Wait until the state's changed or we're done
