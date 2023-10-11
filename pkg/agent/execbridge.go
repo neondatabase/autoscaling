@@ -146,7 +146,10 @@ func (iface *execMonitorInterface) CurrentGeneration() executor.GenerationNumber
 func (iface *execMonitorInterface) GetHandle() executor.MonitorHandle {
 	monitor := iface.runner.monitor
 
-	if monitor == nil || monitor.dispatcher.Exited() {
+	if monitor == nil /* || monitor.dispatcher.Exited() */ {
+		// NB: we can't check if dispatcher.Exited() because otherwise we might return nil when the
+		// executor is told to make a request, because Exited() is not synchronized with changes to
+		// the executor state.
 		return nil
 	}
 
