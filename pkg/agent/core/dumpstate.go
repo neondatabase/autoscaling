@@ -44,6 +44,7 @@ type pluginStateDump struct {
 	OngoingRequest bool                 `json:"ongoingRequest"`
 	ComputeUnit    *api.Resources       `json:"computeUnit"`
 	LastRequest    *pluginRequestedDump `json:"lastRequest"`
+	LastFailureAt  *time.Time           `json:"lastRequestAt"`
 	Permit         *api.Resources       `json:"permit"`
 }
 type pluginRequestedDump struct {
@@ -65,6 +66,7 @@ func (s *pluginState) dump() pluginStateDump {
 		OngoingRequest: s.ongoingRequest,
 		ComputeUnit:    shallowCopy(s.computeUnit),
 		LastRequest:    lastRequest,
+		LastFailureAt:  shallowCopy(s.lastFailureAt),
 		Permit:         shallowCopy(s.permit),
 	}
 }

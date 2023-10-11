@@ -110,7 +110,9 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					MemoryUsageFractionTarget: 0.5,
 				},
 				// these don't really matter, because we're not using (*State).NextActions()
+				NeonVMRetryWait:                    time.Second,
 				PluginRequestTick:                  time.Second,
+				PluginRetryWait:                    time.Second,
 				PluginDeniedRetryWait:              time.Second,
 				MonitorDeniedDownscaleCooldown:     time.Second,
 				MonitorRequestedUpscaleValidPeriod: time.Second,
@@ -180,7 +182,9 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 			LoadAverageFractionTarget: 0.5,
 			MemoryUsageFractionTarget: 0.5,
 		},
+		NeonVMRetryWait:                    5 * time.Second,
 		PluginRequestTick:                  5 * time.Second,
+		PluginRetryWait:                    3 * time.Second,
 		PluginDeniedRetryWait:              2 * time.Second,
 		MonitorDeniedDownscaleCooldown:     5 * time.Second,
 		MonitorRequestedUpscaleValidPeriod: 10 * time.Second,
@@ -1404,5 +1408,120 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	// And then, we shouldn't need to do anything else:
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.7s")},
+	})
+}
+
+// Checks that failed requests to the scheduler plugin and NeonVM API will be retried after a delay
+func TestFailedRequestRetry(t *testing.T) {
+	a := helpers.NewAssert(t)
+	clock := helpers.NewFakeClock(t)
+	clockTick := func() helpers.Elapsed {
+		return clock.Inc(100 * time.Millisecond)
+	}
+	resForCU := DefaultComputeUnit.Mul
+
+	state := helpers.CreateInitialState(
+		DefaultInitialStateConfig,
+		helpers.WithStoredWarnings(a.StoredWarnings()),
+		helpers.WithMinMaxCU(1, 2),
+		helpers.WithCurrentCU(1),
+		helpers.WithConfigSetting(func(c *core.Config) {
+			// Override values for consistency and ease of use
+			c.PluginRetryWait = duration("2s")
+			c.NeonVMRetryWait = duration("3s")
+		}),
+	)
+	nextActions := func() core.ActionSet {
+		return state.NextActions(clock.Now())
+	}
+
+	state.Plugin().NewScheduler()
+	state.Monitor().Active(true)
+
+	// Send initial scheduler request
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(1))
+
+	// Set metrics so that we should be trying to upscale
+	clockTick()
+	metrics := api.Metrics{
+		LoadAverage1Min:  0.3,
+		LoadAverage5Min:  0.0, // unused
+		MemoryUsageBytes: 0.0,
+	}
+	a.Do(state.UpdateMetrics, metrics)
+
+	// We should be asking the scheduler for upscaling
+	a.Call(nextActions).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit: ptr(resForCU(1)),
+			Target:     resForCU(2),
+			Metrics:    &metrics,
+		},
+	})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
+	clockTick()
+	// On request failure, we retry after Config.PluginRetryWait
+	a.Do(state.Plugin().RequestFailed, clock.Now())
+	a.
+		WithWarnings("Wanted to make a request to the scheduler plugin, but previous request failed too recently").
+		Call(nextActions).
+		Equals(core.ActionSet{
+			Wait: &core.ActionWait{Duration: duration("2s")},
+		})
+	clock.Inc(duration("2s"))
+	// ... and then retry:
+	a.Call(nextActions).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit: ptr(resForCU(1)),
+			Target:     resForCU(2),
+			Metrics:    &metrics,
+		},
+	})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
+	clockTick()
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      resForCU(2),
+		Migrate:     nil,
+		ComputeUnit: DefaultComputeUnit,
+	})
+
+	// Now, after plugin request is successful, we should be making a request to NeonVM.
+	// We'll have that request fail the first time as well:
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.9s")}, // plugin request tick
+		NeonVMRequest: &core.ActionNeonVMRequest{
+			Current: resForCU(1),
+			Target:  resForCU(2),
+		},
+	})
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(2))
+	clockTick()
+	// On request failure, we retry after Config.NeonVMRetryWait
+	a.Do(state.NeonVM().RequestFailed, clock.Now())
+	a.
+		WithWarnings("Wanted to make a request to NeonVM API, but recent request failed too recently").
+		Call(nextActions).
+		Equals(core.ActionSet{
+			Wait: &core.ActionWait{Duration: duration("3s")}, // NeonVM retry wait is less than current plugin request tick (4.8s remaining)
+		})
+	clock.Inc(duration("3s"))
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("1.8s")}, // plugin request tick
+		NeonVMRequest: &core.ActionNeonVMRequest{
+			Current: resForCU(1),
+			Target:  resForCU(2),
+		},
+	})
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(2))
+	clockTick()
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+
+	// And then finally, we should be looking to inform the vm-monitor about this upscaling.
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("1.7s")}, // plugin request tick
+		MonitorUpscale: &core.ActionMonitorUpscale{
+			Current: resForCU(1),
+			Target:  resForCU(2),
+		},
 	})
 }
