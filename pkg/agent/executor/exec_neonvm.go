@@ -39,7 +39,7 @@ func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *
 		action := *last.actions.NeonVMRequest
 
 		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
-			logger.Info("Starting NeonVM request", zap.Any("action", action))
+			logger.Info("Starting NeonVM request", zap.Object("action", action))
 			startTime = time.Now()
 			state.NeonVM().StartingRequest(startTime, action.Target)
 		}); !updated {
@@ -48,7 +48,7 @@ func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *
 
 		err := c.clients.NeonVM.Request(ctx, ifaceLogger, action.Current, action.Target)
 		endTime := time.Now()
-		logFields := []zap.Field{zap.Any("action", action), zap.Duration("duration", endTime.Sub(startTime))}
+		logFields := []zap.Field{zap.Object("action", action), zap.Duration("duration", endTime.Sub(startTime))}
 
 		c.update(func(state *core.State) {
 			if err != nil {
