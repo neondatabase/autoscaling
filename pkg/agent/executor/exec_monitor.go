@@ -55,7 +55,7 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		action := *last.actions.MonitorDownscale
 
 		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
-			logger.Info("Starting vm-monitor downscale request", zap.Any("action", action))
+			logger.Info("Starting vm-monitor downscale request", zap.Object("action", action))
 			startTime = time.Now()
 			monitorIface = c.clients.Monitor.GetHandle()
 			state.Monitor().StartingDownscaleRequest(startTime, action.Target)
@@ -75,7 +75,7 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		c.update(func(state *core.State) {
 			unchanged := generationUnchanged(monitorIface)
 			logFields := []zap.Field{
-				zap.Any("action", action),
+				zap.Object("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),
 				zap.Bool("unchanged", unchanged),
 			}
@@ -145,7 +145,7 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 		action := *last.actions.MonitorUpscale
 
 		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
-			logger.Info("Starting vm-monitor upscale request", zap.Any("action", action))
+			logger.Info("Starting vm-monitor upscale request", zap.Object("action", action))
 			startTime = time.Now()
 			monitorIface = c.clients.Monitor.GetHandle()
 			state.Monitor().StartingUpscaleRequest(startTime, action.Target)
@@ -165,7 +165,7 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 		c.update(func(state *core.State) {
 			unchanged := generationUnchanged(monitorIface)
 			logFields := []zap.Field{
-				zap.Any("action", action),
+				zap.Object("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),
 				zap.Bool("unchanged", unchanged),
 			}

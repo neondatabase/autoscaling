@@ -54,7 +54,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		action := *last.actions.PluginRequest
 
 		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
-			logger.Info("Starting plugin request", zap.Any("action", action))
+			logger.Info("Starting plugin request", zap.Object("action", action))
 			startTime = time.Now()
 			pluginIface = c.clients.Plugin.GetHandle()
 			state.Plugin().StartingRequest(startTime, action.Target)
@@ -74,7 +74,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		c.update(func(state *core.State) {
 			unchanged := generationUnchanged(pluginIface)
 			logFields := []zap.Field{
-				zap.Any("action", action),
+				zap.Object("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),
 				zap.Bool("unchanged", unchanged),
 			}
