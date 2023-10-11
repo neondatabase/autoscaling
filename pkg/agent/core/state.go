@@ -41,9 +41,15 @@ type Config struct {
 	// If the VM's ScalingConfig is nil, we use this field instead.
 	DefaultScalingConfig api.ScalingConfig
 
+	// NeonVMRetryWait gives the amount of time to wait to retry after a failed request
+	NeonVMRetryWait time.Duration
+
 	// PluginRequestTick gives the period at which we should be making requests to the scheduler
 	// plugin, even if nothing's changed.
 	PluginRequestTick time.Duration
+
+	// PluginRetryWait gives the amount of time to wait to retry after a failed request
+	PluginRetryWait time.Duration
 
 	// PluginDeniedRetryWait gives the amount of time we must wait before re-requesting resources
 	// that were not fully granted.
@@ -114,6 +120,8 @@ type pluginState struct {
 	// lastRequest, if not nil, gives information about the most recently started request to the
 	// plugin (maybe unfinished!)
 	lastRequest *pluginRequested
+	// lastFailureAt, if not nil, gives the time of the most recent request failure
+	lastFailureAt *time.Time
 	// permit, if not nil, stores the Permit in the most recent PluginResponse. This field will be
 	// nil if we have not been able to contact *any* scheduler. If we switch schedulers, we trust
 	// the old one.
@@ -197,6 +205,7 @@ func NewState(vm api.VmInfo, config Config) *State {
 			ongoingRequest: false,
 			computeUnit:    nil,
 			lastRequest:    nil,
+			lastFailureAt:  nil,
 			permit:         nil,
 		},
 		monitor: monitorState{
@@ -259,7 +268,8 @@ func (s *State) NextActions(now time.Time) ActionSet {
 		pluginRequested = &actions.PluginRequest.Target
 		pluginRequestedPhase = "planned"
 	}
-	actions.NeonVMRequest = s.calculateNeonVMAction(now, desiredResources, pluginRequested, pluginRequestedPhase)
+	var neonvmRequiredWait *time.Duration
+	actions.NeonVMRequest, neonvmRequiredWait = s.calculateNeonVMAction(now, desiredResources, pluginRequested, pluginRequestedPhase)
 
 	// ----
 	// Requests to vm-monitor (upscaling)
@@ -288,6 +298,7 @@ func (s *State) NextActions(now time.Time) ActionSet {
 	requiredWaits := []*time.Duration{
 		calcDesiredResourcesWait(actions),
 		pluginRequiredWait,
+		neonvmRequiredWait,
 		monitorUpscaleRequiredWait,
 		monitorDownscaleRequiredWait,
 	}
@@ -380,6 +391,15 @@ func (s *State) calculatePluginAction(
 		return nil, nil
 	}
 
+	// Can't make a request if we failed too recently
+	if s.plugin.lastFailureAt != nil {
+		timeUntilFailureBackoffExpires := s.plugin.lastFailureAt.Add(s.config.PluginRetryWait).Sub(now)
+		if timeUntilFailureBackoffExpires > 0 {
+			logFailureReason("previous request failed too recently")
+			return nil, &timeUntilFailureBackoffExpires
+		}
+	}
+
 	// At this point, all that's left is either making the request, or saying to wait.
 	// The rest of the complication is just around accurate logging.
 	if timeForRequest || shouldRequestNewResources {
@@ -407,7 +427,7 @@ func (s *State) calculateNeonVMAction(
 	desiredResources api.Resources,
 	pluginRequested *api.Resources,
 	pluginRequestedPhase string,
-) *ActionNeonVMRequest {
+) (*ActionNeonVMRequest, *time.Duration) {
 	// clamp desiredResources to what we're allowed to make a request for
 	desiredResources = s.clampResources(
 		s.vm.Using(),                       // current: what we're using already
@@ -418,16 +438,26 @@ func (s *State) calculateNeonVMAction(
 
 	// If we're already using the desired resources, then no need to make a request
 	if s.vm.Using() == desiredResources {
-		return nil
+		return nil, nil
 	}
 
 	conflictingPluginRequest := pluginRequested != nil && pluginRequested.HasFieldLessThan(desiredResources)
 
 	if !s.neonvm.ongoingRequest() && !conflictingPluginRequest {
+		// We *should* be all clear to make a request; not allowed to make one if we failed too
+		// recently
+		if s.neonvm.requestFailedAt != nil {
+			timeUntilFailureBackoffExpires := s.neonvm.requestFailedAt.Add(s.config.NeonVMRetryWait).Sub(now)
+			if timeUntilFailureBackoffExpires > 0 {
+				s.warn("Wanted to make a request to NeonVM API, but recent request failed too recently")
+				return nil, &timeUntilFailureBackoffExpires
+			}
+		}
+
 		return &ActionNeonVMRequest{
 			Current: s.vm.Using(),
 			Target:  desiredResources,
-		}
+		}, nil
 	} else {
 		var reqs []string
 		if s.plugin.ongoingRequest {
@@ -441,7 +471,7 @@ func (s *State) calculateNeonVMAction(
 			s.warnf("Wanted to make a request to NeonVM API, but there's already %s", strings.Join(reqs, " and "))
 		}
 
-		return nil
+		return nil, nil
 	}
 }
 
@@ -910,6 +940,7 @@ func (h PluginHandle) NewScheduler() {
 		ongoingRequest: false,
 		computeUnit:    h.s.plugin.computeUnit, // Keep the previous scheduler's CU unless told otherwise
 		lastRequest:    nil,
+		lastFailureAt:  nil,
 		permit:         h.s.plugin.permit, // Keep this; trust the previous scheduler.
 	}
 }
@@ -920,6 +951,7 @@ func (h PluginHandle) SchedulerGone() {
 		ongoingRequest: false,
 		computeUnit:    h.s.plugin.computeUnit,
 		lastRequest:    nil,
+		lastFailureAt:  nil,
 		permit:         h.s.plugin.permit, // Keep this; trust the previous scheduler.
 	}
 }
@@ -934,10 +966,16 @@ func (h PluginHandle) StartingRequest(now time.Time, resources api.Resources) {
 
 func (h PluginHandle) RequestFailed(now time.Time) {
 	h.s.plugin.ongoingRequest = false
+	h.s.plugin.lastFailureAt = &now
 }
 
-func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) error {
+func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) (_err error) {
 	h.s.plugin.ongoingRequest = false
+	defer func() {
+		if _err != nil {
+			h.s.plugin.lastFailureAt = &now
+		}
+	}()
 
 	if err := resp.Permit.ValidateNonZero(); err != nil {
 		return fmt.Errorf("Invalid permit: %w", err)
@@ -1081,4 +1119,5 @@ func (h NeonVMHandle) RequestSuccessful(now time.Time) {
 
 func (h NeonVMHandle) RequestFailed(now time.Time) {
 	h.s.neonvm.ongoingRequested = nil
+	h.s.neonvm.requestFailedAt = &now
 }

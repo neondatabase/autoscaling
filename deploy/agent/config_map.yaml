@@ -8,6 +8,7 @@ data:
     {
       "scaling": {
         "requestTimeoutSeconds": 10,
+        "retryFailedRequestSeconds": 5,
         "defaultConfig": {
           "loadAverageFractionTarget": 0.9,
           "memoryUsageFractionTarget": 0.75
@@ -35,6 +36,7 @@ data:
         "schedulerName": "autoscale-scheduler",
         "requestTimeoutSeconds": 2,
         "requestAtLeastEverySeconds": 5,
+        "retryFailedRequestSeconds": 3,
         "retryDeniedUpscaleSeconds": 2,
         "requestPort": 10299
       },

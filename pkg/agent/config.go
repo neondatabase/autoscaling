@@ -65,6 +65,9 @@ type DumpStateConfig struct {
 type ScalingConfig struct {
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
+	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
+	// failed request before making another one.
+	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
 	// DefaultConfig gives the default scaling config, to be used if there is no configuration
 	// supplied with the "autoscaling.neon.tech/config" annotation.
 	DefaultConfig api.ScalingConfig `json:"defaultConfig"`
@@ -96,6 +99,9 @@ type SchedulerConfig struct {
 	// RequestAtLeastEverySeconds gives the maximum duration we should go without attempting a
 	// request to the scheduler, even if nothing's changed.
 	RequestAtLeastEverySeconds uint `json:"requestAtLeastEverySeconds"`
+	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
+	// failed request before making another one.
+	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
 	// RetryDeniedUpscaleSeconds gives the duration, in seconds, that we must wait before resending
 	// a request for resources that were not approved
 	RetryDeniedUpscaleSeconds uint `json:"retryDeniedUpscaleSeconds"`
@@ -146,6 +152,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
 	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
+	erc.Whenf(ec, c.Scaling.RetryFailedRequestSeconds == 0, zeroTmpl, ".scaling.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds")
 	erc.Whenf(ec, c.Monitor.ConnectionTimeoutSeconds == 0, zeroTmpl, ".monitor.connectionTimeoutSeconds")
 	erc.Whenf(ec, c.Monitor.ConnectionRetryMinWaitSeconds == 0, zeroTmpl, ".monitor.connectionRetryMinWaitSeconds")
@@ -161,6 +168,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
 	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
 	erc.Whenf(ec, c.Scheduler.RequestAtLeastEverySeconds == 0, zeroTmpl, ".scheduler.requestAtLeastEverySeconds")
+	erc.Whenf(ec, c.Scheduler.RetryFailedRequestSeconds == 0, zeroTmpl, ".scheduler.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Scheduler.RetryDeniedUpscaleSeconds == 0, zeroTmpl, ".scheduler.retryDeniedUpscaleSeconds")
 	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
 
