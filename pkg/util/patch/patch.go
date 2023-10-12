@@ -1,6 +1,6 @@
 // Construction of JSON patches. See https://jsonpatch.com/
 
-package util
+package patch
 
 import (
 	"strings"

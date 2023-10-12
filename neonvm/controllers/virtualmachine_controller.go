@@ -49,7 +49,7 @@ import (
 	"github.com/neondatabase/autoscaling/neonvm/pkg/ipam"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
-	patchutil "github.com/neondatabase/autoscaling/pkg/util/patch"
+	"github.com/neondatabase/autoscaling/pkg/util/patch"
 )
 
 const (
@@ -723,7 +723,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1.VirtualMachine, runnerPod *corev1.Pod) error {
 	log := log.FromContext(ctx)
 
-	var patches []patchutil.Operation
+	var patches []patch.Operation
 
 	metaSpecs := []struct {
 		metaField   string
@@ -756,7 +756,7 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 		// Add/update the entries we're expecting to be there
 		for k, e := range spec.expected {
 			if a, ok := spec.actual[k]; !ok || e != a {
-				patches = append(patches, patchutil.Operation{
+				patches = append(patches, patch.Operation{
 					// From RFC 6902 (JSON patch):
 					//
 					// > The "add" operation performs one of the following functions, depending upon
@@ -770,8 +770,8 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 					// >   member's value is replaced.
 					//
 					// So: if the value is missing we'll add it. And if it's different, we'll replace it.
-					Op:    patchutil.OpAdd,
-					Path:  fmt.Sprintf("/metadata/%s/%s", spec.metaField, patchutil.PathEscape(k)),
+					Op:    patch.OpAdd,
+					Path:  fmt.Sprintf("/metadata/%s/%s", spec.metaField, patch.PathEscape(k)),
 					Value: e,
 				})
 			}
@@ -782,9 +782,9 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 		for k := range spec.actual {
 			if _, expected := spec.expected[k]; !expected && !spec.ignoreExtra[k] {
 				removed = append(removed, k)
-				patches = append(patches, patchutil.Operation{
-					Op:   patchutil.OpRemove,
-					Path: fmt.Sprintf("/metadata/%s/%s", spec.metaField, patchutil.PathEscape(k)),
+				patches = append(patches, patch.Operation{
+					Op:   patch.OpRemove,
+					Path: fmt.Sprintf("/metadata/%s/%s", spec.metaField, patch.PathEscape(k)),
 				})
 			}
 		}
