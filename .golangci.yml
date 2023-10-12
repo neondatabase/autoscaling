@@ -37,11 +37,11 @@ linters:
     - errorlint        # common errors with Go 1.13+ error wrapping
     - exhaustruct      # all struct fields are initialized
     - exportloopref    # escaping pointers to loop variables
-    - predeclared      # no identifiers in Go's list of predeclared identifiers, see <https://go.dev/ref/spec#Predeclared_identifiers>
     - gci              # deterministic import ordering
     - gocritic         # lots of small checks, see <https://go-critic.com/overview>
     - noctx            # HTTP requests are passed a Context
     - nolintlint       # bad "nolint" directives
+    - predeclared      # no identifiers in Go's list of predeclared identifiers, see <https://go.dev/ref/spec#Predeclared_identifiers>
 
 linters-settings:
   # see: <https://golangci-lint.run/usage/linters/#dupword>, <https://github.com/Abirdcfly/dupword>
