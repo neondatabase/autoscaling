@@ -5,7 +5,6 @@ package plugin
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -115,7 +114,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					return
 				}
 
-				_, isVM := pod.Labels[LabelVM]
+				isVM := util.TryPodOwnerVirtualMachine(pod) != nil
 
 				// Generate events for all non-VM pods that are running
 				if !isVM && pod.Status.Phase == corev1.PodRunning {
@@ -137,7 +136,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					return
 				}
 
-				_, isVM := newPod.Labels[LabelVM]
+				isVM := util.TryPodOwnerVirtualMachine(newPod) != nil
 
 				// Check if a non-VM pod is now running.
 				if !isVM && oldPod.Status.Phase == corev1.PodPending && newPod.Status.Phase == corev1.PodRunning {
@@ -159,11 +158,11 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 
 				// CHeck if the pod is part of a new migration, or if a migration it *was* part of
 				// has now ended.
-				oldMigration := tryMigrationOwnerReference(oldPod)
-				newMigration := tryMigrationOwnerReference(newPod)
+				oldMigration := util.TryPodOwnerVirtualMachineMigration(oldPod)
+				newMigration := util.TryPodOwnerVirtualMachineMigration(newPod)
 
 				if oldMigration == nil && newMigration != nil {
-					isSource := podOwnedByVirtualMachine(newPod)
+					isSource := util.TryPodOwnerVirtualMachine(newPod) == nil
 					callbacks.submitPodStartMigration(logger, name, *newMigration, isSource)
 				} else if oldMigration != nil && newMigration == nil {
 					callbacks.submitPodEndMigration(logger, name, *oldMigration)
@@ -181,7 +180,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					logger.Info("Received delete event for completed pod", zap.Object("pod", name))
 				} else {
 					logger.Info("Received delete event for pod", zap.Object("pod", name))
-					if _, ok := pod.Labels[LabelVM]; ok {
+					if util.TryPodOwnerVirtualMachine(pod) != nil {
 						callbacks.submitVMDeletion(logger, name)
 					} else {
 						callbacks.submitPodDeletion(logger, name)
@@ -190,43 +189,6 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			},
 		},
 	)
-}
-
-// tryMigrationOwnerReference returns the name of the owning migration, if this pod *is* owned by a
-// VirtualMachineMigration. Otherwise returns nil.
-func tryMigrationOwnerReference(pod *corev1.Pod) *util.NamespacedName {
-	for _, ref := range pod.OwnerReferences {
-		// For NeonVM, *at time of writing*, the OwnerReference has an APIVersion of
-		// "vm.neon.tech/v1". But:
-		//
-		// 1. It's good to be extra-safe around possible name collisions for the
-		//    "VirtualMachineMigration" name, even though *practically* it's not going to happen;
-		// 2. We can disambiguate with the APIVersion; and
-		// 3. We don't want to match on a fixed version, in case we want to change the version
-		//    number later.
-		//
-		// So, given that the format is "<NAME>/<VERSION>", we can just match on the "<NAME>/" part
-		// of the APIVersion to have the safety we want with the flexibility we need.
-		if strings.HasPrefix(ref.APIVersion, "vm.neon.tech/") && ref.Kind == "VirtualMachineMigration" {
-			// note: OwnerReferences are not permitted to have a different namespace than the owned
-			// object, so because VirtualMachineMigrations are namespaced, it must have the same
-			// namespace as the Pod.
-			return &util.NamespacedName{Namespace: pod.Namespace, Name: ref.Name}
-		}
-	}
-
-	return nil
-}
-
-func podOwnedByVirtualMachine(pod *corev1.Pod) bool {
-	// For details, see tryMigrationOwnerReference
-	for _, ref := range pod.OwnerReferences {
-		if strings.HasPrefix(ref.APIVersion, "vm.neon.tech/") && ref.Kind == "VirtualMachine" {
-			return true
-		}
-	}
-
-	return false
 }
 
 type vmWatchCallbacks struct {
