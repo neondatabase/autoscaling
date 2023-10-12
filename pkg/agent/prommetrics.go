@@ -48,7 +48,7 @@ const (
 	runnerMetricStatePanicked runnerMetricState = "panicked"
 )
 
-func makePrometheusParts(globalstate *agentState) (PromMetrics, *prometheus.Registry) {
+func makePrometheusParts() (PromMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
 
 	// register stock collectors directly:

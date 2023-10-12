@@ -74,7 +74,7 @@ func NewAutoscaleEnforcerPlugin(ctx context.Context, logger *zap.Logger, config 
 func makeAutoscaleEnforcerPlugin(
 	ctx context.Context,
 	logger *zap.Logger,
-	obj runtime.Object,
+	_obj runtime.Object,
 	h framework.Handle,
 	config *Config,
 ) (framework.Plugin, error) {
@@ -420,14 +420,7 @@ func (e *AutoscaleEnforcer) Filter(
 
 	var otherPodInfo podOtherResourceState
 	if vmInfo == nil {
-		otherPodInfo, err = extractPodOtherPodResourceState(pod)
-		if err != nil {
-			logger.Error("Error extracting resource state for non-VM pod", zap.Error(err))
-			return framework.NewStatus(
-				framework.UnschedulableAndUnresolvable,
-				fmt.Sprintf("Error getting pod info: %s", err),
-			)
-		}
+		otherPodInfo = extractPodOtherPodResourceState(pod)
 	}
 
 	e.state.lock.Lock()
@@ -525,16 +518,7 @@ func (e *AutoscaleEnforcer) Filter(
 			}
 
 			// We *also* need to count pods in ignored namespaces
-			resources, err := extractPodOtherPodResourceState(podInfo.Pod)
-			if err != nil {
-				// FIXME: Same duplicate "pod" field issue as above; same temporary solution.
-				logger.Error(
-					"Error extracting resource state for non-VM Pod",
-					zap.Object("pod", name),
-					zap.Error(fmt.Errorf("Error extracting resource state for %v: %w", name, err)),
-				)
-				continue
-			}
+			resources := extractPodOtherPodResourceState(podInfo.Pod)
 
 			oldRes := otherResources
 			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, resources)
@@ -888,14 +872,7 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	// if this is a non-VM pod, use a different set of information for it.
 	if vmInfo == nil {
-		podResources, err := extractPodOtherPodResourceState(pod)
-		if err != nil {
-			logger.Error("Error extracting resource state for non-VM pod", zap.Error(err))
-			return framework.NewStatus(
-				framework.UnschedulableAndUnresolvable,
-				fmt.Sprintf("Error getting non-VM pod info: %v", err),
-			)
-		}
+		podResources := extractPodOtherPodResourceState(pod)
 
 		oldNodeRes := node.otherResources
 		newNodeRes := node.otherResources.addPod(&e.state.conf.MemSlotSize, podResources)

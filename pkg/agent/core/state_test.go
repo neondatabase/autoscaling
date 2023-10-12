@@ -740,8 +740,8 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 func TestRequestedUpscale(t *testing.T) {
 	a := helpers.NewAssert(t)
 	clock := helpers.NewFakeClock(t)
-	clockTick := func() helpers.Elapsed {
-		return clock.Inc(100 * time.Millisecond)
+	clockTick := func() {
+		clock.Inc(100 * time.Millisecond)
 	}
 	resForCU := DefaultComputeUnit.Mul
 
@@ -1070,8 +1070,8 @@ func TestDownscalePivotBack(t *testing.T) {
 func TestSchedulerDownscaleReupscale(t *testing.T) {
 	a := helpers.NewAssert(t)
 	clock := helpers.NewFakeClock(t)
-	clockTick := func() helpers.Elapsed {
-		return clock.Inc(100 * time.Millisecond)
+	clockTick := func() {
+		clock.Inc(100 * time.Millisecond)
 	}
 	resForCU := DefaultComputeUnit.Mul
 
@@ -1224,8 +1224,8 @@ func TestSchedulerDownscaleReupscale(t *testing.T) {
 func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	a := helpers.NewAssert(t)
 	clock := helpers.NewFakeClock(t)
-	clockTick := func() helpers.Elapsed {
-		return clock.Inc(100 * time.Millisecond)
+	clockTick := func() {
+		clock.Inc(100 * time.Millisecond)
 	}
 	resForCU := DefaultComputeUnit.Mul
 
@@ -1321,8 +1321,8 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	a := helpers.NewAssert(t)
 	clock := helpers.NewFakeClock(t)
-	clockTick := func() helpers.Elapsed {
-		return clock.Inc(100 * time.Millisecond)
+	clockTick := func() {
+		clock.Inc(100 * time.Millisecond)
 	}
 	resForCU := DefaultComputeUnit.Mul
 
@@ -1415,8 +1415,8 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 func TestFailedRequestRetry(t *testing.T) {
 	a := helpers.NewAssert(t)
 	clock := helpers.NewFakeClock(t)
-	clockTick := func() helpers.Elapsed {
-		return clock.Inc(100 * time.Millisecond)
+	clockTick := func() {
+		clock.Inc(100 * time.Millisecond)
 	}
 	resForCU := DefaultComputeUnit.Mul
 
@@ -1533,8 +1533,8 @@ func TestFailedRequestRetry(t *testing.T) {
 func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	a := helpers.NewAssert(t)
 	clock := helpers.NewFakeClock(t)
-	clockTick := func() helpers.Elapsed {
-		return clock.Inc(100 * time.Millisecond)
+	clockTick := func() {
+		clock.Inc(100 * time.Millisecond)
 	}
 	resForCU := DefaultComputeUnit.Mul
 

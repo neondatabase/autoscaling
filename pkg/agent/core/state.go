@@ -231,9 +231,9 @@ func (s *State) info(msg string, fields ...zap.Field) {
 	}
 }
 
-func (s *State) warn(msg string, fields ...zap.Field) {
+func (s *State) warn(msg string /* , fields ...zap.Field */) {
 	if s.config.Log.Warn != nil {
-		s.config.Log.Warn(msg, fields...)
+		s.config.Log.Warn(msg /* , fields... */)
 	}
 }
 

@@ -115,7 +115,7 @@ func RunBillingMetricsCollector(
 	// The rest of this function is to do with collection
 	logger = logger.Named("collect")
 
-	state.collect(logger, conf, store, metrics)
+	state.collect(logger, store, metrics)
 
 	for {
 		select {
@@ -125,7 +125,7 @@ func RunBillingMetricsCollector(
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
-			state.collect(logger, conf, store, metrics)
+			state.collect(logger, store, metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, conf, client.Hostname(), queueWriter)
@@ -135,7 +135,7 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *metricsState) collect(logger *zap.Logger, conf *Config, store VMStoreForNode, metrics PromMetrics) {
+func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics PromMetrics) {
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
