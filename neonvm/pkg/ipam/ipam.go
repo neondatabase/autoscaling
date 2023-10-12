@@ -32,7 +32,7 @@ const (
 
 	UnnamedNetwork string = ""
 
-	// kubermetes client-go rate limiter settings
+	// kubernetes client-go rate limiter settings
 	// https://pkg.go.dev/k8s.io/client-go@v0.27.2/rest#Config
 	KubernetesClientQPS   = 100
 	KubernetesClientBurst = 200
@@ -74,7 +74,7 @@ func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error
 		return nil, fmt.Errorf("error building kubernetes configuration: %v", err)
 	}
 
-	// tune Kubernetes client perfomance
+	// tune Kubernetes client performance
 	cfg.QPS = KubernetesClientQPS
 	cfg.Burst = KubernetesClientBurst
 
@@ -309,7 +309,7 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, a
 				}
 				return ip, fmt.Errorf("error updating IP pool: %v", err)
 			}
-			// pool was readed, acquire or release was processed, pool was updated
+			// pool was read, acquire or release was processed, pool was updated
 			// now we can break retry loop
 			break
 		}

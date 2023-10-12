@@ -44,7 +44,7 @@ type Dispatcher struct {
 
 	// When someone sends a message, the dispatcher will attach a transaction id
 	// to it so that it knows when a response is back. When it receives a message
-	// with the same transaction id, it knows that that is the repsonse to the original
+	// with the same transaction id, it knows that that is the response to the original
 	// message and will send it down the SignalSender so the original sender can use it.
 	waiters map[uint64]util.SignalSender[waiterResult]
 
@@ -84,7 +84,7 @@ func NewDispatcher(
 	logger *zap.Logger,
 	addr string,
 	runner *Runner,
-	sendUpscaleRequested util.CondChannelSender,
+	sendUpscaleRequested func(request api.MoreResources, withLock func()),
 ) (_finalDispatcher *Dispatcher, _ error) {
 	// Create a new root-level context for this Dispatcher so that we can cancel if need be
 	ctx, cancelRootContext := context.WithCancel(ctx)
@@ -278,6 +278,13 @@ func (disp *Dispatcher) ExitError() error {
 	disp.lock.Lock()
 	defer disp.lock.Unlock()
 	return disp.exitError
+}
+
+// temporary method to hopefully help with https://github.com/neondatabase/autoscaling/issues/503
+func (disp *Dispatcher) lenWaiters() int {
+	disp.lock.Lock()
+	defer disp.lock.Unlock()
+	return len(disp.waiters)
 }
 
 // Send a message down the connection. Only call this method with types that
@@ -527,7 +534,7 @@ func (disp *Dispatcher) HandleMessage(
 }
 
 // Long running function that orchestrates all requests/responses.
-func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester util.CondChannelSender) {
+func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester func(_ api.MoreResources, withLock func())) {
 	logger.Info("Starting message handler")
 
 	// Utility for logging + returning an error when we get a message with an
@@ -543,27 +550,19 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 	// upscale. The monitor will get the result back as a NotifyUpscale message
 	// from us, with a new id.
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
-		disp.runner.lock.Lock()
-		defer disp.runner.lock.Unlock()
-
 		// TODO: it shouldn't be this function's responsibility to update metrics.
 		defer func() {
 			disp.runner.global.metrics.monitorRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
 		}()
-
-		upscaleRequester.Send()
 
 		resourceReq := api.MoreResources{
 			Cpu:    false,
 			Memory: true,
 		}
 
-		logger.Info(
-			"Updating requested upscale",
-			zap.Any("oldRequested", disp.runner.requestedUpscale),
-			zap.Any("newRequested", resourceReq),
-		)
-		disp.runner.requestedUpscale = resourceReq
+		upscaleRequester(resourceReq, func() {
+			logger.Info("Updating requested upscale", zap.Any("requested", resourceReq))
+		})
 	}
 	handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
 		disp.lock.Lock()
@@ -620,7 +619,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 				zap.Uint64("id", id),
 				zap.String("error", err.Error),
 			)
-			// Indicate to the receiver that an error occured
+			// Indicate to the receiver that an error occurred
 			sender.Send(waiterResult{
 				err: errors.New("vm-monitor internal error"),
 				res: nil,
@@ -639,7 +638,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 		sender, ok := disp.waiters[id]
 		if ok {
 			logger.Info("vm-monitor responded to health check", zap.Uint64("id", id))
-			// Indicate to the receiver that an error occured
+			// Indicate to the receiver that an error occurred
 			sender.Send(waiterResult{
 				err: nil,
 				res: &MonitorResult{

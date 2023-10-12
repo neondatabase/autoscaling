@@ -87,7 +87,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.
 
 		responseBody, err := json.Marshal(&resp)
 		if err != nil {
-			logger.Panic("Failed to encode repsonse JSON", zap.Error(err))
+			logger.Panic("Failed to encode response JSON", zap.Error(err))
 		}
 
 		logger.Info(

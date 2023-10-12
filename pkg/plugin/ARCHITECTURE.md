@@ -21,7 +21,6 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
   * [Non-VM pods](#non-vm-pods)
   * [Pressure and watermarks](#pressure-and-watermarks)
   * [Startup uncertainty: `buffer`](#startup-uncertainty-buffer)
-  * [Config changes](#config-changes)
 
 ## File descriptions
 
@@ -166,10 +165,7 @@ always_ less than or equal to `total - system`.
 
 During normal operations, we have a strict bound on resource usage in order to keep `reserved ≤
 total - system`, but it isn't feasible to guarantee that in _all_ circumstances. In particular, this
-condition can be temporarily violated [after startup] or [after config changes].
-
-[after startup]: #startup-uncertainty-buffer
-[after config changes]: #config-changes
+condition can be temporarily violated [after startup](#startup-uncertainty-buffer).
 
 ### Non-VM pods
 
@@ -260,49 +256,5 @@ With `buffer`, we have a more precise guarantee about resource usage:
 > will always have `reserved - buffer ≤ total`. For each value of `system`, each node will
 > eventually guarantee that future `reserved` will satisfy `reserved - buffer ≤ total - system`.
 
-If the value of `system` changes, we can't immediately guarantee that our resource allocation
-respects it, but it _eventually_ will. Some more consequences of configuration changes are
-[discussed below](#config-changes).
-
-### Config changes
-
-The scheduler plugin supports changing its configuration at runtime, by watching the `ConfigMap`
-object to allow faster updates. Because of this, there are some edge cases that are worth
-discussing. (**note:** This would also be the case either way, because configs can change between
-restarts.)
-
-There are basically three configurable values that we care about, from a resource-management point
-of view:
-
-1. `nodeConfig.{Cpu,Memory}.Watermark`,
-2. `nodeConfig.{Cpu,Memory}.System`, and
-3. `nodeConfig.ComputeUnit`
-
-These values are all configured on a per-node basis, so they can differ per-node and may change
-between configurations.
-
-Let's go through them one-by-one:
-
-#### Changing `Watermark`
-
-Here, there's nothing special to note. We don't store any values based on the watermark, so all
-that's required is to update the calculated watermark.
-
-#### Changing `System`
-
-Typically, we won't have `reserved > total - system`. However, when `system` increases, this can be
-temporarily violated. This will _also_ change the calculated watermark for the node (because the
-_reservable_ amount of that resource has changed).
-
-The end effect of this is that we can't assume anywhere that `reserved ≤ total - system`, which is
-one of the reasons for having something like [`util.SaturatingSub`](../util/arith.go).
-
-#### Changing `ComputeUnit`
-
-All of the scheduler plugin's responses to `autoscaler-agent`s contain the current value of its
-node's `ComputeUnit`, and the `ComputeUnit` may change at any time. So, for each VM pod, we track
-the last `ComputeUnit` that we informed the `autoscaler-agent` of.
-
-Whenever we receive a resource request, we check that it's a multiple of the _last_ `ComputeUnit`
-that we sent it, not the current one — the `autoscaler-agent` can't have already known. The next
-request will then have to be a multiple of the current `ComputeUnit`.
+If the value of `system` changes between restarts, we can't immediately guarantee that our resource
+allocation respects it, but it _eventually_ will.

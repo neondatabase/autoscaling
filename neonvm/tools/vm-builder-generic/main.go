@@ -204,7 +204,7 @@ mount -t cgroup2 cgroup2 /sys/fs/cgroup
 # Allow all users to move processes to/from the root cgroup.
 #
 # This is required in order to be able to 'cgexec' anything, if the entrypoint is not being run as
-# root, because moving tasks betweeen one cgroup and another *requires write access to the
+# root, because moving tasks between one cgroup and another *requires write access to the
 # cgroup.procs file of the common ancestor*, and because the entrypoint isn't already in a cgroup,
 # any new tasks are automatically placed in the top-level cgroup.
 #

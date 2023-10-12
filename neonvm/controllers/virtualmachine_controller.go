@@ -718,7 +718,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 // updates the values of the runner pod's labels and annotations so that they are exactly equal to
 // the set of labels/annotations we expect - minus some that are ignored.
 //
-// The reason we also need to delete unrecongized labels/annotations is so that if a
+// The reason we also need to delete unrecognized labels/annotations is so that if a
 // label/annotation on the VM itself is deleted, we can accurately reflect that in the pod.
 func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1.VirtualMachine, runnerPod *corev1.Pod) error {
 	log := log.FromContext(ctx)
@@ -1278,22 +1278,22 @@ func (r *VirtualMachineReconciler) tryUpdateVM(ctx context.Context, virtualmachi
 	return r.Update(ctx, virtualmachine)
 }
 
-// return Netwrok Attachment Definition name with IPAM settings
+// return Network Attachment Definition name with IPAM settings
 func nadIpamName() (string, error) {
 	return getEnvVarValue("NAD_IPAM_NAME")
 }
 
-// return Netwrok Attachment Definition namespace with IPAM settings
+// return Network Attachment Definition namespace with IPAM settings
 func nadIpamNamespace() (string, error) {
 	return getEnvVarValue("NAD_IPAM_NAMESPACE")
 }
 
-// return Netwrok Attachment Definition name for second interface in Runner
+// return Network Attachment Definition name for second interface in Runner
 func nadRunnerName() (string, error) {
 	return getEnvVarValue("NAD_RUNNER_NAME")
 }
 
-// return Netwrok Attachment Definition namespace for second interface in Runner
+// return Network Attachment Definition namespace for second interface in Runner
 func nadRunnerNamespace() (string, error) {
 	return getEnvVarValue("NAD_RUNNER_NAMESPACE")
 }

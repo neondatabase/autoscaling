@@ -422,7 +422,7 @@ func (e *AutoscaleEnforcer) Filter(
 	if vmInfo == nil {
 		otherPodInfo, err = extractPodOtherPodResourceState(pod)
 		if err != nil {
-			logger.Error("Error extracing resource state for non-VM pod", zap.Error(err))
+			logger.Error("Error extracting resource state for non-VM pod", zap.Error(err))
 			return framework.NewStatus(
 				framework.UnschedulableAndUnresolvable,
 				fmt.Sprintf("Error getting pod info: %s", err),
@@ -890,7 +890,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	if vmInfo == nil {
 		podResources, err := extractPodOtherPodResourceState(pod)
 		if err != nil {
-			logger.Error("Error extracing resource state for non-VM pod", zap.Error(err))
+			logger.Error("Error extracting resource state for non-VM pod", zap.Error(err))
 			return framework.NewStatus(
 				framework.UnschedulableAndUnresolvable,
 				fmt.Sprintf("Error getting non-VM pod info: %v", err),

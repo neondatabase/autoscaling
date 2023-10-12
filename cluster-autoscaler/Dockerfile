@@ -23,7 +23,7 @@ RUN cd autoscaler/cluster-autoscaler \
 # There are other ways of solving this (see: https://www.arp242.net/static-go.html), but the easiest
 # thing is to just disable cgo.
 
-# We're done buiding. Copy the binary over into the final product.
+# We're done building. Copy the binary over into the final product.
 #
 # This is adapted from CA's Dockerfile.amd64, here:
 # https://github.com/kubernetes/autoscaler/blob/cluster-autoscaler-1.24.1/cluster-autoscaler/Dockerfile.amd64
