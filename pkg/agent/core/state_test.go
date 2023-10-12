@@ -1525,3 +1525,164 @@ func TestFailedRequestRetry(t *testing.T) {
 		},
 	})
 }
+
+// Checks that when metrics are updated during the downscaling process, between the NeonVM request
+// and plugin request, we keep those processes mostly separate, without interference between them.
+//
+// This is distilled from a bug found on staging that resulted in faulty requests to the plugin.
+func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
+	a := helpers.NewAssert(t)
+	clock := helpers.NewFakeClock(t)
+	clockTick := func() helpers.Elapsed {
+		return clock.Inc(100 * time.Millisecond)
+	}
+	resForCU := DefaultComputeUnit.Mul
+
+	state := helpers.CreateInitialState(
+		DefaultInitialStateConfig,
+		helpers.WithStoredWarnings(a.StoredWarnings()),
+		// NOTE: current CU is greater than max CU. This is in line with what happens when
+		// unassigned pooled VMs created by the control plane are first assigned and endpoint and
+		// must immediately scale down.
+		helpers.WithMinMaxCU(1, 2),
+		helpers.WithCurrentCU(4),
+	)
+	nextActions := func() core.ActionSet {
+		return state.NextActions(clock.Now())
+	}
+
+	state.Plugin().NewScheduler()
+
+	// Send initial scheduler request - without the monitor active, so we're stuck at 4 CU for now
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(4))
+
+	clockTick()
+
+	// Monitor's now active, so we should be asking it for downscaling.
+	// We don't yet have metrics though, so we only want to downscale as much as is required.
+	state.Monitor().Active(true)
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.8s")},
+		MonitorDownscale: &core.ActionMonitorDownscale{
+			Current: resForCU(4),
+			Target:  resForCU(2),
+		},
+	})
+	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(2))
+
+	// In the middle of the vm-monitor request, update the metrics so that now the desired resource
+	// usage is actually 1 CU
+	clockTick()
+	// the actual metrics we got in the actual logs
+	metrics := api.Metrics{
+		LoadAverage1Min:  0.0,
+		LoadAverage5Min:  0.0,
+		MemoryUsageBytes: 150589570, // 143.6 MiB
+	}
+	a.Do(state.UpdateMetrics, metrics)
+
+	// nothing to do yet, until the existing vm-monitor request finishes
+	a.
+		WithWarnings(
+			"Wanted to send vm-monitor downscale request, but waiting on other ongoing downscale request (for different resources)",
+		).
+		Call(nextActions).
+		Equals(core.ActionSet{
+			Wait: &core.ActionWait{Duration: duration("4.7s")}, // plugin request tick wait
+		})
+
+	clockTick()
+
+	// When the vm-monitor request finishes, we want to both
+	// (a) request additional downscaling from vm-monitor, and
+	// (b) make a NeonVM request for the initially approved downscaling
+	a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.6s")}, // plugin request tick wait
+		NeonVMRequest: &core.ActionNeonVMRequest{
+			Current: resForCU(4),
+			Target:  resForCU(2),
+		},
+		MonitorDownscale: &core.ActionMonitorDownscale{
+			Current: resForCU(2),
+			Target:  resForCU(1),
+		},
+	})
+	// Start both requests. The vm-monitor request will finish first, but after that we'll just be
+	// waiting on the NeonVM request (and then redoing a follow-up for more downscaling).
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(2))
+	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(1))
+
+	clockTick()
+
+	a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
+	a.
+		WithWarnings(
+			"Wanted to make a request to NeonVM API, but there's already NeonVM request (for different resources) ongoing",
+		).
+		Call(nextActions).
+		Equals(core.ActionSet{
+			Wait: &core.ActionWait{Duration: duration("4.5s")}, // plugin request tick wait
+		})
+
+	clockTick()
+
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+	state.Debug(true)
+	a.
+		Call(nextActions).
+		Equals(core.ActionSet{
+			// At this point in the original logs from staging, the intended request to the plugin was
+			// incorrectly for 1 CU, rather than 2 CU. So, the rest of this test case is mostly just
+			// rounding out the rest of the scale-down routine.
+			PluginRequest: &core.ActionPluginRequest{
+				LastPermit: ptr(resForCU(4)),
+				Target:     resForCU(2),
+				Metrics:    &metrics,
+			},
+			NeonVMRequest: &core.ActionNeonVMRequest{
+				Current: resForCU(2),
+				Target:  resForCU(1),
+			},
+		})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(1))
+
+	clockTick()
+
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      resForCU(2),
+		Migrate:     nil,
+		ComputeUnit: DefaultComputeUnit,
+	})
+	// Still waiting for NeonVM request to complete
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.9s")}, // plugin request tick wait
+	})
+
+	clockTick()
+
+	// After the NeonVM request finishes, all that we have left to do is inform the plugin of the
+	// final downscaling.
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+	a.Call(nextActions).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit: ptr(resForCU(2)),
+			Target:     resForCU(1),
+			Metrics:    &metrics,
+		},
+	})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
+
+	clockTick()
+
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      resForCU(1),
+		Migrate:     nil,
+		ComputeUnit: DefaultComputeUnit,
+	})
+	// Nothing left to do
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.9s")}, // plugin request tick wait
+	})
+}
