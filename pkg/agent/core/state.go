@@ -368,7 +368,7 @@ func (s *State) calculatePluginAction(
 	// ... and this isn't a duplicate (or, at least it's been long enough)
 	shouldRequestNewResources := wantToRequestNewResources && !waitingOnRetryBackoff
 
-	permittedRequestResources := desiredResources
+	permittedRequestResources := requestResources
 	if !shouldRequestNewResources {
 		permittedRequestResources = currentResources
 	}
