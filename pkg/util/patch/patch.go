@@ -43,7 +43,7 @@ type Operation struct {
 
 var pathEscaper = strings.NewReplacer("~", "~0", "/", "~1")
 
-// PathEscape escapes a string for use in a segement of the Path field of an Operation
+// PathEscape escapes a string for use in a segment of the Path field of an Operation
 //
 // This is useful, for example, when using arbitrary strings as map keys (like Kubernetes labels or
 // annotations).
