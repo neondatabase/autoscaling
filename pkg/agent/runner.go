@@ -265,11 +265,16 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			},
 		})
 	})
-	r.spawnBackgroundWorker(ctx, execLogger.Named("sleeper"), "executor: sleeper", ecwc.DoSleeper)
-	r.spawnBackgroundWorker(ctx, execLogger.Named("plugin"), "executor: plugin", ecwc.DoPluginRequests)
-	r.spawnBackgroundWorker(ctx, execLogger.Named("neonvm"), "executor: neonvm", ecwc.DoNeonVMRequests)
-	r.spawnBackgroundWorker(ctx, execLogger.Named("vm-monitor-downscale"), "executor: vm-monitor downscale", ecwc.DoMonitorDownscales)
-	r.spawnBackgroundWorker(ctx, execLogger.Named("vm-monitor-upscale"), "executor: vm-monitor upscale", ecwc.DoMonitorUpscales)
+	r.spawnBackgroundWorker(ctx, execLogger, "executor", func(ctx context.Context, logger *zap.Logger) {
+		spawn := func(c context.Context, l *zap.Logger, requestType string, f func(context.Context, *zap.Logger)) {
+			r.spawnBackgroundWorker(c, l, fmt.Sprintf("executor request: %s", requestType), f)
+		}
+		stateLogger := execLogger.Named("core")
+		clientLogger := execLogger.Named // NB: func(requestType string) *zap.Logger
+		onNextActions := r.global.metrics.runnerNextActions.Inc
+
+		ecwc.DoExecutors(ctx, spawn, stateLogger, clientLogger, onNextActions)
+	})
 
 	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
 	// pod was deleted, or the autoscaler-agent is exiting.
