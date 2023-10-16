@@ -1,7 +1,7 @@
 FROM rust:1.70-alpine as builder
 WORKDIR /workspace
 
-RUN apk add musl-dev git
+RUN apk add musl-dev git openssl-dev
 
 # Which branch to pull from
 ARG BRANCH
