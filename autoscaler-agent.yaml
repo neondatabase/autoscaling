@@ -36,28 +36,26 @@ data:
     {
       "scaling": {
         "requestTimeoutSeconds": 10,
+        "retryFailedRequestSeconds": 5,
         "defaultConfig": {
           "loadAverageFractionTarget": 0.9,
           "memoryUsageFractionTarget": 0.75
         }
       },
-      "informant": {
-        "serverPort": 10301,
-        "callbackPort": 10302,
-        "retryServerMinWaitSeconds": 5,
-        "retryServerNormalWaitSeconds": 5,
-        "registerRetrySeconds": 5,
-        "requestTimeoutSeconds": 1,
-        "registerTimeoutSeconds": 2,
-        "downscaleTimeoutSeconds": 2,
-        "unhealthyAfterSilenceDurationSeconds": 20,
-        "unhealthyStartupGracePeriodSeconds": 20
-      },
       "monitor": {
+          "serverPort": 10301,
           "responseTimeoutSeconds": 5,
-          "connectionTimeoutSeconds": 4
+          "connectionTimeoutSeconds": 4,
+          "connectionRetryMinWaitSeconds": 5,
+          "unhealthyAfterSilenceDurationSeconds": 20,
+          "unhealthyStartupGracePeriodSeconds": 20,
+          "maxHealthCheckSequentialFailuresSeconds": 30,
+          "retryDeniedDownscaleSeconds": 5,
+          "requestedUpscaleValidSeconds": 10,
+          "retryFailedRequestSeconds": 3
       },
       "metrics": {
+        "port": 9100,
         "loadMetricPrefix": "host_",
         "requestTimeoutSeconds": 2,
         "secondsBetweenRequests": 5
@@ -65,6 +63,9 @@ data:
       "scheduler": {
         "schedulerName": "autoscale-scheduler",
         "requestTimeoutSeconds": 2,
+        "requestAtLeastEverySeconds": 5,
+        "retryFailedRequestSeconds": 3,
+        "retryDeniedUpscaleSeconds": 2,
         "requestPort": 10299
       },
       "dumpState": {
@@ -103,7 +104,7 @@ spec:
               fieldPath: status.podIP
         - name: CONFIG_PATH
           value: /etc/autoscaler-agent-config/config.json
-        image: neondatabase/autoscaler-agent:v0.17.12
+        image: neondatabase/autoscaler-agent:v0.18.0-patch2
         name: autoscaler-agent
         ports:
         - containerPort: 9100
