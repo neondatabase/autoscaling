@@ -1,4 +1,4 @@
-FROM rust:1.70-alpine as builder
+FROM rust:1.72-alpine as builder
 WORKDIR /workspace
 
 RUN apk add musl-dev git openssl-dev
