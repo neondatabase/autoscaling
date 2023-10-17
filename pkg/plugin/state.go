@@ -1330,7 +1330,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		pod := &pods.Items[i]
 		podName := util.GetNamespacedName(pod)
 
-		if _, isVM := pod.Labels[LabelVM]; !isVM {
+		vmName := util.TryPodOwnerVirtualMachine(pod)
+		if vmName == nil {
 			continue
 		}
 
@@ -1340,7 +1341,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			logger = logger.With(zap.String("node", pod.Spec.NodeName))
 		}
 
-		migrationName := tryMigrationOwnerReference(pod)
+		migrationName := util.TryPodOwnerVirtualMachineMigration(pod)
 		if migrationName != nil {
 			logger = logger.With(zap.Object("virtualmachinemigration", *migrationName))
 		}
@@ -1359,8 +1360,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		}
 
 		// Check if the VM exists
-		vmName := util.NamespacedName{Namespace: pod.Namespace, Name: pod.Labels[LabelVM]}
-		vm, ok := vmSpecs[vmName]
+		vm, ok := vmSpecs[*vmName]
 		if !ok {
 			logSkip("VM Pod's corresponding VM object is missing from our map (maybe it was removed between listing VMs and Pods?)")
 			continue
@@ -1466,8 +1466,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		pod := &pods.Items[i]
 		podName := util.GetNamespacedName(pod)
 
-		if _, isVM := pod.Labels[LabelVM]; isVM {
-			continue
+		if util.TryPodOwnerVirtualMachine(pod) != nil {
+			continue // skip VMs
 		}
 
 		// new logger just for this loop iteration, with info about the Pod

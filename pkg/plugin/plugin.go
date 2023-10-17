@@ -25,7 +25,6 @@ import (
 )
 
 const Name = "AutoscaleEnforcer"
-const LabelVM = vmapi.VirtualMachineNameLabel
 const LabelPluginCreatedMigration = "autoscaling.neon.tech/created-by-scheduler"
 const ConfigMapNamespace = "kube-system"
 const ConfigMapName = "scheduler-plugin-config"
@@ -256,12 +255,8 @@ func (e *AutoscaleEnforcer) Name() string {
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
 func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, action string) (*api.VmInfo, error) {
-	var vmName util.NamespacedName
-	vmName.Namespace = pod.Namespace
-
-	var ok bool
-	vmName.Name, ok = pod.Labels[LabelVM]
-	if !ok {
+	vmName := util.TryPodOwnerVirtualMachine(pod)
+	if vmName == nil {
 		return nil, nil
 	}
 
@@ -818,7 +813,7 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	pName := util.GetNamespacedName(pod)
 	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
-	if migrationName := tryMigrationOwnerReference(pod); migrationName != nil {
+	if migrationName := util.TryPodOwnerVirtualMachineMigration(pod); migrationName != nil {
 		logger = logger.With(zap.Object("virtualmachinemigration", *migrationName))
 	}
 
