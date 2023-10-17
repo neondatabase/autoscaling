@@ -56,7 +56,7 @@ type Dispatcher struct {
 	// The runner that this dispatcher is part of
 	runner *Runner
 
-	exit func(status websocket.StatusCode, err error)
+	exit func(status websocket.StatusCode, err error, transformErr func(error) error)
 
 	exitError  error
 	exitSignal chan struct{}
@@ -112,7 +112,7 @@ func NewDispatcher(
 		lastTransactionID: atomic.Uint64{}, // Note: initialized to 0, so it's even, as required.
 		protoVersion:      *protoVersion,
 	}
-	disp.exit = func(status websocket.StatusCode, err error) {
+	disp.exit = func(status websocket.StatusCode, err error, transformErr func(error) error) {
 		disp.lock.Lock()
 		defer disp.lock.Unlock()
 
@@ -126,7 +126,11 @@ func NewDispatcher(
 
 		var closeReason string
 		if err != nil {
-			closeReason = err.Error()
+			if transformErr != nil {
+				closeReason = transformErr(err).Error()
+			} else {
+				closeReason = err.Error()
+			}
 		} else {
 			closeReason = "normal exit"
 		}
@@ -144,7 +148,7 @@ func NewDispatcher(
 
 	go func() {
 		<-ctx.Done()
-		disp.exit(websocket.StatusNormalClosure, nil)
+		disp.exit(websocket.StatusNormalClosure, nil, nil)
 	}()
 
 	msgHandlerLogger := logger.Named("message-handler")
@@ -178,7 +182,7 @@ func NewDispatcher(
 				} else if since := time.Since(*firstSequentialFailure); since > continuedFailureAbortTimeout {
 					err := fmt.Errorf("vm-monitor has been failing health checks for at least %s", continuedFailureAbortTimeout)
 					logger.Error(fmt.Sprintf("%s, triggering connection restart", err.Error()))
-					disp.exit(websocket.StatusInternalError, err)
+					disp.exit(websocket.StatusInternalError, err, nil)
 				}
 			} else {
 				// health check was successful, so reset the sequential failures count
@@ -677,7 +681,12 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 				err = fmt.Errorf("Error handling message: %w", err)
 				// note: in theory we *could* be more descriptive with these statuses, but the only
 				// consumer of this API is the vm-monitor, and it doesn't check those.
-				disp.exit(websocket.StatusInternalError, err)
+				//
+				// Also note: there's a limit on the size of the close frame we're allowed to send,
+				// so the actual error we use to exit with must be somewhat reduced in size. These
+				// "Error handling message" errors can get quite long, so we'll only use the root
+				// cause of the error for the message.
+				disp.exit(websocket.StatusInternalError, err, util.RootError)
 			}
 			return
 		}
