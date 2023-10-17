@@ -74,8 +74,8 @@ RUN set -e \
 		libevent-dev \
 		libssl-dev
 
-ENV PGBOUNCER_VERSION 1.18.0
-ENV PGBOUNCER_GITPATH 1_18_0
+ENV PGBOUNCER_VERSION 1.21.0
+ENV PGBOUNCER_GITPATH 1_21_0
 RUN set -e \
 	&& curl -sfSL https://github.com/pgbouncer/pgbouncer/releases/download/pgbouncer_${PGBOUNCER_GITPATH}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz -o pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& tar xzvf pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
@@ -375,6 +375,7 @@ server_tls_sslmode=disable
 pool_mode=transaction
 max_client_conn=10000
 default_pool_size=16
+max_prepared_statements=100
 `
 )
 
