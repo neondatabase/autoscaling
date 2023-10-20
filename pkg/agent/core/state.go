@@ -591,7 +591,7 @@ func (s *State) calculateMonitorDownscaleAction(
 
 	// Can't make another request if we failed too recently:
 	if s.monitor.downscaleFailureAt != nil {
-		timeUntilFailureBackoffExpires := now.Sub(*s.monitor.downscaleFailureAt)
+		timeUntilFailureBackoffExpires := s.monitor.downscaleFailureAt.Add(s.config.MonitorRetryWait).Sub(now)
 		if timeUntilFailureBackoffExpires > 0 {
 			s.warn("Wanted to send vm-monitor downscale request but failed too recently")
 			return nil, &timeUntilFailureBackoffExpires
