@@ -23,6 +23,7 @@ data:
           "unhealthyStartupGracePeriodSeconds": 20,
           "maxHealthCheckSequentialFailuresSeconds": 30,
           "retryDeniedDownscaleSeconds": 5,
+          "deniedDownscaleFollowUpWaitSeconds"; 1,
           "requestedUpscaleValidSeconds": 10,
           "retryFailedRequestSeconds": 3
       },

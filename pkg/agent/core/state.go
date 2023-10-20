@@ -59,6 +59,10 @@ type Config struct {
 	// downscale requests to the vm-monitor where the previous failed.
 	MonitorDeniedDownscaleCooldown time.Duration
 
+	// MonitorDownscaleFollowUpWait gives the minimum time we must wait between subsequent downscale
+	// requests, *whether or not they are a duplicate*.
+	MonitorDownscaleFollowUpWait time.Duration
+
 	// MonitorRequestedUpscaleValidPeriod gives the duration for which requested upscaling from the
 	// vm-monitor must be respected.
 	MonitorRequestedUpscaleValidPeriod time.Duration
@@ -595,6 +599,15 @@ func (s *State) calculateMonitorDownscaleAction(
 		if timeUntilFailureBackoffExpires > 0 {
 			s.warn("Wanted to send vm-monitor downscale request but failed too recently")
 			return nil, &timeUntilFailureBackoffExpires
+		}
+	}
+
+	// Can't make another request if we were denied too recently:
+	if s.monitor.deniedDownscale != nil {
+		timeUntilDeniedDownscaleBackoffExpires := s.monitor.deniedDownscale.at.Add(s.config.MonitorDownscaleFollowUpWait).Sub(now)
+		if timeUntilDeniedDownscaleBackoffExpires > 0 {
+			s.warn("Wanted to send vm-monitor downscale request but too soon after previously denied downscaling")
+			return nil, &timeUntilDeniedDownscaleBackoffExpires
 		}
 	}
 

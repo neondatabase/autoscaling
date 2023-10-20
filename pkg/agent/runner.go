@@ -243,6 +243,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			PluginRetryWait:                    time.Second * time.Duration(r.global.config.Scheduler.RetryFailedRequestSeconds),
 			PluginDeniedRetryWait:              time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
 			MonitorDeniedDownscaleCooldown:     time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
+			MonitorDownscaleFollowUpWait:       time.Second * time.Duration(r.global.config.Monitor.DeniedDownscaleFollowUpWaitSeconds),
 			MonitorRequestedUpscaleValidPeriod: time.Second * time.Duration(r.global.config.Monitor.RequestedUpscaleValidSeconds),
 			MonitorRetryWait:                   time.Second * time.Duration(r.global.config.Monitor.RetryFailedRequestSeconds),
 			Log: core.LogConfig{
