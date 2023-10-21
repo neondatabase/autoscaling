@@ -151,8 +151,8 @@ func makeVMEvent(logger *zap.Logger, vm *vmapi.VirtualMachine, kind vmEventKind)
 	}
 
 	endpointID := ""
-	if vm.Labels != nil {
-		endpointID = vm.Labels[billing.EndpointLabel] // billing needs endpoint IDs anyways, just grab the label name from there
+	if vm.Annotations != nil {
+		endpointID = vm.Labels[api.AnnotationBillingEndpointID] // billing needs endpoint IDs anyways, just grab the label name from there
 	}
 
 	return vmEvent{
