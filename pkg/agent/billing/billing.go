@@ -154,7 +154,7 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 		endpointID, isEndpoint := vm.Annotations[api.AnnotationBillingEndpointID]
 		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
 		if !isEndpoint {
-			// we're only reporting metrics for VMs with tenant IDs, and this VM doesn't have one
+			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
 			continue
 		}
 
