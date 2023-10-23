@@ -93,6 +93,7 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 		zap.Object("virtualmachine", event.vmInfo.NamespacedName()),
 		zap.Object("pod", util.NamespacedName{Namespace: event.vmInfo.Namespace, Name: event.podName}),
 	)
+	logger.Debug("Handling event for VM")
 
 	if err := s.lock.TryLock(ctx); err != nil {
 		logger.Warn("Context canceled while starting to handle event", zap.Error(err))
