@@ -156,7 +156,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					return // no other handling worthwhile if the pod's done.
 				}
 
-				// CHeck if the pod is part of a new migration, or if a migration it *was* part of
+				// Check if the pod is part of a new migration, or if a migration it *was* part of
 				// has now ended.
 				oldMigration := util.TryPodOwnerVirtualMachineMigration(oldPod)
 				newMigration := util.TryPodOwnerVirtualMachineMigration(newPod)
