@@ -148,7 +148,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
 					logger.Info("Received update event for completion of pod", zap.Object("pod", name))
 
-					if isVM {
+					if isVM || util.TryPodOwnerVirtualMachineMigration(newPod) != nil {
 						callbacks.submitVMDeletion(logger, name)
 					} else {
 						callbacks.submitPodDeletion(logger, name)
@@ -156,7 +156,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					return // no other handling worthwhile if the pod's done.
 				}
 
-				// CHeck if the pod is part of a new migration, or if a migration it *was* part of
+				// Check if the pod is part of a new migration, or if a migration it *was* part of
 				// has now ended.
 				oldMigration := util.TryPodOwnerVirtualMachineMigration(oldPod)
 				newMigration := util.TryPodOwnerVirtualMachineMigration(newPod)
