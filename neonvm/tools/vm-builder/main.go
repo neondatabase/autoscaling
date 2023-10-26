@@ -376,7 +376,7 @@ server_tls_sslmode=disable
 pool_mode=transaction
 max_client_conn=10000
 default_pool_size=16
-max_prepared_statements=100
+max_prepared_statements=0
 `
 )
 
