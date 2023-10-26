@@ -370,6 +370,7 @@ listen_port=6432
 listen_addr=0.0.0.0
 auth_type=scram-sha-256
 auth_user=cloud_admin
+auth_dbname=postgres
 client_tls_sslmode=disable
 server_tls_sslmode=disable
 pool_mode=transaction
