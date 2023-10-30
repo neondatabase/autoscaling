@@ -57,22 +57,22 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	}
 	defer schedulerStore.Stop()
 
-	globalState, vmPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, broker, schedulerStore)
-	watchMetrics.MustRegister(vmPromReg)
+	globalState, globalPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	watchMetrics.MustRegister(globalPromReg)
 
 	if r.Config.Billing != nil {
 		logger.Info("Starting billing metrics collector")
 		storeForNode := watch.NewIndexedStore(vmWatchStore, billing.NewVMNodeIndex(r.EnvArgs.K8sNodeName))
 
 		metrics := billing.NewPromMetrics()
-		metrics.MustRegister(vmPromReg)
+		metrics.MustRegister(globalPromReg)
 
 		// TODO: catch panics here, bubble those into a clean-ish shutdown.
 		go billing.RunBillingMetricsCollector(ctx, logger, r.Config.Billing, storeForNode, metrics)
 	}
 
 	promLogger := logger.Named("prometheus")
-	if err := util.StartPrometheusMetricsServer(ctx, promLogger.Named("global"), 9100, vmPromReg); err != nil {
+	if err := util.StartPrometheusMetricsServer(ctx, promLogger.Named("global"), 9100, globalPromReg); err != nil {
 		return fmt.Errorf("Error starting prometheus metrics server: %w", err)
 	}
 	if err := util.StartPrometheusMetricsServer(ctx, promLogger.Named("per-vm"), 9101, vmPromReg); err != nil {
