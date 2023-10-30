@@ -21,7 +21,7 @@ spec:
               containerPort: 9100
               protocol: TCP
             - name: vm-metrics
-              conatinerPort: 9101
+              containerPort: 9101
               protocol: TCP
           resources:
             limits:
