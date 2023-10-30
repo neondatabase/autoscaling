@@ -43,7 +43,7 @@ type agentState struct {
 	vmClient             *vmclient.Clientset
 	schedulerEventBroker *pubsub.Broker[schedwatch.WatchEvent]
 	schedulerStore       *watch.Store[corev1.Pod]
-	metrics              PromMetrics
+	metrics              GlobalMetrics
 }
 
 func (r MainRunner) newAgentState(
@@ -52,7 +52,7 @@ func (r MainRunner) newAgentState(
 	broker *pubsub.Broker[schedwatch.WatchEvent],
 	schedulerStore *watch.Store[corev1.Pod],
 ) (*agentState, *prometheus.Registry) {
-	metrics, promReg := makePrometheusParts()
+	metrics, promReg := makeGlobalMetrics()
 
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
