@@ -14,7 +14,6 @@ import (
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 
-	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
@@ -85,7 +84,7 @@ func startVMWatcher(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
-				for k, v := range metricsForVM(vm) {
+				for k, v := range metricsForVM(vm, nodeName) {
 					perVMMetrics.vmResources.WithLabelValues(k.labelValues()...).Set(v)
 				}
 
