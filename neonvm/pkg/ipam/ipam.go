@@ -233,8 +233,17 @@ func (i *IPAM) acquireORrelease(ctx context.Context, vmName string, vmNamespace 
 	case <-leCtx.Done():
 		err = fmt.Errorf("context got timeout while waiting to become leader")
 	}
+	if err != nil {
+		return ip, err
+	}
 
 	wg.Wait()
+
+	// if ip.String() still <nil> then probably something wrong with leader election
+	if len(ip.String()) == 0 {
+		return ip, fmt.Errorf("something wrong, probably with leader election")
+	}
+
 	return ip, ipamerr
 }
 
