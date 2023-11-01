@@ -1,8 +1,6 @@
-name: go lint
+name: lints
 on:
   pull_request:
-    branches:
-      - main
   push:
     branches:
       - main
@@ -28,9 +26,20 @@ jobs:
           skip-pkg-cache: true
           skip-build-cache: true
 
+  check-go-mod-tidy:
+    name: check go mod tidy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
       - name: go mod tidy
         run: |
           go mod tidy
+      - name: check diff
+        run: |
           if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
             git ls-files --exclude-standard --others .
             git diff .
@@ -38,9 +47,17 @@ jobs:
             exit 1
           fi
 
+  manifests:
+    name: check generated manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v3
       - name: make manifests
         run: |
           make manifests
+      - name: check diff
+        run: |
           if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
             git ls-files --exclude-standard --others .
             git diff .
@@ -48,3 +65,31 @@ jobs:
             exit 1
           fi
 
+  generated-go:
+    name: check generated go files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - name: make generate
+        run: |
+          make generate
+      - name: check diff
+        run: |
+          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+            git ls-files --exclude-standard --others .
+            git diff .
+            echo "ERROR: 'make generate' modified the source tree."
+            exit 1
+          fi
+
+  codespell:
+    name: check spelling with codespell
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: codespell-project/actions-codespell@94259cd8be02ad2903ba34a22d9c13de21a74461 # v2.0
+        with:
+          check_hidden: true
+          skip: go.sum,*.patch # '*.patch' references cluster-autoscaler/ca.patch, but somehow skipping directly doesn't work...

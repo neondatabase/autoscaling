@@ -264,7 +264,7 @@ func (c *Config) forNode(nodeName string) *nodeConfig {
 	return &c.NodeDefaults
 }
 
-func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[vmapi.MilliCPU], margin *resource.Quantity, _ error) {
+func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[vmapi.MilliCPU], margin *resource.Quantity) {
 	totalMilli := total.MilliValue()
 
 	margin = resource.NewMilliQuantity(0, total.Format)
@@ -273,9 +273,10 @@ func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[v
 		Total:                vmapi.MilliCPU(totalMilli),
 		Watermark:            vmapi.MilliCPU(c.Cpu.Watermark * float32(totalMilli)),
 		Reserved:             0,
+		Buffer:               0,
 		CapacityPressure:     0,
 		PressureAccountedFor: 0,
-	}, margin, nil
+	}, margin
 }
 
 func (c *nodeConfig) memoryLimits(
@@ -301,6 +302,7 @@ func (c *nodeConfig) memoryLimits(
 		Total:                uint16(totalSlots),
 		Watermark:            uint16(c.Memory.Watermark * float32(totalSlots)),
 		Reserved:             0,
+		Buffer:               0,
 		CapacityPressure:     0,
 		PressureAccountedFor: 0,
 	}, margin, nil

@@ -25,10 +25,14 @@ This document should be up-to-date. If it isn't, that's a mistake (open an issue
 
 This isn't the only architecture document. You may also want to look at:
 
+* [`pkg/agent/ARCHITECTURE.md`](pkg/agent/ARCHITECTURE.md) — detail on the implementation of the
+    autoscaler-agent
 * [`pkg/plugin/ARCHITECTURE.md`](pkg/plugin/ARCHITECTURE.md) — detail on the implementation of the
   scheduler plugin
-* [`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor) -
-where the (VM) monitor, an autoscaling component that manages a Postgres, lives.
+* [`neondatabase/neon/.../vm_monitor`] (a different repo) — where the vm-monitor, an autoscaling
+  component running _inside_ each VM lives.
+
+[`neondatabase/neon/.../vm_monitor`]: https://github.com/neondatabase/neon/tree/main/libs/vm_monitor
 
 ## High-level overview
 
@@ -49,10 +53,10 @@ A third component, a binary running inside of the VM to (a) handle being upscale
 The scheduler plugin is responsible for handling resource requests from the `autoscaler-agent`,
 capping increases so that node resources aren't overcommitted.
 
-The `autoscaler-agent` periodically reads from a metrics source in the VM (defined by the
-_informant_) and makes scaling decisions about the _desired_ resource allocation. It then
-requests these resources from the scheduler plugin, and submits a patch request for its NeonVM to
-update the resources.
+The `autoscaler-agent` periodically reads from a metrics source in the VM (currently vector's
+`node_exporter`-like functionality) and makes scaling decisions about the _desired_ resource
+allocation. It then requests these resources from the scheduler plugin, and submits a patch request
+for its NeonVM to update the resources.
 
 The VM monitor is responsible for handling all of the resource management functionality inside
 the VM that the `autoscaler-agent` cannot. This constitutes handling upscales (eg. increasing Postgres
@@ -237,7 +241,7 @@ simply returns with an ack.
 
 There are two additional messages types that either party may send:
 - `InvalidMessage`: sent when either party fails to deserialize a message it received
-- `InternalError`: used to indicate that an error occured while processing a request,
+- `InternalError`: used to indicate that an error occurred while processing a request,
   for example, if the monitor errors while trying to downscale
 
 ## Footguns

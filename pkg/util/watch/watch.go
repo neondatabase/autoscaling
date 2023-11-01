@@ -60,7 +60,7 @@ type Accessors[L any, T any] struct {
 // Object is implemented by pointers to T, where T is typically the resource that we're
 // actually watching.
 //
-// Example implementors: *corev1.Pod, *corev1.Node
+// Example implementers: *corev1.Pod, *corev1.Node
 type Object[T any] interface {
 	~*T
 	runtime.Object
@@ -149,12 +149,15 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	sendStop, stopSignal := util.NewSingleSignalPair[struct{}]()
 
 	store := Store[T]{
+		mutex:         sync.Mutex{},
 		objects:       make(map[types.UID]*T),
 		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
 		nextIndexID:   0,
 		indexes:       make(map[uint64]Index[T]),
 		stopSignal:    sendStop,
+		stopped:       atomic.Bool{},
+		failing:       atomic.Bool{},
 	}
 
 	items := accessors.Items(initialList)
@@ -292,7 +295,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
 					uid := meta.GetUID()
-					err := handleEvent(&store, config, handlers, event.Type, uid, obj)
+					err := handleEvent(&store, handlers, event.Type, uid, obj)
 					if err != nil {
 						name := util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 						logger.Error(
@@ -482,7 +485,6 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 // helper for Watch. Error events are expected to already have been handled by the caller.
 func handleEvent[T any, P ~*T](
 	store *Store[T],
-	config Config,
 	handlers HandlerFuncs[P],
 	eventType watch.EventType,
 	uid types.UID,
@@ -491,7 +493,7 @@ func handleEvent[T any, P ~*T](
 	obj := (*T)(ptr)
 
 	// Some of the cases below don't actually require locking the store. Most of the events that we
-	// recieve *do* though, so we're better off doing it here for simplicity.
+	// receive *do* though, so we're better off doing it here for simplicity.
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 

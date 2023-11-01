@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -74,8 +75,8 @@ RUN set -e \
 		libevent-dev \
 		libssl-dev
 
-ENV PGBOUNCER_VERSION 1.18.0
-ENV PGBOUNCER_GITPATH 1_18_0
+ENV PGBOUNCER_VERSION 1.21.0
+ENV PGBOUNCER_GITPATH 1_21_0
 RUN set -e \
 	&& curl -sfSL https://github.com/pgbouncer/pgbouncer/releases/download/pgbouncer_${PGBOUNCER_GITPATH}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz -o pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& tar xzvf pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
@@ -131,12 +132,14 @@ RUN set -e \
 		su-exec \
 		e2fsprogs-extra \
 		blkid \
+		flock \
 	&& mv /sbin/acpid         /neonvm/bin/ \
 	&& mv /sbin/udevd         /neonvm/bin/ \
 	&& mv /sbin/agetty        /neonvm/bin/ \
 	&& mv /sbin/su-exec       /neonvm/bin/ \
 	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
 	&& mv /sbin/blkid         /neonvm/bin/blkid \
+	&& mv /usr/bin/flock	  /neonvm/bin/flock \
 	&& mkdir -p /neonvm/lib \
 	&& cp -f /lib/ld-musl-x86_64.so.1  /neonvm/lib/ \
 	&& cp -f /lib/libblkid.so.1.1.0    /neonvm/lib/libblkid.so.1 \
@@ -169,10 +172,10 @@ RUN set -e \
 ADD inittab   /neonvm/bin/inittab
 ADD vminit    /neonvm/bin/vminit
 ADD vmstart   /neonvm/bin/vmstart
+ADD vmshutdown /neonvm/bin/vmshutdown
 ADD vmacpi    /neonvm/acpi/vmacpi
 ADD vector.yaml /neonvm/config/vector.yaml
-ADD powerdown /neonvm/bin/powerdown
-RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/powerdown
+RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
@@ -233,12 +236,13 @@ fi
 
 /neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
 
-/neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh
+/neonvm/bin/flock -o /neonvm/vmstart.lock -c 'test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh'
 `
 
 	scriptInitTab = `
 ::sysinit:/neonvm/bin/vminit
 ::sysinit:cgconfigparser -l /etc/cgconfig.conf -s 1664
+::once:/neonvm/bin/touch /neonvm/vmstart.allowed
 ::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 ::respawn:/neonvm/bin/udevd
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
@@ -248,26 +252,26 @@ fi
 ::respawn:su -p vm-monitor -c 'RUST_LOG=info /usr/local/bin/vm-monitor --addr "0.0.0.0:10301" --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="host=localhost port=5432 dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
 {{end}}
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
-::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
+::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
+::shutdown:/neonvm/bin/vmshutdown
 `
 
 	scriptVmAcpi = `
 event=button/power
-action=/neonvm/bin/powerdown
+action=/neonvm/bin/poweroff
 `
 
-	scriptPowerDown = `#!/neonvm/bin/sh
-
-su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
-# The poweroff below is the busybox poweroff which goes straight to the kernel, i.e., LINUX_REBOOT_CMD_POWER_OFF / RB_POWER_OFF.
-# Our experiments have shown that, generally, this type of hard shutdown will not FIN/RST existing TCP connections (i.e., state ESTABLISHED).
-# Now, for the particular case of NeonVM, we just did 'pg_ctl stop'.
-# But, the libpagestore.c is currently not explicitly shutting down the TCP connection to pageservers, relying on the kernel
-# to implicitly close the socket on exit.
-# This sleep here is to give the kernel time to send the FIN/RST.
-sleep 1
-/neonvm/bin/poweroff
+	scriptVmShutdown = `#!/neonvm/bin/sh
+rm /neonvm/vmstart.allowed
+if [ -e /neonvm/vmstart.allowed ]; then
+	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" 1>&2
+fi
+# we inhibited new command starts, but there may still be a command running
+while ! /neonvm/bin/flock -n /neonvm/vmstart.lock true; do
+	su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+done
+echo "vmstart workload shut down cleanly" 1>&2
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
@@ -296,7 +300,7 @@ mount -t cgroup2 cgroup2 /sys/fs/cgroup
 # Allow all users to move processes to/from the root cgroup.
 #
 # This is required in order to be able to 'cgexec' anything, if the entrypoint is not being run as
-# root, because moving tasks betweeen one cgroup and another *requires write access to the
+# root, because moving tasks between one cgroup and another *requires write access to the
 # cgroup.procs file of the common ancestor*, and because the entrypoint isn't already in a cgroup,
 # any new tasks are automatically placed in the top-level cgroup.
 #
@@ -367,11 +371,13 @@ listen_port=6432
 listen_addr=0.0.0.0
 auth_type=scram-sha-256
 auth_user=cloud_admin
+auth_dbname=postgres
 client_tls_sslmode=disable
 server_tls_sslmode=disable
 pool_mode=transaction
 max_client_conn=10000
 default_pool_size=16
+max_prepared_statements=0
 `
 )
 
@@ -394,6 +400,7 @@ var (
 
 type dockerMessage struct {
 	Stream string `json:"stream"`
+	Error  string `json:"error"`
 }
 
 func printReader(reader io.ReadCloser) error {
@@ -402,6 +409,10 @@ func printReader(reader io.ReadCloser) error {
 		candidateJSON := scanner.Bytes()
 		var msg dockerMessage
 		if err := json.Unmarshal(candidateJSON, &msg); err != nil || msg.Stream == "" {
+			if msg.Error != "" {
+				return errors.New(msg.Error)
+			}
+
 			log.Println(string(candidateJSON))
 			continue
 		}
@@ -556,9 +567,9 @@ func main() {
 	}{
 		{"Dockerfile", dockerfileVmBuilder},
 		{"vmstart", scriptVmStart},
+		{"vmshutdown", scriptVmShutdown},
 		{"inittab", scriptInitTab},
 		{"vmacpi", scriptVmAcpi},
-		{"powerdown", scriptPowerDown},
 		{"vminit", scriptVmInit},
 		{"cgconfig.conf", configCgroup},
 		{"vector.yaml", configVector},

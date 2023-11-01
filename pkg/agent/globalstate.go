@@ -33,8 +33,6 @@ type agentState struct {
 	lock util.ChanMutex
 	pods map[util.NamespacedName]*podState
 
-	informantMuxServer *HttpMuxServer
-
 	// A base logger to pass around, so we can recreate the logger for a Runner on restart, without
 	// running the risk of leaking keys.
 	baseLogger *zap.Logger
@@ -53,12 +51,12 @@ func (r MainRunner) newAgentState(
 	podIP string,
 	broker *pubsub.Broker[schedwatch.WatchEvent],
 	schedulerStore *watch.Store[corev1.Pod],
-	informantMuxServer *HttpMuxServer,
 ) (*agentState, *prometheus.Registry) {
+	metrics, promReg := makePrometheusParts()
+
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
-		informantMuxServer:   informantMuxServer,
 		baseLogger:           baseLogger,
 		config:               r.Config,
 		kubeClient:           r.KubeClient,
@@ -66,11 +64,8 @@ func (r MainRunner) newAgentState(
 		podIP:                podIP,
 		schedulerEventBroker: broker,
 		schedulerStore:       schedulerStore,
-		metrics:              PromMetrics{}, //nolint:exhaustruct // set below
+		metrics:              metrics,
 	}
-
-	var promReg *prometheus.Registry
-	state.metrics, promReg = makePrometheusParts(state)
 
 	return state, promReg
 }
@@ -98,6 +93,7 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 		zap.Object("virtualmachine", event.vmInfo.NamespacedName()),
 		zap.Object("pod", util.NamespacedName{Namespace: event.vmInfo.Namespace, Name: event.podName}),
 	)
+	logger.Debug("Handling event for VM")
 
 	if err := s.lock.TryLock(ctx); err != nil {
 		logger.Warn("Context canceled while starting to handle event", zap.Error(err))
@@ -164,16 +160,15 @@ func (s *agentState) handleVMEventAdded(
 			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
 			stateUpdatedAt:     now,
 
-			startTime:                   now,
-			lastSuccessfulInformantComm: nil,
+			startTime:                 now,
+			lastSuccessfulMonitorComm: nil,
 		},
 	}
 
 	// Empty update to trigger updating metrics and state.
 	status.update(s, func(s podStatus) podStatus { return s })
 
-	restartCount := 0
-	runner := s.newRunner(event.vmInfo, podName, event.podIP, restartCount)
+	runner := s.newRunner(event.vmInfo, podName, event.podIP)
 	runner.status = status
 
 	txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
@@ -186,7 +181,8 @@ func (s *agentState) handleVMEventAdded(
 		vmInfoUpdated: txVMUpdate,
 	}
 	s.metrics.runnerStarts.Inc()
-	logger := s.loggerForRunner(event.vmInfo.NamespacedName(), podName)
+	restartCount := 0
+	logger := s.loggerForRunner(restartCount, event.vmInfo.NamespacedName(), podName)
 	runner.Spawn(runnerCtx, logger, rxVMUpdate)
 }
 
@@ -323,7 +319,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 			s.metrics.runnerRestarts.Inc()
 
 			restartCount := len(status.previousEndStates) + 1
-			runner := s.newRunner(status.vmInfo, podName, podIP, restartCount)
+			runner := s.newRunner(status.vmInfo, podName, podIP)
 			runner.status = pod.status
 
 			txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
@@ -335,40 +331,38 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 			status.endState = nil
 			status.startTime = time.Now()
 
-			runnerLogger := s.loggerForRunner(status.vmInfo.NamespacedName(), podName)
+			runnerLogger := s.loggerForRunner(restartCount, status.vmInfo.NamespacedName(), podName)
 			runner.Spawn(runnerCtx, runnerLogger, rxVMUpdate)
 			return status
 		})
 	}()
 }
 
-func (s *agentState) loggerForRunner(vmName, podName util.NamespacedName) *zap.Logger {
-	return s.baseLogger.Named("runner").With(zap.Object("virtualmachine", vmName), zap.Object("pod", podName))
+func (s *agentState) loggerForRunner(restartCount int, vmName, podName util.NamespacedName) *zap.Logger {
+	return s.baseLogger.Named("runner").With(
+		zap.Int("restarts", restartCount),
+		zap.Object("virtualmachine", vmName),
+		zap.Object("pod", podName),
+	)
 }
 
 // NB: caller must set Runner.status after creation
-func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string, restartCount int) *Runner {
+func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string) *Runner {
 	return &Runner{
-		global:                          s,
-		status:                          nil, // set by calller
-		schedulerRespondedWithMigration: false,
+		global: s,
+		status: nil, // set by caller
 
-		shutdown:         nil, // set by (*Runner).Run
-		vm:               vmInfo,
-		podName:          podName,
-		podIP:            podIP,
-		lock:             util.NewChanMutex(),
-		requestLock:      util.NewChanMutex(),
-		requestedUpscale: api.MoreResources{Cpu: false, Memory: false},
+		shutdown:    nil, // set by (*Runner).Run
+		vmName:      vmInfo.NamespacedName(),
+		podName:     podName,
+		podIP:       podIP,
+		memSlotSize: vmInfo.Mem.SlotSize,
+		lock:        util.NewChanMutex(),
 
-		lastMetrics:        nil,
-		scheduler:          nil,
-		server:             nil,
-		informant:          nil,
-		computeUnit:        nil,
-		lastApproved:       nil,
-		lastSchedulerError: nil,
-		lastInformantError: nil,
+		executorStateDump: nil, // set by (*Runner).Run
+
+		scheduler: nil,
+		monitor:   nil,
 
 		backgroundWorkerCount: atomic.Int64{},
 		backgroundPanic:       make(chan error),
@@ -422,7 +416,7 @@ type podStatus struct {
 	endState          *podStatusEndState
 	previousEndStates []podStatusEndState
 
-	lastSuccessfulInformantComm *time.Time
+	lastSuccessfulMonitorComm *time.Time
 
 	// vmInfo stores the latest information about the VM, as given by the global VM watcher.
 	//
@@ -446,7 +440,7 @@ type podStatusDump struct {
 	EndState          *podStatusEndState  `json:"endState"`
 	PreviousEndStates []podStatusEndState `json:"previousEndStates"`
 
-	LastSuccessfulInformantComm *time.Time `json:"lastSuccessfulInformantComm"`
+	LastSuccessfulMonitorComm *time.Time `json:"lastSuccessfulMonitorComm"`
 
 	VMInfo api.VmInfo `json:"vmInfo"`
 
@@ -494,7 +488,7 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 		case podStatusExitPanicked:
 			newState = runnerMetricStatePanicked
 		}
-	} else if newStatus.informantStuckAt(global.config).Before(now) {
+	} else if newStatus.monitorStuckAt(global.config).Before(now) {
 		newState = runnerMetricStateStuck
 	} else {
 		newState = runnerMetricStateOk
@@ -521,12 +515,12 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	s.podStatus = newStatus
 }
 
-// informantStuckAt returns the time at which the Runner will be marked "stuck"
-func (s podStatus) informantStuckAt(config *Config) time.Time {
-	startupGracePeriod := time.Second * time.Duration(config.Informant.UnhealthyStartupGracePeriodSeconds)
-	unhealthySilencePeriod := time.Second * time.Duration(config.Informant.UnhealthyAfterSilenceDurationSeconds)
+// monitorStuckAt returns the time at which the Runner will be marked "stuck"
+func (s podStatus) monitorStuckAt(config *Config) time.Time {
+	startupGracePeriod := time.Second * time.Duration(config.Monitor.UnhealthyStartupGracePeriodSeconds)
+	unhealthySilencePeriod := time.Second * time.Duration(config.Monitor.UnhealthyAfterSilenceDurationSeconds)
 
-	if s.lastSuccessfulInformantComm == nil {
+	if s.lastSuccessfulMonitorComm == nil {
 		start := s.startTime
 
 		// For endpoints, we should start the grace period from when the VM was *assigned* the
@@ -537,14 +531,14 @@ func (s podStatus) informantStuckAt(config *Config) time.Time {
 
 		return start.Add(startupGracePeriod)
 	} else {
-		return s.lastSuccessfulInformantComm.Add(unhealthySilencePeriod)
+		return s.lastSuccessfulMonitorComm.Add(unhealthySilencePeriod)
 	}
 }
 
 func (s *lockedPodStatus) periodicallyRefreshState(ctx context.Context, logger *zap.Logger, global *agentState) {
 	maxUpdateSeconds := util.Min(
-		global.config.Informant.UnhealthyStartupGracePeriodSeconds,
-		global.config.Informant.UnhealthyAfterSilenceDurationSeconds,
+		global.config.Monitor.UnhealthyStartupGracePeriodSeconds,
+		global.config.Monitor.UnhealthyAfterSilenceDurationSeconds,
 	)
 	// make maxTick a bit less than maxUpdateSeconds for the benefit of consistency and having
 	// relatively frequent log messages if things are stuck.
@@ -564,7 +558,7 @@ func (s *lockedPodStatus) periodicallyRefreshState(ctx context.Context, logger *
 		// the next point in time at which the state might have changed, so that we minimize the
 		// time between the VM meeting the conditions for being "stuck" and us recognizing it.
 		s.update(global, func(stat podStatus) podStatus {
-			stuckAt := stat.informantStuckAt(global.config)
+			stuckAt := stat.monitorStuckAt(global.config)
 			now := time.Now()
 			if stuckAt.Before(now) && stat.state != runnerMetricStateErrored && stat.state != runnerMetricStatePanicked {
 				if stat.endpointID != "" {
@@ -607,6 +601,6 @@ func (s *lockedPodStatus) dump() podStatusDump {
 		State:          s.state,
 		StateUpdatedAt: s.stateUpdatedAt,
 
-		LastSuccessfulInformantComm: s.lastSuccessfulInformantComm,
+		LastSuccessfulMonitorComm: s.lastSuccessfulMonitorComm,
 	}
 }

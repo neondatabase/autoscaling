@@ -25,7 +25,6 @@ import (
 )
 
 const Name = "AutoscaleEnforcer"
-const LabelVM = vmapi.VirtualMachineNameLabel
 const LabelPluginCreatedMigration = "autoscaling.neon.tech/created-by-scheduler"
 const ConfigMapNamespace = "kube-system"
 const ConfigMapName = "scheduler-plugin-config"
@@ -74,7 +73,7 @@ func NewAutoscaleEnforcerPlugin(ctx context.Context, logger *zap.Logger, config 
 func makeAutoscaleEnforcerPlugin(
 	ctx context.Context,
 	logger *zap.Logger,
-	obj runtime.Object,
+	_obj runtime.Object,
 	h framework.Handle,
 	config *Config,
 ) (framework.Plugin, error) {
@@ -256,12 +255,8 @@ func (e *AutoscaleEnforcer) Name() string {
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
 func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, action string) (*api.VmInfo, error) {
-	var vmName util.NamespacedName
-	vmName.Namespace = pod.Namespace
-
-	var ok bool
-	vmName.Name, ok = pod.Labels[LabelVM]
-	if !ok {
+	vmName := util.TryPodOwnerVirtualMachine(pod)
+	if vmName == nil {
 		return nil, nil
 	}
 
@@ -420,14 +415,7 @@ func (e *AutoscaleEnforcer) Filter(
 
 	var otherPodInfo podOtherResourceState
 	if vmInfo == nil {
-		otherPodInfo, err = extractPodOtherPodResourceState(pod)
-		if err != nil {
-			logger.Error("Error extracing resource state for non-VM pod", zap.Error(err))
-			return framework.NewStatus(
-				framework.UnschedulableAndUnresolvable,
-				fmt.Sprintf("Error getting pod info: %s", err),
-			)
-		}
+		otherPodInfo = extractPodOtherPodResourceState(pod)
 	}
 
 	e.state.lock.Lock()
@@ -525,16 +513,7 @@ func (e *AutoscaleEnforcer) Filter(
 			}
 
 			// We *also* need to count pods in ignored namespaces
-			resources, err := extractPodOtherPodResourceState(podInfo.Pod)
-			if err != nil {
-				// FIXME: Same duplicate "pod" field issue as above; same temporary solution.
-				logger.Error(
-					"Error extracting resource state for non-VM Pod",
-					zap.Object("pod", name),
-					zap.Error(fmt.Errorf("Error extracting resource state for %v: %w", name, err)),
-				)
-				continue
-			}
+			resources := extractPodOtherPodResourceState(podInfo.Pod)
 
 			oldRes := otherResources
 			otherResources = oldRes.addPod(&e.state.conf.MemSlotSize, resources)
@@ -834,7 +813,7 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	pName := util.GetNamespacedName(pod)
 	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
-	if migrationName := tryMigrationOwnerReference(pod); migrationName != nil {
+	if migrationName := util.TryPodOwnerVirtualMachineMigration(pod); migrationName != nil {
 		logger = logger.With(zap.Object("virtualmachinemigration", *migrationName))
 	}
 
@@ -888,14 +867,7 @@ func (e *AutoscaleEnforcer) Reserve(
 
 	// if this is a non-VM pod, use a different set of information for it.
 	if vmInfo == nil {
-		podResources, err := extractPodOtherPodResourceState(pod)
-		if err != nil {
-			logger.Error("Error extracing resource state for non-VM pod", zap.Error(err))
-			return framework.NewStatus(
-				framework.UnschedulableAndUnresolvable,
-				fmt.Sprintf("Error getting non-VM pod info: %v", err),
-			)
-		}
+		podResources := extractPodOtherPodResourceState(pod)
 
 		oldNodeRes := node.otherResources
 		newNodeRes := node.otherResources.addPod(&e.state.conf.MemSlotSize, podResources)
