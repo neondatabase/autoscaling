@@ -239,8 +239,8 @@ func (i *IPAM) acquireORrelease(ctx context.Context, vmName string, vmNamespace 
 
 	wg.Wait()
 
-	// if ip.String() still <nil> then probably something wrong with leader election
-	if len(ip.String()) == 0 {
+	// ip.String() returns string "<nil>" on errors in ip struct parsing or if *ip is nil
+	if ip.String() == "<nil>" {
 		return ip, fmt.Errorf("something wrong, probably with leader election")
 	}
 
