@@ -52,6 +52,8 @@ func (r MainRunner) newAgentState(
 	broker *pubsub.Broker[schedwatch.WatchEvent],
 	schedulerStore *watch.Store[corev1.Pod],
 ) (*agentState, *prometheus.Registry) {
+	metrics, promReg := makePrometheusParts()
+
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
 		pods:                 make(map[util.NamespacedName]*podState),
@@ -62,11 +64,8 @@ func (r MainRunner) newAgentState(
 		podIP:                podIP,
 		schedulerEventBroker: broker,
 		schedulerStore:       schedulerStore,
-		metrics:              PromMetrics{}, //nolint:exhaustruct // set below
+		metrics:              metrics,
 	}
-
-	var promReg *prometheus.Registry
-	state.metrics, promReg = makePrometheusParts(state)
 
 	return state, promReg
 }
@@ -94,6 +93,7 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 		zap.Object("virtualmachine", event.vmInfo.NamespacedName()),
 		zap.Object("pod", util.NamespacedName{Namespace: event.vmInfo.Namespace, Name: event.podName}),
 	)
+	logger.Debug("Handling event for VM")
 
 	if err := s.lock.TryLock(ctx); err != nil {
 		logger.Warn("Context canceled while starting to handle event", zap.Error(err))
@@ -168,8 +168,7 @@ func (s *agentState) handleVMEventAdded(
 	// Empty update to trigger updating metrics and state.
 	status.update(s, func(s podStatus) podStatus { return s })
 
-	restartCount := 0
-	runner := s.newRunner(event.vmInfo, podName, event.podIP, restartCount)
+	runner := s.newRunner(event.vmInfo, podName, event.podIP)
 	runner.status = status
 
 	txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
@@ -182,7 +181,8 @@ func (s *agentState) handleVMEventAdded(
 		vmInfoUpdated: txVMUpdate,
 	}
 	s.metrics.runnerStarts.Inc()
-	logger := s.loggerForRunner(event.vmInfo.NamespacedName(), podName)
+	restartCount := 0
+	logger := s.loggerForRunner(restartCount, event.vmInfo.NamespacedName(), podName)
 	runner.Spawn(runnerCtx, logger, rxVMUpdate)
 }
 
@@ -319,7 +319,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 			s.metrics.runnerRestarts.Inc()
 
 			restartCount := len(status.previousEndStates) + 1
-			runner := s.newRunner(status.vmInfo, podName, podIP, restartCount)
+			runner := s.newRunner(status.vmInfo, podName, podIP)
 			runner.status = pod.status
 
 			txVMUpdate, rxVMUpdate := util.NewCondChannelPair()
@@ -331,38 +331,38 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 			status.endState = nil
 			status.startTime = time.Now()
 
-			runnerLogger := s.loggerForRunner(status.vmInfo.NamespacedName(), podName)
+			runnerLogger := s.loggerForRunner(restartCount, status.vmInfo.NamespacedName(), podName)
 			runner.Spawn(runnerCtx, runnerLogger, rxVMUpdate)
 			return status
 		})
 	}()
 }
 
-func (s *agentState) loggerForRunner(vmName, podName util.NamespacedName) *zap.Logger {
-	return s.baseLogger.Named("runner").With(zap.Object("virtualmachine", vmName), zap.Object("pod", podName))
+func (s *agentState) loggerForRunner(restartCount int, vmName, podName util.NamespacedName) *zap.Logger {
+	return s.baseLogger.Named("runner").With(
+		zap.Int("restarts", restartCount),
+		zap.Object("virtualmachine", vmName),
+		zap.Object("pod", podName),
+	)
 }
 
 // NB: caller must set Runner.status after creation
-func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string, restartCount int) *Runner {
+func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, podIP string) *Runner {
 	return &Runner{
-		global:                          s,
-		status:                          nil, // set by caller
-		schedulerRespondedWithMigration: false,
+		global: s,
+		status: nil, // set by caller
 
-		shutdown:         nil, // set by (*Runner).Run
-		vm:               vmInfo,
-		podName:          podName,
-		podIP:            podIP,
-		lock:             util.NewChanMutex(),
-		requestLock:      util.NewChanMutex(),
-		requestedUpscale: api.MoreResources{Cpu: false, Memory: false},
+		shutdown:    nil, // set by (*Runner).Run
+		vmName:      vmInfo.NamespacedName(),
+		podName:     podName,
+		podIP:       podIP,
+		memSlotSize: vmInfo.Mem.SlotSize,
+		lock:        util.NewChanMutex(),
 
-		lastMetrics:        nil,
-		scheduler:          nil,
-		monitor:            nil,
-		computeUnit:        nil,
-		lastApproved:       nil,
-		lastSchedulerError: nil,
+		executorStateDump: nil, // set by (*Runner).Run
+
+		scheduler: nil,
+		monitor:   nil,
 
 		backgroundWorkerCount: atomic.Int64{},
 		backgroundPanic:       make(chan error),

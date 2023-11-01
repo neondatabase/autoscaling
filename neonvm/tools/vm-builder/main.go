@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -74,8 +75,8 @@ RUN set -e \
 		libevent-dev \
 		libssl-dev
 
-ENV PGBOUNCER_VERSION 1.18.0
-ENV PGBOUNCER_GITPATH 1_18_0
+ENV PGBOUNCER_VERSION 1.21.0
+ENV PGBOUNCER_GITPATH 1_21_0
 RUN set -e \
 	&& curl -sfSL https://github.com/pgbouncer/pgbouncer/releases/download/pgbouncer_${PGBOUNCER_GITPATH}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz -o pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
 	&& tar xzvf pgbouncer-${PGBOUNCER_VERSION}.tar.gz \
@@ -251,7 +252,7 @@ fi
 ::respawn:su -p vm-monitor -c 'RUST_LOG=info /usr/local/bin/vm-monitor --addr "0.0.0.0:10301" --cgroup=neon-postgres{{if .FileCache}} --pgconnstr="host=localhost port=5432 dbname=postgres user=cloud_admin sslmode=disable"{{end}}'
 {{end}}
 ::respawn:su -p nobody -c '/usr/local/bin/pgbouncer /etc/pgbouncer.ini'
-::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter --auto-discover-databases --exclude-databases=template0,template1'
+::respawn:su -p nobody -c 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter'
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 ::shutdown:/neonvm/bin/vmshutdown
 `
@@ -373,11 +374,13 @@ listen_port=6432
 listen_addr=0.0.0.0
 auth_type=scram-sha-256
 auth_user=cloud_admin
+auth_dbname=postgres
 client_tls_sslmode=disable
 server_tls_sslmode=disable
 pool_mode=transaction
 max_client_conn=10000
 default_pool_size=16
+max_prepared_statements=0
 `
 )
 
@@ -400,6 +403,7 @@ var (
 
 type dockerMessage struct {
 	Stream string `json:"stream"`
+	Error  string `json:"error"`
 }
 
 func printReader(reader io.ReadCloser) error {
@@ -408,6 +412,10 @@ func printReader(reader io.ReadCloser) error {
 		candidateJSON := scanner.Bytes()
 		var msg dockerMessage
 		if err := json.Unmarshal(candidateJSON, &msg); err != nil || msg.Stream == "" {
+			if msg.Error != "" {
+				return errors.New(msg.Error)
+			}
+
 			log.Println(string(candidateJSON))
 			continue
 		}

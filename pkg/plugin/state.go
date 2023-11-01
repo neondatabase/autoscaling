@@ -593,10 +593,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, errors.New("Node has no Allocatable or Capacity CPU limits")
 	}
 
-	vCPU, marginCpu, err := nodeConf.vCpuLimits(cpuQ)
-	if err != nil {
-		return nil, fmt.Errorf("Error calculating vCPU limits for node %s: %w", node.Name, err)
-	}
+	vCPU, marginCpu := nodeConf.vCpuLimits(cpuQ)
 
 	// memQ = "mem, as a K8s resource.Quantity"
 	// -A for allocatable, -C for capacity
@@ -684,7 +681,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 	return n, nil
 }
 
-func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, error) {
+func extractPodOtherPodResourceState(pod *corev1.Pod) podOtherResourceState {
 	var cpu resource.Quantity
 	var mem resource.Quantity
 
@@ -698,7 +695,7 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) (podOtherResourceState, er
 		mem.Add(*container.Resources.Requests.Memory())
 	}
 
-	return podOtherResourceState{RawCPU: cpu, RawMemory: mem}, nil
+	return podOtherResourceState{RawCPU: cpu, RawMemory: mem}
 }
 
 func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName string) {
@@ -758,11 +755,7 @@ func (e *AutoscaleEnforcer) handlePodStarted(logger *zap.Logger, pod *corev1.Pod
 
 	logger.Info("Handling non-VM pod start event")
 
-	podResources, err := extractPodOtherPodResourceState(pod)
-	if err != nil {
-		logger.Error("Error extracting resource state for non-VM pod", zap.Error(err))
-		return
-	}
+	podResources := extractPodOtherPodResourceState(pod)
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
@@ -1337,7 +1330,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		pod := &pods.Items[i]
 		podName := util.GetNamespacedName(pod)
 
-		if _, isVM := pod.Labels[LabelVM]; !isVM {
+		vmName := util.TryPodOwnerVirtualMachine(pod)
+		if vmName == nil {
 			continue
 		}
 
@@ -1347,7 +1341,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			logger = logger.With(zap.String("node", pod.Spec.NodeName))
 		}
 
-		migrationName := tryMigrationOwnerReference(pod)
+		migrationName := util.TryPodOwnerVirtualMachineMigration(pod)
 		if migrationName != nil {
 			logger = logger.With(zap.Object("virtualmachinemigration", *migrationName))
 		}
@@ -1366,8 +1360,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		}
 
 		// Check if the VM exists
-		vmName := util.NamespacedName{Namespace: pod.Namespace, Name: pod.Labels[LabelVM]}
-		vm, ok := vmSpecs[vmName]
+		vm, ok := vmSpecs[*vmName]
 		if !ok {
 			logSkip("VM Pod's corresponding VM object is missing from our map (maybe it was removed between listing VMs and Pods?)")
 			continue
@@ -1473,8 +1466,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		pod := &pods.Items[i]
 		podName := util.GetNamespacedName(pod)
 
-		if _, isVM := pod.Labels[LabelVM]; isVM {
-			continue
+		if util.TryPodOwnerVirtualMachine(pod) != nil {
+			continue // skip VMs
 		}
 
 		// new logger just for this loop iteration, with info about the Pod
@@ -1513,10 +1506,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 		// TODO: this is largely duplicated from Reserve, so we should deduplicate it (probably into
 		// trans.go or something).
-		podRes, err := extractPodOtherPodResourceState(pod)
-		if err != nil {
-			return fmt.Errorf("Error extracting resource state from non-VM pod %v: %w", podName, err)
-		}
+		podRes := extractPodOtherPodResourceState(pod)
 
 		oldNodeRes := ns.otherResources
 		newNodeRes := ns.otherResources.addPod(&p.state.conf.MemSlotSize, podRes)

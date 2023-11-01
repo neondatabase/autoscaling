@@ -295,7 +295,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
 					uid := meta.GetUID()
-					err := handleEvent(&store, config, handlers, event.Type, uid, obj)
+					err := handleEvent(&store, handlers, event.Type, uid, obj)
 					if err != nil {
 						name := util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 						logger.Error(
@@ -485,7 +485,6 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 // helper for Watch. Error events are expected to already have been handled by the caller.
 func handleEvent[T any, P ~*T](
 	store *Store[T],
-	config Config,
 	handlers HandlerFuncs[P],
 	eventType watch.EventType,
 	uid types.UID,

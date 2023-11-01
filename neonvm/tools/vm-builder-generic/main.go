@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -245,6 +246,7 @@ var (
 
 type dockerMessage struct {
 	Stream string `json:"stream"`
+	Error  string `json:"error"`
 }
 
 func printReader(reader io.ReadCloser) error {
@@ -253,6 +255,10 @@ func printReader(reader io.ReadCloser) error {
 		candidateJSON := scanner.Bytes()
 		var msg dockerMessage
 		if err := json.Unmarshal(candidateJSON, &msg); err != nil || msg.Stream == "" {
+			if msg.Error != "" {
+				return errors.New(msg.Error)
+			}
+
 			log.Println(string(candidateJSON))
 			continue
 		}

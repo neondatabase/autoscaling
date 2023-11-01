@@ -56,7 +56,7 @@ type Dispatcher struct {
 	// The runner that this dispatcher is part of
 	runner *Runner
 
-	exit func(status websocket.StatusCode, err error)
+	exit func(status websocket.StatusCode, err error, transformErr func(error) error)
 
 	exitError  error
 	exitSignal chan struct{}
@@ -84,7 +84,7 @@ func NewDispatcher(
 	logger *zap.Logger,
 	addr string,
 	runner *Runner,
-	sendUpscaleRequested util.CondChannelSender,
+	sendUpscaleRequested func(request api.MoreResources, withLock func()),
 ) (_finalDispatcher *Dispatcher, _ error) {
 	// Create a new root-level context for this Dispatcher so that we can cancel if need be
 	ctx, cancelRootContext := context.WithCancel(ctx)
@@ -112,7 +112,7 @@ func NewDispatcher(
 		lastTransactionID: atomic.Uint64{}, // Note: initialized to 0, so it's even, as required.
 		protoVersion:      *protoVersion,
 	}
-	disp.exit = func(status websocket.StatusCode, err error) {
+	disp.exit = func(status websocket.StatusCode, err error, transformErr func(error) error) {
 		disp.lock.Lock()
 		defer disp.lock.Unlock()
 
@@ -126,7 +126,11 @@ func NewDispatcher(
 
 		var closeReason string
 		if err != nil {
-			closeReason = err.Error()
+			if transformErr != nil {
+				closeReason = transformErr(err).Error()
+			} else {
+				closeReason = err.Error()
+			}
 		} else {
 			closeReason = "normal exit"
 		}
@@ -144,7 +148,7 @@ func NewDispatcher(
 
 	go func() {
 		<-ctx.Done()
-		disp.exit(websocket.StatusNormalClosure, nil)
+		disp.exit(websocket.StatusNormalClosure, nil, nil)
 	}()
 
 	msgHandlerLogger := logger.Named("message-handler")
@@ -178,7 +182,7 @@ func NewDispatcher(
 				} else if since := time.Since(*firstSequentialFailure); since > continuedFailureAbortTimeout {
 					err := fmt.Errorf("vm-monitor has been failing health checks for at least %s", continuedFailureAbortTimeout)
 					logger.Error(fmt.Sprintf("%s, triggering connection restart", err.Error()))
-					disp.exit(websocket.StatusInternalError, err)
+					disp.exit(websocket.StatusInternalError, err, nil)
 				}
 			} else {
 				// health check was successful, so reset the sequential failures count
@@ -278,6 +282,13 @@ func (disp *Dispatcher) ExitError() error {
 	disp.lock.Lock()
 	defer disp.lock.Unlock()
 	return disp.exitError
+}
+
+// temporary method to hopefully help with https://github.com/neondatabase/autoscaling/issues/503
+func (disp *Dispatcher) lenWaiters() int {
+	disp.lock.Lock()
+	defer disp.lock.Unlock()
+	return len(disp.waiters)
 }
 
 // Send a message down the connection. Only call this method with types that
@@ -527,7 +538,7 @@ func (disp *Dispatcher) HandleMessage(
 }
 
 // Long running function that orchestrates all requests/responses.
-func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester util.CondChannelSender) {
+func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester func(_ api.MoreResources, withLock func())) {
 	logger.Info("Starting message handler")
 
 	// Utility for logging + returning an error when we get a message with an
@@ -543,27 +554,19 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 	// upscale. The monitor will get the result back as a NotifyUpscale message
 	// from us, with a new id.
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
-		disp.runner.lock.Lock()
-		defer disp.runner.lock.Unlock()
-
 		// TODO: it shouldn't be this function's responsibility to update metrics.
 		defer func() {
 			disp.runner.global.metrics.monitorRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
 		}()
-
-		upscaleRequester.Send()
 
 		resourceReq := api.MoreResources{
 			Cpu:    false,
 			Memory: true,
 		}
 
-		logger.Info(
-			"Updating requested upscale",
-			zap.Any("oldRequested", disp.runner.requestedUpscale),
-			zap.Any("newRequested", resourceReq),
-		)
-		disp.runner.requestedUpscale = resourceReq
+		upscaleRequester(resourceReq, func() {
+			logger.Info("Updating requested upscale", zap.Any("requested", resourceReq))
+		})
 	}
 	handleUpscaleConfirmation := func(_ api.UpscaleConfirmation, id uint64) error {
 		disp.lock.Lock()
@@ -678,7 +681,12 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 				err = fmt.Errorf("Error handling message: %w", err)
 				// note: in theory we *could* be more descriptive with these statuses, but the only
 				// consumer of this API is the vm-monitor, and it doesn't check those.
-				disp.exit(websocket.StatusInternalError, err)
+				//
+				// Also note: there's a limit on the size of the close frame we're allowed to send,
+				// so the actual error we use to exit with must be somewhat reduced in size. These
+				// "Error handling message" errors can get quite long, so we'll only use the root
+				// cause of the error for the message.
+				disp.exit(websocket.StatusInternalError, err, util.RootError)
 			}
 			return
 		}
