@@ -10,9 +10,8 @@ Images are available as:
 |----------------|------------|
 | scheduler (and plugin) | `neondatabase/autoscale-scheduler` |
 | autoscaler-agent | `neondatabase/autoscaler-agent` |
-| VM monitor | `neondatabase/vm-monitor` |
 
-The deployment files and a VM monitor binary are attached to each release.
+The deployment files and a vm-builder binary are attached to each release.
 
 For information on inter-version compatibility, see
 [`pkg/api/VERSIONING.md`](./pkg/api/VERSIONING.md).
