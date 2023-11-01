@@ -112,7 +112,7 @@ test: fmt vet envtest ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
+build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
 	go build -o bin/runner           neonvm/runner/main.go
@@ -120,10 +120,6 @@ build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binarie
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
 	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" neonvm/tools/vm-builder/main.go
-
-.PHONY: bin/vm-builder-generic
-bin/vm-builder-generic: ## Build vm-builder-generic binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder-generic  neonvm/tools/vm-builder-generic/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
