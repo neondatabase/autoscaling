@@ -1,0 +1,12 @@
+::sysinit:/neonvm/bin/vminit
+::once:/neonvm/bin/touch /neonvm/vmstart.allowed
+::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
+::respawn:/neonvm/bin/udevd
+::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
+::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
+::respawn:/neonvm/bin/vmstart
+{{ range .InittabCommands }}
+::{{.SysvInitAction}}:su -p {{.CommandUser}} -c {{.ShellEscapedCommand}}
+{{ end }}
+ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
+::shutdown:/neonvm/bin/vmshutdown
