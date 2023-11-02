@@ -91,8 +91,6 @@ func QmpConnect(ip string, port int32) (*qmp.SocketMonitor, error) {
 		return nil, err
 	}
 	if err := mon.Connect(); err != nil {
-		// qmp.NewSocketMonitor() opens a connection; if Connect() fails, we need to make sure to close it.
-		_ = mon.Disconnect()
 		return nil, err
 	}
 
