@@ -523,8 +523,11 @@ func main() {
 
 	defer buildResp.Body.Close()
 
-	out := os.Stdout
-	err = jsonmessage.DisplayJSONMessagesStream(buildResp.Body, out, out.Fd(), term.IsTerminal(int(out.Fd())), nil)
+	out := io.Writer(os.Stdout)
+	if *quiet {
+		out = io.Discard
+	}
+	err = jsonmessage.DisplayJSONMessagesStream(buildResp.Body, out, os.Stdout.Fd(), term.IsTerminal(int(os.Stdout.Fd())), nil)
 	if err != nil {
 		log.Fatalln(err)
 	}
