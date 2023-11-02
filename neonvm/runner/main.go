@@ -183,12 +183,19 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
-func createISO9660runtime(diskPath string, command []string, args []string, env []vmv1.EnvVar, disks []vmv1.Disk) error {
+func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
 	}
 	defer writer.Cleanup()
+
+	if len(sysctl) != 0 {
+		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(sysctl, "\n"))), "sysctl.conf")
+		if err != nil {
+			return err
+		}
+	}
 
 	if len(command) != 0 {
 		err = writer.AddFile(bytes.NewReader([]byte(shellescape.QuoteCommand(command))), "command.sh")
@@ -493,7 +500,11 @@ func main() {
 	}
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
+	sysctl := []string{}
+	if vmSpec.Guest.Settings != nil {
+		sysctl = vmSpec.Guest.Settings.Sysctl
+	}
+	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
 		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 

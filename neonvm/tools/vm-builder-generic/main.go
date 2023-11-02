@@ -222,6 +222,9 @@ mount -o ro,mode=0644 /dev/vdb /neonvm/runtime
 # mount virtual machine .spec.disks
 test -f /neonvm/runtime/mounts.sh && /neonvm/bin/sh /neonvm/runtime/mounts.sh
 
+# set any user-supplied sysctl settings
+test -f /neonvm/runtime/sysctl.conf && /neonvm/bin/sysctl -p /neonvm/runtime/sysctl.conf
+
 # try resize filesystem
 resize2fs /dev/vda
 
