@@ -30,6 +30,8 @@
     ],
     "dev-eu-central-1-alpha": [],
     "dev-eu-west-1-zeta": [],
-    "dev-us-east-2-beta": []
+    "dev-us-east-2-beta": [
+      { "path": ".doMigration", "value": false }
+	]
   }
 }

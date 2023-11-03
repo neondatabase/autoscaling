@@ -90,7 +90,7 @@ data:
     \      \"mem\": 1\n    },\n    \"minUsageScore\": 0.5,\n    \"maxUsageScore\"\
     : 0,\n    \"scorePeak\": 0.8\n  },\n  \"nodeOverrides\": [],\n  \"schedulerName\"\
     : \"autoscale-scheduler\",\n  \"dumpState\": {\n    \"port\": 10298,\n    \"timeoutSeconds\"\
-    : 5\n  },\n  \"migrationDeletionRetrySeconds\": 5,\n  \"doMigration\": true,\n\
+    : 5\n  },\n  \"migrationDeletionRetrySeconds\": 5,\n  \"doMigration\": false,\n\
     \  \"randomizeScores\": true,\n  \"k8sNodeGroupLabel\": \"eks.amazonaws.com/nodegroup\"\
     ,\n  \"k8sAvailabilityZoneLabel\": \"topology.kubernetes.io/zone\",\n  \"ignoreNamespaces\"\
     : [\n    \"overprovisioning\"\n  ]\n}"
@@ -124,7 +124,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.18.3
+        image: neondatabase/autoscale-scheduler:v0.18.6-patch1
         livenessProbe:
           httpGet:
             path: /healthz
@@ -142,8 +142,12 @@ spec:
             port: 10259
             scheme: HTTPS
         resources:
+          limits:
+            cpu: 1
+            memory: 2000Mi
           requests:
-            cpu: '0.1'
+            cpu: 1
+            memory: 2000Mi
         securityContext:
           privileged: false
         volumeMounts:
