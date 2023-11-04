@@ -127,7 +127,6 @@ func (r *VirtualMachine) ValidateCreate() error {
 
 	// validate .spec.guest.ports[].name
 	for _, port := range r.Spec.Guest.Ports {
-		virtualmachinelog.Info("validate port ", "name", port.Name)
 		if len(port.Name) != 0 && port.Name == "qmp" {
 			return errors.New("'qmp' is reserved name for .spec.guest.ports[].name")
 		}
