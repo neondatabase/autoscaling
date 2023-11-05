@@ -65,6 +65,13 @@ func WatchSchedulerUpdates(
 	store *watch.Store[corev1.Pod],
 ) (SchedulerWatch, *SchedulerInfo, error) {
 	events := eventBroker.Subscribe(ctx)
+	finishOk := false
+	defer func() {
+		if !finishOk {
+			eventBroker.Unsubscribe(ctx, events)
+		}
+	}()
+
 	readyQueue := make(chan SchedulerInfo)
 	deleted := make(chan SchedulerInfo)
 	cmd := make(chan watchCmd)
@@ -111,9 +118,11 @@ func WatchSchedulerUpdates(
 	}
 
 	if len(candidates) == 0 {
+		finishOk = true
 		return watcher, nil, nil
 	} else {
 		info := newSchedulerInfo(candidates[0])
+		finishOk = true
 		return watcher, &info, nil
 	}
 }
