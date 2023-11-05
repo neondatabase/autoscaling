@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/alessio/shellescape"
@@ -182,14 +183,18 @@ action=/neonvm/bin/poweroff
 
 	scriptVmShutdown = `#!/neonvm/bin/sh
 rm /neonvm/vmstart.allowed
+{{if .ShutdownHook}}
 if [ -e /neonvm/vmstart.allowed ]; then
 	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" 1>&2
 fi
 # we inhibited new command starts, but there may still be a command running
 while ! /neonvm/bin/flock -n /neonvm/vmstart.lock true; do
-	su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+	echo 'Running shutdown hook...'
+	{{.ShutdownHook}}
+	sleep 0.5s # make sure we don't spin if things aren't working
 done
 echo "vmstart workload shut down cleanly" 1>&2
+{{end}}
 `
 
 	scriptVmInit = `#!/neonvm/bin/sh
@@ -351,6 +356,7 @@ type TemplatesContext struct {
 	SpecBuild       string
 	SpecMerge       string
 	InittabCommands []inittabCommand
+	ShutdownHook    string
 }
 
 type inittabCommand struct {
@@ -467,6 +473,7 @@ func main() {
 	if spec != nil {
 		tmplArgs.SpecBuild = spec.Build
 		tmplArgs.SpecMerge = spec.Merge
+		tmplArgs.ShutdownHook = strings.ReplaceAll(spec.ShutdownHook, "\n", "\n\t")
 
 		for _, c := range spec.Commands {
 			tmplArgs.InittabCommands = append(tmplArgs.InittabCommands, inittabCommand{
@@ -602,10 +609,11 @@ func main() {
 }
 
 type imageSpec struct {
-	Commands []command `yaml:"commands"`
-	Build    string    `yaml:"build"`
-	Merge    string    `yaml:"merge"`
-	Files    []file    `yaml:"files"`
+	Commands     []command `yaml:"commands"`
+	ShutdownHook string    `yaml:"shutdownHook,omitempty"`
+	Build        string    `yaml:"build"`
+	Merge        string    `yaml:"merge"`
+	Files        []file    `yaml:"files"`
 }
 
 type command struct {
