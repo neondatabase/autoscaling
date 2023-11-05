@@ -304,10 +304,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				log.Error(err, "fail to acquire IP")
 				return err
 			}
-			virtualmachine.Status.ExtraNetIP = ip.IP.String()
-			virtualmachine.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
 			message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
 			log.Info(message)
+			virtualmachine.Status.ExtraNetIP = ip.IP.String()
+			virtualmachine.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
 			r.Recorder.Event(virtualmachine, "Normal", "OverlayNet", message)
 		}
 		// VirtualMachine just created, change Phase to "Pending"

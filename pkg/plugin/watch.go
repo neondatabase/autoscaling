@@ -114,7 +114,8 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					return
 				}
 
-				isVM := util.TryPodOwnerVirtualMachine(pod) != nil
+				isVM := util.TryPodOwnerVirtualMachine(pod) != nil ||
+					util.TryPodOwnerVirtualMachineMigration(pod) != nil
 
 				// Generate events for all non-VM pods that are running
 				if !isVM && pod.Status.Phase == corev1.PodRunning {
@@ -136,7 +137,8 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					return
 				}
 
-				isVM := util.TryPodOwnerVirtualMachine(newPod) != nil
+				isVM := util.TryPodOwnerVirtualMachine(newPod) != nil ||
+					util.TryPodOwnerVirtualMachineMigration(newPod) != nil
 
 				// Check if a non-VM pod is now running.
 				if !isVM && oldPod.Status.Phase == corev1.PodPending && newPod.Status.Phase == corev1.PodRunning {
@@ -148,7 +150,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
 					logger.Info("Received update event for completion of pod", zap.Object("pod", name))
 
-					if isVM || util.TryPodOwnerVirtualMachineMigration(newPod) != nil {
+					if isVM {
 						callbacks.submitVMDeletion(logger, name)
 					} else {
 						callbacks.submitPodDeletion(logger, name)
@@ -180,7 +182,9 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 					logger.Info("Received delete event for completed pod", zap.Object("pod", name))
 				} else {
 					logger.Info("Received delete event for pod", zap.Object("pod", name))
-					if util.TryPodOwnerVirtualMachine(pod) != nil {
+					isVM := util.TryPodOwnerVirtualMachine(pod) != nil ||
+						util.TryPodOwnerVirtualMachineMigration(pod) != nil
+					if isVM {
 						callbacks.submitVMDeletion(logger, name)
 					} else {
 						callbacks.submitPodDeletion(logger, name)
