@@ -110,7 +110,6 @@ func (r *VirtualMachine) ValidateCreate() error {
 
 	// validate .spec.disk names
 	for _, disk := range r.Spec.Disks {
-		virtualmachinelog.Info("validate disk", "name", disk.Name)
 		if disk.Name == "virtualmachineimages" {
 			return errors.New("'virtualmachineimages' is reserved name for .spec.disks[].name")
 		}
