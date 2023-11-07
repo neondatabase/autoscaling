@@ -123,7 +123,7 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 
 	// must be called while holding c's lock
 	generationUnchanged := func(since MonitorHandle) bool {
-		return since.Generation() == c.clients.Plugin.CurrentGeneration()
+		return since.Generation() == c.clients.Monitor.CurrentGeneration()
 	}
 
 	for {
