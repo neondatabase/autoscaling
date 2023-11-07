@@ -1,7 +1,7 @@
 ---
 name: Feature request template
 about: Template that will help you to submit a visible and actionable feature request.
-title: 'Feature: '
+title: ''
 labels: t/feature
 assignees: ''
 
