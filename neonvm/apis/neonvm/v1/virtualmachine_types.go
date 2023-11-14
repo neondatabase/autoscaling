@@ -114,7 +114,7 @@ const (
 
 type Guest struct {
 	// +optional
-	KernelImage *string `json:"kernelImage"`
+	KernelImage *string `json:"kernelImage,omitempty"`
 
 	// +optional
 	CPUs CPUs `json:"cpus"`
