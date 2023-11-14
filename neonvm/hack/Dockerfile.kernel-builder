@@ -21,7 +21,8 @@ RUN apt-get update && apt-get -y install \
     python3 \
     cpio \
     zstd \
-    libncurses-dev
+    libncurses-dev \
+    dwarves
 
 RUN set -e \
     && mkdir linux \
