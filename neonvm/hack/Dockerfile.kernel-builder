@@ -1,4 +1,8 @@
-FROM debian:11 AS build-deps
+# Our kernel config is based on https://kernel.ubuntu.com/mainline/v5.15.80/amd64/
+# which was built with `CONFIG_CC_VERSION_TEXT="gcc (Ubuntu 11.3.0-1ubuntu1~22.04) 11.3.0"`
+# `mantic` is newer, so, all the compiler features should be supported.
+# XXX: re-do this commit's recipe to create the kernelc config inside a ubuntu:22.04 container
+FROM ubuntu:mantic AS build-deps
 
 ARG KERNEL_VERSION
 
@@ -21,7 +25,11 @@ RUN apt-get update && apt-get -y install \
     python3 \
     cpio \
     zstd \
-    libncurses-dev
+    libncurses-dev \
+    dwarves \
+    rsync \
+    kmod \
+    debhelper
 
 RUN set -e \
     && mkdir linux \
@@ -34,7 +42,14 @@ ADD linux-config-${KERNEL_VERSION} linux/.config
 
 RUN cd linux && make -j `nproc`
 
+RUN mkdir install && cd linux && make install INSTALL_DIR=../install
+RUN mkdir modules_install && cd linux && make modules_install INSTALL_MOD_PATH=../modules_install
+RUN cd linux && make bindeb-pkg
+
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
 FROM alpine:3.16
 COPY --from=build /build/linux/arch/x86/boot/bzImage /vmlinuz
+COPY --from=build /build/install /
+COPY --from=build /build/modules_install /
+COPY --from=build /build/*.deb /
