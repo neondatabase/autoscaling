@@ -19,7 +19,7 @@ env:
 
 jobs:
   vm-kernel:
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, gen3, large ]
     steps:
 
       - name: git checkout
