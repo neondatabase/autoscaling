@@ -1145,6 +1145,26 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		},
 	}
 
+	// If a custom kernel is used, add that image:
+	if virtualmachine.Spec.Guest.KernelImage != nil {
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "-kernelpath=/vm/images/vmlinuz")
+		pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
+			Image:           *virtualmachine.Spec.Guest.KernelImage,
+			Name:            "init-kernel",
+			ImagePullPolicy: virtualmachine.Spec.Guest.RootDisk.ImagePullPolicy,
+			Args:            []string{"cp", "/vmlinuz", "/vm/images/vmlinuz"},
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      "virtualmachineimages",
+				MountPath: "/vm/images",
+			}},
+			SecurityContext: &corev1.SecurityContext{
+				// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+				RunAsUser:  &[]int64{36}[0],
+				RunAsGroup: &[]int64{34}[0],
+			},
+		})
+	}
+
 	// Add any InitContainers that were specified by the spec
 	pod.Spec.InitContainers = append(pod.Spec.InitContainers, virtualmachine.Spec.ExtraInitContainers...)
 

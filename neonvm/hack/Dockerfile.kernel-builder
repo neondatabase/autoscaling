@@ -31,5 +31,7 @@ ADD linux-config-${KERNEL_VERSION} linux/.config
 
 RUN cd linux && make -j `nproc`
 
-FROM scratch
+# Use alpine so that `cp` is available when loading custom kernels for the runner pod.
+# See the neonvm controller's pod creation logic for more detail.
+FROM alpine:3.16
 COPY --from=build /build/linux/arch/x86/boot/bzImage /vmlinuz
