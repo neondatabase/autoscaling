@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	_ "embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -25,254 +26,21 @@ import (
 
 // vm-builder --src alpine:3.16 --dst vm-alpine:dev --file vm-alpine.qcow2
 
-const (
-	dockerfileVmBuilder = `
-{{.SpecBuild}}
-
-FROM {{.RootDiskImage}} AS rootdisk
-
-# Temporarily set to root in order to do the "merge" step, so that it's possible to make changes in
-# the final VM to files owned by root, even if the source image sets the user to something else.
-USER root
-{{.SpecMerge}}
-
-FROM alpine:3.16 AS vm-runtime
-# add busybox
-ENV BUSYBOX_VERSION 1.35.0
-RUN set -e \
-	&& mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config \
-	&& wget -q https://busybox.net/downloads/binaries/${BUSYBOX_VERSION}-x86_64-linux-musl/busybox -O /neonvm/bin/busybox \
-	&& chmod +x /neonvm/bin/busybox \
-	&& /neonvm/bin/busybox --install -s /neonvm/bin
-
-# add udevd and agetty (with shared libs)
-RUN set -e \
-	&& apk add --no-cache --no-progress --quiet \
-		acpid \
-		udev \
-		agetty \
-		su-exec \
-		e2fsprogs-extra \
-		blkid \
-		flock \
-	&& mv /sbin/acpid         /neonvm/bin/ \
-	&& mv /sbin/udevd         /neonvm/bin/ \
-	&& mv /sbin/agetty        /neonvm/bin/ \
-	&& mv /sbin/su-exec       /neonvm/bin/ \
-	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
-	&& mv /sbin/blkid         /neonvm/bin/blkid \
-	&& mv /usr/bin/flock	  /neonvm/bin/flock \
-	&& mkdir -p /neonvm/lib \
-	&& cp -f /lib/ld-musl-x86_64.so.1  /neonvm/lib/ \
-	&& cp -f /lib/libblkid.so.1.1.0    /neonvm/lib/libblkid.so.1 \
-	&& cp -f /lib/libcrypto.so.1.1     /neonvm/lib/ \
-	&& cp -f /lib/libkmod.so.2.3.7     /neonvm/lib/libkmod.so.2 \
-	&& cp -f /lib/libudev.so.1.6.3     /neonvm/lib/libudev.so.1 \
-	&& cp -f /lib/libz.so.1.2.12       /neonvm/lib/libz.so.1 \
-	&& cp -f /usr/lib/liblzma.so.5.2.5 /neonvm/lib/liblzma.so.5 \
-	&& cp -f /usr/lib/libzstd.so.1.5.2 /neonvm/lib/libzstd.so.1 \
-	&& cp -f /lib/libe2p.so.2          /neonvm/lib/libe2p.so.2 \
-	&& cp -f /lib/libext2fs.so.2       /neonvm/lib/libext2fs.so.2 \
-	&& cp -f /lib/libcom_err.so.2      /neonvm/lib/libcom_err.so.2 \
-	&& cp -f /lib/libblkid.so.1        /neonvm/lib/libblkid.so.1 \
-	&& mv /usr/share/udhcpc/default.script /neonvm/bin/udhcpc.script \
-	&& sed -i 's/#!\/bin\/sh/#!\/neonvm\/bin\/sh/' /neonvm/bin/udhcpc.script \
-	&& sed -i 's/export PATH=.*/export PATH=\/neonvm\/bin/' /neonvm/bin/udhcpc.script
-
-# tools for qemu disk creation
-RUN set -e \
-	&& apk add --no-cache --no-progress --quiet \
-		qemu-img \
-		e2fsprogs
-
-# Install vector.dev binary
-RUN set -e \
-    && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
-    | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-x86_64-unknown-linux-musl/bin/vector
-
-# init scripts
-ADD inittab   /neonvm/bin/inittab
-ADD vminit    /neonvm/bin/vminit
-ADD vmstart   /neonvm/bin/vmstart
-ADD vmshutdown /neonvm/bin/vmshutdown
-ADD vmacpi    /neonvm/acpi/vmacpi
-ADD vector.yaml /neonvm/config/vector.yaml
-RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
-
-FROM vm-runtime AS builder
-ARG DISK_SIZE
-COPY --from=rootdisk / /rootdisk
-COPY --from=vm-runtime /neonvm /rootdisk/neonvm
-RUN set -e \
-    && mkdir -p /rootdisk/etc \
-    && mkdir -p /rootdisk/etc/vector \
-    && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
-    && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
-    && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
-
-FROM alpine:3.16
-RUN apk add --no-cache --no-progress --quiet qemu-img
-COPY --from=builder /disk.qcow2 /
-`
-	scriptVmStart = `#!/neonvm/bin/sh
-
-/neonvm/bin/cat <<'EOF' >/neonvm/bin/vmstarter.sh
-{{ range .Env }}
-export {{.}}
-{{- end }}
-EOF
-
-if /neonvm/bin/test -f /neonvm/runtime/env.sh; then
-    /neonvm/bin/cat /neonvm/runtime/env.sh >>/neonvm/bin/vmstarter.sh
-fi
-
-{{if or .Entrypoint .Cmd | not}}
-# If we have no arguments *at all*, then emit an error. This matches docker's behavior.
-if /neonvm/bin/test \( ! -f /neonvm/runtime/command.sh \) -a \( ! -f /neonvm/runtime/args.sh \); then
-	/neonvm/bin/echo 'Error: No command specified' >&2
-	exit 1
-fi
-{{end}}
-
-{{/* command.sh is set by the runner with the contents of the VM's spec.guest.command, if it's set */}}
-if /neonvm/bin/test -f /neonvm/runtime/command.sh; then
-    /neonvm/bin/cat /neonvm/runtime/command.sh >>/neonvm/bin/vmstarter.sh
-else
-    {{/*
-	A couple notes:
-	  - .Entrypoint is already shell-escaped twice (everything is quoted)
-	  - the shell-escaping isn't perfect. In particular, it doesn't handle backslashes well.
-	  - It's good enough for now
-	*/}}
-    /neonvm/bin/echo -n {{range .Entrypoint}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
-fi
-
-{{/* args.sh is set by the runner with the contents of the VM's spec.guest.args, if it's set */}}
-if /neonvm/bin/test -f /neonvm/runtime/args.sh; then
-    /neonvm/bin/echo -n ' ' >>/neonvm/bin/vmstarter.sh
-    /neonvm/bin/cat /neonvm/runtime/args.sh >>/neonvm/bin/vmstarter.sh
-else
-    {{/* Same as with .Entrypoint; refer there. We don't have '-n' because we want a trailing newline */}}
-    /neonvm/bin/echo -n {{range .Cmd}}' '{{.}}{{end}} >> /neonvm/bin/vmstarter.sh
-fi
-
-/neonvm/bin/chmod +x /neonvm/bin/vmstarter.sh
-
-/neonvm/bin/flock -o /neonvm/vmstart.lock -c 'test -e /neonvm/vmstart.allowed && /neonvm/bin/su-exec {{.User}} /neonvm/bin/sh /neonvm/bin/vmstarter.sh'
-`
-
-	scriptInitTab = `
-::sysinit:/neonvm/bin/vminit
-::once:/neonvm/bin/touch /neonvm/vmstart.allowed
-::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
-::respawn:/neonvm/bin/udevd
-::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
-::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
-::respawn:/neonvm/bin/vmstart
-{{ range .InittabCommands }}
-::{{.SysvInitAction}}:su -p {{.CommandUser}} -c {{.ShellEscapedCommand}}
-{{ end }}
-ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
-::shutdown:/neonvm/bin/vmshutdown
-`
-
-	scriptVmAcpi = `
-event=button/power
-action=/neonvm/bin/poweroff
-`
-
-	scriptVmShutdown = `#!/neonvm/bin/sh
-rm /neonvm/vmstart.allowed
-{{if .ShutdownHook}}
-if [ -e /neonvm/vmstart.allowed ]; then
-	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" 1>&2
-fi
-# we inhibited new command starts, but there may still be a command running
-while ! /neonvm/bin/flock -n /neonvm/vmstart.lock true; do
-	echo 'Running shutdown hook...'
-	{{.ShutdownHook}}
-	sleep 0.5s # make sure we don't spin if things aren't working
-done
-echo "vmstart workload shut down cleanly" 1>&2
-{{end}}
-`
-
-	scriptVmInit = `#!/neonvm/bin/sh
-
-export PATH=/neonvm/bin
-
-# set links to libs
-mkdir -p /lib
-for l in $(find /neonvm/lib -type f); do
-    lib="$(basename $l)"
-    [ ! -e "/lib/${lib}" -a ! -e "/usr/lib/${lib}" ] && ln -s "${l}" "/lib/${lib}"
-done
-
-# udev rule for auto-online hotplugged CPUs
-mkdir -p /lib/udev/rules.d
-echo 'SUBSYSTEM=="cpu", ACTION=="add", TEST=="online", ATTR{online}=="0", ATTR{online}="1"' > /lib/udev/rules.d/99-hotplug-cpu.rules
-
-# system mounts
-mkdir -p /dev/pts /dev/shm
-chmod 0755 /dev/pts
-chmod 1777 /dev/shm
-mount -t proc  proc  /proc
-mount -t sysfs sysfs /sys
-mount -t cgroup2 cgroup2 /sys/fs/cgroup
-
-# Allow all users to move processes to/from the root cgroup.
-#
-# This is required in order to be able to 'cgexec' anything, if the entrypoint is not being run as
-# root, because moving tasks between one cgroup and another *requires write access to the
-# cgroup.procs file of the common ancestor*, and because the entrypoint isn't already in a cgroup,
-# any new tasks are automatically placed in the top-level cgroup.
-#
-# This *would* be bad for security, if we relied on cgroups for security; but instead because they
-# are just used for cooperative signaling, this should be mostly ok.
-chmod go+w /sys/fs/cgroup/cgroup.procs
-
-mount -t devpts -o noexec,nosuid       devpts    /dev/pts
-mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
-
-# neonvm runtime params mounted as iso9660 disk
-mount -o ro,mode=0644 /dev/vdb /neonvm/runtime
-
-# mount virtual machine .spec.disks
-test -f /neonvm/runtime/mounts.sh && /neonvm/bin/sh /neonvm/runtime/mounts.sh
-
-# set any user-supplied sysctl settings
-test -f /neonvm/runtime/sysctl.conf && /neonvm/bin/sysctl -p /neonvm/runtime/sysctl.conf
-
-# try resize filesystem
-resize2fs /dev/vda
-
-# networking
-ip link set up dev lo
-ip link set up dev eth0
-`
-	configVector = `---
-data_dir: /tmp
-api:
-  enabled: true
-  address: "0.0.0.0:8686"
-  playground: false
-sources:
-  host_metrics:
-    filesystem:
-      devices:
-        excludes: [binfmt_misc]
-      filesystems:
-        excludes: [binfmt_misc]
-      mountPoints:
-        excludes: ["*/proc/sys/fs/binfmt_misc"]
-    type: host_metrics
-sinks:
-  prom_exporter:
-    type: prometheus_exporter
-    inputs:
-      - host_metrics
-    address: "0.0.0.0:9100"
-`
+var (
+	//go:embed files/Dockerfile.img
+	dockerfileVmBuilder string
+	//go:embed files/vmstart
+	scriptVmStart string
+	//go:embed files/inittab
+	scriptInitTab string
+	//go:embed files/vmacpi
+	scriptVmAcpi string
+	//go:embed files/vmshutdown
+	scriptVmShutdown string
+	//go:embed files/vminit
+	scriptVmInit string
+	//go:embed files/vector.yaml
+	configVector string
 )
 
 var (
