@@ -68,10 +68,6 @@ type vmMetricsSeconds struct {
 	activeTime time.Duration
 }
 
-const (
-	EndpointLabel string = "neon/endpoint-id"
-)
-
 func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
 	parentLogger *zap.Logger,
@@ -152,7 +148,7 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 		})
 	}
 	for _, vm := range vmsOnThisNode {
-		endpointID, isEndpoint := vm.Labels[EndpointLabel]
+		endpointID, isEndpoint := vm.Annotations[api.AnnotationBillingEndpointID]
 		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
 		if !isEndpoint {
 			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one

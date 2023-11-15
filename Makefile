@@ -6,12 +6,8 @@ IMG_VXLAN ?= vxlan-controller:dev
 # Autoscaler related images
 AUTOSCALER_SCHEDULER_IMG ?= autoscale-scheduler:dev
 AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
-VM_MONITOR_IMG ?= vm-monitor:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
-
-# Which branch of neondatabase/neon to pull the vm-monitor from
-VM_MONITOR_BRANCH ?= main
 
 # kernel for guests
 VM_KERNEL_VERSION ?= "5.15.80"
@@ -116,37 +112,24 @@ test: fmt vet envtest ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: fmt vet bin/vm-builder bin/vm-builder-generic ## Build all neonvm binaries.
+build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 	go build -o bin/controller       neonvm/main.go
 	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
 	go build -o bin/runner           neonvm/runner/main.go
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.VMMonitor=${VM_MONITOR_IMG}" neonvm/tools/vm-builder/main.go
-
-.PHONY: bin/vm-builder-generic
-bin/vm-builder-generic: ## Build vm-builder-generic binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder-generic  neonvm/tools/vm-builder-generic/main.go
+	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" neonvm/tools/vm-builder/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
 
-.PHONY: vm-monitor
-vm-monitor: ## Build vm-monitor image
-	docker buildx build \
-		--tag $(VM_MONITOR_IMG) \
-		--load \
-		--build-arg BRANCH=$(VM_MONITOR_BRANCH) \
-		--file build/vm-monitor/Dockerfile \
-		.
-
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler vm-monitor ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler, vm-monitor
+docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler
 
 .PHONY: docker-push
 docker-push: docker-build ## Push docker images to docker registry
@@ -155,7 +138,6 @@ docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_VXLAN)
 	docker push -q $(AUTOSCALER_SCHEDULER_IMG)
 	docker push -q $(AUTOSCALER_AGENT_IMG)
-	docker push -q $(VM_MONITOR_IMG)
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
@@ -189,10 +171,10 @@ docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
 
 .PHONY: docker-build-examples
 docker-build-examples: bin/vm-builder ## Build docker images for testing VMs
-	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -enable-monitor
+	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml
 
 .PHONY: docker-build-pg14-disk-test
-docker-build-pg14-disk-test: vm-monitor bin/vm-builder-generic ## Build a VM image for testing
+docker-build-pg14-disk-test: bin/vm-builder ## Build a VM image for testing
 	if [ -a 'vm-examples/pg14-disk-test/ssh_id_rsa' ]; then \
 	    echo "Skipping keygen because 'ssh_id_rsa' already exists"; \
 	else \
@@ -201,12 +183,7 @@ docker-build-pg14-disk-test: vm-monitor bin/vm-builder-generic ## Build a VM ima
 	    chmod uga+rw 'vm-examples/pg14-disk-test/ssh_id_rsa' 'vm-examples/pg14-disk-test/ssh_id_rsa.pub'; \
 	fi
 
-	docker buildx build \
-		--tag tmp-$(PG14_DISK_TEST_IMG) \
-		--load \
-		--file vm-examples/pg14-disk-test/Dockerfile.vmdata \
-		vm-examples/pg14-disk-test/
-	./bin/vm-builder-generic -src tmp-$(PG14_DISK_TEST_IMG) -use-inittab -dst $(PG14_DISK_TEST_IMG)
+	./bin/vm-builder -src alpine:3.16 -dst $(PG14_DISK_TEST_IMG) -spec vm-examples/pg14-disk-test/image-spec.yaml
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.

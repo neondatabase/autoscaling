@@ -136,6 +136,17 @@ type Guest struct {
 	// Cannot be updated.
 	// +optional
 	Ports []Port `json:"ports,omitempty"`
+
+	// Additional settings for the VM.
+	// Cannot be updated.
+	// +optional
+	Settings *GuestSettings `json:"settings,omitempty"`
+}
+
+type GuestSettings struct {
+	// Individual lines to add to a sysctl.conf file. See sysctl.conf(5) for more
+	// +optional
+	Sysctl []string `json:"sysctl,omitempty"`
 }
 
 type CPUs struct {

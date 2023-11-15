@@ -25,3 +25,10 @@ spec:
           value: $(NAD_RUNNER_NAME)
         - name: NAD_RUNNER_NAMESPACE
           value: $(NAD_RUNNER_NAMESPACE)
+        resources:
+          limits:
+            cpu: 4
+            memory: 2Gi
+          requests:
+            cpu: 2
+            memory: 1Gi
