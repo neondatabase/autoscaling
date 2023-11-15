@@ -23,6 +23,7 @@ const (
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
 	AnnotationAutoscalingConfig   = "autoscaling.neon.tech/config"
+	AnnotationBillingEndpointID   = "autoscaling.neon.tech/billing-endpoint-id"
 )
 
 // HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling

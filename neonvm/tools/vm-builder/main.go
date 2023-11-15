@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/alessio/shellescape"
@@ -123,6 +124,7 @@ type TemplatesContext struct {
 	SpecBuild       string
 	SpecMerge       string
 	InittabCommands []inittabCommand
+	ShutdownHook    string
 }
 
 type inittabCommand struct {
@@ -239,6 +241,7 @@ func main() {
 	if spec != nil {
 		tmplArgs.SpecBuild = spec.Build
 		tmplArgs.SpecMerge = spec.Merge
+		tmplArgs.ShutdownHook = strings.ReplaceAll(spec.ShutdownHook, "\n", "\n\t")
 
 		for _, c := range spec.Commands {
 			tmplArgs.InittabCommands = append(tmplArgs.InittabCommands, inittabCommand{
@@ -374,10 +377,11 @@ func main() {
 }
 
 type imageSpec struct {
-	Commands []command `yaml:"commands"`
-	Build    string    `yaml:"build"`
-	Merge    string    `yaml:"merge"`
-	Files    []file    `yaml:"files"`
+	Commands     []command `yaml:"commands"`
+	ShutdownHook string    `yaml:"shutdownHook,omitempty"`
+	Build        string    `yaml:"build"`
+	Merge        string    `yaml:"merge"`
+	Files        []file    `yaml:"files"`
 }
 
 type command struct {

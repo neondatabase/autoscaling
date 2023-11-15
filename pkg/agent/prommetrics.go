@@ -7,7 +7,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type PromMetrics struct {
+type GlobalMetrics struct {
 	schedulerRequests        *prometheus.CounterVec
 	schedulerRequestedChange resourceChangePair
 	schedulerApprovedChange  resourceChangePair
@@ -48,7 +48,7 @@ const (
 	runnerMetricStatePanicked runnerMetricState = "panicked"
 )
 
-func makePrometheusParts() (PromMetrics, *prometheus.Registry) {
+func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
 
 	// register stock collectors directly:
@@ -58,7 +58,7 @@ func makePrometheusParts() (PromMetrics, *prometheus.Registry) {
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
-	metrics := PromMetrics{
+	metrics := GlobalMetrics{
 		// the util.RegisterMetric() function registers the collector and returns
 		// it so we can set it directly on the output structure.
 
@@ -248,6 +248,48 @@ func makePrometheusParts() (PromMetrics, *prometheus.Registry) {
 	for _, s := range runnerStates {
 		metrics.runnersCount.WithLabelValues("true", string(s)).Set(0.0)
 		metrics.runnersCount.WithLabelValues("false", string(s)).Set(0.0)
+	}
+
+	return metrics, reg
+}
+
+type PerVMMetrics struct {
+	vmResources *prometheus.GaugeVec
+}
+
+type vmResource string
+
+const (
+	vmResourceCPU vmResource = "cpu"
+	vmResourceMem vmResource = "mem"
+)
+
+type vmResourceValueType string
+
+const (
+	vmResourceValueMin       vmResourceValueType = "min"
+	vmResourceValueSpecUse   vmResourceValueType = "spec_use"
+	vmResourceValueStatusUse vmResourceValueType = "status_use"
+	vmResourceValueMax       vmResourceValueType = "max"
+)
+
+func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
+	reg := prometheus.NewRegistry()
+
+	metrics := PerVMMetrics{
+		vmResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_vm_resources",
+				Help: "Amount of CPU or memory for a VM: min, max, spec using, or status using",
+			},
+			[]string{
+				"vm_namespace", // .metadata.namespace
+				"vm_name",      // .metadata.name
+				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
+				"resource",     // vmResource: "cpu" or "mem"
+				"value",        // vmResourceValue: min, spec_use, status_use, max
+			},
+		)),
 	}
 
 	return metrics, reg

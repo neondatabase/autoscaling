@@ -145,6 +145,19 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
 	if err != nil {
 		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+		if apierrors.IsNotFound(err) {
+			// stop reconcile loop if vm not found (already deleted?)
+			message := fmt.Sprintf("VM (%s) not found", migration.Spec.VmName)
+			r.Recorder.Event(migration, "Warning", "Failed", message)
+			meta.SetStatusCondition(&migration.Status.Conditions,
+				metav1.Condition{Type: typeDegradedVirtualMachineMigration,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Reconciling",
+					Message: message})
+			migration.Status.Phase = vmv1.VmmFailed
+			return r.updateMigrationStatus(ctx, migration)
+		}
+		// return err and try reconcile again
 		return ctrl.Result{}, err
 	}
 
@@ -555,7 +568,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	return ctrl.Result{}, nil
 }
 
-// finalizeVirtualMachineMigration will perform the required operations before delete the CR.
 func (r *VirtualMachineMigrationReconciler) updateMigrationStatus(ctx context.Context, migration *vmv1.VirtualMachineMigration) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	if err := r.Status().Update(ctx, migration); err != nil {

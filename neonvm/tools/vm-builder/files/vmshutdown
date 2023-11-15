@@ -1,10 +1,14 @@
 #!/neonvm/bin/sh
 rm /neonvm/vmstart.allowed
+{{if .ShutdownHook}}
 if [ -e /neonvm/vmstart.allowed ]; then
 	echo "Error: could not remove vmstart.allowed marker, might hang indefinitely during shutdown" 1>&2
 fi
 # we inhibited new command starts, but there may still be a command running
 while ! /neonvm/bin/flock -n /neonvm/vmstart.lock true; do
-	su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
+    echo 'Running shutdown hook...'
+    {{.ShutdownHook}}
+    sleep 0.5s # make sure we don't spin if things aren't working
 done
 echo "vmstart workload shut down cleanly" 1>&2
+{{end}}
