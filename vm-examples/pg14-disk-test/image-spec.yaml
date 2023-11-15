@@ -73,12 +73,12 @@ build: |
 merge: |
   RUN adduser vm-monitor --disabled-password --no-create-home
 
-  ADD cgconfig.conf         /etc/cgconfig.conf
-  ADD postgresql.conf       /etc/postgresql.conf
-  ADD pg_hba.conf           /etc/pg_hba.conf
-  ADD sshd_config           /etc/ssh/sshd_config
-  ADD ssh_id_rsa.pub        /etc/ssh/authorized_keys
-  ADD generate-sshd-keys.sh /bin/generate-sshd-keys.sh
+  COPY cgconfig.conf         /etc/cgconfig.conf
+  COPY postgresql.conf       /etc/postgresql.conf
+  COPY pg_hba.conf           /etc/pg_hba.conf
+  COPY sshd_config           /etc/ssh/sshd_config
+  COPY ssh_id_rsa.pub        /etc/ssh/authorized_keys
+  COPY generate-sshd-keys.sh /bin/generate-sshd-keys.sh
 
   # General tools
   RUN set -e \
