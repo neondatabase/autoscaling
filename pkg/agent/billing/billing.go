@@ -148,9 +148,6 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 		})
 	}
 	for _, vm := range vmsOnThisNode {
-		if vm.Annotations == nil {
-			continue
-		}
 		endpointID, isEndpoint := vm.Annotations[api.AnnotationBillingEndpointID]
 		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
 		if !isEndpoint {
