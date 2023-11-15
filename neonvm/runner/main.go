@@ -10,6 +10,8 @@ import (
 	"strconv"
 
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"math"
@@ -30,7 +32,6 @@ import (
 	"github.com/containerd/cgroups/v3/cgroup1"
 	"github.com/containerd/cgroups/v3/cgroup2"
 	"github.com/digitalocean/go-qemu/qmp"
-	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/libnetwork/types"
 	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -106,13 +107,23 @@ func getResolvConf() (*resolveFile, error) {
 	return getSpecific(resolvePath())
 }
 
+// hashData returns the sha256 sum of src.
+// from https://github.com/moby/moby/blob/v20.10.24/pkg/ioutils/readers.go#L52-L59
+func hashData(src io.Reader) (string, error) {
+	h := sha256.New()
+	if _, err := io.Copy(h, src); err != nil {
+		return "", err
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // GetSpecific returns the contents of the user specified resolv.conf file and its hash
 func getSpecific(path string) (*resolveFile, error) {
 	resolv, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	hash, err := ioutils.HashData(bytes.NewReader(resolv))
+	hash, err := hashData(bytes.NewReader(resolv))
 	if err != nil {
 		return nil, err
 	}
