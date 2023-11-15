@@ -51,6 +51,7 @@ data:
           "unhealthyStartupGracePeriodSeconds": 20,
           "maxHealthCheckSequentialFailuresSeconds": 30,
           "retryDeniedDownscaleSeconds": 5,
+          "deniedDownscaleFollowUpWaitSeconds": 1,
           "requestedUpscaleValidSeconds": 10,
           "retryFailedRequestSeconds": 3
       },
@@ -104,7 +105,7 @@ spec:
               fieldPath: status.podIP
         - name: CONFIG_PATH
           value: /etc/autoscaler-agent-config/config.json
-        image: neondatabase/autoscaler-agent:v0.18.0-patch2
+        image: neondatabase/autoscaler-agent:v0.18.6-patch3
         name: autoscaler-agent
         ports:
         - containerPort: 9100
@@ -112,8 +113,11 @@ spec:
           protocol: TCP
         resources:
           limits:
-            cpu: 100m
-            memory: 100Mi
+            cpu: 1000m
+            memory: 600Mi
+          requests:
+            cpu: 1000m
+            memory: 600Mi
         volumeMounts:
         - mountPath: /etc/autoscaler-agent-config
           name: config
