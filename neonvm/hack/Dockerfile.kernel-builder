@@ -22,7 +22,9 @@ RUN apt-get update && apt-get -y install \
     cpio \
     zstd \
     libncurses-dev \
-    dwarves
+    dwarves \
+    rsync \
+    kmod
 
 RUN set -e \
     && mkdir linux \
@@ -35,7 +37,14 @@ ADD linux-config-${KERNEL_VERSION} linux/.config
 
 RUN cd linux && make -j `nproc`
 
+RUN mkdir install && cd linux && make install INSTALL_DIR=../install
+RUN mkdir modules_install && cd linux && make modules_install INSTALL_MOD_PATH=../modules_install
+RUN cd linux && make bindeb-pkg
+
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
 FROM alpine:3.16
 COPY --from=build /build/linux/arch/x86/boot/bzImage /vmlinuz
+COPY --from=build /build/install /
+COPY --from=build /build/install_mod /
+COPY --from=build /build/*.deb /
