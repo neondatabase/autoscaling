@@ -2450,6 +2450,16 @@ spec:
                     required:
                     - image
                     type: object
+                  settings:
+                    description: Additional settings for the VM. Cannot be updated.
+                    properties:
+                      sysctl:
+                        description: Individual lines to add to a sysctl.conf file.
+                          See sysctl.conf(5) for more
+                        items:
+                          type: string
+                        type: array
+                    type: object
                 type: object
               imagePullSecrets:
                 items:

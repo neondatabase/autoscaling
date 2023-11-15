@@ -120,7 +120,6 @@ discussed more in the [high-level consequences] section below.
 * `vm-examples/` — collection of VMs:
     * `pg14-disk-test/` — VM with Postgres 14 and and ssh access
       * Refer to [`vm-examples/pg14-disk-test/README.md`](./vm-examples/pg14-disk-test)  for more information.
-    * `postgres-minimal/` — Minimal Postgres 15 VM used in e2e tests
 
 [cluster-autoscaler]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler
 

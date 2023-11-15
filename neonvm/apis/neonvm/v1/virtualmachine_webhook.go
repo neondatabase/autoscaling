@@ -110,7 +110,6 @@ func (r *VirtualMachine) ValidateCreate() error {
 
 	// validate .spec.disk names
 	for _, disk := range r.Spec.Disks {
-		virtualmachinelog.Info("validate disk", "name", disk.Name)
 		if disk.Name == "virtualmachineimages" {
 			return errors.New("'virtualmachineimages' is reserved name for .spec.disks[].name")
 		}
@@ -127,7 +126,6 @@ func (r *VirtualMachine) ValidateCreate() error {
 
 	// validate .spec.guest.ports[].name
 	for _, port := range r.Spec.Guest.Ports {
-		virtualmachinelog.Info("validate port ", "name", port.Name)
 		if len(port.Name) != 0 && port.Name == "qmp" {
 			return errors.New("'qmp' is reserved name for .spec.guest.ports[].name")
 		}
@@ -154,6 +152,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.guest.command", func(v *VirtualMachine) any { return v.Spec.Guest.Command }},
 		{".spec.guest.args", func(v *VirtualMachine) any { return v.Spec.Guest.Args }},
 		{".spec.guest.env", func(v *VirtualMachine) any { return v.Spec.Guest.Env }},
+		{".spec.guest.settings", func(v *VirtualMachine) any { return v.Spec.Guest.Settings }},
 		{".spec.disk", func(v *VirtualMachine) any { return v.Spec.Disks }},
 		{".spec.podResources", func(v *VirtualMachine) any { return v.Spec.PodResources }},
 		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},

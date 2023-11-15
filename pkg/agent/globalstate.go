@@ -43,7 +43,7 @@ type agentState struct {
 	vmClient             *vmclient.Clientset
 	schedulerEventBroker *pubsub.Broker[schedwatch.WatchEvent]
 	schedulerStore       *watch.Store[corev1.Pod]
-	metrics              PromMetrics
+	metrics              GlobalMetrics
 }
 
 func (r MainRunner) newAgentState(
@@ -52,7 +52,7 @@ func (r MainRunner) newAgentState(
 	broker *pubsub.Broker[schedwatch.WatchEvent],
 	schedulerStore *watch.Store[corev1.Pod],
 ) (*agentState, *prometheus.Registry) {
-	metrics, promReg := makePrometheusParts()
+	metrics, promReg := makeGlobalMetrics()
 
 	state := &agentState{
 		lock:                 util.NewChanMutex(),
@@ -93,6 +93,7 @@ func (s *agentState) handleEvent(ctx context.Context, logger *zap.Logger, event 
 		zap.Object("virtualmachine", event.vmInfo.NamespacedName()),
 		zap.Object("pod", util.NamespacedName{Namespace: event.vmInfo.Namespace, Name: event.podName}),
 	)
+	logger.Debug("Handling event for VM")
 
 	if err := s.lock.TryLock(ctx); err != nil {
 		logger.Warn("Context canceled while starting to handle event", zap.Error(err))

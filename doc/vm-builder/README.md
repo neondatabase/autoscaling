@@ -1,4 +1,4 @@
-This README covers non-trivial implementation details of vm-builder / vm-builder-generic.
+This README covers non-trivial implementation details of vm-builder.
 
 What `vm-builder` Does
 ======================
