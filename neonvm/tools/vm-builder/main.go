@@ -2,11 +2,9 @@ package main
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,6 +19,8 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/jsonmessage"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -59,28 +59,6 @@ var (
 type dockerMessage struct {
 	Stream string `json:"stream"`
 	Error  string `json:"error"`
-}
-
-func printReader(reader io.ReadCloser) error {
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		candidateJSON := scanner.Bytes()
-		var msg dockerMessage
-		if err := json.Unmarshal(candidateJSON, &msg); err != nil || msg.Stream == "" {
-			if msg.Error != "" {
-				return errors.New(msg.Error)
-			}
-
-			log.Println(string(candidateJSON))
-			continue
-		}
-
-		log.Print(msg.Stream)
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
@@ -311,10 +289,14 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	// do quiet build - discard output
-	//io.Copy(io.Discard, buildResp.Body)
+	defer buildResp.Body.Close()
 
-	if err = printReader(buildResp.Body); err != nil {
+	out := io.Writer(os.Stdout)
+	if *quiet {
+		out = io.Discard
+	}
+	err = jsonmessage.DisplayJSONMessagesStream(buildResp.Body, out, os.Stdout.Fd(), term.IsTerminal(int(os.Stdout.Fd())), nil)
+	if err != nil {
 		log.Fatalln(err)
 	}
 
