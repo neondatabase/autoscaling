@@ -47,7 +47,7 @@ const (
 	QEMU_BIN          = "qemu-system-x86_64"
 	QEMU_IMG_BIN      = "qemu-img"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
-	kernelCmdline     = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
+	baseKernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath                = "/vm/images/runtime.iso"
@@ -469,9 +469,11 @@ func main() {
 	var vmSpecDump string
 	var vmStatusDump string
 	var kernelPath string
+	var appendKernelCmdline string
 	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
+	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
 	flag.Parse()
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
@@ -625,11 +627,16 @@ func main() {
 
 	// kernel details
 	qemuCmd = append(qemuCmd, "-kernel", kernelPath)
+	var effectiveKernelCmdline string
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
-		qemuCmd = append(qemuCmd, "-append", fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName, kernelCmdline))
+		effectiveKernelCmdline = fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName, baseKernelCmdline)
 	} else {
-		qemuCmd = append(qemuCmd, "-append", kernelCmdline)
+		effectiveKernelCmdline = baseKernelCmdline
 	}
+	if appendKernelCmdline != "" {
+		effectiveKernelCmdline = fmt.Sprintf("%s %s", effectiveKernelCmdline, appendKernelCmdline)
+	}
+	qemuCmd = append(qemuCmd, "-append", effectiveKernelCmdline)
 
 	// should runner receive migration ?
 	if os.Getenv("RECEIVE_MIGRATION") == "true" {
