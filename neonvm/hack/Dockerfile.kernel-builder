@@ -50,5 +50,5 @@ RUN cd linux && make bindeb-pkg
 FROM alpine:3.16
 COPY --from=build /build/linux/arch/x86/boot/bzImage /vmlinuz
 COPY --from=build /build/install /
-COPY --from=build /build/install_mod /
+COPY --from=build /build/modules_install /
 COPY --from=build /build/*.deb /
