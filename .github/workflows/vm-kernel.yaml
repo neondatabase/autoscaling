@@ -42,7 +42,7 @@ jobs:
           context: neonvm/hack
           platforms: linux/amd64
           # Push only if this is a scheduled run or if the workflow_dispatch input push is set to true
-          push: 'boom!'
+          push: ${{ github.event_name == 'schedule' && 'true' || ( github.event_name == 'workflow_dispatch' && inputs.push || 'do not know if we should push or not, it will fail' ) }}
           pull: true
           no-cache: true
           file: neonvm/hack/Dockerfile.kernel-builder
