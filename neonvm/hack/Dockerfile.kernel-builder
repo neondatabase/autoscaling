@@ -28,7 +28,7 @@ RUN apt-get update && apt-get -y install \
 
 RUN set -e \
     && mkdir linux \
-    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
+    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
     && tar --strip-components=1 -C linux -xf linux-${KERNEL_VERSION}
 
 FROM build-deps AS build
