@@ -25,7 +25,5 @@ testbin/*
 
 *.qcow2
 neonvm/hack/vmlinuz
-linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64
-linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb
 
 rendered_manifests
