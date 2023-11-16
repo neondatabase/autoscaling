@@ -117,7 +117,7 @@ type Guest struct {
 	KernelImage *string `json:"kernelImage,omitempty"`
 
 	// +optional
-	AdditionalKernelCommandLine *string `json:"additionalKernelCommandLine,omitempty"`
+	AppendKernelCmdline *string `json:"appendKernelCmdline,omitempty"`
 
 	// +optional
 	CPUs CPUs `json:"cpus"`

@@ -167,8 +167,8 @@ func (in *Guest) DeepCopyInto(out *Guest) {
 		*out = new(string)
 		**out = **in
 	}
-	if in.AdditionalKernelCommandLine != nil {
-		in, out := &in.AdditionalKernelCommandLine, &out.AdditionalKernelCommandLine
+	if in.AppendKernelCmdline != nil {
+		in, out := &in.AppendKernelCmdline, &out.AppendKernelCmdline
 		*out = new(string)
 		**out = **in
 	}

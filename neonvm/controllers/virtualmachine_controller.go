@@ -1165,8 +1165,8 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		})
 	}
 
-	if virtualmachine.Spec.Guest.AdditionalKernelCommandLine != nil {
-		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "-additionalKernelCommandLine="+*virtualmachine.Spec.Guest.AdditionalKernelCommandLine)
+	if virtualmachine.Spec.Guest.AppendKernelCmdline != nil {
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "-appendKernelCmdline="+*virtualmachine.Spec.Guest.AppendKernelCmdline)
 	}
 
 	// Add any InitContainers that were specified by the spec

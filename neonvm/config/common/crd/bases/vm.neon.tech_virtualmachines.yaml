@@ -2324,7 +2324,7 @@ spec:
                 type: object
               guest:
                 properties:
-                  additionalKernelCommandLine:
+                  appendKernelCmdline:
                     type: string
                   args:
                     description: Arguments to the entrypoint. The docker image's cmd
