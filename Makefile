@@ -238,15 +238,19 @@ endif
 
 .PHONY: kernel
 kernel: ## Build linux kernel.
-	rm -f neonvm/hack/vmlinuz
+	rm -f neonvm/hack/vmlinuz; \
+	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
+	trap "rm $$iidfile" EXIT; \
 	docker buildx build \
 		--build-arg KERNEL_VERSION=$(VM_KERNEL_VERSION) \
-		--output type=local,dest=neonvm/hack/ \
 		--platform linux/amd64 \
 		--pull \
-		--no-cache \
+		--iidfile $$iidfile \
 		--file neonvm/hack/Dockerfile.kernel-builder \
-		neonvm/hack
+		neonvm/hack; \
+	id=$$(docker create $$(cat $$iidfile)); \
+	docker cp $$id:/vmlinuz neonvm/hack/vmlinuz; \
+	docker rm -f $$id
 
 .PHONY: check-local-context
 check-local-context: ## Asserts that the current kubectl context is pointing at k3d or kind, to avoid accidentally applying to prod
