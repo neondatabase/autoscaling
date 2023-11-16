@@ -10,7 +10,7 @@ E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
 # kernel for guests
-VM_KERNEL_VERSION ?= "5.15.80"
+VM_KERNEL_VERSION ?= "6.5.11-ubuntu-mainline"
 
 ## Golang details
 GOARCH ?= $(shell go env GOARCH)
@@ -215,19 +215,13 @@ endif
 
 .PHONY: kernel
 kernel: ## Build linux kernel.
-	rm -f neonvm/hack/vmlinuz; \
-	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
-	trap "rm $$iidfile" EXIT; \
-	docker buildx build \
-		--build-arg KERNEL_VERSION=$(VM_KERNEL_VERSION) \
-		--platform linux/amd64 \
-		--pull \
-		--iidfile $$iidfile \
-		--file neonvm/hack/Dockerfile.kernel-builder \
-		neonvm/hack; \
-	id=$$(docker create $$(cat $$iidfile)); \
-	docker cp $$id:/vmlinuz neonvm/hack/vmlinuz; \
-	docker rm -f $$id
+	rm -f neonvm/hack/vmlinuz
+	rm -f linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb
+	rm -rf linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64
+	curl -o linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb  https://kernel.ubuntu.com/mainline/v6.5.11/amd64/linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb
+	mkdir linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64
+	dpkg-deb -x linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64.deb linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64
+	cp linux-image-unsigned-6.5.11-060511-generic_6.5.11-060511.202311151304_amd64/boot/vmlinuz-6.5.11-060511-generic neonvm/hack/vmlinuz
 
 .PHONY: check-local-context
 check-local-context: ## Asserts that the current kubectl context is pointing at k3d or kind, to avoid accidentally applying to prod

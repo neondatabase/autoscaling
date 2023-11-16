@@ -4,3 +4,5 @@ bin/
 testbin/
 
 rendered_manifests
+
+disk.qcow2

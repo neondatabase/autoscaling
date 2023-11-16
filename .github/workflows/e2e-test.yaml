@@ -50,7 +50,7 @@ jobs:
           docker rm -f ${ID}
         env:
           VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
-          VM_KERNEL_VERSION: "5.15.80"
+          VM_KERNEL_VERSION: "6.5.11-ubuntu-mainline"
 
       # our docker builds use the output of 'git describe' for embedding git information
       - run: git describe --long --dirty
