@@ -19,7 +19,8 @@ env:
 
 jobs:
   vm-kernel:
-    runs-on: [ self-hosted, gen3, large ]
+    # Use the biggest GitHub Hosted runner
+    runs-on: kernel-builder
     steps:
 
       - name: git checkout
