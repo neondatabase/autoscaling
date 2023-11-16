@@ -14,7 +14,7 @@ on:
         required: false
 
 env:
-  VM_KERNEL_IMAGE:   "neondatabase/vm-kernel-test"
+  VM_KERNEL_IMAGE:   "neondatabase/vm-kernel"
   VM_KERNEL_VERSION: "5.15.80"
 
 jobs:
