@@ -20,7 +20,7 @@ env:
 jobs:
   vm-kernel:
     # Use the biggest GitHub Hosted runner
-    runs-on: kernel-builder
+    runs-on: gha-ubuntu-22.04-64cores
     steps:
 
       - name: git checkout

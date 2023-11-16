@@ -21,14 +21,8 @@ env:
 
 jobs:
   release:
-    strategy:
-      matrix:
-        os: [ ubuntu-latest ]
-    runs-on: ${{ matrix.os }}
+    runs-on: gha-ubuntu-22.04-64cores
     steps:
-      - name: free disk space
-        if: matrix.os == 'ubuntu-latest'
-        uses: jlumbroso/free-disk-space@f68fdb76e2ea636224182cfb7377ff9a1708f9b8 # v1.3.0
       - name: git checkout
         uses: actions/checkout@v3
       - name: get version and git info
