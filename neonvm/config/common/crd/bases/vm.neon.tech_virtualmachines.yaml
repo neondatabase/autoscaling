@@ -2324,6 +2324,8 @@ spec:
                 type: object
               guest:
                 properties:
+                  additionalKernelCommandLine:
+                    type: string
                   args:
                     description: Arguments to the entrypoint. The docker image's cmd
                       is used if this is not provided.

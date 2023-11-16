@@ -167,6 +167,11 @@ func (in *Guest) DeepCopyInto(out *Guest) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.AdditionalKernelCommandLine != nil {
+		in, out := &in.AdditionalKernelCommandLine, &out.AdditionalKernelCommandLine
+		*out = new(string)
+		**out = **in
+	}
 	in.CPUs.DeepCopyInto(&out.CPUs)
 	out.MemorySlotSize = in.MemorySlotSize.DeepCopy()
 	in.MemorySlots.DeepCopyInto(&out.MemorySlots)
