@@ -44,10 +44,10 @@ import (
 )
 
 const (
-	QEMU_BIN      = "qemu-system-x86_64"
-	QEMU_IMG_BIN  = "qemu-img"
-	kernelPath    = "/vm/kernel/vmlinuz"
-	kernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
+	QEMU_BIN          = "qemu-system-x86_64"
+	QEMU_IMG_BIN      = "qemu-img"
+	defaultKernelPath = "/vm/kernel/vmlinuz"
+	kernelCmdline     = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath                = "/vm/images/runtime.iso"
@@ -468,8 +468,10 @@ func main() {
 
 	var vmSpecDump string
 	var vmStatusDump string
+	var kernelPath string
 	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
+	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
 	flag.Parse()
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")

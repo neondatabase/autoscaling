@@ -114,6 +114,9 @@ const (
 
 type Guest struct {
 	// +optional
+	KernelImage *string `json:"kernelImage,omitempty"`
+
+	// +optional
 	CPUs CPUs `json:"cpus"`
 	// +optional
 	// +kubebuilder:default:="1Gi"
