@@ -7,8 +7,8 @@ on:
     inputs:
       push:
         description: 'Push to Docker Hub'
-        required: false
-        default: 'false'
+        type: boolean
+        default: false
       tag:
         description: 'Tag to use for Docker image'
         required: false
