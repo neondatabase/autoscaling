@@ -27,7 +27,8 @@ RUN apt-get update && apt-get -y install \
     libncurses-dev \
     dwarves \
     rsync \
-    kmod
+    kmod \
+    debhelper
 
 RUN set -e \
     && mkdir linux \
