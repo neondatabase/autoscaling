@@ -1,4 +1,7 @@
-FROM debian:11 AS build-deps
+# Our kernel config is based on https://kernel.ubuntu.com/mainline/v6.5.11/amd64/
+# which was built with gcc 13, presumably on latest ubuntu. So, use that, to minimize
+# the diff we get when we run `make menuconfig`.
+FROM ubuntu:mantic AS build-deps
 
 ARG KERNEL_VERSION
 
