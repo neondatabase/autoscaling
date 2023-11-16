@@ -20,6 +20,9 @@ spec:
             - name: metrics
               containerPort: 9100
               protocol: TCP
+            - name: vm-metrics
+              containerPort: 9101
+              protocol: TCP
           resources:
             requests:
               cpu: 1000m

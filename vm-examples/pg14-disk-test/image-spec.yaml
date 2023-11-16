@@ -1,0 +1,117 @@
+# Input to vm-builder
+---
+commands:
+  - name: cgconfigparser
+    user: root
+    sysvInitAction: sysinit
+    shell: '/usr/sbin/cgconfigparser -l /etc/cgconfig.conf -s 1664'
+  - name: postgres-data
+    user: root
+    sysvInitAction: sysinit
+    shell: 'mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql'
+  - name: generate-sshd-keys
+    user: root
+    sysvInitAction: sysinit
+    shell: '/bin/generate-sshd-keys.sh'
+  - name: vm-monitor
+    user: vm-monitor
+    sysvInitAction: respawn
+    shell: 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test --addr="0.0.0.0:10301"'
+  - name: start-postgres
+    user: postgres
+    sysvInitAction: once
+    shell: 'PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf"'
+  - name: sshd
+    user: root
+    sysvInitAction: respawn
+    # if having trouble with ssh, try adding -dd to the ssh args.
+    shell: 'setsid -w /usr/sbin/sshd -D -E /run/sshd/log -h /run/sshd/ssh_host_ecdsa_key -h /run/sshd/ssh_host_ed25519_key -h /run/sshd/ssh_host_rsa_key'
+files:
+  - filename: postgresql.conf
+    hostPath: postgresql.conf
+  - filename: pg_hba.conf
+    hostPath: pg_hba.conf
+  - filename: sshd_config
+    hostPath: sshd_config
+  - filename: ssh_id_rsa.pub
+    hostPath: ssh_id_rsa.pub
+  - filename: generate-sshd-keys.sh
+    hostPath: generate-sshd-keys.sh
+  - filename: allocate-loop.c
+    hostPath: allocate-loop.c
+  - filename: cgconfig.conf
+    hostPath: cgconfig.conf
+build: |
+  # Build vm-monitor
+  FROM rust:1.72-alpine as monitor-builder
+  WORKDIR /workspace
+
+  RUN apk add musl-dev git openssl-dev
+
+  # Which branch to pull from
+  ENV BRANCH main
+
+  # Ensures we reclone upon new commits
+  # https://stackoverflow.com/questions/35134713
+  ADD "https://api.github.com/repos/neondatabase/neon/commits/$BRANCH" latest_commit
+
+  RUN git clone --depth 1 --branch $BRANCH https://github.com/neondatabase/neon.git
+  RUN cargo build --release --manifest-path neon/libs/vm_monitor/Cargo.toml
+  # Move binary so we can cargo clean
+  RUN mkdir -p /workspace/bin && cp /workspace/neon/target/release/vm-monitor /workspace/bin
+  # Cargo clean dramatically reduces the size of the image
+  RUN cargo clean --release --manifest-path neon/libs/vm_monitor/Cargo.toml
+
+  # Build the allocation tester:
+  FROM alpine:3.16 AS allocate-loop-builder
+  RUN set -e \
+      && apk add gcc musl-dev
+  COPY allocate-loop.c allocate-loop.c
+  RUN set -e \
+      && gcc -g -O allocate-loop.c -o /bin/allocate-loop
+
+merge: |
+  RUN adduser vm-monitor --disabled-password --no-create-home
+
+  COPY cgconfig.conf         /etc/cgconfig.conf
+  COPY postgresql.conf       /etc/postgresql.conf
+  COPY pg_hba.conf           /etc/pg_hba.conf
+  COPY sshd_config           /etc/ssh/sshd_config
+  COPY ssh_id_rsa.pub        /etc/ssh/authorized_keys
+  COPY generate-sshd-keys.sh /bin/generate-sshd-keys.sh
+
+  # General tools
+  RUN set -e \
+      && apk add --no-cache \
+              ca-certificates \
+              util-linux-misc \
+              coreutils \
+              cgroup-tools
+
+  # postgresql stuff
+  RUN set -e \
+        && apk add --no-cache \
+                su-exec \
+                postgresql14
+
+  # Initialize postgres
+  ENV PGDATA /var/lib/postgresql
+  RUN set -e \
+      && mkdir -p ${PGDATA} /run/postgresql \
+      && chown -R postgres:postgres ${PGDATA} /run/postgresql \
+      && su-exec postgres pg_ctl init
+
+  # ssh stuff
+  # 'authorized_keys' needs to have the right mode bits, otherwise it'll get ignored by sshd
+  RUN set -e \
+      && apk add --no-cache \
+              openssh-server \
+      && chmod 600 /etc/ssh/authorized_keys
+  # TODO: this line is necessary because vm-builder doesn't transfer mode bits
+  RUN chmod +x /bin/generate-sshd-keys.sh
+
+  COPY --from=allocate-loop-builder /bin/allocate-loop        /bin/allocate-loop
+  COPY --from=monitor-builder       /workspace/bin/vm-monitor /bin/vm-monitor
+
+  # set the greeting message on ssh logins
+  RUN echo -e 'Welcome to Alpine!\n ~ This is the VM :) ~' >/etc/motd
