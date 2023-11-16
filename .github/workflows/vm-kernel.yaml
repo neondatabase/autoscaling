@@ -4,6 +4,14 @@ on:
   schedule:
     - cron:  '42 4 * * 2'  # run once a week
   workflow_dispatch: # adds ability to run this manually
+    inputs:
+      push:
+        description: 'Push to Docker Hub'
+        type: boolean
+        default: false
+      tag:
+        description: 'Tag to use for Docker image'
+        required: false
 
 env:
   VM_KERNEL_IMAGE:   "neondatabase/vm-kernel"
@@ -33,8 +41,10 @@ jobs:
           build-args: KERNEL_VERSION=${{ env.VM_KERNEL_VERSION }}
           context: neonvm/hack
           platforms: linux/amd64
-          push: true
+          # Push only if this is a scheduled run or if the workflow_dispatch input push is set to true
+          push: ${{ github.event_name == 'schedule' && 'true' || ( github.event_name == 'workflow_dispatch' && inputs.push || 'do not know if we should push or not, it will fail' ) }}
           pull: true
           no-cache: true
           file: neonvm/hack/Dockerfile.kernel-builder
-          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}
+          # Tag the image with the tag from the workflow_dispatch input or the VM_KERNEL_VERSION env var
+          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && inputs.tag || env.VM_KERNEL_VERSION }}
