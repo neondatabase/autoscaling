@@ -19,6 +19,7 @@ chmod 0755 /dev/pts
 chmod 1777 /dev/shm
 mount -t proc  proc  /proc
 mount -t sysfs sysfs /sys
+moutn -t debugfs debugfs /sys/kernel/debug
 mount -t cgroup2 cgroup2 /sys/fs/cgroup
 
 # Allow all users to move processes to/from the root cgroup.
