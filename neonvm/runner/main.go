@@ -565,8 +565,8 @@ func main() {
 	}
 
 	// disk details
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=unsafe", rootDiskPath))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=unsafe", runtimeDiskPath))
 	for _, disk := range vmSpec.Disks {
 		switch {
 		case disk.EmptyDisk != nil:
@@ -579,7 +579,7 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				discard = ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=unsafe%s", disk.Name, dPath, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -587,7 +587,7 @@ func main() {
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
 				logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=unsafe", disk.Name, dPath))
 		default:
 			// do nothing
 		}
