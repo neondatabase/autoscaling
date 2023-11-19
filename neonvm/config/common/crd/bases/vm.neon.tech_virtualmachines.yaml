@@ -2520,6 +2520,9 @@ spec:
                 - OnFailure
                 - Never
                 type: string
+              runnerImage:
+                description: Override for normal neonvm-runner image
+                type: string
               runnerPort:
                 default: 25183
                 format: int32
