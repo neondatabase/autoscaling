@@ -82,13 +82,23 @@ kubectl delete neonvm vm-debian
 #### 1. Create local cluster (with 3 nodes)
 
 ```sh
-make local-cluster
+make k3d-setup
 ```
 
 #### 2. Build Linux kernel for Guests
 
 ```sh
 make kernel
+```
+
+(Alternatively, pull & extract it from Dockerhub)
+
+To adjust the kernel config:
+
+```
+docker build --build-arg KERNEL_VERSION=5.15.80 --platform linux/x86_64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder   .
+docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
+# inside that bash shell, do the menuconfig, then copy-out the config to /host
 ```
 
 #### 3. Build and deploy controller and VXLAN overlay network to local cluster
@@ -99,11 +109,19 @@ make deploy
 
 ### Manage Virtual Machines
 
+#### 0. Build & load example images into the k8s cluster
+
+```
+make example-vms
+```
+
 #### 1. Run virtual machine
 
 ```console
 kubectl apply -f samples/vm-example.yaml
 ```
+
+NB: on machines without `/dev/kvm` (e.g., on EC2 non-bare-metal), set `.spec.enableAcceleration = false`.
 
 #### 2. Check VM running
 
