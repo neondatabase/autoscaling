@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      kernel-image:
+        type: string
+        description: 'The kernel image to use for the VMs. If not specified, a kernel will be built from source'
+        required: false
   workflow_call:
     inputs:
       kernel-image:
@@ -61,7 +67,7 @@ jobs:
           file: neonvm/hack/Dockerfile.kernel-builder
           tags: ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}-${{ matrix.cluster }}-${{ github.run_id}}-${{ github.run_attempt }}
         env:
-          VM_KERNEL_IMAGE:   "neondatabase/vm-kernel-do-not-push"
+          VM_KERNEL_IMAGE:   "neondatabase/local-vm-kernel"
           VM_KERNEL_VERSION: "6.1.63"
 
       - name: Load VM kernel
@@ -77,7 +83,7 @@ jobs:
           docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
           docker rm -f ${ID}
         env:
-          VM_KERNEL_IMAGE:   "neondatabase/vm-kernel-do-not-push"
+          VM_KERNEL_IMAGE:   "neondatabase/local-vm-kernel"
           VM_KERNEL_VERSION: "6.1.63"
 
       # our docker builds use the output of 'git describe' for embedding git information
