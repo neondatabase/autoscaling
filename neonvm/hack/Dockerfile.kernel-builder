@@ -25,7 +25,8 @@ RUN apt-get update && apt-get -y install \
 
 RUN set -e \
     && mkdir linux \
-    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
+	&& MAJOR="$(echo ${KERNEL_VERSION} | sed -E 's/^([0-9]+)\.[0-9]+\.[0-9]+$/\1/')" \
+    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
     && tar --strip-components=1 -C linux -xf linux-${KERNEL_VERSION}
 
 FROM build-deps AS build
