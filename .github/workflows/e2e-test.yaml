@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_call:
+    inputs:
+      kernel-image:
+        type: string
+        description: 'The kernel image to use for the VMs'
+        required: false
 
 jobs:
   e2e-tests:
@@ -42,6 +48,7 @@ jobs:
           docker buildx version
 
       - name: Build Linux kernel
+        if: inputs.kernel-image == ''
         uses: docker/build-push-action@v3
         with:
           build-args: KERNEL_VERSION=${{ env.VM_KERNEL_VERSION }}
@@ -59,7 +66,14 @@ jobs:
 
       - name: Load VM kernel
         run: |
-          ID=$(docker create ${VM_KERNEL_IMAGE}:${VM_KERNEL_VERSION}-${{ matrix.cluster }}-${{ github.run_id}}-${{ github.run_attempt }} true)
+          if [ -z "${{ inputs.kernel-image }}" ]; then
+            IMAGE="${VM_KERNEL_IMAGE}:${VM_KERNEL_VERSION}-${{ matrix.cluster }}-${{ github.run_id}}-${{ github.run_attempt }}"
+          else
+            IMAGE="${{ inputs.kernel-image }}"
+            docker pull --quiet $IMAGE
+          fi
+
+          ID=$(docker create ${IMAGE} true)
           docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
           docker rm -f ${ID}
         env:
