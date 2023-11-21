@@ -1,5 +1,5 @@
 # Build the Go binary
-FROM golang:1.20 as builder
+FROM golang:1.21 as builder
 ARG TARGETOS
 ARG TARGETARCH
 
