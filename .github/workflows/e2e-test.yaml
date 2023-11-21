@@ -35,7 +35,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
-        timeout-minutes: 5
+        timeout-minutes: 10
 
       - uses: docker/setup-buildx-action@v2
 
