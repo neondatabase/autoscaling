@@ -4,7 +4,7 @@ metadata:
   name: neonvm # name that you want to give to your cluster (will still be prefixed with `k3d-`)
 servers: 1
 agents:  2
-image: rancher/k3s:v1.25.10-k3s1
+image: rancher/k3s:v1.25.15-k3s2
 
 options:
   k3d: # k3d runtime settings
