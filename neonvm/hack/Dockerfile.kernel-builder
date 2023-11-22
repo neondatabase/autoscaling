@@ -1,4 +1,4 @@
-FROM debian:11 AS build-deps
+FROM ubuntu:23.10 AS build-deps
 
 ARG KERNEL_VERSION
 
@@ -11,7 +11,6 @@ WORKDIR /build
 RUN apt-get update && apt-get -y install \
     curl \
     ca-certificates \
-    git \
     build-essential \
     flex \
     bison \
@@ -24,17 +23,24 @@ RUN apt-get update && apt-get -y install \
     libncurses-dev
 
 RUN set -e \
-    && mkdir linux \
-    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
-    && tar --strip-components=1 -C linux -xf linux-${KERNEL_VERSION}
+    && mkdir -p linux-${KERNEL_VERSION} \
+    && echo "downloading linux-${KERNEL_VERSION}.tar.xz" \
+    && MAJOR=`echo ${KERNEL_VERSION} | sed -E 's/^([0-9]+)\.[0-9]+\.[0-9]+$/\1/'` \
+    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION}.tar.xz \
+    && echo "unpacking kernel archive" \
+    && tar --strip-components=1 -C linux-${KERNEL_VERSION} -xf linux-${KERNEL_VERSION}.tar.xz
+
 
 FROM build-deps AS build
 
-ADD linux-config-${KERNEL_VERSION} linux/.config
+ARG KERNEL_VERSION
 
-RUN cd linux && make -j `nproc`
+ADD linux-config-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
+
+RUN cd linux-${KERNEL_VERSION} && make -j `nproc`
 
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
-FROM alpine:3.16
-COPY --from=build /build/linux/arch/x86/boot/bzImage /vmlinuz
+FROM alpine:3.18
+ARG KERNEL_VERSION
+COPY --from=build /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
