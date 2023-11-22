@@ -9,20 +9,18 @@ RUN set -e \
 WORKDIR /build
 
 RUN apt-get update && apt-get -y install \
-    bc \
     curl \
     ca-certificates \
     build-essential \
     flex \
     bison \
     libelf-dev \
+    bc \
     libssl-dev \
     python3 \
     cpio \
     zstd \
-    libncurses-dev \
-    dwarves \
-    fakeroot
+    libncurses-dev
 
 RUN set -e \
     && mkdir -p linux-${KERNEL_VERSION} \
@@ -39,7 +37,7 @@ ARG KERNEL_VERSION
 
 ADD linux-config-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 
-RUN cd linux-${KERNEL_VERSION} && fakeroot make -j `nproc`
+RUN cd linux-${KERNEL_VERSION} && make -j `nproc`
 
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
