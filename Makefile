@@ -10,7 +10,7 @@ E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
 # kernel for guests
-VM_KERNEL_VERSION ?= "5.15.80"
+VM_KERNEL_VERSION ?= "6.5.11"
 
 ## Golang details
 GOARCH ?= $(shell go env GOARCH)

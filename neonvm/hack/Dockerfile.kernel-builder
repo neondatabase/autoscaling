@@ -1,4 +1,7 @@
-FROM debian:11 AS build-deps
+# Our kernel config is based on https://kernel.ubuntu.com/mainline/v6.5.11/amd64/
+# which was built with gcc 13, presumably on latest ubuntu. So, use that, to minimize
+# the diff we get when we run `make menuconfig`.
+FROM ubuntu:mantic AS build-deps
 
 ARG KERNEL_VERSION
 
@@ -21,11 +24,15 @@ RUN apt-get update && apt-get -y install \
     python3 \
     cpio \
     zstd \
-    libncurses-dev
+    libncurses-dev \
+    dwarves \
+    rsync \
+    kmod \
+    debhelper
 
 RUN set -e \
     && mkdir linux \
-    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
+    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION} \
     && tar --strip-components=1 -C linux -xf linux-${KERNEL_VERSION}
 
 FROM build-deps AS build
@@ -34,7 +41,14 @@ ADD linux-config-${KERNEL_VERSION} linux/.config
 
 RUN cd linux && make -j `nproc`
 
+RUN mkdir install && cd linux && make install INSTALL_DIR=../install
+RUN mkdir modules_install && cd linux && make modules_install INSTALL_MOD_PATH=../modules_install
+RUN cd linux && make bindeb-pkg
+
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
 FROM alpine:3.16
 COPY --from=build /build/linux/arch/x86/boot/bzImage /vmlinuz
+COPY --from=build /build/install /
+COPY --from=build /build/modules_install /
+COPY --from=build /build/*.deb /
