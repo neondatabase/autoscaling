@@ -1145,6 +1145,11 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		},
 	}
 
+	// If a custom neonvm-runner image is requested, use that instead:
+	if virtualmachine.Spec.RunnerImage != nil {
+		pod.Spec.Containers[0].Image = *virtualmachine.Spec.RunnerImage
+	}
+
 	// If a custom kernel is used, add that image:
 	if virtualmachine.Spec.Guest.KernelImage != nil {
 		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "-kernelpath=/vm/images/vmlinuz")
