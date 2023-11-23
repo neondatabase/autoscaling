@@ -10,12 +10,12 @@ env:
 
   KUSTOMIZE_VERSION:        "4.5.7"
   CONTROLLER_TOOLS_VERSION: "0.10.0"
-  CODE_GENERATOR_VERSION:   "0.25.11"
+  CODE_GENERATOR_VERSION:   "0.25.16"
   IMG:                      "neondatabase/neonvm-controller"
   IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:               "neondatabase/neonvm-runner"
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
-  VM_KERNEL_VERSION:        "5.15.80"
+  VM_KERNEL_VERSION:        "6.1.63"
 
   CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
 

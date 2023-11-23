@@ -43,7 +43,7 @@ files:
     hostPath: cgconfig.conf
 build: |
   # Build vm-monitor
-  FROM rust:1.72-alpine as monitor-builder
+  FROM rust:1.74-alpine as monitor-builder
   WORKDIR /workspace
 
   RUN apk add musl-dev git openssl-dev

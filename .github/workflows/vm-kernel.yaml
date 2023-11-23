@@ -15,7 +15,7 @@ on:
 
 env:
   VM_KERNEL_IMAGE:   "neondatabase/vm-kernel"
-  VM_KERNEL_VERSION: "5.15.80"
+  VM_KERNEL_VERSION: "6.1.63"
 
 jobs:
   vm-kernel:

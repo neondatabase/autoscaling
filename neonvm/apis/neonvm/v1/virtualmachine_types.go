@@ -101,6 +101,10 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=true
 	// +optional
 	EnableAcceleration *bool `json:"enableAcceleration,omitempty"`
+
+	// Override for normal neonvm-runner image
+	// +optional
+	RunnerImage *string `json:"runnerImage,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never

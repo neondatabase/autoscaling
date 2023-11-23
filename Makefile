@@ -10,7 +10,7 @@ E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
 # kernel for guests
-VM_KERNEL_VERSION ?= "5.15.80"
+VM_KERNEL_VERSION ?= "6.1.63"
 
 ## Golang details
 GOARCH ?= $(shell go env GOARCH)
@@ -222,6 +222,7 @@ kernel: ## Build linux kernel.
 		--build-arg KERNEL_VERSION=$(VM_KERNEL_VERSION) \
 		--platform linux/amd64 \
 		--pull \
+		--load \
 		--iidfile $$iidfile \
 		--file neonvm/hack/Dockerfile.kernel-builder \
 		neonvm/hack; \
@@ -395,13 +396,13 @@ ENVTEST_K8S_VERSION = 1.25.0
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.10.0
-CODE_GENERATOR_VERSION ?= v0.25.11
+CODE_GENERATOR_VERSION ?= v0.25.16
 
 KUTTL ?= $(LOCALBIN)/kuttl
 KUTTL_VERSION ?= v0.15.0
 
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.25.11
+KUBECTL_VERSION ?= v1.25.16
 
 KIND ?= $(LOCALBIN)/kind
 KIND_VERSION ?= v0.20.0
