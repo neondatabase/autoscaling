@@ -4,7 +4,7 @@
       {
         "path": ".billing",
         "value": {
-          "url": "https://vector-usage-tracking.service.us-east-2.internal.aws.neon.tech/v1",
+          "url": "http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1/usage_events",
           "cpuMetricName": "effective_compute_seconds",
           "activeTimeMetricName": "active_time_seconds",
           "collectEverySeconds": 4,
