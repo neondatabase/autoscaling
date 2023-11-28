@@ -19,6 +19,9 @@ env:
 
 jobs:
   vm-kernel:
+    outputs:
+      image: ${{ fromJSON(steps.build-linux-kernel.outputs.metadata)['image.name'] }}@${{ steps.build-linux-kernel.outputs.digest }}
+
     # Use the biggest GitHub Hosted runner
     runs-on: gha-ubuntu-22.04-64cores
     steps:
@@ -37,6 +40,7 @@ jobs:
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
       - name: build linux kernel
+        id: build-linux-kernel
         uses: docker/build-push-action@v3
         with:
           build-args: KERNEL_VERSION=${{ env.VM_KERNEL_VERSION }}
@@ -49,3 +53,9 @@ jobs:
           file: neonvm/hack/Dockerfile.kernel-builder
           # Tag the image with the tag from the workflow_dispatch input or the VM_KERNEL_VERSION env var
           tags: ${{ env.VM_KERNEL_IMAGE }}:${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && inputs.tag || env.VM_KERNEL_VERSION }}
+
+  e2e-tests:
+    needs: vm-kernel
+    uses: ./.github/workflows/e2e-test.yaml
+    with:
+      kernel-image: ${{ needs.vm-kernel.outputs.image }}
