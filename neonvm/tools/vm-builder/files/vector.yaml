@@ -14,6 +14,7 @@ sources:
       mountPoints:
         excludes: ["*/proc/sys/fs/binfmt_misc"]
     type: host_metrics
+    scrape_interval_secs: 4 # default is 15, but we scrape every 5s in autoscaler-agent
 sinks:
   prom_exporter:
     type: prometheus_exporter
