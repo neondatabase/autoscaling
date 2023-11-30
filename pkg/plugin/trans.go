@@ -21,10 +21,10 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-// resourceTransition maintaines the current state of its resource and handles the transition
+// resourceTransition maintains the current state of its resource and handles the transition
 // into a new state.
 type resourceTransition[T constraints.Unsigned] struct {
-	// node respresents the current state of the node
+	// node represents the current state of the node
 	node *nodeResourceState[T]
 	// oldNode is the old state of the node, which we just keep for convenience
 	oldNode struct {
@@ -90,7 +90,7 @@ func (s verdictSet) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 //
 // Why the new scheduler needs this info? It's always possible for the scheduler
 // to get killed and immediately restart, without the agent believing there was
-// any disconnect, which could lead to unintentional overcommitting of resources
+// any disconnect, which could lead to unintentional over-committing of resources
 // from the Buffer values if too many agents request upscaling on the first
 // request to the scheduler.
 func (r resourceTransition[T]) handleLastPermit(lastPermit T) (verdict string) {
