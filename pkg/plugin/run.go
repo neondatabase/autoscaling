@@ -22,12 +22,12 @@ const (
 	ContentTypeError string = "text/plain"
 )
 
-// The scheduler plugin currently supports v1.0 to v1.1 of the agent<->scheduler plugin protocol.
+// The scheduler plugin currently supports v1.0 to v2.1 of the agent<->scheduler plugin protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV2_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV2_1
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
@@ -173,7 +173,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 
 	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
 
-	permit, status, err := e.handleResources(logger, pod, node, req.Resources, mustMigrate, supportsFractionalCPU)
+	permit, status, err := e.handleResources(logger, pod, node, req.Resources, req.LastPermit, mustMigrate, supportsFractionalCPU)
 	if err != nil {
 		return nil, status, err
 	}
@@ -222,6 +222,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	pod *podState,
 	node *nodeState,
 	req api.Resources,
+	lastPermit *api.Resources,
 	startingMigration bool,
 	supportsFractionalCPU bool,
 ) (api.Resources, int, error) {
@@ -261,11 +262,23 @@ func (e *AutoscaleEnforcer) handleResources(
 	vCPUTransition := collectResourceTransition(&node.vCPU, &pod.vCPU)
 	memTransition := collectResourceTransition(&node.memSlots, &pod.memSlots)
 
+	if lastPermit != nil {
+		vCPUVerdict := vCPUTransition.handleLastPermit(lastPermit.VCPU)
+		memVerdict := memTransition.handleLastPermit(lastPermit.Mem)
+		logger.Info(
+			"Handled last permit info from pod",
+			zap.Object("verdict", verdictSet{
+				cpu: vCPUVerdict,
+				mem: memVerdict,
+			}),
+		)
+	}
+
 	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration, !supportsFractionalCPU)
 	memVerdict := memTransition.handleRequested(req.Mem, startingMigration, false)
 
 	logger.Info(
-		"Handled resources from pod",
+		"Handled requested resources from pod",
 		zap.Object("verdict", verdictSet{
 			cpu: vCPUVerdict,
 			mem: memVerdict,

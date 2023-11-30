@@ -21,8 +21,12 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+// resourceTransition maintaines the current state of its resource and handles the transition
+// into a new state.
 type resourceTransition[T constraints.Unsigned] struct {
-	node    *nodeResourceState[T]
+	// node respresents the current state of the node
+	node *nodeResourceState[T]
+	// oldNode is the old state of the node, which we just keep for convenience
 	oldNode struct {
 		reserved             T
 		buffer               T
@@ -78,6 +82,40 @@ func (s verdictSet) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("cpu", s.cpu)
 	enc.AddString("mem", s.mem)
 	return nil
+}
+
+// handleLastPermit updates reserved values of r.pod and r.node with the most
+// recent info about the last permit received by the agent. This allows a new
+// scheduler to learn about previous scheduler's state.
+//
+// Why the new scheduler needs this info? It's always possible for the scheduler
+// to get killed and immediately restart, without the agent believing there was
+// any disconnect, which could lead to unintentional overcommitting of resources
+// from the Buffer values if too many agents request upscaling on the first
+// request to the scheduler.
+func (r resourceTransition[T]) handleLastPermit(lastPermit T) (verdict string) {
+	if lastPermit <= r.pod.Reserved {
+		r.node.Reserved -= r.pod.Reserved - lastPermit
+		r.pod.Reserved = lastPermit
+		verdict = fmt.Sprintf(
+			"pod reserved (%v -> %v), node reserved (%v -> %v)",
+			r.oldPod.reserved, r.pod.Reserved, r.oldNode.reserved, r.node.Reserved,
+		)
+	} else {
+		// This is an unexpected case that possible to happen in some unlikely scenarios such as:
+		//   1. Agent receives a permit from scheduler (let’s say it’s equal to `a` for a specific resource)
+		//   2. scheduler dies
+		//   3. vm bounds decrease (the max value is `b` and we have `b < a`).
+		//   4. new scheduler reads the cluster state and sets up the buffer values
+		//   => agent’s last permit is greater (`a`) than plugin’s reserved value (`b`)
+		// This might also happen in case of processing a stale request from an agent
+
+		verdict = fmt.Sprintf(
+			"unexpected last permit, no changes: last permit (%v) is greater than pod reserved (%v)",
+			lastPermit, r.pod.Reserved,
+		)
+	}
+	return
 }
 
 // handleRequested updates r.pod and r.node with changes to match the requested resources, within
