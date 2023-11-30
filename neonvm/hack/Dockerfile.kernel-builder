@@ -1,6 +1,6 @@
 FROM ubuntu:23.10 AS build-deps
 
-ARG KERNEL_VERSION
+ARG KERNEL_VERSION=6.1.63
 
 RUN set -e \
     && echo "Build linux  kernel ${KERNEL_VERSION}" \
@@ -35,7 +35,7 @@ FROM build-deps AS build
 
 ARG KERNEL_VERSION
 
-ADD linux-config-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
+ADD linux-config linux-${KERNEL_VERSION}/.config
 
 RUN cd linux-${KERNEL_VERSION} && make -j `nproc`
 

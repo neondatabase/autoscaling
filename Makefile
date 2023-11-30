@@ -9,9 +9,6 @@ AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
-# kernel for guests
-VM_KERNEL_VERSION ?= "6.1.63"
-
 ## Golang details
 GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
@@ -219,7 +216,6 @@ kernel: ## Build linux kernel.
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
 	docker buildx build \
-		--build-arg KERNEL_VERSION=$(VM_KERNEL_VERSION) \
 		--platform linux/amd64 \
 		--pull \
 		--load \
