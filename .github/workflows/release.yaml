@@ -15,7 +15,6 @@ env:
   IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:               "neondatabase/neonvm-runner"
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
-  VM_KERNEL_VERSION:        "6.1.63"
 
   CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
 
@@ -62,12 +61,9 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: load vm kernel
-        run: |
-          docker pull --quiet ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}
-          ID=$(docker create ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }} true)
-          docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
-          docker rm -f ${ID}
+      - name: build vm kernel
+        run:
+          make kernel
 
       - name: build and push runner image
         uses: docker/build-push-action@v3
