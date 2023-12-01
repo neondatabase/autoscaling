@@ -86,7 +86,7 @@ func (h *execPluginHandle) Request(
 	resp, err := h.scheduler.DoRequest(ctx, logger, target, lastPermit, metrics)
 
 	if err == nil && lastPermit != nil {
-		h.runner.recordResourceChange(*lastPermit, target, h.runner.global.metrics.schedulerApprovedChange)
+		h.runner.recordResourceChange(*lastPermit, resp.Permit, h.runner.global.metrics.schedulerApprovedChange)
 	}
 
 	return resp, err

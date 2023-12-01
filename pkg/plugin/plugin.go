@@ -1076,9 +1076,9 @@ func (e *AutoscaleEnforcer) Unreserve(
 		// Mark the resources as no longer reserved
 
 		currentlyMigrating := false // Unreserve is never called on bound pods, so it can't be migrating.
-		vCPUVerdict := collectResourceTransition(&ps.node.vCPU, &ps.vCPU).
+		vCPUVerdict := makeResourceTransitioner(&ps.node.vCPU, &ps.vCPU).
 			handleDeleted(currentlyMigrating)
-		memVerdict := collectResourceTransition(&ps.node.memSlots, &ps.memSlots).
+		memVerdict := makeResourceTransitioner(&ps.node.memSlots, &ps.memSlots).
 			handleDeleted(currentlyMigrating)
 
 		// Delete our record of the pod

@@ -259,8 +259,8 @@ func (e *AutoscaleEnforcer) handleResources(
 		}
 	}
 
-	vCPUTransition := collectResourceTransition(&node.vCPU, &pod.vCPU)
-	memTransition := collectResourceTransition(&node.memSlots, &pod.memSlots)
+	vCPUTransition := makeResourceTransitioner(&node.vCPU, &pod.vCPU)
+	memTransition := makeResourceTransitioner(&node.memSlots, &pod.memSlots)
 
 	if lastPermit != nil {
 		vCPUVerdict := vCPUTransition.handleLastPermit(lastPermit.VCPU)

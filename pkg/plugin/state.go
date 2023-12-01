@@ -841,9 +841,9 @@ func (e *AutoscaleEnforcer) handleVMDeletion(logger *zap.Logger, podName util.Na
 	// Mark the resources as no longer reserved
 	currentlyMigrating := pod.currentlyMigrating()
 
-	vCPUVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+	vCPUVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
 		handleDeleted(currentlyMigrating)
-	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
 		handleDeleted(currentlyMigrating)
 
 	// Delete our record of the pod
@@ -882,9 +882,9 @@ func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName 
 	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
 
 	// Reset buffer to zero:
-	vCPUVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+	vCPUVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
 		handleAutoscalingDisabled()
-	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
 		handleAutoscalingDisabled()
 
 	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
@@ -918,9 +918,9 @@ func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName,
 	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
 
 	// Reset buffer to zero, remove from migration queue (if in it), and set pod's migrationState
-	cpuVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+	cpuVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
 		handleStartMigration(source)
-	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
 		handleStartMigration(source)
 
 	pod.node.mq.removeIfPresent(pod)
@@ -1055,9 +1055,9 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(logger *zap.Logger, 
 		return
 	}
 
-	cpuVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+	cpuVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
 		handleNonAutoscalingUsageChange(vm.Using().VCPU)
-	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
 		handleNonAutoscalingUsageChange(vm.Using().Mem)
 
 	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())

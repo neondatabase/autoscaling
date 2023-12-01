@@ -96,7 +96,7 @@ make kernel
 To adjust the kernel config:
 
 ```
-docker build --build-arg KERNEL_VERSION=5.15.80 --platform linux/x86_64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder   .
+docker build --platform linux/x86_64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder   .
 docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
 # inside that bash shell, do the menuconfig, then copy-out the config to /host
 ```
