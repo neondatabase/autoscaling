@@ -62,11 +62,10 @@ func (e *AutoscaleEnforcer) watchNodeEvents(
 }
 
 type podWatchCallbacks struct {
-	submitPodStarted        func(*zap.Logger, *corev1.Pod)
-	submitVMDeletion        func(*zap.Logger, util.NamespacedName)
-	submitPodDeletion       func(*zap.Logger, util.NamespacedName)
-	submitPodStartMigration func(_ *zap.Logger, podName, migrationName util.NamespacedName, source bool)
-	submitPodEndMigration   func(_ *zap.Logger, podName, migrationName util.NamespacedName)
+	submitStarted        func(*zap.Logger, *corev1.Pod)
+	submitDeletion       func(*zap.Logger, util.NamespacedName)
+	submitStartMigration func(_ *zap.Logger, podName, migrationName util.NamespacedName, source bool)
+	submitEndMigration   func(_ *zap.Logger, podName, migrationName util.NamespacedName)
 }
 
 // watchPodEvents continuously tracks a handful of Pod-related events that we care about. These
@@ -110,51 +109,41 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 				name := util.GetNamespacedName(pod)
 
 				if e.state.conf.ignoredNamespace(pod.Namespace) {
-					logger.Info("Received add event for ignored pod", zap.Object("pod", name))
+					logger.Info("Received add event for ignored Pod", zap.Object("pod", name))
 					return
 				}
 
-				isVM := util.TryPodOwnerVirtualMachine(pod) != nil ||
-					util.TryPodOwnerVirtualMachineMigration(pod) != nil
-
-				// Generate events for all non-VM pods that are running
-				if !isVM && pod.Status.Phase == corev1.PodRunning {
+				// Generate events for pods when they become running
+				if pod.Status.Phase == corev1.PodRunning {
 					if !preexisting {
 						// Generally pods shouldn't be immediately running, so we log this as a
 						// warning. If it was preexisting, then it'll be handled on the initial
 						// cluster read already (but we generate the events anyways so that we
 						// definitely don't miss anything).
-						logger.Warn("Received add event for new non-VM pod already running", zap.Object("pod", name))
+						logger.Warn("Received add event for new Pod already running", zap.Object("pod", name))
 					}
-					callbacks.submitPodStarted(logger, pod)
+					callbacks.submitStarted(logger, pod)
 				}
 			},
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
 				name := util.GetNamespacedName(newPod)
 
 				if e.state.conf.ignoredNamespace(newPod.Namespace) {
-					logger.Info("Received update event for ignored pod", zap.Object("pod", name))
+					logger.Info("Received update event for ignored Pod", zap.Object("pod", name))
 					return
 				}
 
-				isVM := util.TryPodOwnerVirtualMachine(newPod) != nil ||
-					util.TryPodOwnerVirtualMachineMigration(newPod) != nil
-
-				// Check if a non-VM pod is now running.
-				if !isVM && oldPod.Status.Phase == corev1.PodPending && newPod.Status.Phase == corev1.PodRunning {
-					logger.Info("Received update event for non-VM pod now running", zap.Object("pod", name))
-					callbacks.submitPodStarted(logger, newPod)
+				// Check if a pod is now running.
+				if oldPod.Status.Phase == corev1.PodPending && newPod.Status.Phase == corev1.PodRunning {
+					logger.Info("Received update event for Pod now running", zap.Object("pod", name))
+					callbacks.submitStarted(logger, newPod)
 				}
 
 				// Check if pod is "completed" - handle that the same as deletion.
 				if !util.PodCompleted(oldPod) && util.PodCompleted(newPod) {
-					logger.Info("Received update event for completion of pod", zap.Object("pod", name))
+					logger.Info("Received update event for completion of Pod", zap.Object("pod", name))
 
-					if isVM {
-						callbacks.submitVMDeletion(logger, name)
-					} else {
-						callbacks.submitPodDeletion(logger, name)
-					}
+					callbacks.submitDeletion(logger, name)
 					return // no other handling worthwhile if the pod's done.
 				}
 
@@ -165,30 +154,24 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 
 				if oldMigration == nil && newMigration != nil {
 					isSource := util.TryPodOwnerVirtualMachine(newPod) == nil
-					callbacks.submitPodStartMigration(logger, name, *newMigration, isSource)
+					callbacks.submitStartMigration(logger, name, *newMigration, isSource)
 				} else if oldMigration != nil && newMigration == nil {
-					callbacks.submitPodEndMigration(logger, name, *oldMigration)
+					callbacks.submitEndMigration(logger, name, *oldMigration)
 				}
 			},
 			DeleteFunc: func(pod *corev1.Pod, mayBeStale bool) {
 				name := util.GetNamespacedName(pod)
 
 				if e.state.conf.ignoredNamespace(pod.Namespace) {
-					logger.Info("Received delete event for ignored pod", zap.Object("pod", name))
+					logger.Info("Received delete event for ignored Pod", zap.Object("pod", name))
 					return
 				}
 
 				if util.PodCompleted(pod) {
-					logger.Info("Received delete event for completed pod", zap.Object("pod", name))
+					logger.Info("Received delete event for completed Pod", zap.Object("pod", name))
 				} else {
-					logger.Info("Received delete event for pod", zap.Object("pod", name))
-					isVM := util.TryPodOwnerVirtualMachine(pod) != nil ||
-						util.TryPodOwnerVirtualMachineMigration(pod) != nil
-					if isVM {
-						callbacks.submitVMDeletion(logger, name)
-					} else {
-						callbacks.submitPodDeletion(logger, name)
-					}
+					logger.Info("Received delete event for Pod", zap.Object("pod", name))
+					callbacks.submitDeletion(logger, name)
 				}
 			},
 		},
@@ -196,8 +179,8 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 }
 
 type vmWatchCallbacks struct {
-	submitVMDisabledScaling            func(_ *zap.Logger, podName util.NamespacedName)
-	submitVMBoundsChanged              func(_ *zap.Logger, _ *api.VmInfo, podName string)
+	submitDisabledScaling              func(_ *zap.Logger, podName util.NamespacedName)
+	submitBoundsChanged                func(_ *zap.Logger, _ *api.VmInfo, podName string)
 	submitNonAutoscalingVmUsageChanged func(_ *zap.Logger, _ *api.VmInfo, podName string)
 }
 
@@ -308,7 +291,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 				if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
 					logger.Info("Received update to disable autoscaling for VM", util.VMNameFields(newVM))
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
-					callbacks.submitVMDisabledScaling(logger, name)
+					callbacks.submitDisabledScaling(logger, name)
 				}
 
 				if (!oldInfo.ScalingEnabled || !newInfo.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
@@ -330,7 +313,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
-				callbacks.submitVMBoundsChanged(logger, newInfo, newVM.Status.PodName)
+				callbacks.submitBoundsChanged(logger, newInfo, newVM.Status.PodName)
 			},
 		},
 	)

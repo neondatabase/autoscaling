@@ -569,91 +569,185 @@ func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName stri
 	logger.Info("Deleted node")
 }
 
-func (e *AutoscaleEnforcer) handlePodStarted(logger *zap.Logger, pod *corev1.Pod) {
-	podName := util.GetNamespacedName(pod)
+func (e *AutoscaleEnforcer) handleStarted(logger *zap.Logger, pod *corev1.Pod) {
 	nodeName := pod.Spec.NodeName
 
 	logger = logger.With(
 		zap.String("action", "Pod started"),
-		zap.Object("pod", podName),
 		zap.String("node", nodeName),
+		util.PodNameFields(pod),
 	)
-
-	if pod.Spec.SchedulerName == e.state.conf.SchedulerName {
-		logger.Info("Got non-VM pod start event for pod assigned to this scheduler; nothing to do")
-		return
+	if migrationName := util.TryPodOwnerVirtualMachineMigration(pod); migrationName != nil {
+		logger = logger.With(zap.Object("virtualmachinemigration", *migrationName))
 	}
 
-	logger.Info("Handling non-VM pod start event")
+	logger.Info("Handling Pod start event")
 
-	podResources := extractPodResources(pod)
+	_, _, _ = e.reserveResources(context.TODO(), logger, pod, "Pod started", false)
+}
+
+func (e *AutoscaleEnforcer) reserveResources(
+	ctx context.Context,
+	logger *zap.Logger,
+	pod *corev1.Pod,
+	action string,
+	allowDeny bool,
+) (ok bool, _ *verdictSet, _ error) {
+	nodeName := pod.Spec.NodeName
+
+	if e.state.conf.ignoredNamespace(pod.Namespace) {
+		panic(fmt.Errorf("reserveResources called with ignored pod %v", util.GetNamespacedName(pod)))
+	}
+
+	vmInfo, err := e.getVmInfo(logger, pod, action)
+	if err != nil {
+		msg := "Error getting VM info for Pod"
+		logger.Error(msg, zap.Error(err))
+		return false, nil, fmt.Errorf("%s: %w", msg, err)
+	}
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	if _, ok := e.state.pods[podName]; ok {
-		logger.Info("Pod is already known") // will happen during startup
-		return
+	// If the pod already exists, nothing to do
+	if _, ok := e.state.pods[util.GetNamespacedName(pod)]; ok {
+		logger.Info("Pod already exists in global state")
+		return true, &verdictSet{cpu: "", mem: ""}, nil
 	}
 
-	// Pod is not known - let's get information about the node!
-	node, err := e.state.getOrFetchNodeState(context.TODO(), logger, e.metrics, e.nodeStore, nodeName)
+	// Get information about the node
+	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
 	if err != nil {
-		logger.Error("Failed to state for node", zap.Error(err))
+		msg := "Failed to get state for node"
+		logger.Error(msg, zap.Error(err))
+		return false, nil, fmt.Errorf("%s: %w", msg, err)
 	}
 
-	// TODO: this is pretty similar to the Reserve method. Maybe we should join them into one.
+	var add api.Resources
+	if vmInfo != nil {
+		add = vmInfo.Using()
+	} else {
+		add = extractPodResources(pod)
+	}
+
+	shouldDeny := add.VCPU > node.remainingReservableCPU() || add.Mem > node.remainingReservableMem()
+	if shouldDeny && allowDeny {
+		cpuShortVerdict := "NOT ENOUGH"
+		if add.VCPU <= node.remainingReservableCPU() {
+			cpuShortVerdict = "OK"
+		}
+		memShortVerdict := "NOT ENOUGH"
+		if add.Mem <= node.remainingReservableMem() {
+			memShortVerdict = "OK"
+		}
+
+		verdict := verdictSet{
+			cpu: fmt.Sprintf(
+				"need %v, %v of %v used, so %v available (%s)",
+				add.VCPU, node.cpu.Reserved, node.cpu.Total, node.remainingReservableCPU(), cpuShortVerdict,
+			),
+			mem: fmt.Sprintf(
+				"need %v, %v of %v used, so %v available (%s)",
+				add.Mem, node.mem.Reserved, node.mem.Total, node.remainingReservableMem(), memShortVerdict,
+			),
+		}
+
+		logger.Error("Can't reserve resources for Pod (not enough available)", zap.Object("verdict", verdict))
+		return false, &verdict, nil
+	}
+
+	// Construct the final state
+
+	var cpuState podResourceState[vmapi.MilliCPU]
+	var memState podResourceState[api.Bytes]
+	var vmState *vmPodState
+
+	if vmInfo != nil {
+		vmState = &vmPodState{
+			name:                     vmInfo.NamespacedName(),
+			memSlotSize:              vmInfo.Mem.SlotSize,
+			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
+			mostRecentComputeUnit:    nil,
+			metrics:                  nil,
+			mqIndex:                  -1,
+			migrationState:           nil,
+		}
+		cpuState = podResourceState[vmapi.MilliCPU]{
+			Reserved:         vmInfo.Using().VCPU,
+			Buffer:           0,
+			CapacityPressure: 0,
+			Min:              vmInfo.Min().VCPU,
+			Max:              vmInfo.Max().VCPU,
+		}
+		memState = podResourceState[api.Bytes]{
+			Reserved:         vmInfo.Using().Mem,
+			Buffer:           0,
+			CapacityPressure: 0,
+			Min:              vmInfo.Min().Mem,
+			Max:              vmInfo.Max().Mem,
+		}
+	} else {
+		cpuState = podResourceState[vmapi.MilliCPU]{
+			Reserved:         add.VCPU,
+			Buffer:           0,
+			CapacityPressure: 0,
+			Min:              add.VCPU,
+			Max:              add.VCPU,
+		}
+		memState = podResourceState[api.Bytes]{
+			Reserved:         add.Mem,
+			Buffer:           0,
+			CapacityPressure: 0,
+			Min:              add.Mem,
+			Max:              add.Mem,
+		}
+	}
+
+	podName := util.GetNamespacedName(pod)
+
 	ps := &podState{
 		name: podName,
 		node: node,
-		cpu: podResourceState[vmapi.MilliCPU]{
-			Reserved:         podResources.VCPU,
-			Buffer:           0,
-			CapacityPressure: 0,
-			Min:              podResources.VCPU,
-			Max:              podResources.VCPU,
-		},
-		mem: podResourceState[api.Bytes]{
-			Reserved:         podResources.Mem,
-			Buffer:           0,
-			CapacityPressure: 0,
-			Min:              podResources.Mem,
-			Max:              podResources.Mem,
-		},
-		vm: nil,
+		cpu:  cpuState,
+		mem:  memState,
+		vm:   vmState,
 	}
-
 	newNodeReservedCPU := node.cpu.Reserved + ps.cpu.Reserved
 	newNodeReservedMem := node.mem.Reserved + ps.mem.Reserved
 
-	cpuVerdict := fmt.Sprintf(
-		"node reserved %v + %v -> %v of total %v",
-		node.cpu.Reserved, ps.cpu.Reserved, newNodeReservedCPU, node.cpu.Total,
-	)
-	memVerdict := fmt.Sprintf(
-		"node reserved %v + %v -> %v of total %v",
-		node.mem.Reserved, ps.mem.Reserved, newNodeReservedMem, node.mem.Total,
-	)
-
-	log := logger.Info
-	if node.cpu.Reserved > node.cpu.Total || node.mem.Reserved > node.mem.Total {
-		log = logger.Warn
+	verdict := verdictSet{
+		cpu: fmt.Sprintf(
+			"node reserved %v + %v -> %v of total %v",
+			node.cpu.Reserved, ps.cpu.Reserved, newNodeReservedCPU, node.cpu.Total,
+		),
+		mem: fmt.Sprintf(
+			"node reserved %v + %v -> %v of total %v",
+			node.mem.Reserved, ps.mem.Reserved, newNodeReservedMem, node.mem.Total,
+		),
 	}
 
-	log(
-		"Handled new non-VM pod",
-		zap.Object("verdict", verdictSet{
-			cpu: cpuVerdict,
-			mem: memVerdict,
-		}),
-	)
+	if allowDeny {
+		logger.Info("Allowing reserve resources for Pod", zap.Object("verdict", verdict))
+	} else if shouldDeny /* but couldn't */ {
+		logger.Warn("Reserved resources for Pod above totals", zap.Object("verdict", verdict))
+	} else {
+		logger.Info("Reserved resources for Pod", zap.Object("verdict", verdict))
+	}
+
+	node.cpu.Reserved = newNodeReservedCPU
+	node.mem.Reserved = newNodeReservedMem
+
+	node.pods[podName] = ps
+	e.state.pods[podName] = ps
 
 	node.updateMetrics(e.metrics)
+
+	return true, &verdict, nil
 }
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
 // logs, so IMO it's worthwhile to have this separate.
-func (e *AutoscaleEnforcer) handleVMDeletion(logger *zap.Logger, podName util.NamespacedName) {
+func (e *AutoscaleEnforcer) handleDeletion(logger *zap.Logger, podName util.NamespacedName) {
 	logger = logger.With(
 		zap.String("action", "VM deletion"),
 		zap.Object("pod", podName),
@@ -661,6 +755,19 @@ func (e *AutoscaleEnforcer) handleVMDeletion(logger *zap.Logger, podName util.Na
 
 	logger.Info("Handling deletion of VM pod")
 
+	logFields, kind, migrating, verdict := e.unreserveResources(logger, podName)
+
+	logger.With(logFields...).Info(
+		fmt.Sprintf("Deleted %s Pod", kind),
+		zap.Bool("migrating", migrating),
+		zap.Object("verdict", verdict),
+	)
+}
+
+func (e *AutoscaleEnforcer) unreserveResources(
+	logger *zap.Logger,
+	podName util.NamespacedName,
+) (_ []zap.Field, kind string, migrating bool, _ verdictSet) {
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
@@ -669,35 +776,29 @@ func (e *AutoscaleEnforcer) handleVMDeletion(logger *zap.Logger, podName util.Na
 		logger.Warn("Cannot find Pod in global pods map")
 		return
 	}
-	if ps.vm == nil {
-		logger.Error("handleVMDeletion called for non-VM Pod")
-		return
+	logFields := []zap.Field{zap.String("node", ps.node.name)}
+	if ps.vm != nil {
+		logFields = append(logFields, zap.Object("virtualmachine", ps.vm.name))
 	}
-	logger = logger.With(zap.String("node", ps.node.name), zap.Object("virtualmachine", ps.vm.name))
 
 	// Mark the resources as no longer reserved
-	migrating := ps.vm.currentlyMigrating()
+	currentlyMigrating := ps.vm != nil && ps.vm.currentlyMigrating()
 
-	vCPUVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
-		handleDeleted(migrating)
+	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
+		handleDeleted(currentlyMigrating)
 	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
-		handleDeleted(migrating)
+		handleDeleted(currentlyMigrating)
 
 	// Delete our record of the pod
 	delete(e.state.pods, podName)
 	delete(ps.node.pods, podName)
-	ps.node.mq.removeIfPresent(ps.vm)
+	if ps.vm != nil {
+		ps.node.mq.removeIfPresent(ps.vm)
+	}
 
 	ps.node.updateMetrics(e.metrics)
 
-	logger.Info(
-		"Deleted VM pod",
-		zap.Bool("migrating", migrating),
-		zap.Object("verdict", verdictSet{
-			cpu: vCPUVerdict,
-			mem: memVerdict,
-		}),
-	)
+	return logFields, ps.kind(), currentlyMigrating, verdictSet{cpu: cpuVerdict, mem: memVerdict}
 }
 
 func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName util.NamespacedName) {
@@ -813,48 +914,6 @@ func (e *AutoscaleEnforcer) handlePodEndMigration(logger *zap.Logger, podName, m
 	// ps.node.updateMetrics(e.metrics)
 
 	logger.Info("Recorded end of migration for VM pod")
-}
-
-func (e *AutoscaleEnforcer) handlePodDeletion(logger *zap.Logger, podName util.NamespacedName) {
-	logger = logger.With(
-		zap.String("action", "non-VM Pod deletion"),
-		zap.Object("pod", podName),
-	)
-
-	logger.Info("Handling non-VM Pod deletion")
-
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
-
-	ps, ok := e.state.pods[podName]
-	if !ok {
-		logger.Warn("Cannot find Pod in global pods map")
-		return
-	}
-	if ps.vm != nil {
-		logger.Error("handlePodDeletion called for VM pod")
-		return
-	}
-	logger = logger.With(zap.String("node", ps.node.name))
-
-	// Mark the resources as no longer reserved
-	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
-		handleDeleted(false)
-	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
-		handleDeleted(false)
-
-	delete(e.state.pods, podName)
-	delete(ps.node.pods, podName)
-
-	ps.node.updateMetrics(e.metrics)
-
-	logger.Info(
-		"Deleted non-VM pod",
-		zap.Object("verdict", verdictSet{
-			cpu: cpuVerdict,
-			mem: memVerdict,
-		}),
-	)
 }
 
 func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(logger *zap.Logger, vm *api.VmInfo, unqualifiedPodName string) {
