@@ -81,9 +81,26 @@ func (r resourceTransitioner[T]) handleLastPermit(lastPermit T) (verdict string)
 	if lastPermit <= r.pod.Reserved {
 		r.node.Reserved -= r.pod.Reserved - lastPermit
 		r.pod.Reserved = lastPermit
+
+		var podBuffer string
+		var oldNodeBuffer string
+		var newNodeBuffer string
+		if r.pod.Buffer != 0 {
+			podBuffer = fmt.Sprintf(" [buffer %d]", r.pod.Buffer)
+			oldNodeBuffer = fmt.Sprintf(" [buffer %d]", oldState.node.Buffer)
+
+			r.node.Buffer -= r.pod.Buffer
+			r.pod.Buffer = 0
+
+			newNodeBuffer = fmt.Sprintf(" [buffer %d]", r.node.Buffer)
+		}
+
+		totalReservable := r.node.Total
 		verdict = fmt.Sprintf(
-			"pod reserved (%v -> %v), node reserved (%v -> %v)",
-			oldState.pod.Reserved, r.pod.Reserved, oldState.node.Reserved, r.node.Reserved,
+			"pod reserved %d%s -> %d, "+
+				"node reserved %d%s -> %d%s (of %d)",
+			oldState.pod.Reserved, podBuffer, r.pod.Reserved,
+			oldState.node.Reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer, totalReservable,
 		)
 	} else {
 		// This is an unexpected case that possible to happen in some unlikely scenarios such as:
