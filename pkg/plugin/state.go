@@ -40,12 +40,11 @@ type pluginState struct {
 	// otherPods stores information about non-VM pods
 	otherPods map[util.NamespacedName]*otherPodState
 
-	// maxTotalReservableCPU stores the maximum value of any node's vCPU.Total, so that we
-	// can appropriately scale our scoring
-	maxTotalReservableCPU vmapi.MilliCPU
-	// maxTotalReservableMemSlots is the same as maxTotalReservableCPU, but for memory slots instead
-	// of CPU
-	maxTotalReservableMemSlots uint16
+	// maxTotalCPU stores the maximum value of any node's vCPU.Total, so that we can appropriately
+	// scale our scoring
+	maxTotalCPU vmapi.MilliCPU
+	// maxTotalMemSlots is the same as maxTotalReservableCPU, but for memory slots instead of CPU
+	maxTotalMemSlots uint16
 	// conf stores the current configuration, and is nil if the configuration has not yet been set
 	//
 	// Proper initialization of the plugin guarantees conf is not nil.
@@ -543,11 +542,11 @@ func (s *pluginState) getOrFetchNodeState(
 	}
 
 	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
-	if n.vCPU.Total > s.maxTotalReservableCPU {
-		s.maxTotalReservableCPU = n.vCPU.Total
+	if n.vCPU.Total > s.maxTotalCPU {
+		s.maxTotalCPU = n.vCPU.Total
 	}
-	if n.memSlots.Total > s.maxTotalReservableMemSlots {
-		s.maxTotalReservableMemSlots = n.memSlots.Total
+	if n.memSlots.Total > s.maxTotalMemSlots {
+		s.maxTotalMemSlots = n.memSlots.Total
 	}
 
 	n.updateMetrics(metrics, s.memSlotSizeBytes())
@@ -1264,7 +1263,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 	// Check that all fields are equal to their zero value, per the function documentation.
 	hasNonNilField := p.state.nodeMap != nil || p.state.podMap != nil || p.state.otherPods != nil ||
-		p.state.maxTotalReservableCPU != 0 || p.state.maxTotalReservableMemSlots != 0
+		p.state.maxTotalCPU != 0 || p.state.maxTotalMemSlots != 0
 
 	if hasNonNilField {
 		panic(errors.New("readClusterState called with non-nil pluginState field"))

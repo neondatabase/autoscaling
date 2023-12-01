@@ -686,8 +686,8 @@ func (e *AutoscaleEnforcer) Score(
 
 	cpuFraction := 1 - cpuRemaining.AsFloat64()/cpuTotal.AsFloat64()
 	memFraction := 1 - float64(memRemaining)/float64(memTotal)
-	cpuScale := node.vCPU.Total.AsFloat64() / e.state.maxTotalReservableCPU.AsFloat64()
-	memScale := float64(node.memSlots.Total) / float64(e.state.maxTotalReservableMemSlots)
+	cpuScale := node.vCPU.Total.AsFloat64() / e.state.maxTotalCPU.AsFloat64()
+	memScale := float64(node.memSlots.Total) / float64(e.state.maxTotalMemSlots)
 
 	nodeConf := e.state.conf.forNode(nodeName)
 
