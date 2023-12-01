@@ -1,35 +1,35 @@
 package plugin
 
-// Implementation of a metrics-based migration priority queue over podStates
+// Implementation of a metrics-based migration priority queue over vmPodStates
 
 import (
 	"container/heap"
 )
 
-type migrationQueue []*podState
+type migrationQueue []*vmPodState
 
 ///////////////////////
 // package-local API //
 ///////////////////////
 
-func (mq *migrationQueue) addOrUpdate(pod *podState) {
-	if pod.mqIndex == -1 {
-		heap.Push(mq, pod)
+func (mq *migrationQueue) addOrUpdate(vm *vmPodState) {
+	if vm.mqIndex == -1 {
+		heap.Push(mq, vm)
 	} else {
-		heap.Fix(mq, pod.mqIndex)
+		heap.Fix(mq, vm.mqIndex)
 	}
 }
 
-func (mq migrationQueue) isNextInQueue(pod *podState) bool {
+func (mq migrationQueue) isNextInQueue(vm *vmPodState) bool {
 	// the documentation for heap.Pop says that it's equivalent to heap.Remove(h, 0). Therefore,
 	// checking whether something's the next pop target can just be done by checking if its index is
 	// zero.
-	return pod.mqIndex == 0
+	return vm.mqIndex == 0
 }
 
-func (mq *migrationQueue) removeIfPresent(pod *podState) {
-	if pod.mqIndex != -1 {
-		_ = heap.Remove(mq, pod.mqIndex)
+func (mq *migrationQueue) removeIfPresent(vm *vmPodState) {
+	if vm.mqIndex != -1 {
+		_ = heap.Remove(mq, vm.mqIndex)
 	}
 }
 
@@ -51,18 +51,18 @@ func (mq migrationQueue) Swap(i, j int) {
 
 func (mq *migrationQueue) Push(v any) {
 	n := len(*mq)
-	pod := v.(*podState)
-	pod.mqIndex = n
-	*mq = append(*mq, pod)
+	vm := v.(*vmPodState)
+	vm.mqIndex = n
+	*mq = append(*mq, vm)
 }
 
 func (mq *migrationQueue) Pop() any {
 	// Function body + comments taken from the example at https://pkg.go.dev/container/heap
 	old := *mq
 	n := len(old)
-	pod := old[n-1]
-	old[n-1] = nil   // avoid memory leak
-	pod.mqIndex = -1 // for safety
+	vm := old[n-1]
+	old[n-1] = nil  // avoid memory leak
+	vm.mqIndex = -1 // for safety
 	*mq = old[0 : n-1]
-	return pod
+	return vm
 }

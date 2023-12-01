@@ -102,11 +102,10 @@ type pluginStateDump struct {
 
 	Nodes []keyed[string, nodeStateDump] `json:"nodes"`
 
-	VMPods    []podNameAndPointer `json:"vmPods"`
-	OtherPods []podNameAndPointer `json:"otherPods"`
+	Pods []podNameAndPointer `json:"pods"`
 
-	MaxTotalCPU      vmapi.MilliCPU `json:"maxTotalReservableCPU"`
-	MaxTotalMemSlots uint16         `json:"maxTotalReservableMemSlots"`
+	MaxTotalReservableCPU vmapi.MilliCPU `json:"maxTotalReservableCPU"`
+	MaxTotalReservableMem api.Bytes      `json:"maxTotalReservableMem"`
 
 	Conf Config `json:"config"`
 }
@@ -119,39 +118,36 @@ type podNameAndPointer struct {
 type pointerString string
 
 type nodeStateDump struct {
-	Obj              pointerString                                   `json:"obj"`
-	Name             string                                          `json:"name"`
-	NodeGroup        string                                          `json:"nodeGroup"`
-	AvailabilityZone string                                          `json:"availabilityZone"`
-	VCPU             nodeResourceState[vmapi.MilliCPU]               `json:"vCPU"`
-	MemSlots         nodeResourceState[uint16]                       `json:"memSlots"`
-	Pods             []keyed[util.NamespacedName, podStateDump]      `json:"pods"`
-	OtherPods        []keyed[util.NamespacedName, otherPodStateDump] `json:"otherPods"`
-	Mq               []*podNameAndPointer                            `json:"mq"`
+	Obj              pointerString                              `json:"obj"`
+	Name             string                                     `json:"name"`
+	NodeGroup        string                                     `json:"nodeGroup"`
+	AvailabilityZone string                                     `json:"availabilityZone"`
+	CPU              nodeResourceState[vmapi.MilliCPU]          `json:"cpu"`
+	Mem              nodeResourceState[api.Bytes]               `json:"mem"`
+	Pods             []keyed[util.NamespacedName, podStateDump] `json:"pods"`
+	Mq               []*podNameAndPointer                       `json:"mq"`
 }
 
 type podStateDump struct {
-	Obj                      pointerString                    `json:"obj"`
-	Name                     util.NamespacedName              `json:"name"`
-	VMName                   util.NamespacedName              `json:"vmName"`
-	Node                     pointerString                    `json:"node"`
-	TestingOnlyAlwaysMigrate bool                             `json:"testingOnlyAlwaysMigrate"`
-	VCPU                     podResourceState[vmapi.MilliCPU] `json:"vCPU"`
-	MemSlots                 podResourceState[uint16]         `json:"memSlots"`
-	MostRecentComputeUnit    *api.Resources                   `json:"mostRecentComputeUnit"`
-	Metrics                  *api.Metrics                     `json:"metrics"`
-	MqIndex                  int                              `json:"mqIndex"`
-	MigrationState           *podMigrationStateDump           `json:"migrationState"`
+	Obj  pointerString                    `json:"obj"`
+	Name util.NamespacedName              `json:"name"`
+	Node pointerString                    `json:"node"`
+	CPU  podResourceState[vmapi.MilliCPU] `json:"cpu"`
+	Mem  podResourceState[api.Bytes]      `json:"mem"`
+	VM   *vmPodStateDump                  `json:"vm"`
+}
+
+type vmPodStateDump struct {
+	Name                     util.NamespacedName    `json:"name"`
+	TestingOnlyAlwaysMigrate bool                   `json:"testingOnlyAlwaysMigrate"`
+	MostRecentComputeUnit    *api.Resources         `json:"mostRecentComputeUnit"`
+	Metrics                  *api.Metrics           `json:"metrics"`
+	MqIndex                  int                    `json:"mqIndex"`
+	MigrationState           *podMigrationStateDump `json:"migrationState"`
 }
 
 type podMigrationStateDump struct {
 	MigrationName util.NamespacedName `json:"migrationName"`
-}
-
-type otherPodStateDump struct {
-	Obj       pointerString         `json:"obj"`
-	Node      pointerString         `json:"node"`
-	Resources podOtherResourceState `json:"resources"`
 }
 
 func makePointerString[T any](t *T) pointerString {
@@ -172,20 +168,14 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 	}
 	defer s.lock.Unlock()
 
-	vmPods := make([]podNameAndPointer, 0, len(s.podMap))
-	for _, p := range s.podMap {
-		vmPods = append(vmPods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
+	pods := make([]podNameAndPointer, 0, len(s.pods))
+	for _, p := range s.pods {
+		pods = append(pods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
 	}
-	sortSliceByPodName(vmPods, func(p podNameAndPointer) util.NamespacedName { return p.PodName })
+	sortSliceByPodName(pods, func(p podNameAndPointer) util.NamespacedName { return p.PodName })
 
-	otherPods := make([]podNameAndPointer, 0, len(s.otherPods))
-	for _, p := range s.otherPods {
-		otherPods = append(otherPods, podNameAndPointer{Obj: makePointerString(p), PodName: p.name})
-	}
-	sortSliceByPodName(otherPods, func(p podNameAndPointer) util.NamespacedName { return p.PodName })
-
-	nodes := make([]keyed[string, nodeStateDump], 0, len(s.nodeMap))
-	for k, n := range s.nodeMap {
+	nodes := make([]keyed[string, nodeStateDump], 0, len(s.nodes))
+	for k, n := range s.nodes {
 		nodes = append(nodes, keyed[string, nodeStateDump]{Key: k, Value: n.dump()})
 	}
 	slices.SortFunc(nodes, func(kvx, kvy keyed[string, nodeStateDump]) (less bool) {
@@ -201,10 +191,9 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 	return &pluginStateDump{
 		OngoingMigrationDeletions: ongoingMigrationDeletions,
 		Nodes:                     nodes,
-		VMPods:                    vmPods,
-		OtherPods:                 otherPods,
-		MaxTotalCPU:               s.maxTotalCPU,
-		MaxTotalMemSlots:          s.maxTotalMemSlots,
+		Pods:                      pods,
+		MaxTotalReservableCPU:     s.maxTotalReservableCPU,
+		MaxTotalReservableMem:     s.maxTotalReservableMem,
 		Conf:                      *s.conf,
 	}, nil
 }
@@ -215,12 +204,6 @@ func (s *nodeState) dump() nodeStateDump {
 		pods = append(pods, keyed[util.NamespacedName, podStateDump]{Key: k, Value: p.dump()})
 	}
 	sortSliceByPodName(pods, func(kv keyed[util.NamespacedName, podStateDump]) util.NamespacedName { return kv.Key })
-
-	otherPods := make([]keyed[util.NamespacedName, otherPodStateDump], 0, len(s.otherPods))
-	for k, p := range s.otherPods {
-		otherPods = append(otherPods, keyed[util.NamespacedName, otherPodStateDump]{Key: k, Value: p.dump()})
-	}
-	sortSliceByPodName(otherPods, func(kv keyed[util.NamespacedName, otherPodStateDump]) util.NamespacedName { return kv.Key })
 
 	mq := make([]*podNameAndPointer, 0, len(s.mq))
 	for _, p := range s.mq {
@@ -237,15 +220,31 @@ func (s *nodeState) dump() nodeStateDump {
 		Name:             s.name,
 		NodeGroup:        s.nodeGroup,
 		AvailabilityZone: s.availabilityZone,
-		VCPU:             s.vCPU,
-		MemSlots:         s.memSlots,
+		CPU:              s.cpu,
+		Mem:              s.mem,
 		Pods:             pods,
-		OtherPods:        otherPods,
 		Mq:               mq,
 	}
 }
 
 func (s *podState) dump() podStateDump {
+
+	var vm *vmPodStateDump
+	if s.vm != nil {
+		vm = &[]vmPodStateDump{s.vm.dump()}[0]
+	}
+
+	return podStateDump{
+		Obj:  makePointerString(s),
+		Name: s.name,
+		Node: makePointerString(s.node),
+		CPU:  s.cpu,
+		Mem:  s.mem,
+		VM:   vm,
+	}
+}
+
+func (s *vmPodState) dump() vmPodStateDump {
 	// Copy some of the "may be nil" pointer fields
 	var mostRecentComputeUnit *api.Resources
 	if s.mostRecentComputeUnit != nil {
@@ -264,25 +263,12 @@ func (s *podState) dump() podStateDump {
 		}
 	}
 
-	return podStateDump{
-		Obj:                      makePointerString(s),
+	return vmPodStateDump{
 		Name:                     s.name,
-		VMName:                   s.vmName,
-		Node:                     makePointerString(s.node),
 		TestingOnlyAlwaysMigrate: s.testingOnlyAlwaysMigrate,
-		VCPU:                     s.vCPU,
-		MemSlots:                 s.memSlots,
 		MostRecentComputeUnit:    mostRecentComputeUnit,
 		Metrics:                  metrics,
 		MqIndex:                  s.mqIndex,
 		MigrationState:           migrationState,
-	}
-}
-
-func (s *otherPodState) dump() otherPodStateDump {
-	return otherPodStateDump{
-		Obj:       makePointerString(s),
-		Node:      makePointerString(s.node),
-		Resources: s.resources,
 	}
 }
