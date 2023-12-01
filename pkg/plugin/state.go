@@ -72,8 +72,6 @@ type nodeState struct {
 	// memSlots tracks the state of memory slots -- what's available and how
 	memSlots nodeResourceState[uint16]
 
-	computeUnit *api.Resources
-
 	// pods tracks all the VM pods assigned to this node
 	//
 	// This includes both bound pods (i.e., pods fully committed to the node) and reserved pods
@@ -645,8 +643,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 			MarginCPU:        marginCpu,
 			MarginMemory:     marginMemory,
 		},
-		computeUnit: &conf.NodeConfig.ComputeUnit,
-		mq:          migrationQueue{},
+		mq: migrationQueue{},
 	}
 
 	type resourceInfo[T any] struct {
