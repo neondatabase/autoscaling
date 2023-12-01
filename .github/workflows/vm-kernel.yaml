@@ -14,8 +14,7 @@ on:
         required: false
 
 env:
-  VM_KERNEL_IMAGE:   "neondatabase/vm-kernel"
-  VM_KERNEL_VERSION: "6.1.63"
+  VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
 
 jobs:
   vm-kernel:
@@ -43,7 +42,6 @@ jobs:
         id: build-linux-kernel
         uses: docker/build-push-action@v3
         with:
-          build-args: KERNEL_VERSION=${{ env.VM_KERNEL_VERSION }}
           context: neonvm/hack
           platforms: linux/amd64
           # Push only if this is a scheduled run or if the workflow_dispatch input push is set to true
