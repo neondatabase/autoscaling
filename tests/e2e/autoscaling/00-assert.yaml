@@ -11,7 +11,5 @@ status:
   conditions:
     - type: Available
       status: "True"
-  # This is the "canonical form" for Kubernetes. Even if we pass 1, it will work but the created resource will have "1".
-  # This assert checks Kubernetes output (not input), so we need quotes
   cpus: 250m
   memorySize: 1Gi
