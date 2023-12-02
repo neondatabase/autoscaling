@@ -24,9 +24,9 @@ import (
 // resourceTransitioner maintains the current state of its resource and handles the transition
 // into a new state. A resource is associated with a pod, and the pod is associated with a node.
 type resourceTransitioner[T constraints.Unsigned] struct {
-	// node represents the current resource state of in the node
+	// node represents the current resource state of the node
 	node *nodeResourceState[T]
-	// pod represents the current resource state of in the pod.
+	// pod represents the current resource state of the pod.
 	// pod belongs to the node.
 	pod *podResourceState[T]
 }
