@@ -23,20 +23,19 @@ jobs:
 
     runs-on: [ self-hosted, gen3, large ]
     steps:
-
       - name: git checkout
         uses: actions/checkout@v3
 
-      - name: docker - install qemu
-        uses: docker/setup-qemu-action@v2
-      - name: docker - setup buildx
-        uses: docker/setup-buildx-action@v2
+      - name: set custom docker config directory
+        run: |
+          mkdir -p .docker-custom
+          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
       - name: login to docker hub
         run: |
           DOCKERHUB_AUTH=$(echo -n "${{ secrets.NEON_DOCKERHUB_USERNAME }}:${{ secrets.NEON_DOCKERHUB_PASSWORD }}" | base64)
           echo "::add-mask::${DOCKERHUB_AUTH}"
 
-          cat <<-EOF > ~/.docker/config.json
+          cat <<-EOF > .docker-custom/config.json
             {
               "auths": {
                 "https://index.docker.io/v1/": {
@@ -45,6 +44,11 @@ jobs:
               }
             }
           EOF
+
+      - name: docker - install qemu
+        uses: docker/setup-qemu-action@v2
+      - name: docker - setup buildx
+        uses: docker/setup-buildx-action@v2
 
       - name: get kernel version
         id: get-kernel-version
@@ -68,10 +72,10 @@ jobs:
           # Tag the image with the tag from the workflow_dispatch input or the VM_KERNEL_VERSION from linux-config-* file
           tags: ${{ env.VM_KERNEL_IMAGE }}:${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
 
-      - name: logout from docker hub
+      - name: remove custom docker config directory
         if: always()
         run: |
-          rm -f ~/.docker/config.json
+          rm -rf .docker-custom
 
   e2e-tests:
     needs: vm-kernel
