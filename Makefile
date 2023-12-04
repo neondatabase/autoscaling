@@ -340,7 +340,7 @@ e2e-tools: k3d kind kubectl kuttl ## Donwnload tools for e2e tests locally if ne
 
 .PHONE: e2e
 e2e: e2e-tools ## Run e2e kuttl tests
-	$(KUTTL) test --config tests/e2e/kuttl-test.yaml
+	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
 
 ##@ Local kind cluster
