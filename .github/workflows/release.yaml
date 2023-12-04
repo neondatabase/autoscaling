@@ -44,6 +44,7 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
+        timeout-minutes: 10
 
       - name: check everything builds
         run: go build ./...
