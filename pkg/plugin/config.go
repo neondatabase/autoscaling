@@ -21,7 +21,7 @@ import (
 //////////////////
 
 type Config struct {
-	// NodeDefaults is the default node configuration used when not overridden
+	// NodeConfig defines our policies around node resources and scoring
 	NodeConfig nodeConfig `json:"nodeConfig"`
 	// MemSlotSize is the smallest unit of memory that the scheduler plugin will reserve for a VM,
 	// and is defined globally.
