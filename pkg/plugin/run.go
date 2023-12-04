@@ -197,16 +197,15 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	resp := api.PluginResponse{
 		Permit:      permit,
 		Migrate:     migrateDecision,
-		ComputeUnit: getComputeUnitForResponse(node, supportsFractionalCPU),
+		ComputeUnit: getComputeUnitForResponse(e.state.conf.ComputeUnit, supportsFractionalCPU),
 	}
-	pod.mostRecentComputeUnit = node.computeUnit // refer to common allocation
+	pod.mostRecentComputeUnit = &e.state.conf.ComputeUnit
 	return &resp, 200, nil
 }
 
 // getComputeUnitForResponse tries to return compute unit that the agent supports
 // if we have a fractional CPU but the agent does not support it we multiply the result
-func getComputeUnitForResponse(node *nodeState, supportsFractional bool) api.Resources {
-	computeUnit := *node.computeUnit
+func getComputeUnitForResponse(computeUnit api.Resources, supportsFractional bool) api.Resources {
 	if !supportsFractional {
 		initialCU := computeUnit
 		for i := uint16(2); computeUnit.VCPU%1000 != 0; i++ {

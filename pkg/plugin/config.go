@@ -21,6 +21,11 @@ import (
 //////////////////
 
 type Config struct {
+	// ComputeUnit is the desired ratio between CPU and memory that autoscaler-agents should uphold
+	//
+	// This value is sent to autoscaler-agents in every response, as part of api.PluginResponse.
+	ComputeUnit api.Resources `json:"computeUnit"`
+
 	// NodeConfig defines our policies around node resources and scoring
 	NodeConfig nodeConfig `json:"nodeConfig"`
 	// MemSlotSize is the smallest unit of memory that the scheduler plugin will reserve for a VM,
@@ -77,9 +82,8 @@ type Config struct {
 }
 
 type nodeConfig struct {
-	Cpu         resourceConfig `json:"cpu"`
-	Memory      resourceConfig `json:"memory"`
-	ComputeUnit api.Resources  `json:"computeUnit"`
+	Cpu    resourceConfig `json:"cpu"`
+	Memory resourceConfig `json:"memory"`
 
 	// Details about node scoring:
 	// See also: https://www.desmos.com/calculator/wg8s0yn63s
@@ -131,6 +135,10 @@ func (c *Config) validate() (string, error) {
 		return fmt.Sprintf("nodeConfig.%s", path), err
 	}
 
+	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
+		return "computeUnit", err
+	}
+
 	if c.MemSlotSize.Value() <= 0 {
 		return "memBlockSize", errors.New("value must be > 0")
 	} else if c.MemSlotSize.Value() <= math.MaxInt64/1000 && c.MemSlotSize.MilliValue()%1000 != 0 {
@@ -160,9 +168,6 @@ func (c *nodeConfig) validate() (string, error) {
 	}
 	if path, err := c.Memory.validate(); err != nil {
 		return fmt.Sprintf("memory.%s", path), err
-	}
-	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
-		return "computeUnit", err
 	}
 
 	if c.MinUsageScore < 0 || c.MinUsageScore > 1 {
