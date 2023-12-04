@@ -21,6 +21,9 @@ import (
 //////////////////
 
 type Config struct {
+	// ComputeUnit is the desired ratio between CPU and memory that autoscaler-agents should uphold
+	//
+	// This value is sent to autoscaler-agents in every response, as part of api.PluginResponse.
 	ComputeUnit api.Resources `json:"computeUnit"`
 
 	// NodeConfig defines our policies around node resources and scoring
