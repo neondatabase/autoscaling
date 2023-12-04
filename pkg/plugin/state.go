@@ -574,9 +574,6 @@ func (s *pluginState) getOrFetchNodeState(
 // Note: buildInitialNodeState does not take any of the pods or VMs on the node into account; it
 // only examines the total resources available to the node.
 func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) (*nodeState, error) {
-	// Fetch this upfront, because we'll need it a couple times later.
-	nodeConf := conf.forNode(node.Name)
-
 	// cpuQ = "cpu, as a K8s resource.Quantity"
 	// -A for allocatable, -C for capacity
 	var cpuQ *resource.Quantity
@@ -593,7 +590,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, errors.New("Node has no Allocatable or Capacity CPU limits")
 	}
 
-	vCPU, marginCpu := nodeConf.vCpuLimits(cpuQ)
+	vCPU, marginCpu := conf.NodeConfig.vCpuLimits(cpuQ)
 
 	// memQ = "mem, as a K8s resource.Quantity"
 	// -A for allocatable, -C for capacity
@@ -609,7 +606,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, errors.New("Node has no Allocatable or Capacity Memory limits")
 	}
 
-	memSlots, marginMemory, err := nodeConf.memoryLimits(memQ, &conf.MemSlotSize)
+	memSlots, marginMemory, err := conf.NodeConfig.memoryLimits(memQ, &conf.MemSlotSize)
 	if err != nil {
 		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", node.Name, err)
 	}
@@ -648,7 +645,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 			MarginCPU:        marginCpu,
 			MarginMemory:     marginMemory,
 		},
-		computeUnit: &nodeConf.ComputeUnit,
+		computeUnit: &conf.NodeConfig.ComputeUnit,
 		mq:          migrationQueue{},
 	}
 

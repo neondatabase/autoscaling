@@ -692,7 +692,7 @@ func (e *AutoscaleEnforcer) Score(
 	cpuScale := node.totalReservableCPU().AsFloat64() / e.state.maxTotalReservableCPU.AsFloat64()
 	memScale := float64(node.totalReservableMemSlots()) / float64(e.state.maxTotalReservableMemSlots)
 
-	nodeConf := e.state.conf.forNode(nodeName)
+	nodeConf := e.state.conf.NodeConfig
 
 	// Refer to the comments in nodeConfig for more. Also, see: https://www.desmos.com/calculator/wg8s0yn63s
 	calculateScore := func(fraction, scale float64) (float64, int64) {

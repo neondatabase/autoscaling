@@ -17,6 +17,7 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
+        timeout-minutes: 10
 
       - name: build vm-builder
         run:  make bin/vm-builder
