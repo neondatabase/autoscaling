@@ -18,7 +18,7 @@ on:
         required: false
 
 env:
-  E2E: "true"
+  PRESERVE_RUNNER_PODS: "true"
 
 jobs:
   e2e-tests:
