@@ -26,7 +26,7 @@ data:
   autoscale-enforcer-config.json: |
     {
       "memBlockSize": "1Gi",
-      "nodeDefaults": {
+      "nodeConfig": {
         "cpu": { "watermark": 0.9 },
         "memory": { "watermark": 0.9 },
         "computeUnit": { "vCPUs": 0.25, "mem": 1 },
@@ -34,7 +34,6 @@ data:
         "maxUsageScore": 0,
         "scorePeak": 0.8
       },
-      "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
       "dumpState": {
         "port": 10298,

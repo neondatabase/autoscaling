@@ -21,13 +21,8 @@ import (
 //////////////////
 
 type Config struct {
-	// NodeDefaults is the default node configuration used when not overridden
-	NodeDefaults nodeConfig `json:"nodeDefaults"`
-	// NodeOverrides is a list of node configurations that override the default for a small set of
-	// nodes.
-	//
-	// Duplicate names are allowed, and earlier overrides take precedence over later ones.
-	NodeOverrides []overrideSet `json:"nodeOverrides"`
+	// NodeConfig defines our policies around node resources and scoring
+	NodeConfig nodeConfig `json:"nodeConfig"`
 	// MemSlotSize is the smallest unit of memory that the scheduler plugin will reserve for a VM,
 	// and is defined globally.
 	//
@@ -81,11 +76,6 @@ type Config struct {
 	JSONString string `json:"-"`
 }
 
-type overrideSet struct {
-	Nodes  []string   `json:"nodes"` // TODO: these should be changed to globs in the future.
-	Config nodeConfig `json:"config"`
-}
-
 type nodeConfig struct {
 	Cpu         resourceConfig `json:"cpu"`
 	Memory      resourceConfig `json:"memory"`
@@ -137,14 +127,8 @@ func (c *Config) migrationEnabled() bool {
 
 // if the returned error is not nil, the string is a JSON path to the invalid value
 func (c *Config) validate() (string, error) {
-	if path, err := c.NodeDefaults.validate(); err != nil {
-		return fmt.Sprintf("nodeDefaults.%s", path), err
-	}
-
-	for i, override := range c.NodeOverrides {
-		if path, err := override.validate(); err != nil {
-			return fmt.Sprintf("nodeOverrides[%d].%s", i, path), err
-		}
+	if path, err := c.NodeConfig.validate(); err != nil {
+		return fmt.Sprintf("nodeConfig.%s", path), err
 	}
 
 	if c.MemSlotSize.Value() <= 0 {
@@ -165,18 +149,6 @@ func (c *Config) validate() (string, error) {
 
 	if c.MigrationDeletionRetrySeconds == 0 {
 		return "migrationDeletionRetrySeconds", errors.New("value must be > 0")
-	}
-
-	return "", nil
-}
-
-func (s *overrideSet) validate() (string, error) {
-	if len(s.Nodes) == 0 {
-		return "nodes", errors.New("array must be non-empty")
-	}
-
-	if path, err := s.Config.validate(); err != nil {
-		return fmt.Sprintf("config.%s", path), err
 	}
 
 	return "", nil
@@ -248,20 +220,6 @@ func ReadConfig(path string) (*Config, error) {
 // ignoredNamespace returns whether items in the namespace should be treated as if they don't exist
 func (c *Config) ignoredNamespace(namespace string) bool {
 	return slices.Contains(c.IgnoreNamespaces, namespace)
-}
-
-// forNode returns the individual nodeConfig for a node with a particular name, taking override
-// settings into account
-func (c *Config) forNode(nodeName string) *nodeConfig {
-	for i, set := range c.NodeOverrides {
-		for _, name := range set.Nodes {
-			if name == nodeName {
-				return &c.NodeOverrides[i].Config
-			}
-		}
-	}
-
-	return &c.NodeDefaults
 }
 
 func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[vmapi.MilliCPU], margin *resource.Quantity) {
