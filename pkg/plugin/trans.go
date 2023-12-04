@@ -21,50 +21,36 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type resourceTransition[T constraints.Unsigned] struct {
-	node    *nodeResourceState[T]
-	oldNode struct {
-		reserved             T
-		buffer               T
-		capacityPressure     T
-		pressureAccountedFor T
-	}
-	pod    *podResourceState[T]
-	oldPod struct {
-		reserved         T
-		buffer           T
-		capacityPressure T
+// resourceTransitioner maintains the current state of its resource and handles the transition
+// into a new state. A resource is associated with a pod, and the pod is associated with a node.
+type resourceTransitioner[T constraints.Unsigned] struct {
+	// node represents the current resource state of the node
+	node *nodeResourceState[T]
+	// pod represents the current resource state of the pod.
+	// pod belongs to the node.
+	pod *podResourceState[T]
+}
+
+func makeResourceTransitioner[T constraints.Unsigned](
+	node *nodeResourceState[T], pod *podResourceState[T],
+) resourceTransitioner[T] {
+	return resourceTransitioner[T]{
+		node: node,
+		pod:  pod,
 	}
 }
 
-func collectResourceTransition[T constraints.Unsigned](
-	node *nodeResourceState[T],
-	pod *podResourceState[T],
-) resourceTransition[T] {
-	return resourceTransition[T]{
-		node: node,
-		oldNode: struct {
-			reserved             T
-			buffer               T
-			capacityPressure     T
-			pressureAccountedFor T
-		}{
-			reserved:             node.Reserved,
-			buffer:               node.Buffer,
-			capacityPressure:     node.CapacityPressure,
-			pressureAccountedFor: node.PressureAccountedFor,
-		},
-		pod: pod,
-		oldPod: struct {
-			reserved         T
-			buffer           T
-			capacityPressure T
-		}{
-			reserved:         pod.Reserved,
-			buffer:           pod.Buffer,
-			capacityPressure: pod.CapacityPressure,
-		},
-	}
+// resourceState represents a resource state in its pod and its node. This is not necessarily the
+// current state. It represents the resource state at a point in time.
+type resourceState[T constraints.Unsigned] struct {
+	node nodeResourceState[T]
+	pod  podResourceState[T]
+}
+
+// snapshotState snapshots the current state of the resource transitioner by making a copy of
+// its state.
+func (r resourceTransitioner[T]) snapshotState() resourceState[T] {
+	return resourceState[T]{*r.node, *r.pod}
 }
 
 // verdictSet represents a set of verdicts from some operation, for ease of logging
@@ -80,15 +66,70 @@ func (s verdictSet) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
+// handleLastPermit updates reserved values of r.pod and r.node with the most
+// recent info about the last permit received by the agent. This allows a new
+// scheduler to learn about previous scheduler's state.
+//
+// Why the new scheduler needs this info? It's always possible for the scheduler
+// to get killed and immediately restart, without the agent believing there was
+// any disconnect, which could lead to unintentional over-committing of resources
+// from the Buffer values if too many agents request upscaling on the first
+// request to the scheduler.
+func (r resourceTransitioner[T]) handleLastPermit(lastPermit T) (verdict string) {
+	oldState := r.snapshotState()
+
+	if lastPermit <= r.pod.Reserved {
+		r.node.Reserved -= r.pod.Reserved - lastPermit
+		r.pod.Reserved = lastPermit
+
+		var podBuffer string
+		var oldNodeBuffer string
+		var newNodeBuffer string
+		if r.pod.Buffer != 0 {
+			podBuffer = fmt.Sprintf(" [buffer %d]", r.pod.Buffer)
+			oldNodeBuffer = fmt.Sprintf(" [buffer %d]", oldState.node.Buffer)
+
+			r.node.Buffer -= r.pod.Buffer
+			r.pod.Buffer = 0
+
+			newNodeBuffer = fmt.Sprintf(" [buffer %d]", r.node.Buffer)
+		}
+
+		totalReservable := r.node.Total
+		verdict = fmt.Sprintf(
+			"pod reserved %d%s -> %d, "+
+				"node reserved %d%s -> %d%s (of %d)",
+			oldState.pod.Reserved, podBuffer, r.pod.Reserved,
+			oldState.node.Reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer, totalReservable,
+		)
+	} else {
+		// This is an unexpected case that possible to happen in some unlikely scenarios such as:
+		//   1. Agent receives a permit from scheduler (let’s say it’s equal to `a` for a specific resource)
+		//   2. scheduler dies
+		//   3. vm bounds decrease (the max value is `b` and we have `b < a`).
+		//   4. new scheduler reads the cluster state and sets up the buffer values
+		//   => agent’s last permit is greater (`a`) than plugin’s reserved value (`b`)
+		// This might also happen in case of processing a stale request from an agent
+
+		verdict = fmt.Sprintf(
+			"unexpected last permit, no changes: last permit (%v) is greater than pod reserved (%v)",
+			lastPermit, r.pod.Reserved,
+		)
+	}
+	return
+}
+
 // handleRequested updates r.pod and r.node with changes to match the requested resources, within
 // what's possible given the remaining resources.
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
-func (r resourceTransition[T]) handleRequested(requested T, startingMigration bool, onlyThousands bool) (verdict string) {
+func (r resourceTransitioner[T]) handleRequested(requested T, startingMigration bool, onlyThousands bool) (verdict string) {
+	oldState := r.snapshotState()
+
 	totalReservable := r.node.Total
 	// note: it's possible to temporarily have reserved > totalReservable, after loading state or
 	// config change; we have to use SaturatingSub here to account for that.
-	remainingReservable := util.SaturatingSub(totalReservable, r.oldNode.reserved)
+	remainingReservable := util.SaturatingSub(totalReservable, oldState.node.Reserved)
 
 	// Note: The correctness of this function depends on the autoscaler-agents and previous
 	// scheduler being well-behaved. This function will fail to prevent overcommitting when:
@@ -109,7 +150,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		r.pod.Reserved = requested
 		// pressure is now zero, because the pod no longer wants to increase resources.
 		r.pod.CapacityPressure = 0
-		r.node.CapacityPressure -= r.oldPod.capacityPressure
+		r.node.CapacityPressure -= oldState.pod.CapacityPressure
 
 		// use shared verdict below.
 
@@ -119,7 +160,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		// But we _will_ add the pod's request to the node's pressure, noting that its migration
 		// will resolve it.
 		r.pod.CapacityPressure = requested - r.pod.Reserved
-		r.node.CapacityPressure = r.node.CapacityPressure + r.pod.CapacityPressure - r.oldPod.capacityPressure
+		r.node.CapacityPressure = r.node.CapacityPressure + r.pod.CapacityPressure - oldState.pod.CapacityPressure
 
 		// note: we don't need to handle buffer here because migration is never started as the first
 		// communication, so buffers will be zero already.
@@ -132,9 +173,9 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 		verdict = fmt.Sprintf(
 			fmtString,
 			// Denying increase %d -> %d because ...
-			r.oldPod.reserved, requested,
+			oldState.pod.Reserved, requested,
 			// node capacityPressure %d -> %d (%d -> %d spoken for)
-			r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
+			oldState.node.CapacityPressure, r.node.CapacityPressure, oldState.node.PressureAccountedFor, r.node.PressureAccountedFor,
 		)
 		return verdict
 	} else /* typical "request for increase" */ {
@@ -170,7 +211,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 			r.pod.CapacityPressure = increase - maxIncrease
 			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
 			// directly += or -= (implicitly relying on overflow).
-			r.node.CapacityPressure = r.node.CapacityPressure - r.oldPod.capacityPressure + r.pod.CapacityPressure
+			r.node.CapacityPressure = r.node.CapacityPressure - oldState.pod.CapacityPressure + r.pod.CapacityPressure
 			increase = maxIncrease // cap at maxIncrease.
 		} else {
 			// If we're not capped by maxIncrease, relieve pressure coming from this pod
@@ -192,7 +233,7 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 	var newNodeBuffer string
 	if r.pod.Buffer != 0 {
 		podBuffer = fmt.Sprintf(" [buffer %d]", r.pod.Buffer)
-		oldNodeBuffer = fmt.Sprintf(" [buffer %d]", r.oldNode.buffer)
+		oldNodeBuffer = fmt.Sprintf(" [buffer %d]", oldState.node.Buffer)
 
 		r.node.Buffer -= r.pod.Buffer
 		r.pod.Buffer = 0
@@ -208,11 +249,11 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 	verdict = fmt.Sprintf(
 		fmtString,
 		// Register %d%s -> %d%s (pressure %d -> %d)
-		r.oldPod.reserved, podBuffer, r.pod.Reserved, wanted, r.oldPod.capacityPressure, r.pod.CapacityPressure,
+		oldState.pod.Reserved, podBuffer, r.pod.Reserved, wanted, oldState.pod.CapacityPressure, r.pod.CapacityPressure,
 		// node reserved %d%s -> %d%s (of %d)
-		r.oldNode.reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer, totalReservable,
+		oldState.node.Reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer, totalReservable,
 		// node capacityPressure %d -> %d (%d -> %d spoken for)
-		r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
+		oldState.node.CapacityPressure, r.node.CapacityPressure, oldState.node.PressureAccountedFor, r.node.PressureAccountedFor,
 	)
 	return verdict
 }
@@ -220,7 +261,9 @@ func (r resourceTransition[T]) handleRequested(requested T, startingMigration bo
 // handleDeleted updates r.node with changes to match the removal of r.pod
 //
 // A pretty-formatted summary of the changes is returned as the verdict, for logging.
-func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict string) {
+func (r resourceTransitioner[T]) handleDeleted(currentlyMigrating bool) (verdict string) {
+	oldState := r.snapshotState()
+
 	r.node.Reserved -= r.pod.Reserved
 	r.node.CapacityPressure -= r.pod.CapacityPressure
 
@@ -235,7 +278,7 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 		r.node.Buffer -= r.pod.Buffer
 
 		podBuffer = fmt.Sprintf(" [buffer %d]", r.pod.Buffer)
-		oldNodeBuffer = fmt.Sprintf(" [buffer %d]", r.oldNode.buffer)
+		oldNodeBuffer = fmt.Sprintf(" [buffer %d]", oldState.node.Buffer)
 		newNodeBuffer = fmt.Sprintf(" [buffer %d]", r.node.Buffer)
 	}
 
@@ -244,20 +287,22 @@ func (r resourceTransition[T]) handleDeleted(currentlyMigrating bool) (verdict s
 	verdict = fmt.Sprintf(
 		fmtString,
 		// pod had %d%s; node reserved %d%s -> %d%s
-		r.pod.Reserved, podBuffer, r.oldNode.reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer,
+		r.pod.Reserved, podBuffer, oldState.node.Reserved, oldNodeBuffer, r.node.Reserved, newNodeBuffer,
 		// node capacityPressure %d -> %d (%d -> %d spoken for)
-		r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
+		oldState.node.CapacityPressure, r.node.CapacityPressure, oldState.node.PressureAccountedFor, r.node.PressureAccountedFor,
 	)
 	return verdict
 }
 
-func (r resourceTransition[T]) handleNonAutoscalingUsageChange(newUsage T) (verdict string) {
+func (r resourceTransitioner[T]) handleNonAutoscalingUsageChange(newUsage T) (verdict string) {
+	oldState := r.snapshotState()
+
 	diff := newUsage - r.pod.Reserved
 	r.pod.Reserved = newUsage
 	r.node.Reserved += diff
 	verdict = fmt.Sprintf(
 		"pod reserved (%v -> %v), node reserved (%v -> %v)",
-		r.oldPod.reserved, r.pod.Reserved, r.oldNode.reserved, r.node.Reserved,
+		oldState.pod.Reserved, r.pod.Reserved, oldState.node.Reserved, r.node.Reserved,
 	)
 	return verdict
 }
@@ -266,7 +311,9 @@ func (r resourceTransition[T]) handleNonAutoscalingUsageChange(newUsage T) (verd
 // from r.pod
 //
 // A pretty-formatted summary of the changes is returned as the verdict, for logging.
-func (r resourceTransition[T]) handleAutoscalingDisabled() (verdict string) {
+func (r resourceTransitioner[T]) handleAutoscalingDisabled() (verdict string) {
+	oldState := r.snapshotState()
+
 	// buffer is included in reserved, so we reduce everything by buffer.
 	buffer := r.pod.Buffer
 	valuesToReduce := []*T{&r.node.Reserved, &r.node.Buffer, &r.pod.Reserved, &r.pod.Buffer}
@@ -278,8 +325,8 @@ func (r resourceTransition[T]) handleAutoscalingDisabled() (verdict string) {
 	r.pod.CapacityPressure = 0
 
 	var nodeBufferChange string
-	if r.oldPod.buffer != 0 {
-		nodeBufferChange = fmt.Sprintf(" [buffer %d -> %d]", r.oldNode.buffer, r.node.Buffer)
+	if oldState.pod.Buffer != 0 {
+		nodeBufferChange = fmt.Sprintf(" [buffer %d -> %d]", oldState.node.Buffer, r.node.Buffer)
 	}
 
 	fmtString := "pod had buffer %d, capacityPressure %d; " +
@@ -287,9 +334,9 @@ func (r resourceTransition[T]) handleAutoscalingDisabled() (verdict string) {
 	verdict = fmt.Sprintf(
 		fmtString,
 		// pod had buffer %d, capacityPressure %d;
-		r.oldPod.buffer, r.oldPod.capacityPressure,
+		oldState.pod.Buffer, oldState.pod.CapacityPressure,
 		// node reserved %d -> %d%s, capacityPressure %d -> %d
-		r.oldNode.reserved, r.node.Reserved, nodeBufferChange, r.oldNode.capacityPressure, r.node.CapacityPressure,
+		oldState.node.Reserved, r.node.Reserved, nodeBufferChange, oldState.node.CapacityPressure, r.node.CapacityPressure,
 	)
 	return verdict
 }
@@ -301,10 +348,12 @@ func (r resourceTransition[T]) handleAutoscalingDisabled() (verdict string) {
 // to match the pod's resource usage.
 //
 //nolint:unparam // linter complains about 'source'. FIXME: needs more work to figure this out.
-func (r resourceTransition[T]) handleStartMigration(source bool) (verdict string) {
+func (r resourceTransitioner[T]) handleStartMigration(source bool) (verdict string) {
 	// This method is basically the same as handleAutoscalingDisabled, except we also update the
 	// node's PressureAccountedFor because any pressure generated by the pod will be resolved once
 	// the migration completes and the pod gets deleted.
+
+	oldState := r.snapshotState()
 
 	buffer := r.pod.Buffer
 	valuesToReduce := []*T{&r.node.Reserved, &r.node.Buffer, &r.pod.Reserved, &r.pod.Buffer}
@@ -322,9 +371,9 @@ func (r resourceTransition[T]) handleStartMigration(source bool) (verdict string
 	verdict = fmt.Sprintf(
 		fmtString,
 		// pod had buffer %d, capacityPressure %d;
-		r.oldPod.buffer, r.oldPod.capacityPressure,
+		oldState.pod.Buffer, oldState.pod.CapacityPressure,
 		// node reserved %d -> %d, capacityPressure %d -> %d
-		r.oldNode.reserved, r.node.Reserved, r.oldNode.capacityPressure, r.node.CapacityPressure, r.oldNode.pressureAccountedFor, r.node.PressureAccountedFor,
+		oldState.node.Reserved, r.node.Reserved, oldState.node.CapacityPressure, r.node.CapacityPressure, oldState.node.PressureAccountedFor, r.node.PressureAccountedFor,
 	)
 	return verdict
 }

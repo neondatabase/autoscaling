@@ -40,12 +40,11 @@ type pluginState struct {
 	// otherPods stores information about non-VM pods
 	otherPods map[util.NamespacedName]*otherPodState
 
-	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
-	// can appropriately scale our scoring
-	maxTotalReservableCPU vmapi.MilliCPU
-	// maxTotalReservableMemSlots is the same as maxTotalReservableCPU, but for memory slots instead
-	// of CPU
-	maxTotalReservableMemSlots uint16
+	// maxTotalCPU stores the maximum value of any node's vCPU.Total, so that we can appropriately
+	// scale our scoring
+	maxTotalCPU vmapi.MilliCPU
+	// maxTotalMemSlots is the same as maxTotalReservableCPU, but for memory slots instead of CPU
+	maxTotalMemSlots uint16
 	// conf stores the current configuration, and is nil if the configuration has not yet been set
 	//
 	// Proper initialization of the plugin guarantees conf is not nil.
@@ -71,8 +70,6 @@ type nodeState struct {
 	vCPU nodeResourceState[vmapi.MilliCPU]
 	// memSlots tracks the state of memory slots -- what's available and how
 	memSlots nodeResourceState[uint16]
-
-	computeUnit *api.Resources
 
 	// pods tracks all the VM pods assigned to this node
 	//
@@ -381,25 +378,15 @@ func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantit
 	}
 }
 
-// totalReservableCPU returns the amount of node CPU that may be allocated to VM pods
-func (s *nodeState) totalReservableCPU() vmapi.MilliCPU {
-	return s.vCPU.Total
-}
-
-// totalReservableMemSlots returns the number of memory slots that may be allocated to VM pods
-func (s *nodeState) totalReservableMemSlots() uint16 {
-	return s.memSlots.Total
-}
-
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
 func (s *nodeState) remainingReservableCPU() vmapi.MilliCPU {
-	return util.SaturatingSub(s.totalReservableCPU(), s.vCPU.Reserved)
+	return util.SaturatingSub(s.vCPU.Total, s.vCPU.Reserved)
 }
 
 // remainingReservableMemSlots returns the remaining number of memory slots that can be allocated to
 // VM pods
 func (s *nodeState) remainingReservableMemSlots() uint16 {
-	return util.SaturatingSub(s.totalReservableMemSlots(), s.memSlots.Reserved)
+	return util.SaturatingSub(s.memSlots.Total, s.memSlots.Reserved)
 }
 
 // tooMuchPressure is used to signal whether the node should start migrating pods out in order to
@@ -553,13 +540,11 @@ func (s *pluginState) getOrFetchNodeState(
 	}
 
 	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
-	totalReservableCPU := n.totalReservableCPU()
-	if totalReservableCPU > s.maxTotalReservableCPU {
-		s.maxTotalReservableCPU = totalReservableCPU
+	if n.vCPU.Total > s.maxTotalCPU {
+		s.maxTotalCPU = n.vCPU.Total
 	}
-	totalReservableMemSlots := n.totalReservableMemSlots()
-	if totalReservableMemSlots > s.maxTotalReservableMemSlots {
-		s.maxTotalReservableMemSlots = totalReservableMemSlots
+	if n.memSlots.Total > s.maxTotalMemSlots {
+		s.maxTotalMemSlots = n.memSlots.Total
 	}
 
 	n.updateMetrics(metrics, s.memSlotSizeBytes())
@@ -574,9 +559,6 @@ func (s *pluginState) getOrFetchNodeState(
 // Note: buildInitialNodeState does not take any of the pods or VMs on the node into account; it
 // only examines the total resources available to the node.
 func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) (*nodeState, error) {
-	// Fetch this upfront, because we'll need it a couple times later.
-	nodeConf := conf.forNode(node.Name)
-
 	// cpuQ = "cpu, as a K8s resource.Quantity"
 	// -A for allocatable, -C for capacity
 	var cpuQ *resource.Quantity
@@ -593,7 +575,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, errors.New("Node has no Allocatable or Capacity CPU limits")
 	}
 
-	vCPU, marginCpu := nodeConf.vCpuLimits(cpuQ)
+	vCPU, marginCpu := conf.NodeConfig.vCpuLimits(cpuQ)
 
 	// memQ = "mem, as a K8s resource.Quantity"
 	// -A for allocatable, -C for capacity
@@ -609,7 +591,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, errors.New("Node has no Allocatable or Capacity Memory limits")
 	}
 
-	memSlots, marginMemory, err := nodeConf.memoryLimits(memQ, &conf.MemSlotSize)
+	memSlots, marginMemory, err := conf.NodeConfig.memoryLimits(memQ, &conf.MemSlotSize)
 	if err != nil {
 		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", node.Name, err)
 	}
@@ -648,33 +630,29 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 			MarginCPU:        marginCpu,
 			MarginMemory:     marginMemory,
 		},
-		computeUnit: &nodeConf.ComputeUnit,
-		mq:          migrationQueue{},
+		mq: migrationQueue{},
 	}
 
 	type resourceInfo[T any] struct {
-		Total           T
-		Raw             *resource.Quantity
-		Margin          *resource.Quantity
-		TotalReservable T
-		Watermark       T
+		Total     T
+		Raw       *resource.Quantity
+		Margin    *resource.Quantity
+		Watermark T
 	}
 
 	logger.Info(
 		"Built initial node state",
 		zap.Any("cpu", resourceInfo[vmapi.MilliCPU]{
-			Total:           n.vCPU.Total,
-			Raw:             cpuQ,
-			Margin:          n.otherResources.MarginCPU,
-			TotalReservable: n.totalReservableCPU(),
-			Watermark:       n.vCPU.Watermark,
+			Total:     n.vCPU.Total,
+			Raw:       cpuQ,
+			Margin:    n.otherResources.MarginCPU,
+			Watermark: n.vCPU.Watermark,
 		}),
 		zap.Any("memSlots", resourceInfo[uint16]{
-			Total:           n.memSlots.Total,
-			Raw:             memQ,
-			Margin:          n.otherResources.MarginMemory,
-			TotalReservable: n.totalReservableMemSlots(),
-			Watermark:       n.memSlots.Watermark,
+			Total:     n.memSlots.Total,
+			Raw:       memQ,
+			Margin:    n.otherResources.MarginMemory,
+			Watermark: n.memSlots.Watermark,
 		}),
 	)
 
@@ -841,9 +819,9 @@ func (e *AutoscaleEnforcer) handleVMDeletion(logger *zap.Logger, podName util.Na
 	// Mark the resources as no longer reserved
 	currentlyMigrating := pod.currentlyMigrating()
 
-	vCPUVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+	vCPUVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
 		handleDeleted(currentlyMigrating)
-	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
 		handleDeleted(currentlyMigrating)
 
 	// Delete our record of the pod
@@ -882,9 +860,9 @@ func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName 
 	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
 
 	// Reset buffer to zero:
-	vCPUVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+	vCPUVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
 		handleAutoscalingDisabled()
-	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
 		handleAutoscalingDisabled()
 
 	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
@@ -918,9 +896,9 @@ func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName,
 	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
 
 	// Reset buffer to zero, remove from migration queue (if in it), and set pod's migrationState
-	cpuVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+	cpuVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
 		handleStartMigration(source)
-	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
 		handleStartMigration(source)
 
 	pod.node.mq.removeIfPresent(pod)
@@ -1055,9 +1033,9 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(logger *zap.Logger, 
 		return
 	}
 
-	cpuVerdict := collectResourceTransition(&pod.node.vCPU, &pod.vCPU).
+	cpuVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
 		handleNonAutoscalingUsageChange(vm.Using().VCPU)
-	memVerdict := collectResourceTransition(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
 		handleNonAutoscalingUsageChange(vm.Using().Mem)
 
 	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
@@ -1279,7 +1257,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 	// Check that all fields are equal to their zero value, per the function documentation.
 	hasNonNilField := p.state.nodeMap != nil || p.state.podMap != nil || p.state.otherPods != nil ||
-		p.state.maxTotalReservableCPU != 0 || p.state.maxTotalReservableMemSlots != 0
+		p.state.maxTotalCPU != 0 || p.state.maxTotalMemSlots != 0
 
 	if hasNonNilField {
 		panic(errors.New("readClusterState called with non-nil pluginState field"))
@@ -1438,11 +1416,11 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 		cpuVerdict := fmt.Sprintf(
 			"pod = %v/%v (node %v -> %v / %v, %v -> %v buffer)",
-			ps.vCPU.Reserved, vmInfo.Cpu.Max, oldNodeVCPUReserved, ns.vCPU.Reserved, ns.totalReservableCPU(), oldNodeVCPUBuffer, ns.vCPU.Buffer,
+			ps.vCPU.Reserved, vmInfo.Cpu.Max, oldNodeVCPUReserved, ns.vCPU.Reserved, ns.vCPU.Total, oldNodeVCPUBuffer, ns.vCPU.Buffer,
 		)
 		memVerdict := fmt.Sprintf(
 			"pod = %v/%v (node %v -> %v / %v, %v -> %v buffer",
-			ps.memSlots.Reserved, vmInfo.Mem.Max, oldNodeMemReserved, ns.memSlots.Reserved, ns.totalReservableMemSlots(), oldNodeMemBuffer, ns.memSlots.Buffer,
+			ps.memSlots.Reserved, vmInfo.Mem.Max, oldNodeMemReserved, ns.memSlots.Reserved, ns.memSlots.Total, oldNodeMemBuffer, ns.memSlots.Buffer,
 		)
 
 		logger.Info(

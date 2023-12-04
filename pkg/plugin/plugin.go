@@ -530,9 +530,6 @@ func (e *AutoscaleEnforcer) Filter(
 		logger.Warn("Some known Pods weren't included in Filter NodeInfo", zap.Objects("missedPods", missedPodsList))
 	}
 
-	nodeTotalReservableCPU := node.totalReservableCPU()
-	nodeTotalReservableMemSots := node.totalReservableMemSlots()
-
 	var kind string
 	if vmInfo != nil {
 		kind = "VM"
@@ -553,44 +550,44 @@ func (e *AutoscaleEnforcer) Filter(
 
 	if vmInfo != nil {
 		var cpuCompare string
-		if totalNodeVCPU+vmInfo.Cpu.Use > nodeTotalReservableCPU {
+		if totalNodeVCPU+vmInfo.Cpu.Use > node.vCPU.Total {
 			cpuCompare = ">"
 			allowing = false
 		} else {
 			cpuCompare = "<="
 		}
-		cpuMsg = makeMsg("vCPU", cpuCompare, totalNodeVCPU, vmInfo.Cpu.Use, nodeTotalReservableCPU)
+		cpuMsg = makeMsg("vCPU", cpuCompare, totalNodeVCPU, vmInfo.Cpu.Use, node.vCPU.Total)
 
 		var memCompare string
-		if totalNodeMem+vmInfo.Mem.Use > nodeTotalReservableMemSots {
+		if totalNodeMem+vmInfo.Mem.Use > node.memSlots.Total {
 			memCompare = ">"
 			allowing = false
 		} else {
 			memCompare = "<="
 		}
-		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, vmInfo.Mem.Use, nodeTotalReservableMemSots)
+		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, vmInfo.Mem.Use, node.memSlots.Total)
 	} else {
 		newRes := otherResources.addPod(&e.state.conf.MemSlotSize, otherPodInfo)
 		cpuIncr := newRes.ReservedCPU - otherResources.ReservedCPU
 		memIncr := newRes.ReservedMemSlots - otherResources.ReservedMemSlots
 
 		var cpuCompare string
-		if totalNodeVCPU+cpuIncr > nodeTotalReservableCPU {
+		if totalNodeVCPU+cpuIncr > node.vCPU.Total {
 			cpuCompare = ">"
 			allowing = false
 		} else {
 			cpuCompare = "<="
 		}
-		cpuMsg = makeMsg("vCPU", cpuCompare, totalNodeVCPU, cpuIncr, nodeTotalReservableCPU)
+		cpuMsg = makeMsg("vCPU", cpuCompare, totalNodeVCPU, cpuIncr, node.vCPU.Total)
 
 		var memCompare string
-		if totalNodeMem+memIncr > nodeTotalReservableMemSots {
+		if totalNodeMem+memIncr > node.memSlots.Total {
 			memCompare = ">"
 			allowing = false
 		} else {
 			memCompare = "<="
 		}
-		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, memIncr, nodeTotalReservableMemSots)
+		memMsg = makeMsg("memSlots", memCompare, totalNodeMem, memIncr, node.memSlots.Total)
 	}
 
 	var message string
@@ -683,16 +680,16 @@ func (e *AutoscaleEnforcer) Score(
 	}
 
 	cpuRemaining := node.remainingReservableCPU()
-	cpuTotal := node.totalReservableCPU()
+	cpuTotal := node.vCPU.Total
 	memRemaining := node.remainingReservableMemSlots()
-	memTotal := node.totalReservableMemSlots()
+	memTotal := node.memSlots.Total
 
 	cpuFraction := 1 - cpuRemaining.AsFloat64()/cpuTotal.AsFloat64()
 	memFraction := 1 - float64(memRemaining)/float64(memTotal)
-	cpuScale := node.totalReservableCPU().AsFloat64() / e.state.maxTotalReservableCPU.AsFloat64()
-	memScale := float64(node.totalReservableMemSlots()) / float64(e.state.maxTotalReservableMemSlots)
+	cpuScale := node.vCPU.Total.AsFloat64() / e.state.maxTotalCPU.AsFloat64()
+	memScale := float64(node.memSlots.Total) / float64(e.state.maxTotalMemSlots)
 
-	nodeConf := e.state.conf.forNode(nodeName)
+	nodeConf := e.state.conf.NodeConfig
 
 	// Refer to the comments in nodeConfig for more. Also, see: https://www.desmos.com/calculator/wg8s0yn63s
 	calculateScore := func(fraction, scale float64) (float64, int64) {
@@ -923,11 +920,11 @@ func (e *AutoscaleEnforcer) Reserve(
 
 			cpuVerdict := fmt.Sprintf(
 				"need %v (%v -> %v raw), %v of %v used, so %v available (%s)",
-				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
+				addCpu, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, node.vCPU.Reserved, node.vCPU.Total, node.remainingReservableCPU(), cpuShortVerdict,
 			)
 			memVerdict := fmt.Sprintf(
 				"need %v (%v -> %v raw), %v of %v used, so %v available (%s)",
-				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
+				addMem, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, node.memSlots.Reserved, node.memSlots.Total, node.remainingReservableMemSlots(), memShortVerdict,
 			)
 
 			logger.Error(
@@ -1006,11 +1003,11 @@ func (e *AutoscaleEnforcer) Reserve(
 
 		cpuVerdict := fmt.Sprintf(
 			"need %v, %v of %v used, so %v available (%s)",
-			vmInfo.Cpu.Use, node.vCPU.Reserved, node.totalReservableCPU(), node.remainingReservableCPU(), cpuShortVerdict,
+			vmInfo.Cpu.Use, node.vCPU.Reserved, node.vCPU.Total, node.remainingReservableCPU(), cpuShortVerdict,
 		)
 		memVerdict := fmt.Sprintf(
 			"need %v, %v of %v used, so %v available (%s)",
-			vmInfo.Mem.Use, node.memSlots.Reserved, node.totalReservableMemSlots(), node.remainingReservableMemSlots(), memShortVerdict,
+			vmInfo.Mem.Use, node.memSlots.Reserved, node.memSlots.Total, node.remainingReservableMemSlots(), memShortVerdict,
 		)
 
 		logger.Error(
@@ -1076,9 +1073,9 @@ func (e *AutoscaleEnforcer) Unreserve(
 		// Mark the resources as no longer reserved
 
 		currentlyMigrating := false // Unreserve is never called on bound pods, so it can't be migrating.
-		vCPUVerdict := collectResourceTransition(&ps.node.vCPU, &ps.vCPU).
+		vCPUVerdict := makeResourceTransitioner(&ps.node.vCPU, &ps.vCPU).
 			handleDeleted(currentlyMigrating)
-		memVerdict := collectResourceTransition(&ps.node.memSlots, &ps.memSlots).
+		memVerdict := makeResourceTransitioner(&ps.node.memSlots, &ps.memSlots).
 			handleDeleted(currentlyMigrating)
 
 		// Delete our record of the pod

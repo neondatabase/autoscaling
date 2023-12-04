@@ -50,9 +50,16 @@ const (
 	// Changes from v1.1:
 	//
 	// * Supports fractional CPU
+	PluginProtoV2_0
+
+	// PluginProtoV2_1 represents v2.1 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v2.0:
+	//
+	// * added AgentRequest.LastPermit
 	//
 	// Currently the latest version.
-	PluginProtoV2_0
+	PluginProtoV2_1
 
 	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
 	// protocol
@@ -75,6 +82,8 @@ func (v PluginProtoVersion) String() string {
 		return "v1.1"
 	case PluginProtoV2_0:
 		return "v2.0"
+	case PluginProtoV2_1:
+		return "v2.1"
 	default:
 		diff := v - latestPluginProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)
@@ -116,6 +125,10 @@ type AgentRequest struct {
 	// TODO: allow passing nil here if nothing's changed (i.e., the request would be the same as the
 	// previous request)
 	Resources Resources `json:"resources"`
+	// LastPermit indicates the last permit that the agent has received from the scheduler plugin.
+	// In case of a failure, the new running scheduler uses LastPermit to recover the previous state.
+	// LastPermit may be nil.
+	LastPermit *Resources `json:"lastPermit"`
 	// Metrics provides information about the VM's current load, so that the scheduler may
 	// prioritize which pods to migrate
 	//

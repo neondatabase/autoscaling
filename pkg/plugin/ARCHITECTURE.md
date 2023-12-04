@@ -65,12 +65,16 @@ The entrypoint for plugin initialization is through the `NewAutoscaleEnforcerPlu
 The plugins we implement are:
 
 * **[Filter]** — preemptively discard nodes that don't have enough room for the pod
+    * **[PreFilter]** and **[PostFilter]** — used for counts of total number of scheduling attempts
+        and failures.
 * **[Score]** — allows us to rank nodes based on available resources. It's called once for
   each pod-node pair, but we don't _actually_ use the pod.
 * **[Reserve]** — gives us a chance to approve (or deny) putting a pod on a node, setting aside the
   resources for it in the process.
 
 [Filter]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/#filter
+[PreFilter]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/#pre-filter
+[PostFilter]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/#post-filter
 [Score]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/#scoring
 [Reserve]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/#reserve
 
@@ -84,8 +88,7 @@ best to deploy as much as possible through the scheduler.
 VM pods have an associated NeonVM `VirtualMachine` object, so we can fetch the resources from there.
 For non-VM pods, we use the values from `resources.requests` for compatibility with other systems
 (e.g., [cluster-autoscaler]). This can lead to overcommitting, but it isn't _really_ worth being
-strict about this. If a resource is not present in `resources.requests`, we fallback on
-`resources.limits`. If any container in a pod has no value for one of its resources, the pod will be
+strict about this. If any container in a pod has no value for one of its resources, the pod will be
 rejected; the scheduler doesn't have enough information to make accurate decisions.
 
 [cluster autoscaler]: https://github.com/kubernetes/autoscaler
@@ -107,11 +110,11 @@ resource-related types are:
 
 ```go
 type nodeState struct {
-    pods      map[PodName]*podState
-    otherPods map[PodName]*otherPodState
+    pods      map[util.NamespacedName]*podState
+    otherPods map[util.NamespacedName]*otherPodState
 
-    vCPU     nodeResourceState[uint16]
-    memSlots nodeResourceState[uint16
+    vCPU     nodeResourceState[vmapi.MilliCPU]
+    memSlots nodeResourceState[uint16]
 
     otherResources nodeOtherResourceState
 
@@ -120,33 +123,44 @@ type nodeState struct {
 
 // Total resources from *all* pods - both VM and non-VM
 type nodeResourceState[T any] struct {
-    total    T
-    system   T
-    reserved T
-    buffer   T
+    Total     T
+    Watermark T
+    Reserved  T
+    Buffer    T
 
-    capacityPressure     T
-    pressureAccountedFor T
+    CapacityPressure     T
+    PressureAccountedFor T
 }
 
 // Total resources from non-VM pods
 type nodeOtherResourceState struct {
-	rawCpu    resource.Quantity
-	rawMemory resource.Quantity
+	RawCPU    resource.Quantity
+	RawMemory resource.Quantity
 
-	reservedCpu      uint16
-	reservedMemSlots uint16
+	ReservedCPU      vmapi.MilliCPU
+	ReservedMemSlots uint16
+
+    MarginCPU    *resource.Quantity
+    MarginMemory *resource.Quantity
 }
 
 type podState struct {
+    name util.NamespacedName
+
+    vCPU     podResourceState[vmapi.MilliCPU]
+    memSlots podResourceState[uint16]
+
+    // -- other fields omitted --
 }
 
 // Resources for a VM pod
 type podResourceState[T any] struct {
-    reserved T
-    buffer   T
+    Reserved         T
+    Buffer           T
+    CapacityPressure T
 
-    capacityPressure T
+    Min T
+    Max T
 }
 
 // Resources for a non-VM pod
@@ -156,27 +170,26 @@ type podOtherResourceState struct {
 }
 ```
 
-### Basics: `reserved`, `system`, and `total`
+### Basics: `Reserved` and `Total`
 
-At a high-level, `nodeResourceState.reserved` provides an upper bound on the amount of each resource
-that's currently allocated. `total` is the total amount available, and `system` is the amount
-reserved for other functions that the scheduler _isn't responsible for_. So, `reserved` is _almost
-always_ less than or equal to `total - system`.
+At a high-level, `nodeResourceState.Reserved` provides an upper bound on the amount of each resource
+that's currently allocated. `Total` is the total amount available, so `Reserved` is _almost always_
+less than or equal to `Total`.
 
-During normal operations, we have a strict bound on resource usage in order to keep `reserved ≤
-total - system`, but it isn't feasible to guarantee that in _all_ circumstances. In particular, this
+During normal operations, we have a strict bound on resource usage in order to keep `Reserved ≤
+Total`, but it isn't feasible to guarantee that in _all_ circumstances. In particular, this
 condition can be temporarily violated [after startup](#startup-uncertainty-buffer).
 
 ### Non-VM pods
 
 Let's briefly discuss handling non-VM pods. For a single non-VM pod, we store its CPU and memory
 limits in an associated `podOtherResourceState`. The `nodeOtherResourceState` tracks the sum of all
-non-VM pods' resource limits in `rawCpu` and `rawMemory`. It rounds `rawCpu` up to the next integer
-in `reservedCpu` and `rawMemory` up to the next multiple of `config.MemSlotSize` in
-`reservedMemSlots`.
+non-VM pods' resource limits in `RawCPU` and `RawMemory`. It rounds `RawCPU` up to the next integer
+in `ReservedCPU` and `RawMemory` up to the next multiple of `config.MemSlotSize` in
+`ReservedMemSlots`.
 
-The values of `reservedCpu` and `reservedMemSlots` are incorporated into the `nodeState`'s
-`vCPU.reserved` and `memSlots.reserved`.
+The values of `ReservedCPU` and `ReservedMemSlots` are incorporated into the `nodeState`'s
+`vCPU.Reserved` and `memSlots.Reserved`.
 
 This setup means that we don't need to over-represent the resources used by each non-VM pod (like we
 would if each pod's resources were in integer CPU and memory slots), while still guaranteeing that
@@ -187,24 +200,24 @@ we're appropriately factoring in their total usage.
 <!-- Note: this topic is also discussed in the root-level ARCHITECTURE.md -->
 
 In order to preemptively migrate away VMs _before_ we run out of resources, we have a "watermark"
-for each resource. When `reserved > watermark`, we start picking migration targets from the
-migration queue (see: `updateMetricsAndCheckMustMigrate` in [`run.go`]). When `reserved >
-watermark`, we refer to the amount above the watermark as the _logical pressure_ on the resource.
+for each resource. When `Reserved > Watermark`, we start picking migration targets from the
+migration queue (see: `updateMetricsAndCheckMustMigrate` in [`run.go`]). When `Reserved >
+Watermark`, we refer to the amount above the watermark as the _logical pressure_ on the resource.
 
 It's possible, however, that we can't react fast enough and completely run out of resources (i.e.
-`reserved == total - system`). In this case, any requests that go beyond the maximum reservable
-amount are marked as _capacity pressure_ (both in the node's `capacityPressure` and the pod's).
-Roughly speaking, `capacityPressure` represents the amount of additional resources that will be
+`Reserved == Total`). In this case, any requests that go beyond the maximum reservable
+amount are marked as _capacity pressure_ (both in the node's `CapacityPressure` and the pod's).
+Roughly speaking, `CapacityPressure` represents the amount of additional resources that will be
 consumed as soon as they're available — we care about it because migration is slow, so we ideally
 don't want to wait to start more migrations.
 
 So: we have two components of resource pressure:
 
 * _Capacity_ pressure — total requested resources we denied because they weren't available
-* _Logical_ pressure — the difference `reserved - watermark` (or zero, if `reserved ≤ watermark`).
+* _Logical_ pressure — the difference `Reserved - Watermark` (or zero, if `Reserved ≤ Watermark`).
 
-When a VM migration is started, we mark its `reserved` resources _and_ `capacityPressure` as
-`pressureAccountedFor`. We continue migrating away VMs until those migrations account for all of the
+When a VM migration is started, we mark its `Reserved` resources _and_ `CapacityPressure` as
+`PressureAccountedFor`. We continue migrating away VMs until those migrations account for all of the
 resource pressure in the node.
 
 ---
@@ -216,15 +229,15 @@ to cover it. In future, mechanisms to improve this could be:
 
 1. Making `autoscaler-agent`s prefer more-frequent smaller increments in allocation, so that
    requests are less extreme and more likely to be sustained.
-2. Multiplying `capacityPressure` by some fixed ratio (e.g. 0.5) when calculating the total
+2. Multiplying `CapacityPressure` by some fixed ratio (e.g. 0.5) when calculating the total
    pressure to reduce impact — something less than one, but separately guaranteed to be != 0 if
-   `capacityPressure != 0`.
-3. Artificially slowing down pod `capacityPressure`, so that it only contributes to the node's
-   `capacityPressure` when sustained
+   `CapacityPressure != 0`.
+3. Artificially slowing down pod `CapacityPressure`, so that it only contributes to the node's
+   `CapacityPressure` when sustained
 
 In general, the idea is that moving slower and correcting later will prevent drastic adjustments.
 
-### Startup uncertainty: `buffer`
+### Startup uncertainty: `Buffer`
 
 In order to stay useful after communication with the scheduler has failed, `autoscaler-agent`s will
 continue to make scaling decisions _without_ checking with the plugin. These scaling decisions are
@@ -237,24 +250,20 @@ until the `autoscaler-agent` reconnects to us. It's actually quite difficult to 
 previous scheduler last approved, so we don't try! Instead, we work with the uncertainty.
 
 On startup, we _assume_ all existing VM pods may scale — without notifying us — up to the VM's
-configured maximum. So each VM pod gets `reserved` equal to the VM's `<resource>.Max`. Alongside
-that, we track `buffer` — the expected difference between `reserved` usage and actual usage: equal
+configured maximum. So each VM pod gets `Reserved` equal to the VM's `<resource>.Max`. Alongside
+that, we track `Buffer` — the expected difference between `Reserved` usage and actual usage: equal
 to the VM's `<resource>.Max - <resource>.Use`.
 
 As each `autoscaler-agent` reconnects, their first message contains their current resource usage, so
-we're able to reduce `reserved` appropriately and begin allowing other pods to be scheduled. When
-this happens, we reset the pod's `buffer` to zero.
+we're able to reduce `Reserved` appropriately and begin allowing other pods to be scheduled. When
+this happens, we reset the pod's `Buffer` to zero.
 
-Eventually, all `autoscaler-agent`s _should_ reconnect, and the node's `buffer` is zero — meaning
+Eventually, all `autoscaler-agent`s _should_ reconnect, and the node's `Buffer` is zero — meaning
 that there's no longer any uncertainty about VM resource usage.
 
 ---
 
-With `buffer`, we have a more precise guarantee about resource usage:
+With `Buffer`, we have a more precise guarantee about resource usage:
 
 > Assuming all `autoscaler-agent`s *and* the previous scheduler are well-behaved, then each node
-> will always have `reserved - buffer ≤ total`. For each value of `system`, each node will
-> eventually guarantee that future `reserved` will satisfy `reserved - buffer ≤ total - system`.
-
-If the value of `system` changes between restarts, we can't immediately guarantee that our resource
-allocation respects it, but it _eventually_ will.
+> will always have `Reserved - Buffer ≤ Total`.
