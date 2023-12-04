@@ -106,8 +106,8 @@ type pluginStateDump struct {
 	VMPods    []podNameAndPointer `json:"vmPods"`
 	OtherPods []podNameAndPointer `json:"otherPods"`
 
-	MaxTotalReservableCPU      vmapi.MilliCPU `json:"maxTotalReservableCPU"`
-	MaxTotalReservableMemSlots uint16         `json:"maxTotalReservableMemSlots"`
+	MaxTotalCPU      vmapi.MilliCPU `json:"maxTotalReservableCPU"`
+	MaxTotalMemSlots uint16         `json:"maxTotalReservableMemSlots"`
 
 	Conf Config `json:"config"`
 }
@@ -200,13 +200,13 @@ func (s *pluginState) dump(ctx context.Context) (*pluginStateDump, error) {
 	sortSliceByPodName(ongoingMigrationDeletions, func(kv keyed[util.NamespacedName, int]) util.NamespacedName { return kv.Key })
 
 	return &pluginStateDump{
-		OngoingMigrationDeletions:  ongoingMigrationDeletions,
-		Nodes:                      nodes,
-		VMPods:                     vmPods,
-		OtherPods:                  otherPods,
-		MaxTotalReservableCPU:      s.maxTotalReservableCPU,
-		MaxTotalReservableMemSlots: s.maxTotalReservableMemSlots,
-		Conf:                       *s.conf,
+		OngoingMigrationDeletions: ongoingMigrationDeletions,
+		Nodes:                     nodes,
+		VMPods:                    vmPods,
+		OtherPods:                 otherPods,
+		MaxTotalCPU:               s.maxTotalCPU,
+		MaxTotalMemSlots:          s.maxTotalMemSlots,
+		Conf:                      *s.conf,
 	}, nil
 }
 
