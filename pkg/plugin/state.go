@@ -28,7 +28,7 @@ import (
 // pluginState stores the private state for the plugin, used both within and outside of the
 // predefined scheduler plugin points
 //
-// Accessing the individual fields MUST be done while holding a lock.
+// Accessing the individual fields MUST be done while holding the lock, with some exceptions.
 type pluginState struct {
 	lock util.ChanMutex
 
@@ -48,6 +48,8 @@ type pluginState struct {
 	// conf stores the current configuration, and is nil if the configuration has not yet been set
 	//
 	// Proper initialization of the plugin guarantees conf is not nil.
+	//
+	// conf MAY be accessed without holding the lock; it MUST not be modified.
 	conf *Config
 }
 
