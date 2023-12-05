@@ -255,7 +255,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					return
 				case <-store.triggerRelist:
 					config.Metrics.relistRequested()
-					continue
+					goto relist
 				case event, ok := <-watcher.ResultChan():
 					if !ok {
 						logger.Info("Watcher ended gracefully, restarting")
@@ -323,6 +323,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 			// This can amplify request failures - particularly if the K8s API server is overloaded.
 			signalRelistComplete = make([]chan struct{}, 0, 1)
 
+			// Making sure the watcher is stopped. It's safe to call Stop multiple times.
+			watcher.Stop()
+
 			logger.Info("Relisting")
 			for first := true; ; first = false {
 				func() {
@@ -332,6 +335,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					newRelistTriggered := false
 
 					// consume any additional relist request
+					// this works because triggerList has size one
 					select {
 					case <-store.triggerRelist:
 						newRelistTriggered = true
@@ -474,7 +478,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				// err == nil
 				store.failing.Store(false)
 				config.Metrics.unfailing()
-				break newWatcher
+				break
 			}
 		}
 	}()
