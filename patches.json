@@ -4,7 +4,7 @@
       {
         "path": ".billing",
         "value": {
-          "url": "http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1/usage_events",
+          "url": "http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1",
           "cpuMetricName": "effective_compute_seconds",
           "activeTimeMetricName": "active_time_seconds",
           "collectEverySeconds": 4,
