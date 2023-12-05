@@ -314,8 +314,6 @@ func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, actio
 
 // checkSchedulerName asserts that the SchedulerName field of a Pod matches what we're expecting,
 // otherwise returns a non-nil framework.Status to return (and also logs the error)
-//
-// This method expects e.state.lock to be held when it is called. It will not release the lock.
 func (e *AutoscaleEnforcer) checkSchedulerName(logger *zap.Logger, pod *corev1.Pod) *framework.Status {
 	if e.state.conf.SchedulerName != pod.Spec.SchedulerName {
 		err := fmt.Errorf(
@@ -418,13 +416,13 @@ func (e *AutoscaleEnforcer) Filter(
 		otherPodInfo = extractPodOtherPodResourceState(pod)
 	}
 
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
-
 	// Check that the SchedulerName matches what we're expecting
 	if status := e.checkSchedulerName(logger, pod); status != nil {
 		return status
 	}
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
 
 	// Check whether the pod's memory slot size matches the scheduler's. If it doesn't, reject it.
 	if vmInfo != nil && !vmInfo.Mem.SlotSize.Equal(e.state.conf.MemSlotSize) {
@@ -654,13 +652,13 @@ func (e *AutoscaleEnforcer) Score(
 
 	// note: vmInfo may be nil here if the pod does not correspond to a NeonVM virtual machine
 
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
-
 	// Double-check that the SchedulerName matches what we're expecting
 	if status := e.checkSchedulerName(logger, pod); status != nil {
 		return framework.MinNodeScore, status
 	}
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
 
 	// Score by total resources available:
 	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
@@ -831,13 +829,13 @@ func (e *AutoscaleEnforcer) Reserve(
 		)
 	}
 
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
-
 	// Double-check that the SchedulerName matches what we're expecting
 	if status := e.checkSchedulerName(logger, pod); status != nil {
 		return status
 	}
+
+	e.state.lock.Lock()
+	defer e.state.lock.Unlock()
 
 	// Double-check that the VM's memory slot size still matches ours. This should be ensured by
 	// our implementation of Filter, but this would be a *pain* to debug if it went wrong somehow.
