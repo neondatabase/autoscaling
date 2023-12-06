@@ -17,8 +17,13 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -32,9 +37,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/neonvm/controllers"
+	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/tychoish/fun/srv"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -48,6 +56,33 @@ func init() {
 
 	utilruntime.Must(vmv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+}
+
+func run(mgr manager.Manager) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	ctx = srv.SetShutdownSignal(ctx)
+	ctx = srv.SetBaseContext(ctx)
+	ctx = srv.WithOrchestrator(ctx)
+	orca := srv.GetOrchestrator(ctx)
+	defer func() {
+		if err := orca.Wait(); err != nil {
+			setupLog.Error(err, "failed to shut down orchestrator")
+		}
+
+		setupLog.Info("main loop returned, exiting")
+	}()
+
+	if err := orca.Add(srv.HTTP("scheduler-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
+		return fmt.Errorf("failed to add pprof service: %w", err)
+	}
+
+	setupLog.Info("starting manager")
+	if err := mgr.Start(ctx); err != nil {
+		return fmt.Errorf("problem running manager: %w", err)
+	}
+
+	return nil
 }
 
 func main() {
@@ -134,9 +169,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+	if err := run(mgr); err != nil {
+		setupLog.Error(err, "run manager error")
 		os.Exit(1)
 	}
 }
