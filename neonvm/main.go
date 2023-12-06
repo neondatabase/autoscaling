@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -36,6 +37,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/neonvm/controllers"
@@ -56,9 +58,31 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
-func logPanic(err error, msg string, keysAndValues ...any) {
-	setupLog.Error(err, msg, keysAndValues...)
-	panic(msg)
+func run(mgr manager.Manager) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	ctx = srv.SetShutdownSignal(ctx)
+	ctx = srv.SetBaseContext(ctx)
+	ctx = srv.WithOrchestrator(ctx)
+	orca := srv.GetOrchestrator(ctx)
+	defer func() {
+		if err := orca.Wait(); err != nil {
+			setupLog.Error(err, "failed to shut down orchestrator")
+		}
+
+		setupLog.Info("main loop returned, exiting")
+	}()
+
+	if err := orca.Add(srv.HTTP("scheduler-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
+		return fmt.Errorf("failed to add pprof service: %w", err)
+	}
+
+	setupLog.Info("starting manager")
+	if err := mgr.Start(ctx); err != nil {
+		return fmt.Errorf("problem running manager: %w", err)
+	}
+
+	return nil
 }
 
 func main() {
@@ -106,7 +130,8 @@ func main() {
 		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
-		logPanic(err, "unable to start manager")
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
 	}
 
 	if err = (&controllers.VirtualMachineReconciler{
@@ -114,50 +139,38 @@ func main() {
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
 	}).SetupWithManager(mgr); err != nil {
-		logPanic(err, "unable to create controller", "controller", "VirtualMachine")
+		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
+		os.Exit(1)
 	}
 	if err = (&vmv1.VirtualMachine{}).SetupWebhookWithManager(mgr); err != nil {
-		logPanic(err, "unable to create webhook", "webhook", "VirtualMachine")
+		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
+		os.Exit(1)
 	}
 	if err = (&controllers.VirtualMachineMigrationReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
 	}).SetupWithManager(mgr); err != nil {
-		logPanic(err, "unable to create controller", "controller", "VirtualMachineMigration")
+		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
+		os.Exit(1)
 	}
 	if err = (&vmv1.VirtualMachineMigration{}).SetupWebhookWithManager(mgr); err != nil {
-		logPanic(err, "unable to create webhook", "webhook", "VirtualMachineMigration")
+		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachineMigration")
+		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		logPanic(err, "unable to set up health check")
+		setupLog.Error(err, "unable to set up health check")
+		os.Exit(1)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		logPanic(err, "unable to set up ready check")
+		setupLog.Error(err, "unable to set up ready check")
+		os.Exit(1)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	ctx = srv.SetShutdownSignal(ctx)
-	ctx = srv.SetBaseContext(ctx)
-	ctx = srv.WithOrchestrator(ctx)
-	orca := srv.GetOrchestrator(ctx)
-	defer func() {
-		if err := orca.Wait(); err != nil {
-			logPanic(err, "Failed to shut down orchestrator")
-		}
-
-		setupLog.Info("Main loop returned. Exiting.")
-	}()
-
-	if err := orca.Add(srv.HTTP("scheduler-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
-		logPanic(err, "Failed to add pprof service")
-	}
-
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctx); err != nil {
-		logPanic(err, "problem running manager")
+	if err := run(mgr); err != nil {
+		setupLog.Error(err, "run manager error")
+		os.Exit(1)
 	}
 }
