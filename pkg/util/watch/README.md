@@ -74,9 +74,10 @@ store with `List` or the actual `Watch` events themselves.
 
 ## Our changes: Relisting
 
-In the scheduler, we needed the ability to associate an incoming Pod with the VirtualMachine that
-owns it. Fundamentally, this is racy if we're only using watch: it's possible to get an event
-about the Pod before we get any events about the VirtualMachine.
+Relisting was originally motivated by the scheduler: There, we needed the ability to associate an
+incoming Pod with the VirtualMachine that owns it. Fundamentally, this is racy if we're only using
+watch: it's possible to get an event about the Pod before we get any events about the
+VirtualMachine.
 
 In order to provide an explicit ordering here, we have a support for externally triggering a
 "relist" — forcing an ordering on the store's contents by calling `List` again.
