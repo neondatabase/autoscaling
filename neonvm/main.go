@@ -17,8 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -35,6 +39,8 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/neonvm/controllers"
+	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/tychoish/fun/srv"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -48,6 +54,11 @@ func init() {
 
 	utilruntime.Must(vmv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+}
+
+func logPanic(err error, msg string, keysAndValues ...any) {
+	setupLog.Error(err, msg, keysAndValues...)
+	panic(msg)
 }
 
 func main() {
@@ -95,8 +106,7 @@ func main() {
 		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
+		logPanic(err, "unable to start manager")
 	}
 
 	if err = (&controllers.VirtualMachineReconciler{
@@ -104,39 +114,50 @@ func main() {
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
-		os.Exit(1)
+		logPanic(err, "unable to create controller", "controller", "VirtualMachine")
 	}
 	if err = (&vmv1.VirtualMachine{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
-		os.Exit(1)
+		logPanic(err, "unable to create webhook", "webhook", "VirtualMachine")
 	}
 	if err = (&controllers.VirtualMachineMigrationReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
-		os.Exit(1)
+		logPanic(err, "unable to create controller", "controller", "VirtualMachineMigration")
 	}
 	if err = (&vmv1.VirtualMachineMigration{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachineMigration")
-		os.Exit(1)
+		logPanic(err, "unable to create webhook", "webhook", "VirtualMachineMigration")
 	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
+		logPanic(err, "unable to set up health check")
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
+		logPanic(err, "unable to set up ready check")
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	ctx = srv.SetShutdownSignal(ctx)
+	ctx = srv.SetBaseContext(ctx)
+	ctx = srv.WithOrchestrator(ctx)
+	orca := srv.GetOrchestrator(ctx)
+	defer func() {
+		if err := orca.Wait(); err != nil {
+			logPanic(err, "Failed to shut down orchestrator")
+		}
+
+		setupLog.Info("Main loop returned. Exiting.")
+	}()
+
+	if err := orca.Add(srv.HTTP("scheduler-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
+		logPanic(err, "Failed to add pprof service")
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
-		os.Exit(1)
+	if err := mgr.Start(ctx); err != nil {
+		logPanic(err, "problem running manager")
 	}
 }
