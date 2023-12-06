@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/neonvm/controllers/buildtag"
 )
 
 const virtualmachinemigrationFinalizer = "vm.neon.tech/finalizer"
@@ -530,14 +531,20 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				log.Error(err, "Failed to get source runner Pod for deletion")
 				return ctrl.Result{}, err
 			}
-			if err := r.Delete(ctx, sourceRunner); err != nil {
-				log.Error(err, "Failed to delete source runner Pod")
-				return ctrl.Result{}, err
+			var msg, eventReason string
+			if buildtag.NeverDeleteRunnerPods {
+				msg = fmt.Sprintf("Source runner pod deletion was skipped due to '%s' build tag", buildtag.TagnameNeverDeleteRunnerPods)
+				eventReason = "DeleteSkipped"
+			} else {
+				if err := r.Delete(ctx, sourceRunner); err != nil {
+					log.Error(err, "Failed to delete source runner Pod")
+					return ctrl.Result{}, err
+				}
+				msg = "Source runner was deleted"
+				eventReason = "Deleted"
 			}
-			sourceRunnerPodName := migration.Status.SourcePodName
-			message := fmt.Sprintf("Source runner (%s) was deleted", sourceRunnerPodName)
-			log.Info(message)
-			r.Recorder.Event(migration, "Normal", "Deleted", message)
+			log.Info(msg, "Pod.Namespace", sourceRunner.Namespace, "Pod.Name", sourceRunner.Name)
+			r.Recorder.Event(migration, "Normal", eventReason, fmt.Sprintf("%s: %s", msg, sourceRunner.Name))
 			migration.Status.SourcePodName = ""
 			migration.Status.SourcePodIP = ""
 			return r.updateMigrationStatus(ctx, migration)
@@ -615,6 +622,9 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 				// pod already deleted ?
 				return nil
 			}
+			// NB: here, we ignore buildtag.NeverDeleteRunnerPods because we delete runner pods on
+			// VM object deletion with the tag anyways, so it's more consistent to keep the same
+			// behavior for VMMs.
 			if err := r.Delete(ctx, pod); err != nil {
 				log.Error(err, "Failed to delete target runner Pod")
 				return err

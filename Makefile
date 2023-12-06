@@ -138,7 +138,7 @@ docker-push: docker-build ## Push docker images to docker registry
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
-	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
+	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) --build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
 
 .PHONY: docker-build-runner
 docker-build-runner: ## Build docker image for NeonVM runner
