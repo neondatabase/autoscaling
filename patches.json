@@ -18,7 +18,9 @@
     "dev-eu-central-1-alpha": [
       { "path": ".billing", "value": null }
     ],
-    "dev-eu-west-1-zeta": [],
+    "dev-eu-west-1-zeta": [
+      { "path": ".billing.url", "value": "http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1" }
+    ],
     "dev-us-east-2-beta": []
   },
   "autoscale-scheduler": {

@@ -46,7 +46,7 @@ data:
     \   \"requestTimeoutSeconds\": 2,\n    \"requestAtLeastEverySeconds\": 5,\n  \
     \  \"retryFailedRequestSeconds\": 3,\n    \"retryDeniedUpscaleSeconds\": 2,\n\
     \    \"requestPort\": 10299\n  },\n  \"dumpState\": {\n    \"port\": 10300,\n\
-    \    \"timeoutSeconds\": 5\n  },\n  \"billing\": {\n    \"url\": \"https://vector-usage-tracking.beta.us-east-2.internal.aws.neon.build/v1\"\
+    \    \"timeoutSeconds\": 5\n  },\n  \"billing\": {\n    \"url\": \"http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1\"\
     ,\n    \"cpuMetricName\": \"effective_compute_seconds\",\n    \"activeTimeMetricName\"\
     : \"active_time_seconds\",\n    \"collectEverySeconds\": 4,\n    \"accumulateEverySeconds\"\
     : 24,\n    \"pushEverySeconds\": 30,\n    \"pushRequestTimeoutSeconds\": 30,\n\
