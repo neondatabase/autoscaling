@@ -15,9 +15,7 @@
         }
       }
     ],
-    "prod-ap-southeast-1-epsilon": [
-	  { "path": ".billing.url", "value": "http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1" }
-	],
+    "prod-ap-southeast-1-epsilon": [],
     "prod-eu-central-1-gamma": [],
     "prod-il-central-1-iota": [],
     "prod-us-east-1-theta": [],
