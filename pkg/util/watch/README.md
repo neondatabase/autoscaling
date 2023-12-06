@@ -9,9 +9,12 @@ differences:
 2. client-go's periodically resyncs when necessary, but does not provide the external control or
    ability to be notified on completion that would be necessary to use it. Ours provides explicit
    control for relisting, with notification when relisting has finished.
-3. Ours has some additional features, like support for custom indexes
-4. Ours has better observability, by exposing metrics that describe both the API calls and their
-   results, and the current state of the watch (e.g. whether it's healthy).
+3. Ours has some additional features:
+    1. Support for custom indexes
+    2. The ability to choose when the handlers the initial listing are called (before or after
+       returning; see `watch.InitMode`)
+    3. Metrics describing the API calls, their results, and the current state of the watch (e.g.
+       whether it's healthy)
 
 [`client-go` watch implementation]: https://pkg.go.dev/k8s.io/client-go/tools/watch
 
