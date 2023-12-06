@@ -38,14 +38,19 @@ for item in List() {
 stream := Watch()
 loop {
     // stream events...
-    for item in stream {
+    loop {
+        item, ok := <-stream
+        if !ok {
+            // stream closed; watch ended.
+            goto rewatch
+        }
+
         if item is error {
             goto relist
         }
 
         update store with item
     }
-    goto rewatch
 
   relist:
     for item in List() {
