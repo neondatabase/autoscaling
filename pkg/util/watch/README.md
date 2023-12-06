@@ -7,8 +7,8 @@ differences:
 
 1. client-go's is type-erased; ours is generic
 2. client-go's periodically resyncs when necessary, but does not provide the external control or
-   ordering guarantees necessary to use it. Ours provides explicit control for relisting, with
-   notifications when that relisting is complete.
+   ability to be notified on completion that would be necessary to use it. Ours provides explicit
+   control for relisting, with notification when relisting has finished.
 3. Ours has some additional features, like support for custom indexes
 4. Ours has better observability, by exposing metrics that describe both the API calls and their
    results, and the current state of the watch (e.g. whether it's healthy).
