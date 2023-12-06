@@ -40,7 +40,6 @@ func (s *State) Dump() StateDump {
 }
 
 type pluginStateDump struct {
-	Alive          bool                 `json:"alive"`
 	OngoingRequest bool                 `json:"ongoingRequest"`
 	ComputeUnit    *api.Resources       `json:"computeUnit"`
 	LastRequest    *pluginRequestedDump `json:"lastRequest"`
@@ -62,7 +61,6 @@ func (s *pluginState) dump() pluginStateDump {
 	}
 
 	return pluginStateDump{
-		Alive:          s.alive,
 		OngoingRequest: s.ongoingRequest,
 		ComputeUnit:    shallowCopy(s.computeUnit),
 		LastRequest:    lastRequest,

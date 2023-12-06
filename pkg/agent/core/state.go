@@ -115,7 +115,6 @@ type State struct {
 }
 
 type pluginState struct {
-	alive bool
 	// ongoingRequest is true iff there is currently an ongoing request to *this* scheduler plugin.
 	ongoingRequest bool
 	// computeUnit, if not nil, gives the value of the compute unit we most recently got from a
@@ -127,8 +126,7 @@ type pluginState struct {
 	// lastFailureAt, if not nil, gives the time of the most recent request failure
 	lastFailureAt *time.Time
 	// permit, if not nil, stores the Permit in the most recent PluginResponse. This field will be
-	// nil if we have not been able to contact *any* scheduler. If we switch schedulers, we trust
-	// the old one.
+	// nil if we have not been able to contact *any* scheduler.
 	permit *api.Resources
 }
 
@@ -205,7 +203,6 @@ func NewState(vm api.VmInfo, config Config) *State {
 		debug:  false,
 		vm:     vm,
 		plugin: pluginState{
-			alive:          false,
 			ongoingRequest: false,
 			computeUnit:    nil,
 			lastRequest:    nil,
@@ -353,7 +350,7 @@ func (s *State) calculatePluginAction(
 		timeUntilNextRequestTick = s.config.PluginRequestTick - now.Sub(s.plugin.lastRequest.at)
 	}
 
-	timeForRequest := timeUntilNextRequestTick <= 0 && s.plugin.alive
+	timeForRequest := timeUntilNextRequestTick <= 0
 
 	var timeUntilRetryBackoffExpires time.Duration
 	requestPreviouslyDenied := !s.plugin.ongoingRequest &&
@@ -375,14 +372,6 @@ func (s *State) calculatePluginAction(
 	permittedRequestResources := requestResources
 	if !shouldRequestNewResources {
 		permittedRequestResources = currentResources
-	}
-
-	// Can't make a request if the plugin isn't active/alive
-	if !s.plugin.alive {
-		if timeForRequest || shouldRequestNewResources {
-			logFailureReason("there isn't one active right now")
-		}
-		return nil, nil
 	}
 
 	// Can't make a duplicate request
@@ -945,28 +934,6 @@ type PluginHandle struct {
 
 func (s *State) Plugin() PluginHandle {
 	return PluginHandle{s}
-}
-
-func (h PluginHandle) NewScheduler() {
-	h.s.plugin = pluginState{
-		alive:          true,
-		ongoingRequest: false,
-		computeUnit:    h.s.plugin.computeUnit, // Keep the previous scheduler's CU unless told otherwise
-		lastRequest:    nil,
-		lastFailureAt:  nil,
-		permit:         h.s.plugin.permit, // Keep this; trust the previous scheduler.
-	}
-}
-
-func (h PluginHandle) SchedulerGone() {
-	h.s.plugin = pluginState{
-		alive:          false,
-		ongoingRequest: false,
-		computeUnit:    h.s.plugin.computeUnit,
-		lastRequest:    nil,
-		lastFailureAt:  nil,
-		permit:         h.s.plugin.permit, // Keep this; trust the previous scheduler.
-	}
 }
 
 func (h PluginHandle) StartingRequest(now time.Time, resources api.Resources) {

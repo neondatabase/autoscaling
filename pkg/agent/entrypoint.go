@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/tychoish/fun/pubsub"
-	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
 
 	"k8s.io/client-go/kubernetes"
@@ -46,18 +45,13 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	defer vmWatchStore.Stop()
 	logger.Info("VM watcher started")
 
-	broker := pubsub.NewBroker[schedwatch.WatchEvent](ctx, pubsub.BrokerOptions{})
-	if err := srv.GetOrchestrator(ctx).Add(srv.Broker(broker)); err != nil {
-		return err
-	}
-
-	schedulerStore, err := schedwatch.StartSchedulerWatcher(ctx, logger, r.KubeClient, watchMetrics, broker, r.Config.Scheduler.SchedulerName)
+	schedTracker, err := schedwatch.StartSchedulerWatcher(ctx, logger, r.KubeClient, watchMetrics, r.Config.Scheduler.SchedulerName)
 	if err != nil {
 		return fmt.Errorf("Starting scheduler watch server: %w", err)
 	}
-	defer schedulerStore.Stop()
+	defer schedTracker.Stop()
 
-	globalState, globalPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, broker, schedulerStore)
+	globalState, globalPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, schedTracker)
 	watchMetrics.MustRegister(globalPromReg)
 
 	if r.Config.Billing != nil {
