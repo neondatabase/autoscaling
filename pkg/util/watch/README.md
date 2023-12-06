@@ -75,7 +75,7 @@ store with `List` or the actual `Watch` events themselves.
 ## Our changes: Relisting
 
 In the scheduler, we needed the ability to associate an incoming Pod with the VirtualMachine that
-owns it. Fundamentally, this is _kind of_ racy if we're using watch: it's possible to get an event
+owns it. Fundamentally, this is racy if we're only using watch: it's possible to get an event
 about the Pod before we get any events about the VirtualMachine.
 
 In order to provide an explicit ordering here, we have a support for externally triggering a
