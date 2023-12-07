@@ -17,10 +17,12 @@ limitations under the License.
 package v1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -455,8 +457,19 @@ type VirtualMachine struct {
 	Status VirtualMachineStatus `json:"status,omitempty"`
 }
 
-func (vm *VirtualMachine) GetNetworkUsage() (*VirtualMachineNetworkUsage, error) {
-	resp, err := http.Get(fmt.Sprintf("localhost:%d/get_network_usage", vm.Spec.RunnerPort))
+func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context) (*VirtualMachineNetworkUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 500 * time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("localhost:%d/get_network_usage", vm.Spec.RunnerPort),
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
