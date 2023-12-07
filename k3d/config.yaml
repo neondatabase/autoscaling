@@ -1,7 +1,5 @@
 apiVersion: k3d.io/v1alpha5
 kind: Simple
-metadata:
-  name: neonvm # name that you want to give to your cluster (will still be prefixed with `k3d-`)
 servers: 1
 agents:  2
 image: rancher/k3s:v1.25.15-k3s2
