@@ -458,7 +458,7 @@ type VirtualMachine struct {
 }
 
 func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context) (*VirtualMachineNetworkUsage, error) {
-	ctx, cancel := context.WithTimeout(ctx, 500 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 	req, err := http.NewRequestWithContext(
 		ctx,
