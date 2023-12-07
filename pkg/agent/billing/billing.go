@@ -115,7 +115,7 @@ func RunBillingMetricsCollector(
 	// The rest of this function is to do with collection
 	logger = logger.Named("collect")
 
-	if err := state.collect(backgroundCtx, conf, store, metrics, logger); err != nil {
+	if err := state.collect(backgroundCtx, store, metrics, logger); err != nil {
 		logger.Panic("Metrics collection failed", zap.Error(err))
 	}
 
@@ -127,7 +127,7 @@ func RunBillingMetricsCollector(
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
-			if err := state.collect(backgroundCtx, conf, store, metrics, logger); err != nil {
+			if err := state.collect(backgroundCtx, store, metrics, logger); err != nil {
 				logger.Panic("Metrics collection failed", zap.Error(err))
 			}
 		case <-accumulateTicker.C:
@@ -139,7 +139,7 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func (s *metricsState) collect(ctx context.Context, conf *Config, store VMStoreForNode, metrics PromMetrics, logger *zap.Logger) error {
+func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metrics PromMetrics, logger *zap.Logger) error {
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
