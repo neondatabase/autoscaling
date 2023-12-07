@@ -113,7 +113,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	config Config,
 	accessors Accessors[L, T],
 	mode InitMode,
-	opts metav1.ListOptions,
+	listOpts metav1.ListOptions,
 	handlers HandlerFuncs[P],
 ) (*Store[T], error) {
 	if accessors.Items == nil {
@@ -130,13 +130,21 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		handlers.DeleteFunc = func(obj P, mayBeStale bool) {}
 	}
 
+	// use a copy of the options for watching vs listing:
+	// We want to avoid setting some values for the list requests - specifically, in order to
+	// provide synchronization guarantees that the contents of the store are up-to-date strictly
+	// *after* the start of an explicit Relist() request, we need to *not* set a resource version in
+	// the request to get the most recent data.
+	// For more, see: https://kubernetes.io/docs/reference/using-api/api-concepts/#resource-versions
+	watchOpts := listOpts
+
 	// Handling bookmarks means that sometimes the API server will be kind, allowing us to continue
 	// the watch instead of resyncing.
-	opts.AllowWatchBookmarks = true
+	watchOpts.AllowWatchBookmarks = true
 
 	// Perform an initial listing
 	config.Metrics.startList()
-	initialList, err := client.List(ctx, opts)
+	initialList, err := client.List(ctx, listOpts)
 	config.Metrics.doneList(err)
 	if err != nil {
 		return nil, fmt.Errorf("Initial list failed: %w", err)
@@ -144,7 +152,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 	// set ResourceVersion so that the client.Watch request(s) show only the changes since we made
 	// the initial list
-	opts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
+	watchOpts.ResourceVersion = initialList.GetListMeta().GetResourceVersion()
 
 	sendStop, stopSignal := util.NewSingleSignalPair[struct{}]()
 
@@ -184,7 +192,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 	// Start watching
 	config.Metrics.startWatch()
-	watcher, err := client.Watch(ctx, opts)
+	watcher, err := client.Watch(ctx, watchOpts)
 	config.Metrics.doneWatch(err)
 	if err != nil {
 		return nil, fmt.Errorf("Initial watch failed: %w", err)
@@ -291,7 +299,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					meta := obj.GetObjectMeta()
 					// Update ResourceVersion so subsequent calls to client.Watch won't include this
 					// event, which we're currently processing.
-					opts.ResourceVersion = meta.GetResourceVersion()
+					watchOpts.ResourceVersion = meta.GetResourceVersion()
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
 					uid := meta.GetUID()
@@ -350,7 +358,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				}()
 
 				config.Metrics.startList()
-				relistList, err := client.List(ctx, opts)
+				relistList, err := client.List(ctx, listOpts) // don't include resource version, so it's guaranteed most recent
 				config.Metrics.doneList(err)
 				if err != nil {
 					logger.Error("Relist failed", zap.Error(err))
@@ -437,7 +445,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 				}()
 
 				// Update ResourceVersion, recreate watcher.
-				opts.ResourceVersion = relistList.GetListMeta().GetResourceVersion()
+				watchOpts.ResourceVersion = relistList.GetListMeta().GetResourceVersion()
 				logger.Info("Relist complete, restarting watcher")
 				for _, ch := range signalRelistComplete {
 					close(ch)
@@ -448,7 +456,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		newWatcher:
 			for {
 				config.Metrics.startWatch()
-				watcher, err = client.Watch(ctx, opts)
+				watcher, err = client.Watch(ctx, watchOpts)
 				config.Metrics.doneWatch(err)
 				if err != nil {
 					logger.Error("Re-watch failed", zap.Error(err))
