@@ -350,7 +350,7 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 e2e-tools: k3d kind kubectl kuttl ## Donwnload tools for e2e tests locally if necessary.
 
 .PHONE: e2e
-e2e: e2e-tools ## Run e2e kuttl tests
+e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
 
