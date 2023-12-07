@@ -126,24 +126,31 @@ jobs:
 
           namespaces=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
           for namespace in $namespaces; do
-            if [[ "$namespace" == "neonvm-system" ]] || [[ "$namespace" == kuttl-test-* ]]; then
-              tee_if_needed=$GITHUB_STEP_SUMMARY
+            if [[ "$namespace" == "neonvm-system" ]] || [[ "$namespace" == kuttl-test-* ]] || [[ "$namespace" == "kube-system" ]]; then
+              tee_ns_if_needed=$GITHUB_STEP_SUMMARY
             else
-              tee_if_needed=/dev/null
+              tee_ns_if_needed=/dev/null
             fi
 
             {
               echo "<details>"
               echo "<summary>Namespace=$namespace</summary>"
-            } | tee -a $tee_if_needed
+            } | tee -a $tee_ns_if_needed
 
             pods=$(kubectl get pods -n $namespace -o jsonpath='{.items[*].metadata.name}')
             for pod in $pods; do
+              # log for all pods in neonvm-system or kuttl-test-*, and autoscaling pods in kube-system
+              if grep -qE '(neonvm-system|kuttl-test-.+)/.+|kube-system/(autoscaler-agent|autoscale-scheduler)-.+' <(echo "$namespace/$name"); then
+                tee_pod_if_needed=$GITHUB_STEP_SUMMARY
+              else
+                tee_pod_if_needed=/dev/null
+              fi
+
               {
                 echo "<details>"
                 echo "<summary>- Namespace=$namespace Pod=$pod Logs</summary>"
                 echo "<pre>"
-              } | tee -a $tee_if_needed
+              } | tee -a $tee_pod_if_needed
 
               restarts=$(
                 kubectl get pod -n $namespace $pod -o jsonpath='{.status.containerStatuses[0].restartCount}' || echo '0'
@@ -159,28 +166,28 @@ jobs:
                   echo "Logs:"
                   kubectl logs -n $namespace $pod || echo 'Error getting logs'
                 fi
-              } | tee -a $tee_if_needed
+              } | tee -a $tee_pod_if_needed
               {
                 echo "</pre>"
                 echo "</details>"
-              } | tee -a $tee_if_needed
+              } | tee -a $tee_pod_if_needed
 
               {
                 echo "<details>"
                 echo "<summary>- Namespace=$namespace Pod=$pod Events</summary>"
                 echo "<pre>"
-              } | tee -a $tee_if_needed
+              } | tee -a $tee_pod_if_needed
 
-              (kubectl get events --namespace $namespace --field-selector involvedObject.name=$pod || echo 'Error getting events') | tee -a $tee_if_needed
+              (kubectl get events --namespace $namespace --field-selector involvedObject.name=$pod || echo 'Error getting events') | tee -a $tee_pod_if_needed
 
               {
                 echo "</pre>"
                 echo "</pre>"
                 echo "</details>"
-              } | tee -a $tee_if_needed
+              } | tee -a $tee_pod_if_needed
             done
 
-            echo "</details>" | tee -a $tee_if_needed
+            echo "</details>" | tee -a $tee_ns_if_needed
           done
 
       - name: Cleanup
