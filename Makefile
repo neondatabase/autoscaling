@@ -31,6 +31,17 @@ SHELL = /usr/bin/env bash -o pipefail
 
 GIT_INFO := $(shell git describe --long --dirty)
 
+# in CI environment use 'neonvm' as cluster name
+# in other cases add $USER as cluster name suffix
+# or fallback to 'neonvm' if $USER variable absent
+ifdef CI
+  CLUSTER_NAME = neonvm
+else ifdef USER
+  CLUSTER_NAME = neonvm-$(USER)
+else
+  CLUSTER_NAME = neonvm
+endif
+
 .PHONY: all
 all: build
 
@@ -228,7 +239,7 @@ kernel: ## Build linux kernel.
 
 .PHONY: check-local-context
 check-local-context: ## Asserts that the current kubectl context is pointing at k3d or kind, to avoid accidentally applying to prod
-	if [ "$$($(KUBECTL) config current-context)" != 'k3d-neonvm' ] && [ "$$($(KUBECTL) config current-context)" != 'kind-kind' ]; then echo "kubectl context is not pointing to local k3d or kind cluster (must be k3d-neonvm or kind-kind)"; exit 1; fi
+	@if [ "$$($(KUBECTL) config current-context)" != 'k3d-$(CLUSTER_NAME)' ] && [ "$$($(KUBECTL) config current-context)" != 'kind-$(CLUSTER_NAME)' ]; then echo "kubectl context is not pointing to local k3d or kind cluster (must be k3d-$(CLUSTER_NAME) or kind-$(CLUSTER_NAME))"; exit 1; fi
 
 .PHONY: install
 install: check-local-context manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
@@ -299,19 +310,19 @@ deploy: check-local-context load-images manifests render-manifests kubectl ## De
 
 .PHONY: load-images
 load-images: kubectl kind k3d docker-build ## Push docker images to the local kind/k3d cluster
-	@if [ $$($(KUBECTL) config current-context) = k3d-neonvm ]; then make k3d-load;  fi
-	@if [ $$($(KUBECTL) config current-context) = kind-kind ];  then make kind-load; fi
+	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then make k3d-load;  fi
+	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ];  then make kind-load; fi
 
 .PHONY: example-vms
 example-vms: docker-build-examples kind k3d kubectl ## Build and push the testing VM images to the kind/k3d cluster.
-	@if [ $$($(KUBECTL) config current-context) = k3d-neonvm ]; then $(K3D) image import $(E2E_TESTS_VM_IMG) --cluster neonvm --mode direct; fi
-	@if [ $$($(KUBECTL) config current-context) = kind-kind ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name kind; fi
+	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(E2E_TESTS_VM_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
+	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name $(CLUSTER_NAME); fi
 
 .PHONY: pg14-disk-test
 pg14-disk-test: check-local-context docker-build-pg14-disk-test kind k3d kubectl ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
 	$(KUBECTL) create secret generic vm-ssh --from-file=private-key=vm-examples/pg14-disk-test/ssh_id_rsa || true
-	@if [ $$($(KUBECTL) config current-context) = k3d-neonvm ]; then $(K3D) image import $(PG14_DISK_TEST_IMG) --cluster neonvm --mode direct; fi
-	@if [ $$($(KUBECTL) config current-context) = kind-kind ]; then $(KIND) load docker-image $(PG14_DISK_TEST_IMG) --name kind; fi
+	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG14_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
+	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(PG14_DISK_TEST_IMG) --name $(CLUSTER_NAME); fi
 
 .PHONY: kind-load
 kind-load: kind # Push docker images to the kind cluster.
@@ -321,7 +332,7 @@ kind-load: kind # Push docker images to the kind cluster.
 		$(IMG_VXLAN) \
 		$(AUTOSCALER_SCHEDULER_IMG) \
 		$(AUTOSCALER_AGENT_IMG) \
-		--name kind
+		--name $(CLUSTER_NAME)
 
 .PHONY: k3d-load
 k3d-load: k3d # Push docker images to the k3d cluster.
@@ -331,7 +342,7 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 		$(IMG_VXLAN) \
 		$(AUTOSCALER_SCHEDULER_IMG) \
 		$(AUTOSCALER_AGENT_IMG) \
-		--cluster neonvm --mode direct
+		--cluster $(CLUSTER_NAME) --mode direct
 
 ##@ End-to-End tests
 
@@ -339,7 +350,7 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 e2e-tools: k3d kind kubectl kuttl ## Donwnload tools for e2e tests locally if necessary.
 
 .PHONE: e2e
-e2e: e2e-tools ## Run e2e kuttl tests
+e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
 
@@ -347,32 +358,32 @@ e2e: e2e-tools ## Run e2e kuttl tests
 
 .PHONY: kind-setup
 kind-setup: kind kubectl ## Create local cluster by kind tool and prepared config
-	$(KIND) create cluster --config kind/config.yaml
-	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
-	$(KUBECTL) -n cert-manager rollout status deployment cert-manager
-	$(KUBECTL) apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-	$(KUBECTL) patch -n kube-system deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
-	$(KUBECTL) -n kube-system rollout status deployment metrics-server
+	$(KIND) create cluster --name $(CLUSTER_NAME) --config kind/config.yaml
+	$(KUBECTL) --context kind-$(CLUSTER_NAME) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager
+	$(KUBECTL) --context kind-$(CLUSTER_NAME) apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+	$(KUBECTL) --context kind-$(CLUSTER_NAME) patch -n kube-system deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n kube-system rollout status deployment metrics-server
 
 .PHONY: kind-destroy
 kind-destroy: kind ## Destroy local kind cluster
-	$(KIND) delete cluster --name kind
+	$(KIND) delete cluster --name $(CLUSTER_NAME)
 
 ##@ Local k3d cluster
 
 # K3D_FIX_MOUNTS=1 used to allow foreign CNI (cilium, multus and so on), https://github.com/k3d-io/k3d/pull/1268
 .PHONY: k3d-setup
 k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
-	K3D_FIX_MOUNTS=1 $(K3D) cluster create --config k3d/config.yaml
-	$(KUBECTL) apply -f k3d/cilium.yaml
-	$(KUBECTL) -n kube-system rollout status daemonset  cilium
-	$(KUBECTL) -n kube-system rollout status deployment cilium-operator
-	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
-	$(KUBECTL) -n cert-manager rollout status deployment cert-manager
+	K3D_FIX_MOUNTS=1 $(K3D) cluster create $(CLUSTER_NAME) --config k3d/config.yaml
+	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/cilium.yaml
+	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status daemonset  cilium
+	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status deployment cilium-operator
+	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager
 
 .PHONY: k3d-destroy
 k3d-destroy: k3d ## Destroy local k3d cluster
-	$(K3D) cluster delete --config k3d/config.yaml
+	$(K3D) cluster delete $(CLUSTER_NAME)
 
 ##@ Build Dependencies
 
