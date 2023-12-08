@@ -13,6 +13,7 @@ import (
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -84,9 +85,7 @@ func startVMWatcher(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
-				for k, v := range metricsForVM(vm, nodeName) {
-					perVMMetrics.vmResources.WithLabelValues(k.labelValues()...).Set(v)
-				}
+				setMetricsFromVM(vm, nodeName, &perVMMetrics)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(logger, vm, vmEventAdded)
@@ -101,19 +100,8 @@ func startVMWatcher(
 				}
 			},
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
-				oldMetrics := metricsForVM(oldVM, nodeName)
-				newMetrics := metricsForVM(newVM, nodeName)
-
-				// delete old metric label sets that are no longer present
-				for k := range oldMetrics {
-					if _, ok := newMetrics[k]; !ok {
-						perVMMetrics.vmResources.DeleteLabelValues(k.labelValues()...)
-					}
-				}
-				// set all current metric values
-				for k, v := range newMetrics {
-					perVMMetrics.vmResources.WithLabelValues(k.labelValues()...).Set(v)
-				}
+				deleteMetricsfromVM(oldVM, nodeName, &perVMMetrics)
+				setMetricsFromVM(newVM, nodeName, &perVMMetrics)
 
 				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
 				newIsOurs := vmIsOurResponsibility(newVM, config, nodeName)
@@ -148,9 +136,7 @@ func startVMWatcher(
 				submitEvent(event)
 			},
 			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
-				for k := range metricsForVM(vm, nodeName) {
-					perVMMetrics.vmResources.DeleteLabelValues(k.labelValues()...)
-				}
+				deleteMetricsfromVM(vm, nodeName, &perVMMetrics)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(logger, vm, vmEventDeleted)
@@ -215,27 +201,21 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 	}
 }
 
-type vmResourceTuple struct {
-	namespace  string
-	name       string
-	endpointID string
-	resource   vmResource
-	valueType  vmResourceValueType
+type kv[K any, V any] struct {
+	key   K
+	value V
 }
 
-func metricsForVM(vm *vmapi.VirtualMachine, nodeName string) map[vmResourceTuple]float64 {
+func setMetricsFromVM(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVMMetrics) {
 	if vm.Status.Node != nodeName {
-		return nil
+		return
 	}
 
-	endpointID := vm.Labels[endpointLabel]
-
-	type kv[K any, V any] struct {
-		key   K
-		value V
+	commonLabelValues := []string{
+		vm.Namespace,
+		vm.Name,
+		vm.Labels[endpointLabel],
 	}
-
-	metrics := make(map[vmResourceTuple]float64)
 
 	// CPU metrics derived from spec
 	specCPU := []kv[vmResourceValueType, *vmapi.MilliCPU]{
@@ -245,14 +225,12 @@ func metricsForVM(vm *vmapi.VirtualMachine, nodeName string) map[vmResourceTuple
 	}
 	for _, t := range specCPU {
 		if t.value != nil {
-			metrics[vmResourceTuple{
-				namespace:  vm.Namespace,
-				name:       vm.Name,
-				endpointID: endpointID,
-				resource:   vmResourceCPU,
-				valueType:  t.key,
-			}] = t.value.AsFloat64()
+			perVMMetrics.cpu.WithLabelValues(append(commonLabelValues, string(t.key))...).Set(t.value.AsFloat64())
 		}
+	}
+
+	if vm.Status.CPUs != nil {
+		perVMMetrics.cpu.WithLabelValues(append(commonLabelValues, string(vmResourceValueStatusUse))...).Set(vm.Status.CPUs.AsFloat64())
 	}
 	// Memory metrics derived from spec
 	specMem := []kv[vmResourceValueType, *int32]{
@@ -262,46 +240,21 @@ func metricsForVM(vm *vmapi.VirtualMachine, nodeName string) map[vmResourceTuple
 	}
 	for _, t := range specMem {
 		if t.value != nil {
-			metrics[vmResourceTuple{
-				namespace:  vm.Namespace,
-				name:       vm.Name,
-				endpointID: endpointID,
-				resource:   vmResourceMem,
-				valueType:  t.key,
-			}] = float64(vm.Spec.Guest.MemorySlotSize.Value() * int64(*t.value))
+			memValue := float64(vm.Spec.Guest.MemorySlotSize.Value() * int64(*t.value))
+			perVMMetrics.memory.WithLabelValues(append(commonLabelValues, string(t.key))...).Set(memValue)
 		}
 	}
-
-	// Status metrics:
-	if vm.Status.CPUs != nil {
-		metrics[vmResourceTuple{
-			namespace:  vm.Namespace,
-			name:       vm.Name,
-			endpointID: endpointID,
-			resource:   vmResourceCPU,
-			valueType:  vmResourceValueStatusUse,
-		}] = vm.Status.CPUs.AsFloat64()
-	}
-	if vm.Status.MemorySize != nil {
-		// nb: convert to int64 first, because (*resource.Quantity).AsApproximateFloat64() is sometimes very inaccurate.
-		metrics[vmResourceTuple{
-			namespace:  vm.Namespace,
-			name:       vm.Name,
-			endpointID: endpointID,
-			resource:   vmResourceMem,
-			valueType:  vmResourceValueStatusUse,
-		}] = float64(vm.Status.MemorySize.Value())
-	}
-
-	return metrics
 }
 
-func (t vmResourceTuple) labelValues() []string {
-	return []string{
-		t.namespace,
-		t.name,
-		t.endpointID,
-		string(t.resource),
-		string(t.valueType),
+func deleteMetricsfromVM(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVMMetrics) {
+	if vm.Status.Node != nodeName {
+		return
 	}
+	commonLabels := prometheus.Labels{
+		"vm_namespace": vm.Namespace,
+		"vm_name":      vm.Name,
+		"endpoint_id":  vm.Labels[endpointLabel],
+	}
+	perVMMetrics.cpu.DeletePartialMatch(commonLabels)
+	perVMMetrics.memory.DeletePartialMatch(commonLabels)
 }

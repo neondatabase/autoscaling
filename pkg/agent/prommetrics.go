@@ -254,15 +254,9 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 }
 
 type PerVMMetrics struct {
-	vmResources *prometheus.GaugeVec
+	cpu    *prometheus.GaugeVec
+	memory *prometheus.GaugeVec
 }
-
-type vmResource string
-
-const (
-	vmResourceCPU vmResource = "cpu"
-	vmResourceMem vmResource = "mem"
-)
 
 type vmResourceValueType string
 
@@ -277,16 +271,27 @@ func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
 
 	metrics := PerVMMetrics{
-		vmResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+		cpu: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: "autoscaling_vm_resources",
-				Help: "Amount of CPU or memory for a VM: min, max, spec using, or status using",
+				Name: "autoscaling_vm_cpu_cores",
+				Help: "Number of CPUs for a VM: min, max, spec using, or status using",
 			},
 			[]string{
 				"vm_namespace", // .metadata.namespace
 				"vm_name",      // .metadata.name
 				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
-				"resource",     // vmResource: "cpu" or "mem"
+				"value",        // vmResourceValue: min, spec_use, status_use, max
+			},
+		)),
+		memory: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_vm_memory_bytes",
+				Help: "Amount of memory in bytes for a VM: min, max, spec using, or status using",
+			},
+			[]string{
+				"vm_namespace", // .metadata.namespace
+				"vm_name",      // .metadata.name
+				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
 				"value",        // vmResourceValue: min, spec_use, status_use, max
 			},
 		)),
