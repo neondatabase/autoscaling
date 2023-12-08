@@ -14,7 +14,7 @@ import (
 )
 
 type Client struct {
-	BaseURL  string
+	URL      string
 	httpc    *http.Client
 	hostname string
 }
@@ -24,7 +24,7 @@ func NewClient(url string, c *http.Client) Client {
 	if err != nil {
 		hostname = fmt.Sprintf("unknown-%d", rand.Intn(1000))
 	}
-	return Client{BaseURL: url, httpc: c, hostname: hostname}
+	return Client{URL: fmt.Sprintf("%s/usage_events", url), httpc: c, hostname: hostname}
 }
 
 func (c Client) Hostname() string {
@@ -70,7 +70,7 @@ func Send[E Event](ctx context.Context, client Client, traceID TraceID, events [
 		return JSONError{Err: err}
 	}
 
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/usage_events", client.BaseURL), bytes.NewReader(payload))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, client.URL, bytes.NewReader(payload))
 	if err != nil {
 		return RequestError{Err: err}
 	}
