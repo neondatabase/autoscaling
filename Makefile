@@ -224,9 +224,12 @@ endif
 .PHONY: kernel
 kernel: ## Build linux kernel.
 	rm -f neonvm/hack/vmlinuz; \
+	linux_config=$$(ls neonvm/hack/linux-config-*) \
+	kernel_version=$${linux_config##*-} \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
 	docker buildx build \
+	    --build-arg KERNEL_VERSION=$$kernel_version \
 		--platform linux/amd64 \
 		--pull \
 		--load \

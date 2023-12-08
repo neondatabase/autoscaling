@@ -1,5 +1,3 @@
-ARG KERNEL_VERSION=6.1.63
-
 FROM ubuntu:23.10 AS build-deps
 
 ARG KERNEL_VERSION
