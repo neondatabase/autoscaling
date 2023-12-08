@@ -24,7 +24,7 @@ func NewClient(url string, c *http.Client) Client {
 	if err != nil {
 		hostname = fmt.Sprintf("unknown-%d", rand.Intn(1000))
 	}
-	return Client{URL: fmt.Sprintf("%s/usage_events", url), httpc: c, hostname: hostname}
+	return Client{URL: url, httpc: c, hostname: hostname}
 }
 
 func (c Client) Hostname() string {
