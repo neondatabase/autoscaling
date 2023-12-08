@@ -140,7 +140,7 @@ jobs:
             pods=$(kubectl get pods -n $namespace -o jsonpath='{.items[*].metadata.name}')
             for pod in $pods; do
               # log for all pods in neonvm-system or kuttl-test-*, and autoscaling pods in kube-system
-              if grep -qE '(neonvm-system|kuttl-test-.+)/.+|kube-system/(autoscaler-agent|autoscale-scheduler)-.+' <(echo "$namespace/$name"); then
+              if grep -qE '(neonvm-system|kuttl-test-.+)/.+|kube-system/(autoscaler-agent|autoscale-scheduler)-.+' <(echo "$namespace/$pod"); then
                 tee_pod_if_needed=$GITHUB_STEP_SUMMARY
               else
                 tee_pod_if_needed=/dev/null
