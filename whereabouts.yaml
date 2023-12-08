@@ -163,6 +163,12 @@ rules:
   - list
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+- apiGroups:
   - k8s.cni.cncf.io
   resources:
   - network-attachment-definitions
@@ -220,11 +226,16 @@ spec:
         command:
         - /bin/sh
         env:
+        - name: NODENAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
         - name: WHEREABOUTS_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: ghcr.io/k8snetworkplumbingwg/whereabouts:v0.6.1-amd64
+        image: ghcr.io/k8snetworkplumbingwg/whereabouts:v0.6.2-amd64
         name: whereabouts
         resources:
           limits:
@@ -241,8 +252,6 @@ spec:
         - mountPath: /host/etc/cni/net.d
           name: cni-net-dir
       hostNetwork: true
-      nodeSelector:
-        kubernetes.io/arch: amd64
       serviceAccountName: whereabouts
       tolerations:
       - effect: NoSchedule
