@@ -66,9 +66,9 @@ loop {
 }
 ```
 
-Note that because resource versions are opaque strings (even if they _happen_ to look a lot like
-monotonically increasing integers), we must start a new `Watch` every time we call `List`, because
-we have no way to tell the ordering of events except in relation to each other.
+Note that resource versions are opaque strings (even if they _happen_ to look a lot like
+monotonically increasing integers), so we must start a new `Watch` every time we call `List`,
+because we have no way to tell if an event represents the state before or after the `List`.
 
 ## The basic interface
 
