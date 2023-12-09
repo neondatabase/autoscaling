@@ -6,9 +6,10 @@ Our implementation is similar to the [`client-go` watch implementation], with so
 differences:
 
 1. client-go's is type-erased; ours is generic
-2. client-go's periodically resyncs when necessary, but does not provide the external control or
-   ability to be notified on completion that would be necessary to use it. Ours provides explicit
-   control for relisting, with notification when relisting has finished.
+2. client-go's periodically "resyncs" when necessary, but does not provide the external control or
+   ability to be notified on resync completion that would be necessary to use it. Ours provides
+   explicit control for "relisting" (fundamentally the same as "resyncing", just a different name),
+   with notification when relisting has finished.
 3. Ours has some additional features:
     1. Support for custom indexes
     2. The ability to choose when the handlers the initial listing are called (before or after
