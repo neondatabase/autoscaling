@@ -10,10 +10,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tychoish/fun/pubsub"
 	"go.uber.org/zap"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -22,7 +20,6 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
-	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
 // agentState is the global state for the autoscaler agent
@@ -37,34 +34,31 @@ type agentState struct {
 	// running the risk of leaking keys.
 	baseLogger *zap.Logger
 
-	podIP                string
-	config               *Config
-	kubeClient           *kubernetes.Clientset
-	vmClient             *vmclient.Clientset
-	schedulerEventBroker *pubsub.Broker[schedwatch.WatchEvent]
-	schedulerStore       *watch.Store[corev1.Pod]
-	metrics              GlobalMetrics
+	podIP        string
+	config       *Config
+	kubeClient   *kubernetes.Clientset
+	vmClient     *vmclient.Clientset
+	schedTracker *schedwatch.SchedulerTracker
+	metrics      GlobalMetrics
 }
 
 func (r MainRunner) newAgentState(
 	baseLogger *zap.Logger,
 	podIP string,
-	broker *pubsub.Broker[schedwatch.WatchEvent],
-	schedulerStore *watch.Store[corev1.Pod],
+	schedTracker *schedwatch.SchedulerTracker,
 ) (*agentState, *prometheus.Registry) {
 	metrics, promReg := makeGlobalMetrics()
 
 	state := &agentState{
-		lock:                 util.NewChanMutex(),
-		pods:                 make(map[util.NamespacedName]*podState),
-		baseLogger:           baseLogger,
-		config:               r.Config,
-		kubeClient:           r.KubeClient,
-		vmClient:             r.VMClient,
-		podIP:                podIP,
-		schedulerEventBroker: broker,
-		schedulerStore:       schedulerStore,
-		metrics:              metrics,
+		lock:         util.NewChanMutex(),
+		pods:         make(map[util.NamespacedName]*podState),
+		baseLogger:   baseLogger,
+		config:       r.Config,
+		kubeClient:   r.KubeClient,
+		vmClient:     r.VMClient,
+		podIP:        podIP,
+		schedTracker: schedTracker,
+		metrics:      metrics,
 	}
 
 	return state, promReg
@@ -361,8 +355,7 @@ func (s *agentState) newRunner(vmInfo api.VmInfo, podName util.NamespacedName, p
 
 		executorStateDump: nil, // set by (*Runner).Run
 
-		scheduler: nil,
-		monitor:   nil,
+		monitor: nil,
 
 		backgroundWorkerCount: atomic.Int64{},
 		backgroundPanic:       make(chan error),

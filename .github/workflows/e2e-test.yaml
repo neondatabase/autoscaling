@@ -10,6 +10,13 @@ on:
         type: string
         description: 'The kernel image to use for the VMs. If not specified, a kernel will be built from source'
         required: false
+      cluster:
+        type: choice
+        description: 'The cluster to run the tests on'
+        options:
+          - k3d
+          - kind
+        default: k3d
   workflow_call:
     inputs:
       kernel-image:
@@ -17,14 +24,16 @@ on:
         description: 'The kernel image to use for the VMs'
         required: false
 
+env:
+  PRESERVE_RUNNER_PODS: "true"
+
 jobs:
   e2e-tests:
     strategy:
       fail-fast: false
       matrix:
         cluster:
-          - k3d
-          - kind
+          - ${{ inputs.cluster || 'k3d' }}
     runs-on: [ self-hosted, gen3, large ]
     steps:
       - uses: actions/checkout@v3

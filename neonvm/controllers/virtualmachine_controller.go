@@ -46,6 +46,7 @@ import (
 
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/neonvm/controllers/buildtag"
 	"github.com/neondatabase/autoscaling/neonvm/pkg/ipam"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -666,12 +667,9 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
 			if err == nil {
 				// delete current runner
-				if err = r.Delete(ctx, vmRunner); err != nil {
+				if err = r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
 					return err
 				}
-				r.Recorder.Event(virtualmachine, "Normal", "Deleted",
-					fmt.Sprintf("VM runner pod was deleted: %s", vmRunner.Name))
-				log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
 			} else if !apierrors.IsNotFound(err) {
 				return err
 			}
@@ -691,12 +689,9 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// delete runner only when VM failed
 			if found && virtualmachine.Status.Phase == vmv1.VmFailed {
 				// delete current runner
-				if err = r.Delete(ctx, vmRunner); err != nil {
+				if err = r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
 					return err
 				}
-				r.Recorder.Event(virtualmachine, "Normal", "Deleted",
-					fmt.Sprintf("VM runner pod was deleted: %s", vmRunner.Name))
-				log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
 			}
 			// do cleanup when VM failed OR pod not found (deleted manually?) when VM succeeded
 			if virtualmachine.Status.Phase == vmv1.VmFailed || (!found && virtualmachine.Status.Phase == vmv1.VmSucceeded) {
@@ -712,6 +707,31 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// do nothing
 	}
 
+	return nil
+}
+
+// deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
+// then emits an event and log line about what it did, whether it actually deleted the runner pod.
+func (r *VirtualMachineReconciler) deleteRunnerPodIfEnabled(
+	ctx context.Context,
+	virtualmachine *vmv1.VirtualMachine,
+	runner *corev1.Pod,
+) error {
+	log := log.FromContext(ctx)
+	var msg, eventReason string
+	if buildtag.NeverDeleteRunnerPods {
+		msg = fmt.Sprintf("VM runner pod deletion was skipped due to '%s' build tag", buildtag.TagnameNeverDeleteRunnerPods)
+		eventReason = "DeleteSkipped"
+	} else {
+		// delete current runner
+		if err := r.Delete(ctx, runner); err != nil {
+			return err
+		}
+		msg = "VM runner pod was deleted"
+		eventReason = "Deleted"
+	}
+	log.Info(msg, "Pod.Namespace", runner.Namespace, "Pod.Name", runner.Name)
+	r.Recorder.Event(virtualmachine, "Normal", eventReason, fmt.Sprintf("%s: %s", msg, runner.Name))
 	return nil
 }
 

@@ -178,24 +178,6 @@ func (c ExecutorCoreUpdater) UpdatedVM(vm api.VmInfo, withLock func()) {
 	})
 }
 
-// NewScheduler calls (*core.State).Plugin().NewScheduler() on the inner core.State and runs
-// withLock while holding the lock.
-func (c ExecutorCoreUpdater) NewScheduler(withLock func()) {
-	c.core.update(func(state *core.State) {
-		state.Plugin().NewScheduler()
-		withLock()
-	})
-}
-
-// SchedulerGone calls (*core.State).Plugin().SchedulerGone() on the inner core.State and runs
-// withLock while holding the lock.
-func (c ExecutorCoreUpdater) SchedulerGone(withLock func()) {
-	c.core.update(func(state *core.State) {
-		state.Plugin().SchedulerGone()
-		withLock()
-	})
-}
-
 // ResetMonitor calls (*core.State).Monitor().Reset() on the inner core.State and runs withLock
 // while holding the lock.
 func (c ExecutorCoreUpdater) ResetMonitor(withLock func()) {

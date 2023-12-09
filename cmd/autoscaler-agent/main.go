@@ -33,12 +33,13 @@ func main() {
 	if err != nil {
 		logger.Panic("Failed to get args from environment", zap.Error(err))
 	}
+	logger.Info("Got environment args", zap.Any("args", envArgs))
 
 	config, err := agent.ReadConfig(envArgs.ConfigPath)
 	if err != nil {
 		logger.Panic("Failed to read config", zap.Error(err))
 	}
-	logger.Info("Got environment args", zap.Any("args", envArgs))
+	logger.Info("Got config", zap.Any("config", config))
 
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {

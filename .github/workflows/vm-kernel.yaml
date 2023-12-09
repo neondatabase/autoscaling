@@ -21,12 +21,17 @@ jobs:
     outputs:
       image: ${{ fromJSON(steps.build-linux-kernel.outputs.metadata)['image.name'] }}@${{ steps.build-linux-kernel.outputs.digest }}
 
-    # Use the biggest GitHub Hosted runner
-    runs-on: gha-ubuntu-22.04-64cores
+    runs-on: [ self-hosted, gen3, large ]
     steps:
-
       - name: git checkout
         uses: actions/checkout@v3
+
+      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
+      # The default value is ~/.docker
+      - name: set custom docker config directory
+        run: |
+          mkdir -p .docker-custom
+          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
 
       - name: docker - install qemu
         uses: docker/setup-qemu-action@v2
@@ -38,10 +43,19 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
+      - name: get kernel version
+        id: get-kernel-version
+        run: |
+          linux_config=$(ls neonvm/hack/linux-config-*)  # returns something like "neonvm/hack/linux-config-6.1.63"
+          kernel_version=${linux_config##*-}             # returns something like "6.1.63"
+
+          echo VM_KERNEL_VERSION=$kernel_version >> $GITHUB_OUTPUT
+
       - name: build linux kernel
         id: build-linux-kernel
         uses: docker/build-push-action@v3
         with:
+          build-args: KERNEL_VERSION=${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
           context: neonvm/hack
           platforms: linux/amd64
           # Push only if this is a scheduled run or if the workflow_dispatch input push is set to true
@@ -49,8 +63,13 @@ jobs:
           pull: true
           no-cache: true
           file: neonvm/hack/Dockerfile.kernel-builder
-          # Tag the image with the tag from the workflow_dispatch input or the VM_KERNEL_VERSION env var
-          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && inputs.tag || env.VM_KERNEL_VERSION }}
+          # Tag the image with the tag from the workflow_dispatch input or the VM_KERNEL_VERSION from linux-config-* file
+          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
+
+      - name: remove custom docker config directory
+        if: always()
+        run: |
+          rm -rf .docker-custom
 
   e2e-tests:
     needs: vm-kernel

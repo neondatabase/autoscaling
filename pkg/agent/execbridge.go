@@ -26,53 +26,15 @@ var (
 /////////////////////////////////////////////////////////////
 
 type execPluginInterface struct {
-	runner     *Runner
-	core       *executor.ExecutorCore
-	generation *executor.StoredGenerationNumber
+	runner *Runner
 }
 
-func makePluginInterface(
-	r *Runner,
-	core *executor.ExecutorCore,
-	generation *executor.StoredGenerationNumber,
-) *execPluginInterface {
-	return &execPluginInterface{runner: r, core: core, generation: generation}
+func makePluginInterface(r *Runner) *execPluginInterface {
+	return &execPluginInterface{runner: r}
 }
 
-func (iface *execPluginInterface) CurrentGeneration() executor.GenerationNumber {
-	return iface.generation.Get()
-}
-
-// GetHandle implements executor.PluginInterface, and MUST only be called while holding the
-// executor's lock.
-//
-// The locking requirement is why we're able to get away with an "unsynchronized" read of the value
-// in the runner. For more, see the documentation on Runner.scheduler.
-func (iface *execPluginInterface) GetHandle() executor.PluginHandle {
-	scheduler := iface.runner.scheduler
-
-	if scheduler == nil {
-		return nil
-	}
-
-	return &execPluginHandle{
-		runner:    iface.runner,
-		scheduler: scheduler,
-	}
-}
-
-type execPluginHandle struct {
-	runner    *Runner
-	scheduler *Scheduler
-}
-
-// Generation implements executor.PluginHandle
-func (h *execPluginHandle) Generation() executor.GenerationNumber {
-	return h.scheduler.generation
-}
-
-// Request implements executor.PluginHandle
-func (h *execPluginHandle) Request(
+// Request implements executor.PluginInterface
+func (iface *execPluginInterface) Request(
 	ctx context.Context,
 	logger *zap.Logger,
 	lastPermit *api.Resources,
@@ -80,13 +42,13 @@ func (h *execPluginHandle) Request(
 	metrics *api.Metrics,
 ) (*api.PluginResponse, error) {
 	if lastPermit != nil {
-		h.runner.recordResourceChange(*lastPermit, target, h.runner.global.metrics.schedulerRequestedChange)
+		iface.runner.recordResourceChange(*lastPermit, target, iface.runner.global.metrics.schedulerRequestedChange)
 	}
 
-	resp, err := h.scheduler.DoRequest(ctx, logger, target, lastPermit, metrics)
+	resp, err := iface.runner.DoSchedulerRequest(ctx, logger, target, lastPermit, metrics)
 
 	if err == nil && lastPermit != nil {
-		h.runner.recordResourceChange(*lastPermit, resp.Permit, h.runner.global.metrics.schedulerApprovedChange)
+		iface.runner.recordResourceChange(*lastPermit, resp.Permit, iface.runner.global.metrics.schedulerApprovedChange)
 	}
 
 	return resp, err

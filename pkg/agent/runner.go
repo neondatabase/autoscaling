@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -74,13 +75,6 @@ type Runner struct {
 	// "executor"
 	executorStateDump func() executor.StateDump
 
-	// scheduler is the current scheduler that we're communicating with, or nil if there isn't one.
-	// Each scheduler's info field is immutable. When a scheduler is replaced, only the pointer
-	// value here is updated; the original Scheduler remains unchanged.
-	//
-	// Additionally, this field MAY ONLY be updated while holding both lock AND the executor's lock,
-	// which means that it may be read when EITHER holding lock OR the executor's lock.
-	scheduler *Scheduler
 	// monitor, if non nil, stores the current Dispatcher in use for communicating with the
 	// vm-monitor, alongside a generation number.
 	//
@@ -94,24 +88,10 @@ type Runner struct {
 	backgroundPanic       chan error
 }
 
-// Scheduler stores relevant state for a particular scheduler that a Runner is (or has) connected to
-type Scheduler struct {
-	// runner is the parent Runner interacting with this Scheduler instance
-	//
-	// This field is immutable but the data behind the pointer is not.
-	runner *Runner
-
-	// info holds the immutable information we use to connect to and describe the scheduler
-	info schedwatch.SchedulerInfo
-
-	generation executor.GenerationNumber
-}
-
 // RunnerState is the serializable state of the Runner, extracted by its State method
 type RunnerState struct {
 	PodIP                 string             `json:"podIP"`
 	ExecutorState         executor.StateDump `json:"executorState"`
-	Scheduler             *SchedulerState    `json:"scheduler"`
 	Monitor               *MonitorState      `json:"monitor"`
 	BackgroundWorkerCount int64              `json:"backgroundWorkerCount"`
 }
@@ -132,13 +112,6 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	}
 	defer r.lock.Unlock()
 
-	var scheduler *SchedulerState
-	if r.scheduler != nil {
-		scheduler = &SchedulerState{
-			Info: r.scheduler.info,
-		}
-	}
-
 	var monitorState *MonitorState
 	if r.monitor != nil {
 		monitorState = &MonitorState{
@@ -155,7 +128,6 @@ func (r *Runner) State(ctx context.Context) (*RunnerState, error) {
 	return &RunnerState{
 		PodIP:                 r.podIP,
 		ExecutorState:         *executorState,
-		Scheduler:             scheduler,
 		Monitor:               monitorState,
 		BackgroundWorkerCount: r.backgroundWorkerCount.Load(),
 	}, nil
@@ -210,21 +182,6 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	ctx, r.shutdown = context.WithCancel(ctx)
 	defer r.shutdown()
 
-	schedulerWatch, scheduler, err := schedwatch.WatchSchedulerUpdates(
-		ctx, logger.Named("sched-watch"), r.global.schedulerEventBroker, r.global.schedulerStore,
-	)
-	if err != nil {
-		return fmt.Errorf("Error starting scheduler watcher: %w", err)
-	}
-	defer schedulerWatch.Stop()
-
-	if scheduler == nil {
-		logger.Warn("No initial scheduler found")
-	} else {
-		logger.Info("Got initial scheduler pod", zap.Object("scheduler", scheduler))
-		schedulerWatch.Using(*scheduler)
-	}
-
 	getVmInfo := func() api.VmInfo {
 		r.status.mu.Lock()
 		defer r.status.mu.Unlock()
@@ -255,10 +212,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	r.executorStateDump = executorCore.StateDump
 
-	pluginGeneration := executor.NewStoredGenerationNumber()
 	monitorGeneration := executor.NewStoredGenerationNumber()
 
-	pluginIface := makePluginInterface(r, executorCore, pluginGeneration)
+	pluginIface := makePluginInterface(r)
 	neonvmIface := makeNeonVMInterface(r)
 	monitorIface := makeMonitorInterface(r, executorCore, monitorGeneration)
 
@@ -290,15 +246,6 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 				})
 			}
 		}
-	})
-	r.spawnBackgroundWorker(ctx, logger, "track scheduler", func(c context.Context, l *zap.Logger) {
-		newScheduler := func(withLock func()) {
-			ecwc.Updater().NewScheduler(withLock)
-		}
-		schedulerGone := func(withLock func()) {
-			ecwc.Updater().SchedulerGone(withLock)
-		}
-		r.trackSchedulerLoop(c, l, scheduler, schedulerWatch, pluginGeneration, newScheduler, schedulerGone)
 	})
 	r.spawnBackgroundWorker(ctx, logger, "get metrics", func(c context.Context, l *zap.Logger) {
 		r.getMetricsLoop(c, l, func(metrics api.Metrics, withLock func()) {
@@ -547,127 +494,6 @@ func (r *Runner) connectToMonitorLoop(
 	}
 }
 
-// trackSchedulerLoop listens on the schedulerWatch, keeping r.scheduler up-to-date and signalling
-// on registeredScheduler whenever a new Scheduler is successfully registered
-func (r *Runner) trackSchedulerLoop(
-	ctx context.Context,
-	logger *zap.Logger,
-	init *schedwatch.SchedulerInfo,
-	schedulerWatch schedwatch.SchedulerWatch,
-	generation *executor.StoredGenerationNumber,
-	newScheduler func(withLock func()),
-	schedulerGone func(withLock func()),
-) {
-	// pre-declare a bunch of variables because we have some gotos here.
-	var (
-		lastStart   time.Time
-		minWait     time.Duration    = 5 * time.Second // minimum time we have to wait between scheduler starts
-		okForNew    <-chan time.Time                   // channel that sends when we've waited long enough for a new scheduler
-		currentInfo schedwatch.SchedulerInfo
-	)
-
-	if init == nil {
-		goto waitForNewScheduler
-	}
-
-	currentInfo = *init
-
-startScheduler:
-	schedulerWatch.ExpectingDeleted()
-
-	lastStart = time.Now()
-	okForNew = time.After(minWait)
-
-	// Set the current scheduler
-	{
-		verb := "Setting"
-		if init == nil || init.UID != currentInfo.UID {
-			verb = "Updating"
-		}
-
-		func() {
-			r.lock.Lock()
-			defer r.lock.Unlock()
-
-			newScheduler(func() {
-				logger.Info(fmt.Sprintf("%s scheduler pod", verb), zap.Object("scheduler", currentInfo))
-				r.scheduler = &Scheduler{
-					runner:     r,
-					info:       currentInfo,
-					generation: generation.Inc(),
-				}
-			})
-		}()
-	}
-
-	// Start watching for the current scheduler to be deleted
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case info := <-schedulerWatch.Deleted:
-			matched := func() bool {
-				r.lock.Lock()
-				defer r.lock.Unlock()
-
-				if r.scheduler.info.UID != info.UID {
-					logger.Info(
-						"Scheduler candidate pod was deleted, but we aren't using it yet",
-						zap.Object("scheduler", r.scheduler.info), zap.Object("candidate", info),
-					)
-					return false
-				}
-
-				schedulerGone(func() {
-					logger.Info(
-						"Scheduler pod was deleted. Aborting further communication",
-						zap.Object("scheduler", r.scheduler.info),
-					)
-
-					generation.Inc()
-					r.scheduler = nil
-				})
-				return true
-			}()
-
-			if matched {
-				goto waitForNewScheduler
-			}
-		}
-	}
-
-waitForNewScheduler:
-	schedulerWatch.ExpectingReady()
-
-	// If there's a previous scheduler, make sure that we don't restart too quickly. We want a
-	// minimum delay between scheduler starts, controlled by okForNew
-	if okForNew != nil {
-		select {
-		case <-okForNew:
-		default:
-			// Not ready yet; let's log something about it:
-			logger.Info(
-				"Scheduler ended quickly. Respecting minimum delay before switching to a new one",
-				zap.Duration("activeTime", time.Since(lastStart)), zap.Duration("delay", minWait),
-			)
-			select {
-			case <-ctx.Done():
-				return
-			case <-okForNew:
-			}
-		}
-	}
-
-	// Actually watch for a new scheduler
-	select {
-	case <-ctx.Done():
-		return
-	case newInfo := <-schedulerWatch.ReadyQueue:
-		currentInfo = newInfo
-		goto startScheduler
-	}
-}
-
 //////////////////////////////////////////
 // Lower-level implementation functions //
 //////////////////////////////////////////
@@ -819,8 +645,8 @@ func doMonitorUpscale(
 	return err
 }
 
-// DoRequest sends a request to the scheduler and does not validate the response.
-func (s *Scheduler) DoRequest(
+// DoSchedulerRequest sends a request to the scheduler and does not validate the response.
+func (r *Runner) DoSchedulerRequest(
 	ctx context.Context,
 	logger *zap.Logger,
 	resources api.Resources,
@@ -829,7 +655,7 @@ func (s *Scheduler) DoRequest(
 ) (_ *api.PluginResponse, err error) {
 	reqData := &api.AgentRequest{
 		ProtoVersion: PluginProtocolVersion,
-		Pod:          s.runner.podName,
+		Pod:          r.podName,
 		Resources:    resources,
 		LastPermit:   lastPermit,
 		Metrics:      metrics,
@@ -842,16 +668,24 @@ func (s *Scheduler) DoRequest(
 		}
 	}()
 
+	sched := r.global.schedTracker.Get()
+	if sched == nil {
+		err := errors.New("no known ready scheduler to send request to")
+		description := fmt.Sprintf("[error doing request: %s]", err)
+		r.global.metrics.schedulerRequests.WithLabelValues(description).Inc()
+		return nil, err
+	}
+
 	reqBody, err := json.Marshal(reqData)
 	if err != nil {
 		return nil, fmt.Errorf("Error encoding request JSON: %w", err)
 	}
 
-	timeout := time.Second * time.Duration(s.runner.global.config.Scaling.RequestTimeoutSeconds)
+	timeout := time.Second * time.Duration(r.global.config.Scaling.RequestTimeoutSeconds)
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	url := fmt.Sprintf("http://%s:%d/", s.info.IP, s.runner.global.config.Scheduler.RequestPort)
+	url := fmt.Sprintf("http://%s:%d/", sched.IP, r.global.config.Scheduler.RequestPort)
 
 	request, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
@@ -864,12 +698,12 @@ func (s *Scheduler) DoRequest(
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		description := fmt.Sprintf("[error doing request: %s]", util.RootError(err))
-		s.runner.global.metrics.schedulerRequests.WithLabelValues(description).Inc()
+		r.global.metrics.schedulerRequests.WithLabelValues(description).Inc()
 		return nil, fmt.Errorf("Error doing request: %w", err)
 	}
 	defer response.Body.Close()
 
-	s.runner.global.metrics.schedulerRequests.WithLabelValues(strconv.Itoa(response.StatusCode)).Inc()
+	r.global.metrics.schedulerRequests.WithLabelValues(strconv.Itoa(response.StatusCode)).Inc()
 
 	respBody, err := io.ReadAll(response.Body)
 	if err != nil {
