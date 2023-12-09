@@ -24,9 +24,12 @@ differences:
 ## How watching generally works
 
 At a high level, watching _generally_ works by first calling `List` to fetch the current state of
-the items, and then repeatedly calling `Watch` _with the [resource version] from listing_ to stream
-the changes to the objects since the initial fetch. Sometimes there are errors with watching that
-require calling `List` again (e.g. resource version is too old).
+the items, and then calling `Watch` _with the [resource version] from listing_ to stream the changes
+to the objects since the initial fetch.
+
+If the `Watch` stream closes, we create a new one from the latest resource version, and on error, we
+call `List` again ("relist") and retry the `Watch`. This commonly occurs when the resource version
+is too old.
 
 [resource version]: https://kubernetes.io/docs/reference/using-api/api-concepts/#resource-versions
 
