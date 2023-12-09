@@ -83,8 +83,12 @@ incoming Pod with the VirtualMachine that owns it. Fundamentally, this is racy i
 watch: it's possible to get an event about the Pod before we get any events about the
 VirtualMachine.
 
-In order to provide an explicit ordering here, we have a support for externally triggering a
-"relist" — forcing an ordering on the store's contents by calling `List` again.
+In order to allow establishing happens-after relationship between an external event and the contents
+of the store, we have support for externally triggering a "relist" — which guarantees the contents
+of the store are at least as recent as the request to relist.
+
+Concretely, this allows the scheduler to always fetch the VirtualMachine associated with a Pod by
+relisting if the VM is not immediately found (the store is probably just out of date!).
 
 The details of this implementation can be found in the relisting portion of the `watch.Watch`
 function, and in `(*watch.Store[T]).Relist()`.
