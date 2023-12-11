@@ -93,8 +93,6 @@ type State struct {
 
 // one level of indirection below State so that the fields can be public, and JSON-serializable
 type state struct {
-	// ANY CHANGED FIELDS MUST BE UPDATED IN dumpstate.go AS WELL
-
 	Config Config
 
 	// unused. Exists to make it easier to add print debugging (via .config.Warn) for a single call
