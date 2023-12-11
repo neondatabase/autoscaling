@@ -85,7 +85,7 @@ func startVMWatcher(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
-				setMetricsFromVM(vm, nodeName, &perVMMetrics)
+				setVMMetrics(vm, nodeName, &perVMMetrics)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(logger, vm, vmEventAdded)
@@ -100,8 +100,8 @@ func startVMWatcher(
 				}
 			},
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
-				deleteMetricsfromVM(oldVM, nodeName, &perVMMetrics)
-				setMetricsFromVM(newVM, nodeName, &perVMMetrics)
+				deleteVMMetrics(oldVM, nodeName, &perVMMetrics)
+				setVMMetrics(newVM, nodeName, &perVMMetrics)
 
 				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
 				newIsOurs := vmIsOurResponsibility(newVM, config, nodeName)
@@ -136,7 +136,7 @@ func startVMWatcher(
 				submitEvent(event)
 			},
 			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
-				deleteMetricsfromVM(vm, nodeName, &perVMMetrics)
+				deleteVMMetrics(vm, nodeName, &perVMMetrics)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(logger, vm, vmEventDeleted)
@@ -206,7 +206,7 @@ type kv[K any, V any] struct {
 	value V
 }
 
-func setMetricsFromVM(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVMMetrics) {
+func setVMMetrics(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVMMetrics) {
 	if vm.Status.Node != nodeName {
 		return
 	}
@@ -246,7 +246,7 @@ func setMetricsFromVM(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *P
 	}
 }
 
-func deleteMetricsfromVM(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVMMetrics) {
+func deleteVMMetrics(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVMMetrics) {
 	if vm.Status.Node != nodeName {
 		return
 	}
