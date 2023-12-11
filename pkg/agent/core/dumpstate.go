@@ -30,12 +30,12 @@ type StateDump struct {
 // Dump produces a JSON-serializable copy of the State
 func (s *State) Dump() StateDump {
 	return StateDump{
-		Config:  s.config,
-		VM:      s.vm,
-		Plugin:  s.plugin.dump(),
-		Monitor: s.monitor.dump(),
-		NeonVM:  s.neonvm.dump(),
-		Metrics: shallowCopy(s.metrics),
+		Config:  s.internal.Config,
+		VM:      s.internal.VM,
+		Plugin:  s.internal.Plugin.dump(),
+		Monitor: s.internal.Monitor.dump(),
+		NeonVM:  s.internal.NeonVM.dump(),
+		Metrics: shallowCopy(s.internal.Metrics),
 	}
 }
 
@@ -53,19 +53,19 @@ type pluginRequestedDump struct {
 
 func (s *pluginState) dump() pluginStateDump {
 	var lastRequest *pluginRequestedDump
-	if s.lastRequest != nil {
+	if s.LastRequest != nil {
 		lastRequest = &pluginRequestedDump{
-			At:        s.lastRequest.at,
-			Resources: s.lastRequest.resources,
+			At:        s.LastRequest.At,
+			Resources: s.LastRequest.Resources,
 		}
 	}
 
 	return pluginStateDump{
-		OngoingRequest: s.ongoingRequest,
-		ComputeUnit:    shallowCopy(s.computeUnit),
+		OngoingRequest: s.OngoingRequest,
+		ComputeUnit:    shallowCopy(s.ComputeUnit),
 		LastRequest:    lastRequest,
-		LastFailureAt:  shallowCopy(s.lastFailureAt),
-		Permit:         shallowCopy(s.permit),
+		LastFailureAt:  shallowCopy(s.LastFailureAt),
+		Permit:         shallowCopy(s.Permit),
 	}
 }
 
@@ -94,28 +94,28 @@ type deniedDownscaleDump struct {
 
 func (s *monitorState) dump() monitorStateDump {
 	var requestedUpscale *requestedUpscaleDump
-	if s.requestedUpscale != nil {
+	if s.RequestedUpscale != nil {
 		requestedUpscale = &requestedUpscaleDump{
-			At:        s.requestedUpscale.at,
-			Base:      s.requestedUpscale.base,
-			Requested: s.requestedUpscale.requested,
+			At:        s.RequestedUpscale.At,
+			Base:      s.RequestedUpscale.Base,
+			Requested: s.RequestedUpscale.Requested,
 		}
 	}
 
 	var deniedDownscale *deniedDownscaleDump
-	if s.deniedDownscale != nil {
+	if s.DeniedDownscale != nil {
 		deniedDownscale = &deniedDownscaleDump{
-			At:        s.deniedDownscale.at,
-			Current:   s.deniedDownscale.current,
-			Requested: s.deniedDownscale.requested,
+			At:        s.DeniedDownscale.At,
+			Current:   s.DeniedDownscale.Current,
+			Requested: s.DeniedDownscale.Requested,
 		}
 	}
 
 	var ongoingRequest *OngoingMonitorRequestDump
-	if s.ongoingRequest != nil {
+	if s.OngoingRequest != nil {
 		ongoingRequest = &OngoingMonitorRequestDump{
-			Kind:      s.ongoingRequest.kind,
-			Requested: s.ongoingRequest.requested,
+			Kind:      s.OngoingRequest.Kind,
+			Requested: s.OngoingRequest.Requested,
 		}
 	}
 
@@ -123,9 +123,9 @@ func (s *monitorState) dump() monitorStateDump {
 		OngoingRequest:     ongoingRequest,
 		RequestedUpscale:   requestedUpscale,
 		DeniedDownscale:    deniedDownscale,
-		Approved:           shallowCopy(s.approved),
-		DownscaleFailureAt: shallowCopy(s.downscaleFailureAt),
-		UpscaleFailureAt:   shallowCopy(s.upscaleFailureAt),
+		Approved:           shallowCopy(s.Approved),
+		DownscaleFailureAt: shallowCopy(s.DownscaleFailureAt),
+		UpscaleFailureAt:   shallowCopy(s.UpscaleFailureAt),
 	}
 }
 
@@ -137,8 +137,8 @@ type neonvmStateDump struct {
 
 func (s *neonvmState) dump() neonvmStateDump {
 	return neonvmStateDump{
-		LastSuccess:      shallowCopy(s.lastSuccess),
-		OngoingRequested: shallowCopy(s.ongoingRequested),
-		RequestFailedAt:  shallowCopy(s.requestFailedAt),
+		LastSuccess:      shallowCopy(s.LastSuccess),
+		OngoingRequested: shallowCopy(s.OngoingRequested),
+		RequestFailedAt:  shallowCopy(s.RequestFailedAt),
 	}
 }
