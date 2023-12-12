@@ -174,7 +174,7 @@ func NewDispatcher(
 
 			_, err := disp.Call(ctx, logger, timeout, "HealthCheck", api.HealthCheck{})
 			if err != nil {
-				logger.Warn("vm-monitor health check failed", zap.Error(err))
+				logger.Error("vm-monitor health check failed", zap.Error(err))
 
 				if firstSequentialFailure == nil {
 					now := time.Now()
@@ -544,7 +544,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 	// Utility for logging + returning an error when we get a message with an
 	// id we're unaware of. Note: unknownMessage is not a message type.
 	handleUnkownMessage := func(messageType string, id uint64) error {
-		fmtString := "Received %s with id %d but no record of previous message with that id"
+		fmtString := "Received %s with id %d but id is unknown or already timed out waiting for a reply"
 		msg := fmt.Sprintf(fmtString, messageType, id)
 		logger.Warn(msg, zap.Uint64("id", id))
 		return disp.send(ctx, logger, id, api.InvalidMessage{Error: msg})
