@@ -331,7 +331,16 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 			// This can amplify request failures - particularly if the K8s API server is overloaded.
 			signalRelistComplete = make([]chan struct{}, 0, 1)
 
-			// Making sure the watcher is stopped. It's safe to call Stop multiple times.
+			// When we get to this point in the control flow, it's not guaranteed that the watcher
+			// has stopped.
+			//
+			// As of 2023-12-05, the implementation of the API's watchers (internally handled by
+			// k8s.io/apimachinery@.../pkg/watch/streamwatcher.go) explicitly allows multiple calls
+			// to Stop().
+			//
+			// This all means that it's always safe for us to call Stop() here, and sometimes we
+			// MUST call it here (to avoid leaking watchers after relisting), so it's worth just
+			// always calling it.
 			watcher.Stop()
 
 			logger.Info("Relisting")
@@ -342,8 +351,12 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 					newRelistTriggered := false
 
-					// consume any additional relist request
-					// this works because triggerList has size one
+					// Consume any additional relist request.
+					// All usage of triggerRelist from within (*Store[T]).Relist() is asynchronous,
+					// because triggerRelist has capacity=1 and has an item in it iff relisting has
+					// been requested, so if Relist() *would* block on sending, the signal has
+					// already been given.
+					// That's all to say: Receiving only once from triggerRelist is sufficient.
 					select {
 					case <-store.triggerRelist:
 						newRelistTriggered = true
@@ -454,6 +467,11 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 			}
 
 		newWatcher:
+			// In the loop, retry the API call to watch.
+			//
+			// It's possible that we attempt to watch with a resource version that's too old, in
+			// which case the API call *does* succeed, but the first event is an error (which we use
+			// to trigger relisting).
 			for {
 				config.Metrics.startWatch()
 				watcher, err = client.Watch(ctx, watchOpts)
@@ -564,8 +582,12 @@ type Store[T any] struct {
 	objects map[types.UID]*T
 	mutex   sync.Mutex
 
+	// triggerRelist has capacity=1 and *if* the channel contains an item, then relisting has been
+	// requested by some call to (*Store[T]).Relist().
 	triggerRelist chan struct{}
-	relisted      chan struct{}
+	// relisted is replaced and closed whenever relisting happens. Refer to its usage in Watch or
+	// (*Store[T]).Relist() for more detail.
+	relisted chan struct{}
 
 	nextIndexID uint64
 	indexes     map[uint64]Index[T]
@@ -581,11 +603,17 @@ func (w *Store[T]) Relist() <-chan struct{} {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
+	// Because triggerRelist has capacity=1, failing to immediately send to the channel means that
+	// there's already a signal to request relisting that has not yet been processed.
 	select {
 	case w.triggerRelist <- struct{}{}:
 	default:
 	}
 
+	// note: w.relisted is replaced immediately before every attempt at the API call for relisting,
+	// so that there's a strict happens-before relation that guarantees that *when* w.relisted is
+	// closed, the relevant List call *must* have happened after any attempted send on
+	// w.triggerRelist.
 	return w.relisted
 }
 
