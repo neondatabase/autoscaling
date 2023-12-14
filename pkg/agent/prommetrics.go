@@ -299,3 +299,19 @@ func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
 
 	return metrics, reg
 }
+
+// vmMetric is a data object that represents a single metric
+// (either CPU or memory) for a VM.
+type vmMetric struct {
+	labels prometheus.Labels
+	value  float64
+}
+
+func makeLabels(namespace string, vmName string, endpointID string, valueType vmResourceValueType) prometheus.Labels {
+	return prometheus.Labels{
+		"vm_namespace": namespace,
+		"vm_name":      vmName,
+		"endpoint_id":  endpointID,
+		"value":        string(valueType),
+	}
+}

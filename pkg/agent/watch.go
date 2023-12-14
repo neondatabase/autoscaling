@@ -3,17 +3,21 @@ package agent
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -85,7 +89,7 @@ func startVMWatcher(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
-				setVMMetrics(vm, nodeName, &perVMMetrics)
+				setVMMetrics(&perVMMetrics, vm, nodeName)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(logger, vm, vmEventAdded)
@@ -100,12 +104,10 @@ func startVMWatcher(
 				}
 			},
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
-				deleteVMMetrics(oldVM, nodeName, &perVMMetrics)
-				setVMMetrics(newVM, nodeName, &perVMMetrics)
+				updateVMMetrics(&perVMMetrics, oldVM, newVM, nodeName)
 
 				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
 				newIsOurs := vmIsOurResponsibility(newVM, config, nodeName)
-
 				if !oldIsOurs && !newIsOurs {
 					return
 				}
@@ -136,7 +138,7 @@ func startVMWatcher(
 				submitEvent(event)
 			},
 			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
-				deleteVMMetrics(vm, nodeName, &perVMMetrics)
+				deleteVMMetrics(&perVMMetrics, vm, nodeName)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(logger, vm, vmEventDeleted)
@@ -201,64 +203,122 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 	}
 }
 
-type kv[K any, V any] struct {
-	key   K
-	value V
+func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
+	var metrics []vmMetric
+
+	addCPUMetric := func(resValType vmResourceValueType, val *vmapi.MilliCPU) {
+		if val == nil {
+			return
+		}
+		labels := makeLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
+		metrics = append(metrics, vmMetric{
+			labels: labels,
+			value:  val.AsFloat64(),
+		})
+	}
+
+	addCPUMetric(vmResourceValueMin, vm.Spec.Guest.CPUs.Min)
+	addCPUMetric(vmResourceValueMax, vm.Spec.Guest.CPUs.Max)
+	addCPUMetric(vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use)
+	addCPUMetric(vmResourceValueStatusUse, vm.Status.CPUs)
+	return metrics
 }
 
-func setVMMetrics(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVMMetrics) {
+func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
+	var metrics []vmMetric
+
+	addMemMetric := func(resValType vmResourceValueType, val *int64) {
+		if val == nil {
+			return
+		}
+		labels := makeLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
+		metrics = append(metrics, vmMetric{
+			labels: labels,
+			value:  float64(*val),
+		})
+	}
+
+	specMemVal := func(m *int32) *int64 {
+		if m == nil {
+			return nil
+		}
+		memValue := vm.Spec.Guest.MemorySlotSize.Value() * int64(*m)
+		return &memValue
+	}
+	statusMemVal := func(m *resource.Quantity) *int64 {
+		memValue := m.Value()
+		return &memValue
+	}
+
+	addMemMetric(vmResourceValueMin, specMemVal(vm.Spec.Guest.MemorySlots.Min))
+	addMemMetric(vmResourceValueMax, specMemVal(vm.Spec.Guest.MemorySlots.Max))
+	addMemMetric(vmResourceValueSpecUse, specMemVal(vm.Spec.Guest.MemorySlots.Use))
+	addMemMetric(vmResourceValueStatusUse, statusMemVal(vm.Status.MemorySize))
+	return metrics
+}
+
+func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName string) {
 	if vm.Status.Node != nodeName {
 		return
 	}
 
-	commonLabelValues := []string{
-		vm.Namespace,
-		vm.Name,
-		vm.Labels[endpointLabel],
+	cpuMetrics := makeVMCPUMetrics(vm)
+	for _, m := range cpuMetrics {
+		perVMMetrics.cpu.With(m.labels).Set(m.value)
 	}
 
-	// CPU metrics derived from spec
-	specCPU := []kv[vmResourceValueType, *vmapi.MilliCPU]{
-		{key: vmResourceValueMin, value: vm.Spec.Guest.CPUs.Min},
-		{key: vmResourceValueMax, value: vm.Spec.Guest.CPUs.Max},
-		{key: vmResourceValueSpecUse, value: vm.Spec.Guest.CPUs.Use},
-	}
-	for _, t := range specCPU {
-		if t.value != nil {
-			perVMMetrics.cpu.WithLabelValues(append(commonLabelValues, string(t.key))...).Set(t.value.AsFloat64())
-		}
-	}
-	if vm.Status.CPUs != nil {
-		perVMMetrics.cpu.WithLabelValues(append(commonLabelValues, string(vmResourceValueStatusUse))...).Set(vm.Status.CPUs.AsFloat64())
-	}
-
-	// Memory metrics derived from spec
-	specMem := []kv[vmResourceValueType, *int32]{
-		{key: vmResourceValueMin, value: vm.Spec.Guest.MemorySlots.Min},
-		{key: vmResourceValueMax, value: vm.Spec.Guest.MemorySlots.Max},
-		{key: vmResourceValueSpecUse, value: vm.Spec.Guest.MemorySlots.Use},
-	}
-	for _, t := range specMem {
-		if t.value != nil {
-			memValue := float64(vm.Spec.Guest.MemorySlotSize.Value() * int64(*t.value))
-			perVMMetrics.memory.WithLabelValues(append(commonLabelValues, string(t.key))...).Set(memValue)
-		}
-	}
-	if vm.Status.MemorySize != nil {
-		memValue := float64(vm.Status.MemorySize.Value())
-		perVMMetrics.memory.WithLabelValues(append(commonLabelValues, string(vmResourceValueStatusUse))...).Set(memValue)
+	memMetrics := makeVMMemMetrics(vm)
+	for _, m := range memMetrics {
+		perVMMetrics.memory.With(m.labels).Set(m.value)
 	}
 }
 
-func deleteVMMetrics(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVMMetrics) {
+func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmapi.VirtualMachine, nodeName string) {
+	if newVM.Status.Node != nodeName || oldVM.Status.Node != nodeName {
+		// The vm is either has been removed from the nodeName or has been added
+		// there.
+		deleteVMMetrics(perVMMetrics, oldVM, nodeName)
+		setVMMetrics(perVMMetrics, newVM, nodeName)
+		return
+	}
+
+	updateMetrics := func(gauge *prometheus.GaugeVec, oldMetrics, newMetrics []vmMetric) {
+		for _, m := range oldMetrics {
+			// this is a linear search, but since we have small number (~10) of
+			// different metrics for each vm, this should be fine.
+			ok := slices.ContainsFunc(newMetrics, func(vm vmMetric) bool {
+				return maps.Equal(m.labels, vm.labels)
+			})
+			if !ok {
+				gauge.Delete(m.labels)
+			}
+		}
+		for _, m := range newMetrics {
+			gauge.With(m.labels).Set(m.value)
+		}
+	}
+
+	oldCPUMetrics := makeVMCPUMetrics(oldVM)
+	newCPUMetrics := makeVMCPUMetrics(newVM)
+	updateMetrics(perVMMetrics.cpu, oldCPUMetrics, newCPUMetrics)
+
+	oldMemMetrics := makeVMMemMetrics(oldVM)
+	newMemMetrics := makeVMMemMetrics(newVM)
+	updateMetrics(perVMMetrics.memory, oldMemMetrics, newMemMetrics)
+}
+
+func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName string) {
 	if vm.Status.Node != nodeName {
 		return
 	}
-	commonLabels := prometheus.Labels{
-		"vm_namespace": vm.Namespace,
-		"vm_name":      vm.Name,
-		"endpoint_id":  vm.Labels[endpointLabel],
+
+	cpuMetrics := makeVMCPUMetrics(vm)
+	for _, m := range cpuMetrics {
+		perVMMetrics.cpu.Delete(m.labels)
 	}
-	perVMMetrics.cpu.DeletePartialMatch(commonLabels)
-	perVMMetrics.memory.DeletePartialMatch(commonLabels)
+
+	memMetrics := makeVMMemMetrics(vm)
+	for _, m := range memMetrics {
+		perVMMetrics.memory.Delete(m.labels)
+	}
 }
