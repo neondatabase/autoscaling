@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -203,6 +204,18 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 	}
 }
 
+func extractAutoScalingBounds(vm *vmapi.VirtualMachine) *api.ScalingBounds {
+	boundsJSON, ok := vm.Annotations[api.AnnotationAutoscalingBounds]
+	if !ok {
+		return nil
+	}
+	var bounds api.ScalingBounds
+	if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
+		return nil
+	}
+	return &bounds
+}
+
 func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
@@ -217,10 +230,18 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		})
 	}
 
-	addCPUMetric(vmResourceValueMin, vm.Spec.Guest.CPUs.Min)
-	addCPUMetric(vmResourceValueMax, vm.Spec.Guest.CPUs.Max)
+	addCPUMetric(vmResourceValueSpecMin, vm.Spec.Guest.CPUs.Min)
+	addCPUMetric(vmResourceValueSpecMax, vm.Spec.Guest.CPUs.Max)
 	addCPUMetric(vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use)
 	addCPUMetric(vmResourceValueStatusUse, vm.Status.CPUs)
+
+	if bounds := extractAutoScalingBounds(vm); bounds != nil {
+		min := vmapi.MilliCPUFromResourceQuantity(bounds.Min.CPU)
+		addCPUMetric(vmResourceValueAutoscalingMin, &min)
+		max := vmapi.MilliCPUFromResourceQuantity(bounds.Max.CPU)
+		addCPUMetric(vmResourceValueAutoscalingMax, &max)
+	}
+
 	return metrics
 }
 
@@ -250,10 +271,18 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		return &memValue
 	}
 
-	addMemMetric(vmResourceValueMin, specMemVal(vm.Spec.Guest.MemorySlots.Min))
-	addMemMetric(vmResourceValueMax, specMemVal(vm.Spec.Guest.MemorySlots.Max))
+	addMemMetric(vmResourceValueSpecMin, specMemVal(vm.Spec.Guest.MemorySlots.Min))
+	addMemMetric(vmResourceValueSpecMax, specMemVal(vm.Spec.Guest.MemorySlots.Max))
 	addMemMetric(vmResourceValueSpecUse, specMemVal(vm.Spec.Guest.MemorySlots.Use))
 	addMemMetric(vmResourceValueStatusUse, statusMemVal(vm.Status.MemorySize))
+
+	if bounds := extractAutoScalingBounds(vm); bounds != nil {
+		min := bounds.Min.Mem.Value()
+		addMemMetric(vmResourceValueAutoscalingMin, &min)
+		max := bounds.Max.Mem.Value()
+		addMemMetric(vmResourceValueAutoscalingMax, &max)
+	}
+
 	return metrics
 }
 
