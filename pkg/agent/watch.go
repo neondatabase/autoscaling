@@ -228,10 +228,10 @@ func setVMMetrics(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVM
 			perVMMetrics.cpu.WithLabelValues(append(commonLabelValues, string(t.key))...).Set(t.value.AsFloat64())
 		}
 	}
-
 	if vm.Status.CPUs != nil {
 		perVMMetrics.cpu.WithLabelValues(append(commonLabelValues, string(vmResourceValueStatusUse))...).Set(vm.Status.CPUs.AsFloat64())
 	}
+
 	// Memory metrics derived from spec
 	specMem := []kv[vmResourceValueType, *int32]{
 		{key: vmResourceValueMin, value: vm.Spec.Guest.MemorySlots.Min},
@@ -243,6 +243,10 @@ func setVMMetrics(vm *vmapi.VirtualMachine, nodeName string, perVMMetrics *PerVM
 			memValue := float64(vm.Spec.Guest.MemorySlotSize.Value() * int64(*t.value))
 			perVMMetrics.memory.WithLabelValues(append(commonLabelValues, string(t.key))...).Set(memValue)
 		}
+	}
+	if vm.Status.MemorySize != nil {
+		memValue := float64(vm.Status.MemorySize.Value())
+		perVMMetrics.memory.WithLabelValues(append(commonLabelValues, string(vmResourceValueStatusUse))...).Set(memValue)
 	}
 }
 
