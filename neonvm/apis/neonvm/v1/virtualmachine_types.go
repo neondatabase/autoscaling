@@ -265,6 +265,12 @@ type RootDisk struct {
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy"`
 	// +optional
 	Execute []string `json:"execute,omitempty"`
+	// Limit the number of operations per second (IOPS) when performing disk I/O
+	// +optional
+	Iops *int32 `json:"iops,omitempty"`
+	// Limit the number of MiB per second when performing disk I/O
+	// +optional
+	Throughput *int32 `json:"throughput,omitempty"`
 }
 
 type EnvVar struct {
@@ -334,6 +340,12 @@ type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
 	// Discard enables the "discard" mount option for the filesystem
 	Discard bool `json:"discard,omitempty"`
+	// Limit the number of operations per second (IOPS) when performing disk I/O
+	// +optional
+	Iops *int32 `json:"iops,omitempty"`
+	// Limit the number of MiB per second when performing disk I/O
+	// +optional
+	Throughput *int32 `json:"throughput,omitempty"`
 }
 
 type TmpfsDiskSource struct {

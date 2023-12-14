@@ -42,6 +42,8 @@ spec:
     rootDisk:
       image: vm-postgres:14-alpine
       size: 8Gi
+      iops: 10000
+      throughput: 100
     command: ["/bin/sh"]
     args:
       - -c
@@ -64,6 +66,8 @@ spec:
       mountPath: /some/path/1
       emptyDisk:
         size: 2Gi
+        iops: 10000
+        throughput: 100
     - name: disk2
       mountPath: /some/path/2
       configMap:

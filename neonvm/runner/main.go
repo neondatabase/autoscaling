@@ -565,7 +565,37 @@ func main() {
 	}
 
 	// disk details
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=unsafe", rootDiskPath))
+
+	/*
+	   When applying IOPS limits all I/O operations are treated equally
+	   regardless of their size. This means that the user can take advantage
+	   of this in order to circumvent the limits and submit one huge I/O
+	   request instead of several smaller ones.
+
+	   QEMU provides a setting called throttling.iops-size to prevent this
+	   from happening. This setting specifies the size (in bytes) of an I/O
+	   request for accounting purposes. Larger requests will be counted
+	   proportionally to this size.
+
+	   For example, if iops-size is set to 4096 then an 8KB request will be
+	   counted as two, and a 6KB request will be counted as one and a
+	   half. This only applies to requests larger than iops-size: smaller
+	   requests will be always counted as one, no matter their size.
+
+	   AWS EBS volumes default block size is 4 KiB
+	   https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/volume_constraints.html
+	*/
+
+	iops := ""
+	if vmSpec.Guest.RootDisk.Iops != nil {
+		iops = fmt.Sprintf(",throttling.iops-total=%d,throttling.iops-size=4096", *vmSpec.Guest.RootDisk.Iops)
+	}
+	throughput := ""
+	if vmSpec.Guest.RootDisk.Throughput != nil {
+		throughput = fmt.Sprintf(",throttling.bps-total=%d", *vmSpec.Guest.RootDisk.Throughput*1024*1024)
+	}
+
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=unsafe%s%s", rootDiskPath, iops, throughput))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=unsafe", runtimeDiskPath))
 	for _, disk := range vmSpec.Disks {
 		switch {
@@ -579,7 +609,15 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				discard = ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=unsafe%s", disk.Name, dPath, discard))
+			iops := ""
+			if disk.EmptyDisk.Iops != nil {
+				iops = fmt.Sprintf(",throttling.iops-total=%d,throttling.iops-size=4096", *disk.EmptyDisk.Iops)
+			}
+			throughput := ""
+			if disk.EmptyDisk.Throughput != nil {
+				throughput = fmt.Sprintf(",throttling.bps-total=%d", *disk.EmptyDisk.Throughput*1024*1024)
+			}
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=unsafe%s%s%s", disk.Name, dPath, discard, iops, throughput))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)

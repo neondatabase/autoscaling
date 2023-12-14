@@ -967,12 +967,22 @@ spec:
                           description: Discard enables the "discard" mount option
                             for the filesystem
                           type: boolean
+                        iops:
+                          description: Limit the number of operations per second (IOPS)
+                            when performing disk I/O
+                          format: int32
+                          type: integer
                         size:
                           anyOf:
                           - type: integer
                           - type: string
                           pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                           x-kubernetes-int-or-string: true
+                        throughput:
+                          description: Limit the number of MiB per second when performing
+                            disk I/O
+                          format: int32
+                          type: integer
                       required:
                       - size
                       type: object
@@ -2445,12 +2455,22 @@ spec:
                         description: PullPolicy describes a policy for if/when to
                           pull a container image
                         type: string
+                      iops:
+                        description: Limit the number of operations per second (IOPS)
+                          when performing disk I/O
+                        format: int32
+                        type: integer
                       size:
                         anyOf:
                         - type: integer
                         - type: string
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
+                      throughput:
+                        description: Limit the number of MiB per second when performing
+                          disk I/O
+                        format: int32
+                        type: integer
                     required:
                     - image
                     type: object
