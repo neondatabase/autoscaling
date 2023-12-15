@@ -205,9 +205,11 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 }
 
 // extractAutoscalingBounds extracts the ScalingBounds from a VM's autoscaling
-// annotation. We have defined this function for the purpose of metrics, so we
-// could track scaling bounds changes on a VM. api.ExtractVmInfo doesn't provide
-// this data, since its CPU and memory values might come from vm.Spec.
+// annotation, for the purpose of exposing it in per-VM metrics.
+//
+// We're not reusing api.ExtractVmInfo even though it also looks at the bounds
+// annotation, because its data is less precise - CPU and memory values might
+// come from the VM spec without us knowing.
 func extractAutoscalingBounds(vm *vmapi.VirtualMachine) *api.ScalingBounds {
 	boundsJSON, ok := vm.Annotations[api.AnnotationAutoscalingBounds]
 	if !ok {
