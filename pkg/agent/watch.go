@@ -251,7 +251,7 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		metrics = append(metrics, m)
 	}
 
-	// metrics from autoscaling bounds annonation
+	// metrics from autoscaling bounds annotation
 	if bounds := extractAutoScalingBounds(vm); bounds != nil {
 		boundPairs := []pair[vmResourceValueType, resource.Quantity]{
 			{vmResourceValueAutoscalingMin, bounds.Min.CPU},
@@ -292,7 +292,7 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		metrics = append(metrics, m)
 	}
 
-	// metrics from autoscaling bounds annonation
+	// metrics from autoscaling bounds annotation
 	if bounds := extractAutoScalingBounds(vm); bounds != nil {
 		boundPairs := []pair[vmResourceValueType, resource.Quantity]{
 			{vmResourceValueAutoscalingMin, bounds.Min.Mem},
