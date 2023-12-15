@@ -13,7 +13,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -203,57 +202,66 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 	}
 }
 
+type pair[T1 any, T2 any] struct {
+	first  T1
+	second T2
+}
+
+func makeVMMetric(vm *vmapi.VirtualMachine, valType vmResourceValueType, val float64) vmMetric {
+	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], valType)
+	return vmMetric{
+		labels: labels,
+		value:  val,
+	}
+}
+
 func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
-	addCPUMetric := func(resValType vmResourceValueType, val *vmapi.MilliCPU) {
-		if val == nil {
-			return
+	specPairs := []pair[vmResourceValueType, *vmapi.MilliCPU]{
+		{vmResourceValueMin, vm.Spec.Guest.CPUs.Min},
+		{vmResourceValueMax, vm.Spec.Guest.CPUs.Max},
+		{vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use},
+	}
+	for _, p := range specPairs {
+		if p.second != nil {
+			m := makeVMMetric(vm, p.first, p.second.AsFloat64())
+			metrics = append(metrics, m)
 		}
-		labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
-		metrics = append(metrics, vmMetric{
-			labels: labels,
-			value:  val.AsFloat64(),
-		})
 	}
 
-	addCPUMetric(vmResourceValueMin, vm.Spec.Guest.CPUs.Min)
-	addCPUMetric(vmResourceValueMax, vm.Spec.Guest.CPUs.Max)
-	addCPUMetric(vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use)
-	addCPUMetric(vmResourceValueStatusUse, vm.Status.CPUs)
+	if vm.Status.CPUs != nil {
+		m := makeVMMetric(vm, vmResourceValueStatusUse, vm.Status.CPUs.AsFloat64())
+		metrics = append(metrics, m)
+	}
+
 	return metrics
 }
 
 func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
-	addMemMetric := func(resValType vmResourceValueType, val *int64) {
-		if val == nil {
-			return
-		}
-		labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
-		metrics = append(metrics, vmMetric{
-			labels: labels,
-			value:  float64(*val),
-		})
+	memorySlotsToBytes := func(m int32) int64 {
+		return vm.Spec.Guest.MemorySlotSize.Value() * int64(m)
 	}
 
-	specMemVal := func(m *int32) *int64 {
-		if m == nil {
-			return nil
-		}
-		memValue := vm.Spec.Guest.MemorySlotSize.Value() * int64(*m)
-		return &memValue
+	specPairs := []pair[vmResourceValueType, *int32]{
+		{vmResourceValueMin, vm.Spec.Guest.MemorySlots.Min},
+		{vmResourceValueMax, vm.Spec.Guest.MemorySlots.Max},
+		{vmResourceValueSpecUse, vm.Spec.Guest.MemorySlots.Use},
 	}
-	statusMemVal := func(m *resource.Quantity) *int64 {
-		memValue := m.Value()
-		return &memValue
+	for _, p := range specPairs {
+		if p.second != nil {
+			m := makeVMMetric(vm, p.first, float64(memorySlotsToBytes(*p.second)))
+			metrics = append(metrics, m)
+		}
 	}
 
-	addMemMetric(vmResourceValueMin, specMemVal(vm.Spec.Guest.MemorySlots.Min))
-	addMemMetric(vmResourceValueMax, specMemVal(vm.Spec.Guest.MemorySlots.Max))
-	addMemMetric(vmResourceValueSpecUse, specMemVal(vm.Spec.Guest.MemorySlots.Use))
-	addMemMetric(vmResourceValueStatusUse, statusMemVal(vm.Status.MemorySize))
+	if vm.Status.MemorySize != nil {
+		m := makeVMMetric(vm, vmResourceValueStatusUse, float64(vm.Status.MemorySize.Value()))
+		metrics = append(metrics, m)
+	}
+
 	return metrics
 }
 
@@ -275,8 +283,6 @@ func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName
 
 func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmapi.VirtualMachine, nodeName string) {
 	if newVM.Status.Node != nodeName || oldVM.Status.Node != nodeName {
-		// The vm is either has been removed from the nodeName or has been added
-		// there.
 		deleteVMMetrics(perVMMetrics, oldVM, nodeName)
 		setVMMetrics(perVMMetrics, newVM, nodeName)
 		return
