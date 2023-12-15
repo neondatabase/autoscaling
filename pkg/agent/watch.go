@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -202,6 +204,24 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 	}
 }
 
+// extractAutoscalingBounds extracts the ScalingBounds from a VM's autoscaling
+// annotation, for the purpose of exposing it in per-VM metrics.
+//
+// We're not reusing api.ExtractVmInfo even though it also looks at the bounds
+// annotation, because its data is less precise - CPU and memory values might
+// come from the VM spec without us knowing.
+func extractAutoscalingBounds(vm *vmapi.VirtualMachine) *api.ScalingBounds {
+	boundsJSON, ok := vm.Annotations[api.AnnotationAutoscalingBounds]
+	if !ok {
+		return nil
+	}
+	var bounds api.ScalingBounds
+	if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
+		return nil
+	}
+	return &bounds
+}
+
 type pair[T1 any, T2 any] struct {
 	first  T1
 	second T2
@@ -218,9 +238,10 @@ func makeVMMetric(vm *vmapi.VirtualMachine, valType vmResourceValueType, val flo
 func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
+	// metrics from spec
 	specPairs := []pair[vmResourceValueType, *vmapi.MilliCPU]{
-		{vmResourceValueMin, vm.Spec.Guest.CPUs.Min},
-		{vmResourceValueMax, vm.Spec.Guest.CPUs.Max},
+		{vmResourceValueSpecMin, vm.Spec.Guest.CPUs.Min},
+		{vmResourceValueSpecMax, vm.Spec.Guest.CPUs.Max},
 		{vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use},
 	}
 	for _, p := range specPairs {
@@ -230,9 +251,23 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		}
 	}
 
+	// metrics from status
 	if vm.Status.CPUs != nil {
 		m := makeVMMetric(vm, vmResourceValueStatusUse, vm.Status.CPUs.AsFloat64())
 		metrics = append(metrics, m)
+	}
+
+	// metrics from autoscaling bounds annotation
+	if bounds := extractAutoscalingBounds(vm); bounds != nil {
+		boundPairs := []pair[vmResourceValueType, resource.Quantity]{
+			{vmResourceValueAutoscalingMin, bounds.Min.CPU},
+			{vmResourceValueAutoscalingMax, bounds.Max.CPU},
+		}
+		for _, p := range boundPairs {
+			// avoid using resource.Quantity.AsApproximateFloat64() since it's quite inaccurate
+			m := makeVMMetric(vm, p.first, vmapi.MilliCPUFromResourceQuantity(p.second).AsFloat64())
+			metrics = append(metrics, m)
+		}
 	}
 
 	return metrics
@@ -245,9 +280,10 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		return vm.Spec.Guest.MemorySlotSize.Value() * int64(m)
 	}
 
+	// metrics from spec
 	specPairs := []pair[vmResourceValueType, *int32]{
-		{vmResourceValueMin, vm.Spec.Guest.MemorySlots.Min},
-		{vmResourceValueMax, vm.Spec.Guest.MemorySlots.Max},
+		{vmResourceValueSpecMin, vm.Spec.Guest.MemorySlots.Min},
+		{vmResourceValueSpecMax, vm.Spec.Guest.MemorySlots.Max},
 		{vmResourceValueSpecUse, vm.Spec.Guest.MemorySlots.Use},
 	}
 	for _, p := range specPairs {
@@ -257,9 +293,22 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		}
 	}
 
+	// metrics from status
 	if vm.Status.MemorySize != nil {
 		m := makeVMMetric(vm, vmResourceValueStatusUse, float64(vm.Status.MemorySize.Value()))
 		metrics = append(metrics, m)
+	}
+
+	// metrics from autoscaling bounds annotation
+	if bounds := extractAutoscalingBounds(vm); bounds != nil {
+		boundPairs := []pair[vmResourceValueType, resource.Quantity]{
+			{vmResourceValueAutoscalingMin, bounds.Min.Mem},
+			{vmResourceValueAutoscalingMax, bounds.Max.Mem},
+		}
+		for _, p := range boundPairs {
+			m := makeVMMetric(vm, p.first, float64(p.second.Value()))
+			metrics = append(metrics, m)
+		}
 	}
 
 	return metrics

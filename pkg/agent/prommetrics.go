@@ -261,10 +261,12 @@ type PerVMMetrics struct {
 type vmResourceValueType string
 
 const (
-	vmResourceValueMin       vmResourceValueType = "min"
-	vmResourceValueSpecUse   vmResourceValueType = "spec_use"
-	vmResourceValueStatusUse vmResourceValueType = "status_use"
-	vmResourceValueMax       vmResourceValueType = "max"
+	vmResourceValueSpecMin        vmResourceValueType = "spec_min"
+	vmResourceValueAutoscalingMin vmResourceValueType = "autoscaling_min"
+	vmResourceValueSpecUse        vmResourceValueType = "spec_use"
+	vmResourceValueStatusUse      vmResourceValueType = "status_use"
+	vmResourceValueSpecMax        vmResourceValueType = "spec_max"
+	vmResourceValueAutoscalingMax vmResourceValueType = "autoscaling_max"
 )
 
 func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
