@@ -283,6 +283,8 @@ func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName
 
 func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmapi.VirtualMachine, nodeName string) {
 	if newVM.Status.Node != nodeName || oldVM.Status.Node != nodeName {
+		// this case we don't need an in-place metric update. Either we just have
+		// to add the new metrics, or delete the old ones, or nothing!
 		deleteVMMetrics(perVMMetrics, oldVM, nodeName)
 		setVMMetrics(perVMMetrics, newVM, nodeName)
 		return
