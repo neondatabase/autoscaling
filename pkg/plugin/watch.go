@@ -11,6 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 
@@ -268,13 +269,18 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 				if err != nil {
 					// Try to get the runner pod associated with the VM, if we can, but don't worry
 					// about it if we can't.
-					var runnerPod *corev1.Pod
+					var runnerPod runtime.Object
 					if podName := newVM.Status.PodName; podName != "" {
 						// NB: index.Get returns nil if not found, so we only have a non-nil
 						// runnerPod if it's currently known.
-						runnerPod, _ = podIndex.GetIndexed(func(index *watch.NameIndex[corev1.Pod]) (*corev1.Pod, bool) {
+						rp, _ := podIndex.GetIndexed(func(index *watch.NameIndex[corev1.Pod]) (*corev1.Pod, bool) {
 							return index.Get(newVM.Namespace, podName)
 						})
+						// avoid typed nils by only assigning if non-nil
+						// See <https://github.com/neondatabase/autoscaling/issues/689> for more.
+						if rp != nil {
+							runnerPod = rp
+						}
 					}
 
 					logger.Error("Failed to extract VM info in update for new VM", util.VMNameFields(newVM), zap.Error(err))

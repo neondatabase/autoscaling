@@ -216,30 +216,51 @@ func extractAutoScalingBounds(vm *vmapi.VirtualMachine) *api.ScalingBounds {
 	return &bounds
 }
 
+type pair[T1 any, T2 any] struct {
+	first  T1
+	second T2
+}
+
+func makeVMMetric(vm *vmapi.VirtualMachine, valType vmResourceValueType, val float64) vmMetric {
+	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], valType)
+	return vmMetric{
+		labels: labels,
+		value:  val,
+	}
+}
+
 func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
-	addCPUMetric := func(resValType vmResourceValueType, val *vmapi.MilliCPU) {
-		if val == nil {
-			return
+	// metrics from spec
+	specPairs := []pair[vmResourceValueType, *vmapi.MilliCPU]{
+		{vmResourceValueSpecMin, vm.Spec.Guest.CPUs.Min},
+		{vmResourceValueSpecMax, vm.Spec.Guest.CPUs.Max},
+		{vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use},
+	}
+	for _, p := range specPairs {
+		if p.second != nil {
+			m := makeVMMetric(vm, p.first, p.second.AsFloat64())
+			metrics = append(metrics, m)
 		}
-		labels := makeLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
-		metrics = append(metrics, vmMetric{
-			labels: labels,
-			value:  val.AsFloat64(),
-		})
 	}
 
-	addCPUMetric(vmResourceValueSpecMin, vm.Spec.Guest.CPUs.Min)
-	addCPUMetric(vmResourceValueSpecMax, vm.Spec.Guest.CPUs.Max)
-	addCPUMetric(vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use)
-	addCPUMetric(vmResourceValueStatusUse, vm.Status.CPUs)
+	// metrics from status
+	if vm.Status.CPUs != nil {
+		m := makeVMMetric(vm, vmResourceValueStatusUse, vm.Status.CPUs.AsFloat64())
+		metrics = append(metrics, m)
+	}
 
+	// metrics from autoscaling bounds annonation
 	if bounds := extractAutoScalingBounds(vm); bounds != nil {
-		min := vmapi.MilliCPUFromResourceQuantity(bounds.Min.CPU)
-		addCPUMetric(vmResourceValueAutoscalingMin, &min)
-		max := vmapi.MilliCPUFromResourceQuantity(bounds.Max.CPU)
-		addCPUMetric(vmResourceValueAutoscalingMax, &max)
+		boundPairs := []pair[vmResourceValueType, resource.Quantity]{
+			{vmResourceValueAutoscalingMin, bounds.Min.CPU},
+			{vmResourceValueAutoscalingMax, bounds.Max.CPU},
+		}
+		for _, p := range boundPairs {
+			m := makeVMMetric(vm, p.first, vmapi.MilliCPUFromResourceQuantity(p.second).AsFloat64())
+			metrics = append(metrics, m)
+		}
 	}
 
 	return metrics
@@ -248,39 +269,39 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
-	addMemMetric := func(resValType vmResourceValueType, val *int64) {
-		if val == nil {
-			return
+	memorySlotsToBytes := func(m int32) int64 {
+		return vm.Spec.Guest.MemorySlotSize.Value() * int64(m)
+	}
+
+	// metrics from spec
+	specPairs := []pair[vmResourceValueType, *int32]{
+		{vmResourceValueSpecMin, vm.Spec.Guest.MemorySlots.Min},
+		{vmResourceValueSpecMax, vm.Spec.Guest.MemorySlots.Max},
+		{vmResourceValueSpecUse, vm.Spec.Guest.MemorySlots.Use},
+	}
+	for _, p := range specPairs {
+		if p.second != nil {
+			m := makeVMMetric(vm, p.first, float64(memorySlotsToBytes(*p.second)))
+			metrics = append(metrics, m)
 		}
-		labels := makeLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
-		metrics = append(metrics, vmMetric{
-			labels: labels,
-			value:  float64(*val),
-		})
 	}
 
-	specMemVal := func(m *int32) *int64 {
-		if m == nil {
-			return nil
-		}
-		memValue := vm.Spec.Guest.MemorySlotSize.Value() * int64(*m)
-		return &memValue
-	}
-	statusMemVal := func(m *resource.Quantity) *int64 {
-		memValue := m.Value()
-		return &memValue
+	// metrics from status
+	if vm.Status.MemorySize != nil {
+		m := makeVMMetric(vm, vmResourceValueStatusUse, float64(vm.Status.MemorySize.Value()))
+		metrics = append(metrics, m)
 	}
 
-	addMemMetric(vmResourceValueSpecMin, specMemVal(vm.Spec.Guest.MemorySlots.Min))
-	addMemMetric(vmResourceValueSpecMax, specMemVal(vm.Spec.Guest.MemorySlots.Max))
-	addMemMetric(vmResourceValueSpecUse, specMemVal(vm.Spec.Guest.MemorySlots.Use))
-	addMemMetric(vmResourceValueStatusUse, statusMemVal(vm.Status.MemorySize))
-
+	// metrics from autoscaling bounds annonation
 	if bounds := extractAutoScalingBounds(vm); bounds != nil {
-		min := bounds.Min.Mem.Value()
-		addMemMetric(vmResourceValueAutoscalingMin, &min)
-		max := bounds.Max.Mem.Value()
-		addMemMetric(vmResourceValueAutoscalingMax, &max)
+		boundPairs := []pair[vmResourceValueType, resource.Quantity]{
+			{vmResourceValueAutoscalingMin, bounds.Min.Mem},
+			{vmResourceValueAutoscalingMax, bounds.Max.Mem},
+		}
+		for _, p := range boundPairs {
+			m := makeVMMetric(vm, p.first, float64(p.second.Value()))
+			metrics = append(metrics, m)
+		}
 	}
 
 	return metrics
@@ -304,8 +325,8 @@ func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName
 
 func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmapi.VirtualMachine, nodeName string) {
 	if newVM.Status.Node != nodeName || oldVM.Status.Node != nodeName {
-		// The vm is either has been removed from the nodeName or has been added
-		// there.
+		// this case we don't need an in-place metric update. Either we just have
+		// to add the new metrics, or delete the old ones, or nothing!
 		deleteVMMetrics(perVMMetrics, oldVM, nodeName)
 		setVMMetrics(perVMMetrics, newVM, nodeName)
 		return

@@ -136,7 +136,6 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			now := time.Now()
 
 			// set the compute unit and lastApproved by simulating a scheduler request/response
-			state.Plugin().NewScheduler()
 			state.Plugin().StartingRequest(now, c.schedulerApproved)
 			err := state.Plugin().RequestSuccessful(now, api.PluginResponse{
 				Permit:      c.schedulerApproved,
@@ -261,7 +260,6 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		return state.NextActions(clock.Now())
 	}
 
-	state.Plugin().NewScheduler()
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
@@ -424,7 +422,6 @@ func TestPeriodicPluginRequest(t *testing.T) {
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 	)
 
-	state.Plugin().NewScheduler()
 	state.Monitor().Active(true)
 
 	metrics := api.Metrics{
@@ -505,7 +502,6 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		return state.NextActions(clock.Now())
 	}
 
-	state.Plugin().NewScheduler()
 	state.Monitor().Active(true)
 
 	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(6))
@@ -787,7 +783,6 @@ func TestRequestedUpscale(t *testing.T) {
 		return state.NextActions(clock.Now())
 	}
 
-	state.Plugin().NewScheduler()
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
@@ -1060,7 +1055,6 @@ func TestDownscalePivotBack(t *testing.T) {
 			helpers.WithCurrentCU(2),
 		)
 
-		state.Plugin().NewScheduler()
 		state.Monitor().Active(true)
 
 		doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(2))
@@ -1094,162 +1088,6 @@ func TestDownscalePivotBack(t *testing.T) {
 	}
 }
 
-// Checks that if we're disconnected from the scheduler plugin, we're able to downscale and
-// re-upscale back to the last allocation before disconnection, but not beyond that.
-// Also checks that when we reconnect, we first *inform* the scheduler plugin of the current
-// resource allocation, and *then* send a follow-up request asking for additional resources.
-func TestSchedulerDownscaleReupscale(t *testing.T) {
-	a := helpers.NewAssert(t)
-	clock := helpers.NewFakeClock(t)
-	clockTick := func() {
-		clock.Inc(100 * time.Millisecond)
-	}
-	resForCU := DefaultComputeUnit.Mul
-
-	state := helpers.CreateInitialState(
-		DefaultInitialStateConfig,
-		helpers.WithStoredWarnings(a.StoredWarnings()),
-		helpers.WithMinMaxCU(1, 3),
-		helpers.WithCurrentCU(2),
-	)
-	nextActions := func() core.ActionSet {
-		return state.NextActions(clock.Now())
-	}
-
-	state.Plugin().NewScheduler()
-	state.Monitor().Active(true)
-
-	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(2))
-
-	clockTick()
-
-	// Set metrics
-	a.Do(state.UpdateMetrics, api.Metrics{
-		LoadAverage1Min:  0.3, // <- means desired scale = 2
-		LoadAverage5Min:  0.0, // unused
-		MemoryUsageBytes: 0.0,
-	})
-	// Check we're not supposed to do anything
-	a.Call(nextActions).Equals(core.ActionSet{
-		Wait: &core.ActionWait{Duration: duration("4.8s")},
-	})
-
-	clockTick()
-
-	// Record the scheduler as disconnected
-	state.Plugin().SchedulerGone()
-	// ... and check that there's nothing we can do:
-	a.Call(nextActions).Equals(core.ActionSet{})
-
-	clockTick()
-
-	// First:
-	// 1. Change the metrics so we want to downscale to 1 CU
-	// 2. Request downscaling from the vm-monitor
-	// 3. Do the NeonVM request
-	// 4. But *don't* do the request to the scheduler plugin (because it's not there)
-	a.Do(state.UpdateMetrics, api.Metrics{
-		LoadAverage1Min:  0.0,
-		LoadAverage5Min:  0.0,
-		MemoryUsageBytes: 0.0,
-	})
-	// Check that we agree about desired resources
-	a.Call(getDesiredResources, state, clock.Now()).
-		Equals(resForCU(1))
-	// Do vm-monitor request:
-	a.Call(nextActions).Equals(core.ActionSet{
-		MonitorDownscale: &core.ActionMonitorDownscale{
-			Current: resForCU(2),
-			Target:  resForCU(1),
-		},
-	})
-	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(1))
-	clockTick()
-	a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
-	// Do the NeonVM request
-	a.Call(nextActions).Equals(core.ActionSet{
-		NeonVMRequest: &core.ActionNeonVMRequest{
-			Current: resForCU(2),
-			Target:  resForCU(1),
-		},
-	})
-	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(1))
-	clockTick()
-	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-
-	// Now the current state reflects the desired state, so there shouldn't be anything else we need
-	// to do or wait on.
-	a.Call(nextActions).Equals(core.ActionSet{})
-
-	// Next:
-	// 1. Change the metrics so we want to upscale to 3 CU
-	// 2. Can't do the scheduler plugin request (not active), but we previously got a permit for 2 CU
-	// 3. Do the NeonVM request for 2 CU (3 isn't approved)
-	// 4. Do vm-monitor upscale request for 2 CU
-	lastMetrics := api.Metrics{
-		LoadAverage1Min:  0.5,
-		LoadAverage5Min:  0.0,
-		MemoryUsageBytes: 0.0,
-	}
-	a.Do(state.UpdateMetrics, lastMetrics)
-	a.Call(getDesiredResources, state, clock.Now()).
-		Equals(resForCU(3))
-	// Do NeonVM request
-	a.Call(nextActions).Equals(core.ActionSet{
-		NeonVMRequest: &core.ActionNeonVMRequest{
-			Current: resForCU(1),
-			Target:  resForCU(2),
-		},
-	})
-	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(2))
-	clockTick()
-	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	// Do vm-monitor request
-	a.Call(nextActions).Equals(core.ActionSet{
-		MonitorUpscale: &core.ActionMonitorUpscale{
-			Current: resForCU(1),
-			Target:  resForCU(2),
-		},
-	})
-	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(2))
-	clockTick()
-	a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
-
-	// Nothing left to do in the meantime, because again, the current state reflects the desired
-	// state (at least, given that the we can't request anything from the scheduler plugin)
-
-	// Finally:
-	// 1. Update the state so we can now communicate with the scheduler plugin
-	// 2. Make an initial request to the plugin to inform it of *current* resources
-	// 3. Make another request to the plugin to request up to 3 CU
-	// We could test after that too, but this should be enough.
-	a.Do(state.Plugin().NewScheduler)
-	// Initial request: informative about current usage
-	a.Call(nextActions).Equals(core.ActionSet{
-		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: ptr(resForCU(2)),
-			Target:     resForCU(2),
-			Metrics:    &lastMetrics,
-		},
-	})
-	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
-	clockTick()
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
-		Permit:      resForCU(2),
-		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
-	})
-	// Follow-up request: request additional resources
-	a.Call(nextActions).Equals(core.ActionSet{
-		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: ptr(resForCU(2)),
-			Target:     resForCU(3),
-			Metrics:    &lastMetrics,
-		},
-	})
-}
-
 // Checks that if the VM's min/max bounds change so that the maximum is below the current and
 // desired usage, we try to downscale
 func TestBoundsChangeRequiresDownsale(t *testing.T) {
@@ -1270,7 +1108,6 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		return state.NextActions(clock.Now())
 	}
 
-	state.Plugin().NewScheduler()
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
@@ -1367,7 +1204,6 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 		return state.NextActions(clock.Now())
 	}
 
-	state.Plugin().NewScheduler()
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
@@ -1466,7 +1302,6 @@ func TestFailedRequestRetry(t *testing.T) {
 		return state.NextActions(clock.Now())
 	}
 
-	state.Plugin().NewScheduler()
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request
@@ -1581,8 +1416,6 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	nextActions := func() core.ActionSet {
 		return state.NextActions(clock.Now())
 	}
-
-	state.Plugin().NewScheduler()
 
 	// Send initial scheduler request - without the monitor active, so we're stuck at 4 CU for now
 	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(4))
