@@ -204,6 +204,10 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 	}
 }
 
+// extractAutoscalingBounds extracts the ScalingBounds from a VM's autoscaling
+// annotation. We have defined this function for the purpose of metrics, so we
+// could track scaling bounds changes on a VM. api.ExtractVmInfo doesn't provide
+// this data, since its CPU and memory values might come from vm.Spec.
 func extractAutoscalingBounds(vm *vmapi.VirtualMachine) *api.ScalingBounds {
 	boundsJSON, ok := vm.Annotations[api.AnnotationAutoscalingBounds]
 	if !ok {
@@ -252,7 +256,7 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	}
 
 	// metrics from autoscaling bounds annotation
-	if bounds := extractAutoScalingBounds(vm); bounds != nil {
+	if bounds := extractAutoscalingBounds(vm); bounds != nil {
 		boundPairs := []pair[vmResourceValueType, resource.Quantity]{
 			{vmResourceValueAutoscalingMin, bounds.Min.CPU},
 			{vmResourceValueAutoscalingMax, bounds.Max.CPU},
@@ -293,7 +297,7 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	}
 
 	// metrics from autoscaling bounds annotation
-	if bounds := extractAutoScalingBounds(vm); bounds != nil {
+	if bounds := extractAutoscalingBounds(vm); bounds != nil {
 		boundPairs := []pair[vmResourceValueType, resource.Quantity]{
 			{vmResourceValueAutoscalingMin, bounds.Min.Mem},
 			{vmResourceValueAutoscalingMax, bounds.Max.Mem},
