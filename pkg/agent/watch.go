@@ -262,6 +262,7 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 			{vmResourceValueAutoscalingMax, bounds.Max.CPU},
 		}
 		for _, p := range boundPairs {
+			// avoid using resource.Quantity.AsApproximateFloat64() since it's quite inaccurate
 			m := makeVMMetric(vm, p.first, vmapi.MilliCPUFromResourceQuantity(p.second).AsFloat64())
 			metrics = append(metrics, m)
 		}
