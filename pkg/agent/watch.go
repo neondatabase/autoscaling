@@ -210,7 +210,7 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		if val == nil {
 			return
 		}
-		labels := makeLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
+		labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
 		metrics = append(metrics, vmMetric{
 			labels: labels,
 			value:  val.AsFloat64(),
@@ -231,7 +231,7 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		if val == nil {
 			return
 		}
-		labels := makeLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
+		labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], resValType)
 		metrics = append(metrics, vmMetric{
 			labels: labels,
 			value:  float64(*val),
