@@ -204,7 +204,7 @@ func (e vmEvent) Format(state fmt.State, verb rune) {
 	}
 }
 
-func extractAutoScalingBounds(vm *vmapi.VirtualMachine) *api.ScalingBounds {
+func extractAutoscalingBounds(vm *vmapi.VirtualMachine) *api.ScalingBounds {
 	boundsJSON, ok := vm.Annotations[api.AnnotationAutoscalingBounds]
 	if !ok {
 		return nil
