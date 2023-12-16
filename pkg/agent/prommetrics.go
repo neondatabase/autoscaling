@@ -254,43 +254,66 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 }
 
 type PerVMMetrics struct {
-	vmResources *prometheus.GaugeVec
+	cpu    *prometheus.GaugeVec
+	memory *prometheus.GaugeVec
 }
-
-type vmResource string
-
-const (
-	vmResourceCPU vmResource = "cpu"
-	vmResourceMem vmResource = "mem"
-)
 
 type vmResourceValueType string
 
 const (
-	vmResourceValueMin       vmResourceValueType = "min"
-	vmResourceValueSpecUse   vmResourceValueType = "spec_use"
-	vmResourceValueStatusUse vmResourceValueType = "status_use"
-	vmResourceValueMax       vmResourceValueType = "max"
+	vmResourceValueSpecMin        vmResourceValueType = "spec_min"
+	vmResourceValueAutoscalingMin vmResourceValueType = "autoscaling_min"
+	vmResourceValueSpecUse        vmResourceValueType = "spec_use"
+	vmResourceValueStatusUse      vmResourceValueType = "status_use"
+	vmResourceValueSpecMax        vmResourceValueType = "spec_max"
+	vmResourceValueAutoscalingMax vmResourceValueType = "autoscaling_max"
 )
 
 func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
 
 	metrics := PerVMMetrics{
-		vmResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+		cpu: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: "autoscaling_vm_resources",
-				Help: "Amount of CPU or memory for a VM: min, max, spec using, or status using",
+				Name: "autoscaling_vm_cpu_cores",
+				Help: "Number of CPUs for a VM: min, max, spec using, or status using",
 			},
 			[]string{
 				"vm_namespace", // .metadata.namespace
 				"vm_name",      // .metadata.name
 				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
-				"resource",     // vmResource: "cpu" or "mem"
+				"value",        // vmResourceValue: min, spec_use, status_use, max
+			},
+		)),
+		memory: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_vm_memory_bytes",
+				Help: "Amount of memory in bytes for a VM: min, max, spec using, or status using",
+			},
+			[]string{
+				"vm_namespace", // .metadata.namespace
+				"vm_name",      // .metadata.name
+				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
 				"value",        // vmResourceValue: min, spec_use, status_use, max
 			},
 		)),
 	}
 
 	return metrics, reg
+}
+
+func makePerVMMetricsLabels(namespace string, vmName string, endpointID string, valueType vmResourceValueType) prometheus.Labels {
+	return prometheus.Labels{
+		"vm_namespace": namespace,
+		"vm_name":      vmName,
+		"endpoint_id":  endpointID,
+		"value":        string(valueType),
+	}
+}
+
+// vmMetric is a data object that represents a single metric
+// (either CPU or memory) for a VM.
+type vmMetric struct {
+	labels prometheus.Labels
+	value  float64
 }
