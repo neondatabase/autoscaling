@@ -35,6 +35,7 @@ type vmEvent struct {
 }
 
 const endpointLabel = "neon/endpoint-id"
+const projectLabel = "neon/project-id"
 
 // MarshalLogObject implements zapcore.ObjectMarshaler
 func (ev vmEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
@@ -228,7 +229,9 @@ type pair[T1 any, T2 any] struct {
 }
 
 func makeVMMetric(vm *vmapi.VirtualMachine, valType vmResourceValueType, val float64) vmMetric {
-	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, vm.Labels[endpointLabel], valType)
+	endpointID := vm.Labels[endpointLabel]
+	projectID := vm.Labels[projectLabel]
+	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, endpointID, projectID, valType)
 	return vmMetric{
 		labels: labels,
 		value:  val,
