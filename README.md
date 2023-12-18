@@ -40,7 +40,7 @@ settled on the following:
   demand is above a pre-configured threshold
 * Each K8s node has an `autoscaler-agent` pod that triggers scaling decisions and makes resource
   requests to the K8s scheduler on the VMs' behalf to reserve additional resources for them
-* Each compute node runs the _VM monitor binary, which communicates to the autoscaler-agent so that it can
+* Each compute node runs the _VM monitor_ binary, which communicates to the autoscaler-agent so that it can
   immediately respond to memory pressure by allocating more (among other things).
 
 Networking is preserved across migrations by giving each VM an additional IP address on a bridge
