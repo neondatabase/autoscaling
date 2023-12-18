@@ -25,3 +25,5 @@ dd2a6ef105f7e66db78b649710fb38ad15124424
 d7874af75700c1c5ab671eb6b1c7b66a17a07de4
 # "Fix typos (so codespell is happy) (#542)" - various typo fixes
 b82ad114ddfefb525393d25ce17d88c99739bac9
+# "agent/core: Add internal `state` with public fields (#688)" - rename
+26fbb89317f53e02a656510c485bc5d7a8901076
