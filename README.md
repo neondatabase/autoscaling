@@ -51,6 +51,9 @@ For more information, refer to [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Building and running
 
+> [!NOTE]
+> NeonVM and Autoscaling are not expected to work outside Linux x86.
+
 Build NeonVM Linux kernel (it takes time, can be run only once)
 
 ```sh
