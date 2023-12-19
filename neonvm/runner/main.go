@@ -1137,17 +1137,50 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	}
 
 	// pass incoming traffic to .Guest.Spec.Ports into VM
+	iptablesArgs := []string{}
 	for _, port := range ports {
-		logger.Info(fmt.Sprintf("setup DNAT for incoming traffic, port %d", port.Port))
-		iptablesArgs := []string{
+		logger.Info(fmt.Sprintf("setup DNAT rule for incoming traffic to port %d", port.Port))
+		iptablesArgs = []string{
 			"-t", "nat", "-A", "PREROUTING",
 			"-i", "eth0", "-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
 			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
-			logger.Error("could not set up DNAT for incoming traffic", zap.Error(err))
+			logger.Error("could not set up DNAT rule  for incoming traffic", zap.Error(err))
 			return nil, err
 		}
+		logger.Info(fmt.Sprintf("setup DNAT rule for traffic originating from localhost to port %d", port.Port))
+		iptablesArgs = []string{
+			"-t", "nat", "-A", "OUTPUT",
+			"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "LOCAL",
+			"-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
+			"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
+		}
+		if err := execFg("iptables", iptablesArgs...); err != nil {
+			logger.Error("could not set up DNAT rule for traffic from localhost", zap.Error(err))
+			return nil, err
+		}
+		logger.Info(fmt.Sprintf("setup ACCEPT rule for traffic originating from localhost to port %d", port.Port))
+		iptablesArgs = []string{
+			"-A", "OUTPUT",
+			"-s", "127.0.0.1", "-d", ipVm.String(),
+			"-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
+			"-j", "ACCEPT",
+		}
+		if err := execFg("iptables", iptablesArgs...); err != nil {
+			logger.Error("could not set up ACCEPT rule for traffic from localhost", zap.Error(err))
+			return nil, err
+		}
+	}
+	logger.Info(fmt.Sprintf("setup MASQUERADE rule for traffic originating from localhost"))
+	iptablesArgs = []string{
+		"-t", "nat", "-A", "POSTROUTING",
+		"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "UNICAST",
+		"-j", "MASQUERADE",
+	}
+	if err := execFg("iptables", iptablesArgs...); err != nil {
+		logger.Error("could not set up MASQUERADE rule for traffic from localhost", zap.Error(err))
+		return nil, err
 	}
 
 	// get dns details from /etc/resolv.conf
