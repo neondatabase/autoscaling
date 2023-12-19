@@ -34,8 +34,10 @@ type vmEvent struct {
 	endpointID string
 }
 
-const endpointLabel = "neon/endpoint-id"
-const projectLabel = "neon/project-id"
+const (
+	endpointLabel = "neon/endpoint-id"
+	projectLabel  = "neon/project-id"
+)
 
 // MarshalLogObject implements zapcore.ObjectMarshaler
 func (ev vmEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
