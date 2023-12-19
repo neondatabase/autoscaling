@@ -282,6 +282,7 @@ func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
 				"vm_namespace", // .metadata.namespace
 				"vm_name",      // .metadata.name
 				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
+				"project_id",   // .metadata.labels["neon/project-id"]
 				"value",        // vmResourceValue: min, spec_use, status_use, max
 			},
 		)),
@@ -294,6 +295,7 @@ func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
 				"vm_namespace", // .metadata.namespace
 				"vm_name",      // .metadata.name
 				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
+				"project_id",   // .metadata.labels["neon/project-id"]
 				"value",        // vmResourceValue: min, spec_use, status_use, max
 			},
 		)),
@@ -302,11 +304,12 @@ func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
 	return metrics, reg
 }
 
-func makePerVMMetricsLabels(namespace string, vmName string, endpointID string, valueType vmResourceValueType) prometheus.Labels {
+func makePerVMMetricsLabels(namespace string, vmName string, endpointID string, projectID string, valueType vmResourceValueType) prometheus.Labels {
 	return prometheus.Labels{
 		"vm_namespace": namespace,
 		"vm_name":      vmName,
 		"endpoint_id":  endpointID,
+		"project_id":   projectID,
 		"value":        string(valueType),
 	}
 }
