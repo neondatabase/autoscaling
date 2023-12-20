@@ -384,44 +384,6 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 	return nil
 }
 
-func QmpPlugMemoryToRunner(ip string, port int32, size int64) error {
-	memoryDevices, err := QmpQueryMemoryDevices(ip, port)
-	if err != nil {
-		return err
-	}
-	plugged := int32(len(memoryDevices))
-
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
-		return err
-	}
-	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
-
-	// add memdev object for next slot
-	// firstly check if such object already present to avoid repeats
-	cmd := []byte(fmt.Sprintf(`{"execute": "qom-list", "arguments": {"path": "/objects/memslot%d"}}`, plugged+1))
-	_, err = mon.Run(cmd)
-	if err != nil {
-		// that mean such object wasn't found, let's add it
-		cmd = []byte(fmt.Sprintf(`{"execute": "object-add", "arguments": {"id": "memslot%d", "size": %d, "qom-type": "memory-backend-ram"}}`, plugged+1, size))
-		_, err = mon.Run(cmd)
-		if err != nil {
-			return err
-		}
-	}
-	// now add pc-dimm device
-	cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "dimm%d", "driver": "pc-dimm", "memdev": "memslot%d"}}`, plugged+1, plugged+1))
-	_, err = mon.Run(cmd)
-	if err != nil {
-		// device_add command failed... so try remove object that we just created
-		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, plugged+1))
-		mon.Run(cmd) //nolint:errcheck // already have one error, ignoring the second.
-		return err
-	}
-
-	return nil
-}
-
 func QmpUnplugMemory(ip string, port int32) error {
 	memoryDevices, err := QmpQueryMemoryDevices(ip, port)
 	if err != nil {
