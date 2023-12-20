@@ -1113,6 +1113,9 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 				Ports: []corev1.ContainerPort{{
 					ContainerPort: virtualmachine.Spec.QMP,
 					Name:          "qmp",
+				}, {
+					ContainerPort: virtualmachine.Spec.QMPManual,
+					Name:          "qmp-manual",
 				}},
 				Command: []string{
 					"runner",
