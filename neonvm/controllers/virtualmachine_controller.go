@@ -435,9 +435,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			var currentCPUUsage vmv1.MilliCPU
 			if supportsCgroup {
 				if cgroupUsage.VCPUs.RoundedUp() != pluggedCPU {
-					// Only report the mismatch here. We will resolve it in the
-					// next reconcile iteration loops.
-					log.Info("Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
+					// This is not expected but it's fine. We only report the
+					// mismatch here and will resolve it in the next reconcile
+					// iteration loops.
+					log.Error(nil, "Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
 						"VirtualMachine", virtualmachine.Name,
 						"Runner Pod", vmRunner.Name,
 						"plugged CPUs", pluggedCPU,
