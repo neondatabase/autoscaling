@@ -50,6 +50,8 @@ const (
 	// Changes from v1.1:
 	//
 	// * Supports fractional CPU
+	//
+	// Last used in release version v0.19.x.
 	PluginProtoV2_0
 
 	// PluginProtoV2_1 represents v2.1 of the agent<->scheduler plugin protocol.
