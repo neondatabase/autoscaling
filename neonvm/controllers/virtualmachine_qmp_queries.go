@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +57,15 @@ type QmpMemoryDevice struct {
 		Node         int64  `json:"node"`
 		Id           string `json:"id"`
 	} `json:"data"`
+}
+
+type QmpObjects struct {
+	Return []QmpObject `json:"return"`
+}
+
+type QmpObject struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type QmpMigrationInfo struct {
@@ -269,6 +279,91 @@ func QmpQueryMemoryDevices(ip string, port int32) ([]QmpMemoryDevice, error) {
 	return result.Return, nil
 }
 
+// MemslotIdxFromName takes "/objects/memslot3" and returns 3
+func MemslotIdxFromName(name string) (int, error) {
+	idxStr := strings.TrimPrefix(name, "/objects/memslot")
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		// doesn't reference `err`, because we don't know the actual issue
+		return 0, fmt.Errorf("failed to parse memory device id: %q", name)
+	}
+	return idx, nil
+}
+
+func QmpQueryMemoryBackendIds(mon *qmp.SocketMonitor) (map[int]struct{}, error) {
+	cmd := []byte(`{"execute": "qom-list", "arguments": {"path": "/objects"}}`)
+	raw, err := mon.Run(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	var result QmpObjects
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("error unmarshaling json: %w", err)
+	}
+	backends := map[int]struct{}{}
+	for _, o := range result.Return {
+		if o.Name == "pc.ram" { // Non-hotplugged memory
+			continue
+		}
+		if o.Type != "child<memory-backend-ram>" {
+			continue
+		}
+
+		idx, err := MemslotIdxFromName(o.Name)
+		if err != nil {
+			return nil, err
+		}
+		backends[idx] = struct{}{}
+	}
+	return backends, nil
+}
+
+// QmpAddMemoryBackend adds a single memory slot to the VM with the given size.
+//
+// The memory slot does nothing until a corresponding "device" is added to the VM for the same memory slot.
+// See QmpAddMemoryDevice for more.
+// When unplugging, QmpDelMemoryDevice must be called before QmpDelMemoryBackend.
+func QmpAddMemoryBackend(mon *qmp.SocketMonitor, idx int, sizeBytes int64) error {
+	cmd := []byte(fmt.Sprintf(
+		`{"execute": "object-add",
+		  "arguments": {"id": "memslot%d",
+						"size": %d,
+						"qom-type": "memory-backend-ram"}}`, idx, sizeBytes,
+	))
+	_, err := mon.Run(cmd)
+	return err
+}
+
+func QmpDelMemoryBackend(mon *qmp.SocketMonitor, idx int) error {
+	cmd := []byte(fmt.Sprintf(
+		`{"execute": "object-del",
+		  "arguments": {"id": "memslot%d"}}`, idx,
+	))
+	_, err := mon.Run(cmd)
+	return err
+}
+
+func QmpAddMemoryDevice(mon *qmp.SocketMonitor, idx int) error {
+	cmd := []byte(fmt.Sprintf(
+		`{"execute": "device_add",
+		  "arguments": {"id": "dimm%d",
+						"driver": "pc-dimm",
+						"memdev": "memslot%d"}}`, idx, idx,
+	))
+	_, err := mon.Run(cmd)
+	return err
+}
+
+func QmpDelMemoryDevice(mon *qmp.SocketMonitor, idx int) error {
+	cmd := []byte(fmt.Sprintf(
+		`{"execute": "device_del",
+		  "arguments": {"id": "dimm%d"}}`, idx,
+	))
+	_, err := mon.Run(cmd)
+	return err
+}
+
 func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	// slots - number of pluggable memory slots (Max - Min)
 	slots := *virtualmachine.Spec.Guest.MemorySlots.Max - *virtualmachine.Spec.Guest.MemorySlots.Min
@@ -291,29 +386,28 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	// try to find empty slot
-	var slot int32
-	for slot = 1; slot <= slots; slot++ {
-		cmd := []byte(fmt.Sprintf(`{"execute": "qom-list", "arguments": {"path": "/objects/memslot%d"}}`, slot))
-		_, err = mon.Run(cmd)
-		if err != nil {
+	backends, err := QmpQueryMemoryBackendIds(mon)
+	if err != nil {
+		return err
+	}
+	var slot int
+	for slot = 1; slot <= int(slots); slot++ {
+		_, ok := backends[slot]
+		if !ok {
 			// that mean such object wasn't found, or by other words slot is empty
 			break
 		}
 	}
 
-	// add memdev object
-	cmd := []byte(fmt.Sprintf(`{"execute": "object-add", "arguments": {"id": "memslot%d", "size": %d, "qom-type": "memory-backend-ram"}}`, slot, virtualmachine.Spec.Guest.MemorySlotSize.Value()))
-	_, err = mon.Run(cmd)
+	err = QmpAddMemoryBackend(mon, slot, virtualmachine.Spec.Guest.MemorySlotSize.Value())
 	if err != nil {
 		return err
 	}
 	// now add pc-dimm device
-	cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "dimm%d", "driver": "pc-dimm", "memdev": "memslot%d"}}`, slot, slot))
-	_, err = mon.Run(cmd)
+	err = QmpAddMemoryDevice(mon, slot)
 	if err != nil {
 		// device_add command failed... so try remove object that we just created
-		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, slot))
-		mon.Run(cmd) //nolint:errcheck // already have one error, ignoring the second.
+		_ = QmpDelMemoryBackend(mon, slot)
 		return err
 	}
 
@@ -350,33 +444,19 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 			continue
 		}
 		// add memdev object
-		memdevId := strings.ReplaceAll(m.Data.Memdev, "/objects/", "")
-		cmd := []byte(fmt.Sprintf(`{
-			"execute": "object-add",
-			"arguments": {
-				"id": %q,
-				"size": %d,
-				"qom-type": "memory-backend-ram"
-			}
-		}`, memdevId, m.Data.Size))
-		_, err = target.Run(cmd)
+		memdevIdx, err := MemslotIdxFromName(m.Data.Memdev)
+		if err != nil {
+			return err
+		}
+		err = QmpAddMemoryBackend(target, memdevIdx, m.Data.Size)
 		if err != nil {
 			return err
 		}
 		// now add pc-dimm device
-		cmd = []byte(fmt.Sprintf(`{
-			"execute": "device_add",
-			"arguments": {
-				"id": %q,
-				"driver": "pc-dimm",
-				"memdev": "%s"
-			}
-		}`, m.Data.Id, memdevId))
-		_, err = target.Run(cmd)
+		err = QmpAddMemoryDevice(target, memdevIdx)
 		if err != nil {
 			// device_add command failed... so try remove object that we just created
-			cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": %q}}`, m.Data.Memdev))
-			target.Run(cmd) //nolint:errcheck // already have one error, ignoring the second.
+			_ = QmpDelMemoryBackend(target, memdevIdx)
 			return err
 		}
 	}
@@ -405,8 +485,12 @@ func QmpUnplugMemory(ip string, port int32) error {
 	var merr error
 	for i = plugged - 1; i >= 0; i-- {
 		// remove pc-dimm device
-		cmd := []byte(fmt.Sprintf(`{"execute": "device_del", "arguments": {"id": %q}}`, memoryDevices[i].Data.Id))
-		_, err = mon.Run(cmd)
+		idx, err := MemslotIdxFromName(memoryDevices[i].Data.Memdev)
+		if err != nil {
+			merr = errors.Join(merr, err)
+			continue
+		}
+		err = QmpDelMemoryDevice(mon, idx)
 		if err != nil {
 			merr = errors.Join(merr, err)
 			continue
@@ -415,11 +499,7 @@ func QmpUnplugMemory(ip string, port int32) error {
 		time.Sleep(time.Second)
 
 		// remove corresponding memdev object
-		cmd = []byte(fmt.Sprintf(`{
-			"execute": "object-del",
-			"arguments": {"id": %q}
-		}`, strings.ReplaceAll(memoryDevices[i].Data.Memdev, "/objects/", "")))
-		_, err = mon.Run(cmd)
+		err = QmpDelMemoryBackend(mon, idx)
 		if err != nil {
 			merr = errors.Join(merr, err)
 			continue
