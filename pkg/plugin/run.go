@@ -22,12 +22,12 @@ const (
 	ContentTypeError string = "text/plain"
 )
 
-// The scheduler plugin currently supports v1.0 to v2.1 of the agent<->scheduler plugin protocol.
+// The scheduler plugin currently supports v1.0 to v3.0 of the agent<->scheduler plugin protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV2_1
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
@@ -197,23 +197,31 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	resp := api.PluginResponse{
 		Permit:      permit,
 		Migrate:     migrateDecision,
-		ComputeUnit: getComputeUnitForResponse(e.state.conf.ComputeUnit, supportsFractionalCPU),
+		ComputeUnit: getComputeUnitForResponse(e.state.conf.ComputeUnit, req.ProtoVersion),
 	}
 	pod.mostRecentComputeUnit = &e.state.conf.ComputeUnit
 	return &resp, 200, nil
 }
 
 // getComputeUnitForResponse tries to return compute unit that the agent supports
-// if we have a fractional CPU but the agent does not support it we multiply the result
-func getComputeUnitForResponse(computeUnit api.Resources, supportsFractional bool) api.Resources {
-	if !supportsFractional {
+//
+// If the plugin is not supposed to send a compute unit in this version of the protocol, then we
+// return nil.
+// Else if our compute unit has a fractional CPU but the agent doesn't support that, we multiply the
+// result until it's no longer fractional.
+func getComputeUnitForResponse(computeUnit api.Resources, protoVersion api.PluginProtoVersion) *api.Resources {
+	if !protoVersion.PluginSendsComputeUnit() {
+		return nil
+	}
+
+	if !protoVersion.SupportsFractionalCPU() {
 		initialCU := computeUnit
 		for i := uint16(2); computeUnit.VCPU%1000 != 0; i++ {
 			computeUnit = initialCU.Mul(i)
 		}
 	}
 
-	return computeUnit
+	return &computeUnit
 }
 
 func (e *AutoscaleEnforcer) handleResources(

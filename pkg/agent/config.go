@@ -66,6 +66,9 @@ type DumpStateConfig struct {
 
 // ScalingConfig defines the scheduling we use for scaling up and down
 type ScalingConfig struct {
+	// ComputeUnit is the desired ratio between CPU and memory that the autoscaler-agent should
+	// uphold when making changes to a VM
+	ComputeUnit api.Resources `json:"computeUnit"`
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous

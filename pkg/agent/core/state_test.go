@@ -105,6 +105,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				ScalingEnabled: true,
 			},
 			core.Config{
+				ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
 				DefaultScalingConfig: api.ScalingConfig{
 					LoadAverageFractionTarget: 0.5,
 					MemoryUsageFractionTarget: 0.5,
@@ -127,20 +128,18 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			},
 		)
 
-		computeUnit := api.Resources{VCPU: 250, Mem: 1}
-
 		t.Run(c.name, func(t *testing.T) {
 			// set the metrics
 			state.UpdateMetrics(c.metrics)
 
 			now := time.Now()
 
-			// set the compute unit and lastApproved by simulating a scheduler request/response
+			// set lastApproved by simulating a scheduler request/response
 			state.Plugin().StartingRequest(now, c.schedulerApproved)
 			err := state.Plugin().RequestSuccessful(now, api.PluginResponse{
 				Permit:      c.schedulerApproved,
 				Migrate:     nil,
-				ComputeUnit: computeUnit,
+				ComputeUnit: nil,
 			})
 			if err != nil {
 				t.Errorf("state.Plugin().RequestSuccessful() failed: %s", err)
@@ -178,6 +177,7 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 		MaxCU: 4,
 	},
 	Core: core.Config{
+		ComputeUnit: DefaultComputeUnit,
 		DefaultScalingConfig: api.ScalingConfig{
 			LoadAverageFractionTarget: 0.5,
 			MemoryUsageFractionTarget: 0.5,
@@ -207,25 +207,22 @@ func doInitialPluginRequest(
 	state *core.State,
 	clock *helpers.FakeClock,
 	requestTime time.Duration,
-	computeUnit api.Resources,
 	metrics *api.Metrics,
 	resources api.Resources,
 ) {
-	a.WithWarnings("Can't determine desired resources because compute unit hasn't been set yet").
-		Call(state.NextActions, clock.Now()).
-		Equals(core.ActionSet{
-			PluginRequest: &core.ActionPluginRequest{
-				LastPermit: nil,
-				Target:     resources,
-				Metrics:    metrics,
-			},
-		})
+	a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit: nil,
+			Target:     resources,
+			Metrics:    metrics,
+		},
+	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resources)
 	clock.Inc(requestTime)
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resources,
 		Migrate:     nil,
-		ComputeUnit: computeUnit,
+		ComputeUnit: nil,
 	})
 }
 
@@ -263,7 +260,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(1))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
 
 	// Set metrics
 	clockTick().AssertEquals(duration("0.2s"))
@@ -294,7 +291,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(2),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 
 	// Scheduler approval is done, now we should be making the request to NeonVM
@@ -403,7 +400,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(1),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 
 	// Finally, check there's no leftover actions:
@@ -441,7 +438,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	reqEvery := DefaultInitialStateConfig.Core.PluginRequestTick
 	endTime := duration("20s")
 
-	doInitialPluginRequest(a, state, clock, clockTick, DefaultComputeUnit, &metrics, resources)
+	doInitialPluginRequest(a, state, clock, clockTick, &metrics, resources)
 
 	for clock.Elapsed().Duration < endTime {
 		timeSinceScheduledRequest := (clock.Elapsed().Duration - base) % reqEvery
@@ -467,7 +464,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 			a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 				Permit:      resources,
 				Migrate:     nil,
-				ComputeUnit: DefaultComputeUnit,
+				ComputeUnit: nil,
 			})
 			clock.Inc(clockTick - reqDuration)
 		}
@@ -504,7 +501,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 
 	state.Monitor().Active(true)
 
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(6))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(6))
 
 	// Set metrics
 	clockTick().AssertEquals(duration("0.2s"))
@@ -639,7 +636,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(3),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 	// ... And *now* there's nothing left to do but wait until downscale wait expires:
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -701,7 +698,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(3),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("0.9s")}, // yep, still waiting on retrying vm-monitor downscaling
@@ -754,7 +751,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(1),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 	// And now there's truly nothing left to do. Back to waiting on plugin request tick :)
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -786,7 +783,7 @@ func TestRequestedUpscale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(1))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
 
 	// Set metrics
 	clockTick()
@@ -821,7 +818,7 @@ func TestRequestedUpscale(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(2),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 
 	// After approval from the scheduler plugin, now need to make NeonVM request:
@@ -873,7 +870,7 @@ func TestRequestedUpscale(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(2),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 
 	// Still should just be waiting on vm-monitor upscale expiring
@@ -1018,7 +1015,7 @@ func TestDownscalePivotBack(t *testing.T) {
 				a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 					Permit:      resForCU(1),
 					Migrate:     nil,
-					ComputeUnit: DefaultComputeUnit,
+					ComputeUnit: nil,
 				})
 			},
 			post: func(pluginWait *time.Duration) {
@@ -1037,7 +1034,7 @@ func TestDownscalePivotBack(t *testing.T) {
 				a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 					Permit:      resForCU(2),
 					Migrate:     nil,
-					ComputeUnit: DefaultComputeUnit,
+					ComputeUnit: nil,
 				})
 			},
 		},
@@ -1057,7 +1054,7 @@ func TestDownscalePivotBack(t *testing.T) {
 
 		state.Monitor().Active(true)
 
-		doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(2))
+		doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
 
 		clockTick().AssertEquals(duration("0.2s"))
 		pluginWait := duration("4.8s")
@@ -1111,7 +1108,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(2))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
 
 	clockTick()
 
@@ -1176,7 +1173,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(1),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 	// And then, we shouldn't need to do anything else:
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -1207,7 +1204,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(2))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
 
 	clockTick()
 
@@ -1248,7 +1245,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(3),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 	// Do NeonVM request for the upscaling
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -1305,7 +1302,7 @@ func TestFailedRequestRetry(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(1))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
 
 	// Set metrics so that we should be trying to upscale
 	clockTick()
@@ -1348,7 +1345,7 @@ func TestFailedRequestRetry(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(2),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 
 	// Now, after plugin request is successful, we should be making a request to NeonVM.
@@ -1418,7 +1415,23 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	}
 
 	// Send initial scheduler request - without the monitor active, so we're stuck at 4 CU for now
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), DefaultComputeUnit, nil, resForCU(4))
+	a.
+		WithWarnings("Wanted to send vm-monitor downscale request, but there's no active connection").
+		Call(state.NextActions, clock.Now()).
+		Equals(core.ActionSet{
+			PluginRequest: &core.ActionPluginRequest{
+				LastPermit: nil,
+				Target:     resForCU(4),
+				Metrics:    nil,
+			},
+		})
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(4))
+	clockTick()
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+		Permit:      resForCU(4),
+		Migrate:     nil,
+		ComputeUnit: nil,
+	})
 
 	clockTick()
 
@@ -1517,7 +1530,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(2),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 	// Still waiting for NeonVM request to complete
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -1543,7 +1556,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
 		Permit:      resForCU(1),
 		Migrate:     nil,
-		ComputeUnit: DefaultComputeUnit,
+		ComputeUnit: nil,
 	})
 	// Nothing left to do
 	a.Call(nextActions).Equals(core.ActionSet{
