@@ -281,20 +281,37 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
-	memorySlotsToBytes := func(m int32) int64 {
-		return vm.Spec.Guest.MemorySlotSize.Value() * int64(m)
-	}
+	if vm.Spec.Guest.Memory != nil {
+		// metrics from spec
+		specPairs := []pair[vmResourceValueType, *resource.Quantity]{
+			{vmResourceValueSpecMin, vm.Spec.Guest.Memory.Min},
+			{vmResourceValueSpecMax, vm.Spec.Guest.Memory.Max},
+			{vmResourceValueSpecUse, vm.Spec.Guest.Memory.Use},
+		}
 
-	// metrics from spec
-	specPairs := []pair[vmResourceValueType, *int32]{
-		{vmResourceValueSpecMin, vm.Spec.Guest.MemorySlots.Min},
-		{vmResourceValueSpecMax, vm.Spec.Guest.MemorySlots.Max},
-		{vmResourceValueSpecUse, vm.Spec.Guest.MemorySlots.Use},
-	}
-	for _, p := range specPairs {
-		if p.second != nil {
-			m := makeVMMetric(vm, p.first, float64(memorySlotsToBytes(*p.second)))
-			metrics = append(metrics, m)
+		for _, p := range specPairs {
+			if p.second != nil {
+				m := makeVMMetric(vm, p.first, float64(p.second.Value()))
+				metrics = append(metrics, m)
+			}
+		}
+	} else {
+		memorySlotsToBytes := func(m int32) int64 {
+			return vm.Spec.Guest.MemorySlotSize.Value() * int64(m)
+		}
+
+		// metrics from spec
+		specPairs := []pair[vmResourceValueType, *int32]{
+			{vmResourceValueSpecMin, vm.Spec.Guest.MemorySlots.Min},
+			{vmResourceValueSpecMax, vm.Spec.Guest.MemorySlots.Max},
+			{vmResourceValueSpecUse, vm.Spec.Guest.MemorySlots.Use},
+		}
+
+		for _, p := range specPairs {
+			if p.second != nil {
+				m := makeVMMetric(vm, p.first, float64(memorySlotsToBytes(*p.second)))
+				metrics = append(metrics, m)
+			}
 		}
 	}
 

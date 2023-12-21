@@ -126,10 +126,12 @@ type Guest struct {
 	// +optional
 	CPUs CPUs `json:"cpus"`
 	// +optional
-	// +kubebuilder:default:="1Gi"
-	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
+	Memory *Memory `json:"memory,omitempty"`
 	// +optional
-	MemorySlots MemorySlots `json:"memorySlots"`
+	// +kubebuilder:default:="1Gi"
+	MemorySlotSize resource.Quantity `json:"memorySlotSize,omitempty"`
+	// +optional
+	MemorySlots *MemorySlots `json:"memorySlots,omitempty"`
 	// +optional
 	RootDisk RootDisk `json:"rootDisk"`
 	// Docker image Entrypoint array replacement.
@@ -235,6 +237,16 @@ func (m MilliCPU) Format(state fmt.State, verb rune) {
 	default:
 		state.Write([]byte(fmt.Sprintf("%v", m.AsFloat64())))
 	}
+}
+
+type Memory struct {
+	// +optional
+	// +kubebuilder:default:="1Gi"
+	Min *resource.Quantity `json:"min"`
+	// +optional
+	Max *resource.Quantity `json:"max,omitempty"`
+	// +optional
+	Use *resource.Quantity `json:"use,omitempty"`
 }
 
 type MemorySlots struct {
@@ -382,6 +394,8 @@ type VirtualMachineStatus struct {
 	Node string `json:"node,omitempty"`
 	// +optional
 	CPUs *MilliCPU `json:"cpus,omitempty"`
+	// +optional
+	MemoryRequested *resource.Quantity `json:"memoryRequested,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 }

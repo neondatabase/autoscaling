@@ -508,10 +508,18 @@ func main() {
 	}
 
 	memory := []string{}
-	memory = append(memory, fmt.Sprintf("size=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Min)))
-	if vmSpec.Guest.MemorySlots.Max != nil {
-		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
-		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
+	if vmSpec.Guest.Memory != nil {
+		memory = append(memory, fmt.Sprintf("size=%db", vmSpec.Guest.Memory.Min.Value()))
+		if vmSpec.Guest.Memory.Max != nil {
+			memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.Memory.Max.Value()))
+		}
+
+	} else {
+		memory = append(memory, fmt.Sprintf("size=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Min)))
+		if vmSpec.Guest.MemorySlots.Max != nil {
+			memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
+			memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
+		}
 	}
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
@@ -606,6 +614,11 @@ func main() {
 
 	// memory details
 	qemuCmd = append(qemuCmd, "-m", strings.Join(memory, ","))
+	if vmSpec.Guest.Memory != nil {
+		virtioMemSize := vmSpec.Guest.Memory.Max.Value() - vmSpec.Guest.Memory.Min.Value()
+		qemuCmd = append(qemuCmd, "-object", fmt.Sprintf("memory-backend-ram,id=vmem0,size=%db", virtioMemSize))
+		qemuCmd = append(qemuCmd, "-device", "virtio-mem-pci,id=vm0,memdev=vmem0,block-size=8M,requested-size=0")
+	}
 
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)

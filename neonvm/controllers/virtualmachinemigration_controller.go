@@ -287,12 +287,14 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			}
 			log.Info("CPUs in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 
-			// do hotplug Memory in targetRunner
-			log.Info("Syncing Memory in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
-			if err := QmpSyncMemoryToTarget(vm, migration); err != nil {
-				return ctrl.Result{}, err
+			if vm.Spec.Guest.Memory == nil {
+				// do hotplug Memory in targetRunner
+				log.Info("Syncing Memory in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
+				if err := QmpSyncMemoryToTarget(vm, migration); err != nil {
+					return ctrl.Result{}, err
+				}
+				log.Info("Memory in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 			}
-			log.Info("Memory in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 
 			// Migrate only running VMs to target with plugged devices
 			if vm.Status.Phase == vmv1.VmPreMigrating {

@@ -452,6 +452,26 @@ func QmpGetMemorySize(ip string, port int32) (*resource.Quantity, error) {
 	return resource.NewQuantity(result.Return.BaseMemory+result.Return.PluggedMemory, resource.BinarySI), nil
 }
 
+func QmpResizeVirtioMem(virtualmachine *vmv1.VirtualMachine) error {
+	// calculate real requested size
+	virtioMemSize := virtualmachine.Spec.Guest.Memory.Use.Value() - virtualmachine.Spec.Guest.Memory.Min.Value()
+
+	mon, err := QmpConnect(QmpAddr(virtualmachine))
+	if err != nil {
+		return err
+	}
+	defer mon.Disconnect()
+
+	// resize virtio-mem
+	cmd := []byte(fmt.Sprintf(`{"execute": "qom-set", "arguments": {"path": "vm0", "property": "requested-size", "value": %d}}`, virtioMemSize))
+	_, err = mon.Run(cmd)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigration *vmv1.VirtualMachineMigration) error {
 
 	// QMP port

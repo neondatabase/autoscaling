@@ -466,6 +466,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 						virtualmachine.Name,
 						virtualmachine.Status.MemorySize))
 			}
+			// initial update .status.memoryRequested if it absent
+			if virtualmachine.Spec.Guest.Memory != nil && virtualmachine.Status.MemoryRequested == nil {
+				virtualmachine.Status.MemoryRequested = virtualmachine.Spec.Guest.Memory.Min
+			}
 
 			// check if need hotplug/unplug CPU or memory
 			// compare guest spec and count of plugged
@@ -475,12 +479,31 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use.RoundedUp())
 				virtualmachine.Status.Phase = vmv1.VmScaling
 			}
-			memorySizeFromSpec := resource.NewQuantity(int64(*virtualmachine.Spec.Guest.MemorySlots.Use)*virtualmachine.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
-			if !memorySize.Equal(*memorySizeFromSpec) {
-				log.Info("VM goes into scale mode, need to resize Memory",
-					"Memory on board", memorySize,
-					"Memory in spec", memorySizeFromSpec)
-				virtualmachine.Status.Phase = vmv1.VmScaling
+			memorySizeFromSpec := new(resource.Quantity)
+			if virtualmachine.Spec.Guest.Memory != nil {
+				// just get memory from spec
+				memorySizeFromSpec = virtualmachine.Spec.Guest.Memory.Use
+			} else {
+				// calculate memory from memorySlots
+				memorySizeFromSpec = resource.NewQuantity(int64(*virtualmachine.Spec.Guest.MemorySlots.Use)*virtualmachine.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
+			}
+
+			if virtualmachine.Spec.Guest.Memory != nil {
+				// virtio-mem
+				if !virtualmachine.Status.MemoryRequested.Equal(*memorySizeFromSpec) {
+					log.Info("VM goes into scale mode, need to resize Memory",
+						"Memory requested", *virtualmachine.Status.MemoryRequested,
+						"Memory in spec", memorySizeFromSpec)
+					virtualmachine.Status.Phase = vmv1.VmScaling
+				}
+			} else {
+				// plugable DIMM
+				if !memorySize.Equal(*memorySizeFromSpec) {
+					log.Info("VM goes into scale mode, need to resize Memory",
+						"Memory on board", memorySize,
+						"Memory in spec", memorySizeFromSpec)
+					virtualmachine.Status.Phase = vmv1.VmScaling
+				}
 			}
 
 		case corev1.PodSucceeded:
@@ -600,57 +623,93 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			cpuScaled = true
 		}
 
-		// do hotplug/unplug Memory
-		// firstly get current state from QEMU
-		memoryDevices, err := QmpQueryMemoryDevices(QmpAddr(virtualmachine))
-		memoryPluggedSlots := *virtualmachine.Spec.Guest.MemorySlots.Min + int32(len(memoryDevices))
-		if err != nil {
-			log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
-			return err
-		}
-		// compare guest spec and count of plugged
-		if *virtualmachine.Spec.Guest.MemorySlots.Use > memoryPluggedSlots {
-			// going to plug one Memory Slot
-			log.Info("Plug one more Memory module into VM")
-			if err := QmpPlugMemory(virtualmachine); err != nil {
-				return err
-			}
-			r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
-				fmt.Sprintf("One more DIMM was plugged into VM %s",
-					virtualmachine.Name))
-		} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
-			// going to unplug one Memory Slot
-			log.Info("Unplug one Memory module from VM")
-			if err := QmpUnplugMemory(QmpAddr(virtualmachine)); err != nil {
-				// special case !
-				// error means VM hadn't memory devices available for unplug
-				// need set .memorySlots.Use back to real value
-				log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
-				// firstly re-fetch VM
-				if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
-					log.Error(err, "Unable to re-fetch VirtualMachine")
-					return err
+		if virtualmachine.Spec.Guest.Memory != nil {
+			// working with virtio-mem device
+			if virtualmachine.Spec.Guest.Memory.Use.Equal(*virtualmachine.Status.MemorySize) {
+				// compare .use and .requested, may be we already requested virtio-mem resize ?
+				if virtualmachine.Spec.Guest.Memory.Use.Equal(*virtualmachine.Status.MemoryRequested) {
+					// .use == real size == .requested, noting to do
+					ramScaled = true
+				} else {
+					// .use == real size, but .requested not ? fix .requested
+					virtualmachine.Status.MemoryRequested = virtualmachine.Spec.Guest.Memory.Use
+					r.Recorder.Event(virtualmachine, "Normal", "MemoryInfo",
+						fmt.Sprintf("VirtualMachine %s reuested to use %v memory",
+							virtualmachine.Name,
+							virtualmachine.Spec.Guest.Memory.Use))
 				}
-				memorySlotsUseInSpec := *virtualmachine.Spec.Guest.MemorySlots.Use
-				virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
-				if err := r.tryUpdateVM(ctx, virtualmachine); err != nil {
-					log.Error(err,
-						"Failed to update .spec.guest.memorySlots.use",
-						"old value", memorySlotsUseInSpec,
-						"new value", memoryPluggedSlots)
-					return err
-				}
-				r.Recorder.Event(virtualmachine, "Warning", "ScaleDown",
-					fmt.Sprintf("Unable unplug DIMM from VM %s, all memory devices are busy",
-						virtualmachine.Name))
 			} else {
-				r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
-					fmt.Sprintf("One DIMM was unplugged from VM %s",
-						virtualmachine.Name))
+				// we have drift between .use and real memory size
+				// compare .use and .requested, may be we already requested virtio-mem resize ?
+				if virtualmachine.Spec.Guest.Memory.Use.Equal(*virtualmachine.Status.MemoryRequested) {
+					// yes, seems already requested
+					ramScaled = true
+				} else {
+					// request resize
+					log.Info("Resize virtio-mem device")
+					if err := QmpResizeVirtioMem(virtualmachine); err != nil {
+						return err
+					}
+					virtualmachine.Status.MemoryRequested = virtualmachine.Spec.Guest.Memory.Use
+					r.Recorder.Event(virtualmachine, "Normal", "MemoryInfo",
+						fmt.Sprintf("VirtualMachine %s reuested to use %v memory",
+							virtualmachine.Name,
+							virtualmachine.Spec.Guest.Memory.Use))
+				}
 			}
 		} else {
-			// seems already plugged correctly
-			ramScaled = true
+			// working with do pluggable Memory
+			// firstly get current state from QEMU
+			memoryDevices, err := QmpQueryMemoryDevices(QmpAddr(virtualmachine))
+			memoryPluggedSlots := *virtualmachine.Spec.Guest.MemorySlots.Min + int32(len(memoryDevices))
+			if err != nil {
+				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+			// compare guest spec and count of plugged
+			if *virtualmachine.Spec.Guest.MemorySlots.Use > memoryPluggedSlots {
+				// going to plug one Memory Slot
+				log.Info("Plug one more Memory module into VM")
+				if err := QmpPlugMemory(virtualmachine); err != nil {
+					return err
+				}
+				r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
+					fmt.Sprintf("One more DIMM was plugged into VM %s",
+						virtualmachine.Name))
+			} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
+				// going to unplug one Memory Slot
+				log.Info("Unplug one Memory module from VM")
+				if err := QmpUnplugMemory(QmpAddr(virtualmachine)); err != nil {
+					// special case !
+					// error means VM hadn't memory devices available for unplug
+					// need set .memorySlots.Use back to real value
+					log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
+					// firstly re-fetch VM
+					if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
+						log.Error(err, "Unable to re-fetch VirtualMachine")
+						return err
+					}
+					memorySlotsUseInSpec := *virtualmachine.Spec.Guest.MemorySlots.Use
+					virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
+					if err := r.tryUpdateVM(ctx, virtualmachine); err != nil {
+						log.Error(err,
+							"Failed to update .spec.guest.memorySlots.use",
+							"old value", memorySlotsUseInSpec,
+							"new value", memoryPluggedSlots)
+						return err
+					}
+					r.Recorder.Event(virtualmachine, "Warning", "ScaleDown",
+						fmt.Sprintf("Unable unplug DIMM from VM %s, all memory devices are busy",
+							virtualmachine.Name))
+				} else {
+					r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
+						fmt.Sprintf("One DIMM was unplugged from VM %s",
+							virtualmachine.Name))
+				}
+			} else {
+				// seems already plugged correctly
+				ramScaled = true
+			}
 		}
 
 		// set VM phase to running if everything scaled
@@ -854,13 +913,21 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 }
 
 func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
+	usage := vmv1.VirtualMachineUsage{}
+
 	cpu := *spec.Guest.CPUs.Use
 
-	memorySlots := *spec.Guest.MemorySlots.Use
-
-	usage := vmv1.VirtualMachineUsage{
-		CPU:    cpu.ToResourceQuantity(),
-		Memory: resource.NewQuantity(spec.Guest.MemorySlotSize.Value()*int64(memorySlots), resource.BinarySI),
+	if spec.Guest.Memory != nil {
+		usage = vmv1.VirtualMachineUsage{
+			CPU:    cpu.ToResourceQuantity(),
+			Memory: spec.Guest.Memory.Use,
+		}
+	} else {
+		memorySlots := *spec.Guest.MemorySlots.Use
+		usage = vmv1.VirtualMachineUsage{
+			CPU:    cpu.ToResourceQuantity(),
+			Memory: resource.NewQuantity(spec.Guest.MemorySlotSize.Value()*int64(memorySlots), resource.BinarySI),
+		}
 	}
 
 	usageJSON, err := json.Marshal(usage)
