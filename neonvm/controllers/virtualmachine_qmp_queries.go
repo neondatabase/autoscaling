@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +10,11 @@ import (
 	"time"
 
 	"github.com/digitalocean/go-qemu/qmp"
+	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/client-go/tools/record"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
@@ -267,21 +271,27 @@ func QmpQueryMemoryDevices(ip string, port int32) ([]QmpMemoryDevice, error) {
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
-	var result QmpMemoryDevices
+	return QmpMonQueryMemoryDevices(mon)
+}
+
+func QmpMonQueryMemoryDevices(mon *qmp.SocketMonitor) ([]QmpMemoryDevice, error) {
 	cmd := []byte(`{"execute": "query-memory-devices"}`)
 	raw, err := mon.Run(cmd)
 	if err != nil {
 		return nil, err
 	}
+
+	var result QmpMemoryDevices
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("error unmarshaling json: %w", err)
 	}
 	return result.Return, nil
 }
 
-// MemslotIdxFromName takes "/objects/memslot3" and returns 3
+// MemslotIdxFromName takes "/objects/memslot3" or "memslot3 and returns 3
 func MemslotIdxFromName(name string) (int, error) {
-	idxStr := strings.TrimPrefix(name, "/objects/memslot")
+	name = strings.TrimPrefix(name, "/objects/")
+	idxStr := strings.TrimPrefix(name, "memslot")
 	idx, err := strconv.Atoi(idxStr)
 	if err != nil {
 		// doesn't reference `err`, because we don't know the actual issue
@@ -364,54 +374,296 @@ func QmpDelMemoryDevice(mon *qmp.SocketMonitor, idx int) error {
 	return err
 }
 
-func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
-	// slots - number of pluggable memory slots (Max - Min)
-	slots := *virtualmachine.Spec.Guest.MemorySlots.Max - *virtualmachine.Spec.Guest.MemorySlots.Min
+type QmpMemorySetter struct {
+	vm        *vmv1.VirtualMachine
+	targetCnt int
+	recorder  record.EventRecorder
+	log       logr.Logger
 
-	memoryDevices, err := QmpQueryMemoryDevices(QmpAddr(virtualmachine))
+	mon         *qmp.SocketMonitor
+	memBackends map[int]bool // idx -> is active
+	maxBackend  int          // stores the max idx that was discovered to added.
+	// Is needed to know where to start deletion
+
+	memDevCount int
+	errs        []error
+}
+
+func (r *QmpMemorySetter) buildState() error {
+	memDevs, err := QmpMonQueryMemoryDevices(r.mon)
 	if err != nil {
 		return err
 	}
+	r.memDevCount = len(memDevs)
 
-	// check if available mmory slots present
-	plugged := int32(len(memoryDevices))
-	if plugged >= slots {
-		return errors.New("no empty slots for Memory hotplug")
-	}
-
-	mon, err := QmpConnect(QmpAddr(virtualmachine))
-	if err != nil {
-		return err
-	}
-	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
-
-	// try to find empty slot
-	backends, err := QmpQueryMemoryBackendIds(mon)
-	if err != nil {
-		return err
-	}
-	var slot int
-	for slot = 1; slot <= int(slots); slot++ {
-		_, ok := backends[slot]
-		if !ok {
-			// that mean such object wasn't found, or by other words slot is empty
-			break
+	for _, m := range memDevs {
+		idx, err := MemslotIdxFromName(m.Data.Memdev)
+		if err == nil {
+			r.memBackends[idx] = true
 		}
 	}
 
-	err = QmpAddMemoryBackend(mon, slot, virtualmachine.Spec.Guest.MemorySlotSize.Value())
+	backends, err := QmpQueryMemoryBackendIds(r.mon)
 	if err != nil {
-		return err
-	}
-	// now add pc-dimm device
-	err = QmpAddMemoryDevice(mon, slot)
-	if err != nil {
-		// device_add command failed... so try remove object that we just created
-		_ = QmpDelMemoryBackend(mon, slot)
 		return err
 	}
 
+	for b := range backends {
+		if _, ok := r.memBackends[b]; !ok {
+			r.memBackends[b] = false
+		}
+	}
+	for idx := range r.memBackends {
+		r.maxBackend = max(r.maxBackend, idx)
+	}
+	r.log.Info("QMP memory state", "backends", r.memBackends, "maxBackend", r.maxBackend)
 	return nil
+}
+
+func (r *QmpMemorySetter) Disconnect() {
+	if r.mon != nil {
+		err := r.mon.Disconnect()
+		if err != nil {
+			r.log.Error(err, "Failed to disconnect QMP")
+		}
+	}
+}
+
+// attemptsCounter limits the total number of operations in each phase.
+// In case QMP keeps timeouting, but the operation silently succeeding,
+// we don't want to keep doing the QMP actions until we get enough positive
+// results.
+type attemptsCounter struct {
+	target int
+	done   int
+}
+
+func newAttemptsCounter(target int) *attemptsCounter {
+	return &attemptsCounter{
+		target: target,
+		done:   0,
+	}
+}
+
+// Registers an attempt and returns true if it allowed to continue
+func (t *attemptsCounter) attempt() bool {
+	if t.done < t.target {
+		t.done++
+		return true
+	}
+	return false
+}
+
+func (t *attemptsCounter) didSomething() bool {
+	return t.done > 0
+}
+
+func (r *QmpMemorySetter) AddBackends() {
+	if r.targetCnt <= len(r.memBackends) {
+		return
+	}
+
+	attempts := newAttemptsCounter(r.targetCnt - len(r.memBackends))
+	for idx := 1; idx <= r.targetCnt; idx++ {
+		if _, ok := r.memBackends[idx]; ok {
+			continue
+		}
+
+		if !attempts.attempt() {
+			break
+		}
+
+		err := QmpAddMemoryBackend(r.mon, idx, r.vm.Spec.Guest.MemorySlotSize.Value())
+		if err != nil {
+			r.errs = append(r.errs, err)
+			r.recorder.Event(r.vm, "Warning", "ScaleUp",
+				fmt.Sprintf("Failed to add memslot%d: %s",
+					idx, err.Error()))
+			continue
+		}
+		r.recorder.Event(r.vm, "Normal", "ScaleUp",
+			fmt.Sprintf("Added memslot%d", idx))
+		r.memBackends[idx] = false
+		// The one we just added might be the new max
+		r.maxBackend = max(r.maxBackend, idx)
+	}
+
+	if attempts.didSomething() {
+		// might need to wait for QEMU to allocate the memory
+		time.Sleep(time.Second)
+	}
+}
+
+func (r *QmpMemorySetter) AddDevices() {
+	if r.targetCnt <= r.memDevCount {
+		return
+	}
+
+	attempts := newAttemptsCounter(r.targetCnt - r.memDevCount)
+
+	for idx := 1; idx <= r.maxBackend; idx++ {
+		active, ok := r.memBackends[idx]
+		if !ok || active {
+			continue
+		}
+		// Found unused backend to plug into
+
+		if !attempts.attempt() {
+			break
+		}
+
+		err := QmpAddMemoryDevice(r.mon, idx)
+		if err != nil {
+			r.errs = append(r.errs, err)
+			r.recorder.Event(r.vm, "Warning", "ScaleUp",
+				fmt.Sprintf("Failed to add dimm%d to VM %s: %s",
+					idx, r.vm.Name, err.Error()))
+			continue
+		}
+		r.recorder.Event(r.vm, "Normal", "ScaleUp",
+			fmt.Sprintf("Added dimm%d", idx))
+		r.memBackends[idx] = true
+		r.memDevCount++
+	}
+}
+
+func (r *QmpMemorySetter) RemoveDevices() {
+	if r.memDevCount <= r.targetCnt {
+		return
+	}
+
+	attempts := newAttemptsCounter(r.memDevCount - r.targetCnt)
+	// Removing from the end to keep memslot1,memslot2,...
+	for idx := r.maxBackend; idx >= 1; idx-- {
+		active, ok := r.memBackends[idx]
+		if !ok || !active {
+			continue
+		}
+		// Found used backend to remove
+
+		if !attempts.attempt() {
+			break
+		}
+
+		err := QmpDelMemoryDevice(r.mon, idx)
+		if err != nil {
+			r.errs = append(r.errs, err)
+			r.recorder.Event(r.vm, "Warning", "ScaleDown",
+				fmt.Sprintf("Failed to remove dimm%d: %s",
+					idx, err.Error()))
+			continue
+		}
+		r.recorder.Event(r.vm, "Normal", "ScaleDown",
+			fmt.Sprintf("Removed dimm%d", idx))
+		r.memBackends[idx] = false
+		r.memDevCount--
+	}
+
+	if attempts.didSomething() {
+		// wait a bit to allow guest kernel remove memory block
+		time.Sleep(time.Second)
+	}
+}
+
+func (r *QmpMemorySetter) RemoveBackends() {
+	if len(r.memBackends) <= r.targetCnt {
+		return
+	}
+
+	attempts := newAttemptsCounter(len(r.memBackends) - r.targetCnt)
+	for idx := r.maxBackend; idx >= 1; idx-- {
+		active, ok := r.memBackends[idx]
+		if !ok || active {
+			continue
+		}
+
+		if !attempts.attempt() {
+			break
+		}
+
+		err := QmpDelMemoryBackend(r.mon, idx)
+		if err != nil {
+			r.errs = append(r.errs, err)
+			r.recorder.Event(r.vm, "Warning", "ScaleDown",
+				fmt.Sprintf("Failed to remove memslot%d: %s",
+					idx, err.Error()))
+			continue
+		}
+		r.recorder.Event(r.vm, "Normal", "ScaleDown",
+			fmt.Sprintf("Removed memslot%d", idx))
+		delete(r.memBackends, idx)
+	}
+}
+
+func (r *QmpMemorySetter) run() (int, error) {
+	// Usually, runs first two or last two phases.
+	// If there are leftover slots, might run 2 and 4.
+	// If there are errors, last two phases serve as cleanup.
+	phases := []func(){
+		r.AddBackends,
+		r.AddDevices,
+		r.RemoveDevices,
+		r.RemoveBackends,
+	}
+	for _, phase := range phases {
+		phase()
+	}
+
+	return r.memDevCount, errors.Join(r.errs...)
+}
+
+// QmpSetMemorySlots attempts to plug/unplug memory slots to match targetCnt.
+//
+// Returns the number of slots, which the function managed to plug.
+// Ideally, it matches targetCnt, but can be less or more if there are
+// errors.
+//
+// Returns -1 if failed to father current state of memory, otherwise,
+// the return value is valid even if there are errors.
+//
+// In order for the hotplug to occur, we have to do two things:
+// 1. Plug memory backend (memslot<n>) - a QEMU object, which physically
+// allocates the memory from host
+// 2. Plug DIMM device (dimm<n>) - a device, which exposes the memory to the
+// host. dimm<n> is always plugged into memslot<n> with the same n.
+//
+// In order to do hotunplug, we need to make the same actions in the reversed
+// order.
+func QmpSetMemorySlots(
+	ctx context.Context,
+	vm *vmv1.VirtualMachine,
+	targetCnt int,
+	recorder record.EventRecorder,
+) (int, error) {
+	log := log.FromContext(ctx)
+
+	mon, err := QmpConnect(QmpAddr(vm))
+	if err != nil {
+		return -1, err
+	}
+
+	setter := &QmpMemorySetter{
+		vm:        vm,
+		targetCnt: targetCnt,
+		recorder:  recorder,
+		log:       log,
+
+		mon: mon,
+
+		memBackends: map[int]bool{},
+		maxBackend:  0,
+		memDevCount: 0,
+		errs:        []error{},
+	}
+
+	defer setter.Disconnect()
+
+	err = setter.buildState()
+	if err != nil {
+		return -1, err
+	}
+
+	return setter.run()
 }
 
 func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineMigration) error {
@@ -462,57 +714,6 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 	}
 
 	return nil
-}
-
-func QmpUnplugMemory(ip string, port int32) error {
-	memoryDevices, err := QmpQueryMemoryDevices(ip, port)
-	if err != nil {
-		return err
-	}
-	plugged := len(memoryDevices)
-	if plugged == 0 {
-		return errors.New("there are no unpluggable Memory slots")
-	}
-
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
-		return err
-	}
-	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
-
-	// run from last to first
-	var i int
-	var merr error
-	for i = plugged - 1; i >= 0; i-- {
-		// remove pc-dimm device
-		idx, err := MemslotIdxFromName(memoryDevices[i].Data.Memdev)
-		if err != nil {
-			merr = errors.Join(merr, err)
-			continue
-		}
-		err = QmpDelMemoryDevice(mon, idx)
-		if err != nil {
-			merr = errors.Join(merr, err)
-			continue
-		}
-		// wait a bit to allow guest kernel remove memory block
-		time.Sleep(time.Second)
-
-		// remove corresponding memdev object
-		err = QmpDelMemoryBackend(mon, idx)
-		if err != nil {
-			merr = errors.Join(merr, err)
-			continue
-		}
-		// successfully deleted memory device
-		break
-	}
-	if i >= 0 {
-		// some memory device was removed
-		return nil
-	}
-
-	return merr
 }
 
 func QmpGetMemorySize(ip string, port int32) (*resource.Quantity, error) {
