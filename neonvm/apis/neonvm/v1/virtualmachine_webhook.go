@@ -302,7 +302,7 @@ func MemorySizeValidate(m *resource.Quantity) error {
 	if err != nil {
 		return err
 	}
-	if m.Value() % blockSize.Value() != 0 {
+	if m.Value()%blockSize.Value() != 0 {
 		return fmt.Errorf("size %s has to be multiples of 'block-size' %s", m.String(), blockSize.String())
 	}
 	return nil
