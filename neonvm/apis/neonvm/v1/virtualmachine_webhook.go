@@ -128,6 +128,15 @@ func (r *VirtualMachine) ValidateCreate() error {
 					r.Spec.Guest.Memory.Use.String(),
 					r.Spec.Guest.Memory.Max.String())
 			}
+			if err := MemorySizeValidate(r.Spec.Guest.Memory.Min); err != nil {
+				return err
+			}
+			if err := MemorySizeValidate(r.Spec.Guest.Memory.Max); err != nil {
+				return err
+			}
+			if err := MemorySizeValidate(r.Spec.Guest.Memory.Use); err != nil {
+				return err
+			}
 		}
 	} else {
 		// validate .spec.guest.memorySlots.use and .spec.guest.memorySlots.max
@@ -257,6 +266,9 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 					r.Spec.Guest.Memory.Use.String(),
 					r.Spec.Guest.Memory.Max.String())
 			}
+			if err := MemorySizeValidate(r.Spec.Guest.Memory.Use); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -282,5 +294,16 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachine) ValidateDelete() error {
 	// TODO(user): fill in your validation logic upon object deletion.
+	return nil
+}
+
+func MemorySizeValidate(m *resource.Quantity) error {
+	blockSize, err := resource.ParseQuantity("8Mi")
+	if err != nil {
+		return err
+	}
+	if m.Value() % blockSize.Value() != 0 {
+		return fmt.Errorf("size %s has to be multiples of 'block-size' %s", m.String(), blockSize.String())
+	}
 	return nil
 }
