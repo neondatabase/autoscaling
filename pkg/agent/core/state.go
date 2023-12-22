@@ -14,7 +14,7 @@ package core
 // That said, there's still some tricky semantics we want to maintain. Internally, the
 // autoscaler-agent must be designed around eventual consistency, but the API we expose to the
 // vm-monitor is strictly synchronous. As such, there's some subtle logic to make sure that we're
-// not violating our own guarantees.
+// not violating our own guarantees unless required to.
 //
 // ---
 // ¹ https://github.com/neondatabase/autoscaling/issues/23
@@ -287,8 +287,6 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	// NB: upscaling takes priority over downscaling requests, because otherwise we'd potentially
 	// forego notifying the vm-monitor of increased resources because we were busy asking if it
 	// could downscale.
-	// var monitorUpscaleRequestResources api.Resources
-
 	var monitorUpscaleRequiredWait *time.Duration
 	actions.MonitorUpscale, monitorUpscaleRequiredWait = s.calculateMonitorUpscaleAction(now, desiredResources)
 
