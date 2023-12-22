@@ -63,10 +63,6 @@ type Config struct {
 	// downscale requests to the vm-monitor where the previous failed.
 	MonitorDeniedDownscaleCooldown time.Duration
 
-	// MonitorDownscaleFollowUpWait gives the minimum time we must wait between subsequent downscale
-	// requests, *whether or not they are a duplicate*.
-	MonitorDownscaleFollowUpWait time.Duration
-
 	// MonitorRequestedUpscaleValidPeriod gives the duration for which requested upscaling from the
 	// vm-monitor must be respected.
 	MonitorRequestedUpscaleValidPeriod time.Duration
@@ -491,6 +487,14 @@ func (s *state) calculateMonitorUpscaleAction(
 		ptr(desiredResources.Max(*s.Monitor.Approved)), // don't increase above desired resources
 	)
 
+	// Clamp the request resources so we're not increasing by more than 1 CU:
+	requestResources = s.clampResources(
+		*s.Monitor.Approved,
+		requestResources,
+		nil, // no lower bound
+		ptr(requestResources.Add(s.Config.ComputeUnit)), // upper bound: must not increase by >1 CU
+	)
+
 	// Check validity of the request that we would send, before sending it
 	if requestResources.HasFieldLessThan(*s.Monitor.Approved) {
 		panic(fmt.Errorf(
@@ -556,6 +560,14 @@ func (s *state) calculateMonitorDownscaleAction(
 		ptr(*s.Monitor.Approved), // upper bound: don't increase (this is only downscaling!)
 	)
 
+	// Clamp the request resources so we're not decreasing by more than 1 CU:
+	requestResources = s.clampResources(
+		*s.Monitor.Approved,
+		requestResources,
+		ptr(s.Monitor.Approved.SaturatingSub(s.Config.ComputeUnit)), // Must not decrease by >1 CU
+		nil, // no upper bound
+	)
+
 	// Check validity of the request that we would send, before sending it
 	if requestResources.HasFieldGreaterThan(*s.Monitor.Approved) {
 		panic(fmt.Errorf(
@@ -595,15 +607,6 @@ func (s *state) calculateMonitorDownscaleAction(
 		if timeUntilFailureBackoffExpires > 0 {
 			s.warn("Wanted to send vm-monitor downscale request but failed too recently")
 			return nil, &timeUntilFailureBackoffExpires
-		}
-	}
-
-	// Can't make another request if we were denied too recently:
-	if s.Monitor.DeniedDownscale != nil {
-		timeUntilDeniedDownscaleBackoffExpires := s.Monitor.DeniedDownscale.At.Add(s.Config.MonitorDownscaleFollowUpWait).Sub(now)
-		if timeUntilDeniedDownscaleBackoffExpires > 0 {
-			s.warn("Wanted to send vm-monitor downscale request but too soon after previously denied downscaling")
-			return nil, &timeUntilDeniedDownscaleBackoffExpires
 		}
 	}
 
