@@ -497,7 +497,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					virtualmachine.Status.Phase = vmv1.VmScaling
 				}
 			} else {
-				// plugable DIMM
+				// pluggable DIMM
 				if !memorySize.Equal(*memorySizeFromSpec) {
 					log.Info("VM goes into scale mode, need to resize Memory",
 						"Memory on board", memorySize,
