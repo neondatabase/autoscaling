@@ -8,23 +8,18 @@ spec:
     port: 5432
     protocol: TCP
     targetPort: postgres
-    nodePort: 30432
   - name: pooler
     port: 6432
     protocol: TCP
     targetPort: postgres
-    nodePort: 30632
   - name: host-metrics
     port: 9100
     protocol: TCP
     targetPort: host-metrics
-    nodePort: 30100
   - name: metrics
     port: 9187
     protocol: TCP
     targetPort: metrics
-    nodePort: 30187
-  type: NodePort
   selector:
     vm.neon.tech/name: example
 
