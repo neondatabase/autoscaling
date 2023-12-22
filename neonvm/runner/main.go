@@ -569,6 +569,7 @@ func main() {
 		"-serial", "stdio",
 		"-msg", "timestamp=on",
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
+		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMPManual),
 		"-qmp", fmt.Sprintf("unix:%s,server,wait=off", qmpUnixSocketForSigtermHandler),
 	}
 
