@@ -475,8 +475,8 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a := helpers.NewAssert(t)
 	clock := helpers.NewFakeClock(t)
 	clockTickDuration := duration("0.1s")
-	clockTick := func() helpers.Elapsed {
-		return clock.Inc(clockTickDuration)
+	clockTick := func() {
+		clock.Inc(clockTickDuration)
 	}
 	resForCU := DefaultComputeUnit.Mul
 
