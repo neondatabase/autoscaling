@@ -437,7 +437,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				if cgroupUsage.VCPUs.RoundedUp() != pluggedCPU {
 					// This is not expected but it's fine. We only report the
 					// mismatch here and will resolve it in the next reconcile
-					// iteration loops.
+					// iteration loops by comparing these values to spec CPU use
+					// and moving to the scaling phase.
 					log.Error(nil, "Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
 						"VirtualMachine", virtualmachine.Name,
 						"Runner Pod", vmRunner.Name,
