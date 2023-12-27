@@ -264,6 +264,57 @@ func runnerSupportsCgroup(pod *corev1.Pod) bool {
 	return api.RunnerProtoVersion(uintVal).SupportsCgroupFractionalCPU()
 }
 
+func (r *VirtualMachineReconciler) updateVMStatusCPU(
+	ctx context.Context,
+	virtualmachine *vmv1.VirtualMachine,
+	vmRunner *corev1.Pod,
+	qmpPluggedCPUs uint32, supportsCgroup bool, cgroupUsage api.VCPUCgroup,
+) {
+	log := log.FromContext(ctx)
+
+	// We expect:
+	// - vm.Status.CPUs = cgroupUsage.VCPUs
+	// - vm.Status.CPUs.RoundUp() == qmpPluggedCPUs
+	// Otherwise, we update the status.
+	var currentCPUUsage vmv1.MilliCPU
+	if supportsCgroup {
+		if cgroupUsage.VCPUs.RoundedUp() != qmpPluggedCPUs {
+			// This is not expected but it's fine. We only report the
+			// mismatch here and will resolve it in the next reconcile
+			// iteration loops by comparing these values to spec CPU use
+			// and moving to the scaling phase.
+			log.Error(nil, "Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
+				"VirtualMachine", virtualmachine.Name,
+				"Runner Pod", vmRunner.Name,
+				"plugged CPUs", qmpPluggedCPUs,
+				"cgroup vCPUs", cgroupUsage.VCPUs)
+		}
+		currentCPUUsage = min(cgroupUsage.VCPUs, vmv1.MilliCPU(1000*qmpPluggedCPUs))
+	} else {
+		currentCPUUsage = vmv1.MilliCPU(1000 * qmpPluggedCPUs)
+	}
+	if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != currentCPUUsage {
+		virtualmachine.Status.CPUs = &currentCPUUsage
+		r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
+			fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
+				virtualmachine.Name,
+				virtualmachine.Status.CPUs))
+	}
+}
+
+func (r *VirtualMachineReconciler) updateVMStatusMemory(
+	virtualmachine *vmv1.VirtualMachine,
+	qmpMemorySize *resource.Quantity,
+) {
+	if virtualmachine.Status.MemorySize == nil || !qmpMemorySize.Equal(*virtualmachine.Status.MemorySize) {
+		virtualmachine.Status.MemorySize = qmpMemorySize
+		r.Recorder.Event(virtualmachine, "Normal", "MemoryInfo",
+			fmt.Sprintf("VirtualMachine %s uses %v memory",
+				virtualmachine.Name,
+				virtualmachine.Status.MemorySize))
+	}
+}
+
 func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
 	log := log.FromContext(ctx)
 
@@ -428,34 +479,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				}
 			}
 
-			// Update status. We expect:
-			// - vm.Status.CPUs = cgroupUsage.VCPUs
-			// - vm.Status.CPUs.RoundUp() == pluggedCPU
-			// Otherwise, we update the status.
-			var currentCPUUsage vmv1.MilliCPU
-			if supportsCgroup {
-				if cgroupUsage.VCPUs.RoundedUp() != pluggedCPU {
-					// This is not expected but it's fine. We only report the
-					// mismatch here and will resolve it in the next reconcile
-					// iteration loops by comparing these values to spec CPU use
-					// and moving to the scaling phase.
-					log.Error(nil, "Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
-						"VirtualMachine", virtualmachine.Name,
-						"Runner Pod", vmRunner.Name,
-						"plugged CPUs", pluggedCPU,
-						"cgroup vCPUs", cgroupUsage.VCPUs)
-				}
-				currentCPUUsage = min(cgroupUsage.VCPUs, vmv1.MilliCPU(1000*pluggedCPU))
-			} else {
-				currentCPUUsage = vmv1.MilliCPU(1000 * pluggedCPU)
-			}
-			if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != currentCPUUsage {
-				virtualmachine.Status.CPUs = &currentCPUUsage
-				r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
-					fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
-						virtualmachine.Name,
-						virtualmachine.Status.CPUs))
-			}
+			// update status by CPUs used in the VM
+			r.updateVMStatusCPU(ctx, virtualmachine, vmRunner, pluggedCPU, supportsCgroup, cgroupUsage)
 
 			// get Memory details from hypervisor and update VM status
 			memorySize, err := QmpGetMemorySize(QmpAddr(virtualmachine))
@@ -463,14 +488,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
 				return err
 			}
-			// update status by Memory sizes used in VM
-			if virtualmachine.Status.MemorySize == nil || !memorySize.Equal(*virtualmachine.Status.MemorySize) {
-				virtualmachine.Status.MemorySize = memorySize
-				r.Recorder.Event(virtualmachine, "Normal", "MemoryInfo",
-					fmt.Sprintf("VirtualMachine %s uses %v memory",
-						virtualmachine.Name,
-						virtualmachine.Status.MemorySize))
-			}
+			// update status by memory sizes used in the VM
+			r.updateVMStatusMemory(virtualmachine, memorySize)
 
 			// check if need hotplug/unplug CPU or memory
 			// compare guest spec and count of plugged
@@ -695,6 +714,18 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 		// set VM phase to running if everything scaled
 		if cpuScaled && ramScaled {
+			// update status by CPUs used in the VM
+			r.updateVMStatusCPU(ctx, virtualmachine, vmRunner, pluggedCPU, supportsCgroup, cgroupUsage)
+
+			// get Memory details from hypervisor and update VM status
+			memorySize, err := QmpGetMemorySize(QmpAddr(virtualmachine))
+			if err != nil {
+				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+			// update status by memory sizes used in the VM
+			r.updateVMStatusMemory(virtualmachine, memorySize)
+
 			virtualmachine.Status.Phase = vmv1.VmRunning
 		}
 
