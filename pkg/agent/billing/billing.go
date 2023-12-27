@@ -22,6 +22,8 @@ type Config struct {
 	URL                       string `json:"url"`
 	CPUMetricName             string `json:"cpuMetricName"`
 	ActiveTimeMetricName      string `json:"activeTimeMetricName"`
+	IngressBytesMetricName    string `json:"ingressBytesMetricName"`
+	EgressBytesMetricName     string `json:"egressBytesMetricName"`
 	CollectEverySeconds       uint   `json:"collectEverySeconds"`
 	AccumulateEverySeconds    uint   `json:"accumulateEverySeconds"`
 	PushEverySeconds          uint   `json:"pushEverySeconds"`
@@ -42,8 +44,10 @@ type metricsKey struct {
 }
 
 type vmMetricsHistory struct {
-	lastSlice *metricsTimeSlice
-	total     vmMetricsSeconds
+	lastSlice         *metricsTimeSlice
+	total             vmMetricsSeconds
+	totalIngressBytes vmapi.NetworkBytes
+	totalEgressBytes  vmapi.NetworkBytes
 }
 
 type metricsTimeSlice struct {
@@ -189,8 +193,8 @@ func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metric
 				metrics: vmMetricsInstant{
 					// strategically under-bill by assigning the minimum to the entire time slice.
 					cpu:          util.Min(oldMetrics.cpu, presentMetrics.cpu),
-					ingressBytes: presentMetrics.ingressBytes,
-					egressBytes:  presentMetrics.egressBytes,
+					ingressBytes: presentMetrics.ingressBytes - oldMetrics.ingressBytes,
+					egressBytes:  presentMetrics.egressBytes - oldMetrics.egressBytes,
 				},
 				// note: we know s.lastTime != nil because otherwise old would be empty.
 				startTime: *s.lastCollectTime,
@@ -200,8 +204,10 @@ func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metric
 			vmHistory, ok := s.historical[key]
 			if !ok {
 				vmHistory = vmMetricsHistory{
-					lastSlice: nil,
-					total:     vmMetricsSeconds{cpu: 0, activeTime: time.Duration(0)},
+					lastSlice:         nil,
+					total:             vmMetricsSeconds{cpu: 0, activeTime: time.Duration(0)},
+					totalIngressBytes: 0,
+					totalEgressBytes:  0,
 				}
 			}
 			// append the slice, merging with the previous if the resource usage was the same
@@ -249,6 +255,8 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 	}
 	h.total.cpu += metricsSeconds.cpu
 	h.total.activeTime += metricsSeconds.activeTime
+	h.totalIngressBytes += h.lastSlice.metrics.ingressBytes
+	h.totalEgressBytes += h.lastSlice.metrics.egressBytes
 
 	h.lastSlice = nil
 }
@@ -307,6 +315,26 @@ func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname s
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
 			Value:          int(math.Round(history.total.activeTime.Seconds())),
+		})))
+		countInBatch += 1
+		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+			MetricName:     conf.IngressBytesMetricName,
+			Type:           "", // set by billing.Enrich
+			IdempotencyKey: "", // set by billing.Enrich
+			EndpointID:     key.endpointID,
+			StartTime:      s.pushWindowStart,
+			StopTime:       now,
+			Value:          history.totalIngressBytes,
+		})))
+		countInBatch += 1
+		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+			MetricName:     conf.EgressBytesMetricName,
+			Type:           "", // set by billing.Enrich
+			IdempotencyKey: "", // set by billing.Enrich
+			EndpointID:     key.endpointID,
+			StartTime:      s.pushWindowStart,
+			StopTime:       now,
+			Value:          history.total.totalEgressBytes,
 		})))
 	}
 
