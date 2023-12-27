@@ -25,5 +25,6 @@ testbin/*
 
 *.qcow2
 neonvm/hack/vmlinuz
+neonvm/hack/kernel/vmlinuz
 
 rendered_manifests

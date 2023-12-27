@@ -223,8 +223,8 @@ endif
 
 .PHONY: kernel
 kernel: ## Build linux kernel.
-	rm -f neonvm/hack/vmlinuz; \
-	linux_config=$$(ls neonvm/hack/linux-config-*) \
+	rm -f neonvm/hack/vmlinuz neonvm/hack/kernel/vmlinuz; \
+	linux_config=$$(ls neonvm/hack/kernel/linux-config-*) \
 	kernel_version=$${linux_config##*-} \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
@@ -234,10 +234,10 @@ kernel: ## Build linux kernel.
 		--pull \
 		--load \
 		--iidfile $$iidfile \
-		--file neonvm/hack/Dockerfile.kernel-builder \
-		neonvm/hack; \
+		--file neonvm/hack/kernel/Dockerfile.kernel-builder \
+		neonvm/hack/kernel; \
 	id=$$(docker create $$(cat $$iidfile)); \
-	docker cp $$id:/vmlinuz neonvm/hack/vmlinuz; \
+	docker cp $$id:/vmlinuz neonvm/hack/kernel/vmlinuz; \
 	docker rm -f $$id
 
 .PHONY: check-local-context

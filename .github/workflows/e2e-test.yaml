@@ -73,7 +73,7 @@ jobs:
         run: |
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
+          docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
           docker rm -f ${ID}
 
       # our docker builds use the output of 'git describe' for embedding git information
