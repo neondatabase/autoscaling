@@ -2513,6 +2513,12 @@ spec:
                 maximum: 65535
                 minimum: 1
                 type: integer
+              qmpManual:
+                default: 20184
+                format: int32
+                maximum: 65535
+                minimum: 1
+                type: integer
               restartPolicy:
                 default: Always
                 enum:

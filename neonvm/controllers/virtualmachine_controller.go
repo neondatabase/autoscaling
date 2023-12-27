@@ -281,7 +281,8 @@ func (r *VirtualMachineReconciler) updateVMStatusCPU(
 		if cgroupUsage.VCPUs.RoundedUp() != qmpPluggedCPUs {
 			// This is not expected but it's fine. We only report the
 			// mismatch here and will resolve it in the next reconcile
-			// iteration loops.
+			// iteration loops by comparing these values to spec CPU use
+			// and moving to the scaling phase.
 			log.Error(nil, "Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
 				"VirtualMachine", virtualmachine.Name,
 				"Runner Pod", vmRunner.Name,
@@ -1183,6 +1184,9 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 				Ports: []corev1.ContainerPort{{
 					ContainerPort: virtualmachine.Spec.QMP,
 					Name:          "qmp",
+				}, {
+					ContainerPort: virtualmachine.Spec.QMPManual,
+					Name:          "qmp-manual",
 				}},
 				Command: []string{
 					"runner",
