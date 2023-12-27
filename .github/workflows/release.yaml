@@ -27,7 +27,7 @@ jobs:
 
   release:
     needs: vm-kernel
-    runs-on: gha-ubuntu-22.04-64cores
+    runs-on: [ self-hosted, gen3, large ]
     steps:
       - name: git checkout
         uses: actions/checkout@v3
@@ -51,6 +51,13 @@ jobs:
         with:
           go-version-file: 'go.mod'
         timeout-minutes: 10
+
+      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
+      # The default value is ~/.docker
+      - name: set custom docker config directory
+        run: |
+          mkdir -p .docker-custom
+          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
 
       - name: check everything builds
         run: go build ./...
@@ -169,3 +176,8 @@ jobs:
             rendered_manifests/multus-eks.yaml
             rendered_manifests/whereabouts.yaml
             deploy/vmscrape.yaml
+
+      - name: remove custom docker config directory
+        if: always()
+        run: |
+          rm -rf .docker-custom
