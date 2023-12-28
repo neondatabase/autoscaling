@@ -68,18 +68,18 @@ vm_ip="$(kubectl get neonvm "$vm_name" -o jsonpath='{.status.podIP}')"
 # '
 #
 # nad_file="ssh-nad-$NAD_NAME.tmp"
-# 
+#
 # cleanup () {
 #     rm "$nad_file"
 #     kubectl delete network-attachment-definitions.k8s.cni.cncf.io "$NAD_NAME"
 # }
-# 
+#
 # trap cleanup EXIT INT TERM
-# 
+#
 # echo "$NAD" > "$nad_file"
 # kubectl apply -f "$nad_file"
 
-if [ -n "$NODE_NAME" ]; then 
+if [ -n "$NODE_NAME" ]; then
     NODE_SELECTOR='"nodeSelector": { "kubernetes.io/hostname": "'"$NODE_NAME"'" },'
 else
     NODE_SELECTOR=""
@@ -88,7 +88,7 @@ fi
 # Provide a manual configuration for the container so that we can pass through the ssh private key
 #
 # Note: this requires creating the 'vm-ssh' secret, as described in the readme.
-# Note: the defaultMode below, is decimal 384 and therefore octal 600 
+# Note: the defaultMode below, is decimal 384 and therefore octal 600
 # Note: setting StrictHostKeyChecking=no disables the "authenticity of host" dialog
 SSH_OPTS='-o StrictHostKeyChecking=no'
 CONTAINER_CFG='
@@ -98,7 +98,7 @@ CONTAINER_CFG='
         '"$NODE_SELECTOR"'
         "containers": [{
             "name": "'"ssh-$vm_name"'",
-            "image": "alpine:3.18",
+            "image": "alpine:3.19",
             "args": [
                 "/bin/sh",
                 "-c",

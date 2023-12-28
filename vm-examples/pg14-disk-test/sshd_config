@@ -5,7 +5,7 @@
 
 # This sshd was compiled with PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# sshd_config adapted from alpine:3.18 default sshd_config
+# sshd_config adapted from alpine:3.16 default sshd_config
 
 # The strategy used for options in the default sshd_config shipped with
 # OpenSSH is to specify options with their default value where

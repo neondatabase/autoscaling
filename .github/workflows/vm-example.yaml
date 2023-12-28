@@ -32,10 +32,10 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: build vm-alpine:3.18
-        run:  bin/vm-builder -src alpine:3.18 -dst neondatabase/vm-alpine:3.18
-      - name: push vm-alpine:3.18
-        run:  docker push -q neondatabase/vm-alpine:3.18
+      - name: build vm-alpine:3.19
+        run:  bin/vm-builder -src alpine:3.19 -dst neondatabase/vm-alpine:3.19
+      - name: push vm-alpine:3.19
+        run:  docker push -q neondatabase/vm-alpine:3.19
 
       - name: build vm-ubuntu:22.04
         run:  bin/vm-builder -src ubuntu:22.04 -dst neondatabase/vm-ubuntu:22.04
