@@ -489,7 +489,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				return err
 			}
 
-      // initial update .status.memoryRequested if it absent
+			// initial update .status.memoryRequested if it absent
 			if virtualmachine.Spec.Guest.Memory != nil && virtualmachine.Status.MemoryRequested == nil {
 				virtualmachine.Status.MemoryRequested = virtualmachine.Spec.Guest.Memory.Min
 			}
@@ -516,7 +516,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				virtualmachine.Status.Phase = vmv1.VmScaling
 			}
 
-      memorySizeFromSpec := new(resource.Quantity)
+			memorySizeFromSpec := new(resource.Quantity)
 			if virtualmachine.Spec.Guest.Memory != nil {
 				// just get memory from spec
 				memorySizeFromSpec = virtualmachine.Spec.Guest.Memory.Use
