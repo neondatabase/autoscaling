@@ -99,7 +99,7 @@ jobs:
           build-args: KERNEL_VERSION=${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
           context: neonvm/hack
           platforms: linux/amd64
-          # Push kernel image only for schedules builds or if workflow_dispatch/workflow_call input is true
+          # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
           push: ${{ github.event_name == 'schedule' && 'true' || ( inputs.push || 'false' ) }}
           pull: true
           no-cache: true
