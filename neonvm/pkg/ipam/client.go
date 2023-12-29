@@ -1,10 +1,11 @@
 package ipam
 
 import (
+	nad "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	nad "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	neonvm "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 )
 

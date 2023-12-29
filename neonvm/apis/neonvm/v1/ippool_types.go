@@ -42,5 +42,5 @@ type IPPoolList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&IPPool{}, &IPPoolList{})
+	SchemeBuilder.Register(&IPPool{}, &IPPoolList{}) //nolint:exhaustruct // just being used to provide the types
 }

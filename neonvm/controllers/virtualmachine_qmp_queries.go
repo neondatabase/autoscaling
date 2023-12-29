@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/digitalocean/go-qemu/qmp"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -102,7 +103,7 @@ func QmpGetCpus(ip string, port int32) ([]QmpCpuSlot, []QmpCpuSlot, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "query-hotpluggable-cpus"}`)
 	raw, err := mon.Run(qmpcmd)
@@ -111,7 +112,9 @@ func QmpGetCpus(ip string, port int32) ([]QmpCpuSlot, []QmpCpuSlot, error) {
 	}
 
 	var result QmpCpus
-	json.Unmarshal(raw, &result)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, nil, fmt.Errorf("error unmarshaling json: %w", err)
+	}
 
 	plugged := []QmpCpuSlot{}
 	empty := []QmpCpuSlot{}
@@ -139,11 +142,20 @@ func QmpPlugCpu(ip string, port int32) error {
 	if err != nil {
 		return err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	// empty list reversed, first cpu slot in the end of list and last cpu slot in the beginning
 	slot := empty[len(empty)-1]
-	qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
+	qmpcmd := []byte(fmt.Sprintf(`{
+		"execute": "device_add",
+		"arguments": {
+			"id": "cpu%d",
+			"driver": %q,
+			"core-id": %d,
+			"socket-id": 0,
+			"thread-id": 0
+		}
+	}`, slot.Core, slot.Type, slot.Core))
 
 	_, err = mon.Run(qmpcmd)
 	if err != nil {
@@ -176,9 +188,9 @@ func QmpUnplugCpu(ip string, port int32) error {
 	if err != nil {
 		return err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
-	cmd := []byte(fmt.Sprintf(`{"execute": "device_del", "arguments": {"id": "%s"}}`, plugged[slot].QOM))
+	cmd := []byte(fmt.Sprintf(`{"execute": "device_del", "arguments": {"id": %q}}`, plugged[slot].QOM))
 	_, err = mon.Run(cmd)
 	if err != nil {
 		return err
@@ -207,7 +219,7 @@ func QmpSyncCpuToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineM
 	if err != nil {
 		return err
 	}
-	defer target.Disconnect()
+	defer target.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 searchForEmpty:
 	for _, slot := range plugged {
@@ -219,7 +231,16 @@ searchForEmpty:
 				continue searchForEmpty
 			}
 		}
-		qmpcmd := []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "cpu%d", "driver": "%s", "core-id": %d, "socket-id": 0,  "thread-id": 0}}`, slot.Core, slot.Type, slot.Core))
+		qmpcmd := []byte(fmt.Sprintf(`{
+			"execute": "device_add",
+			"arguments": {
+				"id": "cpu%d",
+				"driver": %q,
+				"core-id": %d,
+				"socket-id": 0,
+				"thread-id": 0
+			}
+		}`, slot.Core, slot.Type, slot.Core))
 		_, err = target.Run(qmpcmd)
 		if err != nil {
 			return err
@@ -234,7 +255,7 @@ func QmpQueryMemoryDevices(ip string, port int32) ([]QmpMemoryDevice, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	var result QmpMemoryDevices
 	cmd := []byte(`{"execute": "query-memory-devices"}`)
@@ -242,7 +263,9 @@ func QmpQueryMemoryDevices(ip string, port int32) ([]QmpMemoryDevice, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal(raw, &result)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("error unmarshaling json: %w", err)
+	}
 	return result.Return, nil
 }
 
@@ -265,7 +288,7 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	if err != nil {
 		return err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	// try to find empty slot
 	var slot int32
@@ -290,7 +313,7 @@ func QmpPlugMemory(virtualmachine *vmv1.VirtualMachine) error {
 	if err != nil {
 		// device_add command failed... so try remove object that we just created
 		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, slot))
-		mon.Run(cmd)
+		mon.Run(cmd) //nolint:errcheck // already have one error, ignoring the second.
 		return err
 	}
 
@@ -311,7 +334,7 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 	if err != nil {
 		return err
 	}
-	defer target.Disconnect()
+	defer target.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	for _, m := range memoryDevices {
 		// firsly check if slot occupied already
@@ -328,18 +351,32 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 		}
 		// add memdev object
 		memdevId := strings.ReplaceAll(m.Data.Memdev, "/objects/", "")
-		cmd := []byte(fmt.Sprintf(`{"execute": "object-add", "arguments": {"id": "%s", "size": %d, "qom-type": "memory-backend-ram"}}`, memdevId, m.Data.Size))
+		cmd := []byte(fmt.Sprintf(`{
+			"execute": "object-add",
+			"arguments": {
+				"id": %q,
+				"size": %d,
+				"qom-type": "memory-backend-ram"
+			}
+		}`, memdevId, m.Data.Size))
 		_, err = target.Run(cmd)
 		if err != nil {
 			return err
 		}
 		// now add pc-dimm device
-		cmd = []byte(fmt.Sprintf(`{"execute": "device_add", "arguments": {"id": "%s", "driver": "pc-dimm", "memdev": "%s"}}`, m.Data.Id, memdevId))
+		cmd = []byte(fmt.Sprintf(`{
+			"execute": "device_add",
+			"arguments": {
+				"id": %q,
+				"driver": "pc-dimm",
+				"memdev": "%s"
+			}
+		}`, m.Data.Id, memdevId))
 		_, err = target.Run(cmd)
 		if err != nil {
 			// device_add command failed... so try remove object that we just created
-			cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "%s"}}`, m.Data.Memdev))
-			target.Run(cmd)
+			cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": %q}}`, m.Data.Memdev))
+			target.Run(cmd) //nolint:errcheck // already have one error, ignoring the second.
 			return err
 		}
 	}
@@ -358,7 +395,7 @@ func QmpPlugMemoryToRunner(ip string, port int32, size int64) error {
 	if err != nil {
 		return err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	// add memdev object for next slot
 	// firstly check if such object already present to avoid repeats
@@ -378,7 +415,7 @@ func QmpPlugMemoryToRunner(ip string, port int32, size int64) error {
 	if err != nil {
 		// device_add command failed... so try remove object that we just created
 		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "memslot%d"}}`, plugged+1))
-		mon.Run(cmd)
+		mon.Run(cmd) //nolint:errcheck // already have one error, ignoring the second.
 		return err
 	}
 
@@ -399,14 +436,14 @@ func QmpUnplugMemory(ip string, port int32) error {
 	if err != nil {
 		return err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	// run from last to first
 	var i int
 	var merr error
 	for i = plugged - 1; i >= 0; i-- {
 		// remove pc-dimm device
-		cmd := []byte(fmt.Sprintf(`{"execute": "device_del", "arguments": {"id": "%s"}}`, memoryDevices[i].Data.Id))
+		cmd := []byte(fmt.Sprintf(`{"execute": "device_del", "arguments": {"id": %q}}`, memoryDevices[i].Data.Id))
 		_, err = mon.Run(cmd)
 		if err != nil {
 			merr = errors.Join(merr, err)
@@ -416,7 +453,10 @@ func QmpUnplugMemory(ip string, port int32) error {
 		time.Sleep(time.Second)
 
 		// remove corresponding memdev object
-		cmd = []byte(fmt.Sprintf(`{"execute": "object-del", "arguments": {"id": "%s"}}`, strings.ReplaceAll(memoryDevices[i].Data.Memdev, "/objects/", "")))
+		cmd = []byte(fmt.Sprintf(`{
+			"execute": "object-del",
+			"arguments": {"id": %q}
+		}`, strings.ReplaceAll(memoryDevices[i].Data.Memdev, "/objects/", "")))
 		_, err = mon.Run(cmd)
 		if err != nil {
 			merr = errors.Join(merr, err)
@@ -438,7 +478,7 @@ func QmpGetMemorySize(ip string, port int32) (*resource.Quantity, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "query-memory-size-summary"}`)
 	raw, err := mon.Run(qmpcmd)
@@ -447,7 +487,9 @@ func QmpGetMemorySize(ip string, port int32) (*resource.Quantity, error) {
 	}
 
 	var result QmpMemorySize
-	json.Unmarshal(raw, &result)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("error unmarshaling json: %w", err)
+	}
 
 	return resource.NewQuantity(result.Return.BaseMemory+result.Return.PluggedMemory, resource.BinarySI), nil
 }
@@ -466,7 +508,7 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 	if err := smon.Connect(); err != nil {
 		return err
 	}
-	defer smon.Disconnect()
+	defer smon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	// connect to target runner QMP
 	t_ip := virtualmachinemigration.Status.TargetPodIP
@@ -477,7 +519,7 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 	if err := tmon.Connect(); err != nil {
 		return err
 	}
-	defer tmon.Disconnect()
+	defer tmon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	cache := resource.MustParse("256Mi")
 	var qmpcmd []byte
@@ -570,24 +612,25 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 	return nil
 }
 
-func QmpGetMigrationInfo(ip string, port int32) (MigrationInfo, error) {
-	empty := MigrationInfo{}
+func QmpGetMigrationInfo(ip string, port int32) (*MigrationInfo, error) {
 	mon, err := QmpConnect(ip, port)
 	if err != nil {
-		return empty, err
+		return nil, err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "query-migrate"}`)
 	raw, err := mon.Run(qmpcmd)
 	if err != nil {
-		return empty, err
+		return nil, err
 	}
 
 	var result QmpMigrationInfo
-	json.Unmarshal(raw, &result)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("error unmarshaling json: %w", err)
+	}
 
-	return result.Return, nil
+	return &result.Return, nil
 }
 
 func QmpCancelMigration(ip string, port int32) error {
@@ -595,7 +638,7 @@ func QmpCancelMigration(ip string, port int32) error {
 	if err != nil {
 		return err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "migrate_cancel"}`)
 	_, err = mon.Run(qmpcmd)
@@ -611,7 +654,7 @@ func QmpQuit(ip string, port int32) error {
 	if err != nil {
 		return err
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "quit"}`)
 	_, err = mon.Run(qmpcmd)

@@ -307,7 +307,7 @@ const (
 )
 
 type Disk struct {
-	//Disk's name.
+	// Disk's name.
 	// Must be a DNS_LABEL and unique within the virtual machine.
 	Name string `json:"name"`
 	// Mounted read-only if true, read-write otherwise (false or unspecified).
@@ -466,5 +466,5 @@ type VirtualMachineList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&VirtualMachine{}, &VirtualMachineList{})
+	SchemeBuilder.Register(&VirtualMachine{}, &VirtualMachineList{}) //nolint:exhaustruct // just being used to provide the types
 }
