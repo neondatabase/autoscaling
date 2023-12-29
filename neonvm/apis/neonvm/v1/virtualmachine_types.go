@@ -61,6 +61,12 @@ type VirtualMachineSpec struct {
 
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default:=20184
+	// +optional
+	QMPManual int32 `json:"qmpManual,omitempty"`
+
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	// +kubebuilder:default:=25183
 	// +optional
 	RunnerPort int32 `json:"runnerPort,omitempty"`
