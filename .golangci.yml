@@ -60,7 +60,6 @@ linters-settings:
       - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.ObjectMeta$'
       - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
       - '^github.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'
-      - '^github\.com/containerd/cgroups/v3/cgroup2\.(Resources|Memory)'
       - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
       - '^github\.com/neondatabase/autoscaling/pkg/util/patch\.Operation$'
       - '^github\.com/neondatabase/autoscaling/pkg/util/watch\.HandlerFuncs$'
@@ -109,18 +108,6 @@ linters-settings:
     #     ...
     #   }
     check-shadowing: false
-    # add some additional functions to the printf format specifiers checking
-    printf:
-      # Kubernetes' klog — this is our primary logger
-      - (k8s.io/klog/v2).Infof
-      - (k8s.io/klog/v2).Warningf
-      - (k8s.io/klog/v2).Errorf
-      - (k8s.io/klog/v2).Fatalf
-      # autoscaler-agent's RunnerLogger
-      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Infof
-      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Warningf
-      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Errorf
-      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Fatalf
   # see: <https://golangci-lint.run/usage/linters/#nolintlint>
   nolintlint:
     allow-unused: false
