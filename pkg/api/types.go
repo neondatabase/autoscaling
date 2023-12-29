@@ -60,7 +60,7 @@ const (
 	//
 	// * added AgentRequest.LastPermit
 	//
-	// Last used in release version <todo>.
+	// Last used in release version v0.21.0.
 	PluginProtoV2_1
 
 	// PluginProtoV3_0 represents v3.0 of the agent<->scheduler plugin protocol.
