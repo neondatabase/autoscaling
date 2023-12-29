@@ -10,7 +10,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
-
 	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/util"
