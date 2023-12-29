@@ -39,6 +39,7 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"bufio"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -53,6 +54,7 @@ const (
 	runtimeDiskPath                = "/vm/images/runtime.iso"
 	mountedDiskPath                = "/vm/images"
 	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
+	logSerialSocket                = "/vm/log.sock"
 
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
@@ -563,6 +565,9 @@ func main() {
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMPManual),
 		"-qmp", fmt.Sprintf("unix:%s,server,wait=off", qmpUnixSocketForSigtermHandler),
+		"-device", "virtio-serial",
+		"-chardev", fmt.Sprintf("socket,path=%s,server,nowait,id=log", logSerialSocket),
+		"-device", "virtserialport,chardev=log,name=tech.neon.log.0",
 	}
 
 	// disk details
@@ -672,6 +677,8 @@ func main() {
 	go terminateQemuOnSigterm(ctx, logger, &wg)
 	wg.Add(1)
 	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
+	wg.Add(1)
+	go forwardLogs(ctx, logger, &wg)
 
 	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
 	logger.Info("calling cgexec", zap.Strings("args", args))
@@ -776,6 +783,47 @@ func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cg
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
 		logger.Info("shut down cpu_change server", zap.Error(err))
+	}
+}
+
+// writes from socket line by line
+func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) error {
+	defer wg.Done()
+
+	delay := 3 * time.Second
+
+	var conn net.Conn
+	var reader *bufio.Reader
+
+	for {
+		if conn == nil {
+			var err error
+			conn, err = net.Dial("unix", logSerialSocket)
+			if err != nil {
+				logger.Error("failed to dial to logSerialSocket", zap.Error(err))
+				time.Sleep(delay)
+				continue
+			}
+			reader = bufio.NewReader(conn)
+		}
+
+		select {
+		case <-ctx.Done():
+			conn.Close()
+			return ctx.Err()
+		default:
+			conn.SetReadDeadline(time.Now().Add(delay))
+			str, err := reader.ReadString('\n')
+			if err != nil {
+				if errors.Is(err, os.ErrDeadlineExceeded) {
+					continue
+				}
+				logger.Error("failed to read from socket", zap.Error(err))
+				time.Sleep(delay)
+				conn = nil
+			}
+			fmt.Print(str)
+		}
 	}
 }
 
