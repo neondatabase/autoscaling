@@ -15,12 +15,18 @@ env:
   IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:               "neondatabase/neonvm-runner"
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
-  VM_KERNEL_VERSION:        "6.1.63"
 
   CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
 
 jobs:
+  vm-kernel:
+    uses: ./.github/workflows/vm-kernel.yaml
+    with:
+      push: true
+      tag: ${{ github.ref_name }}
+
   release:
+    needs: vm-kernel
     runs-on: gha-ubuntu-22.04-64cores
     steps:
       - name: git checkout
@@ -64,9 +70,11 @@ jobs:
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
       - name: load vm kernel
+        env:
+          IMAGE: ${{ needs.vm-kernel.outputs.image }}
         run: |
-          docker pull --quiet ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}
-          ID=$(docker create ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }} true)
+          docker pull --quiet $IMAGE
+          ID=$(docker create $IMAGE true)
           docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
           docker rm -f ${ID}
 

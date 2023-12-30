@@ -11,13 +11,54 @@ on:
         default: false
       tag:
         description: 'Tag to use for Docker image'
+        type: string
         required: false
+  workflow_call:
+    inputs:
+      push:
+        description: 'Push to Docker Hub'
+        type: boolean
+        default: false
+      tag:
+        description: 'Tag to use for Docker image'
+        type: string
+        required: false
+      kernel-image-tag-override:
+        description: 'If set, the workflow return the full image name for this tag'
+        type: string
+        required: false
+        default: ''
+    outputs:
+      image:
+        description: 'vm-kernel Docker image'
+        value: ${{ jobs.check-kernel-image-override.outputs.image || jobs.vm-kernel.outputs.image }}
 
 env:
   VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
 
 jobs:
+  check-kernel-image-override:
+    outputs:
+      image: ${{ steps.check-kernel-image-override.outputs.image }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - id: check-kernel-image-override
+        env:
+          OVERRIDE_TAG: ${{ inputs.kernel-image-tag-override }}
+        run: |
+          if [ -n "${OVERRIDE_TAG}" ]; then
+            DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}:${OVERRIDE_TAG} -v | jq -r '.Descriptor.digest')
+            IMAGE="${VM_KERNEL_IMAGE}:${OVERRIDE_TAG}@${DIGEST}"
+          else
+            IMAGE=""
+          fi
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+
   vm-kernel:
+    needs: check-kernel-image-override
+    if: needs.check-kernel-image-override.outputs.image == ''
     outputs:
       image: ${{ fromJSON(steps.build-linux-kernel.outputs.metadata)['image.name'] }}@${{ steps.build-linux-kernel.outputs.digest }}
 
@@ -58,21 +99,14 @@ jobs:
           build-args: KERNEL_VERSION=${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
           context: neonvm/hack
           platforms: linux/amd64
-          # Push only if this is a scheduled run or if the workflow_dispatch input push is set to true
-          push: ${{ github.event_name == 'schedule' && 'true' || ( github.event_name == 'workflow_dispatch' && inputs.push || 'false' ) }}
+          # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
+          push: ${{ github.event_name == 'schedule' && 'true' || ( inputs.push || 'false' ) }}
           pull: true
           no-cache: true
           file: neonvm/hack/Dockerfile.kernel-builder
-          # Tag the image with the tag from the workflow_dispatch input or the VM_KERNEL_VERSION from linux-config-* file
-          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
-
+          # Tag kernel image with workflow_dispatch/workflow_call input or with the kernel version by default
+          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
       - name: remove custom docker config directory
         if: always()
         run: |
           rm -rf .docker-custom
-
-  e2e-tests:
-    needs: vm-kernel
-    uses: ./.github/workflows/e2e-test.yaml
-    with:
-      kernel-image: ${{ needs.vm-kernel.outputs.image }}

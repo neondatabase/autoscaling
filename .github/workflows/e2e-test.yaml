@@ -17,18 +17,21 @@ on:
           - k3d
           - kind
         default: k3d
-  workflow_call:
-    inputs:
-      kernel-image:
-        type: string
-        description: 'The kernel image to use for the VMs'
-        required: false
 
 env:
   PRESERVE_RUNNER_PODS: "true"
 
 jobs:
+  vm-kernel:
+    uses: ./.github/workflows/vm-kernel.yaml
+    with:
+      push: true
+      tag: ${{ github.run_id }}
+      kernel-image-tag-override: ${{ inputs.kernel-image }}
+    secrets: inherit
+
   e2e-tests:
+    needs: vm-kernel
     strategy:
       fail-fast: false
       matrix:
@@ -64,38 +67,14 @@ jobs:
           docker version
           docker buildx version
 
-      - name: Build Linux kernel
-        if: inputs.kernel-image == ''
-        uses: docker/build-push-action@v3
-        with:
-          build-args: KERNEL_VERSION=${{ env.VM_KERNEL_VERSION }}
-          context: neonvm/hack
-          platforms: linux/amd64
-          push: false
-          load: true
-          pull: true
-          no-cache: true
-          file: neonvm/hack/Dockerfile.kernel-builder
-          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}-${{ matrix.cluster }}-${{ github.run_id}}-${{ github.run_attempt }}
-        env:
-          VM_KERNEL_IMAGE:   "neondatabase/local-vm-kernel"
-          VM_KERNEL_VERSION: "6.1.63"
-
       - name: Load VM kernel
+        env:
+          IMAGE: ${{ needs.vm-kernel.outputs.image }}
         run: |
-          if [ -z "${{ inputs.kernel-image }}" ]; then
-            IMAGE="${VM_KERNEL_IMAGE}:${VM_KERNEL_VERSION}-${{ matrix.cluster }}-${{ github.run_id}}-${{ github.run_attempt }}"
-          else
-            IMAGE="${{ inputs.kernel-image }}"
-            docker pull --quiet $IMAGE
-          fi
-
-          ID=$(docker create ${IMAGE} true)
+          docker pull --quiet $IMAGE
+          ID=$(docker create $IMAGE true)
           docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
           docker rm -f ${ID}
-        env:
-          VM_KERNEL_IMAGE:   "neondatabase/local-vm-kernel"
-          VM_KERNEL_VERSION: "6.1.63"
 
       # our docker builds use the output of 'git describe' for embedding git information
       - run: git describe --long --dirty
