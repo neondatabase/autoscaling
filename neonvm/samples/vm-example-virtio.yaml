@@ -34,11 +34,10 @@ spec:
       min: 1
       max: 4
       use: 2
-    memorySlotSize: 1Gi
-    memorySlots:
-      min: 1
-      max: 2
-      use: 2
+    memory:
+      min: 1Gi
+      max: 2Gi
+      use: 2Gi
     rootDisk:
       image: vm-postgres:15-bullseye
       size: 8Gi
