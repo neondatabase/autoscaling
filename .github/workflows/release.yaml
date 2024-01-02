@@ -15,13 +15,19 @@ env:
   IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:               "neondatabase/neonvm-runner"
   VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
-  VM_KERNEL_VERSION:        "6.1.63"
 
   CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
 
 jobs:
+  vm-kernel:
+    uses: ./.github/workflows/vm-kernel.yaml
+    with:
+      push: true
+      tag: ${{ github.ref_name }}
+
   release:
-    runs-on: gha-ubuntu-22.04-64cores
+    needs: vm-kernel
+    runs-on: [ self-hosted, gen3, large ]
     steps:
       - name: git checkout
         uses: actions/checkout@v3
@@ -46,6 +52,13 @@ jobs:
           go-version-file: 'go.mod'
         timeout-minutes: 10
 
+      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
+      # The default value is ~/.docker
+      - name: set custom docker config directory
+        run: |
+          mkdir -p .docker-custom
+          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
+
       - name: check everything builds
         run: go build ./...
 
@@ -64,9 +77,11 @@ jobs:
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
       - name: load vm kernel
+        env:
+          IMAGE: ${{ needs.vm-kernel.outputs.image }}
         run: |
-          docker pull --quiet ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }}
-          ID=$(docker create ${{ env.VM_KERNEL_IMAGE }}:${{ env.VM_KERNEL_VERSION }} true)
+          docker pull --quiet $IMAGE
+          ID=$(docker create $IMAGE true)
           docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
           docker rm -f ${ID}
 
@@ -161,3 +176,8 @@ jobs:
             rendered_manifests/multus-eks.yaml
             rendered_manifests/whereabouts.yaml
             deploy/vmscrape.yaml
+
+      - name: remove custom docker config directory
+        if: always()
+        run: |
+          rm -rf .docker-custom

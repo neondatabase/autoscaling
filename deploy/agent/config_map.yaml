@@ -7,6 +7,7 @@ data:
   config.json: |
     {
       "scaling": {
+        "computeUnit": { "vCPUs": 0.25, "mem": 1 },
         "requestTimeoutSeconds": 10,
         "retryFailedRequestSeconds": 5,
         "defaultConfig": {

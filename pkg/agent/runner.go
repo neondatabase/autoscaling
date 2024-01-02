@@ -45,7 +45,7 @@ import (
 //
 // Currently, each autoscaler-agent supports only one version at a time. In the future, this may
 // change.
-const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV2_1
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
 
 // Runner is per-VM Pod god object responsible for handling everything
 //
@@ -194,6 +194,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
 		Core: core.Config{
+			ComputeUnit:                        r.global.config.Scaling.ComputeUnit,
 			DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
 			NeonVMRetryWait:                    time.Second * time.Duration(r.global.config.Scaling.RetryFailedRequestSeconds),
 			PluginRequestTick:                  time.Second * time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds),

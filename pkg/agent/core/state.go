@@ -37,6 +37,10 @@ import (
 
 // Config represents some of the static configuration underlying the decision-making of State
 type Config struct {
+	// ComputeUnit is the desired ratio between CPU and memory, copied from the global
+	// autoscaler-agent config.
+	ComputeUnit api.Resources
+
 	// DefaultScalingConfig is just copied from the global autoscaler-agent config.
 	// If the VM's ScalingConfig is nil, we use this field instead.
 	DefaultScalingConfig api.ScalingConfig
@@ -120,9 +124,6 @@ type state struct {
 type pluginState struct {
 	// OngoingRequest is true iff there is currently an ongoing request to *this* scheduler plugin.
 	OngoingRequest bool
-	// ComputeUnit, if not nil, gives the value of the compute unit we most recently got from a
-	// PluginResponse
-	ComputeUnit *api.Resources
 	// LastRequest, if not nil, gives information about the most recently started request to the
 	// plugin (maybe unfinished!)
 	LastRequest *pluginRequested
@@ -208,7 +209,6 @@ func NewState(vm api.VmInfo, config Config) *State {
 			VM:     vm,
 			Plugin: pluginState{
 				OngoingRequest: false,
-				ComputeUnit:    nil,
 				LastRequest:    nil,
 				LastFailureAt:  nil,
 				Permit:         nil,
@@ -661,12 +661,6 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
-	// if we don't know what the compute unit is, don't do anything.
-	if s.Plugin.ComputeUnit == nil {
-		s.warn("Can't determine desired resources because compute unit hasn't been set yet")
-		return s.VM.Using(), nil
-	}
-
 	var goalCU uint32
 	if s.Metrics != nil {
 		// For CPU:
@@ -674,7 +668,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		// average),
 		// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
 		goalCPUs := float64(s.Metrics.LoadAverage1Min) / s.scalingConfig().LoadAverageFractionTarget
-		cpuGoalCU := uint32(math.Round(goalCPUs / s.Plugin.ComputeUnit.VCPU.AsFloat64()))
+		cpuGoalCU := uint32(math.Round(goalCPUs / s.Config.ComputeUnit.VCPU.AsFloat64()))
 
 		// For Mem:
 		// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
@@ -683,7 +677,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		//
 		// NOTE: use uint64 for calculations on bytes as uint32 can overflow
 		memGoalBytes := uint64(math.Round(float64(s.Metrics.MemoryUsageBytes) / s.scalingConfig().MemoryUsageFractionTarget))
-		bytesPerCU := uint64(int64(s.Plugin.ComputeUnit.Mem) * s.VM.Mem.SlotSize.Value())
+		bytesPerCU := uint64(int64(s.Config.ComputeUnit.Mem) * s.VM.Mem.SlotSize.Value())
 		memGoalCU := uint32(memGoalBytes / bytesPerCU)
 
 		goalCU = util.Max(cpuGoalCU, memGoalCU)
@@ -701,7 +695,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	timeUntilRequestedUpscalingExpired := s.timeUntilRequestedUpscalingExpired(now)
 	requestedUpscalingInEffect := timeUntilRequestedUpscalingExpired > 0
 	if requestedUpscalingInEffect {
-		reqCU := s.requiredCUForRequestedUpscaling(*s.Plugin.ComputeUnit, *s.Monitor.RequestedUpscale)
+		reqCU := s.requiredCUForRequestedUpscaling(s.Config.ComputeUnit, *s.Monitor.RequestedUpscale)
 		if reqCU > initialGoalCU {
 			// FIXME: this isn't quite correct, because if initialGoalCU is already equal to the
 			// maximum goal CU we *could* have, this won't actually have an effect.
@@ -716,7 +710,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	timeUntilDeniedDownscaleExpired := s.timeUntilDeniedDownscaleExpired(now)
 	deniedDownscaleInEffect := timeUntilDeniedDownscaleExpired > 0
 	if deniedDownscaleInEffect {
-		reqCU := s.requiredCUForDeniedDownscale(*s.Plugin.ComputeUnit, s.Monitor.DeniedDownscale.Requested)
+		reqCU := s.requiredCUForDeniedDownscale(s.Config.ComputeUnit, s.Monitor.DeniedDownscale.Requested)
 		if reqCU > initialGoalCU {
 			deniedDownscaleAffectedResult = true
 			goalCU = util.Max(goalCU, reqCU)
@@ -731,7 +725,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	if s.Metrics == nil && goalCU == 0 {
 		goalResources = s.VM.Using()
 	} else {
-		goalResources = s.Plugin.ComputeUnit.Mul(uint16(goalCU))
+		goalResources = s.Config.ComputeUnit.Mul(uint16(goalCU))
 	}
 
 	// bound goalResources by the minimum and maximum resource amounts for the VM
@@ -753,7 +747,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			s.warn("Can't decrease desired resources to within VM maximum because of vm-monitor previously denied downscale request")
 		}
 		preMaxResult := result
-		result = result.Max(s.minRequiredResourcesForDeniedDownscale(*s.Plugin.ComputeUnit, *s.Monitor.DeniedDownscale))
+		result = result.Max(s.minRequiredResourcesForDeniedDownscale(s.Config.ComputeUnit, *s.Monitor.DeniedDownscale))
 		if result != preMaxResult {
 			deniedDownscaleAffectedResult = true
 		}
@@ -972,9 +966,6 @@ func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) 
 	if err := resp.Permit.ValidateNonZero(); err != nil {
 		return fmt.Errorf("Invalid permit: %w", err)
 	}
-	if err := resp.ComputeUnit.ValidateNonZero(); err != nil {
-		return fmt.Errorf("Invalid compute unit: %w", err)
-	}
 
 	// Errors from resp in connection with the prior request
 	if resp.Permit.HasFieldGreaterThan(h.s.Plugin.LastRequest.Resources) {
@@ -991,7 +982,9 @@ func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) 
 
 	// All good - set everything.
 
-	h.s.Plugin.ComputeUnit = &resp.ComputeUnit
+	// NOTE: We don't set the compute unit, even though the plugin response contains it. We're in
+	// the process of moving the source of truth for ComputeUnit from the scheduler plugin to the
+	// autoscaler-agent.
 	h.s.Plugin.Permit = &resp.Permit
 	return nil
 }
