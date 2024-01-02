@@ -73,7 +73,7 @@ func run(mgr manager.Manager) error {
 		setupLog.Info("main loop returned, exiting")
 	}()
 
-	if err := orca.Add(srv.HTTP("scheduler-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
+	if err := orca.Add(srv.HTTP("pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
 		return fmt.Errorf("failed to add pprof service: %w", err)
 	}
 
