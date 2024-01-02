@@ -242,6 +242,23 @@ func (r Resources) Max(cmp Resources) Resources {
 	}
 }
 
+// Add returns the result of adding the two Resources
+func (r Resources) Add(other Resources) Resources {
+	return Resources{
+		VCPU: r.VCPU + other.VCPU,
+		Mem:  r.Mem + other.Mem,
+	}
+}
+
+// SaturatingSub returns the result of subtracting r - other, with values that *would* underflow
+// instead set to zero.
+func (r Resources) SaturatingSub(other Resources) Resources {
+	return Resources{
+		VCPU: util.SaturatingSub(r.VCPU, other.VCPU),
+		Mem:  util.SaturatingSub(r.Mem, other.Mem),
+	}
+}
+
 // Mul returns the result of multiplying each resource by factor
 func (r Resources) Mul(factor uint16) Resources {
 	return Resources{
