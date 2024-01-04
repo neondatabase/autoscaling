@@ -12,7 +12,7 @@ commands:
   - name: generate-sshd-keys
     user: root
     sysvInitAction: sysinit
-    shell: '/bin/generate-sshd-keys.sh'
+    shell: '/usr/bin/ssh-keygen -A'
   - name: vm-monitor
     user: vm-monitor
     sysvInitAction: respawn
@@ -25,7 +25,7 @@ commands:
     user: root
     sysvInitAction: respawn
     # if having trouble with ssh, try adding -dd to the ssh args.
-    shell: 'setsid -w /usr/sbin/sshd -D -E /run/sshd/log -h /run/sshd/ssh_host_ecdsa_key -h /run/sshd/ssh_host_ed25519_key -h /run/sshd/ssh_host_rsa_key'
+    shell: '/usr/sbin/sshd -E /var/log/ssh.log'
 files:
   - filename: postgresql.conf
     hostPath: postgresql.conf
@@ -77,8 +77,6 @@ merge: |
   COPY postgresql.conf       /etc/postgresql.conf
   COPY pg_hba.conf           /etc/pg_hba.conf
   COPY sshd_config           /etc/ssh/sshd_config
-  COPY ssh_id_rsa.pub        /etc/ssh/authorized_keys
-  COPY generate-sshd-keys.sh /bin/generate-sshd-keys.sh
 
   # General tools
   RUN set -e \
@@ -104,11 +102,7 @@ merge: |
   # ssh stuff
   # 'authorized_keys' needs to have the right mode bits, otherwise it'll get ignored by sshd
   RUN set -e \
-      && apk add --no-cache \
-              openssh-server \
-      && chmod 600 /etc/ssh/authorized_keys
-  # TODO: this line is necessary because vm-builder doesn't transfer mode bits
-  RUN chmod +x /bin/generate-sshd-keys.sh
+      && apk add --no-cache openssh-server
 
   COPY --from=allocate-loop-builder /bin/allocate-loop        /bin/allocate-loop
   COPY --from=monitor-builder       /workspace/bin/vm-monitor /bin/vm-monitor

@@ -183,14 +183,6 @@ docker-build-examples: bin/vm-builder ## Build docker images for testing VMs
 
 .PHONY: docker-build-pg14-disk-test
 docker-build-pg14-disk-test: bin/vm-builder ## Build a VM image for testing
-	if [ -a 'vm-examples/pg14-disk-test/ssh_id_rsa' ]; then \
-	    echo "Skipping keygen because 'ssh_id_rsa' already exists"; \
-	else \
-	    echo "Generating new keypair with empty passphrase ..."; \
-	    ssh-keygen -t rsa -N '' -f 'vm-examples/pg14-disk-test/ssh_id_rsa'; \
-	    chmod uga+rw 'vm-examples/pg14-disk-test/ssh_id_rsa' 'vm-examples/pg14-disk-test/ssh_id_rsa.pub'; \
-	fi
-
 	./bin/vm-builder -src alpine:3.16 -dst $(PG14_DISK_TEST_IMG) -spec vm-examples/pg14-disk-test/image-spec.yaml
 
 #.PHONY: docker-push
@@ -323,7 +315,6 @@ example-vms: docker-build-examples kind k3d kubectl ## Build and push the testin
 
 .PHONY: pg14-disk-test
 pg14-disk-test: check-local-context docker-build-pg14-disk-test kind k3d kubectl ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
-	$(KUBECTL) create secret generic vm-ssh --from-file=private-key=vm-examples/pg14-disk-test/ssh_id_rsa || true
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG14_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(PG14_DISK_TEST_IMG) --name $(CLUSTER_NAME); fi
 

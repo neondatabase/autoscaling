@@ -61,6 +61,7 @@ require (
 	github.com/tychoish/fun v0.8.5
 	github.com/vishvananda/netlink v1.1.1-0.20220125195016-0639e7e787ba
 	go.uber.org/zap v1.24.0
+	golang.org/x/crypto v0.17.0
 	golang.org/x/exp v0.0.0-20230425010034-47ecfdc1ba53
 	golang.org/x/term v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -167,7 +168,6 @@ require (
 	go.opentelemetry.io/proto/otlp v0.7.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/mod v0.8.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/oauth2 v0.7.0 // indirect

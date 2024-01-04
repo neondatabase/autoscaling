@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -37,6 +42,7 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -194,7 +200,22 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
-func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk) error {
+type sshAuthKeysFile struct {
+	mountTag  string
+	file      *os.File
+	mountPath string
+	name      string
+	perm      os.FileMode
+}
+
+func createISO9660runtime(
+	diskPath string,
+	command, args,
+	sysctl []string,
+	env []vmv1.EnvVar,
+	disks []vmv1.Disk,
+	authKeys sshAuthKeysFile,
+) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
@@ -234,8 +255,11 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 		}
 	}
 
+	mounts := []string{}
+	mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, authKeys.mountPath))
+	mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o ro,mode=%d $(/neonvm/bin/blkid -L %s) %s`, authKeys.perm, authKeys.mountTag, authKeys.mountPath))
+
 	if len(disks) != 0 {
-		mounts := []string{}
 		for _, disk := range disks {
 			mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			switch {
@@ -257,11 +281,12 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 				// do nothing
 			}
 		}
-		mounts = append(mounts, "")
-		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(mounts, "\n"))), "mounts.sh")
-		if err != nil {
-			return err
-		}
+	}
+
+	mounts = append(mounts, "")
+	err = writer.AddFile(bytes.NewReader([]byte(strings.Join(mounts, "\n"))), "mounts.sh")
+	if err != nil {
+		return err
 	}
 
 	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
@@ -361,6 +386,42 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 
 	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
 	if err := execFg("chown", "36:34", diskPath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createISO9660FromFile(logger *zap.Logger, diskName string, diskPath string, f *os.File, fileName string) error {
+	writer, err := iso9660.NewWriter()
+	if err != nil {
+		return err
+	}
+	defer writer.Cleanup()
+
+	logger.Info("adding file to ISO9660 disk", zap.String("path", fileName))
+	err = writer.AddFile(f, fileName)
+	if err != nil {
+		return err
+	}
+
+	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	err = outputFile.Chown(36, 34)
+	if err != nil {
+		return err
+	}
+
+	err = writer.WriteTo(outputFile, diskName)
+	if err != nil {
+		return err
+	}
+
+	err = outputFile.Close()
+	if err != nil {
 		return err
 	}
 
@@ -514,12 +575,34 @@ func main() {
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 
+	// ssh prep
+	prefix := "/root/.ssh"
+	if err := os.MkdirAll(prefix, 0700); err != nil {
+		logger.Fatal("failed to make ssh folder", zap.Error(err))
+	}
+	if err := sshKeygen(prefix); err != nil {
+		logger.Fatal("ssh keygen failed", zap.Error(err))
+	}
+	f, err := os.Open("/root/.ssh/id_rsa.pub")
+	if err != nil {
+		logger.Fatal("failed to open ssh public key")
+	}
+	authKeys := sshAuthKeysFile{
+		mountTag:  "ssh-authorized-keys",
+		file:      f,
+		mountPath: "/mnt/ssh",
+		name:      "authorized_keys",
+		perm:      0600,
+	}
+
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{}
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
 	}
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
+	err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command,
+		vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, authKeys)
+	if err != nil {
 		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 
@@ -568,6 +651,16 @@ func main() {
 	// disk details
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
+
+	{
+		diskName := authKeys.mountTag
+		diskPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, authKeys.mountTag)
+		if err := createISO9660FromFile(logger, diskName, diskPath, authKeys.file, authKeys.name); err != nil {
+			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
+		}
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", authKeys.mountTag, diskPath))
+	}
+
 	for _, disk := range vmSpec.Disks {
 		switch {
 		case disk.EmptyDisk != nil:
@@ -1214,6 +1307,16 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 		return nil, err
 	}
 
+	f, err := os.OpenFile("/etc/hosts", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	record := fmt.Sprintf("%v neonvm-br\n", ipVm)
+	if _, err := f.WriteString(record); err != nil {
+		return nil, err
+	}
+
 	return mac, nil
 }
 
@@ -1282,4 +1385,84 @@ func overlayNetwork(iface string) (mac.MAC, error) {
 	}
 
 	return mac, nil
+}
+
+func sshKeygen(prefix string) error {
+	privateKeyPath := path.Join(prefix, "id_rsa")
+	publicKeyPath := path.Join(prefix, "id_rsa.pub")
+	bitSize := 4096
+
+	privateKey, err := generatePrivateKey(bitSize)
+	if err != nil {
+		return err
+	}
+
+	publicKeyBytes, err := generatePublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return err
+	}
+
+	privateKeyBytes := encodePrivateKeyToPEM(privateKey)
+
+	err = writeKeyToFile(privateKeyBytes, privateKeyPath)
+	if err != nil {
+		return err
+	}
+
+	err = writeKeyToFile(publicKeyBytes, publicKeyPath)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// generatePrivateKey creates a RSA Private Key of specified byte size
+func generatePrivateKey(bitSize int) (*rsa.PrivateKey, error) {
+	// Private Key generation
+	privateKey, err := rsa.GenerateKey(rand.Reader, bitSize)
+	if err != nil {
+		return nil, err
+	}
+	// Validate Private Key
+	err = privateKey.Validate()
+	if err != nil {
+		return nil, err
+	}
+	return privateKey, nil
+}
+
+// encodePrivateKeyToPEM encodes Private Key from RSA to PEM format
+func encodePrivateKeyToPEM(privateKey *rsa.PrivateKey) []byte {
+	// Get ASN.1 DER format
+	privDER := x509.MarshalPKCS1PrivateKey(privateKey)
+	// pem.Block
+	privBlock := pem.Block{
+		Type:    "RSA PRIVATE KEY",
+		Headers: nil,
+		Bytes:   privDER,
+	}
+	// Private key in PEM format
+	privatePEM := pem.EncodeToMemory(&privBlock)
+	return privatePEM
+}
+
+// generatePublicKey take a rsa.PublicKey and return bytes suitable for writing to .pub file
+// returns in the format "ssh-rsa ..."
+func generatePublicKey(privatekey *rsa.PublicKey) ([]byte, error) {
+	publicRsaKey, err := ssh.NewPublicKey(privatekey)
+	if err != nil {
+		return nil, err
+	}
+	pubKeyBytes := ssh.MarshalAuthorizedKey(publicRsaKey)
+	return pubKeyBytes, nil
+}
+
+// writePemToFile writes keys to a file
+func writeKeyToFile(keyBytes []byte, filePath string) error {
+	err := os.WriteFile(filePath, keyBytes, 0600)
+	if err != nil {
+		return err
+	}
+	return nil
 }

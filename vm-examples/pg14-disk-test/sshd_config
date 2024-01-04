@@ -25,10 +25,8 @@
 #RekeyLimit default none
 
 # Logging
-#
-# NOTE: we run this with -E /var/log/sshd, so the log files go there.
 SyslogFacility AUTH
-LogLevel DEBUG
+LogLevel INFO
 
 # Authentication:
 
@@ -39,7 +37,7 @@ LogLevel DEBUG
 #MaxSessions 10
 
 PubkeyAuthentication yes
-AuthorizedKeysFile	/etc/ssh/authorized_keys
+AuthorizedKeysFile	/mnt/ssh/authorized_keys
 HostbasedAuthentication no
 PasswordAuthentication no
 
