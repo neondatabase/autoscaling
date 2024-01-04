@@ -61,6 +61,13 @@ RUN set -e \
     && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
     | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-x86_64-unknown-linux-musl/bin/vector
 
+# ssh server
+RUN set -e \
+	&& apk add --no-cache --no-progress --quiet \
+		openssh-server \
+	&& mv /usr/bin/ssh-keygen /neonvm/bin/ \
+	&& mv /usr/sbin/sshd      /neonvm/bin/
+
 # init scripts
 COPY inittab     /neonvm/bin/inittab
 COPY vminit      /neonvm/bin/vminit
@@ -68,6 +75,7 @@ COPY vmstart     /neonvm/bin/vmstart
 COPY vmshutdown  /neonvm/bin/vmshutdown
 COPY vmacpi      /neonvm/acpi/vmacpi
 COPY vector.yaml /neonvm/config/vector.yaml
+COPY sshd_config /neonvm/config/sshd_config
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 
 FROM vm-runtime AS builder
@@ -77,6 +85,7 @@ COPY --from=vm-runtime /neonvm /rootdisk/neonvm
 RUN set -e \
     && mkdir -p /rootdisk/etc \
     && mkdir -p /rootdisk/etc/vector \
+    && mkdir -p /rootdisk/etc/ssh \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2

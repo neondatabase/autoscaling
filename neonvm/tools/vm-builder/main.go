@@ -41,6 +41,8 @@ var (
 	scriptVmInit string
 	//go:embed files/vector.yaml
 	configVector string
+	//go:embed files/sshd_config
+	configSshd string
 )
 
 var (
@@ -262,6 +264,7 @@ func main() {
 		{"vmacpi", scriptVmAcpi},
 		{"vminit", scriptVmInit},
 		{"vector.yaml", configVector},
+		{"sshd_config", configSshd},
 	}
 
 	for _, f := range files {
