@@ -343,12 +343,16 @@ func QmpQueryMemoryBackendIds(mon *qmp.SocketMonitor) (map[int]struct{}, error) 
 	return backends, nil
 }
 
+type QMPRunner interface {
+	Run([]byte) ([]byte, error)
+}
+
 // QmpAddMemoryBackend adds a single memory slot to the VM with the given size.
 //
 // The memory slot does nothing until a corresponding "device" is added to the VM for the same memory slot.
 // See QmpAddMemoryDevice for more.
 // When unplugging, QmpDelMemoryDevice must be called before QmpDelMemoryBackend.
-func QmpAddMemoryBackend(mon *qmp.SocketMonitor, idx int, sizeBytes int64) error {
+func QmpAddMemoryBackend(mon QMPRunner, idx int, sizeBytes int64) error {
 	cmd := []byte(fmt.Sprintf(
 		`{"execute": "object-add",
 		  "arguments": {"id": "memslot%d",
