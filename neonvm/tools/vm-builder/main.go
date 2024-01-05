@@ -58,11 +58,6 @@ var (
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 )
 
-type dockerMessage struct {
-	Stream string `json:"stream"`
-	Error  string `json:"error"`
-}
-
 func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
 	tmpl, err := template.New(filename).Parse(tmplString)
 	if err != nil {
@@ -157,7 +152,7 @@ func main() {
 	if !*forcePull {
 		hostImages, err := cli.ImageList(ctx, types.ImageListOptions{})
 		if err != nil {
-			log.Fatalln(err)
+			log.Fatalln(err) //nolint:gocritic // linter complains that Fatalln circumvents deferred cli.Close(). Too much work to fix in #721, leaving for later.
 		}
 
 		for _, img := range hostImages {
@@ -175,15 +170,22 @@ func main() {
 
 	if !hostContainsSrcImage {
 		// pull source image
-		log.Printf("Pull source docker image: %s", *srcImage)
-		pull, err := cli.ImagePull(ctx, *srcImage, types.ImagePullOptions{})
+		// use a closure so deferred close is closer
+		err := func() error {
+			log.Printf("Pull source docker image: %s", *srcImage)
+			pull, err := cli.ImagePull(ctx, *srcImage, types.ImagePullOptions{})
+			if err != nil {
+				return err
+			}
+			defer pull.Close()
+			// do quiet pull - discard output
+			_, err = io.Copy(io.Discard, pull)
+			return err
+		}()
 		if err != nil {
 			log.Fatalln(err)
 		}
-		defer pull.Close()
 
-		// do quiet pull - discard output
-		io.Copy(io.Discard, pull)
 	}
 
 	log.Printf("Build docker image for virtual machine (disk size %s): %s\n", *size, dstIm)
@@ -202,16 +204,20 @@ func main() {
 	}
 
 	tmplArgs := TemplatesContext{
+		User:          "root", // overridden below, if imageSpec.Config.User != ""
 		Entrypoint:    imageSpec.Config.Entrypoint,
 		Cmd:           imageSpec.Config.Cmd,
 		Env:           imageSpec.Config.Env,
 		RootDiskImage: *srcImage,
+
+		SpecBuild:       "",  // overridden below if spec != nil
+		SpecMerge:       "",  // overridden below if spec != nil
+		InittabCommands: nil, // overridden below if spec != nil
+		ShutdownHook:    "",  // overridden below if spec != nil
 	}
 
 	if len(imageSpec.Config.User) != 0 {
 		tmplArgs.User = imageSpec.Config.User
-	} else {
-		tmplArgs.User = "root"
 	}
 
 	tarBuffer := new(bytes.Buffer)
@@ -329,7 +335,7 @@ func main() {
 		tarReader := tar.NewReader(fromContainer)
 		for {
 			header, err := tarReader.Next()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			} else if err != nil {
 				log.Fatalln(err)
@@ -339,15 +345,19 @@ func main() {
 				log.Printf("skip file %s", header.Name)
 				continue
 			}
-			path := filepath.Join(*outFile)
+			path := filepath.Join(*outFile) //nolint:gocritic // FIXME: this is probably incorrect, intended to join with header.Name ?
 			info := header.FileInfo()
 
-			file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode())
-			if err != nil {
-				log.Fatalln(err)
-			}
-			defer file.Close()
-			_, err = io.Copy(file, tarReader)
+			// Open and write to the file inside a closure, so we can defer close
+			err = func() error {
+				file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode())
+				if err != nil {
+					return err
+				}
+				defer file.Close()
+				_, err = io.Copy(file, tarReader)
+				return err
+			}()
 			if err != nil {
 				log.Fatalln(err)
 			}

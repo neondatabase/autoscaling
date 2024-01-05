@@ -2,9 +2,6 @@
 run:
   deadline: 5m
   issues-exit-code: 1
-  # TODO: fix all the issues for neonvm and enable linter for it
-  skip-dirs:
-    - neonvm
 
 issues:
   exclude:
@@ -53,20 +50,37 @@ linters-settings:
   # see: <https://golangci-lint.run/usage/linters/#exhaustruct>
   exhaustruct:
     exclude:
+      - '^crypto/tls\.Config$'
       - '^net/http\.(Client|Server)'
-      - '^net\.TCPAddr$'
-      # metav1.{CreateOptions,GetOptions,ListOptions,WatchOptions,PatchOptions,DeleteOptions}
-      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch|Delete)Options$'
-      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.ObjectMeta$'
+      - '^net\.(Dialer|TCPAddr)$'
+      - '^archive/tar\.Header$'
+      - '^k8s\.io/api/core/v1\.\w+$'
       - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
-      - '^github.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'
+      # metav1.{CreateOptions,GetOptions,ListOptions,WatchOptions,PatchOptions,UpdateOptions,DeleteOptions}
+      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch|Update|Delete)Options$'
+      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Condition|LabelSelector|ObjectMeta)$'
+      - '^k8s\.io/client-go/tools/leaderelection/resourcelock\.ResourceLockConfig$'
+      - '^k8s\.io/client-go/tools/leaderelection\.(LeaderCallbacks|LeaderElectionConfig)$'
+      - '^sigs\.k8s\.io/controller-runtime/pkg/client\.Options$'
+      - '^sigs\.k8s\.io/controller-runtime/pkg/controller\.Options$'
+      - '^sigs\.k8s\.io/controller-runtime/pkg/envtest\.(Environment|WebhookInstallOptions)$'
+      - '^sigs\.k8s\.io/controller-runtime/pkg/manager\.Options$'
+      - '^sigs\.k8s\.io/controller-runtime/pkg/reconcile\.Result$'
+      - '^sigs\.k8s\.io/controller-runtime/pkg/scheme\.Builder$'
       - '^github\.com/containerd/cgroups/v3/cgroup2\.(Resources|Memory)'
+      - '^github\.com/containerd/cgroups/v3/cgroup2\.CPU$'
+      - '^github\.com/docker/docker/api/types/container\.Config$'
+      - '^github\.com/docker/docker/api/types\.\w+Options$'
+      - '^github\.com/opencontainers/runtime-spec/specs-go\.\w+$' # Exempt the entire package. Too many big structs.
+      - '^github\.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'
       - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
-      - '^github\.com/neondatabase/autoscaling/pkg/util/patch\.Operation$'
-      - '^github\.com/neondatabase/autoscaling/pkg/util/watch\.HandlerFuncs$'
+      - '^github\.com/vishvananda/netlink\.\w+$' # Exempt the entire package. Too many big structs.
       # vmapi.{VirtualMachine,VirtualMachineSpec,VirtualMachineMigration,VirtualMachineMigrationSpec}
       - '^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.VirtualMachine(Migration)?(Spec)?$'
+      - '^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.IPPool$'
       - '^github\.com/neondatabase/autoscaling/pkg/agent/core\.ActionSet$'
+      - '^github\.com/neondatabase/autoscaling/pkg/util/patch\.Operation$'
+      - '^github\.com/neondatabase/autoscaling/pkg/util/watch\.HandlerFuncs$'
 
   # see: <https://golangci-lint.run/usage/linters/#gci>
   gci:
@@ -77,8 +91,6 @@ linters-settings:
       - default
       # k8s.io can be a large group; we want that visually distinguished
       - Prefix(k8s.io)
-      # neonvm is *kind of* local, but not really. Don't lump it in with 'default'
-      - Prefix(github.com/neondatabase/autoscaling/neonvm)
       - Prefix(github.com/neondatabase/autoscaling)
 
   # see: <https://golangci-lint.run/usage/linters/#gocritic>, <https://go-critic.com/overview>

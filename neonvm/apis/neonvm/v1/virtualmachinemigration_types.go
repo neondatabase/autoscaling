@@ -177,5 +177,5 @@ type VirtualMachineMigrationList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&VirtualMachineMigration{}, &VirtualMachineMigrationList{})
+	SchemeBuilder.Register(&VirtualMachineMigration{}, &VirtualMachineMigrationList{}) //nolint:exhaustruct // just being used to provide the types
 }

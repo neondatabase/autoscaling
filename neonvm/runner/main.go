@@ -1,26 +1,25 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"strconv"
-
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -37,6 +36,7 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -199,7 +199,7 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 	if err != nil {
 		return err
 	}
-	defer writer.Cleanup()
+	defer writer.Cleanup() //nolint:errcheck // Nothing to do with the error, maybe log it ? TODO
 
 	if len(sysctl) != 0 {
 		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(sysctl, "\n"))), "sysctl.conf")
@@ -376,7 +376,7 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 	if err != nil {
 		return err
 	}
-	defer writer.Cleanup()
+	defer writer.Cleanup() //nolint:errcheck // Nothing to do with the error, maybe log it ? TODO
 
 	dir, err := os.Open(contentPath)
 	if err != nil {
@@ -411,14 +411,18 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 			continue
 		}
 
-		logger.Info("adding file to ISO9660 disk", zap.String("path", outputPath))
-		fileToAdd, err := os.Open(fileName)
-		if err != nil {
-			return err
-		}
-		defer fileToAdd.Close()
+		// run the file handling logic in a closure, so the defers happen within the loop body,
+		// rather than the outer function.
+		err = func() error {
+			logger.Info("adding file to ISO9660 disk", zap.String("path", outputPath))
+			fileToAdd, err := os.Open(fileName)
+			if err != nil {
+				return err
+			}
+			defer fileToAdd.Close()
 
-		err = writer.AddFile(fileToAdd, outputPath)
+			return writer.AddFile(fileToAdd, outputPath)
+		}()
 		if err != nil {
 			return err
 		}
@@ -498,8 +502,8 @@ func main() {
 	if err := json.Unmarshal(vmSpecJson, vmSpec); err != nil {
 		logger.Fatal("Failed to unmarshal VM spec", zap.Error(err))
 	}
-	vmStatus := &vmv1.VirtualMachineStatus{}
-	if err := json.Unmarshal(vmStatusJson, vmStatus); err != nil {
+	var vmStatus vmv1.VirtualMachineStatus
+	if err := json.Unmarshal(vmStatusJson, &vmStatus); err != nil {
 		logger.Fatal("Failed to unmarshal VM Status", zap.Error(err))
 	}
 
@@ -536,8 +540,10 @@ func main() {
 	if err != nil {
 		logger.Fatal("could not get root image size", zap.Error(err))
 	}
-	imageSize := QemuImgOutputPartial{}
-	json.Unmarshal(qemuImgOut, &imageSize)
+	var imageSize QemuImgOutputPartial
+	if err := json.Unmarshal(qemuImgOut, &imageSize); err != nil {
+		logger.Fatal("Failed to unmarhsal QEMU image size", zap.Error(err))
+	}
 	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
 
 	// going to resize
@@ -710,9 +716,8 @@ func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	parsed := api.VCPUChange{}
-	err = json.Unmarshal(body, &parsed)
-	if err != nil {
+	var parsed api.VCPUChange
+	if err = json.Unmarshal(body, &parsed); err != nil {
 		logger.Error("could not parse body", zap.Error(err))
 		w.WriteHeader(400)
 		return
@@ -752,7 +757,7 @@ func handleCPUCurrent(logger *zap.Logger, w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Add("Content-Type", "application/json")
-	w.Write(body)
+	w.Write(body) //nolint:errcheck // Not much to do with the error here. TODO: log it?
 }
 
 func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cgroupPath string, wg *sync.WaitGroup) {
@@ -956,7 +961,7 @@ func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 
 	arr := strings.Split(strings.Trim(string(data), "\n"), " ")
 	if len(arr) == 0 {
-		return nil, fmt.Errorf("unexpected cgroup data")
+		return nil, errors.New("unexpected cgroup data")
 	}
 	quota, err := strconv.ParseUint(arr[0], 10, 64)
 	if err != nil {
@@ -1016,7 +1021,7 @@ func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.Wa
 		logger.Error("failed to start monitor connection", zap.Error(err))
 		return
 	}
-	defer mon.Disconnect()
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "system_powerdown"}`)
 	_, err = mon.Run(qmpcmd)
@@ -1026,8 +1031,6 @@ func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.Wa
 	}
 
 	logger.Info("system_powerdown command sent to QEMU")
-
-	return
 }
 
 func calcIPs(cidr string) (net.IP, net.IP, net.IPMask, error) {
@@ -1150,7 +1153,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	}
 
 	// pass incoming traffic to .Guest.Spec.Ports into VM
-	iptablesArgs := []string{}
+	var iptablesArgs []string
 	for _, port := range ports {
 		logger.Info(fmt.Sprintf("setup DNAT rule for incoming traffic to port %d", port.Port))
 		iptablesArgs = []string{
@@ -1159,7 +1162,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
-			logger.Error("could not set up DNAT rule  for incoming traffic", zap.Error(err))
+			logger.Error("could not set up DNAT rule for incoming traffic", zap.Error(err))
 			return nil, err
 		}
 		logger.Info(fmt.Sprintf("setup DNAT rule for traffic originating from localhost to port %d", port.Port))
@@ -1185,7 +1188,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			return nil, err
 		}
 	}
-	logger.Info(fmt.Sprintf("setup MASQUERADE rule for traffic originating from localhost"))
+	logger.Info("setup MASQUERADE rule for traffic originating from localhost")
 	iptablesArgs = []string{
 		"-t", "nat", "-A", "POSTROUTING",
 		"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "UNICAST",

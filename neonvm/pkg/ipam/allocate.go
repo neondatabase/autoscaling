@@ -10,10 +10,13 @@ import (
 	whereaboutstypes "github.com/k8snetworkplumbingwg/whereabouts/pkg/types"
 )
 
-func doAcquire(ctx context.Context,
+func doAcquire(
+	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
-	vmName string, vmNamespace string) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+	vmName string,
+	vmNamespace string,
+) (net.IPNet, []whereaboutstypes.IPReservation, error) {
 
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
@@ -38,9 +41,13 @@ func doAcquire(ctx context.Context,
 	return net.IPNet{IP: ip, Mask: ipnet.Mask}, newReservation, nil
 }
 
-func doRelease(ctx context.Context,
-	ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation,
-	vmName string, vmNamespace string) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+func doRelease(
+	_ context.Context,
+	ipRange RangeConfiguration,
+	reservation []whereaboutstypes.IPReservation,
+	vmName string,
+	vmNamespace string,
+) (net.IPNet, []whereaboutstypes.IPReservation, error) {
 
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")

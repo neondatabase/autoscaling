@@ -33,7 +33,14 @@ import (
 	"strconv"
 	"time"
 
+	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"golang.org/x/crypto/ssh"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -43,17 +50,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/tools/record"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/neonvm/controllers/buildtag"
 	"github.com/neondatabase/autoscaling/neonvm/pkg/ipam"
-
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
 )
@@ -140,11 +140,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if controllerutil.ContainsFinalizer(&virtualmachine, virtualmachineFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for VirtualMachine before delete it")
-			if err := r.doFinalizerOperationsForVirtualMachine(ctx, &virtualmachine); err != nil {
-				// if fail to delete the external dependency here, return with error
-				// so that it can be retried
-				return ctrl.Result{}, err
-			}
+			r.doFinalizerOperationsForVirtualMachine(ctx, &virtualmachine)
 
 			// remove our finalizer from the list and update it.
 			log.Info("Removing Finalizer for VirtualMachine after successfully perform the operations")
@@ -199,8 +195,8 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{RequeueAfter: time.Second}, nil
 }
 
-// finalizeVirtualMachine will perform the required operations before delete the CR.
-func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
+// doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
+func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, virtualmachine *vmv1.VirtualMachine) {
 	// TODO(user): Add the cleanup steps that the operator
 	// needs to do before the CR can be deleted. Examples
 	// of finalizers include performing backups and deleting
@@ -227,33 +223,31 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 		if err != nil {
 			// ignore error
 			log.Error(err, "ignored error")
-			return nil
+			return
 		}
 		nadNamespace, err := nadIpamNamespace()
 		if err != nil {
 			// ignore error
 			log.Error(err, "ignored error")
-			return nil
+			return
 		}
 		ipam, err := ipam.New(ctx, nadName, nadNamespace)
 		if err != nil {
 			// ignore error
 			log.Error(err, "ignored error")
-			return nil
+			return
 		}
 		defer ipam.Close()
 		ip, err := ipam.ReleaseIP(ctx, virtualmachine.Name, virtualmachine.Namespace)
 		if err != nil {
 			// ignore error
 			log.Error(err, "fail to release IP, error ignored")
-			return nil
+			return
 		}
 		message := fmt.Sprintf("Released IP %s", ip.String())
 		log.Info(message)
 		r.Recorder.Event(virtualmachine, "Normal", "OverlayNet", message)
 	}
-
-	return nil
 }
 
 func runnerSupportsCgroup(pod *corev1.Pod) bool {
@@ -274,7 +268,8 @@ func (r *VirtualMachineReconciler) updateVMStatusCPU(
 	ctx context.Context,
 	virtualmachine *vmv1.VirtualMachine,
 	vmRunner *corev1.Pod,
-	qmpPluggedCPUs uint32, supportsCgroup bool, cgroupUsage api.VCPUCgroup,
+	qmpPluggedCPUs uint32,
+	cgroupUsage *api.VCPUCgroup,
 ) {
 	log := log.FromContext(ctx)
 
@@ -283,7 +278,7 @@ func (r *VirtualMachineReconciler) updateVMStatusCPU(
 	// - vm.Status.CPUs.RoundUp() == qmpPluggedCPUs
 	// Otherwise, we update the status.
 	var currentCPUUsage vmv1.MilliCPU
-	if supportsCgroup {
+	if cgroupUsage != nil {
 		if cgroupUsage.VCPUs.RoundedUp() != qmpPluggedCPUs {
 			// This is not expected but it's fine. We only report the
 			// mismatch here and will resolve it in the next reconcile
@@ -502,7 +497,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			pluggedCPU := uint32(len(cpuSlotsPlugged))
 
 			// get cgroups CPU details from runner pod
-			var cgroupUsage api.VCPUCgroup
+			var cgroupUsage *api.VCPUCgroup
 			supportsCgroup := runnerSupportsCgroup(vmRunner)
 			if supportsCgroup {
 				cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
@@ -513,7 +508,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// update status by CPUs used in the VM
-			r.updateVMStatusCPU(ctx, virtualmachine, vmRunner, pluggedCPU, supportsCgroup, cgroupUsage)
+			r.updateVMStatusCPU(ctx, virtualmachine, vmRunner, pluggedCPU, cgroupUsage)
 
 			// get Memory details from hypervisor and update VM status
 			memorySize, err := QmpGetMemorySize(QmpAddr(virtualmachine))
@@ -646,7 +641,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		specCPU := virtualmachine.Spec.Guest.CPUs.Use
 		pluggedCPU := uint32(len(cpuSlotsPlugged))
 
-		var cgroupUsage api.VCPUCgroup
+		var cgroupUsage *api.VCPUCgroup
 		supportsCgroup := runnerSupportsCgroup(vmRunner)
 		if supportsCgroup {
 			cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
@@ -748,7 +743,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// set VM phase to running if everything scaled
 		if cpuScaled && ramScaled {
 			// update status by CPUs used in the VM
-			r.updateVMStatusCPU(ctx, virtualmachine, vmRunner, pluggedCPU, supportsCgroup, cgroupUsage)
+			r.updateVMStatusCPU(ctx, virtualmachine, vmRunner, pluggedCPU, cgroupUsage)
 
 			// get Memory details from hypervisor and update VM status
 			memorySize, err := QmpGetMemorySize(QmpAddr(virtualmachine))
@@ -771,7 +766,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
 			if err == nil {
 				// delete current runner
-				if err = r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
+				if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
 					return err
 				}
 			} else if !apierrors.IsNotFound(err) {
@@ -793,7 +788,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// delete runner only when VM failed
 			if found && virtualmachine.Status.Phase == vmv1.VmFailed {
 				// delete current runner
-				if err = r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
+				if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
 					return err
 				}
 			}
@@ -1117,6 +1112,7 @@ func setRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.Mill
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("unexpected status %s", resp.Status)
@@ -1124,39 +1120,39 @@ func setRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.Mill
 	return nil
 }
 
-func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (api.VCPUCgroup, error) {
+func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgroup, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := api.VCPUCgroup{}
 
 	url := fmt.Sprintf("http://%s:%d/cpu_current", vm.Status.PodIP, vm.Spec.RunnerPort)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 
 	if resp.StatusCode != 200 {
-		return result, fmt.Errorf("unexpected status %s", resp.Status)
+		return nil, fmt.Errorf("unexpected status %s", resp.Status)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 
+	var result api.VCPUCgroup
 	err = json.Unmarshal(body, &result)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 
-	return result, nil
+	return &result, nil
 }
 
 // imageForVirtualMachine gets the Operand image which is managed by this controller
@@ -1183,12 +1179,12 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 
 	vmSpecJson, err := json.Marshal(virtualmachine.Spec)
 	if err != nil {
-		return nil, fmt.Errorf("marshal VM Spec: %s", err)
+		return nil, fmt.Errorf("marshal VM Spec: %w", err)
 	}
 
 	vmStatusJson, err := json.Marshal(virtualmachine.Status)
 	if err != nil {
-		return nil, fmt.Errorf("marshal VM Status: %s", err)
+		return nil, fmt.Errorf("marshal VM Status: %w", err)
 	}
 
 	pod := &corev1.Pod{
