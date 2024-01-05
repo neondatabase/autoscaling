@@ -390,6 +390,8 @@ type VirtualMachineStatus struct {
 	CPUs *MilliCPU `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
+	// +optional
+	SSHSecretName string `json:"secretName,omitempty"`
 }
 
 type VmPhase string

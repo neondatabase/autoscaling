@@ -1,0 +1,3 @@
+Host *
+    StrictHostKeyChecking accept-new
+    IdentityFile /mnt/ssh/id_rsa

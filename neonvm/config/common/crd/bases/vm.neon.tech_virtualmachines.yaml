@@ -2685,6 +2685,8 @@ spec:
                 type: string
               podName:
                 type: string
+              secretName:
+                type: string
             type: object
         type: object
     served: true

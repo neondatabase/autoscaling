@@ -217,8 +217,15 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		targetRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: migration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
+			sshSecret := &corev1.Secret{}
+			err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
+			if err != nil {
+				log.Error(err, "Failed to get ssh secret")
+				return ctrl.Result{}, err
+			}
+
 			// Define a new target pod
-			tpod, err := r.targetPodForVirtualMachine(vm, migration)
+			tpod, err := r.targetPodForVirtualMachine(vm, migration, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to generate Target Pod spec")
 				return ctrl.Result{}, err
@@ -652,9 +659,11 @@ func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) e
 // targetPodForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	vm *vmv1.VirtualMachine,
-	migration *vmv1.VirtualMachineMigration) (*corev1.Pod, error) {
+	migration *vmv1.VirtualMachineMigration,
+	sshSecret *corev1.Secret,
+) (*corev1.Pod, error) {
 
-	pod, err := podSpec(vm)
+	pod, err := podSpec(vm, sshSecret)
 	if err != nil {
 		return nil, err
 	}

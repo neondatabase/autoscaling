@@ -19,8 +19,12 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +33,7 @@ import (
 	"strconv"
 	"time"
 
+	"golang.org/x/crypto/ssh"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -81,6 +86,7 @@ type VirtualMachineReconciler struct {
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachines/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;list;watch
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools/finalizers,verbs=update
@@ -324,6 +330,11 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		meta.SetStatusCondition(&virtualmachine.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 	}
 
+	// Generate ssh secret name
+	if len(virtualmachine.Status.SSHSecretName) == 0 {
+		virtualmachine.Status.SSHSecretName = virtualmachine.Name
+	}
+
 	// Generate runner pod name
 	if len(virtualmachine.Status.PodName) == 0 {
 		virtualmachine.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", virtualmachine.Name))
@@ -369,8 +380,29 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
+			secret := &corev1.Secret{}
+			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.SSHSecretName, Namespace: virtualmachine.Namespace}, secret)
+			if err != nil && apierrors.IsNotFound(err) {
+				// Define a new ssh secret
+				secret, err = r.sshSecretForVirtualMachine(virtualmachine)
+				if err != nil {
+					log.Error(err, "Failed to define new ssh Secret for VirtualMachine")
+					return err
+				}
+
+				log.Info("Creating a new ssh Secret", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
+				if err = r.Create(ctx, secret); err != nil {
+					log.Error(err, "Failed to create new ssh secret", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
+					return err
+				}
+				log.Info("SSH Secret was created", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
+			} else if err != nil {
+				log.Error(err, "Failed to ssh secret")
+				return err
+			}
+
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(virtualmachine)
+			pod, err := r.podForVirtualMachine(virtualmachine, secret)
 			if err != nil {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
@@ -384,8 +416,9 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
 			r.Recorder.Event(virtualmachine, "Normal", "Created",
-				fmt.Sprintf("VirtualMachine %s created, pod %s",
-					virtualmachine.Name, pod.Name))
+				fmt.Sprintf("VirtualMachine %s created, pod %s, secret %s",
+					virtualmachine.Name, pod.Name, secret.Name))
+
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")
 			return err
@@ -944,9 +977,10 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
-	virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
-
-	pod, err := podSpec(virtualmachine)
+	virtualmachine *vmv1.VirtualMachine,
+	sshSecret *corev1.Secret,
+) (*corev1.Pod, error) {
+	pod, err := podSpec(virtualmachine, sshSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -958,6 +992,41 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 	}
 
 	return pod, nil
+}
+
+func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
+	secret, err := sshSecretSpec(virtualmachine)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := ctrl.SetControllerReference(virtualmachine, secret, r.Scheme); err != nil {
+		return nil, err
+	}
+	return secret, nil
+}
+
+func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
+	bitSize := 2048
+	privateKey, publicKey, err := sshKeygen(bitSize)
+	if err != nil {
+		return nil, err
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      virtualmachine.Name,
+			Namespace: virtualmachine.Namespace,
+		},
+		Immutable: ptr(true),
+		Type:      corev1.SecretTypeSSHAuth,
+		Data: map[string][]byte{
+			"ssh-privatekey": privateKey,
+			"ssh-publickey":  publicKey,
+		},
+	}
+
+	return secret, nil
 }
 
 // labelsForVirtualMachine returns the labels for selecting the resources
@@ -1101,7 +1170,7 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
-func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
+func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*corev1.Pod, error) {
 	labels := labelsForVirtualMachine(virtualmachine)
 	annotations := annotationsForVirtualMachine(virtualmachine)
 	affinity := affinityForVirtualMachine(virtualmachine)
@@ -1216,6 +1285,14 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 						// Note that this mode corresponds to "private" in Linux terminology.
 						MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
 					},
+					{
+						Name:      "ssh-private-key",
+						MountPath: "/mnt/ssh",
+					},
+					{
+						Name:      "ssh-public-key",
+						MountPath: "/vm/ssh",
+					},
 				},
 				Resources: virtualmachine.Spec.PodResources,
 			}},
@@ -1232,6 +1309,36 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 						HostPath: &corev1.HostPathVolumeSource{
 							Path: "/sys/fs/cgroup",
 							Type: &[]corev1.HostPathType{corev1.HostPathDirectory}[0],
+						},
+					},
+				},
+				{
+					Name: "ssh-private-key",
+					VolumeSource: corev1.VolumeSource{
+						Secret: &corev1.SecretVolumeSource{
+							SecretName: sshSecret.Name,
+							Items: []corev1.KeyToPath{
+								{
+									Key:  "ssh-privatekey",
+									Path: "id_rsa",
+									Mode: ptr[int32](0600),
+								},
+							},
+						},
+					},
+				},
+				{
+					Name: "ssh-public-key",
+					VolumeSource: corev1.VolumeSource{
+						Secret: &corev1.SecretVolumeSource{
+							SecretName: sshSecret.Name,
+							Items: []corev1.KeyToPath{
+								{
+									Key:  "ssh-publickey",
+									Path: "authorized_keys",
+									Mode: ptr[int32](0644),
+								},
+							},
 						},
 					},
 				},
@@ -1429,3 +1536,68 @@ func getEnvVarValue(envVarName string) (string, error) {
 	}
 	return value, nil
 }
+
+func sshKeygen(bitSize int) ([]byte, []byte, error) {
+	privateKey, err := generatePrivateKey(bitSize)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	privateKeyBytes := encodePrivateKeyToPEM(privateKey)
+
+	publicKeyBytes, err := generatePublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return privateKeyBytes, publicKeyBytes, nil
+}
+
+// encodePrivateKeyToPEM encodes Private Key from RSA to PEM format
+func encodePrivateKeyToPEM(privateKey *rsa.PrivateKey) []byte {
+	// Get ASN.1 DER format
+	privDER := x509.MarshalPKCS1PrivateKey(privateKey)
+
+	// pem.Block
+	privBlock := pem.Block{
+		Type:    "RSA PRIVATE KEY",
+		Headers: nil,
+		Bytes:   privDER,
+	}
+
+	// Private key in PEM format
+	privatePEM := pem.EncodeToMemory(&privBlock)
+
+	return privatePEM
+}
+
+// generatePrivateKey creates a RSA Private Key of specified byte size
+func generatePrivateKey(bitSize int) (*rsa.PrivateKey, error) {
+	// Private Key generation
+	privateKey, err := rsa.GenerateKey(rand.Reader, bitSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate Private Key
+	err = privateKey.Validate()
+	if err != nil {
+		return nil, err
+	}
+
+	return privateKey, nil
+}
+
+// generatePublicKey take a rsa.PublicKey and return bytes suitable for writing to .pub file
+// returns in the format "ssh-rsa ..."
+func generatePublicKey(privatekey *rsa.PublicKey) ([]byte, error) {
+	publicRsaKey, err := ssh.NewPublicKey(privatekey)
+	if err != nil {
+		return nil, err
+	}
+
+	pubKeyBytes := ssh.MarshalAuthorizedKey(publicRsaKey)
+	return pubKeyBytes, nil
+}
+
+func ptr[T any](t T) *T { return &t }
