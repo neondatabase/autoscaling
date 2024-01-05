@@ -375,29 +375,30 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
-			secret := &corev1.Secret{}
-			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.SSHSecretName, Namespace: virtualmachine.Namespace}, secret)
+			// Check if the ssh secret already exists, if not create a new one
+			sshSecret := &corev1.Secret{}
+			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.SSHSecretName, Namespace: virtualmachine.Namespace}, sshSecret)
 			if err != nil && apierrors.IsNotFound(err) {
 				// Define a new ssh secret
-				secret, err = r.sshSecretForVirtualMachine(virtualmachine)
+				sshSecret, err = r.sshSecretForVirtualMachine(virtualmachine)
 				if err != nil {
-					log.Error(err, "Failed to define new ssh Secret for VirtualMachine")
+					log.Error(err, "Failed to define new SSH Secret for VirtualMachine")
 					return err
 				}
 
-				log.Info("Creating a new ssh Secret", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
-				if err = r.Create(ctx, secret); err != nil {
-					log.Error(err, "Failed to create new ssh secret", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
+				log.Info("Creating a new SSH Secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+				if err = r.Create(ctx, sshSecret); err != nil {
+					log.Error(err, "Failed to create new SSH secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
 					return err
 				}
-				log.Info("SSH Secret was created", "Secret.Namespace", secret.Namespace, "Secret.Name", secret.Name)
+				log.Info("SSH Secret was created", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
 			} else if err != nil {
 				log.Error(err, "Failed to ssh secret")
 				return err
 			}
 
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(virtualmachine, secret)
+			pod, err := r.podForVirtualMachine(virtualmachine, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
@@ -411,8 +412,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
 			r.Recorder.Event(virtualmachine, "Normal", "Created",
-				fmt.Sprintf("VirtualMachine %s created, pod %s, secret %s",
-					virtualmachine.Name, pod.Name, secret.Name))
+				fmt.Sprintf("VirtualMachine %s created, Pod %s, SSH Secret %s",
+					virtualmachine.Name, pod.Name, sshSecret.Name))
 
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")
@@ -995,6 +996,8 @@ func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(virtualmachine *vm
 		return nil, err
 	}
 
+	// Set the ownerRef for the Secret
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
 	if err := ctrl.SetControllerReference(virtualmachine, secret, r.Scheme); err != nil {
 		return nil, err
 	}
@@ -1002,7 +1005,8 @@ func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(virtualmachine *vm
 }
 
 func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
-	bitSize := 2048
+	// with bitSize = 2048 it takes ~100ms
+	bitSize := 2048 // TODO: make this configurable
 	privateKey, publicKey, err := sshKeygen(bitSize)
 	if err != nil {
 		return nil, err

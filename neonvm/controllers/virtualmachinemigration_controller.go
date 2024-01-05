@@ -220,8 +220,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		if err != nil && apierrors.IsNotFound(err) {
 			sshSecret := &corev1.Secret{}
 			err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
+			// We require the SSH secret to exist because we cannot unmount and
+			// mount the new secret into the VM after the live migration. If a
+			// VM's SSH secret is deleted accidentally then live migration is
+			// not possible.
 			if err != nil {
-				log.Error(err, "Failed to get ssh secret")
+				log.Error(err, "Failed to get VM's SSH Secret")
 				return ctrl.Result{}, err
 			}
 
