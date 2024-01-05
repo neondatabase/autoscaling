@@ -9,11 +9,14 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-func shallowCopy[T any](ptr *T) *T {
+func shallowCopy[T any](ptr *T, f ...func(T) T) *T {
 	if ptr == nil {
 		return nil
 	} else {
 		x := *ptr
+		if len(f) != 0 {
+			x = f[0](x)
+		}
 		return &x
 	}
 }
@@ -44,23 +47,30 @@ func (s *State) Dump() StateDump {
 	}
 }
 
+func (b resourceBounds) deepCopy() resourceBounds {
+	return resourceBounds{
+		Confirmed: shallowCopy[api.Resources](b.Confirmed),
+		Lower:     b.Lower,
+		Upper:     b.Upper,
+	}
+}
+
 func (s *pluginState) deepCopy() pluginState {
 	return pluginState{
 		OngoingRequest: s.OngoingRequest,
 		LastRequest:    shallowCopy[pluginRequested](s.LastRequest),
 		LastFailureAt:  shallowCopy[time.Time](s.LastFailureAt),
-		Permit:         shallowCopy[api.Resources](s.Permit),
+		Permitted:      shallowCopy[resourceBounds](s.Permitted, resourceBounds.deepCopy),
 	}
 }
 
 func (s *monitorState) deepCopy() monitorState {
 	return monitorState{
-		OngoingRequest:     shallowCopy[ongoingMonitorRequest](s.OngoingRequest),
-		RequestedUpscale:   shallowCopy[requestedUpscale](s.RequestedUpscale),
-		DeniedDownscale:    shallowCopy[deniedDownscale](s.DeniedDownscale),
-		Approved:           shallowCopy[api.Resources](s.Approved),
-		DownscaleFailureAt: shallowCopy[time.Time](s.DownscaleFailureAt),
-		UpscaleFailureAt:   shallowCopy[time.Time](s.UpscaleFailureAt),
+		OngoingRequest:   shallowCopy[ongoingMonitorRequest](s.OngoingRequest),
+		RequestedUpscale: shallowCopy[requestedUpscale](s.RequestedUpscale),
+		DeniedDownscale:  shallowCopy[deniedDownscale](s.DeniedDownscale),
+		Approved:         shallowCopy[resourceBounds](s.Approved, resourceBounds.deepCopy),
+		LastFailureAt:    shallowCopy[time.Time](s.LastFailureAt),
 	}
 }
 
@@ -68,6 +78,7 @@ func (s *neonvmState) deepCopy() neonvmState {
 	return neonvmState{
 		LastSuccess:      shallowCopy[api.Resources](s.LastSuccess),
 		OngoingRequested: shallowCopy[api.Resources](s.OngoingRequested),
+		CurrentResources: s.CurrentResources.deepCopy(),
 		RequestFailedAt:  shallowCopy[time.Time](s.RequestFailedAt),
 	}
 }

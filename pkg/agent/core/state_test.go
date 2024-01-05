@@ -1272,6 +1272,7 @@ func TestFailedRequestRetry(t *testing.T) {
 			// Override values for consistency and ease of use
 			c.PluginRetryWait = duration("2s")
 			c.NeonVMRetryWait = duration("3s")
+			c.MonitorRetryWait = duration("1s")
 		}),
 	)
 	nextActions := func() core.ActionSet {
@@ -1359,6 +1360,7 @@ func TestFailedRequestRetry(t *testing.T) {
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
 	// And then finally, we should be looking to inform the vm-monitor about this upscaling.
+	// Let's have that fail the first time as well.
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("1.7s")}, // plugin request tick
 		MonitorUpscale: &core.ActionMonitorUpscale{
@@ -1366,6 +1368,422 @@ func TestFailedRequestRetry(t *testing.T) {
 			Target:  resForCU(2),
 		},
 	})
+	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(2))
+	clockTick()
+	a.Do(state.Monitor().UpscaleRequestFailed, clock.Now())
+	// On request failure, we retry after Config.MonitorRetryWait
+	a.
+		WithWarnings("Wanted to send vm-monitor upscale request, but failed too recently").
+		Call(nextActions).
+		Equals(core.ActionSet{
+			Wait: &core.ActionWait{Duration: duration("1s")}, // monitor retry wait is less than current plugin request tick (1.6s remaining)
+		})
+	clock.Inc(duration("1s"))
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("0.6s")},
+		MonitorUpscale: &core.ActionMonitorUpscale{
+			Current: resForCU(1),
+			Target:  resForCU(2),
+		},
+	})
+	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(2))
+	clockTick()
+	a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
+}
+
+// Checks that failed requests are not assumed to have *not* taken effect, e.g. if a downscaling
+// request to the scheduler fails, we must assume that it *could have* succeeded.
+//
+// See also: https://github.com/neondatabase/autoscaling/issues/680
+func TestFailuresNotAssumedSuccessful(t *testing.T) {
+	// General strategy:
+	// At a high level, we're scaling up from 1->2 CU, then down from 2->1 CU.
+	// At each step, we'll have *some* kind of request failure that causes a delay in continuing the
+	// scaling, while *also* preventing reverting the scaling until the failure is resolved.
+	// So, immediately after the request failure, we update the metrics so we *would* scale the
+	// other direction - and check that nothing is attempted.
+	//
+	// To double-check, we *also* check that we *would* have been able to reverse if the request
+	// hadn't failed, by doing that first.
+	//
+	// ---
+	//
+	// Here's the process for scale-up:
+	// 1. Update metrics so desired is 2 CU
+	// 2. Plugin request (1->2)
+	//   2a. Do request (1->2)
+	//   2b. Succeed
+	//   2c. Update metrics so desired is 1 CU
+	//   2d. Do request (2->1)
+	//   2e. Succeed
+	//   2f. Update metrics so desired is 2 CU
+	//   2g. Do request (1->2)
+	//   2h. Fail
+	//   2i. Update metrics so desired is 1 CU
+	//   2j. Check: We *would* need to make explicit request back down
+	//   2k. Update metrics so desired is 2 CU
+	//   2l. Do request (1->2)
+	//   2m. Succeed
+	// 3. NeonVM request (1->2)
+	//   3a. Do request (1->2)
+	//   3b. Succeed
+	//   3c. Update metrics so desired is 1 CU
+	//   3d. Do request (2->1)
+	//   3e. Succeed
+	//   3f. Update metrics so desired is 2 CU
+	//   3g. Do request (1->2)
+	//   3h. Fail
+	//   3i. Update metrics so desired is 1 CU
+	//   3j. Check: We *would* need to make explicit request back down (can't contact plugin)
+	//   3k. Update metrics so desired is 2 CU
+	//   3l. Do request (1->2)
+	//   3m. Succeed
+	// 4. vm-monitor request (1->2)
+	//   ... etc etc. Roughly the same as the previous two.
+	//
+	// A lot of this is duplicated and follows the same form. So, we try to deduplicate below.
+
+	type scalingCallbacks struct {
+		kind           string
+		action         func(metrics api.Metrics, start, end api.Resources) core.ActionSet
+		requestStart   func(helpers.Assert, *core.State, time.Time, core.ActionSet)
+		requestSuccess func(helpers.Assert, *core.State, time.Time, api.Resources, api.Resources)
+		requestFailed  func(helpers.Assert, *core.State, time.Time, api.Resources, api.Resources)
+	}
+
+	type scriptStep func(scalingCallbacks, helpers.Assert, *core.State, *api.Metrics, *helpers.FakeClock)
+
+	scriptConditional := func(steps map[string]scriptStep) scriptStep {
+		return func(cb scalingCallbacks, a helpers.Assert, s *core.State, m *api.Metrics, c *helpers.FakeClock) {
+			if step, ok := steps[cb.kind]; ok {
+				step(cb, a, s, m, c)
+			} else if step, ok := steps["else"]; ok {
+				step(cb, a, s, m, c)
+			} else {
+				panic(fmt.Errorf("no handler for callbacks kind %q", cb.kind))
+			}
+		}
+	}
+	scriptWithWarnings := func(step scriptStep, warnings map[string][]string) scriptStep {
+		return func(cb scalingCallbacks, a helpers.Assert, s *core.State, m *api.Metrics, c *helpers.FakeClock) {
+			step(cb, a.WithWarnings(warnings[cb.kind]...), s, m, c)
+		}
+	}
+	scriptClockInc := func(d string) scriptStep {
+		return func(_ scalingCallbacks, _ helpers.Assert, _ *core.State, _ *api.Metrics, c *helpers.FakeClock) {
+			c.Inc(duration(d))
+		}
+	}
+	scriptUpdateMetrics := func(metrics api.Metrics) scriptStep {
+		return func(_ scalingCallbacks, _ helpers.Assert, s *core.State, m *api.Metrics, _ *helpers.FakeClock) {
+			s.UpdateMetrics(metrics)
+			*m = metrics
+		}
+	}
+	nextActions := func(s *core.State, t time.Time, override bool) (_ core.ActionSet, wait bool) {
+		actionSet := s.NextActions(t)
+		wait = actionSet.Wait != nil
+		if override {
+			actionSet.Wait = nil
+		}
+		return actionSet, wait
+	}
+	resForCU := DefaultComputeUnit.Mul
+	actionSetForRequest := func(cb scalingCallbacks, m api.Metrics, startCU, endCU uint16, dur ...string) core.ActionSet {
+		actionSet := cb.action(m, resForCU(startCU), resForCU(endCU))
+		if len(dur) != 0 {
+			actionSet.Wait = &core.ActionWait{Duration: duration(dur[0])}
+		}
+		return actionSet
+	}
+	scriptCheckMustWait := func(dur string) scriptStep {
+		return func(_ scalingCallbacks, a helpers.Assert, s *core.State, _ *api.Metrics, c *helpers.FakeClock) {
+			a.Call(s.NextActions, c.Now()).Equals(core.ActionSet{
+				Wait: &core.ActionWait{Duration: duration(dur)},
+			})
+		}
+	}
+	scriptRequestStart := func(startCU, endCU uint16, wait bool, dur ...string) scriptStep {
+		return func(cb scalingCallbacks, a helpers.Assert, s *core.State, m *api.Metrics, c *helpers.FakeClock) {
+			actionSet := actionSetForRequest(cb, *m, startCU, endCU, dur...)
+			a.Call(nextActions, s, c.Now(), len(dur) == 0).Equals(actionSet, wait)
+			cb.requestStart(a, s, c.Now(), actionSet)
+		}
+	}
+	scriptCheckDesiredRequest := func(startCU, endCU uint16, wait bool, dur ...string) scriptStep {
+		return func(cb scalingCallbacks, a helpers.Assert, s *core.State, m *api.Metrics, c *helpers.FakeClock) {
+			actionSet := actionSetForRequest(cb, *m, startCU, endCU, dur...)
+			a.Call(nextActions, s, c.Now(), len(dur) == 0).Equals(actionSet, wait)
+		}
+	}
+	scriptRequestSuccess := func(startCU, endCU uint16) scriptStep {
+		return func(cb scalingCallbacks, a helpers.Assert, s *core.State, m *api.Metrics, c *helpers.FakeClock) {
+			cb.requestSuccess(a, s, c.Now(), resForCU(startCU), resForCU(endCU))
+		}
+	}
+	scriptRequestFailed := func(startCU, endCU uint16) scriptStep {
+		return func(cb scalingCallbacks, a helpers.Assert, s *core.State, m *api.Metrics, c *helpers.FakeClock) {
+			cb.requestFailed(a, s, c.Now(), resForCU(startCU), resForCU(endCU))
+		}
+	}
+
+	pluginCallbacks := scalingCallbacks{
+		kind: "plugin",
+		action: func(metrics api.Metrics, start, end api.Resources) core.ActionSet {
+			return core.ActionSet{
+				PluginRequest: &core.ActionPluginRequest{
+					LastPermit: &start,
+					Target:     end,
+					Metrics:    &metrics,
+				},
+			}
+		},
+		requestStart: func(a helpers.Assert, s *core.State, t time.Time, act core.ActionSet) {
+			a.Do(s.Plugin().StartingRequest, t, act.PluginRequest.Target)
+		},
+		requestSuccess: func(a helpers.Assert, s *core.State, t time.Time, _, end api.Resources) {
+			a.NoError(s.Plugin().RequestSuccessful, t, api.PluginResponse{
+				Permit:      end,
+				Migrate:     nil,
+				ComputeUnit: nil,
+			})
+		},
+		requestFailed: func(a helpers.Assert, s *core.State, t time.Time, _, _ api.Resources) {
+			a.Do(s.Plugin().RequestFailed, t)
+		},
+	}
+	neonvmCallbacks := scalingCallbacks{
+		kind: "neonvm",
+		action: func(metrics api.Metrics, start, end api.Resources) core.ActionSet {
+			return core.ActionSet{
+				NeonVMRequest: &core.ActionNeonVMRequest{
+					Current: start,
+					Target:  end,
+				},
+			}
+		},
+		requestStart: func(a helpers.Assert, s *core.State, t time.Time, act core.ActionSet) {
+			a.Do(s.NeonVM().StartingRequest, t, act.NeonVMRequest.Target)
+		},
+		requestSuccess: func(a helpers.Assert, s *core.State, t time.Time, _, _ api.Resources) {
+			a.Do(s.NeonVM().RequestSuccessful, t)
+		},
+		requestFailed: func(a helpers.Assert, s *core.State, t time.Time, _, _ api.Resources) {
+			a.Do(s.NeonVM().RequestFailed, t)
+		},
+	}
+	monitorCallbacks := scalingCallbacks{
+		kind: "monitor",
+		action: func(metrics api.Metrics, start, end api.Resources) core.ActionSet {
+			var act core.ActionSet
+			if end.HasFieldGreaterThan(start) /* upscaling */ {
+				act.MonitorUpscale = &core.ActionMonitorUpscale{
+					Current: start,
+					Target:  end,
+				}
+			} else /* downscaling */ {
+				act.MonitorDownscale = &core.ActionMonitorDownscale{
+					Current: start,
+					Target:  end,
+				}
+			}
+			return act
+		},
+		requestStart: func(a helpers.Assert, s *core.State, t time.Time, act core.ActionSet) {
+			if act.MonitorUpscale != nil {
+				a.Do(s.Monitor().StartingUpscaleRequest, t, act.MonitorUpscale.Target)
+			} else if act.MonitorDownscale != nil {
+				a.Do(s.Monitor().StartingDownscaleRequest, t, act.MonitorDownscale.Target)
+			} else {
+				panic("expected either MonitorUpscale or MonitorDownscale")
+			}
+		},
+		requestSuccess: func(a helpers.Assert, s *core.State, t time.Time, start, end api.Resources) {
+			if end.HasFieldGreaterThan(start) /* upscaling */ {
+				a.Do(s.Monitor().UpscaleRequestSuccessful, t)
+			} else /* downscaling */ {
+				a.Do(s.Monitor().DownscaleRequestAllowed, t)
+			}
+		},
+		requestFailed: func(a helpers.Assert, s *core.State, t time.Time, start, end api.Resources) {
+			if end.HasFieldGreaterThan(start) /* upscaling */ {
+				a.Do(s.Monitor().UpscaleRequestFailed, t)
+			} else /* downscaling */ {
+				a.Do(s.Monitor().DownscaleRequestFailed, t)
+			}
+		},
+	}
+
+	// metrics for 1 CU
+	loMetrics := api.Metrics{
+		LoadAverage1Min:  0.0,
+		LoadAverage5Min:  0.0, // unused
+		MemoryUsageBytes: 0.0,
+	}
+	// metrics for 2 CU
+	hiMetrics := api.Metrics{
+		LoadAverage1Min:  0.3,
+		LoadAverage5Min:  0.0, // unused
+		MemoryUsageBytes: 0.0,
+	}
+
+	configOverride := helpers.WithConfigSetting(func(c *core.Config) {
+		// Override values for consistency and clarity
+		c.PluginRetryWait = duration("2s")
+		c.NeonVMRetryWait = duration("2s")
+		c.MonitorRetryWait = duration("2s")
+		c.PluginRequestTick = duration("100s") // make very long, so we don't have to worry about it
+	})
+
+	clockTick := scriptClockInc("0.1s")
+	scaleupFlow := []scriptStep{
+		scriptUpdateMetrics(hiMetrics),
+		// scale up
+		scriptConditional(map[string]scriptStep{
+			"plugin": scriptRequestStart(1, 2, false),
+			"else":   scriptRequestStart(1, 2, true),
+		}),
+		clockTick,
+		scriptRequestSuccess(1, 2),
+		clockTick,
+		// scale back down
+		scriptUpdateMetrics(loMetrics),
+		scriptConditional(map[string]scriptStep{
+			"plugin": scriptRequestStart(2, 1, false),
+			"else":   scriptRequestStart(2, 1, true),
+		}),
+		clockTick,
+		scriptRequestSuccess(2, 1),
+		clockTick,
+		// scale up, fail request.
+		scriptUpdateMetrics(hiMetrics),
+		scriptConditional(map[string]scriptStep{
+			"plugin": scriptRequestStart(1, 2, false),
+			"else":   scriptRequestStart(1, 2, true),
+		}),
+		clockTick,
+		scriptRequestFailed(1, 2),
+		clockTick,
+		// check we would need to explicitly scale down if metrics change
+		scriptUpdateMetrics(loMetrics),
+		scriptWithWarnings(
+			scriptCheckMustWait("1.9s"),
+			map[string][]string{
+				"plugin":  {"Wanted to make a request to the scheduler plugin, but previous request failed too recently"},
+				"neonvm":  {"Wanted to make a request to NeonVM API, but recent request failed too recently"},
+				"monitor": {"Wanted to send vm-monitor downscale request, but failed too recently"},
+			},
+		),
+		scriptClockInc("1.9s"),
+		scriptConditional(map[string]scriptStep{
+			"plugin":  scriptCheckDesiredRequest(1, 1, false),
+			"neonvm":  scriptCheckDesiredRequest(1, 1, true),
+			"monitor": scriptCheckDesiredRequest(2, 1, true),
+		}),
+		scriptUpdateMetrics(hiMetrics),
+		// succeed scale-up
+		scriptConditional(map[string]scriptStep{
+			"plugin": scriptRequestStart(1, 2, false),
+			"else":   scriptRequestStart(1, 2, true),
+		}),
+		clockTick,
+		scriptRequestSuccess(1, 2),
+		clockTick,
+	}
+	scaledownFlow := []scriptStep{
+		scriptUpdateMetrics(loMetrics),
+		// scale down
+		scriptConditional(map[string]scriptStep{
+			"plugin": scriptRequestStart(2, 1, false),
+			"else":   scriptRequestStart(2, 1, true),
+		}),
+		clockTick,
+		scriptRequestSuccess(2, 1),
+		clockTick,
+		// scale back up
+		scriptUpdateMetrics(hiMetrics),
+		scriptConditional(map[string]scriptStep{
+			"plugin": scriptRequestStart(1, 2, false),
+			"else":   scriptRequestStart(1, 2, true),
+		}),
+		clockTick,
+		scriptRequestSuccess(1, 2),
+		clockTick,
+		// scale down, fail request
+		scriptUpdateMetrics(loMetrics),
+		scriptConditional(map[string]scriptStep{
+			"plugin": scriptRequestStart(2, 1, false),
+			"else":   scriptRequestStart(2, 1, true),
+		}),
+		clockTick,
+		scriptRequestFailed(2, 1),
+		clockTick,
+		// check we would need to explicitly scale up if metrics change
+		scriptUpdateMetrics(hiMetrics),
+		scriptWithWarnings(
+			scriptCheckMustWait("1.9s"),
+			map[string][]string{
+				"plugin":  {"Wanted to make a request to the scheduler plugin, but previous request failed too recently"},
+				"neonvm":  {"Wanted to make a request to NeonVM API, but recent request failed too recently"},
+				"monitor": {"Wanted to send vm-monitor upscale request, but failed too recently"},
+			},
+		),
+		scriptClockInc("1.9s"),
+		scriptConditional(map[string]scriptStep{
+			"plugin":  scriptCheckDesiredRequest(1, 2, false),
+			"neonvm":  scriptCheckDesiredRequest(2, 2, true),
+			"monitor": scriptCheckDesiredRequest(1, 2, true),
+		}),
+		scriptUpdateMetrics(loMetrics),
+		// succeed scale-down
+		scriptConditional(map[string]scriptStep{
+			"plugin": scriptRequestStart(1, 1, false),
+			"else":   scriptRequestStart(2, 1, true),
+		}),
+		clockTick,
+		scriptRequestSuccess(2, 1),
+		clockTick,
+	}
+
+	// --- Actually run the test ---
+
+	a := helpers.NewAssert(t)
+	state := helpers.CreateInitialState(
+		DefaultInitialStateConfig,
+		helpers.WithStoredWarnings(a.StoredWarnings()),
+		helpers.WithMinMaxCU(1, 2),
+		helpers.WithCurrentCU(1),
+		configOverride,
+	)
+
+	clock := helpers.NewFakeClock(t)
+
+	state.Monitor().Active(true)
+
+	// Set metrics so initially we're doing nothing.
+	lastMetrics := loMetrics
+	a.Do(state.UpdateMetrics, lastMetrics)
+
+	// Send initial scheduler request
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), &lastMetrics, resForCU(1))
+
+	// --- Run scale-up ---
+	scaleupCallbacks := []scalingCallbacks{pluginCallbacks, neonvmCallbacks, monitorCallbacks}
+	for _, cb := range scaleupCallbacks {
+		for stepi := range scaleupFlow {
+			t.Logf("scale-up / %s / %d of %d", cb.kind, stepi, len(scaleupFlow))
+			scaleupFlow[stepi](cb, a, state, &lastMetrics, clock)
+		}
+	}
+
+	// --- Run scale-down ---
+	scaledownCallbacks := []scalingCallbacks{monitorCallbacks, neonvmCallbacks, pluginCallbacks}
+	for _, cb := range scaledownCallbacks {
+		for stepi := range scaledownFlow {
+			t.Logf("scale-down / %s / %d of %d", cb.kind, stepi, len(scaleupFlow))
+			scaledownFlow[stepi](cb, a, state, &lastMetrics, clock)
+		}
+	}
 }
 
 // Checks that when metrics are updated during the downscaling process, between the NeonVM request
@@ -1479,7 +1897,6 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	clockTick()
 
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	state.Debug(true)
 	a.
 		Call(nextActions).
 		Equals(core.ActionSet{

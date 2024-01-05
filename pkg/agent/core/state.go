@@ -115,6 +115,90 @@ type state struct {
 	Metrics *api.Metrics
 }
 
+// resourceBounds tracks the uncertainty associated with possibly-failed requests.
+//
+// To explain why this is necessary, consider the following sequence of events:
+//
+// 1. autoscaler-agent scales down from 2 CU -> 1 CU
+// 2. autoscaler-agent sends (informative) request to the scheduler plugin for 1 CU
+// 3. scheduler plugin starts processing the request
+// 4. autoscaler-agent times out waiting for the response, interprets the request as "failed"
+// 5. scheduler plugin successfully processes the request
+//
+// From that point, if the autoscaler-agent decides that the VM should actually remain at 2 CU
+// rather than downscaling, if it's only tracking successful requests, it may falsely infer that the
+// scheduler has still approved it up to 2 CU.
+//
+// For that specific case, the "scheduler approved" value is only ever used as an upper bound - so
+// we can probably just store a single value and continually min() that with any amount we request.
+// But NeonVM requests, for example, are used both as an upper *and* lower bound (for scheduler and
+// vm-monitor requests, respectively).
+type resourceBounds struct {
+	// Confirmed is the most recent value that we have received confirmation for.
+	//
+	// For the scheduler, this refers to the value of PluginResponse.Permit.
+	// For the vm-monitor, this is the resources associated with the last successful upscale or
+	// downscale request.
+	// For NeonVM object changes, we *currently* (temporarily) set this value based on successful
+	// requests (and not events from Kubernetes).
+	// (for more detail, see https://github.com/neondatabase/autoscaling/issues/350#issuecomment-1857295638)
+	//
+	// When a request fails, this value is set to nil - we no longer know the state, and therefore
+	// no longer have confirmation for this value.
+	// (Technically, we could have designed this however we like. This model works out easier than
+	// the other options.)
+	Confirmed *api.Resources
+
+	// Lower is the smallest possible value that we could have made effective - with or without
+	// confirmation of such a request.
+	//
+	// For example, if we make a request to the scheduler saying we've scaled down to 1 CU, this
+	// value will *immediately* be equal to 1 CU. Lower would remain 1 CU until we receive
+	// confirmation for some value greater than 1 CU (most likely on a different request).
+	Lower api.Resources
+	// Upper is the largest possible value that we could have made effective - with or without
+	// confirmation of such a request.
+	//
+	// This value is basically just the inverse of Lower.
+	Upper api.Resources
+}
+
+// fixedResourceBounds returns a new resourceBounds with all values set to resources.
+func fixedResourceBounds(resources api.Resources) resourceBounds {
+	return resourceBounds{Confirmed: &resources, Lower: resources, Upper: resources}
+}
+
+// updateTentative sets the bounds according to a request that has started, but not necessarily
+// confirmed yet.
+func (r *resourceBounds) updateTentative(value api.Resources) {
+	r.Lower = r.Lower.Min(value)
+	r.Upper = r.Upper.Max(value)
+}
+
+// confirmConsistent updates r.Confirmed with the value, under the assumption that receiving
+// confirmation for the value aligns the lower and upper bounds.
+//
+// Note: This is only suitable for situations where there are synchronization guarantees that mean
+// that (a) the "true" confirmed value never changes without our request, and (b) a successful
+// request means the "true" value was immediately updated.
+func (r *resourceBounds) confirmConsistent(value api.Resources) {
+	if value.HasFieldLessThan(r.Lower) {
+		panic(fmt.Errorf(
+			"confirmConsistent called with value that has field less than r.Lower: %+v has field less than %+v",
+			value, r.Lower,
+		))
+	} else if value.HasFieldGreaterThan(r.Upper) {
+		panic(fmt.Errorf(
+			"confirmConsistent called with value that has field greater than r.Upper: %+v has field greater than %+v",
+			value, r.Upper,
+		))
+	}
+
+	r.Lower = value
+	r.Upper = value
+	r.Confirmed = &value
+}
+
 type pluginState struct {
 	// OngoingRequest is true iff there is currently an ongoing request to *this* scheduler plugin.
 	OngoingRequest bool
@@ -123,14 +207,17 @@ type pluginState struct {
 	LastRequest *pluginRequested
 	// LastFailureAt, if not nil, gives the time of the most recent request failure
 	LastFailureAt *time.Time
-	// Permit, if not nil, stores the Permit in the most recent PluginResponse. This field will be
-	// nil if we have not been able to contact *any* scheduler.
-	Permit *api.Resources
+	// Permitted, if not nil, stores the range of values that the scheduler plugin *may* have
+	// approved, depending on whether requests are successful.
+	//
+	// This field will be nil if we have not sent requests to *any* scheduler.
+	Permitted *resourceBounds
 }
 
 type pluginRequested struct {
 	At        time.Time
 	Resources api.Resources
+	Failed    bool
 }
 
 type monitorState struct {
@@ -145,15 +232,12 @@ type monitorState struct {
 
 	// Approved stores the most recent Resources associated with either (a) an accepted downscale
 	// request, or (b) a successful upscale notification.
-	Approved *api.Resources
+	Approved *resourceBounds
 
-	// DownscaleFailureAt, if not nil, stores the time at which a downscale request most recently
-	// failed (where "failed" means that some unexpected error occurred, not that it was merely
-	// denied).
-	DownscaleFailureAt *time.Time
-	// UpscaleFailureAt, if not nil, stores the time at which an upscale request most recently
-	// failed
-	UpscaleFailureAt *time.Time
+	// LastFailureAt, if not nil, stores the time at which a request most recently failed (where
+	// "failed" means that some unexpected error occurred - rather than being just denied, in the
+	// case of downscaling).
+	LastFailureAt *time.Time
 }
 
 func (ms *monitorState) active() bool {
@@ -188,6 +272,7 @@ type neonvmState struct {
 	LastSuccess *api.Resources
 	// OngoingRequested, if not nil, gives the resources requested
 	OngoingRequested *api.Resources
+	CurrentResources resourceBounds
 	RequestFailedAt  *time.Time
 }
 
@@ -205,19 +290,19 @@ func NewState(vm api.VmInfo, config Config) *State {
 				OngoingRequest: false,
 				LastRequest:    nil,
 				LastFailureAt:  nil,
-				Permit:         nil,
+				Permitted:      nil,
 			},
 			Monitor: monitorState{
-				OngoingRequest:     nil,
-				RequestedUpscale:   nil,
-				DeniedDownscale:    nil,
-				Approved:           nil,
-				DownscaleFailureAt: nil,
-				UpscaleFailureAt:   nil,
+				OngoingRequest:   nil,
+				RequestedUpscale: nil,
+				DeniedDownscale:  nil,
+				Approved:         nil,
+				LastFailureAt:    nil,
 			},
 			NeonVM: neonvmState{
 				LastSuccess:      nil,
 				OngoingRequested: nil,
+				CurrentResources: fixedResourceBounds(vm.Using()),
 				RequestFailedAt:  nil,
 			},
 			Metrics: nil,
@@ -328,19 +413,13 @@ func (s *state) calculatePluginAction(
 
 	// additional resources we want to request OR previous downscaling we need to inform the plugin of
 	// NOTE: only valid if s.plugin.permit != nil AND there's no ongoing NeonVM request.
+	currentResources := s.NeonVM.CurrentResources.Upper
 	requestResources := s.clampResources(
-		s.VM.Using(),
+		currentResources,
 		desiredResources,
-		ptr(s.VM.Using()), // don't decrease below VM using (decrease happens *before* telling the plugin)
+		&currentResources, // don't decrease below VM using (decrease happens *before* telling the plugin)
 		nil,               // but any increase is ok
 	)
-	// resources if we're just informing the plugin of current resource usage.
-	currentResources := s.VM.Using()
-	if s.NeonVM.OngoingRequested != nil {
-		// include any ongoing NeonVM request, because we're already using that.
-		currentResources = currentResources.Max(*s.NeonVM.OngoingRequested)
-	}
-
 	// We want to make a request to the scheduler plugin if:
 	//  1. it's been long enough since the previous request (so we're obligated by PluginRequestTick); or
 	//  2.a. we want to request resources / inform it of downscale;
@@ -356,8 +435,9 @@ func (s *state) calculatePluginAction(
 	var timeUntilRetryBackoffExpires time.Duration
 	requestPreviouslyDenied := !s.Plugin.OngoingRequest &&
 		s.Plugin.LastRequest != nil &&
-		s.Plugin.Permit != nil &&
-		s.Plugin.LastRequest.Resources.HasFieldGreaterThan(*s.Plugin.Permit)
+		s.Plugin.Permitted != nil &&
+		s.Plugin.Permitted.Confirmed != nil &&
+		s.Plugin.LastRequest.Resources.HasFieldGreaterThan(*s.Plugin.Permitted.Confirmed)
 	if requestPreviouslyDenied {
 		timeUntilRetryBackoffExpires = s.Plugin.LastRequest.At.Add(s.Config.PluginDeniedRetryWait).Sub(now)
 	}
@@ -365,21 +445,16 @@ func (s *state) calculatePluginAction(
 	waitingOnRetryBackoff := timeUntilRetryBackoffExpires > 0
 
 	// changing the resources we're requesting from the plugin
-	wantToRequestNewResources := s.Plugin.LastRequest != nil && s.Plugin.Permit != nil &&
-		requestResources != *s.Plugin.Permit
+	wantToRequestNewResources := s.Plugin.LastRequest != nil &&
+		requestResources != s.Plugin.LastRequest.Resources
 	// ... and this isn't a duplicate (or, at least it's been long enough)
 	shouldRequestNewResources := wantToRequestNewResources && !waitingOnRetryBackoff
-
-	permittedRequestResources := requestResources
-	if !shouldRequestNewResources {
-		permittedRequestResources = currentResources
-	}
 
 	// Can't make a duplicate request
 	if s.Plugin.OngoingRequest {
 		// ... but if the desired request is different from what we would be making,
 		// then it's worth logging
-		if s.Plugin.LastRequest.Resources != permittedRequestResources {
+		if s.Plugin.LastRequest.Resources != requestResources {
 			logFailureReason("there's already an ongoing request for different resources")
 		}
 		return nil, nil
@@ -396,10 +471,17 @@ func (s *state) calculatePluginAction(
 
 	// At this point, all that's left is either making the request, or saying to wait.
 	// The rest of the complication is just around accurate logging.
-	if timeForRequest || shouldRequestNewResources {
+	if timeForRequest || shouldRequestNewResources || s.Plugin.LastRequest.Failed {
+		var lastPermit *api.Resources
+		if s.Plugin.Permitted != nil {
+			// NOTE: We must send Permitted.Lower instead of Permitted.Confirmed because if our last
+			// request was downscaling, and we falsely believe it failed, we could end up telling
+			// the scheduler that it last permitted more than it actually did.
+			lastPermit = &s.Plugin.Permitted.Lower
+		}
 		return &ActionPluginRequest{
-			LastPermit: s.Plugin.Permit,
-			Target:     permittedRequestResources,
+			LastPermit: lastPermit,
+			Target:     requestResources,
 			Metrics:    s.Metrics,
 		}, nil
 	} else {
@@ -423,15 +505,19 @@ func (s *state) calculateNeonVMAction(
 	pluginRequestedPhase string,
 ) (*ActionNeonVMRequest, *time.Duration) {
 	// clamp desiredResources to what we're allowed to make a request for
+	// TODO: After switching to VM events as the source of truth, need to modify this function to
+	// handle cases where the VM spec changes outside of our control (ref #350); otherwise we'll end
+	// up panicking because s.VM.Using() may suddenly become greater than plugin approved or less
+	// than monitor approved.
 	desiredResources = s.clampResources(
-		s.VM.Using(),                       // current: what we're using already
-		desiredResources,                   // target: desired resources
-		ptr(s.monitorApprovedLowerBound()), // lower bound: downscaling that the monitor has approved
-		ptr(s.pluginApprovedUpperBound()),  // upper bound: upscaling that the plugin has approved
+		s.NeonVM.CurrentResources.Lower, // current: what we're using already
+		desiredResources,                // target: desired resources
+		ptr(s.monitorApproved().Upper),  // lower bound: downscaling that the monitor has approved
+		ptr(s.pluginApproved().Lower),   // upper bound: upscaling that the plugin has approved
 	)
 
 	// If we're already using the desired resources, then no need to make a request
-	if s.VM.Using() == desiredResources {
+	if current := s.NeonVM.CurrentResources.Confirmed; current != nil && *current == desiredResources {
 		return nil, nil
 	}
 
@@ -479,30 +565,31 @@ func (s *state) calculateMonitorUpscaleAction(
 	}
 
 	requestResources := s.clampResources(
-		*s.Monitor.Approved,      // current: last resources we got the OK from the monitor on
-		s.VM.Using(),             // target: what the VM is currently using
-		ptr(*s.Monitor.Approved), // don't decrease below what the monitor is currently set to (this is an *upscale* request)
-		ptr(desiredResources.Max(*s.Monitor.Approved)), // don't increase above desired resources
+		s.Monitor.Approved.Lower,                              // current: last resources we got the OK from the monitor on
+		s.NeonVM.CurrentResources.Lower.Min(desiredResources), // target: what the VM is currently using
+		&s.Monitor.Approved.Lower,                             // lower: don't decrease
+		ptr(desiredResources.Max(s.Monitor.Approved.Upper)),   // don't increase above desired resources
 	)
 
 	// Clamp the request resources so we're not increasing by more than 1 CU:
 	requestResources = s.clampResources(
-		*s.Monitor.Approved,
+		s.Monitor.Approved.Lower,
 		requestResources,
 		nil, // no lower bound
 		ptr(requestResources.Add(s.Config.ComputeUnit)), // upper bound: must not increase by >1 CU
 	)
 
 	// Check validity of the request that we would send, before sending it
-	if requestResources.HasFieldLessThan(*s.Monitor.Approved) {
+	if requestResources.HasFieldLessThan(s.Monitor.Approved.Lower) {
 		panic(fmt.Errorf(
-			"resources for vm-monitor upscaling are less than what was last approved: %+v has field less than %+v",
+			"resources for vm-monitor upscaling are less than lower bound of what was last approved: %+v has field less than %+v",
 			requestResources,
-			*s.Monitor.Approved,
+			s.Monitor.Approved.Lower,
 		))
 	}
 
-	wantToDoRequest := requestResources != *s.Monitor.Approved
+	wantToDoRequest := requestResources.HasFieldGreaterThan(s.Monitor.Approved.Lower) &&
+		(s.Monitor.Approved.Confirmed == nil || requestResources.HasFieldGreaterThan(*s.Monitor.Approved.Confirmed))
 	if !wantToDoRequest {
 		return nil, nil
 	}
@@ -523,8 +610,8 @@ func (s *state) calculateMonitorUpscaleAction(
 	}
 
 	// Can't make another request if we failed too recently:
-	if s.Monitor.UpscaleFailureAt != nil {
-		timeUntilFailureBackoffExpires := s.Monitor.UpscaleFailureAt.Add(s.Config.MonitorRetryWait).Sub(now)
+	if s.Monitor.LastFailureAt != nil {
+		timeUntilFailureBackoffExpires := s.Monitor.LastFailureAt.Add(s.Config.MonitorRetryWait).Sub(now)
 		if timeUntilFailureBackoffExpires > 0 {
 			s.warn("Wanted to send vm-monitor upscale request, but failed too recently")
 			return nil, &timeUntilFailureBackoffExpires
@@ -533,7 +620,7 @@ func (s *state) calculateMonitorUpscaleAction(
 
 	// Otherwise, we can make the request:
 	return &ActionMonitorUpscale{
-		Current: *s.Monitor.Approved,
+		Current: s.Monitor.Approved.Lower,
 		Target:  requestResources,
 	}, nil
 }
@@ -552,30 +639,31 @@ func (s *state) calculateMonitorDownscaleAction(
 	}
 
 	requestResources := s.clampResources(
-		*s.Monitor.Approved,      // current: what the monitor is already aware of
-		desiredResources,         // target: what we'd like the VM to be using
-		nil,                      // lower bound: any decrease is fine
-		ptr(*s.Monitor.Approved), // upper bound: don't increase (this is only downscaling!)
+		s.Monitor.Approved.Upper,  // current: what the monitor is already aware of
+		desiredResources,          // target: what we'd like the VM to be using
+		nil,                       // lower bound: any decrease is fine
+		&s.Monitor.Approved.Upper, // upper bound: don't increase (this is only downscaling!)
 	)
 
 	// Clamp the request resources so we're not decreasing by more than 1 CU:
 	requestResources = s.clampResources(
-		*s.Monitor.Approved,
+		s.Monitor.Approved.Upper,
 		requestResources,
-		ptr(s.Monitor.Approved.SaturatingSub(s.Config.ComputeUnit)), // Must not decrease by >1 CU
+		ptr(s.Monitor.Approved.Upper.SaturatingSub(s.Config.ComputeUnit)), // lower bound: must not decrease by >1 CU
 		nil, // no upper bound
 	)
 
 	// Check validity of the request that we would send, before sending it
-	if requestResources.HasFieldGreaterThan(*s.Monitor.Approved) {
+	if requestResources.HasFieldGreaterThan(s.Monitor.Approved.Upper) {
 		panic(fmt.Errorf(
-			"resources for vm-monitor downscaling are greater than what was last approved: %+v has field greater than %+v",
+			"resources for vm-monitor downscaling are greater than upper bound of what was last approved: %+v has field greater than %+v",
 			requestResources,
-			*s.Monitor.Approved,
+			s.Monitor.Approved.Upper,
 		))
 	}
 
-	wantToDoRequest := requestResources != *s.Monitor.Approved
+	wantToDoRequest := requestResources.HasFieldLessThan(s.Monitor.Approved.Upper) &&
+		(s.Monitor.Approved.Confirmed == nil || requestResources.HasFieldLessThan(*s.Monitor.Approved.Confirmed))
 	if !wantToDoRequest {
 		return nil, nil
 	}
@@ -600,10 +688,10 @@ func (s *state) calculateMonitorDownscaleAction(
 	}
 
 	// Can't make another request if we failed too recently:
-	if s.Monitor.DownscaleFailureAt != nil {
-		timeUntilFailureBackoffExpires := s.Monitor.DownscaleFailureAt.Add(s.Config.MonitorRetryWait).Sub(now)
+	if s.Monitor.LastFailureAt != nil {
+		timeUntilFailureBackoffExpires := s.Monitor.LastFailureAt.Add(s.Config.MonitorRetryWait).Sub(now)
 		if timeUntilFailureBackoffExpires > 0 {
-			s.warn("Wanted to send vm-monitor downscale request but failed too recently")
+			s.warn("Wanted to send vm-monitor downscale request, but failed too recently")
 			return nil, &timeUntilFailureBackoffExpires
 		}
 	}
@@ -619,7 +707,7 @@ func (s *state) calculateMonitorDownscaleAction(
 
 	// Nothing else to check, we're good to make the request
 	return &ActionMonitorDownscale{
-		Current: *s.Monitor.Approved,
+		Current: s.Monitor.Approved.Upper,
 		Target:  requestResources,
 	}, nil
 }
@@ -890,19 +978,19 @@ func (s *state) clampResources(
 	return api.Resources{VCPU: cpu, Mem: mem}
 }
 
-func (s *state) monitorApprovedLowerBound() api.Resources {
+func (s *state) monitorApproved() resourceBounds {
 	if s.Monitor.Approved != nil {
 		return *s.Monitor.Approved
 	} else {
-		return s.VM.Using()
+		return fixedResourceBounds(s.VM.Using())
 	}
 }
 
-func (s *state) pluginApprovedUpperBound() api.Resources {
-	if s.Plugin.Permit != nil {
-		return *s.Plugin.Permit
+func (s *state) pluginApproved() resourceBounds {
+	if s.Plugin.Permitted != nil {
+		return *s.Plugin.Permitted
 	} else {
-		return s.VM.Using()
+		return fixedResourceBounds(s.VM.Using())
 	}
 }
 
@@ -946,13 +1034,20 @@ func (h PluginHandle) StartingRequest(now time.Time, resources api.Resources) {
 	h.s.Plugin.LastRequest = &pluginRequested{
 		At:        now,
 		Resources: resources,
+		Failed:    false, // We'll set this later when the request completes.
 	}
 	h.s.Plugin.OngoingRequest = true
+	if h.s.Plugin.Permitted == nil {
+		h.s.Plugin.Permitted = ptr(fixedResourceBounds(h.s.NeonVM.CurrentResources.Lower))
+		h.s.Plugin.Permitted.Confirmed = nil
+	}
+	h.s.Plugin.Permitted.updateTentative(resources)
 }
 
 func (h PluginHandle) RequestFailed(now time.Time) {
 	h.s.Plugin.OngoingRequest = false
 	h.s.Plugin.LastFailureAt = &now
+	h.s.Plugin.LastRequest.Failed = true
 }
 
 func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) (_err error) {
@@ -985,7 +1080,7 @@ func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) 
 	// NOTE: We don't set the compute unit, even though the plugin response contains it. We're in
 	// the process of moving the source of truth for ComputeUnit from the scheduler plugin to the
 	// autoscaler-agent.
-	h.s.Plugin.Permit = &resp.Permit
+	h.s.Plugin.Permitted.confirmConsistent(resp.Permit)
 	return nil
 }
 
@@ -1000,19 +1095,18 @@ func (s *State) Monitor() MonitorHandle {
 
 func (h MonitorHandle) Reset() {
 	h.s.Monitor = monitorState{
-		OngoingRequest:     nil,
-		RequestedUpscale:   nil,
-		DeniedDownscale:    nil,
-		Approved:           nil,
-		DownscaleFailureAt: nil,
-		UpscaleFailureAt:   nil,
+		OngoingRequest:   nil,
+		RequestedUpscale: nil,
+		DeniedDownscale:  nil,
+		Approved:         nil,
+		LastFailureAt:    nil,
 	}
 }
 
 func (h MonitorHandle) Active(active bool) {
 	if active {
 		approved := h.s.VM.Using()
-		h.s.Monitor.Approved = &approved // TODO: this is racy
+		h.s.Monitor.Approved = ptr(fixedResourceBounds(approved)) // TODO: this is racy
 	} else {
 		h.s.Monitor.Approved = nil
 	}
@@ -1021,55 +1115,63 @@ func (h MonitorHandle) Active(active bool) {
 func (h MonitorHandle) UpscaleRequested(now time.Time, resources api.MoreResources) {
 	h.s.Monitor.RequestedUpscale = &requestedUpscale{
 		At:        now,
-		Base:      *h.s.Monitor.Approved,
+		Base:      *h.s.Monitor.Approved.Confirmed,
 		Requested: resources,
 	}
 }
 
 func (h MonitorHandle) StartingUpscaleRequest(now time.Time, resources api.Resources) {
+	h.s.Monitor.Approved.updateTentative(resources)
 	h.s.Monitor.OngoingRequest = &ongoingMonitorRequest{
 		Kind:      monitorRequestKindUpscale,
 		Requested: resources,
 	}
-	h.s.Monitor.UpscaleFailureAt = nil
 }
 
 func (h MonitorHandle) UpscaleRequestSuccessful(now time.Time) {
-	h.s.Monitor.Approved = &h.s.Monitor.OngoingRequest.Requested
+	h.s.Monitor.Approved.confirmConsistent(h.s.Monitor.OngoingRequest.Requested)
 	h.s.Monitor.OngoingRequest = nil
+	h.s.Monitor.LastFailureAt = nil
 }
 
 func (h MonitorHandle) UpscaleRequestFailed(now time.Time) {
 	h.s.Monitor.OngoingRequest = nil
-	h.s.Monitor.UpscaleFailureAt = &now
+	h.s.Monitor.Approved.Confirmed = nil
+	h.s.Monitor.LastFailureAt = &now
 }
 
 func (h MonitorHandle) StartingDownscaleRequest(now time.Time, resources api.Resources) {
+	h.s.Monitor.Approved.updateTentative(resources)
 	h.s.Monitor.OngoingRequest = &ongoingMonitorRequest{
 		Kind:      monitorRequestKindDownscale,
 		Requested: resources,
 	}
-	h.s.Monitor.DownscaleFailureAt = nil
 }
 
 func (h MonitorHandle) DownscaleRequestAllowed(now time.Time) {
-	h.s.Monitor.Approved = &h.s.Monitor.OngoingRequest.Requested
+	h.s.Monitor.Approved.confirmConsistent(h.s.Monitor.OngoingRequest.Requested)
 	h.s.Monitor.OngoingRequest = nil
+	h.s.Monitor.LastFailureAt = nil
 }
 
 // Downscale request was successful but the monitor denied our request.
 func (h MonitorHandle) DownscaleRequestDenied(now time.Time) {
 	h.s.Monitor.DeniedDownscale = &deniedDownscale{
 		At:        now,
-		Current:   *h.s.Monitor.Approved,
+		Current:   h.s.Monitor.Approved.Upper,
 		Requested: h.s.Monitor.OngoingRequest.Requested,
 	}
+	if h.s.Monitor.Approved.Confirmed != nil {
+		h.s.Monitor.Approved.confirmConsistent(*h.s.Monitor.Approved.Confirmed)
+	}
 	h.s.Monitor.OngoingRequest = nil
+	h.s.Monitor.LastFailureAt = nil // nb: "failed" means there was an unexpected error, not just being denied
 }
 
 func (h MonitorHandle) DownscaleRequestFailed(now time.Time) {
 	h.s.Monitor.OngoingRequest = nil
-	h.s.Monitor.DownscaleFailureAt = &now
+	h.s.Monitor.Approved.Confirmed = nil
+	h.s.Monitor.LastFailureAt = &now
 }
 
 type NeonVMHandle struct {
@@ -1083,6 +1185,7 @@ func (s *State) NeonVM() NeonVMHandle {
 func (h NeonVMHandle) StartingRequest(now time.Time, resources api.Resources) {
 	// FIXME: add time to ongoing request info (or maybe only in RequestFailed?)
 	h.s.NeonVM.OngoingRequested = &resources
+	h.s.NeonVM.CurrentResources.updateTentative(resources)
 }
 
 func (h NeonVMHandle) RequestSuccessful(now time.Time) {
@@ -1097,11 +1200,12 @@ func (h NeonVMHandle) RequestSuccessful(now time.Time) {
 	// necessary changes.
 	// See the comments in (*State).UpdatedVM() for more info.
 	h.s.VM.SetUsing(resources)
-
+	h.s.NeonVM.CurrentResources.confirmConsistent(resources)
 	h.s.NeonVM.OngoingRequested = nil
 }
 
 func (h NeonVMHandle) RequestFailed(now time.Time) {
 	h.s.NeonVM.OngoingRequested = nil
 	h.s.NeonVM.RequestFailedAt = &now
+	h.s.NeonVM.CurrentResources.Confirmed = nil
 }
