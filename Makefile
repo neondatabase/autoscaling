@@ -43,7 +43,7 @@ else
 endif
 
 .PHONY: all
-all: build
+all: build lint
 
 ##@ General
 
@@ -132,6 +132,10 @@ bin/vm-builder: ## Build vm-builder binary.
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
+
+.PHONY: lint
+lint: ## Run golangci-lint against code.
+	golangci-lint run
 
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
