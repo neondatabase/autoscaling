@@ -392,7 +392,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				}
 				log.Info("SSH Secret was created", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
 			} else if err != nil {
-				log.Error(err, "Failed to ssh secret")
+				log.Error(err, "Failed to get SSH Secret")
 				return err
 			}
 
