@@ -19,9 +19,8 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -1005,9 +1004,8 @@ func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(virtualmachine *vm
 }
 
 func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
-	// with bitSize = 2048 it takes ~100ms
-	bitSize := 2048 // TODO: make this configurable
-	privateKey, publicKey, err := sshKeygen(bitSize)
+	// using ed25519 signatures it takes ~16us to finish
+	publicKey, privateKey, err := sshKeygen()
 	if err != nil {
 		return nil, err
 	}
@@ -1020,8 +1018,8 @@ func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) 
 		Immutable: ptr(true),
 		Type:      corev1.SecretTypeSSHAuth,
 		Data: map[string][]byte{
-			"ssh-privatekey": privateKey,
 			"ssh-publickey":  publicKey,
+			"ssh-privatekey": privateKey,
 		},
 	}
 
@@ -1320,7 +1318,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 							Items: []corev1.KeyToPath{
 								{
 									Key:  "ssh-privatekey",
-									Path: "id_rsa",
+									Path: "id_ed25519",
 									Mode: ptr[int32](0600),
 								},
 							},
@@ -1537,66 +1535,42 @@ func getEnvVarValue(envVarName string) (string, error) {
 	return value, nil
 }
 
-func sshKeygen(bitSize int) ([]byte, []byte, error) {
-	privateKey, err := generatePrivateKey(bitSize)
+func sshKeygen() ([]byte, []byte, error) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	privateKeyBytes := encodePrivateKeyToPEM(privateKey)
-
-	publicKeyBytes, err := generatePublicKey(&privateKey.PublicKey)
+	publicKeyBytes, err := encodePublicKey(publicKey)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return privateKeyBytes, publicKeyBytes, nil
-}
-
-// encodePrivateKeyToPEM encodes Private Key from RSA to PEM format
-func encodePrivateKeyToPEM(privateKey *rsa.PrivateKey) []byte {
-	// Get ASN.1 DER format
-	privDER := x509.MarshalPKCS1PrivateKey(privateKey)
-
-	// pem.Block
-	privBlock := pem.Block{
-		Type:    "RSA PRIVATE KEY",
-		Headers: nil,
-		Bytes:   privDER,
+	privateKeyBytes, err := encodePrivateKey(privateKey)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	// Private key in PEM format
-	privatePEM := pem.EncodeToMemory(&privBlock)
-
-	return privatePEM
+	return publicKeyBytes, privateKeyBytes, nil
 }
 
-// generatePrivateKey creates a RSA Private Key of specified byte size
-func generatePrivateKey(bitSize int) (*rsa.PrivateKey, error) {
-	// Private Key generation
-	privateKey, err := rsa.GenerateKey(rand.Reader, bitSize)
+func encodePrivateKey(privateKey ed25519.PrivateKey) ([]byte, error) {
+	privBlock, err := ssh.MarshalPrivateKey(privateKey, "")
+	if err != nil {
+		return nil, err
+	}
+	privatePEM := pem.EncodeToMemory(privBlock)
+
+	return privatePEM, nil
+}
+
+func encodePublicKey(publicKey ed25519.PublicKey) ([]byte, error) {
+	sshPublicKey, err := ssh.NewPublicKey(publicKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// Validate Private Key
-	err = privateKey.Validate()
-	if err != nil {
-		return nil, err
-	}
-
-	return privateKey, nil
-}
-
-// generatePublicKey take a rsa.PublicKey and return bytes suitable for writing to .pub file
-// returns in the format "ssh-rsa ..."
-func generatePublicKey(privatekey *rsa.PublicKey) ([]byte, error) {
-	publicRsaKey, err := ssh.NewPublicKey(privatekey)
-	if err != nil {
-		return nil, err
-	}
-
-	pubKeyBytes := ssh.MarshalAuthorizedKey(publicRsaKey)
+	pubKeyBytes := ssh.MarshalAuthorizedKey(sshPublicKey)
 	return pubKeyBytes, nil
 }
 
