@@ -22,7 +22,6 @@ jobs:
   vm-kernel:
     uses: ./.github/workflows/vm-kernel.yaml
     with:
-      push: true
       tag: ${{ github.ref_name }}
 
   release:

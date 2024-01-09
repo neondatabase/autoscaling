@@ -21,13 +21,15 @@ on:
 env:
   PRESERVE_RUNNER_PODS: "true"
 
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
   vm-kernel:
     uses: ./.github/workflows/vm-kernel.yaml
     with:
-      push: true
-      tag: ${{ github.run_id }}
-      kernel-image-tag-override: ${{ inputs.kernel-image }}
+      return-image-for-tag: ${{ inputs.kernel-image }}
     secrets: inherit
 
   e2e-tests:
