@@ -463,7 +463,7 @@ func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context) (*VirtualMachineN
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("localhost:%d/get_network_usage", vm.Spec.RunnerPort),
+		fmt.Sprintf("%s:%d/get_network_usage", vm.Status.PodIP, vm.Spec.RunnerPort),
 		nil,
 	)
 	if err != nil {

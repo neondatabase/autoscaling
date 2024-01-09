@@ -3,7 +3,6 @@ package billing
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -76,6 +75,11 @@ type vmMetricsSeconds struct {
 	activeTime time.Duration
 }
 
+type vmMetricsKV struct {
+	key   metricsKey
+	value vmMetricsInstant
+}
+
 func RunBillingMetricsCollector(
 	backgroundCtx context.Context,
 	parentLogger *zap.Logger,
@@ -143,6 +147,33 @@ func RunBillingMetricsCollector(
 	}
 }
 
+func collectMetricsForVM(vm *vmapi.VirtualMachine, ctx context.Context, metricsChan chan vmMetricsKV) {
+	byteCounts, err := vm.GetNetworkUsage(ctx)
+	if err != nil {
+		byteCounts = &vmapi.VirtualMachineNetworkUsage{
+			IngressBytes: 0,
+			EgressBytes:  0,
+		}
+	}
+	endpointID, _ := vm.Annotations[api.AnnotationBillingEndpointID]
+	key := metricsKey{
+		uid:        vm.UID,
+		endpointID: endpointID,
+	}
+
+	presentMetrics := vmMetricsInstant{
+		cpu:          *vm.Status.CPUs,
+		ingressBytes: byteCounts.IngressBytes,
+		egressBytes:  byteCounts.EgressBytes,
+	}
+
+	result := vmMetricsKV{
+		key:   key,
+		value: presentMetrics,
+	}
+	metricsChan <- result
+}
+
 func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metrics PromMetrics, logger *zap.Logger) error {
 	now := time.Now()
 
@@ -159,8 +190,11 @@ func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metric
 			return i.List()
 		})
 	}
+
+	metricsChan := make(chan vmMetricsKV, len(vmsOnThisNode))
+	metricsToCollect := 0
 	for _, vm := range vmsOnThisNode {
-		endpointID, isEndpoint := vm.Annotations[api.AnnotationBillingEndpointID]
+		_, isEndpoint := vm.Annotations[api.AnnotationBillingEndpointID]
 		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
 		if !isEndpoint {
 			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
@@ -171,21 +205,14 @@ func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metric
 			continue
 		}
 
-		byteCounts, err := vm.GetNetworkUsage(ctx)
-		if err != nil {
-			return err
-		}
-		logger.Info(fmt.Sprintf("Got byte counts %v", byteCounts))
-		key := metricsKey{
-			uid:        vm.UID,
-			endpointID: endpointID,
-		}
+		go collectMetricsForVM(vm, ctx, metricsChan)
+		metricsToCollect += 1
+	}
 
-		presentMetrics := vmMetricsInstant{
-			cpu:          *vm.Status.CPUs,
-			ingressBytes: byteCounts.IngressBytes,
-			egressBytes:  byteCounts.EgressBytes,
-		}
+	for i := 0; i < metricsToCollect; i++ {
+		kv := <-metricsChan
+		key := kv.key
+		presentMetrics := kv.value
 
 		if oldMetrics, ok := old[key]; ok {
 			// The VM was present from s.lastTime to now. Add a time slice to its metrics history.
@@ -324,7 +351,7 @@ func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname s
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
-			Value:          history.totalIngressBytes,
+			Value:          int(history.totalIngressBytes),
 		})))
 		countInBatch += 1
 		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
@@ -334,7 +361,7 @@ func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname s
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
-			Value:          history.total.totalEgressBytes,
+			Value:          int(history.totalEgressBytes),
 		})))
 	}
 
