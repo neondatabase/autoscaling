@@ -123,9 +123,7 @@ func RunBillingMetricsCollector(
 	// The rest of this function is to do with collection
 	logger = logger.Named("collect")
 
-	if err := state.collect(backgroundCtx, store, metrics, logger); err != nil {
-		logger.Panic("Metrics collection failed", zap.Error(err))
-	}
+	state.collect(backgroundCtx, store, metrics, logger)
 
 	for {
 		select {
@@ -135,9 +133,7 @@ func RunBillingMetricsCollector(
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
-			if err := state.collect(backgroundCtx, store, metrics, logger); err != nil {
-				logger.Panic("Metrics collection failed", zap.Error(err))
-			}
+			state.collect(backgroundCtx, store, metrics, logger)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, conf, client.Hostname(), queueWriter)
@@ -155,7 +151,7 @@ func collectMetricsForVM(vm *vmapi.VirtualMachine, ctx context.Context, metricsC
 			EgressBytes:  0,
 		}
 	}
-	endpointID, _ := vm.Annotations[api.AnnotationBillingEndpointID]
+	endpointID := vm.Annotations[api.AnnotationBillingEndpointID]
 	key := metricsKey{
 		uid:        vm.UID,
 		endpointID: endpointID,
@@ -174,7 +170,7 @@ func collectMetricsForVM(vm *vmapi.VirtualMachine, ctx context.Context, metricsC
 	metricsChan <- result
 }
 
-func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metrics PromMetrics, logger *zap.Logger) error {
+func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metrics PromMetrics, logger *zap.Logger) {
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
@@ -246,7 +242,6 @@ func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metric
 	}
 
 	s.lastCollectTime = &now
-	return nil
 }
 
 func (h *vmMetricsHistory) appendSlice(timeSlice metricsTimeSlice) {
