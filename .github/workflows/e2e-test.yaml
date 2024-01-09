@@ -21,13 +21,15 @@ on:
 env:
   PRESERVE_RUNNER_PODS: "true"
 
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
   vm-kernel:
     uses: ./.github/workflows/vm-kernel.yaml
     with:
-      push: true
-      tag: ${{ github.run_id }}
-      kernel-image-tag-override: ${{ inputs.kernel-image }}
+      return-image-for-tag: ${{ inputs.kernel-image }}
     secrets: inherit
 
   e2e-tests:
@@ -73,7 +75,7 @@ jobs:
         run: |
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
+          docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
           docker rm -f ${ID}
 
       # our docker builds use the output of 'git describe' for embedding git information
