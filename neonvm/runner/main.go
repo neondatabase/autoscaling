@@ -132,6 +132,7 @@ func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map,
 		return nil, nil, err
 	}
 
+	//nolint:exhaustruct // This has a whole bunch of optional configuration options that we don't care about
 	counters, err := ebpf.NewMap(&ebpf.MapSpec{
 		Type:       ebpf.Array,
 		KeySize:    MAP_KEY_SIZE,
@@ -195,6 +196,7 @@ func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map,
 		asm.Return(),
 	}
 
+	//nolint:exhaustruct // This has a whole bunch of optional configuration options that we don't care about
 	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
 		Name:         "neon_network_monitor",
 		Type:         ebpf.CGroupSKB,
@@ -891,7 +893,11 @@ func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Add("Content-Type", "application/json")
-	w.Write(body)
+	if _, err := w.Write(body); err != nil {
+		logger.Error("could not write body: %v", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
 }
 
 func listenForHTTPRequests(

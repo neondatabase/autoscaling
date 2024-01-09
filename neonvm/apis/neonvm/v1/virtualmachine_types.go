@@ -475,6 +475,9 @@ func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context) (*VirtualMachineN
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 	var result VirtualMachineNetworkUsage
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, err
