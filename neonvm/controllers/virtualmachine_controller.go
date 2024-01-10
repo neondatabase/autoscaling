@@ -376,7 +376,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		if err != nil && apierrors.IsNotFound(err) {
 			// Check if the ssh secret already exists, if not create a new one
 			sshSecret := &corev1.Secret{}
-			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.SSHSecretName, Namespace: virtualmachine.Namespace}, sshSecret)
+			err := r.Get(ctx, types.NamespacedName{
+				Name:      virtualmachine.Status.SSHSecretName,
+				Namespace: virtualmachine.Namespace,
+			}, sshSecret)
 			if err != nil && apierrors.IsNotFound(err) {
 				// Define a new ssh secret
 				sshSecret, err = r.sshSecretForVirtualMachine(virtualmachine)
