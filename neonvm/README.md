@@ -73,7 +73,7 @@ root@neonvm:~# curl -k https://kubernetes/version
 #### SSH
 
 ```sh
-kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- screen /dev/pts/0
+kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- ssh neonvm-br
 ```
 
 ### Delete virtual machine
