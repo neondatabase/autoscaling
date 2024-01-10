@@ -67,8 +67,7 @@ linters-settings:
       - '^sigs\.k8s\.io/controller-runtime/pkg/manager\.Options$'
       - '^sigs\.k8s\.io/controller-runtime/pkg/reconcile\.Result$'
       - '^sigs\.k8s\.io/controller-runtime/pkg/scheme\.Builder$'
-      - '^github\.com/containerd/cgroups/v3/cgroup2\.(Resources|Memory)'
-      - '^github\.com/containerd/cgroups/v3/cgroup2\.CPU$'
+      - '^github\.com/containerd/cgroups/v3/cgroup2\.(CPU|Resources)'
       - '^github\.com/docker/docker/api/types/container\.Config$'
       - '^github\.com/docker/docker/api/types\.\w+Options$'
       - '^github\.com/opencontainers/runtime-spec/specs-go\.\w+$' # Exempt the entire package. Too many big structs.
@@ -121,18 +120,6 @@ linters-settings:
     #     ...
     #   }
     check-shadowing: false
-    # add some additional functions to the printf format specifiers checking
-    printf:
-      # Kubernetes' klog — this is our primary logger
-      - (k8s.io/klog/v2).Infof
-      - (k8s.io/klog/v2).Warningf
-      - (k8s.io/klog/v2).Errorf
-      - (k8s.io/klog/v2).Fatalf
-      # autoscaler-agent's RunnerLogger
-      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Infof
-      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Warningf
-      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Errorf
-      - (github.com/neondatabase/autoscaling/pkg/agent.RunnerLogger).Fatalf
   # see: <https://golangci-lint.run/usage/linters/#nolintlint>
   nolintlint:
     allow-unused: false
