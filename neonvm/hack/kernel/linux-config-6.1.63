@@ -1961,8 +1961,9 @@ CONFIG_RANDOM_TRUST_BOOTLOADER=y
 #
 # PTP clock support
 #
-# CONFIG_PTP_1588_CLOCK is not set
-CONFIG_PTP_1588_CLOCK_OPTIONAL=y
+CONFIG_PTP_1588_CLOCK=y
+CONFIG_PTP_1588_CLOCK_KVM=y
+# end of PTP clock support
 
 #
 # Enable PHYLIB and NETWORK_PHY_TIMESTAMPING to see the additional clocks.

@@ -41,6 +41,8 @@ var (
 	scriptVmInit string
 	//go:embed files/vector.yaml
 	configVector string
+	//go:embed files/chrony.conf
+	configChrony string
 )
 
 var (
@@ -268,6 +270,7 @@ func main() {
 		{"vmacpi", scriptVmAcpi},
 		{"vminit", scriptVmInit},
 		{"vector.yaml", configVector},
+		{"chrony.conf", configChrony},
 	}
 
 	for _, f := range files {
