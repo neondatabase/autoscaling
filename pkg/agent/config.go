@@ -142,6 +142,8 @@ func (c *Config) validate() error {
 	)
 
 	erc.Whenf(ec, c.Billing != nil && c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.IngressBytesMetricName == "", emptyTmpl, ".billing.ingressBytesMetricName")
+	erc.Whenf(ec, c.Billing != nil && c.Billing.EgressBytesMetricName == "", emptyTmpl, ".billing.egressBytesMetricName")
 	erc.Whenf(ec, c.Billing != nil && c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
 	erc.Whenf(ec, c.Billing != nil && c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
 	erc.Whenf(ec, c.Billing != nil && c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")

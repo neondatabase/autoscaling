@@ -105,11 +105,16 @@ type resolveFile struct {
 	Hash    string
 }
 
+// Attaches a BPF program to the given cgroup which checks each packet to see if it comes
+// from/is going to the external network. These counts are exposed through a map which
+// can be read.
 func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map, error) {
 	const (
 		MAP_KEY_SIZE = 4
 		MAP_VAL_SIZE = 8
 
+		// Below are offsets into `struct __sk_buff`, defined in uapi/linux/bpf.h
+		// https://elixir.bootlin.com/linux/v4.15/source/include/uapi/linux/bpf.h#L799
 		LEN_OFFSET        = 4
 		PKT_TYPE_OFFSET   = 8
 		REMOTE_IP4_OFFSET = 100
@@ -140,7 +145,7 @@ func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map,
 		MaxEntries: 2,
 	})
 	if err != nil {
-		logger.Fatal("Failed to create eBPF map: %v", zap.Error(err))
+		logger.Fatal("Failed to create eBPF map", zap.Error(err))
 		return nil, nil, err
 	}
 
@@ -205,7 +210,7 @@ func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map,
 		AttachTo:     cgroupPath,
 	})
 	if err != nil {
-		logger.Fatal("Failed to attach eBPF program: %v", zap.Error(err))
+		logger.Fatal("Failed to attach eBPF program", zap.Error(err))
 		counters.Close()
 		return nil, nil, err
 	}
@@ -881,20 +886,20 @@ func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err := counters.Lookup(1, &counts.EgressBytes); err != nil {
-		logger.Error("error reading egress byte counts: %v", zap.Error(err))
+		logger.Error("error reading egress byte counts", zap.Error(err))
 		w.WriteHeader(500)
 		return
 	}
 	body, err := json.Marshal(counts)
 	if err != nil {
-		logger.Error("could not marshal byte counts: %v", zap.Error(err))
+		logger.Error("could not marshal byte counts", zap.Error(err))
 		w.WriteHeader(500)
 		return
 	}
 
 	w.Header().Add("Content-Type", "application/json")
 	if _, err := w.Write(body); err != nil {
-		logger.Error("could not write body: %v", zap.Error(err))
+		logger.Error("could not write body", zap.Error(err))
 		w.WriteHeader(500)
 		return
 	}
@@ -921,7 +926,7 @@ func listenForHTTPRequests(
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUCurrent(cpuCurrentLogger, w, r, cgroupPath)
 	})
-	mux.HandleFunc("/get_network_usage", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/network_usage", func(w http.ResponseWriter, r *http.Request) {
 		handleGetNetworkUsage(networkUsageLogger, w, r, counters)
 	})
 	server := http.Server{
@@ -940,11 +945,11 @@ func listenForHTTPRequests(
 		if errors.Is(err, http.ErrServerClosed) {
 			logger.Info("http server closed")
 		} else if err != nil {
-			logger.Fatal("cpu_change exited with error", zap.Error(err))
+			logger.Fatal("http server exited with error", zap.Error(err))
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
-		logger.Info("shut down http", zap.Error(err))
+		logger.Info("shut down http server", zap.Error(err))
 	}
 }
 

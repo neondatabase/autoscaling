@@ -53,6 +53,8 @@ type VirtualMachineUsage struct {
 	Memory *resource.Quantity `json:"memory"`
 }
 
+type NetworkBytes uint64
+
 type VirtualMachineNetworkUsage struct {
 	IngressBytes NetworkBytes `json:"ingress_bytes"`
 	EgressBytes  NetworkBytes `json:"egress_bytes"`
@@ -190,7 +192,6 @@ type CPUs struct {
 // +kubebuilder:validation:XIntOrString
 // +kubebuilder:validation:Pattern=^[0-9]+((\.[0-9]*)?|m)
 type MilliCPU uint32 // note: pattern is more restrictive than resource.Quantity, because we're just using it for CPU
-type NetworkBytes uint64
 
 // RoundedUp returns the smallest integer number of CPUs greater than or equal to the effective
 // value of m.
@@ -457,30 +458,33 @@ type VirtualMachine struct {
 	Status VirtualMachineStatus `json:"status,omitempty"`
 }
 
-func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context) (*VirtualMachineNetworkUsage, error) {
-	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context, timeout time.Duration) (*VirtualMachineNetworkUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("%s:%d/get_network_usage", vm.Status.PodIP, vm.Spec.RunnerPort),
+		fmt.Sprintf("%s:%d/network_usage", vm.Status.PodIP, vm.Spec.RunnerPort),
 		nil,
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error initializing http request to fetch n etwork usage: %w", err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error performing http request to fetch network usage: %w", err)
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("received non-200 response fetching network usage")
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error reading http response body: %w", err)
 	}
 	var result VirtualMachineNetworkUsage
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error unmarshaling http response as VirtualMachineNetworkUsage: %w", err)
 	}
 	return &result, nil
 }

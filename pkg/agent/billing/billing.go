@@ -123,7 +123,7 @@ func RunBillingMetricsCollector(
 	// The rest of this function is to do with collection
 	logger = logger.Named("collect")
 
-	state.collect(backgroundCtx, store, metrics, logger)
+	state.collect(backgroundCtx, logger, store, metrics)
 
 	for {
 		select {
@@ -133,7 +133,7 @@ func RunBillingMetricsCollector(
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
-			state.collect(backgroundCtx, store, metrics, logger)
+			state.collect(backgroundCtx, logger, store, metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, conf, client.Hostname(), queueWriter)
@@ -143,8 +143,8 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func collectMetricsForVM(vm *vmapi.VirtualMachine, ctx context.Context, metricsChan chan vmMetricsKV) {
-	byteCounts, err := vm.GetNetworkUsage(ctx)
+func collectMetricsForVM(ctx context.Context, vm *vmapi.VirtualMachine, metricsChan chan vmMetricsKV) {
+	byteCounts, err := vm.GetNetworkUsage(ctx, 500*time.Millisecond)
 	if err != nil {
 		byteCounts = &vmapi.VirtualMachineNetworkUsage{
 			IngressBytes: 0,
@@ -152,25 +152,20 @@ func collectMetricsForVM(vm *vmapi.VirtualMachine, ctx context.Context, metricsC
 		}
 	}
 	endpointID := vm.Annotations[api.AnnotationBillingEndpointID]
-	key := metricsKey{
-		uid:        vm.UID,
-		endpointID: endpointID,
+	metricsChan <- vmMetricsKV{
+		key: metricsKey{
+			uid:        vm.UID,
+			endpointID: endpointID,
+		},
+		value: vmMetricsInstant{
+			cpu:          *vm.Status.CPUs,
+			ingressBytes: byteCounts.IngressBytes,
+			egressBytes:  byteCounts.EgressBytes,
+		},
 	}
-
-	presentMetrics := vmMetricsInstant{
-		cpu:          *vm.Status.CPUs,
-		ingressBytes: byteCounts.IngressBytes,
-		egressBytes:  byteCounts.EgressBytes,
-	}
-
-	result := vmMetricsKV{
-		key:   key,
-		value: presentMetrics,
-	}
-	metricsChan <- result
 }
 
-func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metrics PromMetrics, logger *zap.Logger) {
+func (s *metricsState) collect(ctx context.Context, logger *zap.Logger, store VMStoreForNode, metrics PromMetrics) {
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
@@ -201,7 +196,7 @@ func (s *metricsState) collect(ctx context.Context, store VMStoreForNode, metric
 			continue
 		}
 
-		go collectMetricsForVM(vm, ctx, metricsChan)
+		go collectMetricsForVM(ctx, vm, metricsChan)
 		metricsToCollect += 1
 	}
 
@@ -311,7 +306,7 @@ func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname s
 	now := time.Now()
 
 	countInBatch := 0
-	batchSize := 2 * len(s.historical)
+	batchSize := 4 * len(s.historical)
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
