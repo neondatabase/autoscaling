@@ -54,6 +54,9 @@ const (
 	mountedDiskPath                = "/vm/images"
 	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
 
+	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
+	sshAuthorizedKeysMountPoint = "/vm/ssh"
+
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
 	defaultNetworkCIDR       = "169.254.254.252/30"
@@ -579,12 +582,11 @@ func main() {
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
 	{
-		diskName := "ssh-authorized-keys"
-		diskPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, "ssh-authorized-keys")
-		if err := createISO9660FromPath(logger, diskName, diskPath, "/vm/ssh"); err != nil {
+		name := "ssh-authorized-keys"
+		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
 			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", diskName, diskPath))
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
 	}
 	for _, disk := range vmSpec.Disks {
 		switch {
