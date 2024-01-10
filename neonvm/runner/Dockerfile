@@ -46,7 +46,7 @@ RUN apk add --no-cache \
     openssh
 
 COPY --from=builder /runner /usr/bin/runner
-COPY neonvm/hack/vmlinuz /vm/kernel/vmlinuz
+COPY neonvm/hack/kernel/vmlinuz /vm/kernel/vmlinuz
 COPY neonvm/runner/ssh_config /etc/ssh/ssh_config
 
 ENTRYPOINT ["/sbin/tini", "--", "runner"]

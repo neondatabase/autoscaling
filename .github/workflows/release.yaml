@@ -22,7 +22,6 @@ jobs:
   vm-kernel:
     uses: ./.github/workflows/vm-kernel.yaml
     with:
-      push: true
       tag: ${{ github.ref_name }}
 
   release:
@@ -82,7 +81,7 @@ jobs:
         run: |
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm/hack/vmlinuz
+          docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
           docker rm -f ${ID}
 
       - name: build and push runner image
