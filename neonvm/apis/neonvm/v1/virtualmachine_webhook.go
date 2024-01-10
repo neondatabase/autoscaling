@@ -116,8 +116,8 @@ func (r *VirtualMachine) ValidateCreate() error {
 		"rootdisk",
 		"runtime",
 		"sysfscgroup",
-		"ssh-private-key",
-		"ssh-public-key",
+		"ssh-privatekey",
+		"ssh-publickey",
 		"ssh-authorized-keys",
 	}
 	for _, disk := range r.Spec.Disks {

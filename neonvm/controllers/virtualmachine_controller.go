@@ -1287,11 +1287,11 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 						MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
 					},
 					{
-						Name:      "ssh-private-key",
+						Name:      "ssh-privatekey",
 						MountPath: "/mnt/ssh",
 					},
 					{
-						Name:      "ssh-public-key",
+						Name:      "ssh-publickey",
 						MountPath: "/vm/ssh",
 					},
 				},
@@ -1314,7 +1314,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 					},
 				},
 				{
-					Name: "ssh-private-key",
+					Name: "ssh-privatekey",
 					VolumeSource: corev1.VolumeSource{
 						Secret: &corev1.SecretVolumeSource{
 							SecretName: sshSecret.Name,
@@ -1329,7 +1329,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 					},
 				},
 				{
-					Name: "ssh-public-key",
+					Name: "ssh-publickey",
 					VolumeSource: corev1.VolumeSource{
 						Secret: &corev1.SecretVolumeSource{
 							SecretName: sshSecret.Name,
