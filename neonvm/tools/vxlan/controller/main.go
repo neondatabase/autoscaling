@@ -30,7 +30,7 @@ const (
 )
 
 var (
-	delete = flag.Bool("delete", false, `delete VXLAN interfaces`)
+	deleteIfaces = flag.Bool("delete", false, `delete VXLAN interfaces`)
 )
 
 func main() {
@@ -49,7 +49,7 @@ func main() {
 	}
 
 	// -delete option used for teardown vxlan setup
-	if *delete {
+	if *deleteIfaces {
 		log.Printf("deleting vxlan interface %s", VXLAN_IF_NAME)
 		if err := deleteLink(VXLAN_IF_NAME); err != nil {
 			log.Print(err)
@@ -125,7 +125,7 @@ func createBrigeInterface(name string) error {
 		log.Printf("link with name %s already found", name)
 		return nil
 	}
-	_, notFound := err.(netlink.LinkNotFoundError)
+	_, notFound := err.(netlink.LinkNotFoundError) //nolint:errorlint // errors.Is doesn't work, we actually just want to know the type.
 	if !notFound {
 		return err
 	}
@@ -154,7 +154,7 @@ func createVxlanInterface(name string, vxlanID int, ownIP string, bridgeName str
 		log.Printf("link with name %s already found", name)
 		return nil
 	}
-	_, notFound := err.(netlink.LinkNotFoundError)
+	_, notFound := err.(netlink.LinkNotFoundError) //nolint:errorlint // errors.Is doesn't work, we actually just want to know the type.
 	if !notFound {
 		return err
 	}
@@ -231,7 +231,7 @@ func deleteLink(name string) error {
 		log.Printf("link with name %s was deleted", name)
 		return nil
 	}
-	_, notFound := err.(netlink.LinkNotFoundError)
+	_, notFound := err.(netlink.LinkNotFoundError) //nolint:errorlint // errors.Is doesn't work, we actually just want to know the type.
 	if !notFound {
 		return err
 	}

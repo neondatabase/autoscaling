@@ -45,6 +45,6 @@ RUN apk add --no-cache \
     cgroup-tools
 
 COPY --from=builder /runner /usr/bin/runner
-COPY neonvm/hack/vmlinuz /vm/kernel/vmlinuz
+COPY neonvm/hack/kernel/vmlinuz /vm/kernel/vmlinuz
 
 ENTRYPOINT ["/sbin/tini", "--", "runner"]

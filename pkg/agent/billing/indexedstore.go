@@ -7,7 +7,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 

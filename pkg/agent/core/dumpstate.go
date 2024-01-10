@@ -47,7 +47,6 @@ func (s *State) Dump() StateDump {
 func (s *pluginState) deepCopy() pluginState {
 	return pluginState{
 		OngoingRequest: s.OngoingRequest,
-		ComputeUnit:    shallowCopy[api.Resources](s.ComputeUnit),
 		LastRequest:    shallowCopy[pluginRequested](s.LastRequest),
 		LastFailureAt:  shallowCopy[time.Time](s.LastFailureAt),
 		Permit:         shallowCopy[api.Resources](s.Permit),

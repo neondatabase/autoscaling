@@ -1,25 +1,144 @@
 name: vm-kernel
 
 on:
-  schedule:
-    - cron:  '42 4 * * 2'  # run once a week
   workflow_dispatch: # adds ability to run this manually
     inputs:
-      push:
-        description: 'Push to Docker Hub'
-        type: boolean
-        default: false
       tag:
         description: 'Tag to use for Docker image'
+        type: string
         required: false
+      force-rebuild:
+        description: 'Rebuild the kernel image even if it already exists'
+        type: boolean
+        required: false
+        default: false
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to use for Docker image'
+        type: string
+        required: false
+      return-image-for-tag:
+        description: 'Make workflow to return image for the passed tag without building or tagging anything'
+        type: string
+        required: false
+        default: ''
+      force-rebuild:
+        description: 'Rebuild the kernel image even if it already exists. No-op if `return-image-for-tag` is set'
+        type: boolean
+        required: false
+        default: false
+    outputs:
+      image:
+        description: 'vm-kernel Docker image'
+        value: ${{ jobs.setup-build-vm-kernel-image.outputs.image || jobs.build-vm-kernel-image.outputs.image }}
 
 env:
   VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
 
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
-  vm-kernel:
+  setup-build-vm-kernel-image:
     outputs:
-      image: ${{ fromJSON(steps.build-linux-kernel.outputs.metadata)['image.name'] }}@${{ steps.build-linux-kernel.outputs.digest }}
+      image: ${{ steps.get-kernel-image.outputs.image }}
+      last-kernel-sha: ${{ steps.get-last-kernel-commit-sha.outputs.last-kernel-sha }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: get last kernel commit sha
+        id: get-last-kernel-commit-sha
+        env:
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CACHE_TAG=$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              --method GET \
+              --field path=neonvm/hack/kernel \
+              --field sha=${COMMIT_SHA} \
+              --field per_page=1 \
+              --jq ".[0].sha" \
+              "/repos/${GITHUB_REPOSITORY}/commits"
+          )
+          echo "last-kernel-sha=${CACHE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: get kernel image
+        id: get-kernel-image
+        env:
+          FORCED_TAG: ${{ inputs.return-image-for-tag }}
+          FORCE_REBUILD: ${{ inputs.force-rebuild }}
+          CACHE_TAG: ${{ steps.get-last-kernel-commit-sha.outputs.last-kernel-sha }}
+        run: |
+          if [ -n "${FORCED_TAG}" ]; then
+            DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}:${FORCED_TAG} -v | jq -r '.Descriptor.digest')
+            IMAGE="${VM_KERNEL_IMAGE}:${FORCED_TAG}@${DIGEST}"
+          elif [ "${FORCE_REBUILD}" == "false" ]; then
+            CACHE_TAG_DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}:${CACHE_TAG} -v | jq -r '.Descriptor.digest' || true)
+            if [ -n "${CACHE_TAG_DIGEST}" ]; then
+              IMAGE="${VM_KERNEL_IMAGE}:${CACHE_TAG}@${CACHE_TAG_DIGEST}"
+            else
+              IMAGE=""
+            fi
+          else
+            IMAGE=""
+          fi
+
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+
+      - name: check if we need to retag the image
+        id: check-if-retag-needed
+        env:
+          CACHED_IMAGE: ${{ steps.get-kernel-image.outputs.image }}
+          FORCE_REBUILD: "${{ inputs.force-rebuild }}"
+          FORCED_TAG: ${{ inputs.return-image-for-tag }}
+          NEW_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "${NEW_TAG}" ]; then
+            # there's no tag provided to retag the image with
+            RETAG_NEEDED=false
+          elif [ -z "${CACHED_IMAGE}" ]; then
+            # there's no image to retag
+            RETAG_NEEDED=false
+          elif [ -n "${FORCED_TAG}"]; then
+            # we're asked to return image for a specific tag, so no need to retag
+            RETAG_NEEDED=false
+          elif [ "${FORCE_REBUILD}" == "true" ]; then
+            # the image is going to be rebuilt anyway, no need to retag it now
+            RETAG_NEEDED=false
+          else
+            RETAG_NEEDED=true
+          fi
+
+          echo "retag-needed=${RETAG_NEEDED}" >> $GITHUB_OUTPUT
+
+      - name: login to docker hub
+        if: steps.check-if-retag-needed.outputs.retag-needed == 'true'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: tag image with new tag
+        if: steps.check-if-retag-needed.outputs.retag-needed == 'true'
+        env:
+          CACHED_IMAGE: ${{ steps.get-kernel-image.outputs.image }}
+          NEW_TAG: ${{ inputs.tag }}
+        run: |
+          docker pull ${CACHED_IMAGE}
+          docker tag ${CACHED_IMAGE} ${VM_KERNEL_IMAGE}:${NEW_TAG}
+          docker push ${VM_KERNEL_IMAGE}:${NEW_TAG}
+
+  build-vm-kernel-image:
+    needs: setup-build-vm-kernel-image
+    if: needs.setup-build-vm-kernel-image.outputs.image == ''
+    outputs:
+      image: ${{ steps.get-tags.outputs.canonical }}@${{ steps.build-linux-kernel.outputs.digest }}
 
     runs-on: [ self-hosted, gen3, large ]
     steps:
@@ -46,33 +165,43 @@ jobs:
       - name: get kernel version
         id: get-kernel-version
         run: |
-          linux_config=$(ls neonvm/hack/linux-config-*)  # returns something like "neonvm/hack/linux-config-6.1.63"
-          kernel_version=${linux_config##*-}             # returns something like "6.1.63"
+          linux_config=$(ls neonvm/hack/kernel/linux-config-*)  # returns something like "neonvm/hack/kernel/linux-config-6.1.63"
+          kernel_version=${linux_config##*-}                    # returns something like "6.1.63"
 
           echo VM_KERNEL_VERSION=$kernel_version >> $GITHUB_OUTPUT
+
+      - name: get docker tags
+        id: get-tags
+        env:
+          KERNEL_VERSION_TAG: ${{ inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
+          CACHE_TAG: ${{ needs.setup-build-vm-kernel-image.outputs.last-kernel-sha }}
+        run: |
+          # A comma-separated list of tags
+          TAGS="${VM_KERNEL_IMAGE}:${KERNEL_VERSION_TAG}"
+          TAGS="${VM_KERNEL_IMAGE}:${CACHE_TAG},${TAGS}"
+          TAGS="${VM_KERNEL_IMAGE}:${GITHUB_RUN_ID},${TAGS}"
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+          # `docker/build-push-action@v3` returns all ${TAGS} in metadata ("image.name" field), so it can't be used a image name right away.
+          # Choose one of them as a "canonical" tag and use it to construct the job output (along with a digest provided by `docker/build-push-action@v3`).
+          echo "canonical=${VM_KERNEL_IMAGE}:${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
 
       - name: build linux kernel
         id: build-linux-kernel
         uses: docker/build-push-action@v3
         with:
           build-args: KERNEL_VERSION=${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
-          context: neonvm/hack
+          context: neonvm/hack/kernel
           platforms: linux/amd64
-          # Push only if this is a scheduled run or if the workflow_dispatch input push is set to true
-          push: ${{ github.event_name == 'schedule' && 'true' || ( github.event_name == 'workflow_dispatch' && inputs.push || 'false' ) }}
+          # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
+          push: true
           pull: true
           no-cache: true
-          file: neonvm/hack/Dockerfile.kernel-builder
-          # Tag the image with the tag from the workflow_dispatch input or the VM_KERNEL_VERSION from linux-config-* file
-          tags: ${{ env.VM_KERNEL_IMAGE }}:${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
+          file: neonvm/hack/kernel/Dockerfile.kernel-builder
+          tags: ${{ steps.get-tags.outputs.tags }}
 
       - name: remove custom docker config directory
         if: always()
         run: |
           rm -rf .docker-custom
-
-  e2e-tests:
-    needs: vm-kernel
-    uses: ./.github/workflows/e2e-test.yaml
-    with:
-      kernel-image: ${{ needs.vm-kernel.outputs.image }}

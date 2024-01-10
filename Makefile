@@ -43,7 +43,7 @@ else
 endif
 
 .PHONY: all
-all: build
+all: build lint
 
 ##@ General
 
@@ -132,6 +132,10 @@ bin/vm-builder: ## Build vm-builder binary.
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
+
+.PHONY: lint
+lint: ## Run golangci-lint against code.
+	golangci-lint run
 
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
@@ -223,8 +227,8 @@ endif
 
 .PHONY: kernel
 kernel: ## Build linux kernel.
-	rm -f neonvm/hack/vmlinuz; \
-	linux_config=$$(ls neonvm/hack/linux-config-*) \
+	rm -f neonvm/hack/vmlinuz neonvm/hack/kernel/vmlinuz; \
+	linux_config=$$(ls neonvm/hack/kernel/linux-config-*) \
 	kernel_version=$${linux_config##*-} \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
@@ -234,10 +238,10 @@ kernel: ## Build linux kernel.
 		--pull \
 		--load \
 		--iidfile $$iidfile \
-		--file neonvm/hack/Dockerfile.kernel-builder \
-		neonvm/hack; \
+		--file neonvm/hack/kernel/Dockerfile.kernel-builder \
+		neonvm/hack/kernel; \
 	id=$$(docker create $$(cat $$iidfile)); \
-	docker cp $$id:/vmlinuz neonvm/hack/vmlinuz; \
+	docker cp $$id:/vmlinuz neonvm/hack/kernel/vmlinuz; \
 	docker rm -f $$id
 
 .PHONY: check-local-context

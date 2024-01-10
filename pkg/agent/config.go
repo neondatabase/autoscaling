@@ -47,9 +47,6 @@ type MonitorConfig struct {
 	// RetryDeniedDownscaleSeconds gives the duration, in seconds, that we must wait before retrying
 	// a downscale request that was previously denied
 	RetryDeniedDownscaleSeconds uint `json:"retryDeniedDownscaleSeconds"`
-	// DeniedDownscaleFollowUpWaitSeconds gives the duration, in seconds, that we must wait before
-	// making another downscale request after one was just denied.
-	DeniedDownscaleFollowUpWaitSeconds uint `json:"deniedDownscaleFollowUpWaitSeconds"`
 	// RequestedUpscaleValidSeconds gives the duration, in seconds, that requested upscaling should
 	// be respected for, before allowing re-downscaling.
 	RequestedUpscaleValidSeconds uint `json:"requestedUpscaleValidSeconds"`
@@ -66,6 +63,9 @@ type DumpStateConfig struct {
 
 // ScalingConfig defines the scheduling we use for scaling up and down
 type ScalingConfig struct {
+	// ComputeUnit is the desired ratio between CPU and memory that the autoscaler-agent should
+	// uphold when making changes to a VM
+	ComputeUnit api.Resources `json:"computeUnit"`
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
@@ -154,6 +154,8 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Metrics.Port == 0, zeroTmpl, ".metrics.port")
 	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
+	erc.Whenf(ec, c.Scaling.ComputeUnit.VCPU == 0, zeroTmpl, ".scaling.computeUnit.vCPUs")
+	erc.Whenf(ec, c.Scaling.ComputeUnit.Mem == 0, zeroTmpl, ".scaling.computeUnit.mem")
 	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
 	erc.Whenf(ec, c.Scaling.RetryFailedRequestSeconds == 0, zeroTmpl, ".scaling.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds")
@@ -165,7 +167,6 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Monitor.MaxHealthCheckSequentialFailuresSeconds == 0, zeroTmpl, ".monitor.maxHealthCheckSequentialFailuresSeconds")
 	erc.Whenf(ec, c.Monitor.RetryFailedRequestSeconds == 0, zeroTmpl, ".monitor.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Monitor.RetryDeniedDownscaleSeconds == 0, zeroTmpl, ".monitor.retryDeniedDownscaleSeconds")
-	erc.Whenf(ec, c.Monitor.DeniedDownscaleFollowUpWaitSeconds == 0, zeroTmpl, ".monitor.deniedDownscaleFollowUpWaitSeconds")
 	erc.Whenf(ec, c.Monitor.RequestedUpscaleValidSeconds == 0, zeroTmpl, ".monitor.requestedUpscaleValidSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.Validate())

@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -60,8 +59,17 @@ const (
 	//
 	// * added AgentRequest.LastPermit
 	//
-	// Currently the latest version.
+	// Last used in release version v0.21.0.
 	PluginProtoV2_1
+
+	// PluginProtoV3_0 represents v3.0 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v2.1:
+	//
+	// * Removes PluginResponse.ComputeUnit (agent is now responsible for source of truth)
+	//
+	// Currently the latest version.
+	PluginProtoV3_0
 
 	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
 	// protocol
@@ -86,6 +94,8 @@ func (v PluginProtoVersion) String() string {
 		return "v2.0"
 	case PluginProtoV2_1:
 		return "v2.1"
+	case PluginProtoV3_0:
+		return "v3.0"
 	default:
 		diff := v - latestPluginProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)
@@ -107,6 +117,14 @@ func (v PluginProtoVersion) AllowsNilMetrics() bool {
 
 func (v PluginProtoVersion) SupportsFractionalCPU() bool {
 	return v >= PluginProtoV2_0
+}
+
+// PluginSendsComputeUnit returns whether this version of the protocol expects the scheduler plugin
+// to send the value of the Compute Unit in its PluginResponse.
+//
+// This is true for all versions below v3.0.
+func (v PluginProtoVersion) PluginSendsComputeUnit() bool {
+	return v < PluginProtoV3_0
 }
 
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
@@ -223,6 +241,23 @@ func (r Resources) Max(cmp Resources) Resources {
 	}
 }
 
+// Add returns the result of adding the two Resources
+func (r Resources) Add(other Resources) Resources {
+	return Resources{
+		VCPU: r.VCPU + other.VCPU,
+		Mem:  r.Mem + other.Mem,
+	}
+}
+
+// SaturatingSub returns the result of subtracting r - other, with values that *would* underflow
+// instead set to zero.
+func (r Resources) SaturatingSub(other Resources) Resources {
+	return Resources{
+		VCPU: util.SaturatingSub(r.VCPU, other.VCPU),
+		Mem:  util.SaturatingSub(r.Mem, other.Mem),
+	}
+}
+
 // Mul returns the result of multiplying each resource by factor
 func (r Resources) Mul(factor uint16) Resources {
 	return Resources{
@@ -279,7 +314,9 @@ type PluginResponse struct {
 	//
 	// This value may be different across nodes, and the scheduler expects that all AgentRequests
 	// will abide by the most recent ComputeUnit they've received.
-	ComputeUnit Resources `json:"resourceUnit"`
+	//
+	// THIS FIELD IS DEPRECATED: See https://github.com/neondatabase/autoscaling/issues/706
+	ComputeUnit *Resources `json:"resourceUnit,omitempty"`
 }
 
 // MigrateResponse, when provided, is a notification to the autsocaler-agent that it will migrate

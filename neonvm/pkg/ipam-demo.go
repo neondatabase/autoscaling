@@ -9,9 +9,10 @@ import (
 	"time"
 
 	"go.uber.org/zap/zapcore"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	"k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/neonvm/pkg/ipam"
 )
@@ -27,7 +28,7 @@ var (
 
 func main() {
 
-	opts := zap.Options{
+	opts := zap.Options{ //nolint:exhaustruct // typical options struct; not all fields expected to be filled.
 		Development:     true,
 		StacktraceLevel: zapcore.Level(zapcore.PanicLevel),
 		TimeEncoder:     zapcore.ISO8601TimeEncoder,
@@ -65,7 +66,7 @@ func main() {
 			if ip, err := ipam.AcquireIP(ctx, id, demoNamespace); err != nil {
 				logger.Error(err, "lease failed", "id", id)
 			} else {
-				logger.Info("acquired", "id", id, "ip", ip.String(), "acquired in", time.Now().Sub(startTime))
+				logger.Info("acquired", "id", id, "ip", ip.String(), "acquired in", time.Since(startTime))
 			}
 		}(i)
 		time.Sleep(time.Millisecond * 200)
@@ -83,7 +84,7 @@ func main() {
 			if ip, err := ipam.ReleaseIP(ctx, id, demoNamespace); err != nil {
 				logger.Error(err, "release failed", "id", id)
 			} else {
-				logger.Info("released", "id", id, "ip", ip.String(), "released in", time.Now().Sub(startTime))
+				logger.Info("released", "id", id, "ip", ip.String(), "released in", time.Since(startTime))
 			}
 		}(i)
 		time.Sleep(time.Millisecond * 200)
