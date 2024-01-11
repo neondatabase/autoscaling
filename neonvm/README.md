@@ -45,6 +45,12 @@ vm-debian   1      1Gi      vm-debian-8rxp7   Running   3m13s
 
 ### Go inside virtual machine
 
+#### SSH
+
+```sh
+kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- ssh neonvm-br
+```
+
 #### Pseudoterminal
 
 ```console
@@ -68,12 +74,6 @@ root@neonvm:~# curl -k https://kubernetes/version
 }
 
 <press CTRL-a k to exit screen session>
-```
-
-#### SSH
-
-```sh
-kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- ssh neonvm-br
 ```
 
 ### Delete virtual machine
@@ -150,6 +150,12 @@ kubectl logs $VM_POD
 
 #### 4. Connect to the VM
 
+##### SSH
+
+```sh
+kubectl exec -it $VM_POD -- ssh neonvm-br
+```
+
 ##### Console
 
 ```sh
@@ -158,12 +164,6 @@ kubectl exec -it $VM_POD -- screen /dev/pts/0
 <press Enter to see output>
 ```
 to exit from console press `CTRL-a k` (see manual for `screen` tool)
-
-##### SSH
-
-```sh
-kubectl exec -it $VM_POD -- ssh neonvm-br
-```
 
 #### 5. Plug/Unplug CPUs in VM
 
