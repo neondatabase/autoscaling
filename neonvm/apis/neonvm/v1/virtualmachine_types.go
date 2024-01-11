@@ -391,7 +391,7 @@ type VirtualMachineStatus struct {
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 	// +optional
-	SSHSecretName string `json:"secretName,omitempty"`
+	SSHSecretName string `json:"sshSecretName,omitempty"`
 }
 
 type VmPhase string
