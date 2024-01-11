@@ -95,15 +95,14 @@ data:
   autoscale-enforcer-config.json: |
     {
       "memBlockSize": "1Gi",
-      "nodeDefaults": {
+      "computeUnit": { "vCPUs": 0.25, "mem": 1 },
+      "nodeConfig": {
         "cpu": { "watermark": 0.9 },
         "memory": { "watermark": 0.9 },
-        "computeUnit": { "vCPUs": 0.25, "mem": 1 },
         "minUsageScore": 0.5,
         "maxUsageScore": 0,
         "scorePeak": 0.8
       },
-      "nodeOverrides": [],
       "schedulerName": "autoscale-scheduler",
       "dumpState": {
         "port": 10298,
@@ -144,7 +143,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.17.4
+        image: neondatabase/autoscale-scheduler:v0.22.0
         livenessProbe:
           httpGet:
             path: /healthz
@@ -162,8 +161,12 @@ spec:
             port: 10259
             scheme: HTTPS
         resources:
+          limits:
+            cpu: 1
+            memory: 2000Mi
           requests:
-            cpu: "0.1"
+            cpu: 1
+            memory: 2000Mi
         securityContext:
           privileged: false
         volumeMounts:
