@@ -691,55 +691,31 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 		// do hotplug/unplug Memory
-		// firstly get current state from QEMU
-		memoryDevices, err := QmpQueryMemoryDevices(QmpAddr(virtualmachine))
-		memoryPluggedSlots := *virtualmachine.Spec.Guest.MemorySlots.Min + int32(len(memoryDevices))
-		if err != nil {
-			log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+		memSlotsMin := *virtualmachine.Spec.Guest.MemorySlots.Min
+		targetSlotCount := int(*virtualmachine.Spec.Guest.MemorySlots.Use - memSlotsMin)
+
+		realSlots, err := QmpSetMemorySlots(ctx, virtualmachine, targetSlotCount, r.Recorder)
+		if realSlots < 0 {
 			return err
 		}
-		// compare guest spec and count of plugged
-		if *virtualmachine.Spec.Guest.MemorySlots.Use > memoryPluggedSlots {
-			// going to plug one Memory Slot
-			log.Info("Plug one more Memory module into VM")
-			if err := QmpPlugMemory(virtualmachine); err != nil {
+
+		if realSlots != int(targetSlotCount) {
+			log.Info("Couldn't achieve desired memory slot count, will modify .spec.guest.memorySlots.use instead", "details", err)
+			// firstly re-fetch VM
+			if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
+				log.Error(err, "Unable to re-fetch VirtualMachine")
 				return err
 			}
-			r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
-				fmt.Sprintf("One more DIMM was plugged into VM %s",
-					virtualmachine.Name))
-		} else if *virtualmachine.Spec.Guest.MemorySlots.Use < memoryPluggedSlots {
-			// going to unplug one Memory Slot
-			log.Info("Unplug one Memory module from VM")
-			if err := QmpUnplugMemory(QmpAddr(virtualmachine)); err != nil {
-				// special case !
-				// error means VM hadn't memory devices available for unplug
-				// need set .memorySlots.Use back to real value
-				log.Info("All memory devices busy, unable to unplug any, will modify .spec.guest.memorySlots.use instead", "details", err)
-				// firstly re-fetch VM
-				if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
-					log.Error(err, "Unable to re-fetch VirtualMachine")
-					return err
-				}
-				memorySlotsUseInSpec := *virtualmachine.Spec.Guest.MemorySlots.Use
-				virtualmachine.Spec.Guest.MemorySlots.Use = &memoryPluggedSlots
-				if err := r.tryUpdateVM(ctx, virtualmachine); err != nil {
-					log.Error(err,
-						"Failed to update .spec.guest.memorySlots.use",
-						"old value", memorySlotsUseInSpec,
-						"new value", memoryPluggedSlots)
-					return err
-				}
-				r.Recorder.Event(virtualmachine, "Warning", "ScaleDown",
-					fmt.Sprintf("Unable unplug DIMM from VM %s, all memory devices are busy",
-						virtualmachine.Name))
-			} else {
-				r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
-					fmt.Sprintf("One DIMM was unplugged from VM %s",
-						virtualmachine.Name))
+			memorySlotsUseInSpec := *virtualmachine.Spec.Guest.MemorySlots.Use
+			memoryPluggedSlots := memSlotsMin + int32(realSlots)
+			*virtualmachine.Spec.Guest.MemorySlots.Use = memoryPluggedSlots
+			if err := r.tryUpdateVM(ctx, virtualmachine); err != nil {
+				log.Error(err, "Failed to update .spec.guest.memorySlots.use",
+					"old value", memorySlotsUseInSpec,
+					"new value", memoryPluggedSlots)
+				return err
 			}
 		} else {
-			// seems already plugged correctly
 			ramScaled = true
 		}
 

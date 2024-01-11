@@ -49,6 +49,7 @@ require (
 	github.com/digitalocean/go-qemu v0.0.0-20220826173844-d5f5e3ceed89
 	github.com/docker/docker v24.0.7+incompatible
 	github.com/docker/libnetwork v0.8.0-dev.2.0.20210525090646-64b7a4574d14
+	github.com/go-logr/logr v1.2.3
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
 	github.com/k8snetworkplumbingwg/whereabouts v0.6.1
 	github.com/kdomanski/iso9660 v0.3.3
@@ -107,7 +108,6 @@ require (
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/felixge/httpsnoop v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
-	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/zapr v1.2.3 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/go-openapi/jsonreference v0.20.0 // indirect
