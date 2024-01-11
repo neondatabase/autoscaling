@@ -74,6 +74,14 @@ root@neonvm:~# curl -k https://kubernetes/version
 kubectl delete neonvm vm-debian
 ```
 
+### Clock synchronization
+
+We Synchronize VM clocks to host using PTP with hardware time stamping. We enabled PTP clock (and the KVM related directive) on the kernel and use chrony on the VM as a server. You can checkout chronyd log at `/var/log/chrony/chrony.log` and use the commands below:
+
+```sh
+/neonvm/bin/chronyc tracking
+/neonvm/bin/chronyc sources
+```
 
 ## Local development
 
