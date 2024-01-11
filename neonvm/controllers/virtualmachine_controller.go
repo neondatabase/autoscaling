@@ -326,7 +326,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 	// Generate ssh secret name
 	if len(virtualmachine.Status.SSHSecretName) == 0 {
-		virtualmachine.Status.SSHSecretName = virtualmachine.Name
+		virtualmachine.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", virtualmachine.Name)
 	}
 
 	// Generate runner pod name
