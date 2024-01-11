@@ -53,6 +53,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
       - name: make manifests
         run: |
           make manifests
