@@ -60,7 +60,7 @@ func (c *ExecutorCore) DoSleeper(ctx context.Context, logger *zap.Logger) {
 			// Otherwise, trigger cache invalidation because we've waited for the requested
 			// amount of time:
 			default:
-				c.update(func(*core.State) {})
+				c.update(func(*State) {})
 				updates.Awake()
 				last = c.getActions()
 			}

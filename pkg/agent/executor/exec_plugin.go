@@ -38,7 +38,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		var startTime time.Time
 		action := *last.actions.PluginRequest
 
-		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
+		if updated := c.updateIfActionsUnchanged(last, func(state *State) {
 			logger.Info("Starting plugin request", zap.Object("action", action))
 			startTime = time.Now()
 			state.Plugin().StartingRequest(startTime, action.Target)
@@ -49,7 +49,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		resp, err := c.clients.Plugin.Request(ctx, ifaceLogger, action.LastPermit, action.Target, action.Metrics)
 		endTime := time.Now()
 
-		c.update(func(state *core.State) {
+		c.update(func(state *State) {
 			logFields := []zap.Field{
 				zap.Object("action", action),
 				zap.Duration("duration", endTime.Sub(startTime)),

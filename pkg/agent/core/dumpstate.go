@@ -21,18 +21,18 @@ func shallowCopy[T any](ptr *T) *T {
 // StateDump provides introspection into the current values of the fields of State
 //
 // It implements json.Marshaler.
-type StateDump struct {
-	internal state
+type StateDump[M ToAPIMetrics] struct {
+	internal state[M]
 }
 
-func (d StateDump) MarshalJSON() ([]byte, error) {
+func (d StateDump[M]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.internal)
 }
 
 // Dump produces a JSON-serializable copy of the State
-func (s *State) Dump() StateDump {
-	return StateDump{
-		internal: state{
+func (s *State[M]) Dump() StateDump[M] {
+	return StateDump[M]{
+		internal: state[M]{
 			Debug:   s.internal.Debug,
 			Config:  s.internal.Config,
 			VM:      s.internal.VM,
