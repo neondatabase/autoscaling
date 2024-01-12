@@ -78,9 +78,16 @@ COPY vector.yaml /neonvm/config/vector.yaml
 COPY sshd_config /neonvm/config/sshd_config
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 
+# rootdisk modification
+FROM rootdisk AS rootdisk-mod
+COPY --from=vm-runtime /neonvm /neonvm
+# setup sshd user to support sshd UsePrivilegeSeparation
+RUN /neonvm/bin/addgroup sshd || true \
+	&& /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd || true
+
 FROM vm-runtime AS builder
 ARG DISK_SIZE
-COPY --from=rootdisk / /rootdisk
+COPY --from=rootdisk-mod / /rootdisk
 COPY --from=vm-runtime /neonvm /rootdisk/neonvm
 RUN set -e \
     && mkdir -p /rootdisk/etc \

@@ -53,8 +53,4 @@ ip link set up dev eth0
 
 # ssh
 /neonvm/bin/ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
-
-# setup sshd user to support sshd UsePrivilegeSeparation
 mkdir -p /var/empty
-/neonvm/bin/addgroup sshd
-/neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
