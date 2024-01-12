@@ -991,7 +991,7 @@ func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) 
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      virtualmachine.Name,
+			Name:      virtualmachine.Status.SSHSecretName,
 			Namespace: virtualmachine.Namespace,
 		},
 		Immutable: ptr(true),
