@@ -1239,7 +1239,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 		return nil, err
 	}
 	defer f.Close()
-	record := fmt.Sprintf("%v neonvm-br\n", ipVm)
+	record := fmt.Sprintf("%v guest-vm\n", ipVm)
 	if _, err := f.WriteString(record); err != nil {
 		return nil, err
 	}

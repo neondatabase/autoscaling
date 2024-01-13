@@ -48,7 +48,7 @@ vm-debian   1      1Gi      vm-debian-8rxp7   Running   3m13s
 #### SSH
 
 ```sh
-kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- ssh neonvm-br
+kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- ssh guest-vm
 ```
 
 #### Pseudoterminal
@@ -153,7 +153,7 @@ kubectl logs $VM_POD
 ##### SSH
 
 ```sh
-kubectl exec -it $VM_POD -- ssh neonvm-br
+kubectl exec -it $VM_POD -- ssh guest-vm
 ```
 
 ##### Console
