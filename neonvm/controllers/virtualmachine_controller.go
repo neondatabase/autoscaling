@@ -382,7 +382,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}, sshSecret)
 			if err != nil && apierrors.IsNotFound(err) {
 				// Define a new ssh secret
-				sshSecret, err = r.sshSecretForVirtualMachine(virtualmachine)
+				sshSecret, err = sshSecretForVirtualMachine(virtualmachine, r.Scheme)
 				if err != nil {
 					log.Error(err, "Failed to define new SSH Secret for VirtualMachine")
 					return err
@@ -968,15 +968,15 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 	return pod, nil
 }
 
-func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
-	secret, err := sshSecretSpec(virtualmachine)
+func sshSecretForVirtualMachine(vm *vmv1.VirtualMachine, scheme *runtime.Scheme) (*corev1.Secret, error) {
+	secret, err := sshSecretSpec(vm)
 	if err != nil {
 		return nil, err
 	}
 
 	// Set the ownerRef for the Secret
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
-	if err := ctrl.SetControllerReference(virtualmachine, secret, r.Scheme); err != nil {
+	if err := ctrl.SetControllerReference(vm, secret, scheme); err != nil {
 		return nil, err
 	}
 	return secret, nil

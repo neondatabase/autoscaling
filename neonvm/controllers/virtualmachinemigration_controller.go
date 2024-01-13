@@ -218,19 +218,31 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		targetRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: migration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
-			// We require the SSH secret to exist because we cannot unmount and
-			// mount the new secret into the VM after the live migration. If a
-			// VM's SSH secret is deleted accidentally then live migration is
-			// not possible.
 			if len(vm.Status.SSHSecretName) == 0 {
-				err := errors.New("VM .Status.SSHSecretName is empty")
-				log.Error(err, "Failed to get VM's SSH Secret")
-				return ctrl.Result{}, err
+				vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
+				if err := r.Status().Update(ctx, vm); err != nil {
+					log.Error(err, "Failed to set VM SSHSecretName")
+					return ctrl.Result{}, err
+				}
 			}
 			sshSecret := &corev1.Secret{}
 			err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
-			if err != nil {
-				log.Error(err, "Failed to get VM's SSH Secret")
+			if err != nil && apierrors.IsNotFound(err) {
+				// Define a new ssh secret
+				sshSecret, err = sshSecretForVirtualMachine(vm, r.Scheme)
+				if err != nil {
+					log.Error(err, "Failed to define new SSH Secret for VirtualMachine")
+					return ctrl.Result{}, err
+				}
+
+				log.Info("Creating a new SSH Secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+				if err = r.Create(ctx, sshSecret); err != nil {
+					log.Error(err, "Failed to create new SSH secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+					return ctrl.Result{}, err
+				}
+				log.Info("SSH Secret was created", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+			} else if err != nil {
+				log.Error(err, "Failed to get SSH Secret")
 				return ctrl.Result{}, err
 			}
 
