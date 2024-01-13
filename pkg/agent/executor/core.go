@@ -33,6 +33,8 @@ type Config struct {
 	Core core.Config
 }
 
+type State = core.State[core.Metrics]
+
 type ExecutorCore struct {
 	mu sync.Mutex
 
@@ -57,7 +59,7 @@ func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config Config) *Exe
 	return &ExecutorCore{
 		mu:            sync.Mutex{},
 		stateLogger:   stateLogger,
-		core:          core.NewState(vm, config.Core),
+		core:          core.NewState(core.NewSimpleFactorScaling(), vm, config.Core),
 		actions:       nil, // (*ExecutorCore).getActions() checks if this is nil
 		lastActionsID: -1,
 		onNextActions: config.OnNextActions,
@@ -140,7 +142,7 @@ func (c *ExecutorCore) updateIfActionsUnchanged(actions timedActions, with func(
 }
 
 // may change in the future
-type StateDump = core.StateDump
+type StateDump = core.StateDump[core.Metrics]
 
 // StateDump copies and returns the current state inside the executor
 func (c *ExecutorCore) StateDump() StateDump {
@@ -162,8 +164,8 @@ type ExecutorCoreUpdater struct {
 
 // UpdateMetrics calls (*core.State).UpdateMetrics() on the inner core.State and runs withLock while
 // holding the lock.
-func (c ExecutorCoreUpdater) UpdateMetrics(metrics api.Metrics, withLock func()) {
-	c.core.update(func(state *core.State) {
+func (c ExecutorCoreUpdater) UpdateMetrics(metrics core.Metrics, withLock func()) {
+	c.core.update(func(state *State) {
 		state.UpdateMetrics(metrics)
 		withLock()
 	})

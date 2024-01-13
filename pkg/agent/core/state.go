@@ -23,7 +23,6 @@ package core
 import (
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -112,7 +111,7 @@ type state[M ToAPIMetrics] struct {
 	// NeonVM records all state relevant to the NeonVM k8s API
 	NeonVM neonvmState
 
-	Metrics *api.Metrics
+	ScalingAlgorithm ScalingAlgorithm[M]
 }
 
 type pluginState struct {
@@ -126,6 +125,9 @@ type pluginState struct {
 	// Permit, if not nil, stores the Permit in the most recent PluginResponse. This field will be
 	// nil if we have not been able to contact *any* scheduler.
 	Permit *api.Resources
+	// Metrics stores the most recent metrics received from the VM, used in requests to the
+	// scheduler plugin.
+	Metrics *api.Metrics
 }
 
 type pluginRequested struct {
@@ -206,6 +208,7 @@ func NewState[M ToAPIMetrics](alg ScalingAlgorithm[M], vm api.VmInfo, config Con
 				LastRequest:    nil,
 				LastFailureAt:  nil,
 				Permit:         nil,
+				Metrics:        nil,
 			},
 			Monitor: monitorState{
 				OngoingRequest:     nil,
@@ -220,7 +223,7 @@ func NewState[M ToAPIMetrics](alg ScalingAlgorithm[M], vm api.VmInfo, config Con
 				OngoingRequested: nil,
 				RequestFailedAt:  nil,
 			},
-			Metrics: nil,
+			ScalingAlgorithm: alg,
 		},
 	}
 }
@@ -400,7 +403,7 @@ func (s *state[M]) calculatePluginAction(
 		return &ActionPluginRequest{
 			LastPermit: s.Plugin.Permit,
 			Target:     permittedRequestResources,
-			Metrics:    s.Metrics,
+			Metrics:    s.Plugin.Metrics,
 		}, nil
 	} else {
 		if wantToRequestNewResources && waitingOnRetryBackoff {
@@ -647,41 +650,8 @@ func (s *state[M]) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time
 	//    is greater than s.vm.Max()
 	// 4. s.vm.Using() is much larger than s.vm.Min() and not a multiple of s.computeUnit, but load
 	//    is low so we should just decrease *anyways*.
-	//
-	// ---
-	//
-	// Broadly, the implementation works like this:
-	// For CPU:
-	// Based on load average, calculate the "goal" number of CPUs (and therefore compute units)
-	//
-	// For Memory:
-	// Based on memory usage, calculate the VM's desired memory allocation and extrapolate a
-	// goal number of CUs from that.
-	//
-	// 1. Take the maximum of these two goal CUs to create a unified goal CU
-	// 2. Cap the goal CU by min/max, etc
-	// 3. that's it!
 
-	var goalCU uint32
-	if s.Metrics != nil {
-		// For CPU:
-		// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
-		// average),
-		// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
-		goalCPUs := float64(s.Metrics.LoadAverage1Min) / s.scalingConfig().LoadAverageFractionTarget
-		cpuGoalCU := uint32(math.Round(goalCPUs / s.Config.ComputeUnit.VCPU.AsFloat64()))
-
-		// For Mem:
-		// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
-		// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
-		// that to CUs
-		//
-		// NOTE: use uint64 for calculations on bytes as uint32 can overflow
-		memGoalBytes := api.Bytes(math.Round(float64(s.Metrics.MemoryUsageBytes) / s.scalingConfig().MemoryUsageFractionTarget))
-		memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
-
-		goalCU = util.Max(cpuGoalCU, memGoalCU)
-	}
+	goalCU, goalCUValid := s.ScalingAlgorithm.GoalCU(s.scalingConfig(), s.Config.ComputeUnit)
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
 	// requested upscaling or denied downscaling affected the outcome.
@@ -720,9 +690,10 @@ func (s *state[M]) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time
 	// resources for the desired "goal" compute units
 	var goalResources api.Resources
 
-	// If there's no constraints and s.metrics is nil, then we'll end up with goalCU = 0.
-	// But if we have no metrics, we'd prefer to keep things as-is, rather than scaling down.
-	if s.Metrics == nil && goalCU == 0 {
+	// If there's no constraints and we haven't received metrics yet, then we'll end up with
+	// goalCU = 0. But if we've had no metrics, we'd prefer to keep things as-is, rather than
+	// scaling down.
+	if !goalCUValid {
 		goalResources = s.VM.Using()
 	} else {
 		goalResources = s.Config.ComputeUnit.Mul(uint16(goalCU))
@@ -929,8 +900,11 @@ func (s *State[M]) UpdatedVM(vm api.VmInfo) {
 	s.internal.VM = vm
 }
 
+// UpdateMetrics updates the state with the new metrics provided
 func (s *State[M]) UpdateMetrics(metrics M) {
-	s.internal.Metrics = &metrics
+	apiMetrics := metrics.ToAPI()
+	s.internal.Plugin.Metrics = &apiMetrics
+	s.internal.ScalingAlgorithm.Update(metrics)
 }
 
 // PluginHandle provides write access to the scheduler plugin pieces of an UpdateState

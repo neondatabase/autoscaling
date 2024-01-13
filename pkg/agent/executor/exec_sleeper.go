@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	"github.com/neondatabase/autoscaling/pkg/agent/core"
 )
 
 func (c *ExecutorCore) DoSleeper(ctx context.Context, logger *zap.Logger) {

@@ -36,7 +36,11 @@ type VmInfoOpt interface {
 	modifyVmInfoWithConfig(InitialVmInfoConfig, *api.VmInfo)
 }
 
-func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *core.State {
+func CreateInitialState[M core.ToAPIMetrics](
+	config InitialStateConfig,
+	scalingAlgorithm core.ScalingAlgorithm[M],
+	opts ...InitialStateOpt,
+) *core.State[M] {
 	vmOpts := []VmInfoOpt{}
 	for _, o := range opts {
 		if vo, ok := o.(VmInfoOpt); ok {
@@ -50,7 +54,7 @@ func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *cor
 		o.modifyStateConfig(&config.Core)
 	}
 
-	return core.NewState(vm, config.Core)
+	return core.NewState(scalingAlgorithm, vm, config.Core)
 }
 
 func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {

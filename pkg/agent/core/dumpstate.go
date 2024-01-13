@@ -33,13 +33,13 @@ func (d StateDump[M]) MarshalJSON() ([]byte, error) {
 func (s *State[M]) Dump() StateDump[M] {
 	return StateDump[M]{
 		internal: state[M]{
-			Debug:   s.internal.Debug,
-			Config:  s.internal.Config,
-			VM:      s.internal.VM,
-			Plugin:  s.internal.Plugin.deepCopy(),
-			Monitor: s.internal.Monitor.deepCopy(),
-			NeonVM:  s.internal.NeonVM.deepCopy(),
-			Metrics: shallowCopy[api.Metrics](s.internal.Metrics),
+			Debug:            s.internal.Debug,
+			Config:           s.internal.Config,
+			VM:               s.internal.VM,
+			Plugin:           s.internal.Plugin.deepCopy(),
+			Monitor:          s.internal.Monitor.deepCopy(),
+			NeonVM:           s.internal.NeonVM.deepCopy(),
+			ScalingAlgorithm: s.internal.ScalingAlgorithm.DeepCopy(),
 		},
 	}
 }
@@ -50,6 +50,7 @@ func (s *pluginState) deepCopy() pluginState {
 		LastRequest:    shallowCopy[pluginRequested](s.LastRequest),
 		LastFailureAt:  shallowCopy[time.Time](s.LastFailureAt),
 		Permit:         shallowCopy[api.Resources](s.Permit),
+		Metrics:        shallowCopy[api.Metrics](s.Metrics),
 	}
 }
 
