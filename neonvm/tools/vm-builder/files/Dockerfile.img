@@ -89,10 +89,19 @@ COPY vector.yaml /neonvm/config/vector.yaml
 COPY chrony.conf /neonvm/config/chrony.conf
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 
+# rootdisk modification
+FROM rootdisk AS rootdisk-mod
+COPY --from=vm-runtime /neonvm /neonvm
+RUN set -e \
+    && /neonvm/bin/id -g chrony > /dev/null 2>&1 || /neonvm/bin/addgroup chrony \
+    && /neonvm/bin/id -u chrony > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G chrony -g 'chrony' -s /neonvm/bin/nologin chrony \
+    && /neonvm/bin/mkdir -p /var/lib/chrony \
+    && /neonvm/bin/chown chrony:chrony /var/lib/chrony \
+    && /neonvm/bin/mkdir -p /var/log/chrony
+
 FROM vm-runtime AS builder
 ARG DISK_SIZE
-COPY --from=rootdisk / /rootdisk
-COPY --from=vm-runtime /neonvm /rootdisk/neonvm
+COPY --from=rootdisk-mod / /rootdisk
 RUN set -e \
     && mkdir -p /rootdisk/etc \
     && mkdir -p /rootdisk/etc/vector \

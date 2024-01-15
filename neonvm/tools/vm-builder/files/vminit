@@ -51,11 +51,3 @@ resize2fs /dev/vda
 ip link set up dev lo
 ip link set up dev eth0
 
-# chrony
-/neonvm/bin/addgroup chrony
-/neonvm/bin/adduser -D -H -G chrony -g 'chrony' -s /neonvm/bin/nologin chrony
-
-mkdir -p /var/lib/chrony
-chown chrony:chrony /var/lib/chrony
-
-mkdir -p /var/log/chrony
