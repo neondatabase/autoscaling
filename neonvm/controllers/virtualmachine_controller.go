@@ -1514,23 +1514,27 @@ func getEnvVarValue(envVarName string) (string, error) {
 	return value, nil
 }
 
-func sshKeygen() ([]byte, []byte, error) {
+// sshKeygen generates a pair of public and private keys using the ed25519
+// algorithm. It returns the generated public key and private key as byte
+// slices. If an error occurs during key generation or encoding, it returns nil
+// for both keys and the error.
+func sshKeygen() (publicKeyBytes []byte, privateKeyBytes []byte, err error) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	publicKeyBytes, err := encodePublicKey(publicKey)
+	publicKeyBytes, err = encodePublicKey(publicKey)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	privateKeyBytes, err := encodePrivateKey(privateKey)
+	privateKeyBytes, err = encodePrivateKey(privateKey)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return publicKeyBytes, privateKeyBytes, nil
+	return
 }
 
 func encodePrivateKey(privateKey ed25519.PrivateKey) ([]byte, error) {
