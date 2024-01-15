@@ -1322,60 +1322,62 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 					},
 				},
 			},
-			Containers: []corev1.Container{{
-				Image:           image,
-				Name:            "neonvm-runner",
-				ImagePullPolicy: corev1.PullIfNotPresent,
-				// Ensure restrictive context for the container
-				// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
-				SecurityContext: &corev1.SecurityContext{
-					Privileged: &[]bool{false}[0],
-					Capabilities: &corev1.Capabilities{
-						Add: []corev1.Capability{
-							"NET_ADMIN",
-							"SYS_ADMIN",
-							"SYS_RESOURCE",
+			Containers: []corev1.Container{
+				{
+					Image:           image,
+					Name:            "neonvm-runner",
+					ImagePullPolicy: corev1.PullIfNotPresent,
+					// Ensure restrictive context for the container
+					// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: &[]bool{false}[0],
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{
+								"NET_ADMIN",
+								"SYS_ADMIN",
+								"SYS_RESOURCE",
+							},
 						},
 					},
-				},
-				Ports: []corev1.ContainerPort{{
-					ContainerPort: virtualmachine.Spec.QMP,
-					Name:          "qmp",
-				}, {
-					ContainerPort: virtualmachine.Spec.QMPManual,
-					Name:          "qmp-manual",
-				}},
-				Command: []string{
-					"runner",
-					"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
-					"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
-				},
-				Env: []corev1.EnvVar{{
-					Name: "K8S_POD_NAME",
-					ValueFrom: &corev1.EnvVarSource{
-						FieldRef: &corev1.ObjectFieldSelector{
-							FieldPath: "metadata.name",
+					Ports: []corev1.ContainerPort{{
+						ContainerPort: virtualmachine.Spec.QMP,
+						Name:          "qmp",
+					}, {
+						ContainerPort: virtualmachine.Spec.QMPManual,
+						Name:          "qmp-manual",
+					}},
+					Command: []string{
+						"runner",
+						"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
+						"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
+					},
+					Env: []corev1.EnvVar{{
+						Name: "K8S_POD_NAME",
+						ValueFrom: &corev1.EnvVarSource{
+							FieldRef: &corev1.ObjectFieldSelector{
+								FieldPath: "metadata.name",
+							},
+						},
+					}},
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "virtualmachineimages",
+							MountPath: "/vm/images",
+						},
+						{
+							Name:      "sysfscgroup",
+							MountPath: "/sys/fs/cgroup",
+							// MountPropagationNone means that the volume in a container will
+							// not receive new mounts from the host or other containers, and filesystems
+							// mounted inside the container won't be propagated to the host or other
+							// containers.
+							// Note that this mode corresponds to "private" in Linux terminology.
+							MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
 						},
 					},
-				}},
-				VolumeMounts: []corev1.VolumeMount{
-					{
-						Name:      "virtualmachineimages",
-						MountPath: "/vm/images",
-					},
-					{
-						Name:      "sysfscgroup",
-						MountPath: "/sys/fs/cgroup",
-						// MountPropagationNone means that the volume in a container will
-						// not receive new mounts from the host or other containers, and filesystems
-						// mounted inside the container won't be propagated to the host or other
-						// containers.
-						// Note that this mode corresponds to "private" in Linux terminology.
-						MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
-					},
+					Resources: virtualmachine.Spec.PodResources,
 				},
-				Resources: virtualmachine.Spec.PodResources,
-			}},
+			},
 			Volumes: []corev1.Volume{
 				{
 					Name: "virtualmachineimages",
