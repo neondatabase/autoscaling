@@ -994,7 +994,7 @@ func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) 
 			Name:      virtualmachine.Status.SSHSecretName,
 			Namespace: virtualmachine.Namespace,
 		},
-		Immutable: ptr(true),
+		Immutable: &[]bool{true}[0],
 		Type:      corev1.SecretTypeSSHAuth,
 		Data: map[string][]byte{
 			"ssh-publickey":  publicKey,
@@ -1298,7 +1298,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 								{
 									Key:  "ssh-privatekey",
 									Path: "id_ed25519",
-									Mode: ptr[int32](0600),
+									Mode: &[]int32{0600}[0],
 								},
 							},
 						},
@@ -1313,7 +1313,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 								{
 									Key:  "ssh-publickey",
 									Path: "authorized_keys",
-									Mode: ptr[int32](0644),
+									Mode: &[]int32{0644}[0],
 								},
 							},
 						},
@@ -1556,5 +1556,3 @@ func encodePublicKey(publicKey ed25519.PublicKey) ([]byte, error) {
 	pubKeyBytes := ssh.MarshalAuthorizedKey(sshPublicKey)
 	return pubKeyBytes, nil
 }
-
-func ptr[T any](t T) *T { return &t }
