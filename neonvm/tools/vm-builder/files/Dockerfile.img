@@ -89,7 +89,6 @@ RUN set -e \
 FROM vm-runtime AS builder
 ARG DISK_SIZE
 COPY --from=rootdisk-mod / /rootdisk
-COPY --from=vm-runtime /neonvm /rootdisk/neonvm
 RUN set -e \
     && mkdir -p /rootdisk/etc \
     && mkdir -p /rootdisk/etc/vector \
