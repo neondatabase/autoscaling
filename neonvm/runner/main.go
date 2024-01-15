@@ -680,27 +680,27 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	selfCgroupPath, err := getSelfCgroupPath(logger)
-	if err != nil {
-		logger.Fatal("Failed to get self cgroup path", zap.Error(err))
-	}
-	// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
-	// that the cgroup '/neonvm-qemu-...' still works.
-	if selfCgroupPath == "/" {
-		selfCgroupPath = ""
-	}
-	// ... but also we should have some uniqueness just in case, so we're not sharing a root level
-	// cgroup if that *is* what's happening. This *should* only be relevant for local clusters.
-	//
-	// We don't want to just use the VM spec's .status.PodName because during migrations that will
-	// be equal to the source pod, not this one, which may be... somewhat confusing.
-	cgroupPath := fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
+		selfCgroupPath, err := getSelfCgroupPath(logger)
+		if err != nil {
+			logger.Fatal("Failed to get self cgroup path", zap.Error(err))
+		}
+		// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
+		// that the cgroup '/neonvm-qemu-...' still works.
+		if selfCgroupPath == "/" {
+			selfCgroupPath = ""
+		}
+		// ... but also we should have some uniqueness just in case, so we're not sharing a root level
+		// cgroup if that *is* what's happening. This *should* only be relevant for local clusters.
+		//
+		// We don't want to just use the VM spec's .status.PodName because during migrations that will
+		// be equal to the source pod, not this one, which may be... somewhat confusing.
+		cgroupPath := fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
 
-	logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
+		logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
 
-	if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
-		logger.Fatal("Failed to set cgroup limit", zap.Error(err))
-	}
+		if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
+			logger.Fatal("Failed to set cgroup limit", zap.Error(err))
+		}
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
 
