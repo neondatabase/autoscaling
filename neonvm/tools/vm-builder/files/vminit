@@ -50,4 +50,3 @@ resize2fs /dev/vda
 # networking
 ip link set up dev lo
 ip link set up dev eth0
-
