@@ -25,6 +25,18 @@ COPY pkg/util pkg/util
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /runner neonvm/runner/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /container-mgr neonvm/runner/container-mgr/*.go
+
+FROM alpine:3.16 as crictl
+
+RUN apk add --no-cache \
+    curl
+WORKDIR /workspace
+# FIXME: There's non-overlapping version support for <1.27 and >=1.27.
+# We should carefully consider how we go about future-proofing this (or not).
+ENV VERSION="v1.25.0"
+RUN curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz" -o crictl.tar.gz \
+	&& tar zxvf crictl.tar.gz -C /
 
 FROM alpine:3.16
 
@@ -42,10 +54,12 @@ RUN apk add --no-cache \
     e2fsprogs \
     qemu-system-x86_64 \
     qemu-img \
-    cgroup-tools \
+	cgroup-tools \
     openssh
 
 COPY --from=builder /runner /usr/bin/runner
+COPY --from=builder /container-mgr /usr/bin/container-mgr
+COPY --from=crictl /crictl /usr/bin/crictl
 COPY neonvm/hack/kernel/vmlinuz /vm/kernel/vmlinuz
 COPY neonvm/runner/ssh_config /etc/ssh/ssh_config
 

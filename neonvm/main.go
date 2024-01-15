@@ -32,12 +32,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -89,12 +92,15 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var concurrencyLimit int
+	var enableContainerMgr bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
+	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
+
 	opts := zap.Options{ //nolint:exhaustruct // typical options struct; not all fields needed.
 		Development:     true,
 		StacktraceLevel: zapcore.Level(zapcore.PanicLevel),
@@ -111,6 +117,14 @@ func main() {
 	cfg := ctrl.GetConfigOrDie()
 	cfg.QPS = 1000
 	cfg.Burst = 2000
+
+	// fetch node info to determine if we're running in k3s
+	isK3s, err := checkIfRunningInK3sCluster(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to check if running in k3s")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
@@ -137,13 +151,18 @@ func main() {
 
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
 
+	rc := &controllers.ReconcilerConfig{
+		IsK3s:                   isK3s,
+		UseContainerMgr:         enableContainerMgr,
+		MaxConcurrentReconciles: concurrencyLimit,
+	}
+
 	if err = (&controllers.VirtualMachineReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
+		Config:   rc,
 		Metrics:  reconcilerMetrics,
-
-		MaxConcurrentReconciles: concurrencyLimit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
 		os.Exit(1)
@@ -156,9 +175,8 @@ func main() {
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
+		Config:   rc,
 		Metrics:  reconcilerMetrics,
-
-		MaxConcurrentReconciles: concurrencyLimit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
 		os.Exit(1)
@@ -182,4 +200,26 @@ func main() {
 		setupLog.Error(err, "run manager error")
 		os.Exit(1)
 	}
+}
+
+func checkIfRunningInK3sCluster(cfg *rest.Config) (bool, error) {
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return false, fmt.Errorf("failed to create new k8s client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Second)
+	defer cancel()
+
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, err
+	}
+
+	for _, node := range nodes.Items {
+		if node.Status.NodeInfo.OSImage == "K3s dev" {
+			return true, nil
+		}
+	}
+	return false, nil
 }

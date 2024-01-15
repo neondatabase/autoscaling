@@ -116,6 +116,7 @@ func (r *VirtualMachine) ValidateCreate() error {
 		"rootdisk",
 		"runtime",
 		"sysfscgroup",
+		"containerdsock",
 		"ssh-privatekey",
 		"ssh-publickey",
 		"ssh-authorized-keys",
