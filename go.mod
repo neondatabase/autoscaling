@@ -43,7 +43,7 @@ replace (
 require (
 	github.com/alessio/shellescape v1.4.1
 	github.com/cilium/cilium v1.12.14
-	github.com/cilium/ebpf v0.11.0
+	github.com/cilium/ebpf v0.12.3
 	github.com/containerd/cgroups/v3 v3.0.1
 	github.com/containernetworking/cni v1.1.1
 	github.com/coreos/go-iptables v0.6.0

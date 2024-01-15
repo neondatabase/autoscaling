@@ -143,9 +143,10 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func collectMetricsForVM(ctx context.Context, vm *vmapi.VirtualMachine, metricsChan chan vmMetricsKV) {
+func collectMetricsForVM(ctx context.Context, logger *zap.Logger, vm *vmapi.VirtualMachine, metricsChan chan vmMetricsKV) {
 	byteCounts, err := vm.GetNetworkUsage(ctx, 500*time.Millisecond)
 	if err != nil {
+		logger.Error("Failed to collect network usage", util.VMNameFields(vm), zap.Error(err))
 		byteCounts = &vmapi.VirtualMachineNetworkUsage{
 			IngressBytes: 0,
 			EgressBytes:  0,
@@ -196,7 +197,7 @@ func (s *metricsState) collect(ctx context.Context, logger *zap.Logger, store VM
 			continue
 		}
 
-		go collectMetricsForVM(ctx, vm, metricsChan)
+		go collectMetricsForVM(ctx, logger, vm, metricsChan)
 		metricsToCollect += 1
 	}
 

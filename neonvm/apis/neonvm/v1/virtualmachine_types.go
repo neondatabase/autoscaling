@@ -464,11 +464,11 @@ func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context, timeout time.Dura
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("%s:%d/network_usage", vm.Status.PodIP, vm.Spec.RunnerPort),
+		fmt.Sprintf("http://%s:%d/network_usage", vm.Status.PodIP, vm.Spec.RunnerPort),
 		nil,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("error initializing http request to fetch n etwork usage: %w", err)
+		return nil, fmt.Errorf("error initializing http request to fetch network usage: %w", err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

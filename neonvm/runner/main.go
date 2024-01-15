@@ -29,6 +29,7 @@ import (
 	"github.com/cilium/cilium/pkg/mac"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup1"
@@ -105,21 +106,19 @@ type resolveFile struct {
 	Hash    string
 }
 
-// Attaches a BPF program to the given cgroup which checks each packet to see if it comes
-// from/is going to the external network. These counts are exposed through a map which
-// can be read.
-func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map, error) {
-	const (
-		MAP_KEY_SIZE = 4
-		MAP_VAL_SIZE = 8
+type NetworkDirection uint32
 
+const (
+	NETWORK_INGRESS NetworkDirection = 0
+	NETWORK_EGRESS  NetworkDirection = 1
+)
+
+func generateBPF(logger *zap.Logger, counters *ebpf.Map, direction NetworkDirection) (*ebpf.Program, error) {
+	const (
 		// Below are offsets into `struct __sk_buff`, defined in uapi/linux/bpf.h
 		// https://elixir.bootlin.com/linux/v4.15/source/include/uapi/linux/bpf.h#L799
-		LEN_OFFSET        = 4
-		PKT_TYPE_OFFSET   = 8
-		REMOTE_IP4_OFFSET = 100
-
-		PACKET_OUTGOING = 4
+		LEN_OFFSET        = 0
+		REMOTE_IP4_OFFSET = 92
 
 		CLASS_A_MASK int32 = -16777216 // (255 << 24)
 		CLASS_B_MASK int32 = CLASS_A_MASK + (240 << 16)
@@ -132,6 +131,71 @@ func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map,
 		LOOPBACK_ADDRESS int32 = (127 << 24) | (0 << 16) | (0 << 8) | (1 << 0)
 	)
 
+	insns := asm.Instructions{
+		// R1 contains a pointer to an __sk_buff (defined in bpf.h)
+		// Load length, and remote_ip4 into R6 and R7
+		asm.LoadMem(asm.R6, asm.R1, LEN_OFFSET, asm.Word),
+		asm.LoadMem(asm.R7, asm.R1, REMOTE_IP4_OFFSET, asm.Word),
+
+		/*
+			// Check if remote address is the loopback address,
+			// or class A, B, or C private address
+			// If it is any of these, exit
+			asm.JEq.Imm(asm.R7, LOOPBACK_ADDRESS, "exit"),
+			asm.Mov.Reg(asm.R8, asm.R7),
+			asm.And.Imm(asm.R8, CLASS_A_MASK),
+			asm.JEq.Imm(asm.R8, CLASS_A_ADDRESS, "exit"),
+			asm.Mov.Reg(asm.R8, asm.R7),
+			asm.And.Imm(asm.R8, CLASS_B_MASK),
+			asm.JEq.Imm(asm.R8, CLASS_B_ADDRESS, "exit"),
+			asm.Mov.Reg(asm.R8, asm.R7),
+			asm.And.Imm(asm.R8, CLASS_C_MASK),
+			asm.JEq.Imm(asm.R8, CLASS_C_ADDRESS, "exit"),
+		*/
+		// Load the map into R1
+		asm.LoadMapPtr(asm.R1, counters.FD()),
+
+		// bpf_map_lookup_elem takes a pointer to the key, so we
+		// have to spill the key to the stack. The key is the
+		// network direction (i.e. 0 for ingress and 1 for egress).
+		asm.Mov.Reg(asm.R2, asm.RFP),
+		asm.Add.Imm(asm.R2, -4),
+		asm.StoreImm(asm.R2, 0, int64(direction), asm.Word),
+		// Now we have a pointer to the map in R1 and
+		// a pointer to the key in R2.
+		asm.FnMapLookupElem.Call(),
+		asm.JEq.Imm(asm.R0, 0, "exit"),
+		// R0 now holds a pointer to the counter
+		// Atomically add the packet length (stored in R6) to it
+		asm.StoreXAdd(asm.R0, asm.R6, asm.DWord),
+		asm.Mov.Imm(asm.R0, 1).WithSymbol("exit"),
+		asm.Return(),
+	}
+
+	//nolint:exhaustruct // This has a whole bunch of optional configuration options that we don't care about
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
+		Name:         "neon_network_monitor",
+		Type:         ebpf.CGroupSKB,
+		License:      "Apache 2.0",
+		Instructions: insns,
+	})
+	if err != nil {
+		logger.Fatal("Failed to attach eBPF program", zap.Error(err))
+		return nil, err
+	}
+	return prog, nil
+}
+
+// Attaches a BPF program to the given cgroup which checks each packet to see if it comes
+// from/is going to the external network. These counts are exposed through a map which
+// can be read.
+func attachBPF(logger *zap.Logger, cgroupPath string) ([]link.Link, *ebpf.Map, error) {
+	const (
+		MAP_KEY_SIZE  = 4
+		MAP_VAL_SIZE  = 8
+		CGROUP_PREFIX = "/sys/fs/cgroup"
+	)
+	cgroupPath = fmt.Sprintf("%s/%s", CGROUP_PREFIX, cgroupPath)
 	if err := rlimit.RemoveMemlock(); err != nil {
 		logger.Fatal("Failed to remove memlock", zap.Error(err))
 		return nil, nil, err
@@ -149,74 +213,39 @@ func attachBPF(logger *zap.Logger, cgroupPath string) (*ebpf.Program, *ebpf.Map,
 		return nil, nil, err
 	}
 
-	insns := asm.Instructions{
-		// R1 contains a pointer to an __sk_buf (defined in bpf.h)
-		// Load length, pkt_type, and remote_ip4 into R6, R7, and R8
-		asm.LoadMem(asm.R6, asm.R1, LEN_OFFSET, asm.Word),
-		asm.LoadMem(asm.R7, asm.R1, PKT_TYPE_OFFSET, asm.Word),
-		asm.LoadMem(asm.R8, asm.R1, REMOTE_IP4_OFFSET, asm.Word),
-
-		// Check if remote address is a the loopback address,
-		// or class A, B, or C private address
-		// If it is any of these, exit
-		asm.JEq.Imm(asm.R8, LOOPBACK_ADDRESS, "exit"),
-		asm.Mov.Reg(asm.R9, asm.R8),
-		asm.And.Imm(asm.R9, CLASS_A_MASK),
-		asm.JEq.Imm(asm.R9, CLASS_A_ADDRESS, "exit"),
-		asm.Mov.Reg(asm.R9, asm.R8),
-		asm.And.Imm(asm.R9, CLASS_B_MASK),
-		asm.JEq.Imm(asm.R9, CLASS_B_ADDRESS, "exit"),
-		asm.Mov.Reg(asm.R9, asm.R8),
-		asm.And.Imm(asm.R9, CLASS_C_MASK),
-		asm.JEq.Imm(asm.R9, CLASS_C_ADDRESS, "exit"),
-
-		// Load the map into R1
-		asm.LoadMapPtr(asm.R1, counters.FD()),
-		// If it's an outgoing packet, bump the egress counter
-		asm.JEq.Imm(asm.R7, PACKET_OUTGOING, "bump-egress"),
-		// Else bump the ingress counter
-
-		// bpf_map_lookup_elem takes a pointer to the key, so we
-		// have to spill the key to the stack
-		asm.StoreImm(asm.RFP, -MAP_KEY_SIZE, 0, asm.Word),
-		asm.Mov.Reg(asm.R2, asm.RFP),
-		asm.Add.Imm(asm.R2, -MAP_KEY_SIZE),
-		asm.FnMapLookupElem.Call(),
-		asm.JEq.Imm(asm.R0, 0, "exit"),
-		// R0 now holds a pointer to the ingress counter
-		// Atomically add the packet length (stored in R6) to it
-		asm.StoreXAdd(asm.R0, asm.R6, asm.DWord),
-		asm.Ja.Label("exit"),
-
-		// Bump the egress counter. This is the same as above
-		// except we store 1 onto the stack instead of 0
-		asm.StoreImm(asm.RFP, -MAP_KEY_SIZE, 1, asm.Word).WithSymbol("bump-egress"),
-		asm.Mov.Reg(asm.R2, asm.RFP),
-		asm.Add.Imm(asm.R2, -MAP_KEY_SIZE),
-		asm.FnMapLookupElem.Call(),
-		asm.JEq.Imm(asm.R0, 0, "exit"),
-		asm.StoreXAdd(asm.R0, asm.R6, asm.DWord),
-
-		asm.Mov.Imm(asm.R0, 1).WithSymbol("exit"),
-		asm.Return(),
+	ingressProgram, err := generateBPF(logger, counters, NETWORK_INGRESS)
+	if err != nil {
+		counters.Close()
+		return nil, nil, err
 	}
-
-	//nolint:exhaustruct // This has a whole bunch of optional configuration options that we don't care about
-	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
-		Name:         "neon_network_monitor",
-		Type:         ebpf.CGroupSKB,
-		License:      "Apache 2.0",
-		Instructions: insns,
-		AttachTo:     cgroupPath,
+	ingressLink, err := link.AttachCgroup(link.CgroupOptions{
+		Path:    cgroupPath,
+		Attach:  ebpf.AttachCGroupInetIngress,
+		Program: ingressProgram,
 	})
 	if err != nil {
-		logger.Fatal("Failed to attach eBPF program", zap.Error(err))
+		logger.Fatal("Failed to link ingress program", zap.Error(err))
+		return nil, nil, err
+	}
+
+	egressProgram, err := generateBPF(logger, counters, NETWORK_EGRESS)
+	if err != nil {
 		counters.Close()
 		return nil, nil, err
 	}
 
-	logger.Info("Successfully created eBPF program")
-	return prog, counters, nil
+	egressLink, err := link.AttachCgroup(link.CgroupOptions{
+		Path:    cgroupPath,
+		Attach:  ebpf.AttachCGroupInetEgress,
+		Program: egressProgram,
+	})
+	if err != nil {
+		logger.Fatal("Failed to link egress program", zap.Error(err))
+		counters.Close()
+		return nil, nil, err
+	}
+	logger.Info("Successfully attached eBPF programs")
+	return []link.Link{ingressLink, egressLink}, counters, nil
 }
 
 // Get returns the contents of /etc/resolv.conf and its hash
@@ -789,11 +818,13 @@ func main() {
 		logger.Fatal("Failed to set cgroup limit", zap.Error(err))
 	}
 
-	bpf_program, counters, err := attachBPF(logger, cgroupPath)
+	links, counters, err := attachBPF(logger, cgroupPath)
 	if err != nil {
 		logger.Fatal("Failed to load BPF program", zap.Error(err))
 	}
-	defer bpf_program.Close()
+	defer links[NETWORK_INGRESS].Close()
+	defer links[NETWORK_EGRESS].Close()
+	defer counters.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
@@ -880,12 +911,12 @@ func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Re
 	}
 
 	var counts vmv1.VirtualMachineNetworkUsage
-	if err := counters.Lookup(0, &counts.IngressBytes); err != nil {
+	if err := counters.Lookup(NETWORK_INGRESS, &counts.IngressBytes); err != nil {
 		logger.Error("error reading ingress byte counts", zap.Error(err))
 		w.WriteHeader(500)
 		return
 	}
-	if err := counters.Lookup(1, &counts.EgressBytes); err != nil {
+	if err := counters.Lookup(NETWORK_EGRESS, &counts.EgressBytes); err != nil {
 		logger.Error("error reading egress byte counts", zap.Error(err))
 		w.WriteHeader(500)
 		return
@@ -903,6 +934,7 @@ func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Re
 		w.WriteHeader(500)
 		return
 	}
+	logger.Info("Responded with byte counts", zap.String("byte_counts", string(body)))
 }
 
 func listenForHTTPRequests(
