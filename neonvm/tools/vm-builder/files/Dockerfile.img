@@ -81,9 +81,10 @@ RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 # rootdisk modification
 FROM rootdisk AS rootdisk-mod
 COPY --from=vm-runtime /neonvm /neonvm
-# setup sshd user to support sshd UsePrivilegeSeparation
-RUN /neonvm/bin/addgroup sshd || true \
-	&& /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd || true
+# setup sshd user and group to support sshd UsePrivilegeSeparation
+RUN set -e \
+    && /neonvm/bin/id -g sshd > /dev/null 2>&1 || /neonvm/bin/addgroup sshd \
+    && /neonvm/bin/id -u sshd > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
