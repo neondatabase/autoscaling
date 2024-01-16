@@ -602,7 +602,7 @@ func main() {
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
-			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
+			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 			logger.Info("creating iso9660 image", zap.String("diskPath", dPath), zap.String("diskName", disk.Name), zap.String("mountPath", mnt))
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {

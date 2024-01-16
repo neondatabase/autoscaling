@@ -41,6 +41,8 @@ var (
 	scriptVmInit string
 	//go:embed files/vector.yaml
 	configVector string
+	//go:embed files/chrony.conf
+	configChrony string
 	//go:embed files/sshd_config
 	configSshd string
 )
@@ -270,6 +272,7 @@ func main() {
 		{"vmacpi", scriptVmAcpi},
 		{"vminit", scriptVmInit},
 		{"vector.yaml", configVector},
+		{"chrony.conf", configChrony},
 		{"sshd_config", configSshd},
 	}
 
