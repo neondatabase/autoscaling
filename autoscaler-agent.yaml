@@ -35,6 +35,7 @@ data:
   config.json: |
     {
       "scaling": {
+        "computeUnit": { "vCPUs": 0.25, "mem": 1 },
         "requestTimeoutSeconds": 10,
         "retryFailedRequestSeconds": 5,
         "defaultConfig": {
@@ -51,7 +52,6 @@ data:
           "unhealthyStartupGracePeriodSeconds": 20,
           "maxHealthCheckSequentialFailuresSeconds": 30,
           "retryDeniedDownscaleSeconds": 5,
-          "deniedDownscaleFollowUpWaitSeconds": 1,
           "requestedUpscaleValidSeconds": 10,
           "retryFailedRequestSeconds": 3
       },
@@ -105,7 +105,7 @@ spec:
               fieldPath: status.podIP
         - name: CONFIG_PATH
           value: /etc/autoscaler-agent-config/config.json
-        image: neondatabase/autoscaler-agent:v0.21.0
+        image: neondatabase/autoscaler-agent:v0.22.0
         name: autoscaler-agent
         ports:
         - containerPort: 9100
