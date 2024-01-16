@@ -1,4 +1,4 @@
-# Victoria Metrics scraper for autoscaler-agent and autoscale-scheduler
+# Victoria Metrics scraper for autoscaler-agent, autoscale-scheduler, and neonvm controllers
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
 metadata:
@@ -14,7 +14,7 @@ spec:
     matchExpressions:
       - key: name
         operator: In
-        values: [autoscaler-agent, autoscale-scheduler]
+        values: [autoscaler-agent, autoscale-scheduler, neonvm-controller]
   namespaceSelector:
     matchNames:
       - kube-system
