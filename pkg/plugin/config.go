@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 //////////////////
@@ -20,11 +19,6 @@ import (
 //////////////////
 
 type Config struct {
-	// ComputeUnit is the desired ratio between CPU and memory that autoscaler-agents should uphold
-	//
-	// This value is sent to autoscaler-agents in every response, as part of api.PluginResponse.
-	ComputeUnit api.Resources `json:"computeUnit"`
-
 	// NodeConfig defines our policies around node resources and scoring
 	NodeConfig nodeConfig `json:"nodeConfig"`
 	// MemSlotSize is the smallest unit of memory that the scheduler plugin will reserve for a VM,
@@ -132,10 +126,6 @@ func (c *Config) migrationEnabled() bool {
 func (c *Config) validate() (string, error) {
 	if path, err := c.NodeConfig.validate(); err != nil {
 		return fmt.Sprintf("nodeConfig.%s", path), err
-	}
-
-	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
-		return "computeUnit", err
 	}
 
 	if c.MemSlotSize.Value() <= 0 {

@@ -977,7 +977,6 @@ func (e *AutoscaleEnforcer) Reserve(
 				Max:              vmInfo.Mem.Max,
 			},
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
-			mostRecentComputeUnit:    nil,
 			metrics:                  nil,
 			mqIndex:                  -1,
 			migrationState:           nil,

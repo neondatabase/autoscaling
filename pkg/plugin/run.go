@@ -195,33 +195,10 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	}
 
 	resp := api.PluginResponse{
-		Permit:      permit,
-		Migrate:     migrateDecision,
-		ComputeUnit: getComputeUnitForResponse(e.state.conf.ComputeUnit, req.ProtoVersion),
+		Permit:  permit,
+		Migrate: migrateDecision,
 	}
-	pod.mostRecentComputeUnit = &e.state.conf.ComputeUnit
 	return &resp, 200, nil
-}
-
-// getComputeUnitForResponse tries to return compute unit that the agent supports
-//
-// If the plugin is not supposed to send a compute unit in this version of the protocol, then we
-// return nil.
-// Else if our compute unit has a fractional CPU but the agent doesn't support that, we multiply the
-// result until it's no longer fractional.
-func getComputeUnitForResponse(computeUnit api.Resources, protoVersion api.PluginProtoVersion) *api.Resources {
-	if !protoVersion.PluginSendsComputeUnit() {
-		return nil
-	}
-
-	if !protoVersion.SupportsFractionalCPU() {
-		initialCU := computeUnit
-		for i := uint16(2); computeUnit.VCPU%1000 != 0; i++ {
-			computeUnit = initialCU.Mul(i)
-		}
-	}
-
-	return &computeUnit
 }
 
 func (e *AutoscaleEnforcer) handleResources(
@@ -247,23 +224,6 @@ func (e *AutoscaleEnforcer) handleResources(
 			return api.Resources{}, 400, err
 		}
 		return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
-	}
-
-	// Check that the resources correspond to an integer number of compute units, based on what the
-	// pod was most recently informed of. The resources may only be mismatched if one of them is at
-	// the minimum or maximum of what's allowed for this VM.
-	if pod.mostRecentComputeUnit != nil {
-		cu := *pod.mostRecentComputeUnit
-		dividesCleanly := req.VCPU%cu.VCPU == 0 && req.Mem%cu.Mem == 0 && uint32(req.VCPU/cu.VCPU) == uint32(req.Mem/cu.Mem)
-		atMin := req.VCPU == pod.vCPU.Min || req.Mem == pod.memSlots.Min
-		atMax := req.VCPU == pod.vCPU.Max || req.Mem == pod.memSlots.Max
-		if !dividesCleanly && !(atMin || atMax) {
-			contextString := "If the VM's bounds did not just change, then this indicates a bug in the autoscaler-agent."
-			logger.Warn(
-				"Pod requested resources do not divide cleanly by previous compute unit",
-				zap.Object("requested", req), zap.Object("computeUnit", cu), zap.String("context", contextString),
-			)
-		}
 	}
 
 	vCPUTransition := makeResourceTransitioner(&node.vCPU, &pod.vCPU)

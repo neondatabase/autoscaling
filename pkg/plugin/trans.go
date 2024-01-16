@@ -381,7 +381,6 @@ func (r resourceTransitioner[T]) handleStartMigration(source bool) (verdict stri
 func handleUpdatedLimits[T constraints.Unsigned](
 	node *nodeResourceState[T],
 	pod *podResourceState[T],
-	receivedContact bool,
 	newMin T,
 	newMax T,
 ) (verdict string) {
@@ -389,10 +388,10 @@ func handleUpdatedLimits[T constraints.Unsigned](
 		return fmt.Sprintf("limits unchanged (min = %d, max = %d)", newMin, newMax)
 	}
 
-	// if we haven't yet been contacted by the autoscaler-agent, then we should update
-	// {node,pod}.Buffer based on the change in the maximum bound so that we can make a best-effort
-	// attempt to avoid overcommitting. This solution can't be perfect (because we're intentionally
-	// not using the "hard" limits provided by NeonVM, which would be overly conservative).
+	// If the maximum bound has changed, then we should update {node,pod}.Buffer based it so that we
+	// can make a best-effort attempt to avoid overcommitting. This solution can't be perfect
+	// (because we're intentionally not using the "hard" limits provided by NeonVM, which would be
+	// overly conservative).
 	// However. This solution should be *good enough* - the cases it protects against are already
 	// exceptionally rare, and the imperfections even more so.
 	//
@@ -414,7 +413,7 @@ func handleUpdatedLimits[T constraints.Unsigned](
 	// attempt to prevent this is worthwhile here. (realistically, the things we can't prevent would
 	// require a "perfect storm" of other failures in order to be relevant - which is good!)
 	bufferVerdict := ""
-	updateBuffer := !receivedContact && pod.Max != newMax
+	updateBuffer := pod.Max != newMax
 	if updateBuffer {
 		oldPodBuffer := pod.Buffer
 		oldNodeBuffer := node.Buffer

@@ -214,10 +214,6 @@ type podState struct {
 	// memSlots is the current state of this pod's memory slot(s) utilization and pressure
 	memSlots podResourceState[uint16]
 
-	// mostRecentComputeUnit stores the "compute unit" that this pod's autoscaler-agent most
-	// recently observed (and so, what future AgentRequests are expected to abide by)
-	mostRecentComputeUnit *api.Resources
-
 	// metrics is the most recent metrics update we received for this pod. A nil pointer means that
 	// we have not yet received metrics.
 	metrics *api.Metrics
@@ -998,12 +994,9 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(logger *zap.Logger, vm *a
 	}
 	logger = logger.With(zap.String("node", pod.node.name))
 
-	// FIXME: this definition of receivedContact may be inaccurate if there was an error with the
-	// autoscaler-agent's request.
-	receivedContact := pod.mostRecentComputeUnit != nil
 	var n *nodeResourceState[vmapi.MilliCPU] = &pod.node.vCPU
-	cpuVerdict := handleUpdatedLimits(n, &pod.vCPU, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
-	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, receivedContact, vm.Mem.Min, vm.Mem.Max)
+	cpuVerdict := handleUpdatedLimits(n, &pod.vCPU, vm.Cpu.Min, vm.Cpu.Max)
+	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, vm.Mem.Min, vm.Mem.Max)
 
 	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
 
@@ -1387,10 +1380,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 				Max:              vmInfo.Mem.Max,
 			},
 
-			mqIndex:               -1,
-			metrics:               nil,
-			mostRecentComputeUnit: nil,
-			migrationState:        nil,
+			mqIndex:        -1,
+			metrics:        nil,
+			migrationState: nil,
 
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
 		}

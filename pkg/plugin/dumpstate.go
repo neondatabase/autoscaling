@@ -138,7 +138,6 @@ type podStateDump struct {
 	TestingOnlyAlwaysMigrate bool                             `json:"testingOnlyAlwaysMigrate"`
 	VCPU                     podResourceState[vmapi.MilliCPU] `json:"vCPU"`
 	MemSlots                 podResourceState[uint16]         `json:"memSlots"`
-	MostRecentComputeUnit    *api.Resources                   `json:"mostRecentComputeUnit"`
 	Metrics                  *api.Metrics                     `json:"metrics"`
 	MqIndex                  int                              `json:"mqIndex"`
 	MigrationState           *podMigrationStateDump           `json:"migrationState"`
@@ -247,11 +246,6 @@ func (s *nodeState) dump() nodeStateDump {
 
 func (s *podState) dump() podStateDump {
 	// Copy some of the "may be nil" pointer fields
-	var mostRecentComputeUnit *api.Resources
-	if s.mostRecentComputeUnit != nil {
-		mrcu := *s.mostRecentComputeUnit
-		mostRecentComputeUnit = &mrcu
-	}
 	var metrics *api.Metrics
 	if s.metrics != nil {
 		m := *s.metrics
@@ -272,7 +266,6 @@ func (s *podState) dump() podStateDump {
 		TestingOnlyAlwaysMigrate: s.testingOnlyAlwaysMigrate,
 		VCPU:                     s.vCPU,
 		MemSlots:                 s.memSlots,
-		MostRecentComputeUnit:    mostRecentComputeUnit,
 		Metrics:                  metrics,
 		MqIndex:                  s.mqIndex,
 		MigrationState:           migrationState,

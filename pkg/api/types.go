@@ -306,17 +306,6 @@ type PluginResponse struct {
 	// Migrate, if present, notifies the autoscaler-agent that its VM will be migrated away,
 	// alongside whatever other information may be useful.
 	Migrate *MigrateResponse `json:"migrate,omitempty"`
-
-	// ComputeUnit is the minimum unit of resources that the scheduler is expecting to work with
-	//
-	// For example, if ComputeUnit is Resources{ VCPU: 2, Mem: 4 }, then all VMs are expected to
-	// have allocated vCPUs that are a multiple of two, with twice as many memory slots.
-	//
-	// This value may be different across nodes, and the scheduler expects that all AgentRequests
-	// will abide by the most recent ComputeUnit they've received.
-	//
-	// THIS FIELD IS DEPRECATED: See https://github.com/neondatabase/autoscaling/issues/706
-	ComputeUnit *Resources `json:"resourceUnit,omitempty"`
 }
 
 // MigrateResponse, when provided, is a notification to the autsocaler-agent that it will migrate

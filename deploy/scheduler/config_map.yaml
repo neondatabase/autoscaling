@@ -26,7 +26,6 @@ data:
   autoscale-enforcer-config.json: |
     {
       "memBlockSize": "1Gi",
-      "computeUnit": { "vCPUs": 0.25, "mem": 1 },
       "nodeConfig": {
         "cpu": { "watermark": 0.9 },
         "memory": { "watermark": 0.9 },
