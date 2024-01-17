@@ -5,6 +5,7 @@
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector
 ::respawn:/neonvm/bin/chronyd -n -f /neonvm/config/chrony.conf -l /var/log/chrony/chrony.log
+::respawn:/neonvm/bin/sshd -E /var/log/ssh.log -f /neonvm/config/sshd_config
 ::respawn:/neonvm/bin/vmstart
 {{ range .InittabCommands }}
 ::{{.SysvInitAction}}:su -p {{.CommandUser}} -c {{.ShellEscapedCommand}}

@@ -42,9 +42,11 @@ RUN apk add --no-cache \
     e2fsprogs \
     qemu-system-x86_64 \
     qemu-img \
-    cgroup-tools
+    cgroup-tools \
+    openssh
 
 COPY --from=builder /runner /usr/bin/runner
 COPY neonvm/hack/kernel/vmlinuz /vm/kernel/vmlinuz
+COPY neonvm/runner/ssh_config /etc/ssh/ssh_config
 
 ENTRYPOINT ["/sbin/tini", "--", "runner"]

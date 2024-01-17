@@ -45,6 +45,14 @@ vm-debian   1      1Gi      vm-debian-8rxp7   Running   3m13s
 
 ### Go inside virtual machine
 
+#### SSH
+
+```sh
+kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- ssh guest-vm
+```
+
+#### Pseudoterminal
+
 ```console
 kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- screen /dev/pts/0
 
@@ -149,7 +157,15 @@ VM_POD=$(kubectl get neonvm example -ojsonpath='{.status.podName}')
 kubectl logs $VM_POD
 ```
 
-#### 4. Connect to console inside VM
+#### 4. Connect to the VM
+
+##### SSH
+
+```sh
+kubectl exec -it $VM_POD -- ssh guest-vm
+```
+
+##### Console
 
 ```sh
 kubectl exec -it $VM_POD -- screen /dev/pts/0
