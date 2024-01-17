@@ -1074,6 +1074,11 @@ spec:
                 default: true
                 description: Use KVM acceleation
                 type: boolean
+              enableSSH:
+                description: 'Enable SSH on the VM. It works only if the VM image
+                  is built using VM Builder that has SSH support (TODO: mention VM
+                  Builder version).'
+                type: boolean
               extraInitContainers:
                 items:
                   description: A single application container that you want to run

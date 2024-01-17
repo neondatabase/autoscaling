@@ -218,20 +218,27 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		targetRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: migration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
-			// We require the SSH secret to exist because we cannot unmount and
-			// mount the new secret into the VM after the live migration. If a
-			// VM's SSH secret is deleted accidentally then live migration is
-			// not possible.
-			if len(vm.Status.SSHSecretName) == 0 {
-				err := errors.New("VM .Status.SSHSecretName is empty")
-				log.Error(err, "Failed to get VM's SSH Secret")
-				return ctrl.Result{}, err
+			enableSSH := false
+			if vm.Spec.EnableSSH != nil && *vm.Spec.EnableSSH {
+				enableSSH = true
 			}
-			sshSecret := &corev1.Secret{}
-			err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
-			if err != nil {
-				log.Error(err, "Failed to get VM's SSH Secret")
-				return ctrl.Result{}, err
+			var sshSecret *corev1.Secret
+			if enableSSH {
+				// We require the SSH secret to exist because we cannot unmount and
+				// mount the new secret into the VM after the live migration. If a
+				// VM's SSH secret is deleted accidentally then live migration is
+				// not possible.
+				if len(vm.Status.SSHSecretName) == 0 {
+					err := errors.New("VM .Status.SSHSecretName is empty")
+					log.Error(err, "Failed to get VM's SSH Secret")
+					return ctrl.Result{}, err
+				}
+				sshSecret = &corev1.Secret{}
+				err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
+				if err != nil {
+					log.Error(err, "Failed to get VM's SSH Secret")
+					return ctrl.Result{}, err
+				}
 			}
 
 			// Define a new target pod

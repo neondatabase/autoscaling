@@ -324,8 +324,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		meta.SetStatusCondition(&virtualmachine.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 	}
 
+	enableSSH := false
+	if virtualmachine.Spec.EnableSSH != nil && *virtualmachine.Spec.EnableSSH {
+		enableSSH = true
+	}
+
 	// Generate ssh secret name
-	if len(virtualmachine.Status.SSHSecretName) == 0 {
+	if enableSSH && len(virtualmachine.Status.SSHSecretName) == 0 {
 		virtualmachine.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", virtualmachine.Name)
 	}
 
@@ -374,29 +379,32 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
-			// Check if the ssh secret already exists, if not create a new one
-			sshSecret := &corev1.Secret{}
-			err := r.Get(ctx, types.NamespacedName{
-				Name:      virtualmachine.Status.SSHSecretName,
-				Namespace: virtualmachine.Namespace,
-			}, sshSecret)
-			if err != nil && apierrors.IsNotFound(err) {
-				// Define a new ssh secret
-				sshSecret, err = r.sshSecretForVirtualMachine(virtualmachine)
-				if err != nil {
-					log.Error(err, "Failed to define new SSH Secret for VirtualMachine")
-					return err
-				}
+			var sshSecret *corev1.Secret
+			if enableSSH {
+				// Check if the ssh secret already exists, if not create a new one
+				sshSecret = &corev1.Secret{}
+				err := r.Get(ctx, types.NamespacedName{
+					Name:      virtualmachine.Status.SSHSecretName,
+					Namespace: virtualmachine.Namespace,
+				}, sshSecret)
+				if err != nil && apierrors.IsNotFound(err) {
+					// Define a new ssh secret
+					sshSecret, err = r.sshSecretForVirtualMachine(virtualmachine)
+					if err != nil {
+						log.Error(err, "Failed to define new SSH Secret for VirtualMachine")
+						return err
+					}
 
-				log.Info("Creating a new SSH Secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
-				if err = r.Create(ctx, sshSecret); err != nil {
-					log.Error(err, "Failed to create new SSH secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+					log.Info("Creating a new SSH Secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+					if err = r.Create(ctx, sshSecret); err != nil {
+						log.Error(err, "Failed to create new SSH secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+						return err
+					}
+					log.Info("SSH Secret was created", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+				} else if err != nil {
+					log.Error(err, "Failed to get SSH Secret")
 					return err
 				}
-				log.Info("SSH Secret was created", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
-			} else if err != nil {
-				log.Error(err, "Failed to get SSH Secret")
-				return err
 			}
 
 			// Define a new pod
@@ -413,10 +421,11 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
-			r.Recorder.Event(virtualmachine, "Normal", "Created",
-				fmt.Sprintf("VirtualMachine %s created, Pod %s, SSH Secret %s",
-					virtualmachine.Name, pod.Name, sshSecret.Name))
-
+			msg := fmt.Sprintf("VirtualMachine %s created, Pod %s", virtualmachine.Name, pod.Name)
+			if sshSecret != nil {
+				msg = fmt.Sprintf("%s, SSH Secret %s", msg, sshSecret.Name)
+			}
+			r.Recorder.Event(virtualmachine, "Normal", "Created", msg)
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")
 			return err
@@ -1262,14 +1271,6 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 						// Note that this mode corresponds to "private" in Linux terminology.
 						MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
 					},
-					{
-						Name:      "ssh-privatekey",
-						MountPath: "/mnt/ssh",
-					},
-					{
-						Name:      "ssh-publickey",
-						MountPath: "/vm/ssh",
-					},
 				},
 				Resources: virtualmachine.Spec.PodResources,
 			}},
@@ -1289,38 +1290,53 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 						},
 					},
 				},
-				{
-					Name: "ssh-privatekey",
-					VolumeSource: corev1.VolumeSource{
-						Secret: &corev1.SecretVolumeSource{
-							SecretName: sshSecret.Name,
-							Items: []corev1.KeyToPath{
-								{
-									Key:  "ssh-privatekey",
-									Path: "id_ed25519",
-									Mode: &[]int32{0600}[0],
-								},
-							},
-						},
-					},
-				},
-				{
-					Name: "ssh-publickey",
-					VolumeSource: corev1.VolumeSource{
-						Secret: &corev1.SecretVolumeSource{
-							SecretName: sshSecret.Name,
-							Items: []corev1.KeyToPath{
-								{
-									Key:  "ssh-publickey",
-									Path: "authorized_keys",
-									Mode: &[]int32{0644}[0],
-								},
+			},
+		},
+	}
+
+	if sshSecret != nil {
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{
+				Name:      "ssh-privatekey",
+				MountPath: "/mnt/ssh",
+			},
+			corev1.VolumeMount{
+				Name:      "ssh-publickey",
+				MountPath: "/vm/ssh",
+			},
+		)
+		pod.Spec.Volumes = append(pod.Spec.Volumes,
+			corev1.Volume{
+				Name: "ssh-privatekey",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: sshSecret.Name,
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "ssh-privatekey",
+								Path: "id_ed25519",
+								Mode: &[]int32{0600}[0],
 							},
 						},
 					},
 				},
 			},
-		},
+			corev1.Volume{
+				Name: "ssh-publickey",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: sshSecret.Name,
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "ssh-publickey",
+								Path: "authorized_keys",
+								Mode: &[]int32{0644}[0],
+							},
+						},
+					},
+				},
+			},
+		)
 	}
 
 	// If a custom neonvm-runner image is requested, use that instead:

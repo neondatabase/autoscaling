@@ -197,7 +197,7 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
-func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk) error {
+func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk, enableSSH bool) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
@@ -238,8 +238,10 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 	}
 
 	var mounts []string
-	mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
-	mounts = append(mounts, "/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
+	if enableSSH {
+		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
+		mounts = append(mounts, "/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
+	}
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
@@ -525,12 +527,17 @@ func main() {
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 
+	enableSSH := false
+	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
+		enableSSH = true
+	}
+
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{}
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
 	}
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
+	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
 		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 
@@ -581,13 +588,15 @@ func main() {
 	// disk details
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
-	{
+
+	if enableSSH {
 		name := "ssh-authorized-keys"
 		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
 			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
 	}
+
 	for _, disk := range vmSpec.Disks {
 		switch {
 		case disk.EmptyDisk != nil:

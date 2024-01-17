@@ -111,6 +111,11 @@ type VirtualMachineSpec struct {
 	// Override for normal neonvm-runner image
 	// +optional
 	RunnerImage *string `json:"runnerImage,omitempty"`
+
+	// Enable SSH on the VM. It works only if the VM image is built using VM Builder that
+	// has SSH support (TODO: mention VM Builder version).
+	// +optional
+	EnableSSH *bool `json:"enableSSH,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
