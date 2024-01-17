@@ -35,7 +35,7 @@ number.
 
 | Release | autoscaler-agent | Scheduler plugin |
 |---------|------------------|------------------|
-| _Current_ | v3.0 only | v1.0-v4.0 |
+| _Current_ | v4.0 only | v1.0-v4.0 |
 | v0.22.0 | **v3.0 only** | **v1.0-v3.0** |
 | v0.21.0 | v2.1 only | v1.0-v2.1 |
 | v0.20.0 | **v2.1 only** | **v1.0-v2.1** |
