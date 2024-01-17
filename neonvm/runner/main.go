@@ -54,6 +54,9 @@ const (
 	mountedDiskPath                = "/vm/images"
 	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
 
+	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
+	sshAuthorizedKeysMountPoint = "/vm/ssh"
+
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
 	defaultNetworkCIDR       = "169.254.254.252/30"
@@ -194,7 +197,7 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
-func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk) error {
+func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk, enableSSH bool) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
@@ -234,8 +237,13 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 		}
 	}
 
+	var mounts []string
+	if enableSSH {
+		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
+		mounts = append(mounts, "/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
+	}
+
 	if len(disks) != 0 {
-		mounts := []string{}
 		for _, disk := range disks {
 			mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			switch {
@@ -257,11 +265,12 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 				// do nothing
 			}
 		}
-		mounts = append(mounts, "")
-		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(mounts, "\n"))), "mounts.sh")
-		if err != nil {
-			return err
-		}
+	}
+
+	mounts = append(mounts, "")
+	err = writer.AddFile(bytes.NewReader([]byte(strings.Join(mounts, "\n"))), "mounts.sh")
+	if err != nil {
+		return err
 	}
 
 	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
@@ -518,12 +527,17 @@ func main() {
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 
+	enableSSH := false
+	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
+		enableSSH = true
+	}
+
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{}
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
 	}
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
+	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
 		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 
@@ -574,6 +588,15 @@ func main() {
 	// disk details
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
+
+	if enableSSH {
+		name := "ssh-authorized-keys"
+		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
+			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
+		}
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
+	}
+
 	for _, disk := range vmSpec.Disks {
 		switch {
 		case disk.EmptyDisk != nil:
@@ -1214,6 +1237,19 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	// run dnsmasq for default Guest interface
 	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
 		logger.Error("could not run dnsmasq", zap.Error(err))
+		return nil, err
+	}
+
+	// Adding VM's IP address to the /etc/hosts, so we can access it easily from
+	// the pod. This is particularly useful for ssh into the VM from the runner
+	// pod.
+	f, err := os.OpenFile("/etc/hosts", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	record := fmt.Sprintf("%v guest-vm\n", ipVm)
+	if _, err := f.WriteString(record); err != nil {
 		return nil, err
 	}
 

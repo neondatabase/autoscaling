@@ -19,8 +19,11 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +33,7 @@ import (
 	"time"
 
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"golang.org/x/crypto/ssh"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -81,6 +85,7 @@ type VirtualMachineReconciler struct {
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachines/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;list;watch
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools/finalizers,verbs=update
@@ -319,6 +324,14 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		meta.SetStatusCondition(&virtualmachine.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 	}
 
+	// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
+	enableSSH := *virtualmachine.Spec.EnableSSH
+
+	// Generate ssh secret name
+	if enableSSH && len(virtualmachine.Status.SSHSecretName) == 0 {
+		virtualmachine.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", virtualmachine.Name)
+	}
+
 	// Generate runner pod name
 	if len(virtualmachine.Status.PodName) == 0 {
 		virtualmachine.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", virtualmachine.Name))
@@ -364,8 +377,36 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
+			var sshSecret *corev1.Secret
+			if enableSSH {
+				// Check if the ssh secret already exists, if not create a new one
+				sshSecret = &corev1.Secret{}
+				err := r.Get(ctx, types.NamespacedName{
+					Name:      virtualmachine.Status.SSHSecretName,
+					Namespace: virtualmachine.Namespace,
+				}, sshSecret)
+				if err != nil && apierrors.IsNotFound(err) {
+					// Define a new ssh secret
+					sshSecret, err = r.sshSecretForVirtualMachine(virtualmachine)
+					if err != nil {
+						log.Error(err, "Failed to define new SSH Secret for VirtualMachine")
+						return err
+					}
+
+					log.Info("Creating a new SSH Secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+					if err = r.Create(ctx, sshSecret); err != nil {
+						log.Error(err, "Failed to create new SSH secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+						return err
+					}
+					log.Info("SSH Secret was created", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+				} else if err != nil {
+					log.Error(err, "Failed to get SSH Secret")
+					return err
+				}
+			}
+
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(virtualmachine)
+			pod, err := r.podForVirtualMachine(virtualmachine, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
@@ -378,9 +419,11 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
-			r.Recorder.Event(virtualmachine, "Normal", "Created",
-				fmt.Sprintf("VirtualMachine %s created, pod %s",
-					virtualmachine.Name, pod.Name))
+			msg := fmt.Sprintf("VirtualMachine %s created, Pod %s", virtualmachine.Name, pod.Name)
+			if sshSecret != nil {
+				msg = fmt.Sprintf("%s, SSH Secret %s", msg, sshSecret.Name)
+			}
+			r.Recorder.Event(virtualmachine, "Normal", "Created", msg)
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")
 			return err
@@ -915,9 +958,10 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
-	virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
-
-	pod, err := podSpec(virtualmachine)
+	virtualmachine *vmv1.VirtualMachine,
+	sshSecret *corev1.Secret,
+) (*corev1.Pod, error) {
+	pod, err := podSpec(virtualmachine, sshSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -929,6 +973,43 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 	}
 
 	return pod, nil
+}
+
+func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
+	secret, err := sshSecretSpec(virtualmachine)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Secret
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(virtualmachine, secret, r.Scheme); err != nil {
+		return nil, err
+	}
+	return secret, nil
+}
+
+func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
+	// using ed25519 signatures it takes ~16us to finish
+	publicKey, privateKey, err := sshKeygen()
+	if err != nil {
+		return nil, err
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      virtualmachine.Status.SSHSecretName,
+			Namespace: virtualmachine.Namespace,
+		},
+		Immutable: &[]bool{true}[0],
+		Type:      corev1.SecretTypeSSHAuth,
+		Data: map[string][]byte{
+			"ssh-publickey":  publicKey,
+			"ssh-privatekey": privateKey,
+		},
+	}
+
+	return secret, nil
 }
 
 // labelsForVirtualMachine returns the labels for selecting the resources
@@ -1073,7 +1154,7 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
-func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
+func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*corev1.Pod, error) {
 	labels := labelsForVirtualMachine(virtualmachine)
 	annotations := annotationsForVirtualMachine(virtualmachine)
 	affinity := affinityForVirtualMachine(virtualmachine)
@@ -1209,6 +1290,51 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 				},
 			},
 		},
+	}
+
+	if sshSecret != nil {
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{
+				Name:      "ssh-privatekey",
+				MountPath: "/mnt/ssh",
+			},
+			corev1.VolumeMount{
+				Name:      "ssh-publickey",
+				MountPath: "/vm/ssh",
+			},
+		)
+		pod.Spec.Volumes = append(pod.Spec.Volumes,
+			corev1.Volume{
+				Name: "ssh-privatekey",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: sshSecret.Name,
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "ssh-privatekey",
+								Path: "id_ed25519",
+								Mode: &[]int32{0600}[0],
+							},
+						},
+					},
+				},
+			},
+			corev1.Volume{
+				Name: "ssh-publickey",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: sshSecret.Name,
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "ssh-publickey",
+								Path: "authorized_keys",
+								Mode: &[]int32{0644}[0],
+							},
+						},
+					},
+				},
+			},
+		)
 	}
 
 	// If a custom neonvm-runner image is requested, use that instead:
@@ -1400,4 +1526,47 @@ func getEnvVarValue(envVarName string) (string, error) {
 		return "", fmt.Errorf("unable to find %s environment variable", envVarName)
 	}
 	return value, nil
+}
+
+// sshKeygen generates a pair of public and private keys using the ed25519
+// algorithm. It returns the generated public key and private key as byte
+// slices. If an error occurs during key generation or encoding, it returns nil
+// for both keys and the error.
+func sshKeygen() (publicKeyBytes []byte, privateKeyBytes []byte, err error) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	publicKeyBytes, err = encodePublicKey(publicKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	privateKeyBytes, err = encodePrivateKey(privateKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return
+}
+
+func encodePrivateKey(privateKey ed25519.PrivateKey) ([]byte, error) {
+	privBlock, err := ssh.MarshalPrivateKey(privateKey, "")
+	if err != nil {
+		return nil, err
+	}
+	privatePEM := pem.EncodeToMemory(privBlock)
+
+	return privatePEM, nil
+}
+
+func encodePublicKey(publicKey ed25519.PublicKey) ([]byte, error) {
+	sshPublicKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	pubKeyBytes := ssh.MarshalAuthorizedKey(sshPublicKey)
+	return pubKeyBytes, nil
 }

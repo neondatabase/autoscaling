@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -110,15 +111,18 @@ func (r *VirtualMachine) ValidateCreate() error {
 	}
 
 	// validate .spec.disk names
+	reservedDiskNames := []string{
+		"virtualmachineimages",
+		"rootdisk",
+		"runtime",
+		"sysfscgroup",
+		"ssh-privatekey",
+		"ssh-publickey",
+		"ssh-authorized-keys",
+	}
 	for _, disk := range r.Spec.Disks {
-		if disk.Name == "virtualmachineimages" {
-			return errors.New("'virtualmachineimages' is reserved name for .spec.disks[].name")
-		}
-		if disk.Name == "vmroot" {
-			return errors.New("'vmroot' is reserved name for .spec.disks[].name")
-		}
-		if disk.Name == "vmruntime" {
-			return errors.New("'vmruntime' is reserved name for .spec.disks[].name")
+		if slices.Contains(reservedDiskNames, disk.Name) {
+			return fmt.Errorf("'%s' is reserved for .spec.disks[].name", disk.Name)
 		}
 		if len(disk.Name) > 32 {
 			return fmt.Errorf("disk name '%s' too long, should be less than or equal to 32", disk.Name)
@@ -157,6 +161,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.disk", func(v *VirtualMachine) any { return v.Spec.Disks }},
 		{".spec.podResources", func(v *VirtualMachine) any { return v.Spec.PodResources }},
 		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},
+		{".spec.enableSSH", func(v *VirtualMachine) any { return v.Spec.EnableSSH }},
 	}
 
 	for _, info := range immutableFields {

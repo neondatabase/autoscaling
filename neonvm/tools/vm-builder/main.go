@@ -43,6 +43,8 @@ var (
 	configVector string
 	//go:embed files/chrony.conf
 	configChrony string
+	//go:embed files/sshd_config
+	configSshd string
 )
 
 var (
@@ -271,6 +273,7 @@ func main() {
 		{"vminit", scriptVmInit},
 		{"vector.yaml", configVector},
 		{"chrony.conf", configChrony},
+		{"sshd_config", configSshd},
 	}
 
 	for _, f := range files {
