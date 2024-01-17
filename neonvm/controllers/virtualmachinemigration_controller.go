@@ -229,14 +229,16 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				// VM's SSH secret is deleted accidentally then live migration is
 				// not possible.
 				if len(vm.Status.SSHSecretName) == 0 {
-					err := errors.New("VM .Status.SSHSecretName is empty")
+					err := errors.New("VM has .Spec.EnableSSH but its .Status.SSHSecretName is empty")
 					log.Error(err, "Failed to get VM's SSH Secret")
+					r.Recorder.Event(migration, "Warning", "Failed", err.Error())
 					return ctrl.Result{}, err
 				}
 				sshSecret = &corev1.Secret{}
 				err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
 				if err != nil {
 					log.Error(err, "Failed to get VM's SSH Secret")
+					r.Recorder.Event(migration, "Warning", "Failed", fmt.Sprintf("Failed to get VM's SSH Secret: %v", err))
 					return ctrl.Result{}, err
 				}
 			}
