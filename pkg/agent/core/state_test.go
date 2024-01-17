@@ -8,14 +8,14 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	helpers "github.com/neondatabase/autoscaling/pkg/agent/core/testhelpers"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
+	slotSize := api.Bytes(1 << 30 /* 1 Gi */)
+
 	cases := []struct {
 		name string
 
@@ -37,12 +37,12 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				LoadAverage5Min:  0.0, // unused
 				MemoryUsageBytes: 0.0,
 			},
-			vmUsing:           api.Resources{VCPU: 250, Mem: 1},
-			schedulerApproved: api.Resources{VCPU: 250, Mem: 1},
+			vmUsing:           api.Resources{VCPU: 250, Mem: 1 * slotSize},
+			schedulerApproved: api.Resources{VCPU: 250, Mem: 1 * slotSize},
 			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
 			deniedDownscale:   nil,
 
-			expected: api.Resources{VCPU: 500, Mem: 2},
+			expected: api.Resources{VCPU: 500, Mem: 2 * slotSize},
 			warnings: nil,
 		},
 		{
@@ -52,13 +52,13 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				LoadAverage5Min:  0.0,
 				MemoryUsageBytes: 0.0,
 			},
-			vmUsing:           api.Resources{VCPU: 250, Mem: 2},
-			schedulerApproved: api.Resources{VCPU: 250, Mem: 2},
+			vmUsing:           api.Resources{VCPU: 250, Mem: 2 * slotSize},
+			schedulerApproved: api.Resources{VCPU: 250, Mem: 2 * slotSize},
 			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
-			deniedDownscale:   &api.Resources{VCPU: 250, Mem: 1},
+			deniedDownscale:   &api.Resources{VCPU: 250, Mem: 1 * slotSize},
 
 			// need to scale up because vmUsing is mismatched and otherwise we'd be scaling down.
-			expected: api.Resources{VCPU: 500, Mem: 2},
+			expected: api.Resources{VCPU: 500, Mem: 2 * slotSize},
 			warnings: nil,
 		},
 		{
@@ -69,12 +69,12 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				LoadAverage5Min:  0.0,
 				MemoryUsageBytes: 0.0,
 			},
-			vmUsing:           api.Resources{VCPU: 1000, Mem: 5}, // note: mem greater than maximum. It can happen when scaling bounds change
-			schedulerApproved: api.Resources{VCPU: 1000, Mem: 5}, // unused
+			vmUsing:           api.Resources{VCPU: 1000, Mem: 5 * slotSize}, // note: mem greater than maximum. It can happen when scaling bounds change
+			schedulerApproved: api.Resources{VCPU: 1000, Mem: 5 * slotSize}, // unused
 			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
-			deniedDownscale:   &api.Resources{VCPU: 1000, Mem: 4},
+			deniedDownscale:   &api.Resources{VCPU: 1000, Mem: 4 * slotSize},
 
-			expected: api.Resources{VCPU: 1000, Mem: 5},
+			expected: api.Resources{VCPU: 1000, Mem: 5 * slotSize},
 			warnings: []string{
 				"Can't decrease desired resources to within VM maximum because of vm-monitor previously denied downscale request",
 			},
@@ -94,9 +94,9 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					Max: 1000,
 				},
 				Mem: api.VmMemInfo{
-					SlotSize: resource.NewQuantity(1<<30 /* 1 Gi */, resource.BinarySI), // unused, doesn't actually matter.
+					SlotSize: slotSize,
 					Min:      1,
-					Use:      c.vmUsing.Mem,
+					Use:      uint16(c.vmUsing.Mem / slotSize),
 					Max:      4,
 				},
 				// remaining fields are also unused:
@@ -105,7 +105,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				ScalingEnabled: true,
 			},
 			core.Config{
-				ComputeUnit: api.Resources{VCPU: 250, Mem: 1},
+				ComputeUnit: api.Resources{VCPU: 250, Mem: 1 * slotSize},
 				DefaultScalingConfig: api.ScalingConfig{
 					LoadAverageFractionTarget: 0.5,
 					MemoryUsageFractionTarget: 0.5,
@@ -165,12 +165,12 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 	}
 }
 
-var DefaultComputeUnit = api.Resources{VCPU: 250, Mem: 1}
+var DefaultComputeUnit = api.Resources{VCPU: 250, Mem: 1 << 30 /* 1 Gi */}
 
 var DefaultInitialStateConfig = helpers.InitialStateConfig{
 	VM: helpers.InitialVmInfoConfig{
 		ComputeUnit:    DefaultComputeUnit,
-		MemorySlotSize: resource.MustParse("1Gi"),
+		MemorySlotSize: 1 << 30, /* 1 Gi */
 
 		MinCU: 1,
 		MaxCU: 4,

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 
 	"golang.org/x/exp/slices"
@@ -27,14 +26,6 @@ type Config struct {
 
 	// NodeConfig defines our policies around node resources and scoring
 	NodeConfig nodeConfig `json:"nodeConfig"`
-	// MemSlotSize is the smallest unit of memory that the scheduler plugin will reserve for a VM,
-	// and is defined globally.
-	//
-	// Any VM with a MemorySlotSize that does not match this value will be rejected.
-	//
-	// This value cannot be increased at runtime, and configurations that attempt to do so will be
-	// rejected.
-	MemSlotSize resource.Quantity `json:"memBlockSize"`
 
 	// SchedulerName informs the scheduler of its name, so that it can identify pods that a previous
 	// version handled.
@@ -130,18 +121,12 @@ func (c *Config) migrationEnabled() bool {
 
 // if the returned error is not nil, the string is a JSON path to the invalid value
 func (c *Config) validate() (string, error) {
-	if path, err := c.NodeConfig.validate(); err != nil {
-		return fmt.Sprintf("nodeConfig.%s", path), err
-	}
-
 	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
 		return "computeUnit", err
 	}
 
-	if c.MemSlotSize.Value() <= 0 {
-		return "memBlockSize", errors.New("value must be > 0")
-	} else if c.MemSlotSize.Value() <= math.MaxInt64/1000 && c.MemSlotSize.MilliValue()%1000 != 0 {
-		return "memBlockSize", errors.New("value cannot have milli-precision")
+	if path, err := c.NodeConfig.validate(); err != nil {
+		return fmt.Sprintf("nodeConfig.%s", path), err
 	}
 
 	if c.SchedulerName == "" {
@@ -226,10 +211,8 @@ func (c *Config) ignoredNamespace(namespace string) bool {
 	return slices.Contains(c.IgnoreNamespaces, namespace)
 }
 
-func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[vmapi.MilliCPU], margin *resource.Quantity) {
+func (c *nodeConfig) vCpuLimits(total *resource.Quantity) nodeResourceState[vmapi.MilliCPU] {
 	totalMilli := total.MilliValue()
-
-	margin = resource.NewMilliQuantity(0, total.Format)
 
 	return nodeResourceState[vmapi.MilliCPU]{
 		Total:                vmapi.MilliCPU(totalMilli),
@@ -238,34 +221,18 @@ func (c *nodeConfig) vCpuLimits(total *resource.Quantity) (_ nodeResourceState[v
 		Buffer:               0,
 		CapacityPressure:     0,
 		PressureAccountedFor: 0,
-	}, margin
+	}
 }
 
-func (c *nodeConfig) memoryLimits(
-	total *resource.Quantity,
-	slotSize *resource.Quantity,
-) (_ nodeResourceState[uint16], margin *resource.Quantity, _ error) {
-	if slotSize.Cmp(*total) == 1 /* if slotSize > total */ {
-		err := fmt.Errorf("slotSize %v greater than node total %v", slotSize, total)
-		return nodeResourceState[uint16]{}, nil, err
-	}
+func (c *nodeConfig) memoryLimits(total *resource.Quantity) nodeResourceState[api.Bytes] {
+	totalBytes := total.Value()
 
-	totalSlots := total.Value() / slotSize.Value()
-	if totalSlots > int64(math.MaxUint16) {
-		err := fmt.Errorf("too many memory slots (%d > maximum uint16)", totalSlots)
-		return nodeResourceState[uint16]{}, nil, err
-	}
-
-	unreservable := total.Value() - slotSize.Value()*totalSlots
-
-	margin = resource.NewQuantity(unreservable, total.Format)
-
-	return nodeResourceState[uint16]{
-		Total:                uint16(totalSlots),
-		Watermark:            uint16(c.Memory.Watermark * float32(totalSlots)),
+	return nodeResourceState[api.Bytes]{
+		Total:                api.Bytes(totalBytes),
+		Watermark:            api.Bytes(c.Memory.Watermark * float32(totalBytes)),
 		Reserved:             0,
 		Buffer:               0,
 		CapacityPressure:     0,
 		PressureAccountedFor: 0,
-	}, margin, nil
+	}
 }

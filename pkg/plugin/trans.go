@@ -16,8 +16,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/constraints"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -122,8 +120,10 @@ func (r resourceTransitioner[T]) handleLastPermit(lastPermit T) (verdict string)
 // handleRequested updates r.pod and r.node with changes to match the requested resources, within
 // what's possible given the remaining resources.
 //
+// Any permitted increases are required to be a multiple of factor.
+//
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
-func (r resourceTransitioner[T]) handleRequested(requested T, startingMigration bool, onlyThousands bool) (verdict string) {
+func (r resourceTransitioner[T]) handleRequested(requested T, startingMigration bool, factor T) (verdict string) {
 	oldState := r.snapshotState()
 
 	totalReservable := r.node.Total
@@ -200,13 +200,9 @@ func (r resourceTransitioner[T]) handleRequested(requested T, startingMigration 
 		// Please think carefully before changing this.
 
 		increase := requested - r.pod.Reserved
-		// Increases are bounded by what's left in the node
-		maxIncrease := remainingReservable
-		// if only in thousands, round down maxIncrease to nearest multiple of 1000
-		if onlyThousands {
-			thousand := T(100) * 10 // avoid compiler complaining about 1000 > maximum int8
-			maxIncrease = (maxIncrease / thousand) * thousand
-		}
+		// Increases are bounded by what's left in the node, rounded down to the nearest multiple of
+		// the factor.
+		maxIncrease := (remainingReservable / factor) * factor
 		if increase > maxIncrease /* increases are bound by what's left in the node */ {
 			r.pod.CapacityPressure = increase - maxIncrease
 			// adjust node pressure accordingly. We can have old < new or new > old, so we shouldn't
@@ -447,36 +443,4 @@ func handleUpdatedLimits[T constraints.Unsigned](
 	pod.Max = newMax
 
 	return fmt.Sprintf("updated min %d -> %d, max %d -> %d%s", oldMin, newMin, oldMax, newMax, bufferVerdict)
-}
-
-// handleDeletedPod is kind of like handleDeleted, except that it returns both verdicts side by
-// side instead of being generic over the resource
-func handleDeletedPod(
-	node *nodeState,
-	pod podOtherResourceState,
-	memSlotSize *resource.Quantity,
-) (cpuVerdict string, memVerdict string) {
-
-	oldRes := node.otherResources
-	newRes := node.otherResources.subPod(memSlotSize, pod)
-	node.otherResources = newRes
-
-	oldNodeCpuReserved := node.vCPU.Reserved
-	oldNodeMemReserved := node.memSlots.Reserved
-
-	node.vCPU.Reserved = node.vCPU.Reserved - oldRes.ReservedCPU + newRes.ReservedCPU
-	node.memSlots.Reserved = node.memSlots.Reserved - oldRes.ReservedMemSlots + newRes.ReservedMemSlots
-
-	cpuVerdict = fmt.Sprintf(
-		"pod had %v (raw), node otherPods (%v -> %v raw, %v margin, %d -> %d rounded), node reserved %d -> %d",
-		&pod.RawCPU, &oldRes.RawCPU, &newRes.RawCPU, newRes.MarginCPU, oldRes.ReservedCPU, newRes.ReservedCPU,
-		oldNodeCpuReserved, node.vCPU.Reserved,
-	)
-	memVerdict = fmt.Sprintf(
-		"pod had %v (raw), node otherPods (%v -> %v raw, %v margin, %d -> %d slots), node reserved %d -> %d slots",
-		&pod.RawMemory, &oldRes.RawMemory, &newRes.RawMemory, newRes.MarginMemory, oldRes.ReservedMemSlots, newRes.ReservedMemSlots,
-		oldNodeMemReserved, node.memSlots.Reserved,
-	)
-
-	return
 }

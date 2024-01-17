@@ -58,32 +58,35 @@ type VmCpuInfo struct {
 }
 
 type VmMemInfo struct {
+	// Min is the minimum number of memory slots available
 	Min uint16 `json:"min"`
+	// Max is the maximum number of memory slots available
 	Max uint16 `json:"max"`
+	// Use is the number of memory slots currently plugged in the VM
 	Use uint16 `json:"use"`
 
-	SlotSize *resource.Quantity `json:"slotSize"`
+	SlotSize Bytes `json:"slotSize"`
 }
 
 // Using returns the Resources that this VmInfo says the VM is using
 func (vm VmInfo) Using() Resources {
 	return Resources{
 		VCPU: vm.Cpu.Use,
-		Mem:  vm.Mem.Use,
+		Mem:  vm.Mem.SlotSize * Bytes(vm.Mem.Use),
 	}
 }
 
 // SetUsing sets the values of vm.{Cpu,Mem}.Use to those provided by r
 func (vm *VmInfo) SetUsing(r Resources) {
 	vm.Cpu.Use = r.VCPU
-	vm.Mem.Use = r.Mem
+	vm.Mem.Use = uint16(r.Mem / vm.Mem.SlotSize)
 }
 
 // Min returns the Resources representing the minimum amount this VmInfo says the VM must reserve
 func (vm VmInfo) Min() Resources {
 	return Resources{
 		VCPU: vm.Cpu.Min,
-		Mem:  vm.Mem.Min,
+		Mem:  vm.Mem.SlotSize * Bytes(vm.Mem.Min),
 	}
 }
 
@@ -91,7 +94,7 @@ func (vm VmInfo) Min() Resources {
 func (vm VmInfo) Max() Resources {
 	return Resources{
 		VCPU: vm.Cpu.Max,
-		Mem:  vm.Mem.Max,
+		Mem:  vm.Mem.SlotSize * Bytes(vm.Mem.Max),
 	}
 }
 
@@ -127,7 +130,6 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 	scalingEnabled := HasAutoscalingEnabled(vm)
 	alwaysMigrate := HasAlwaysMigrateLabel(vm)
 
-	slotSize := vm.Spec.Guest.MemorySlotSize // explicitly copy slot size so we aren't keeping the VM object around
 	info := VmInfo{
 		Name:      vm.Name,
 		Namespace: vm.Namespace,
@@ -140,7 +142,7 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
 			Max:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Max, ".spec.guest.memorySlots.max")),
 			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
-			SlotSize: &slotSize,
+			SlotSize: BytesFromResourceQuantity(vm.Spec.Guest.MemorySlotSize),
 		},
 		ScalingConfig:  nil, // set below, maybe
 		AlwaysMigrate:  alwaysMigrate,
@@ -157,7 +159,7 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 
-		if err := bounds.Validate(info.Mem.SlotSize); err != nil {
+		if err := bounds.Validate(&vm.Spec.Guest.MemorySlotSize); err != nil {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
@@ -222,8 +224,8 @@ func (vm *VmInfo) applyBounds(b ScalingBounds) {
 
 	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
 	// (2^16-1) * info.Mem.SlotSize.Value().
-	vm.Mem.Min = uint16(b.Min.Mem.Value() / vm.Mem.SlotSize.Value())
-	vm.Mem.Max = uint16(b.Max.Mem.Value() / vm.Mem.SlotSize.Value())
+	vm.Mem.Min = uint16(BytesFromResourceQuantity(b.Min.Mem) / vm.Mem.SlotSize)
+	vm.Mem.Max = uint16(BytesFromResourceQuantity(b.Max.Mem) / vm.Mem.SlotSize)
 }
 
 // ScalingBounds is the type that we deserialize from the "autoscaling.neon.tech/bounds" annotation

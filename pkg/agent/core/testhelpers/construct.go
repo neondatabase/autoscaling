@@ -1,11 +1,10 @@
 package testhelpers
 
 import (
+	"fmt"
 	"testing"
 
 	"go.uber.org/zap"
-
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
@@ -14,7 +13,7 @@ import (
 
 type InitialVmInfoConfig struct {
 	ComputeUnit    api.Resources
-	MemorySlotSize resource.Quantity
+	MemorySlotSize api.Bytes
 
 	MinCU uint16
 	MaxCU uint16
@@ -59,6 +58,14 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 		o.modifyVmInfoConfig(&config)
 	}
 
+	if config.ComputeUnit.Mem%config.MemorySlotSize != 0 {
+		panic(fmt.Errorf(
+			"compute unit is not divisible by memory slot size: %v is not divisible by %v",
+			config.ComputeUnit.Mem,
+			config.MemorySlotSize,
+		))
+	}
+
 	vm := api.VmInfo{
 		Name:      "test",
 		Namespace: "test",
@@ -68,10 +75,10 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 			Max: vmapi.MilliCPU(config.MaxCU) * config.ComputeUnit.VCPU,
 		},
 		Mem: api.VmMemInfo{
-			SlotSize: &config.MemorySlotSize,
-			Min:      config.MinCU * config.ComputeUnit.Mem,
-			Use:      config.MinCU * config.ComputeUnit.Mem,
-			Max:      config.MaxCU * config.ComputeUnit.Mem,
+			SlotSize: config.MemorySlotSize,
+			Min:      config.MinCU * uint16(config.ComputeUnit.Mem/config.MemorySlotSize),
+			Use:      config.MinCU * uint16(config.ComputeUnit.Mem/config.MemorySlotSize),
+			Max:      config.MaxCU * uint16(config.ComputeUnit.Mem/config.MemorySlotSize),
 		},
 		ScalingConfig:  nil,
 		AlwaysMigrate:  false,
