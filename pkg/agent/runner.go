@@ -190,8 +190,8 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	execLogger := logger.Named("exec")
 
-	// Add a small random amount to core.Config.PluginRequestTick so that periodic requests tend to
-	// become distribted randomly over time.
+	// Subtract a small random amount from core.Config.PluginRequestTick so that periodic requests
+	// tend to become distribted randomly over time.
 	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
 
 	coreExecLogger := execLogger.Named("core")
@@ -201,7 +201,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			ComputeUnit:                        r.global.config.Scaling.ComputeUnit,
 			DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
 			NeonVMRetryWait:                    time.Second * time.Duration(r.global.config.Scaling.RetryFailedRequestSeconds),
-			PluginRequestTick:                  time.Second*time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds) + pluginRequestJitter,
+			PluginRequestTick:                  time.Second*time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds) - pluginRequestJitter,
 			PluginRetryWait:                    time.Second * time.Duration(r.global.config.Scheduler.RetryFailedRequestSeconds),
 			PluginDeniedRetryWait:              time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
 			MonitorDeniedDownscaleCooldown:     time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
