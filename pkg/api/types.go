@@ -76,6 +76,7 @@ const (
 	// Changes from v3.0:
 	//
 	// * Memory quantities now use "number of bytes" instead of "number of memory slots"
+	// * Adds AgentRequest.ComputeUnit
 	//
 	// Currently the latest version.
 	PluginProtoV4_0
@@ -138,6 +139,14 @@ func (v PluginProtoVersion) PluginSendsComputeUnit() bool {
 	return v < PluginProtoV3_0
 }
 
+// AgentSendsComputeUnit returns whether this version of the protocol expects the autoscaler-agent
+// to send the value of its configured Compute Unit in its AgentRequest.
+//
+// This is true for version v4.0 and greater.
+func (v PluginProtoVersion) AgentSendsComputeUnit() bool {
+	return v >= PluginProtoV4_0
+}
+
 // RepresentsMemoryAsBytes returns whether this version of the protocol uses byte quantities to
 // refer to memory amounts, rather than a number of memory slots.
 //
@@ -156,6 +165,8 @@ type AgentRequest struct {
 	ProtoVersion PluginProtoVersion `json:"protoVersion"`
 	// Pod is the namespaced name of the pod making the request
 	Pod util.NamespacedName `json:"pod"`
+	// ComputeUnit gives the value of the agent's configured compute unit to use for the VM.
+	ComputeUnit *Resources `json:"computeUnit"`
 	// Resources gives a requested or notified change in resources allocated to the VM.
 	//
 	// The requested amount MAY be equal to the current amount, in which case it serves as a
