@@ -114,6 +114,7 @@ type VirtualMachineSpec struct {
 
 	// Enable SSH on the VM. It works only if the VM image is built using VM Builder that
 	// has SSH support (TODO: mention VM Builder version).
+	// +kubebuilder:default:=false
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
 }

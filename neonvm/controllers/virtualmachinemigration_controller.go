@@ -218,10 +218,8 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		targetRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: migration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
-			enableSSH := false
-			if vm.Spec.EnableSSH != nil && *vm.Spec.EnableSSH {
-				enableSSH = true
-			}
+			// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
+			enableSSH := *vm.Spec.EnableSSH
 			var sshSecret *corev1.Secret
 			if enableSSH {
 				// We require the SSH secret to exist because we cannot unmount and

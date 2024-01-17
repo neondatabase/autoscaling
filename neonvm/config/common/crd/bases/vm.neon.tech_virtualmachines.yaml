@@ -1075,6 +1075,7 @@ spec:
                 description: Use KVM acceleation
                 type: boolean
               enableSSH:
+                default: false
                 description: 'Enable SSH on the VM. It works only if the VM image
                   is built using VM Builder that has SSH support (TODO: mention VM
                   Builder version).'

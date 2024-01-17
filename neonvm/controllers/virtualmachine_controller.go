@@ -324,10 +324,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		meta.SetStatusCondition(&virtualmachine.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 	}
 
-	enableSSH := false
-	if virtualmachine.Spec.EnableSSH != nil && *virtualmachine.Spec.EnableSSH {
-		enableSSH = true
-	}
+	// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
+	enableSSH := *virtualmachine.Spec.EnableSSH
 
 	// Generate ssh secret name
 	if enableSSH && len(virtualmachine.Status.SSHSecretName) == 0 {
