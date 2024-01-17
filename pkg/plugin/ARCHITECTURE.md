@@ -110,18 +110,15 @@ resource-related types are:
 
 ```go
 type nodeState struct {
-    pods      map[util.NamespacedName]*podState
-    otherPods map[util.NamespacedName]*otherPodState
+    pods map[util.NamespacedName]*podState
 
-    vCPU     nodeResourceState[vmapi.MilliCPU]
-    memSlots nodeResourceState[uint16]
-
-    otherResources nodeOtherResourceState
+    cpu nodeResourceState[vmapi.MilliCPU]
+    mem nodeResourceState[api.Bytes]
 
     // -- other fields omitted --
 }
 
-// Total resources from *all* pods - both VM and non-VM
+// Total resources from all pods - both VM and non-VM
 type nodeResourceState[T any] struct {
     Total     T
     Watermark T
@@ -132,68 +129,35 @@ type nodeResourceState[T any] struct {
     PressureAccountedFor T
 }
 
-// Total resources from non-VM pods
-type nodeOtherResourceState struct {
-	RawCPU    resource.Quantity
-	RawMemory resource.Quantity
-
-	ReservedCPU      vmapi.MilliCPU
-	ReservedMemSlots uint16
-
-    MarginCPU    *resource.Quantity
-    MarginMemory *resource.Quantity
-}
-
 type podState struct {
     name util.NamespacedName
 
-    vCPU     podResourceState[vmapi.MilliCPU]
-    memSlots podResourceState[uint16]
-
     // -- other fields omitted --
+    cpu podResourceState[vmapi.MilliCPU]
+    mem podResourceState[api.Bytes]
 }
 
 // Resources for a VM pod
 type podResourceState[T any] struct {
-    Reserved         T
-    Buffer           T
-    CapacityPressure T
+    Reserved T
+    Buffer   T
 
+    CapacityPressure T
+    
     Min T
     Max T
 }
-
-// Resources for a non-VM pod
-type podOtherResourceState struct {
-	rawCpu    resource.Quantity
-	rawMemory resource.Quantity
-}
 ```
 
-### Basics: `Reserved` and `Total`
+### Basics: `reserved` and `total`
 
 At a high-level, `nodeResourceState.Reserved` provides an upper bound on the amount of each resource
-that's currently allocated. `Total` is the total amount available, so `Reserved` is _almost always_
+that's currently allocated. `Total` is the total amount available, so, `Reserved` is _almost always_
 less than or equal to `Total`.
 
 During normal operations, we have a strict bound on resource usage in order to keep `Reserved ≤
 Total`, but it isn't feasible to guarantee that in _all_ circumstances. In particular, this
 condition can be temporarily violated [after startup](#startup-uncertainty-buffer).
-
-### Non-VM pods
-
-Let's briefly discuss handling non-VM pods. For a single non-VM pod, we store its CPU and memory
-limits in an associated `podOtherResourceState`. The `nodeOtherResourceState` tracks the sum of all
-non-VM pods' resource limits in `RawCPU` and `RawMemory`. It rounds `RawCPU` up to the next integer
-in `ReservedCPU` and `RawMemory` up to the next multiple of `config.MemSlotSize` in
-`ReservedMemSlots`.
-
-The values of `ReservedCPU` and `ReservedMemSlots` are incorporated into the `nodeState`'s
-`vCPU.Reserved` and `memSlots.Reserved`.
-
-This setup means that we don't need to over-represent the resources used by each non-VM pod (like we
-would if each pod's resources were in integer CPU and memory slots), while still guaranteeing that
-we're appropriately factoring in their total usage.
 
 ### Pressure and watermarks
 

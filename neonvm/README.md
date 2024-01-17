@@ -45,6 +45,14 @@ vm-debian   1      1Gi      vm-debian-8rxp7   Running   3m13s
 
 ### Go inside virtual machine
 
+#### SSH
+
+```sh
+kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- ssh guest-vm
+```
+
+#### Pseudoterminal
+
 ```console
 kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- screen /dev/pts/0
 
@@ -74,6 +82,15 @@ root@neonvm:~# curl -k https://kubernetes/version
 kubectl delete neonvm vm-debian
 ```
 
+### Clock synchronization
+
+We synchronize VM clocks to host using kvm_ptp. We enable PTP clock (and the KVM related directive) on the kernel and use chrony on the VM as a server. 
+You can checkout chrony server log at `/var/log/chrony/chrony.log` and use chrony client as below:
+
+```sh
+/neonvm/bin/chronyc tracking
+/neonvm/bin/chronyc sources
+```
 
 ## Local development
 
@@ -140,7 +157,15 @@ VM_POD=$(kubectl get neonvm example -ojsonpath='{.status.podName}')
 kubectl logs $VM_POD
 ```
 
-#### 4. Connect to console inside VM
+#### 4. Connect to the VM
+
+##### SSH
+
+```sh
+kubectl exec -it $VM_POD -- ssh guest-vm
+```
+
+##### Console
 
 ```sh
 kubectl exec -it $VM_POD -- screen /dev/pts/0

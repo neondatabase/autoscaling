@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -33,27 +32,21 @@ type pluginState struct {
 
 	ongoingMigrationDeletions map[util.NamespacedName]int
 
-	podMap  map[util.NamespacedName]*podState
-	nodeMap map[string]*nodeState
+	pods  map[util.NamespacedName]*podState
+	nodes map[string]*nodeState
 
-	// otherPods stores information about non-VM pods
-	otherPods map[util.NamespacedName]*otherPodState
-
-	// maxTotalCPU stores the maximum value of any node's vCPU.Total, so that we can appropriately
-	// scale our scoring
-	maxTotalCPU vmapi.MilliCPU
-	// maxTotalMemSlots is the same as maxTotalReservableCPU, but for memory slots instead of CPU
-	maxTotalMemSlots uint16
+	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
+	// can appropriately scale our scoring
+	maxTotalReservableCPU vmapi.MilliCPU
+	// maxTotalReservableMem is the same as maxTotalReservableCPU, but for bytes of memory instead
+	// of CPU
+	maxTotalReservableMem api.Bytes
 	// conf stores the current configuration, and is nil if the configuration has not yet been set
 	//
 	// Proper initialization of the plugin guarantees conf is not nil.
 	//
 	// conf MAY be accessed without holding the lock; it MUST not be modified.
 	conf *Config
-}
-
-func (s *pluginState) memSlotSizeBytes() uint64 {
-	return uint64(s.conf.MemSlotSize.Value())
 }
 
 // nodeState is the information that we track for a particular
@@ -67,21 +60,16 @@ type nodeState struct {
 	// availabilityZone, if present, gives the availability zone that this node is in.
 	availabilityZone string
 
-	// vCPU tracks the state of vCPU resources -- what's available and how
-	vCPU nodeResourceState[vmapi.MilliCPU]
-	// memSlots tracks the state of memory slots -- what's available and how
-	memSlots nodeResourceState[uint16]
+	// cpu tracks the state of vCPU resources -- what's available and how
+	cpu nodeResourceState[vmapi.MilliCPU]
+	// mem tracks the state of bytes of memory -- what's available and how
+	mem nodeResourceState[api.Bytes]
 
 	// pods tracks all the VM pods assigned to this node
 	//
 	// This includes both bound pods (i.e., pods fully committed to the node) and reserved pods
 	// (still may be unreserved)
 	pods map[util.NamespacedName]*podState
-
-	// otherPods are the non-VM pods that we're also tracking in this node
-	otherPods map[util.NamespacedName]*otherPodState
-	// otherResources is the sum resource usage associated with the non-VM pods
-	otherResources nodeOtherResourceState
 
 	// mq is the priority queue tracking which pods should be chosen first for migration
 	mq migrationQueue
@@ -103,11 +91,9 @@ func (s *nodeResourceState[T]) fields() []nodeResourceStateField[T] {
 	}
 }
 
-func (s *nodeState) updateMetrics(metrics PromMetrics, memSlotSizeBytes uint64) {
-	s.vCPU.updateMetrics(metrics.nodeCPUResources, s.name, s.nodeGroup, s.availabilityZone, vmapi.MilliCPU.AsFloat64)
-	s.memSlots.updateMetrics(metrics.nodeMemResources, s.name, s.nodeGroup, s.availabilityZone, func(memSlots uint16) float64 {
-		return float64(uint64(memSlots) * memSlotSizeBytes) // convert memSlots -> bytes
-	})
+func (s *nodeState) updateMetrics(metrics PromMetrics) {
+	s.cpu.updateMetrics(metrics.nodeCPUResources, s.name, s.nodeGroup, s.availabilityZone, vmapi.MilliCPU.AsFloat64)
+	s.mem.updateMetrics(metrics.nodeMemResources, s.name, s.nodeGroup, s.availabilityZone, api.Bytes.AsFloat64)
 }
 
 func (s *nodeResourceState[T]) updateMetrics(
@@ -124,7 +110,7 @@ func (s *nodeResourceState[T]) updateMetrics(
 
 func (s *nodeState) removeMetrics(metrics PromMetrics) {
 	gauges := []*prometheus.GaugeVec{metrics.nodeCPUResources, metrics.nodeMemResources}
-	fields := s.vCPU.fields() // No particular reason to be CPU, we just want the valueNames, and CPU vs memory valueNames are the same
+	fields := s.cpu.fields() // No particular reason to be CPU, we just want the valueNames, and CPU vs memory valueNames are the same
 
 	for _, g := range gauges {
 		for _, f := range fields {
@@ -172,47 +158,38 @@ type nodeResourceState[T any] struct {
 	PressureAccountedFor T `json:"pressureAccountedFor"`
 }
 
-// nodeOtherResourceState are total resources associated with the non-VM pods in a node
-//
-// The resources are basically broken up into two groups: the "raw" amounts (which have a finer
-// resolution than what we track for VMs) and the "reserved" amounts. The reserved amounts are
-// rounded up to the next unit that
-type nodeOtherResourceState struct {
-	RawCPU    resource.Quantity `json:"rawCPU"`
-	RawMemory resource.Quantity `json:"rawMemory"`
-
-	ReservedCPU      vmapi.MilliCPU `json:"reservedCPU"`
-	ReservedMemSlots uint16         `json:"reservedMemSlots"`
-
-	// MarginCPU and MarginMemory track the amount of other resources we can get "for free" because
-	// they were left out when rounding the Total usage to fit in integer units of CPUs or memory
-	// slots
-	//
-	// These values are both only changed by configuration changes.
-	MarginCPU    *resource.Quantity `json:"marginCPU"`
-	MarginMemory *resource.Quantity `json:"marginMemory"`
-}
-
-// podState is the information we track for an individual
+// podState is the information we track for an individual pod, which may or may not be associated
+// with a VM
 type podState struct {
 	// name is the namespace'd name of the pod
 	//
 	// name will not change after initialization, so it can be accessed without holding a lock.
 	name util.NamespacedName
 
-	// vmName is the name of the VM, as given by the 'vm.neon.tech/name' label (and name.Namespace)
-	vmName util.NamespacedName
+	// node provides information about the node that this pod is bound to or reserved onto.
+	node *nodeState
+
+	// cpu is the current state of this pod's vCPU utilization and pressure
+	cpu podResourceState[vmapi.MilliCPU]
+	// memBytes is the current state of this pod's memory utilization and pressure
+	mem podResourceState[api.Bytes]
+
+	// vm stores the extra information associated with VMs
+	vm *vmPodState
+}
+
+type vmPodState struct {
+	// name is the name of the VM, as given by the owner reference for the VM or VM migration that
+	// owns this pod
+	name util.NamespacedName
+
+	// memSlotSize stores the value of the VM's .Spec.Guest.MemorySlotSize, for compatibility with
+	// earlier versions of the agent<->plugin protocol.
+	memSlotSize api.Bytes
 
 	// testingOnlyAlwaysMigrate is a test-only debugging flag that, if present in the pod's labels,
 	// will always prompt it to mgirate, regardless of whether the VM actually *needs* to.
 	testingOnlyAlwaysMigrate bool
-
-	// node provides information about the node that this pod is bound to or reserved onto.
-	node *nodeState
-	// vCPU is the current state of this pod's vCPU utilization and pressure
-	vCPU podResourceState[vmapi.MilliCPU]
-	// memSlots is the current state of this pod's memory slot(s) utilization and pressure
-	memSlots podResourceState[uint16]
 
 	// mostRecentComputeUnit stores the "compute unit" that this pod's autoscaler-agent most
 	// recently observed (and so, what future AgentRequests are expected to abide by)
@@ -231,7 +208,7 @@ type podState struct {
 	migrationState *podMigrationState
 }
 
-// podMigrationState tracks the information about an ongoing pod's migration
+// podMigrationState tracks the information about an ongoing VM pod's migration
 type podMigrationState struct {
 	// name gives the name of the VirtualMachineMigration that this pod is involved in
 	name util.NamespacedName
@@ -259,141 +236,39 @@ type podResourceState[T any] struct {
 	Max T `json:"max"`
 }
 
-// otherPodState tracks a little bit of information for the non-VM pods we're handling
-type otherPodState struct {
-	name      util.NamespacedName
-	node      *nodeState
-	resources podOtherResourceState
-}
-
-// podOtherResourceState is the resources tracked for a non-VM pod
-//
-// This is *like* nodeOtherResourceState, but we don't track reserved amounts because they only
-// exist at the high-level "total resource usage" scope
-type podOtherResourceState struct {
-	RawCPU    resource.Quantity `json:"rawCPU"`
-	RawMemory resource.Quantity `json:"rawMemory"`
-}
-
-// addPod is a convenience method that returns the new resource state if we were to add the given
-// pod resources
-//
-// This is used both to determine if there's enough room for the pod *and* to keep around the
-// before and after so that we can use it for logging.
-func (r nodeOtherResourceState) addPod(
-	memSlotSize *resource.Quantity,
-	p podOtherResourceState,
-) nodeOtherResourceState {
-	newState := nodeOtherResourceState{
-		RawCPU:       r.RawCPU.DeepCopy(),
-		RawMemory:    r.RawMemory.DeepCopy(),
-		MarginCPU:    r.MarginCPU,
-		MarginMemory: r.MarginMemory,
-		// reserved amounts set by calculateReserved()
-		ReservedCPU:      0,
-		ReservedMemSlots: 0,
-	}
-
-	newState.RawCPU.Add(p.RawCPU)
-	newState.RawMemory.Add(p.RawMemory)
-
-	newState.calculateReserved(memSlotSize)
-
-	return newState
-}
-
-// subPod is a convenience method that returns the new resource state if we were to remove the given
-// pod resources
-//
-// This *also* happens to be what we use for calculations when actually removing a pod, because it
-// allows us to use both the before and after for logging.
-func (r nodeOtherResourceState) subPod(
-	memSlotSize *resource.Quantity,
-	p podOtherResourceState,
-) nodeOtherResourceState {
-	// Check we aren't underflowing.
-	//
-	// We're more worried about underflow than overflow because it should *generally* be pretty
-	// difficult to get overflow to occur (also because overflow would probably take a slow & steady
-	// leak to trigger, which is less useful than underflow.
-	if r.RawCPU.Cmp(p.RawCPU) == -1 {
-		panic(fmt.Errorf(
-			"underflow: cannot subtract %v pod CPU from %v node CPU",
-			&p.RawCPU, &r.RawCPU,
-		))
-	} else if r.RawMemory.Cmp(p.RawMemory) == -1 {
-		panic(fmt.Errorf(
-			"underflow: cannot subtract %v pod memory from %v node memory",
-			&p.RawMemory, &r.RawMemory,
-		))
-	}
-
-	newState := nodeOtherResourceState{
-		RawCPU:       r.RawCPU.DeepCopy(),
-		RawMemory:    r.RawMemory.DeepCopy(),
-		MarginCPU:    r.MarginCPU,
-		MarginMemory: r.MarginMemory,
-		// reserved amounts set by calculateReserved()
-		ReservedCPU:      0,
-		ReservedMemSlots: 0,
-	}
-
-	newState.RawCPU.Sub(p.RawCPU)
-	newState.RawMemory.Sub(p.RawMemory)
-
-	newState.calculateReserved(memSlotSize)
-
-	return newState
-}
-
-// calculateReserved sets the values of r.reservedCpu and r.reservedMemSlots based on the current
-// "raw" resource amounts and the memory slot size
-func (r *nodeOtherResourceState) calculateReserved(memSlotSize *resource.Quantity) {
-	// If rawCpu doesn't exceed the margin we have from rounding up System, set reserved = 0
-	if r.RawCPU.Cmp(*r.MarginCPU) <= 0 {
-		r.ReservedCPU = 0
+func (p *podState) kind() string {
+	if p.vm != nil {
+		return "VM"
 	} else {
-		// set cupCopy := r.rawCpu - r.marginCpu
-		cpuCopy := r.RawCPU.DeepCopy()
-		cpuCopy.Sub(*r.MarginCPU)
-		r.ReservedCPU = vmapi.MilliCPUFromResourceQuantity(cpuCopy)
+		return "non-VM"
 	}
+}
 
-	// If rawMemory doesn't exceed the margin ..., set reserved = 0
-	if r.RawMemory.Cmp(*r.MarginMemory) <= 0 {
-		r.ReservedMemSlots = 0
+func (p *podState) logFields() []zap.Field {
+	podName := zap.Object("pod", p.name)
+	if p.vm != nil {
+		vmName := zap.Object("virtualmachine", p.vm.name)
+		return []zap.Field{podName, vmName}
 	} else {
-		// set memoryCopy := r.rawMemory - r.marginMemory
-		memoryCopy := r.RawMemory.DeepCopy()
-		memoryCopy.Sub(*r.MarginMemory)
-
-		memSlotSizeExact := memSlotSize.Value()
-		// note: For integer arithmetic, (x + n-1) / n is equivalent to ceil(x/n)
-		newReservedMemSlots := (memoryCopy.Value() + memSlotSizeExact - 1) / memSlotSizeExact
-		if newReservedMemSlots > math.MaxUint16 {
-			panic(fmt.Errorf(
-				"new reserved mem slots overflows uint16 (%d > %d)", newReservedMemSlots, math.MaxUint16,
-			))
-		}
-		r.ReservedMemSlots = uint16(newReservedMemSlots)
+		return []zap.Field{podName}
 	}
 }
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
 func (s *nodeState) remainingReservableCPU() vmapi.MilliCPU {
-	return util.SaturatingSub(s.vCPU.Total, s.vCPU.Reserved)
+	return util.SaturatingSub(s.cpu.Total, s.cpu.Reserved)
 }
 
-// remainingReservableMemSlots returns the remaining number of memory slots that can be allocated to
+// remainingReservableMem returns the remaining number of bytes of memory that can be allocated to
 // VM pods
-func (s *nodeState) remainingReservableMemSlots() uint16 {
-	return util.SaturatingSub(s.memSlots.Total, s.memSlots.Reserved)
+func (s *nodeState) remainingReservableMem() api.Bytes {
+	return util.SaturatingSub(s.mem.Total, s.mem.Reserved)
 }
 
 // tooMuchPressure is used to signal whether the node should start migrating pods out in order to
 // relieve some of the pressure
 func (s *nodeState) tooMuchPressure(logger *zap.Logger) bool {
-	if s.vCPU.Reserved <= s.vCPU.Watermark && s.memSlots.Reserved < s.memSlots.Watermark {
+	if s.cpu.Reserved <= s.cpu.Watermark && s.mem.Reserved < s.mem.Watermark {
 		type okPair[T any] struct {
 			Reserved  T
 			Watermark T
@@ -401,8 +276,8 @@ func (s *nodeState) tooMuchPressure(logger *zap.Logger) bool {
 
 		logger.Debug(
 			"tooMuchPressure = false (clearly)",
-			zap.Any("vCPU", okPair[vmapi.MilliCPU]{Reserved: s.vCPU.Reserved, Watermark: s.vCPU.Watermark}),
-			zap.Any("memSlots", okPair[uint16]{Reserved: s.memSlots.Reserved, Watermark: s.memSlots.Watermark}),
+			zap.Any("cpu", okPair[vmapi.MilliCPU]{Reserved: s.cpu.Reserved, Watermark: s.cpu.Watermark}),
+			zap.Any("mem", okPair[api.Bytes]{Reserved: s.mem.Reserved, Watermark: s.mem.Watermark}),
 		)
 		return false
 	}
@@ -416,25 +291,25 @@ func (s *nodeState) tooMuchPressure(logger *zap.Logger) bool {
 	}
 
 	var cpu info[vmapi.MilliCPU]
-	var mem info[uint16]
+	var mem info[api.Bytes]
 
-	cpu.LogicalPressure = util.SaturatingSub(s.vCPU.Reserved, s.vCPU.Watermark)
-	mem.LogicalPressure = util.SaturatingSub(s.memSlots.Reserved, s.memSlots.Watermark)
+	cpu.LogicalPressure = util.SaturatingSub(s.cpu.Reserved, s.cpu.Watermark)
+	mem.LogicalPressure = util.SaturatingSub(s.mem.Reserved, s.mem.Watermark)
 
 	// Account for existing slack in the system, to counteract capacityPressure that hasn't been
 	// updated yet
-	cpu.LogicalSlack = s.vCPU.Buffer + util.SaturatingSub(s.vCPU.Watermark, s.vCPU.Reserved)
-	mem.LogicalSlack = s.memSlots.Buffer + util.SaturatingSub(s.memSlots.Watermark, s.memSlots.Reserved)
+	cpu.LogicalSlack = s.cpu.Buffer + util.SaturatingSub(s.cpu.Watermark, s.cpu.Reserved)
+	mem.LogicalSlack = s.mem.Buffer + util.SaturatingSub(s.mem.Watermark, s.mem.Reserved)
 
-	cpu.TooMuch = cpu.LogicalPressure+s.vCPU.CapacityPressure > s.vCPU.PressureAccountedFor+cpu.LogicalSlack
-	mem.TooMuch = mem.LogicalPressure+s.memSlots.CapacityPressure > s.memSlots.PressureAccountedFor+mem.LogicalSlack
+	cpu.TooMuch = cpu.LogicalPressure+s.cpu.CapacityPressure > s.cpu.PressureAccountedFor+cpu.LogicalSlack
+	mem.TooMuch = mem.LogicalPressure+s.mem.CapacityPressure > s.mem.PressureAccountedFor+mem.LogicalSlack
 
 	result := cpu.TooMuch || mem.TooMuch
 
 	logger.Debug(
 		fmt.Sprintf("tooMuchPressure = %v", result),
-		zap.Any("vCPU", cpu),
-		zap.Any("memSlots", mem),
+		zap.Any("cpu", cpu),
+		zap.Any("mem", mem),
 	)
 
 	return result
@@ -445,12 +320,12 @@ func (s *nodeState) tooMuchPressure(logger *zap.Logger) bool {
 //
 // A returned error indicates that the pod's resource usage has changed enough that we should try to
 // migrate something else first. The error provides justification for this.
-func (s *podState) checkOkToMigrate(oldMetrics api.Metrics) error {
+func (s *vmPodState) checkOkToMigrate(oldMetrics api.Metrics) error {
 	// TODO. Note: s.metrics may be nil.
 	return nil
 }
 
-func (s *podState) currentlyMigrating() bool {
+func (s *vmPodState) currentlyMigrating() bool {
 	return s.migrationState != nil
 }
 
@@ -467,7 +342,7 @@ func (s *pluginState) getOrFetchNodeState(
 ) (*nodeState, error) {
 	logger = logger.With(zap.String("node", nodeName))
 
-	if n, ok := s.nodeMap[nodeName]; ok {
+	if n, ok := s.nodes[nodeName]; ok {
 		logger.Debug("Using stored information for node")
 		return n, nil
 	}
@@ -529,7 +404,7 @@ func (s *pluginState) getOrFetchNodeState(
 
 		// It's possible that the node was already added. Don't double-process nodes if we don't have
 		// to.
-		if n, ok := s.nodeMap[nodeName]; ok {
+		if n, ok := s.nodes[nodeName]; ok {
 			logger.Warn("Local information for node became available while waiting on relist, using it instead")
 			return n, nil
 		}
@@ -541,16 +416,16 @@ func (s *pluginState) getOrFetchNodeState(
 	}
 
 	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
-	if n.vCPU.Total > s.maxTotalCPU {
-		s.maxTotalCPU = n.vCPU.Total
+	if n.cpu.Total > s.maxTotalReservableCPU {
+		s.maxTotalReservableCPU = n.cpu.Total
 	}
-	if n.memSlots.Total > s.maxTotalMemSlots {
-		s.maxTotalMemSlots = n.memSlots.Total
+	if n.mem.Total > s.maxTotalReservableMem {
+		s.maxTotalReservableMem = n.mem.Total
 	}
 
-	n.updateMetrics(metrics, s.memSlotSizeBytes())
+	n.updateMetrics(metrics)
 
-	s.nodeMap[nodeName] = n
+	s.nodes[nodeName] = n
 	return n, nil
 }
 
@@ -576,7 +451,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, errors.New("Node has no Allocatable or Capacity CPU limits")
 	}
 
-	vCPU, marginCpu := conf.NodeConfig.vCpuLimits(cpuQ)
+	cpu := conf.NodeConfig.vCpuLimits(cpuQ)
 
 	// memQ = "mem, as a K8s resource.Quantity"
 	// -A for allocatable, -C for capacity
@@ -592,10 +467,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		return nil, errors.New("Node has no Allocatable or Capacity Memory limits")
 	}
 
-	memSlots, marginMemory, err := conf.NodeConfig.memoryLimits(memQ, &conf.MemSlotSize)
-	if err != nil {
-		return nil, fmt.Errorf("Error calculating memory slot limits for node %s: %w", node.Name, err)
-	}
+	mem := conf.NodeConfig.memoryLimits(memQ)
 
 	var nodeGroup string
 	if conf.K8sNodeGroupLabel != "" {
@@ -619,50 +491,35 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 		name:             node.Name,
 		nodeGroup:        nodeGroup,
 		availabilityZone: availabilityZone,
-		vCPU:             vCPU,
-		memSlots:         memSlots,
+		cpu:              cpu,
+		mem:              mem,
 		pods:             make(map[util.NamespacedName]*podState),
-		otherPods:        make(map[util.NamespacedName]*otherPodState),
-		otherResources: nodeOtherResourceState{
-			RawCPU:           resource.Quantity{},
-			RawMemory:        resource.Quantity{},
-			ReservedCPU:      0,
-			ReservedMemSlots: 0,
-			MarginCPU:        marginCpu,
-			MarginMemory:     marginMemory,
-		},
-		mq: migrationQueue{},
+		mq:               migrationQueue{},
 	}
 
 	type resourceInfo[T any] struct {
 		Total     T
-		Raw       *resource.Quantity
-		Margin    *resource.Quantity
 		Watermark T
 	}
 
 	logger.Info(
 		"Built initial node state",
 		zap.Any("cpu", resourceInfo[vmapi.MilliCPU]{
-			Total:     n.vCPU.Total,
-			Raw:       cpuQ,
-			Margin:    n.otherResources.MarginCPU,
-			Watermark: n.vCPU.Watermark,
+			Total:     n.cpu.Total,
+			Watermark: n.cpu.Watermark,
 		}),
-		zap.Any("memSlots", resourceInfo[uint16]{
-			Total:     n.memSlots.Total,
-			Raw:       memQ,
-			Margin:    n.otherResources.MarginMemory,
-			Watermark: n.memSlots.Watermark,
+		zap.Any("memSlots", resourceInfo[api.Bytes]{
+			Total:     n.mem.Total,
+			Watermark: n.mem.Watermark,
 		}),
 	)
 
 	return n, nil
 }
 
-func extractPodOtherPodResourceState(pod *corev1.Pod) podOtherResourceState {
-	var cpu resource.Quantity
-	var mem resource.Quantity
+func extractPodResources(pod *corev1.Pod) api.Resources {
+	var cpu vmapi.MilliCPU
+	var mem api.Bytes
 
 	for _, container := range pod.Spec.Containers {
 		// For each resource, add the requests, if they're provided. We use this because it matches
@@ -670,11 +527,11 @@ func extractPodOtherPodResourceState(pod *corev1.Pod) podOtherResourceState {
 		//
 		// NB: .Cpu() returns a pointer to a value equal to zero if the resource is not present. So
 		// we can just add it either way.
-		cpu.Add(*container.Resources.Requests.Cpu())
-		mem.Add(*container.Resources.Requests.Memory())
+		cpu += vmapi.MilliCPUFromResourceQuantity(*container.Resources.Requests.Cpu())
+		mem += api.BytesFromResourceQuantity(*container.Resources.Requests.Memory())
 	}
 
-	return podOtherResourceState{RawCPU: cpu, RawMemory: mem}
+	return api.Resources{VCPU: cpu, Mem: mem}
 }
 
 func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName string) {
@@ -688,7 +545,7 @@ func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName stri
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	node, ok := e.state.nodeMap[nodeName]
+	node, ok := e.state.nodes[nodeName]
 	if !ok {
 		logger.Warn("Cannot find node in nodeMap")
 	}
@@ -700,20 +557,15 @@ func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName stri
 	// For any pods still on the node, remove them from the global state:
 	for name, pod := range node.pods {
 		logger.Warn(
-			"Found VM pod still on node at time of deletion",
-			zap.Object("pod", name),
-			zap.Object("virtualmachine", pod.vmName),
+			fmt.Sprintf("Found %s pod still on node at time of deletion", pod.kind()),
+			pod.logFields()...,
 		)
-		delete(e.state.podMap, name)
-	}
-	for name := range node.otherPods {
-		logger.Warn("Found non-VM pod still on node at time of deletion", zap.Object("pod", name))
-		delete(e.state.otherPods, name)
+		delete(e.state.pods, name)
 	}
 
 	node.removeMetrics(e.metrics)
 
-	delete(e.state.nodeMap, nodeName)
+	delete(e.state.nodes, nodeName)
 	logger.Info("Deleted node")
 }
 
@@ -734,12 +586,12 @@ func (e *AutoscaleEnforcer) handlePodStarted(logger *zap.Logger, pod *corev1.Pod
 
 	logger.Info("Handling non-VM pod start event")
 
-	podResources := extractPodOtherPodResourceState(pod)
+	podResources := extractPodResources(pod)
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	if _, ok := e.state.otherPods[podName]; ok {
+	if _, ok := e.state.pods[podName]; ok {
 		logger.Info("Pod is already known") // will happen during startup
 		return
 	}
@@ -751,38 +603,40 @@ func (e *AutoscaleEnforcer) handlePodStarted(logger *zap.Logger, pod *corev1.Pod
 	}
 
 	// TODO: this is pretty similar to the Reserve method. Maybe we should join them into one.
-	oldNodeRes := node.otherResources
-	newNodeRes := node.otherResources.addPod(&e.state.conf.MemSlotSize, podResources)
-
-	addCPU := newNodeRes.ReservedCPU - oldNodeRes.ReservedCPU
-	addMem := newNodeRes.ReservedMemSlots - oldNodeRes.ReservedMemSlots
-
-	oldNodeCPUReserved := node.vCPU.Reserved
-	oldNodeMemReserved := node.memSlots.Reserved
-
-	node.otherResources = newNodeRes
-	node.vCPU.Reserved += addCPU
-	node.memSlots.Reserved += addMem
-
-	ps := &otherPodState{
-		name:      podName,
-		node:      node,
-		resources: podResources,
+	ps := &podState{
+		name: podName,
+		node: node,
+		cpu: podResourceState[vmapi.MilliCPU]{
+			Reserved:         podResources.VCPU,
+			Buffer:           0,
+			CapacityPressure: 0,
+			Min:              podResources.VCPU,
+			Max:              podResources.VCPU,
+		},
+		mem: podResourceState[api.Bytes]{
+			Reserved:         podResources.Mem,
+			Buffer:           0,
+			CapacityPressure: 0,
+			Min:              podResources.Mem,
+			Max:              podResources.Mem,
+		},
+		vm: nil,
 	}
-	node.otherPods[podName] = ps
-	e.state.otherPods[podName] = ps
+
+	newNodeReservedCPU := node.cpu.Reserved + ps.cpu.Reserved
+	newNodeReservedMem := node.mem.Reserved + ps.mem.Reserved
 
 	cpuVerdict := fmt.Sprintf(
-		"node reserved %d -> %d / %d, node other resources %d -> %d rounded (%v -> %v raw, %v margin)",
-		oldNodeCPUReserved, node.vCPU.Reserved, node.vCPU.Total, oldNodeRes.ReservedCPU, newNodeRes.ReservedCPU, &oldNodeRes.RawCPU, &newNodeRes.RawCPU, newNodeRes.MarginCPU,
+		"node reserved %v + %v -> %v of total %v",
+		node.cpu.Reserved, ps.cpu.Reserved, newNodeReservedCPU, node.cpu.Total,
 	)
 	memVerdict := fmt.Sprintf(
-		"node reserved %d -> %d / %d, node other resources %d -> %d slots (%v -> %v raw, %v margin)",
-		oldNodeMemReserved, node.memSlots.Reserved, node.memSlots.Total, oldNodeRes.ReservedMemSlots, newNodeRes.ReservedMemSlots, &oldNodeRes.RawMemory, &newNodeRes.RawMemory, newNodeRes.MarginMemory,
+		"node reserved %v + %v -> %v of total %v",
+		node.mem.Reserved, ps.mem.Reserved, newNodeReservedMem, node.mem.Total,
 	)
 
 	log := logger.Info
-	if node.vCPU.Reserved > node.vCPU.Total || node.memSlots.Reserved > node.memSlots.Total {
+	if node.cpu.Reserved > node.cpu.Total || node.mem.Reserved > node.mem.Total {
 		log = logger.Warn
 	}
 
@@ -794,7 +648,7 @@ func (e *AutoscaleEnforcer) handlePodStarted(logger *zap.Logger, pod *corev1.Pod
 		}),
 	)
 
-	node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+	node.updateMetrics(e.metrics)
 }
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
@@ -810,31 +664,35 @@ func (e *AutoscaleEnforcer) handleVMDeletion(logger *zap.Logger, podName util.Na
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	pod, ok := e.state.podMap[podName]
+	ps, ok := e.state.pods[podName]
 	if !ok {
-		logger.Warn("Cannot find pod in podMap")
+		logger.Warn("Cannot find Pod in global pods map")
 		return
 	}
-	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
+	if ps.vm == nil {
+		logger.Error("handleVMDeletion called for non-VM Pod")
+		return
+	}
+	logger = logger.With(zap.String("node", ps.node.name), zap.Object("virtualmachine", ps.vm.name))
 
 	// Mark the resources as no longer reserved
-	currentlyMigrating := pod.currentlyMigrating()
+	migrating := ps.vm.currentlyMigrating()
 
-	vCPUVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
-		handleDeleted(currentlyMigrating)
-	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
-		handleDeleted(currentlyMigrating)
+	vCPUVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
+		handleDeleted(migrating)
+	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
+		handleDeleted(migrating)
 
 	// Delete our record of the pod
-	delete(e.state.podMap, podName)
-	delete(pod.node.pods, podName)
-	pod.node.mq.removeIfPresent(pod)
+	delete(e.state.pods, podName)
+	delete(ps.node.pods, podName)
+	ps.node.mq.removeIfPresent(ps.vm)
 
-	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+	ps.node.updateMetrics(e.metrics)
 
 	logger.Info(
 		"Deleted VM pod",
-		zap.Bool("migrating", currentlyMigrating),
+		zap.Bool("migrating", migrating),
 		zap.Object("verdict", verdictSet{
 			cpu: vCPUVerdict,
 			mem: memVerdict,
@@ -853,25 +711,29 @@ func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	pod, ok := e.state.podMap[podName]
+	ps, ok := e.state.pods[podName]
 	if !ok {
-		logger.Error("Cannot find pod in podMap")
+		logger.Error("Cannot find Pod in global pods map")
 		return
 	}
-	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
+	logger = logger.With(zap.String("node", ps.node.name))
+	if ps.vm == nil {
+		logger.Error("handleVMDisabledScaling called for non-VM Pod")
+		return
+	}
+	logger = logger.With(zap.Object("virtualmachine", ps.vm.name))
 
-	// Reset buffer to zero:
-	vCPUVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
+	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
 		handleAutoscalingDisabled()
-	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
 		handleAutoscalingDisabled()
 
-	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+	ps.node.updateMetrics(e.metrics)
 
 	logger.Info(
 		"Disabled autoscaling for VM pod",
 		zap.Object("verdict", verdictSet{
-			cpu: vCPUVerdict,
+			cpu: cpuVerdict,
 			mem: memVerdict,
 		}),
 	)
@@ -889,23 +751,28 @@ func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName,
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	pod, ok := e.state.podMap[podName]
+	ps, ok := e.state.pods[podName]
 	if !ok {
-		logger.Warn("Cannot find pod in podMap")
+		logger.Error("Cannot find Pod in global pods map")
 		return
 	}
-	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
+	logger = logger.With(zap.String("node", ps.node.name))
+	if ps.vm == nil {
+		logger.Error("handlePodStartMigration called for non-VM Pod")
+		return
+	}
+	logger = logger.With(zap.Object("virtualmachine", ps.vm.name))
 
 	// Reset buffer to zero, remove from migration queue (if in it), and set pod's migrationState
-	cpuVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
+	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
 		handleStartMigration(source)
-	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
 		handleStartMigration(source)
 
-	pod.node.mq.removeIfPresent(pod)
-	pod.migrationState = &podMigrationState{name: migrationName}
+	ps.node.mq.removeIfPresent(ps.vm)
+	ps.vm.migrationState = &podMigrationState{name: migrationName}
 
-	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+	ps.node.updateMetrics(e.metrics)
 
 	logger.Info(
 		"Handled start of migration involving pod",
@@ -919,6 +786,7 @@ func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName,
 func (e *AutoscaleEnforcer) handlePodEndMigration(logger *zap.Logger, podName, migrationName util.NamespacedName) {
 	logger = logger.With(
 		zap.String("action", "VM pod end migration"),
+		zap.Object("pod", podName),
 		zap.Object("virtualmachinemigration", migrationName),
 	)
 
@@ -927,17 +795,22 @@ func (e *AutoscaleEnforcer) handlePodEndMigration(logger *zap.Logger, podName, m
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	pod, ok := e.state.podMap[podName]
+	ps, ok := e.state.pods[podName]
 	if !ok {
-		logger.Warn("Cannot find pod in podMap")
+		logger.Error("Cannot find Pod in global pods map")
 		return
 	}
-	logger = logger.With(zap.String("node", pod.node.name), zap.Object("virtualmachine", pod.vmName))
+	logger = logger.With(zap.String("node", ps.node.name))
+	if ps.vm == nil {
+		logger.Error("handlePodEndMigration called for non-VM Pod")
+		return
+	}
+	logger = logger.With(zap.Object("virtualmachine", ps.vm.name))
 
-	pod.migrationState = nil
+	ps.vm.migrationState = nil
 
 	//nolint:gocritic // NOTE: not *currently* needed, but this should be kept here as a reminder, in case that changes.
-	// pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+	// ps.node.updateMetrics(e.metrics)
 
 	logger.Info("Recorded end of migration for VM pod")
 }
@@ -953,20 +826,27 @@ func (e *AutoscaleEnforcer) handlePodDeletion(logger *zap.Logger, podName util.N
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	pod, ok := e.state.otherPods[podName]
+	ps, ok := e.state.pods[podName]
 	if !ok {
-		logger.Warn("Cannot find pod in otherPods")
+		logger.Warn("Cannot find Pod in global pods map")
 		return
 	}
-	logger = logger.With(zap.String("node", pod.node.name))
+	if ps.vm != nil {
+		logger.Error("handlePodDeletion called for VM pod")
+		return
+	}
+	logger = logger.With(zap.String("node", ps.node.name))
 
 	// Mark the resources as no longer reserved
-	cpuVerdict, memVerdict := handleDeletedPod(pod.node, pod.resources, &e.state.conf.MemSlotSize)
+	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
+		handleDeleted(false)
+	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
+		handleDeleted(false)
 
-	delete(e.state.otherPods, podName)
-	delete(pod.node.otherPods, podName)
+	delete(e.state.pods, podName)
+	delete(ps.node.pods, podName)
 
-	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+	ps.node.updateMetrics(e.metrics)
 
 	logger.Info(
 		"Deleted non-VM pod",
@@ -991,21 +871,24 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(logger *zap.Logger, vm *a
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	pod, ok := e.state.podMap[podName]
+	ps, ok := e.state.pods[podName]
 	if !ok {
-		logger.Error("Cannot find Pod in podMap")
+		logger.Error("Cannot find Pod in global pods map")
 		return
 	}
-	logger = logger.With(zap.String("node", pod.node.name))
+	logger = logger.With(zap.String("node", ps.node.name))
+	if ps.vm == nil {
+		logger.Error("handleUpdatedScalingBounds called for non-VM Pod")
+		return
+	}
 
 	// FIXME: this definition of receivedContact may be inaccurate if there was an error with the
 	// autoscaler-agent's request.
-	receivedContact := pod.mostRecentComputeUnit != nil
-	var n *nodeResourceState[vmapi.MilliCPU] = &pod.node.vCPU
-	cpuVerdict := handleUpdatedLimits(n, &pod.vCPU, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
-	memVerdict := handleUpdatedLimits(&pod.node.memSlots, &pod.memSlots, receivedContact, vm.Mem.Min, vm.Mem.Max)
+	receivedContact := ps.vm.mostRecentComputeUnit != nil
+	cpuVerdict := handleUpdatedLimits(&ps.node.cpu, &ps.cpu, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
+	memVerdict := handleUpdatedLimits(&ps.node.mem, &ps.mem, receivedContact, vm.Min().Mem, vm.Max().Mem)
 
-	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+	ps.node.updateMetrics(e.metrics)
 
 	logger.Info(
 		"Updated scaling bounds for VM pod",
@@ -1028,18 +911,18 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(logger *zap.Logger, 
 		zap.Object("virtualmachine", vm.NamespacedName()),
 	)
 
-	pod, ok := e.state.podMap[podName]
+	ps, ok := e.state.pods[podName]
 	if !ok {
-		logger.Error("Cannot find Pod in podMap")
+		logger.Error("Cannot find Pod in global pods map")
 		return
 	}
 
-	cpuVerdict := makeResourceTransitioner(&pod.node.vCPU, &pod.vCPU).
+	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
 		handleNonAutoscalingUsageChange(vm.Using().VCPU)
-	memVerdict := makeResourceTransitioner(&pod.node.memSlots, &pod.memSlots).
+	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
 		handleNonAutoscalingUsageChange(vm.Using().Mem)
 
-	pod.node.updateMetrics(e.metrics, e.state.memSlotSizeBytes())
+	ps.node.updateMetrics(e.metrics)
 
 	logger.Info(
 		"Updated non-autoscaling VM usage",
@@ -1145,7 +1028,7 @@ func (e *AutoscaleEnforcer) cleanupMigration(logger *zap.Logger, vmm *vmapi.Virt
 	}
 }
 
-func (s *podState) isBetterMigrationTarget(other *podState) bool {
+func (s *vmPodState) isBetterMigrationTarget(other *vmPodState) bool {
 	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
 	if s.metrics == nil || other.metrics == nil {
 		return s.metrics != nil && other.metrics == nil
@@ -1160,7 +1043,7 @@ func (s *podState) isBetterMigrationTarget(other *podState) bool {
 //
 // A lock will ALWAYS be held on return from this function.
 func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logger, pod *podState) (created bool, _ error) {
-	if pod.currentlyMigrating() {
+	if pod.vm.currentlyMigrating() {
 		return false, fmt.Errorf("Pod is already migrating")
 	}
 
@@ -1169,7 +1052,7 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 	defer e.state.lock.Lock()
 
 	vmmName := util.NamespacedName{
-		Name:      fmt.Sprintf("schedplugin-%s", pod.vmName.Name),
+		Name:      fmt.Sprintf("schedplugin-%s", pod.vm.name.Name),
 		Namespace: pod.name.Namespace,
 	}
 
@@ -1218,7 +1101,7 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 			},
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
-			VmName: pod.vmName.Name,
+			VmName: pod.vm.name.Name,
 
 			// FIXME: NeonVM's VirtualMachineMigrationSpec has a bunch of boolean fields that aren't
 			// pointers, which means we need to explicitly set them when using the Go API.
@@ -1257,8 +1140,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 	defer p.state.lock.Unlock()
 
 	// Check that all fields are equal to their zero value, per the function documentation.
-	hasNonNilField := p.state.nodeMap != nil || p.state.podMap != nil || p.state.otherPods != nil ||
-		p.state.maxTotalCPU != 0 || p.state.maxTotalMemSlots != 0
+	hasNonNilField := p.state.nodes != nil || p.state.pods != nil ||
+		p.state.maxTotalReservableCPU != 0 || p.state.maxTotalReservableMem != 0
 
 	if hasNonNilField {
 		panic(errors.New("readClusterState called with non-nil pluginState field"))
@@ -1290,9 +1173,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		return fmt.Errorf("Error listing Pods: %w", err)
 	}
 
-	p.state.nodeMap = make(map[string]*nodeState)
-	p.state.podMap = make(map[util.NamespacedName]*podState)
-	p.state.otherPods = make(map[util.NamespacedName]*otherPodState)
+	p.state.nodes = make(map[string]*nodeState)
+	p.state.pods = make(map[util.NamespacedName]*podState)
 
 	// Store the VMs by name, so that we can access them as we're going through pods
 	logger.Info("Building initial vmSpecs map")
@@ -1301,10 +1183,11 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 		vmSpecs[util.GetNamespacedName(vm)] = vm
 	}
 
+	skippedPods := 0
+
 	// Add all VM pods to the map, by filtering out from the pod list. We'll take care of the non-VM
 	// pods in a separate pass after this.
-	logger.Info("Adding VM pods to podMap")
-	skippedVms := 0
+	logger.Info("Adding VM Pods to pods map")
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		podName := util.GetNamespacedName(pod)
@@ -1327,7 +1210,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 		logSkip := func(format string, args ...any) {
 			logger.Warn("Skipping VM", zap.Error(fmt.Errorf(format, args...)))
-			skippedVms += 1
+			skippedPods += 1
 		}
 
 		if p.state.conf.ignoredNamespace(pod.Namespace) {
@@ -1353,14 +1236,6 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			return fmt.Errorf("Error extracting VM info for %v: %w", vmName, err)
 		}
 
-		// Check that the memory slot size matches.
-		if !vmInfo.Mem.SlotSize.Equal(p.state.conf.MemSlotSize) {
-			return fmt.Errorf(
-				"VM %v memory slot size (%v) doesn't match conf slot size (%v)",
-				vmName, &vmInfo.Mem.SlotSize, &p.state.conf.MemSlotSize,
-			)
-		}
-
 		ns, err := p.state.getOrFetchNodeState(ctx, logger, p.metrics, p.nodeStore, pod.Spec.NodeName)
 		if err != nil {
 			logSkip("Couldn't find Node that VM pod is on (maybe it has since been removed?): %w", err)
@@ -1369,59 +1244,62 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 		// Build the pod state, update the node
 		ps := &podState{
-			name:   podName,
-			vmName: util.GetNamespacedName(vm),
-			node:   ns,
-			vCPU: podResourceState[vmapi.MilliCPU]{
+			name: podName,
+			node: ns,
+			cpu: podResourceState[vmapi.MilliCPU]{
 				Reserved:         vmInfo.Cpu.Max,
 				Buffer:           vmInfo.Cpu.Max - vmInfo.Cpu.Use,
 				CapacityPressure: 0,
 				Min:              vmInfo.Cpu.Min,
 				Max:              vmInfo.Cpu.Max,
 			},
-			memSlots: podResourceState[uint16]{
-				Reserved:         vmInfo.Mem.Max,
-				Buffer:           vmInfo.Mem.Max - vmInfo.Mem.Use,
+			mem: podResourceState[api.Bytes]{
+				Reserved:         vmInfo.Max().Mem,
+				Buffer:           vmInfo.Max().Mem - vmInfo.Using().Mem,
 				CapacityPressure: 0,
-				Min:              vmInfo.Mem.Min,
-				Max:              vmInfo.Mem.Max,
+				Min:              vmInfo.Min().Mem,
+				Max:              vmInfo.Max().Mem,
 			},
+			vm: &vmPodState{
+				name: util.GetNamespacedName(vm),
 
-			mqIndex:               -1,
-			metrics:               nil,
-			mostRecentComputeUnit: nil,
-			migrationState:        nil,
+				mqIndex:               -1,
+				metrics:               nil,
+				mostRecentComputeUnit: nil,
+				migrationState:        nil,
 
-			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
+				memSlotSize:              vmInfo.Mem.SlotSize,
+				testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
+			},
 		}
 
 		// If scaling isn't enabled *or* the pod is involved in an ongoing migration, then we can be
 		// more precise about usage (because scaling is forbidden while migrating).
 		if !vmInfo.ScalingEnabled || migrationName != nil {
-			ps.vCPU.Buffer = 0
-			ps.vCPU.Reserved = vmInfo.Cpu.Use
+			ps.cpu.Buffer = 0
+			ps.cpu.Reserved = vmInfo.Cpu.Use
 
-			ps.memSlots.Buffer = 0
-			ps.memSlots.Reserved = vmInfo.Mem.Use
+			ps.mem.Buffer = 0
+			ps.mem.Reserved = vmInfo.Using().Mem
 		}
 
-		oldNodeVCPUReserved := ns.vCPU.Reserved
-		oldNodeMemReserved := ns.memSlots.Reserved
-		oldNodeVCPUBuffer := ns.vCPU.Buffer
-		oldNodeMemBuffer := ns.memSlots.Buffer
+		oldNodeCPUReserved := ns.cpu.Reserved
+		oldNodeMemReserved := ns.mem.Reserved
+		oldNodeCPUBuffer := ns.cpu.Buffer
+		oldNodeMemBuffer := ns.mem.Buffer
 
-		ns.vCPU.Reserved += ps.vCPU.Reserved
-		ns.vCPU.Buffer += ps.vCPU.Buffer
-		ns.memSlots.Reserved += ps.memSlots.Reserved
-		ns.memSlots.Buffer += ps.memSlots.Buffer
+		ns.cpu.Reserved += ps.cpu.Reserved
+		ns.cpu.Buffer += ps.cpu.Buffer
+		ns.mem.Reserved += ps.mem.Reserved
+		ns.mem.Buffer += ps.mem.Buffer
 
 		cpuVerdict := fmt.Sprintf(
 			"pod = %v/%v (node %v -> %v / %v, %v -> %v buffer)",
-			ps.vCPU.Reserved, vmInfo.Cpu.Max, oldNodeVCPUReserved, ns.vCPU.Reserved, ns.vCPU.Total, oldNodeVCPUBuffer, ns.vCPU.Buffer,
+			ps.cpu.Reserved, vmInfo.Cpu.Max, oldNodeCPUReserved, ns.cpu.Reserved, ns.cpu.Total, oldNodeCPUBuffer, ns.cpu.Buffer,
 		)
 		memVerdict := fmt.Sprintf(
 			"pod = %v/%v (node %v -> %v / %v, %v -> %v buffer",
-			ps.memSlots.Reserved, vmInfo.Mem.Max, oldNodeMemReserved, ns.memSlots.Reserved, ns.memSlots.Total, oldNodeMemBuffer, ns.memSlots.Buffer,
+			ps.mem.Reserved, vmInfo.Max().Mem, oldNodeMemReserved, ns.mem.Reserved, ns.mem.Total, oldNodeMemBuffer, ns.mem.Buffer,
 		)
 
 		logger.Info(
@@ -1432,15 +1310,14 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			}),
 		)
 
-		ns.updateMetrics(p.metrics, p.state.memSlotSizeBytes())
+		ns.updateMetrics(p.metrics)
 
 		ns.pods[podName] = ps
-		p.state.podMap[podName] = ps
+		p.state.pods[podName] = ps
 	}
 
 	// Add the non-VM pods to the map
-	logger.Info("Adding non-VM pods to otherPods map")
-	skippedOtherPods := 0
+	logger.Info("Adding non-VM Pods to pods map")
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		podName := util.GetNamespacedName(pod)
@@ -1457,7 +1334,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 		logSkip := func(format string, args ...any) {
 			logger.Warn("Skipping non-VM pod", zap.Error(fmt.Errorf(format, args...)))
-			skippedOtherPods += 1
+			skippedPods += 1
 		}
 
 		if util.PodCompleted(pod) {
@@ -1465,9 +1342,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			continue
 		}
 
-		if _, ok := p.state.podMap[podName]; ok {
-			continue
-		} else if p.state.conf.ignoredNamespace(pod.Namespace) {
+		if p.state.conf.ignoredNamespace(pod.Namespace) {
 			logSkip("non-VM pod is in ignored namespace")
 			continue
 		}
@@ -1485,34 +1360,41 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 
 		// TODO: this is largely duplicated from Reserve, so we should deduplicate it (probably into
 		// trans.go or something).
-		podRes := extractPodOtherPodResourceState(pod)
+		podRes := extractPodResources(pod)
 
-		oldNodeRes := ns.otherResources
-		newNodeRes := ns.otherResources.addPod(&p.state.conf.MemSlotSize, podRes)
+		oldNodeCpuReserved := ns.cpu.Reserved
+		oldNodeMemReserved := ns.mem.Reserved
 
-		addCpu := newNodeRes.ReservedCPU - oldNodeRes.ReservedCPU
-		addMem := newNodeRes.ReservedMemSlots - oldNodeRes.ReservedMemSlots
+		ns.cpu.Reserved += podRes.VCPU
+		ns.mem.Reserved += podRes.Mem
 
-		oldNodeCpuReserved := ns.vCPU.Reserved
-		oldNodeMemReserved := ns.memSlots.Reserved
-
-		ns.otherResources = newNodeRes
-		ns.vCPU.Reserved += addCpu
-		ns.memSlots.Reserved += addMem
-
-		ps := &otherPodState{
-			name:      podName,
-			node:      ns,
-			resources: podRes,
+		ps := &podState{
+			name: podName,
+			node: ns,
+			vm:   nil,
+			cpu: podResourceState[vmapi.MilliCPU]{
+				Reserved:         podRes.VCPU,
+				Buffer:           0,
+				CapacityPressure: 0,
+				Min:              podRes.VCPU,
+				Max:              podRes.VCPU,
+			},
+			mem: podResourceState[api.Bytes]{
+				Reserved:         podRes.Mem,
+				Buffer:           0,
+				CapacityPressure: 0,
+				Min:              podRes.Mem,
+				Max:              podRes.Mem,
+			},
 		}
 
 		cpuVerdict := fmt.Sprintf(
-			"pod %v (node %v [%v raw] -> %v [%v raw])",
-			&podRes.RawCPU, oldNodeCpuReserved, &oldNodeRes.RawCPU, ns.vCPU.Reserved, &newNodeRes.RawCPU,
+			"pod %v (node %v -> %v)",
+			&podRes.VCPU, oldNodeCpuReserved, ns.cpu.Reserved,
 		)
 		memVerdict := fmt.Sprintf(
-			"pod %v (node %v [%v raw] -> %v [%v raw])",
-			&podRes.RawMemory, oldNodeMemReserved, &oldNodeRes.RawMemory, ns.memSlots.Reserved, &newNodeRes.RawMemory,
+			"pod %v (node %v -> %v)",
+			&podRes.Mem, oldNodeMemReserved, ns.mem.Reserved,
 		)
 
 		logger.Info(
@@ -1523,36 +1405,35 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			}),
 		)
 
-		ns.updateMetrics(p.metrics, p.state.memSlotSizeBytes())
+		ns.updateMetrics(p.metrics)
 
-		ns.otherPods[podName] = ps
-		p.state.otherPods[podName] = ps
+		ns.pods[podName] = ps
+		p.state.pods[podName] = ps
 	}
 
 	// Human-visible sanity checks on item counts:
 	logger.Info(fmt.Sprintf(
-		"Done loading state, found: %d nodes, %d VMs (%d skipped), %d non-VM pods (%d skipped)",
-		len(p.state.nodeMap), len(p.state.podMap), skippedVms, len(p.state.otherPods), skippedOtherPods,
+		"Done loading state, found: %d nodes, %d Pods (%d skipped)",
+		len(p.state.nodes), len(p.state.pods), skippedPods,
 	))
 
 	// At this point, everything's been added to the state. We just need to make sure that we're not
 	// over-budget on anything:
 	logger.Info("Checking for any over-budget nodes")
 	overBudgetCount := 0
-	for nodeName := range p.state.nodeMap {
-		ns := p.state.nodeMap[nodeName]
+	for nodeName, ns := range p.state.nodes {
 		overBudget := []string{}
 
-		if ns.vCPU.Reserved-ns.vCPU.Buffer > ns.vCPU.Total {
+		if ns.cpu.Reserved-ns.cpu.Buffer > ns.cpu.Total {
 			overBudget = append(overBudget, fmt.Sprintf(
 				"expected CPU usage (reserved %d - buffer %d) > total %d",
-				ns.vCPU.Reserved, ns.vCPU.Buffer, ns.vCPU.Total,
+				ns.cpu.Reserved, ns.cpu.Buffer, ns.cpu.Total,
 			))
 		}
-		if ns.memSlots.Reserved > ns.memSlots.Total {
+		if ns.mem.Reserved > ns.mem.Total {
 			overBudget = append(overBudget, fmt.Sprintf(
-				"expected memSlots usage (reserved %d - buffer %d) > total %d",
-				ns.memSlots.Reserved, ns.memSlots.Buffer, ns.memSlots.Total,
+				"expected memory usage (reserved %d - buffer %d) > total %d",
+				ns.mem.Reserved, ns.mem.Buffer, ns.mem.Total,
 			))
 		}
 

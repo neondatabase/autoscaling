@@ -218,8 +218,31 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		targetRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: migration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
+			// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
+			enableSSH := *vm.Spec.EnableSSH
+			var sshSecret *corev1.Secret
+			if enableSSH {
+				// We require the SSH secret to exist because we cannot unmount and
+				// mount the new secret into the VM after the live migration. If a
+				// VM's SSH secret is deleted accidentally then live migration is
+				// not possible.
+				if len(vm.Status.SSHSecretName) == 0 {
+					err := errors.New("VM has .Spec.EnableSSH but its .Status.SSHSecretName is empty")
+					log.Error(err, "Failed to get VM's SSH Secret")
+					r.Recorder.Event(migration, "Warning", "Failed", err.Error())
+					return ctrl.Result{}, err
+				}
+				sshSecret = &corev1.Secret{}
+				err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
+				if err != nil {
+					log.Error(err, "Failed to get VM's SSH Secret")
+					r.Recorder.Event(migration, "Warning", "Failed", fmt.Sprintf("Failed to get VM's SSH Secret: %v", err))
+					return ctrl.Result{}, err
+				}
+			}
+
 			// Define a new target pod
-			tpod, err := r.targetPodForVirtualMachine(vm, migration)
+			tpod, err := r.targetPodForVirtualMachine(vm, migration, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to generate Target Pod spec")
 				return ctrl.Result{}, err
@@ -653,9 +676,11 @@ func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) e
 // targetPodForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	vm *vmv1.VirtualMachine,
-	migration *vmv1.VirtualMachineMigration) (*corev1.Pod, error) {
+	migration *vmv1.VirtualMachineMigration,
+	sshSecret *corev1.Secret,
+) (*corev1.Pod, error) {
 
-	pod, err := podSpec(vm)
+	pod, err := podSpec(vm, sshSecret)
 	if err != nil {
 		return nil, err
 	}
