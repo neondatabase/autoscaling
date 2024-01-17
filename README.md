@@ -4,6 +4,7 @@ This branch exists only to track what's currently deployed to these production c
 similar fashion to the staging branch:
 
 - prod-ap-southeast-1-epsilon
+- prod-ap-southeast-2-kappa
 - prod-eu-central-1-gamma
 - prod-il-central-1-iota
 - prod-us-east-1-theta
