@@ -3,7 +3,7 @@ apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
 metadata:
   name: autoscaling-components
-  namespace: monitoring-system
+  namespace: monitoring
 spec:
   podMetricsEndpoints:
     - port: metrics
@@ -24,7 +24,7 @@ apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
 metadata:
   name: neonvm-controller
-  namespace: monitoring-system
+  namespace: monitoring
 spec:
   podMetricsEndpoints:
     - port: metrics
