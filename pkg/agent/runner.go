@@ -354,6 +354,16 @@ func (r *Runner) getMetricsLoop(
 	timeout := time.Second * time.Duration(r.global.config.Metrics.RequestTimeoutSeconds)
 	waitBetweenDuration := time.Second * time.Duration(r.global.config.Metrics.SecondsBetweenRequests)
 
+	randomStartWait := util.NewTimeRange(time.Second, 0, int(r.global.config.Metrics.SecondsBetweenRequests)).Random()
+
+	logger.Info("Sleeping for random delay before making first metrics request", zap.Duration("delay", randomStartWait))
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(randomStartWait):
+	}
+
 	for {
 		metrics, err := r.doMetricsRequest(ctx, logger, timeout)
 		if err != nil {
