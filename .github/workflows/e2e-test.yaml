@@ -66,7 +66,7 @@ jobs:
       controller-preserve-runner-pods: true
     secrets: inherit
 
-  build-vms:
+  build-test-vm:
     needs: get-tag
     uses: ./.github/workflows/build-test-vm.yaml
     with:
@@ -75,7 +75,7 @@ jobs:
     secrets: inherit
 
   e2e-tests:
-    needs: [ build-images, build-vms ]
+    needs: [ build-images, build-test-vm ]
     strategy:
       fail-fast: false
       matrix:
@@ -164,7 +164,7 @@ jobs:
 
       - name: load e2e test vm image
         env:
-          TEST_IMAGE: ${{ needs.build-vms.outputs.vm-postgres-15-bullseye }}
+          TEST_IMAGE: ${{ needs.build-test-vm.outputs.vm-postgres-15-bullseye }}
         timeout-minutes: 2
         run: |
           # Pull the docker image so we can re-tag it, because using a consistent tag inside the
