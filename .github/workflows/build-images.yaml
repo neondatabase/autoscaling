@@ -1,0 +1,207 @@
+name: build-images
+
+on:
+  workflow_call:
+    inputs:
+      # 'skip' is kind of silly. it exists because we can't actually *skip* this job from e2e-test,
+      # otherwise the follow-up job that needs it wouldn't be able to run. So instead we pretend the
+      # job completed successfully, but actually do nothing...
+      skip:
+        description: 'Changes this action to perform a no-op'
+        type: boolean
+        required: false
+      tag:
+        description: 'Tag to use for the Docker images'
+        type: string
+        required: true
+      kernel-image:
+        description: 'Kernel image for the VMs embedded in neonvm-runner. If not specified, a kernel will be built from source'
+        type: string
+        required: false
+      build-cluster-autoscaler:
+        description: 'Build the custom cluster-autoscaler image'
+        type: boolean
+        required: false
+    outputs:
+      controller:
+        description: 'neonvm-controller image'
+        value: ${{ jobs.tags.outputs.controller }}
+      vxlan-controller:
+        description: 'neonvm-vxlan-controller image'
+        value: ${{ jobs.tags.outputs.vxlan-controller }}
+      runner:
+        description: 'neonvm-runner image'
+        value: ${{ jobs.tags.outputs.runner }}
+      scheduler:
+        description: 'autoscale-scheduler image'
+        value: ${{ jobs.tags.outputs.scheduler }}
+      autoscaler-agent:
+        description: 'autoscaler-agent image'
+        value: ${{ jobs.tags.outputs.autoscaler-agent }}
+
+env:
+  IMG_CONTROLLER:         "neondatabase/neonvm-controller"
+  IMG_VXLAN_CONTROLLER:   "neondatabase/neonvm-vxlan-controller"
+  IMG_RUNNER:             "neondatabase/neonvm-runner"
+  IMG_KERNEL:             "neondatabase/vm-kernel"
+  IMG_SCHEDULER:          "neondatabase/autoscale-scheduler"
+  IMG_AUTOSCALER_AGENT:   "neondatabase/autoscaler-agent"
+  IMG_CLUSTER_AUTOSCALER: "neondatabase/cluster-autoscaler-neonvm"
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  tags:
+    outputs:
+      controller:         ${{ steps.show-tags.outputs.controller }}
+      vxlan-controller:   ${{ steps.show-tags.outputs.vxlan-controller }}
+      runner:             ${{ steps.show-tags.outputs.runner }}
+      scheduler:          ${{ steps.show-tags.outputs.scheduler }}
+      autoscaler-agent:   ${{ steps.show-tags.outputs.autoscaler-agent }}
+      cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
+    runs-on: [ self-hosted, gen3, small ]
+    steps:
+      - id: show-tags
+        run: |
+          echo "controller=${{ env.IMG_CONTROLLER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${{ env.IMG_VXLAN_CONTROLLER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${{ env.IMG_RUNNER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${{ env.IMG_SCHEDULER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${{ env.IMG_AUTOSCALER_AGENT }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${{ env.IMG_CLUSTER_AUTOSCALER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+
+  vm-kernel:
+    if: ${{ ! inputs.skip }}
+    uses: ./.github/workflows/vm-kernel.yaml
+    with:
+      tag: ${{ inputs.kernel-image || inputs.tag }}
+      return-image-for-tag: ${{ inputs.kernel-image }}
+    secrets: inherit
+
+  build:
+    if: ${{ ! inputs.skip }}
+    needs: [ tags, vm-kernel ]
+    runs-on: [ self-hosted, gen3, large ]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # fetch all, so that we also include tags
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
+          # Disable cache on self-hosted runners to avoid /usr/bin/tar errors, see https://github.com/actions/setup-go/issues/403
+          cache: false
+        # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
+        timeout-minutes: 10
+
+      # Use 'git describe' for embedding git information (duplicated from the Makefile)
+      - name: get git info
+        id: get-git-info
+        run: |
+          # note: --tags enables matching on lightweight (i.e. not annotated) tags, which normally
+          # wouldn't be necessary, except that actions/checkout@v3 does weird things to setup the
+          # repository that means that we actually end up checked out with *just* a lightweight tag
+          # to the tagged commit.
+          echo "info=$(git describe --tags --long --dirty)" >> $GITHUB_OUTPUT
+
+      - name: get CA base git tag
+        id: get-ca-tag
+        if: ${{ inputs.build-cluster-autoscaler }}
+        run: |
+          echo "tag=$(cat cluster-autoscaler/ca.tag)" >> $GITHUB_OUTPUT
+
+      - name: Check dependencies
+        run: |
+          docker version
+          docker buildx version
+
+      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
+      # The default value is ~/.docker
+      - name: set custom docker config directory
+        run: |
+          mkdir -p .docker-custom
+          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v2
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: Load VM kernel
+        env:
+          IMAGE: ${{ needs.vm-kernel.outputs.image }}
+        run: |
+          docker pull --quiet $IMAGE
+          ID=$(docker create $IMAGE true)
+          docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
+          docker rm -f ${ID}
+
+      - name: Build and push neonvm-runner image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: neonvm/runner/Dockerfile
+          tags: ${{ needs.tags.outputs.runner }}
+
+      - name: Build and push neonvm-controller image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: neonvm/Dockerfile
+          tags: ${{ needs.tags.outputs.controller }}
+          build-args: |
+            VM_RUNNER_IMAGE=${{ needs.tags.outputs.runner }}
+
+      - name: Build and push neonvm-vxlan-controller image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: neonvm/tools/vxlan/Dockerfile
+          tags: ${{ needs.tags.outputs.vxlan-controller }}
+
+      - name: Build and push autoscale-scheduler image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: build/autoscale-scheduler/Dockerfile
+          tags: ${{ needs.tags.outputs.scheduler }}
+          build-args: |
+            GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
+
+      - name: Build and push autoscaler-agent image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: build/autoscaler-agent/Dockerfile
+          tags: ${{ needs.tags.outputs.autoscaler-agent }}
+          build-args: |
+            GIT_INFO=${{ steps.get-git-info.outputs.info }}
+
+      - name: Build and push cluster-autoscaler image
+        uses: docker/build-push-action@v3
+        if: ${{ inputs.build-cluster-autoscaler }}
+        with:
+          context: cluster-autoscaler
+          platforms: linux/amd64
+          push: true
+          tags: ${{ needs.tags.outputs.cluster-autoscaler }}
+          build-args: |
+            CA_GIT_TAG=${{ steps.get-ca-tag.outputs.tag }}
+
+      - name: Remove custom docker config directory
+        if: always()
+        run: |
+          rm -rf .docker-custom

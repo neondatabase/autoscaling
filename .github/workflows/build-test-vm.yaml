@@ -1,0 +1,86 @@
+name: build-test-vm
+
+on:
+  workflow_dispatch: # adds ability to run this manually
+    inputs:
+      tag:
+        description: 'Tag to use for the Docker images'
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      skip:
+        description: 'Changes this action to perform a no-op'
+        type: boolean
+        required: false
+      tag:
+        description: 'Tag to use for the Docker images'
+        type: string
+        required: true
+      upload-vm-builder:
+        description: 'If true, upload vm-builder in an artifact'
+        type: boolean
+        required: false
+        default: false
+    outputs:
+      vm-postgres-15-bullseye:
+        description: 'image name for postgres:15-bullseye, VM-ified'
+        value: ${{ jobs.build.outputs.vm-postgres-15-bullseye }}
+
+env:
+  IMG_POSTGRES_15_BULLSEYE: "neondatabase/vm-postgres-15-bullseye"
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  build:
+    outputs:
+      vm-postgres-15-bullseye: ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+    runs-on: [ self-hosted, gen3, large ]
+    steps:
+      - id: show-tags
+        run: |
+          echo "vm-postgres-15-bullseye=${{ env.IMG_POSTGRES_15_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
+          # Disable cache on self-hosted runners to avoid /usr/bin/tar errors, see https://github.com/actions/setup-go/issues/403
+          cache: false
+        # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
+        timeout-minutes: 10
+
+      - run: make bin/vm-builder
+
+      - name: upload vm-builder
+        if: ${{ inputs.upload-vm-builder }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-builder
+          path: bin/vm-builder
+          if-no-files-found: error
+          retention-days: 2
+
+      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
+      # The default value is ~/.docker
+      - name: set custom docker config directory
+        run: |
+          mkdir -p .docker-custom
+          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
+
+      - name: login to docker hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: build ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+        run: |
+          ./bin/vm-builder -src postgres:15-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+      - name: docker push ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+        run: |
+          docker push ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+
