@@ -23,7 +23,7 @@ on:
         type: string
         description: 'Tag to use for images, skipping building'
         required: false
-      push_yamls:
+      push-yamls:
         type: boolean
         description: 'If true, pushes a tarball containing the rendered yaml manifests as an artifact'
         required: false
@@ -118,6 +118,7 @@ jobs:
           IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs.autoscaler-agent }}
 
       - name: upload manifests
+        if: ${{ inputs.push-yamls }}
         uses: actions/upload-artifact@v4
         with:
           name: rendered_manifests
