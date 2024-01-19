@@ -18,3 +18,22 @@ spec:
   namespaceSelector:
     matchNames:
       - kube-system
+---
+# Victoria Metrics scraper for NeonVM Controller
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: neonvm-controller
+  namespace: monitoring
+spec:
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scrapeTimeout: 10s
+  selector:
+    matchLabels:
+      control-plane: controller
+  namespaceSelector:
+    matchNames:
+      - neonvm-system
