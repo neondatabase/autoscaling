@@ -1,5 +1,6 @@
 name: release
 on:
+  pull_request:
   push:
     tags:
       - "v*.*.*"
@@ -8,7 +9,8 @@ jobs:
   build-images:
     uses: ./.github/workflows/build-images.yaml
     with:
-      tag: ${{ github.ref_name }}
+      # tag: ${{ github.ref_name }}
+      tag: testrelease-20240119.${{ github.event.pull_request.head.sha}}
       kernel-image: ${{ inputs.kernel-image }}
       build-cluster-autoscaler: true
     secrets: inherit
@@ -16,7 +18,8 @@ jobs:
   build-vms:
     uses: ./.github/workflows/build-test-vm.yaml
     with:
-      tag: ${{ github.ref_name }}
+      # tag: ${{ github.ref_name }}
+      tag: testrelease-20240119.${{ github.event.pull_request.head.sha}}
       upload-vm-builder: true
     secrets: inherit
 
@@ -24,7 +27,8 @@ jobs:
     needs: [ build-images, build-vms ]
     uses: ./.github/workflows/e2e-test.yaml
     with:
-      tag: ${{ github.ref_name }}
+      # tag: ${{ github.ref_name }}
+      tag: testrelease-20240119.${{ github.event.pull_request.head.sha}}
       push-yamls: true
     secrets: inherit
 
@@ -48,16 +52,19 @@ jobs:
           # See e2e-test.yaml: the individual yamls are flattened inside the artifact.
           path: rendered_manifests
 
-      - name: github release
-        uses: softprops/action-gh-release@v1
-        with:
-          fail_on_unmatched_files: true
-          files: |
-            vm-builder
-            rendered_manifests/autoscale-scheduler.yaml
-            rendered_manifests/autoscaler-agent.yaml
-            rendered_manifests/neonvm.yaml
-            rendered_manifests/multus.yaml
-            rendered_manifests/multus-eks.yaml
-            rendered_manifests/whereabouts.yaml
-            deploy/vmscrape.yaml
+      - name: show files
+        run: ls -R .
+
+      # - name: github release
+      #   uses: softprops/action-gh-release@v1
+      #   with:
+      #     fail_on_unmatched_files: true
+      #     files: |
+      #       vm-builder
+      #       rendered_manifests/autoscale-scheduler.yaml
+      #       rendered_manifests/autoscaler-agent.yaml
+      #       rendered_manifests/neonvm.yaml
+      #       rendered_manifests/multus.yaml
+      #       rendered_manifests/multus-eks.yaml
+      #       rendered_manifests/whereabouts.yaml
+      #       deploy/vmscrape.yaml
