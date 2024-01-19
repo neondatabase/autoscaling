@@ -429,8 +429,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			return err
 		}
 		// runner pod found, check phase
-		switch vmRunner.Status.Phase {
-		case corev1.PodRunning:
+		switch runnerContainerStatus(vmRunner) {
+		case runnerRunning:
 			virtualmachine.Status.PodIP = vmRunner.Status.PodIP
 			virtualmachine.Status.Phase = vmv1.VmRunning
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -438,21 +438,21 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodSucceeded:
+		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodFailed:
+		case runnerFailed:
 			virtualmachine.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodUnknown:
+		case runnerUnknown:
 			virtualmachine.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
@@ -489,8 +489,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 		// runner pod found, check/update phase now
-		switch vmRunner.Status.Phase {
-		case corev1.PodRunning:
+		switch runnerContainerStatus(vmRunner) {
+		case runnerRunning:
 			// update status by IP of runner pod
 			virtualmachine.Status.PodIP = vmRunner.Status.PodIP
 			// update phase
@@ -557,21 +557,21 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				virtualmachine.Status.Phase = vmv1.VmScaling
 			}
 
-		case corev1.PodSucceeded:
+		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodFailed:
+		case runnerFailed:
 			virtualmachine.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodUnknown:
+		case runnerUnknown:
 			virtualmachine.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
@@ -609,8 +609,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 		// runner pod found, check that it's still up:
-		switch vmRunner.Status.Phase {
-		case corev1.PodSucceeded:
+		switch runnerContainerStatus(vmRunner) {
+		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
@@ -618,7 +618,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
 			return nil
-		case corev1.PodFailed:
+		case runnerFailed:
 			virtualmachine.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
@@ -626,7 +626,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
 			return nil
-		case corev1.PodUnknown:
+		case runnerUnknown:
 			virtualmachine.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
@@ -744,55 +744,109 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 	case vmv1.VmSucceeded, vmv1.VmFailed:
-		switch virtualmachine.Spec.RestartPolicy {
-		case vmv1.RestartPolicyAlways:
-			log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
-			// get runner to delete
-			vmRunner := &corev1.Pod{}
-			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
-			if err == nil {
-				// delete current runner
-				if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
-					return err
-				}
-			} else if !apierrors.IsNotFound(err) {
+		// Always delete runner pod. Otherwise, we could end up with one container succeeded/failed
+		// but the other one still running (meaning that the pod still ends up Running).
+		vmRunner := &corev1.Pod{}
+		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+		if err == nil {
+			// delete current runner
+			if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
 				return err
 			}
-			// do cleanup
-			virtualmachine.Cleanup()
-		case vmv1.RestartPolicyOnFailure:
-			log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
-			// get runner to delete
-			found := true
-			vmRunner := &corev1.Pod{}
-			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
-			if apierrors.IsNotFound(err) {
-				found = false
-			} else if err != nil {
-				return err
-			}
-			// delete runner only when VM failed
-			if found && virtualmachine.Status.Phase == vmv1.VmFailed {
-				// delete current runner
-				if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
-					return err
-				}
-			}
-			// do cleanup when VM failed OR pod not found (deleted manually?) when VM succeeded
-			if virtualmachine.Status.Phase == vmv1.VmFailed || (!found && virtualmachine.Status.Phase == vmv1.VmSucceeded) {
-				virtualmachine.Cleanup()
-			}
-		case vmv1.RestartPolicyNever:
-			// TODO: implement TTL or do nothing
-		default:
-			// do nothing
+		} else if !apierrors.IsNotFound(err) {
+			return err
 		}
 
+		// We must keep the VM status the same until we know the neonvm-runner container has been
+		// terminated, otherwise we could end up starting a new runner pod while the VM in the old
+		// one is still running.
+		//
+		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
+		// one* container inside the runner pod has finished; the other may still be running.
+		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
+			// clean up status, but keep the phase; we'll use it below (and possibly keep it around to
+			// be visible to the user if we don't intend to restart).
+			phase := virtualmachine.Status.Phase
+			virtualmachine.Cleanup()
+			virtualmachine.Status.Phase = phase
+
+			shouldRestart := virtualmachine.Spec.RestartPolicy == vmv1.RestartPolicyAlways ||
+				(virtualmachine.Spec.RestartPolicy == vmv1.RestartPolicyOnFailure && virtualmachine.Status.Phase == vmv1.VmFailed)
+
+			if shouldRestart {
+				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
+				virtualmachine.Status.Phase = "" // reset to trigger restart
+			}
+
+			// TODO for RestartPolicyNever: implement TTL or do nothing
+		}
 	default:
 		// do nothing
 	}
 
 	return nil
+}
+
+type runnerStatus string
+
+const (
+	runnerUnknown   runnerStatus = "Unknown"
+	runnerPending   runnerStatus = "Pending"
+	runnerRunning   runnerStatus = "Running"
+	runnerFailed    runnerStatus = "Failed"
+	runnerSucceeded runnerStatus = "Succeeded"
+)
+
+func runnerContainerStatus(pod *corev1.Pod) runnerStatus {
+	switch pod.Status.Phase {
+	case "", corev1.PodPending:
+		return runnerPending
+	case corev1.PodSucceeded:
+		return runnerSucceeded
+	case corev1.PodFailed:
+		return runnerFailed
+	case corev1.PodUnknown:
+		return runnerUnknown
+
+	// With runners with neonvm-container-mgr, the pod phase itself won't be updated if just the
+	// neonvm-runner container exits or completes.
+	// So we need to manually check through the container statuses to check whether they're ok.
+	case corev1.PodRunning:
+		completed := false
+
+		for _, stat := range pod.Status.ContainerStatuses {
+			if stat.State.Terminated != nil {
+				if stat.State.Terminated.ExitCode == 0 {
+					completed = true
+				} else {
+					// exit code non-zero, so the container failed
+					return runnerFailed
+				}
+			}
+		}
+
+		if completed {
+			return runnerSucceeded
+		} else {
+			return runnerRunning
+		}
+
+	default:
+		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
+	}
+}
+
+func runnerContainerStopped(pod *corev1.Pod) bool {
+	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		return true
+	}
+
+	for _, stat := range pod.Status.ContainerStatuses {
+		if stat.Name == "neonvm-runner" {
+			return stat.State.Terminated != nil
+		}
+	}
+	return false
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and

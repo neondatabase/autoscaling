@@ -297,8 +297,8 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 
 		// now inspect target pod status and update migration
-		switch targetRunner.Status.Phase {
-		case corev1.PodRunning:
+		switch runnerContainerStatus(targetRunner) {
+		case runnerRunning:
 			// update migration status
 			migration.Status.SourcePodName = vm.Status.PodName
 			migration.Status.SourcePodIP = vm.Status.PodIP
@@ -343,7 +343,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				migration.Status.Phase = vmv1.VmmRunning
 				return r.updateMigrationStatus(ctx, migration)
 			}
-		case corev1.PodSucceeded:
+		case runnerSucceeded:
 			// target runner pod finished without error? but it shouldn't finish
 			message := fmt.Sprintf("Target Pod (%s) completed suddenly", targetRunner.Name)
 			log.Info(message)
@@ -355,7 +355,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 					Message: message})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
-		case corev1.PodFailed:
+		case runnerFailed:
 			message := fmt.Sprintf("Target Pod (%s) failed", targetRunner.Name)
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Failed", message)
@@ -366,7 +366,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 					Message: message})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
-		case corev1.PodUnknown:
+		case runnerUnknown:
 			message := fmt.Sprintf("Target Pod (%s) in Unknown phase", targetRunner.Name)
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Unknown", message)
