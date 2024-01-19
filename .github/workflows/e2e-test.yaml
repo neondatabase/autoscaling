@@ -29,7 +29,6 @@ on:
         required: false
 
 env:
-  PRESERVE_RUNNER_PODS: "true"
   IMG_E2E_TEST: vm-postgres:15-bullseye
 
 defaults:
@@ -61,6 +60,10 @@ jobs:
       skip: ${{ inputs.tag != '' }}
       tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
       kernel-image: ${{ inputs.kernel-image }}
+      # note: setting to preserve runner pods will mean that if !skip, they'll be built with those
+      # settings and used properly in the tests. But if skip (because inputs.tag != ''), then this
+      # setting will have no effect and the release images will be normal.
+      controller-preserve-runner-pods: true
     secrets: inherit
 
   build-vms:

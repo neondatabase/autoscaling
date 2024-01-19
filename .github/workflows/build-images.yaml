@@ -22,6 +22,10 @@ on:
         description: 'Build the custom cluster-autoscaler image'
         type: boolean
         required: false
+      controller-preserve-runner-pods:
+        description: 'ONLY USE FOR E2E TESTS: Set neonvm-controller to never delete VM runner pods'
+        type: boolean
+        required: false
     outputs:
       controller:
         description: 'neonvm-controller image'
@@ -148,6 +152,16 @@ jobs:
           file: neonvm/runner/Dockerfile
           tags: ${{ needs.tags.outputs.runner }}
 
+      - name: Generate neonvm-controller build tags
+        env:
+          PRESERVE_RUNNER_PODS: ${{ inputs.controller-preserve-runner-pods }}
+        run: |
+          if [ "$PRESERVE_RUNNER_PODS" = 'true' ]; then
+            echo "buildtags=nodelete" | tee -a $GITHUB_OUTPUT
+          else
+            echo "buildtags=" | tee -a $GITHUB_OUTPUT
+          fi
+
       - name: Build and push neonvm-controller image
         uses: docker/build-push-action@v3
         with:
@@ -158,6 +172,7 @@ jobs:
           tags: ${{ needs.tags.outputs.controller }}
           build-args: |
             VM_RUNNER_IMAGE=${{ needs.tags.outputs.runner }}
+            BUILDTAGS=${{ steps.controller-build-tags.outputs.buildtags }}
 
       - name: Build and push neonvm-vxlan-controller image
         uses: docker/build-push-action@v3
