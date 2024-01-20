@@ -12,15 +12,14 @@ import (
 
 type Metrics struct {
 	LoadAverage1Min  float32
-	LoadAverage5Min  float32 // unused. To be removed when api.Metrics.LoadAverage5Min is removed.
 	MemoryUsageBytes float32
 }
 
 func (m Metrics) ToAPI() api.Metrics {
 	return api.Metrics{
 		LoadAverage1Min:  m.LoadAverage1Min,
-		LoadAverage5Min:  m.LoadAverage5Min,
-		MemoryUsageBytes: m.MemoryUsageBytes,
+		LoadAverage5Min:  nil,
+		MemoryUsageBytes: nil,
 	}
 }
 
@@ -62,10 +61,6 @@ func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err e
 	}
 
 	m.LoadAverage1Min, err = getField(loadPrefix+"load1", loadPrefix+"load15")
-	if err != nil {
-		return
-	}
-	m.LoadAverage5Min, err = getField(loadPrefix+"load5", "")
 	if err != nil {
 		return
 	}

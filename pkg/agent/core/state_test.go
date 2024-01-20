@@ -34,7 +34,6 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "BasicScaleup",
 			metrics: core.Metrics{
 				LoadAverage1Min:  0.30,
-				LoadAverage5Min:  0.0, // unused
 				MemoryUsageBytes: 0.0,
 			},
 			vmUsing:           api.Resources{VCPU: 250, Mem: 1 * slotSize},
@@ -49,7 +48,6 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "MismatchedApprovedNoScaledown",
 			metrics: core.Metrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
-				LoadAverage5Min:  0.0,
 				MemoryUsageBytes: 0.0,
 			},
 			vmUsing:           api.Resources{VCPU: 250, Mem: 2 * slotSize},
@@ -66,7 +64,6 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "MismatchedApprovedNoScaledownButVMAtMaximum",
 			metrics: core.Metrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
-				LoadAverage5Min:  0.0,
 				MemoryUsageBytes: 0.0,
 			},
 			vmUsing:           api.Resources{VCPU: 1000, Mem: 5 * slotSize}, // note: mem greater than maximum. It can happen when scaling bounds change
@@ -265,7 +262,6 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	clockTick().AssertEquals(duration("0.2s"))
 	lastMetrics := core.Metrics{
 		LoadAverage1Min:  0.3,
-		LoadAverage5Min:  0.0, // unused
 		MemoryUsageBytes: 0.0,
 	}
 	a.Do(state.UpdateMetrics, lastMetrics)
@@ -342,7 +338,6 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	// Set metrics back so that desired resources should now be zero
 	lastMetrics = core.Metrics{
 		LoadAverage1Min:  0.0,
-		LoadAverage5Min:  0.0, // unused
 		MemoryUsageBytes: 0.0,
 	}
 	a.Do(state.UpdateMetrics, lastMetrics)
@@ -1419,7 +1414,6 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	// the actual metrics we got in the actual logs
 	metrics := core.Metrics{
 		LoadAverage1Min:  0.0,
-		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 150589570, // 143.6 MiB
 	}
 	a.Do(state.UpdateMetrics, metrics)
