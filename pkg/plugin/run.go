@@ -150,6 +150,16 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)
 	}
 
+	// check that nil-ness of req.Metrics.{LoadAverage5Min,MemoryUsageBytes} match what's expected
+	// for the protocol version.
+	if (req.Metrics.LoadAverage5Min != nil) != (req.Metrics.MemoryUsageBytes != nil) {
+		return nil, 400, fmt.Errorf("presence of metrics.loadAvg5M must match presence metrics.memoryUsageBytes")
+	} else if req.Metrics.LoadAverage5Min == nil && req.ProtoVersion.IncludesExtendedMetrics() {
+		return nil, 400, fmt.Errorf("nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
+	} else if req.Metrics.LoadAverage5Min != nil && !req.ProtoVersion.IncludesExtendedMetrics() {
+		return nil, 400, fmt.Errorf("non-nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
+	}
+
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 

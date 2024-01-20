@@ -76,6 +76,7 @@ const (
 	// Changes from v3.0:
 	//
 	// * Memory quantities now use "number of bytes" instead of "number of memory slots"
+	// * Removed AgentRequest.metrics fields loadAvg5M and memoryUsageBytes
 	//
 	// Currently the latest version.
 	PluginProtoV4_0
@@ -146,6 +147,14 @@ func (v PluginProtoVersion) RepresentsMemoryAsBytes() bool {
 	return v >= PluginProtoV4_0
 }
 
+// IncludesExtendedMetrics returns whether this version of the protocol includes the AgentRequest's
+// metrics loadAvg5M and memoryUsageBytes.
+//
+// This is true for all versions below v4.0.
+func (v PluginProtoVersion) IncludesExtendedMetrics() bool {
+	return v < PluginProtoV4_0
+}
+
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
 //
 // All AgentRequests expect a PluginResponse.
@@ -178,9 +187,11 @@ type AgentRequest struct {
 // Metrics gives the information pulled from vector.dev's host metrics that the scheduler may use to
 // prioritize which pods it should migrate.
 type Metrics struct {
-	LoadAverage1Min  float32 `json:"loadAvg1M"`
-	LoadAverage5Min  float32 `json:"loadAvg5M"`
-	MemoryUsageBytes float32 `json:"memoryUsageBytes"`
+	LoadAverage1Min float32 `json:"loadAvg1M"`
+	// DEPRECATED. Will be removed in an upcoming release.
+	LoadAverage5Min *float32 `json:"loadAvg5M,omitempty"`
+	// DEPRECATED. Will be removed in an upcoming release.
+	MemoryUsageBytes *float32 `json:"memoryUsageBytes,omitempty"`
 }
 
 // ProtocolRange returns a VersionRange exactly equal to r.ProtoVersion
