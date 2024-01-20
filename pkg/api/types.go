@@ -166,6 +166,10 @@ type AgentRequest struct {
 	// Pod is the namespaced name of the pod making the request
 	Pod util.NamespacedName `json:"pod"`
 	// ComputeUnit gives the value of the agent's configured compute unit to use for the VM.
+	//
+	// If the requested resources are not a multiple of ComputeUnit, the scheduler plugin will make
+	// a best-effort attempt to return a value satisfying the request. Any approved increases will
+	// be a multiple of ComputeUnit, but otherwise the plugin does not check.
 	ComputeUnit *Resources `json:"computeUnit"`
 	// Resources gives a requested or notified change in resources allocated to the VM.
 	//
