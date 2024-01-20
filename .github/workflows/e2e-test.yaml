@@ -41,8 +41,6 @@ jobs:
       tag: ${{ inputs.tag || steps.get-tag.outputs.tag }}
     runs-on: [ self-hosted, gen3, small ]
     steps:
-      - uses: actions/checkout@v3
-        if: ${{ inputs.tag == '' }}
       - name: get tag
         if: ${{ inputs.tag == '' }}
         id: get-tag
