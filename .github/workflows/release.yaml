@@ -1,7 +1,7 @@
 name: release
 on:
-  # UNCOMMENT TO ALLOW TESTING:
-  pull_request:
+  # # UNCOMMENT TO ALLOW TESTING:
+  # pull_request:
   push:
     tags:
       - "v*.*.*"
@@ -80,20 +80,17 @@ jobs:
           # See e2e-test.yaml: the individual yamls are flattened inside the artifact.
           path: rendered_manifests
 
-      - name: show files
-        if: ${{ needs.get-tag.outputs.dry-run == 'true' }}
-        run: ls -R .
-
-      # - name: github release
-      #   uses: softprops/action-gh-release@v1
-      #   with:
-      #     fail_on_unmatched_files: true
-      #     files: |
-      #       vm-builder
-      #       rendered_manifests/autoscale-scheduler.yaml
-      #       rendered_manifests/autoscaler-agent.yaml
-      #       rendered_manifests/neonvm.yaml
-      #       rendered_manifests/multus.yaml
-      #       rendered_manifests/multus-eks.yaml
-      #       rendered_manifests/whereabouts.yaml
-      #       deploy/vmscrape.yaml
+      - name: github release
+        if: ${{ needs.get-tag.outputs.dry-run == 'false' }}
+        uses: softprops/action-gh-release@v1
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            vm-builder
+            rendered_manifests/autoscale-scheduler.yaml
+            rendered_manifests/autoscaler-agent.yaml
+            rendered_manifests/neonvm.yaml
+            rendered_manifests/multus.yaml
+            rendered_manifests/multus-eks.yaml
+            rendered_manifests/whereabouts.yaml
+            deploy/vmscrape.yaml
