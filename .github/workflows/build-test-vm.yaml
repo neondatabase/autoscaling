@@ -25,7 +25,7 @@ on:
     outputs:
       vm-postgres-15-bullseye:
         description: 'image name for postgres:15-bullseye, VM-ified'
-        value: ${{ jobs.build.outputs.vm-postgres-15-bullseye }}
+        value: ${{ jobs.tags.outputs.vm-postgres-15-bullseye }}
 
 env:
   IMG_POSTGRES_15_BULLSEYE: "neondatabase/vm-postgres-15-bullseye"
@@ -35,15 +35,20 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
-  build:
+  tags:
     outputs:
       vm-postgres-15-bullseye: ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
-    runs-on: [ self-hosted, gen3, large ]
+    runs-on: [ self-hosted, gen3, small ]
     steps:
       - id: show-tags
         run: |
           echo "vm-postgres-15-bullseye=${{ env.IMG_POSTGRES_15_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
+  build:
+    if: ${{ ! inputs.skip }}
+    needs: tags
+    runs-on: [ self-hosted, gen3, large ]
+    steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v4
         with:
@@ -77,10 +82,10 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: build ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+      - name: build ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
         run: |
-          ./bin/vm-builder -src postgres:15-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
-      - name: docker push ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+          ./bin/vm-builder -src postgres:15-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
+      - name: docker push ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
         run: |
-          docker push ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+          docker push ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
 
