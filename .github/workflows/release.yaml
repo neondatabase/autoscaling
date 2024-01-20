@@ -9,6 +9,10 @@ on:
 env:
   DRY_RUN: "true"
 
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
   get-tag:
     outputs:
@@ -22,8 +26,7 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha || '' }}
         run: |
           if [ "$DRY_RUN" = 'true' ]; then
-            test -n "$SHA"
-            sha="${SHA::7}}
+            sha="${SHA::7}"
             day="$(date -u '+%+4Y%m%d')" # equivalent to %F (e.g. '2024-01-19') with no dashes (e.g. '20240119')
             echo "tag=testrelease-$day.$sha.$GITHUB_RUN_ID" | tee -a $GITHUB_OUTPUT
           else
