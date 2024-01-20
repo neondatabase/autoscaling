@@ -42,7 +42,7 @@ jobs:
       build-cluster-autoscaler: true
     secrets: inherit
 
-  build-vms:
+  build-test-vm:
     uses: ./.github/workflows/build-test-vm.yaml
     needs: get-tag
     with:
@@ -51,7 +51,7 @@ jobs:
     secrets: inherit
 
   e2e:
-    needs: [ get-tag, build-images, build-vms ]
+    needs: [ get-tag, build-images, build-test-vm ]
     uses: ./.github/workflows/e2e-test.yaml
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
