@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
   golangci:
     name: golangci-lint
@@ -40,7 +44,7 @@ jobs:
           go mod tidy
       - name: check diff
         run: |
-          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
             git ls-files --exclude-standard --others .
             git diff .
             echo "ERROR: 'go mod tidy' modified the source tree."
@@ -61,7 +65,7 @@ jobs:
           make manifests
       - name: check diff
         run: |
-          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
             git ls-files --exclude-standard --others .
             git diff .
             echo "ERROR: 'make manifests' modified the source tree."
@@ -79,7 +83,7 @@ jobs:
           make generate
       - name: check diff
         run: |
-          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
             git ls-files --exclude-standard --others .
             git diff .
             echo "ERROR: 'make generate' modified the source tree."
