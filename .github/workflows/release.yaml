@@ -40,7 +40,6 @@ jobs:
     needs: get-tag
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
-      kernel-image: ${{ inputs.kernel-image }}
       build-cluster-autoscaler: true
     secrets: inherit
 

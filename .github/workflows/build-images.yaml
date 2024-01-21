@@ -153,6 +153,7 @@ jobs:
           tags: ${{ needs.tags.outputs.runner }}
 
       - name: Generate neonvm-controller build tags
+        id: controller-build-tags
         env:
           PRESERVE_RUNNER_PODS: ${{ inputs.controller-preserve-runner-pods }}
         run: |
