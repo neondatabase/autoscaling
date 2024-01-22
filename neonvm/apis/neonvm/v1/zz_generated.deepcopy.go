@@ -721,6 +721,11 @@ func (in *VirtualMachineStatus) DeepCopyInto(out *VirtualMachineStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.Restarts != nil {
+		in, out := &in.Restarts, &out.Restarts
+		*out = new(int32)
+		**out = **in
+	}
 	if in.CPUs != nil {
 		in, out := &in.CPUs, &out.CPUs
 		*out = new(MilliCPU)

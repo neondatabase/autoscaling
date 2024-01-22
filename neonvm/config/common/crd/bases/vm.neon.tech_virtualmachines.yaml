@@ -31,6 +31,9 @@ spec:
     - jsonPath: .status.phase
       name: Status
       type: string
+    - jsonPath: .status.restarts
+      name: Restarts
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -2691,6 +2694,10 @@ spec:
                 type: string
               podName:
                 type: string
+              restarts:
+                description: Number of times the VM runner pod has been recreated
+                format: int32
+                type: integer
               sshSecretName:
                 type: string
             type: object
