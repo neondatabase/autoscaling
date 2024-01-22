@@ -13,19 +13,10 @@ commands:
     user: vm-monitor
     sysvInitAction: respawn
     shell: 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test --addr="0.0.0.0:10301"'
-  - name: udevadm trigger
-    user: root
-    shell: 'udevadm trigger'
-    sysvInitAction: once
   - name: start-postgres
     user: postgres
     sysvInitAction: once
-    shell: 'udevadm settle && PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf" -l /dev/virtio-ports/tech.neon.log.0'
-  - name: sshd
-    user: root
-    sysvInitAction: respawn
-    # if having trouble with ssh, try adding -dd to the ssh args.
-    shell: 'setsid -w /usr/sbin/sshd -D -E /run/sshd/log -h /run/sshd/ssh_host_ecdsa_key -h /run/sshd/ssh_host_ed25519_key -h /run/sshd/ssh_host_rsa_key'
+    shell: 'PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf" -l /dev/virtio-ports/tech.neon.log.0'
 files:
   - filename: postgresql.conf
     hostPath: postgresql.conf
@@ -35,8 +26,6 @@ files:
     hostPath: allocate-loop.c
   - filename: cgconfig.conf
     hostPath: cgconfig.conf
-  - filename: 10-neon-log-port.rules
-    hostPath: 10-neon-log-port.rules
 build: |
   # Build vm-monitor
   FROM rust:1.74-alpine as monitor-builder
@@ -72,7 +61,6 @@ merge: |
   COPY cgconfig.conf         /etc/cgconfig.conf
   COPY postgresql.conf       /etc/postgresql.conf
   COPY pg_hba.conf           /etc/pg_hba.conf
-  COPY 10-neon-log-port.rules /etc/udev/rules.d/10-neon-log-port.rules
 
   # General tools
   RUN set -e \
@@ -80,8 +68,7 @@ merge: |
               ca-certificates \
               util-linux-misc \
               coreutils \
-              cgroup-tools \
-              udev
+              cgroup-tools
 
   # postgresql stuff
   RUN set -e \
