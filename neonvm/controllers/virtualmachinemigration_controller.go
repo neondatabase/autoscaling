@@ -57,6 +57,8 @@ type VirtualMachineMigrationReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+
+	Metrics ReconcilerMetrics
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -666,11 +668,14 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 // Note that the Pods will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	cntrlName := "virtualmachinemigration"
+	reconciler := WithMetrics(r, r.Metrics, cntrlName)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 8}).
-		Complete(r)
+		Named(cntrlName).
+		Complete(reconciler)
 }
 
 // targetPodForVirtualMachine returns a VirtualMachine Pod object
