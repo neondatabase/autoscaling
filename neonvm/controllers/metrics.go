@@ -19,8 +19,8 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 	m := ReconcilerMetrics{
 		failing: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: "failing",
-				Help: "number of failing objects",
+				Name: "reconcile_failing_objects",
+				Help: "Number of objects that are failing to reconcile for each specific controller",
 			},
 			[]string{"controller"},
 		),
@@ -38,11 +38,12 @@ type wrappedReconciler struct {
 	failing map[client.ObjectKey]struct{}
 }
 
+// WithMetrics wraps a given Reconciler with metrics capabilities.
 func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) reconcile.Reconciler {
 	return &wrappedReconciler{
-		ControllerName: cntrlName,
 		Reconciler:     reconciler,
 		Metrics:        rm,
+		ControllerName: cntrlName,
 		lock:           sync.Mutex{},
 		failing:        make(map[client.ObjectKey]struct{}),
 	}
@@ -51,6 +52,12 @@ func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlNam
 func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	res, err := d.Reconciler.Reconcile(ctx, req)
 
+	// This part is executed sequentially since we acquire a mutex lock. It
+	// should be quite fast since a mutex lock/unlock + 1 memory write takes
+	// ~60ns. Having 8 reconile workers, we wait at most 8*60=480ns to acquire
+	// the lock. I (@shayanh) preferred to go with the simplest implementation
+	// as of now. For a more performant solution, if needed, we can switch to an
+	// async approach.
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if err != nil {
