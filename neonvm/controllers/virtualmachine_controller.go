@@ -75,7 +75,7 @@ type VirtualMachineReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	Metrics ReconcilerMetrics
+	Metrics ReconcilerMetrics `exhaustruct:"optional"`
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
