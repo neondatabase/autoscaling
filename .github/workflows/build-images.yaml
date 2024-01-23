@@ -117,11 +117,6 @@ jobs:
         run: |
           echo "tag=$(cat cluster-autoscaler/ca.tag)" >> $GITHUB_OUTPUT
 
-      - name: Check dependencies
-        run: |
-          docker version
-          docker buildx version
-
       # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
       # The default value is ~/.docker
       - name: set custom docker config directory
@@ -133,6 +128,11 @@ jobs:
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: Check dependencies
+        run: |
+          docker version
+          docker buildx version
 
       - name: Load VM kernel
         env:
