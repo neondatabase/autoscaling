@@ -53,9 +53,8 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	res, err := d.Reconciler.Reconcile(ctx, req)
 
 	// This part is executed sequentially since we acquire a mutex lock. It
-	// should be quite fast since a mutex lock/unlock + 1 memory write takes
-	// ~60ns. Having 8 reconile workers, we wait at most 8*60=480ns to acquire
-	// the lock. I (@shayanh) preferred to go with the simplest implementation
+	// should be quite fast since a mutex lock/unlock + 2 memory writes takes less
+	// than 100ns. I (@shayanh) preferred to go with the simplest implementation
 	// as of now. For a more performant solution, if needed, we can switch to an
 	// async approach.
 	d.lock.Lock()
