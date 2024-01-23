@@ -13,7 +13,6 @@ import (
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -150,6 +149,13 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)
 	}
 
+	// Check that req.ComputeUnit == nil matches whether the protocol version supports it.
+	if req.ComputeUnit == nil && req.ProtoVersion.AgentSendsComputeUnit() {
+		return nil, 400, fmt.Errorf("computeUnit required for protocol version %v", req.ProtoVersion)
+	} else if req.ComputeUnit != nil && !req.ProtoVersion.AgentSendsComputeUnit() {
+		return nil, 400, fmt.Errorf("computeUnit field not supported for protocol version %v", req.ProtoVersion)
+	}
+
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
@@ -163,10 +169,24 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		return nil, 400, errors.New("pod is not associated with a VM")
 	}
 
+	// Check that req.ComputeUnit.Mem is divisible by the VM's memory slot size
+	if req.ComputeUnit != nil && req.ComputeUnit.Mem%pod.vm.memSlotSize != 0 {
+		return nil, 400, fmt.Errorf(
+			"computeUnit is not divisible by VM memory slot size: %v not divisible by %v",
+			req.ComputeUnit,
+			pod.vm.memSlotSize,
+		)
+	}
+
 	// If the request was actually sending a quantity of *memory slots*, rather than bytes, then
 	// multiply memory resources to make it match the
 	if !req.ProtoVersion.RepresentsMemoryAsBytes() {
 		req.Resources.Mem *= pod.vm.memSlotSize
+	}
+
+	computeUnit := e.state.conf.ComputeUnit
+	if req.ComputeUnit != nil {
+		computeUnit = *req.ComputeUnit
 	}
 
 	node := pod.node
@@ -184,7 +204,16 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 
 	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
 
-	permit, status, err := e.handleResources(logger, pod, node, req.Resources, req.LastPermit, mustMigrate, supportsFractionalCPU)
+	permit, status, err := e.handleResources(
+		logger,
+		pod,
+		node,
+		computeUnit,
+		req.Resources,
+		req.LastPermit,
+		mustMigrate,
+		supportsFractionalCPU,
+	)
 	if err != nil {
 		return nil, status, err
 	}
@@ -249,6 +278,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	logger *zap.Logger,
 	pod *podState,
 	node *nodeState,
+	cu api.Resources,
 	req api.Resources,
 	lastPermit *api.Resources,
 	startingMigration bool,
@@ -301,11 +331,11 @@ func (e *AutoscaleEnforcer) handleResources(
 		)
 	}
 
-	cpuFactor := vmapi.MilliCPU(1)
+	cpuFactor := cu.VCPU
 	if !supportsFractionalCPU {
 		cpuFactor = 1000
 	}
-	memFactor := pod.vm.memSlotSize
+	memFactor := cu.Mem
 
 	cpuVerdict := makeResourceTransitioner(&node.cpu, &pod.cpu).
 		handleRequested(req.VCPU, startingMigration, cpuFactor)
