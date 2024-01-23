@@ -105,7 +105,6 @@ jobs:
           kind version
           kuttl version
           docker version
-          docker buildx version
 
       - run: make render-release
         env:
