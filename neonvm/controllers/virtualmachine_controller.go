@@ -847,10 +847,9 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 			expected:  annotationsForVirtualMachine(vm),
 			actual:    runnerPod.Annotations,
 			ignoreExtra: map[string]bool{
-				"kubectl.kubernetes.io/default-container": true,
-				"k8s.v1.cni.cncf.io/networks":             true,
-				"k8s.v1.cni.cncf.io/network-status":       true,
-				"k8s.v1.cni.cncf.io/networks-status":      true,
+				"k8s.v1.cni.cncf.io/networks":        true,
+				"k8s.v1.cni.cncf.io/network-status":  true,
+				"k8s.v1.cni.cncf.io/networks-status": true,
 			},
 		},
 	}
@@ -1032,13 +1031,14 @@ func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[strin
 		"kubectl.kubernetes.io/last-applied-configuration": true,
 	}
 
-	a := make(map[string]string, len(virtualmachine.Annotations)+1)
+	a := make(map[string]string, len(virtualmachine.Annotations)+2)
 	for k, v := range virtualmachine.Annotations {
 		if !ignored[k] {
 			a[k] = v
 		}
 	}
 
+	a["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
 	return a
 }
@@ -1441,11 +1441,6 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 			// do nothing
 		}
 	}
-
-	if pod.ObjectMeta.Annotations == nil {
-		pod.ObjectMeta.Annotations = map[string]string{}
-	}
-	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 
 	// use multus network to add extra network interface
 	if virtualmachine.Spec.ExtraNetwork != nil && virtualmachine.Spec.ExtraNetwork.Enable {
