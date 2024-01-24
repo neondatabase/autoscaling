@@ -867,39 +867,37 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 		Jitter: true,
 	}
 
-	tryForward := func() {
-		if conn == nil {
-			var err error
-			conn, err = net.Dial("unix", logSerialSocket)
+	for {
+		func() {
+			if conn == nil {
+				var err error
+				conn, err = net.Dial("unix", logSerialSocket)
+				if err != nil {
+					logger.Error("failed to dial to logSerialSocket", zap.Error(err))
+					return
+				}
+				reader = bufio.NewReaderSize(conn, bufferedReaderSize)
+			}
+
+			b.Attempt()
+			err := conn.SetReadDeadline(time.Now().Add(delay))
 			if err != nil {
-				logger.Error("failed to dial to logSerialSocket", zap.Error(err))
+				logger.Error("failed to set read deadline", zap.Error(err))
+				conn = nil
 				return
 			}
-			reader = bufio.NewReaderSize(conn, bufferedReaderSize)
-		}
 
-		b.Attempt()
-		err := conn.SetReadDeadline(time.Now().Add(delay))
-		if err != nil {
-			logger.Error("failed to set read deadline", zap.Error(err))
-			conn = nil
-			return
-		}
+			err = drainLogsReader(reader, logger)
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// We've hit the deadline, meaning the reading session was successful.
+				b.Reset()
+				return
+			}
 
-		err = drainLogsReader(reader, logger)
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			// We've hit the deadline, meaning the reading session was successful.
-			b.Reset()
-			return
-		}
-
-		if err != nil {
-			conn = nil
-		}
-	}
-
-	for {
-		tryForward()
+			if err != nil {
+				conn = nil
+			}
+		}()
 
 		select {
 		case <-ctx.Done():
