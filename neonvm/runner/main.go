@@ -853,7 +853,7 @@ func drainLogsReader(reader *bufio.Reader, logger *zap.Logger) error {
 	}
 }
 
-// writes from socket to stdout line by line
+// forwardLogs writes from socket to stdout line by line
 func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	defer wg.Done()
 
