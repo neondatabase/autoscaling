@@ -16,7 +16,7 @@ commands:
   - name: start-postgres
     user: postgres
     sysvInitAction: once
-    shell: 'PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf"'
+    shell: 'PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf" -l /dev/virtio-ports/tech.neon.log.0'
 files:
   - filename: postgresql.conf
     hostPath: postgresql.conf
