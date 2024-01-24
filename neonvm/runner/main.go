@@ -587,7 +587,7 @@ func main() {
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMPManual),
 		"-qmp", fmt.Sprintf("unix:%s,server,wait=off", qmpUnixSocketForSigtermHandler),
 		"-device", "virtio-serial",
-		"-chardev", fmt.Sprintf("socket,path=%s,server,nowait,id=log", logSerialSocket),
+		"-chardev", fmt.Sprintf("socket,path=%s,server=on,wait=off,id=log", logSerialSocket),
 		"-device", "virtserialport,chardev=log,name=tech.neon.log.0",
 	}
 
