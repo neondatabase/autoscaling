@@ -56,6 +56,7 @@ const (
 	mountedDiskPath                = "/vm/images"
 	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
 	logSerialSocket                = "/vm/log.sock"
+	bufferedReaderSize             = 4096
 
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
@@ -817,6 +818,7 @@ func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cg
 
 func drainLogsReader(reader *bufio.Reader) error {
 	for {
+		// ReadSlice actually can return no more than bufferedReaderSize bytes
 		slice, err := reader.ReadSlice('\n')
 		if err != nil {
 			if len(slice) != 0 {
@@ -853,7 +855,7 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 				logger.Error("failed to dial to logSerialSocket", zap.Error(err))
 				return
 			}
-			reader = bufio.NewReader(conn)
+			reader = bufio.NewReaderSize(conn, bufferedReaderSize)
 		}
 
 		b.Attempt()
