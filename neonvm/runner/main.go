@@ -834,7 +834,7 @@ func printWithNewline(slice []byte) error {
 	return err
 }
 
-func drainLogsReader(reader *bufio.Reader) error {
+func drainLogsReader(reader *bufio.Reader, logger *zap.Logger) error {
 	for {
 		// ReadSlice actually can return no more than bufferedReaderSize bytes
 		slice, err := reader.ReadSlice('\n')
@@ -843,6 +843,11 @@ func drainLogsReader(reader *bufio.Reader) error {
 
 		err = errors.Join(err, err2)
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				logger.Warn("EOF while reading from log serial")
+			} else {
+				logger.Error("failed to read from log serial", zap.Error(err))
+			}
 			return err
 		}
 	}
@@ -881,7 +886,7 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 			return
 		}
 
-		err = drainLogsReader(reader)
+		err = drainLogsReader(reader, logger)
 		if errors.Is(err, os.ErrDeadlineExceeded) {
 			// We've hit the deadline, meaning the reading session was successful.
 			b.Reset()
@@ -889,7 +894,6 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 		}
 
 		if err != nil {
-			logger.Error("failed to read from socket", zap.Error(err))
 			conn = nil
 		}
 	}
@@ -902,10 +906,7 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 			if conn != nil {
 				conn.Close()
 			}
-			err := drainLogsReader(reader)
-			if err != nil {
-				logger.Error("failed to read from socket", zap.Error(err))
-			}
+			_ = drainLogsReader(reader, logger)
 			return
 		case <-time.After(b.Duration()):
 		}
