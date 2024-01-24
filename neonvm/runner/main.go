@@ -816,20 +816,35 @@ func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cg
 	}
 }
 
+func printWithNewline(slice []byte) error {
+	if len(slice) == 0 {
+		return nil
+	}
+
+	_, err := os.Stdout.Write(slice)
+	if err != nil {
+		return err
+	}
+
+	if slice[len(slice)-1] == '\n' {
+		return nil
+	}
+
+	_, err = os.Stdout.WriteString("\n")
+	return err
+}
+
 func drainLogsReader(reader *bufio.Reader) error {
 	for {
 		// ReadSlice actually can return no more than bufferedReaderSize bytes
 		slice, err := reader.ReadSlice('\n')
-		if err != nil {
-			if len(slice) != 0 {
-				// Print and add a newline to the slice we got
-				fmt.Printf("%s\n", slice)
-			}
+		// If err != nil, slice might not have \n at the end
+		err2 := printWithNewline(slice)
 
+		err = errors.Join(err, err2)
+		if err != nil {
 			return err
 		}
-
-		fmt.Printf("%s", slice)
 	}
 }
 
