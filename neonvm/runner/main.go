@@ -1122,6 +1122,8 @@ func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.Wa
 	select {
 	case <-c:
 	case <-ctx.Done():
+		logger.Info("context canceled, not going to powerdown QEMU because it's already finished")
+		return
 	}
 
 	logger.Info("got signal, sending powerdown command to QEMU")
