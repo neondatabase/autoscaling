@@ -38,7 +38,7 @@ jobs:
   tags:
     outputs:
       vm-postgres-15-bullseye: ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
-    runs-on: [ self-hosted, gen3, small ]
+    runs-on: ubuntu-latest
     steps:
       - id: show-tags
         run: |

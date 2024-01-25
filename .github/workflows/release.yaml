@@ -15,7 +15,7 @@ jobs:
     outputs:
       tag: ${{ steps.get-tag.outputs.tag }}
       dry-run: ${{ steps.get-tag.outputs.dry-run }}
-    runs-on: [ self-hosted, gen3, small ]
+    runs-on: ubuntu-latest
     steps:
       - name: get tag
         id: get-tag
@@ -61,7 +61,7 @@ jobs:
 
   release:
     needs: [ get-tag, e2e ]
-    runs-on: [ self-hosted, gen3, large ]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 

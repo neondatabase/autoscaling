@@ -65,7 +65,7 @@ jobs:
       scheduler:          ${{ steps.show-tags.outputs.scheduler }}
       autoscaler-agent:   ${{ steps.show-tags.outputs.autoscaler-agent }}
       cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
-    runs-on: [ self-hosted, gen3, small ]
+    runs-on: ubuntu-latest
     steps:
       - id: show-tags
         run: |
