@@ -23,6 +23,7 @@ jobs:
     uses: ./.github/workflows/vm-kernel.yaml
     with:
       tag: ${{ github.ref_name }}
+    secrets: inherit
 
   release:
     needs: vm-kernel
