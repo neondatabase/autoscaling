@@ -1591,6 +1591,12 @@ spec:
                 default: true
                 description: Use KVM acceleation
                 type: boolean
+              enableSSH:
+                default: false
+                description: 'Enable SSH on the VM. It works only if the VM image
+                  is built using VM Builder that has SSH support (TODO: mention VM
+                  Builder version).'
+                type: boolean
               extraInitContainers:
                 items:
                   description: A single application container that you want to run
@@ -3202,6 +3208,8 @@ spec:
                 type: string
               podName:
                 type: string
+              sshSecretName:
+                type: string
             type: object
         type: object
     served: true
@@ -3305,6 +3313,18 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - k8s.cni.cncf.io
@@ -3725,7 +3745,7 @@ spec:
       containers:
       - args:
         - --health-probe-bind-address=:8081
-        - --metrics-bind-address=127.0.0.1:8080
+        - --metrics-bind-address=:8080
         - --leader-elect
         - --zap-devel=false
         - --zap-time-encoding=iso8601
@@ -3742,7 +3762,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.22.0
+        image: neondatabase/neonvm-controller:v0.23.0
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3753,6 +3773,9 @@ spec:
         ports:
         - containerPort: 9443
           name: webhook-server
+          protocol: TCP
+        - containerPort: 8080
+          name: metrics
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -3924,7 +3947,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.22.0
+        image: neondatabase/neonvm-vxlan-controller:v0.23.0
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -3956,7 +3979,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.22.0
+        image: neondatabase/neonvm-vxlan-controller:v0.23.0
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:

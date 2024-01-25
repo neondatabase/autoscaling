@@ -94,8 +94,7 @@ apiVersion: v1
 data:
   autoscale-enforcer-config.json: |
     {
-      "memBlockSize": "1Gi",
-      "computeUnit": { "vCPUs": 0.25, "mem": 1 },
+      "computeUnit": { "vCPUs": 0.25, "mem": "1Gi" },
       "nodeConfig": {
         "cpu": { "watermark": 0.9 },
         "memory": { "watermark": 0.9 },
@@ -142,7 +141,7 @@ spec:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.22.0
+        image: neondatabase/autoscale-scheduler:v0.23.0
         livenessProbe:
           httpGet:
             path: /healthz
