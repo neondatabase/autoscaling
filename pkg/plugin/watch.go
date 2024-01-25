@@ -46,6 +46,7 @@ func (e *AutoscaleEnforcer) watchNodeEvents(
 			// FIXME: make these configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Second, 3, 5),
 			RetryWatchAfter:  util.NewTimeRange(time.Second, 3, 5),
+			RelistRateLimit:  nil,
 		},
 		watch.Accessors[*corev1.NodeList, corev1.Node]{
 			Items: func(list *corev1.NodeList) []corev1.Node { return list.Items },
@@ -99,6 +100,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 			// FIXME: make these configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
+			RelistRateLimit:  nil,
 		},
 		watch.Accessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
@@ -251,6 +253,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 			// FIXME: make these durations configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
+			RelistRateLimit:  util.NewTimeRange(time.Second, 1, 2),
 		},
 		watch.Accessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
 			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
@@ -370,6 +373,7 @@ func (e *AutoscaleEnforcer) watchMigrationEvents(
 			// FIXME: make these durations configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Second, 3, 5),
 			RetryWatchAfter:  util.NewTimeRange(time.Second, 3, 5),
+			RelistRateLimit:  nil,
 		},
 		watch.Accessors[*vmapi.VirtualMachineMigrationList, vmapi.VirtualMachineMigration]{
 			Items: func(list *vmapi.VirtualMachineMigrationList) []vmapi.VirtualMachineMigration { return list.Items },
