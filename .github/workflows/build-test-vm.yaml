@@ -89,3 +89,7 @@ jobs:
         run: |
           docker push ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
 
+      - name: Remove custom docker config directory
+        if: always()
+        run: |
+          rm -rf .docker-custom
