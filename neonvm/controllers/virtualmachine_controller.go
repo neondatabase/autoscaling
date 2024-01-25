@@ -74,6 +74,8 @@ type VirtualMachineReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+
+	Metrics ReconcilerMetrics `exhaustruct:"optional"`
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -1468,11 +1470,14 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	cntrlName := "virtualmachine"
+	reconciler := WithMetrics(r, r.Metrics, cntrlName)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 8}).
-		Complete(r)
+		Named(cntrlName).
+		Complete(reconciler)
 }
 
 func DeepEqual(v1, v2 interface{}) bool {

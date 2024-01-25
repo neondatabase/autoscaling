@@ -133,10 +133,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	reconcilerMetrics := controllers.MakeReconcilerMetrics()
+
 	if err = (&controllers.VirtualMachineReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
+		Metrics:  reconcilerMetrics,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
 		os.Exit(1)
@@ -149,6 +152,7 @@ func main() {
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
+		Metrics:  reconcilerMetrics,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
 		os.Exit(1)

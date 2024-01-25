@@ -39,6 +39,8 @@ var (
 	scriptVmShutdown string
 	//go:embed files/vminit
 	scriptVmInit string
+	//go:embed files/udev-init.sh
+	scriptUdevInit string
 	//go:embed files/vector.yaml
 	configVector string
 	//go:embed files/chrony.conf
@@ -274,6 +276,7 @@ func main() {
 		{"vector.yaml", configVector},
 		{"chrony.conf", configChrony},
 		{"sshd_config", configSshd},
+		{"udev-init.sh", scriptUdevInit},
 	}
 
 	for _, f := range files {

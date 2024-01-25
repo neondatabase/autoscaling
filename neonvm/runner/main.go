@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -32,6 +33,7 @@ import (
 	"github.com/containerd/cgroups/v3/cgroup2"
 	"github.com/digitalocean/go-qemu/qmp"
 	"github.com/docker/libnetwork/types"
+	"github.com/jpillora/backoff"
 	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
@@ -53,6 +55,8 @@ const (
 	runtimeDiskPath                = "/vm/images/runtime.iso"
 	mountedDiskPath                = "/vm/images"
 	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
+	logSerialSocket                = "/vm/log.sock"
+	bufferedReaderSize             = 4096
 
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
@@ -583,6 +587,9 @@ func main() {
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMPManual),
 		"-qmp", fmt.Sprintf("unix:%s,server,wait=off", qmpUnixSocketForSigtermHandler),
+		"-device", "virtio-serial",
+		"-chardev", fmt.Sprintf("socket,path=%s,server=on,wait=off,id=log", logSerialSocket),
+		"-device", "virtserialport,chardev=log,name=tech.neon.log.0",
 	}
 
 	// disk details
@@ -701,6 +708,8 @@ func main() {
 	go terminateQemuOnSigterm(ctx, logger, &wg)
 	wg.Add(1)
 	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
+	wg.Add(1)
+	go forwardLogs(ctx, logger, &wg)
 
 	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
 	logger.Info("calling cgexec", zap.Strings("args", args))
@@ -804,6 +813,101 @@ func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cg
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
 		logger.Info("shut down cpu_change server", zap.Error(err))
+	}
+}
+
+func printWithNewline(slice []byte) error {
+	if len(slice) == 0 {
+		return nil
+	}
+
+	_, err := os.Stdout.Write(slice)
+	if err != nil {
+		return err
+	}
+
+	if slice[len(slice)-1] == '\n' {
+		return nil
+	}
+
+	_, err = os.Stdout.WriteString("\n")
+	return err
+}
+
+func drainLogsReader(reader *bufio.Reader, logger *zap.Logger) error {
+	for {
+		// ReadSlice actually can return no more than bufferedReaderSize bytes
+		slice, err := reader.ReadSlice('\n')
+		// If err != nil, slice might not have \n at the end
+		err2 := printWithNewline(slice)
+
+		err = errors.Join(err, err2)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				logger.Warn("EOF while reading from log serial")
+			} else {
+				logger.Error("failed to read from log serial", zap.Error(err))
+			}
+			return err
+		}
+	}
+}
+
+// forwardLogs writes from socket to stdout line by line
+func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	delay := 3 * time.Second
+	var conn net.Conn
+	var reader *bufio.Reader
+	b := &backoff.Backoff{
+		Min:    100 * time.Millisecond,
+		Max:    delay,
+		Factor: 2,
+		Jitter: true,
+	}
+
+	for {
+		func() {
+			if conn == nil {
+				var err error
+				conn, err = net.Dial("unix", logSerialSocket)
+				if err != nil {
+					logger.Error("failed to dial to logSerialSocket", zap.Error(err))
+					return
+				}
+				reader = bufio.NewReaderSize(conn, bufferedReaderSize)
+			}
+
+			b.Attempt()
+			err := conn.SetReadDeadline(time.Now().Add(delay))
+			if err != nil {
+				logger.Error("failed to set read deadline", zap.Error(err))
+				conn = nil
+				return
+			}
+
+			err = drainLogsReader(reader, logger)
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// We've hit the deadline, meaning the reading session was successful.
+				b.Reset()
+				return
+			}
+
+			if err != nil {
+				conn = nil
+			}
+		}()
+
+		select {
+		case <-ctx.Done():
+			if conn != nil {
+				conn.Close()
+			}
+			_ = drainLogsReader(reader, logger)
+			return
+		case <-time.After(b.Duration()):
+		}
 	}
 }
 
