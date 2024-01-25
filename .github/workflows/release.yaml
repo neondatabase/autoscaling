@@ -23,9 +23,7 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.event.pull_request.head.sha || '' }}
         run: |
-          # note: github.ref_name is e.g. '748/merge' for a PR, or the name of the tag for a tag.
-          # Maybe we could use github.event_name for this, not sure.
-          if [[ "$REF_NAME" = */merge ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             echo "dry-run=true" | tee -a $GITHUB_OUTPUT
             sha="${SHA::7}"
             day="$(date -u '+%+4Y%m%d')" # equivalent to %F (e.g. '2024-01-19') with no dashes (e.g. '20240119')
