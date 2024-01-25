@@ -77,7 +77,7 @@ jobs:
           echo "cluster-autoscaler=${{ env.IMG_CLUSTER_AUTOSCALER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   vm-kernel:
-    if: ${{ ! inputs.skip }}
+    if: ${{ inputs.skip != 'true' }}
     uses: ./.github/workflows/vm-kernel.yaml
     with:
       tag: ${{ inputs.kernel-image || inputs.tag }}
@@ -85,7 +85,7 @@ jobs:
     secrets: inherit
 
   build:
-    if: ${{ ! inputs.skip }}
+    if: ${{ inputs.skip != 'true' }}
     needs: [ tags, vm-kernel ]
     runs-on: [ self-hosted, gen3, large ]
     steps:
@@ -113,7 +113,7 @@ jobs:
 
       - name: get CA base git tag
         id: get-ca-tag
-        if: ${{ inputs.build-cluster-autoscaler }}
+        if: ${{ inputs.build-cluster-autoscaler == 'true' }}
         run: |
           echo "tag=$(cat cluster-autoscaler/ca.tag)" >> $GITHUB_OUTPUT
 
@@ -208,7 +208,7 @@ jobs:
 
       - name: Build and push cluster-autoscaler image
         uses: docker/build-push-action@v3
-        if: ${{ inputs.build-cluster-autoscaler }}
+        if: ${{ inputs.build-cluster-autoscaler == 'true' }}
         with:
           context: cluster-autoscaler
           platforms: linux/amd64

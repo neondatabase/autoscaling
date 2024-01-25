@@ -45,7 +45,7 @@ jobs:
           echo "vm-postgres-15-bullseye=${{ env.IMG_POSTGRES_15_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   build:
-    if: ${{ ! inputs.skip }}
+    if: ${{ inputs.skip != 'true' }}
     needs: tags
     runs-on: [ self-hosted, gen3, large ]
     steps:
@@ -61,7 +61,7 @@ jobs:
       - run: make bin/vm-builder
 
       - name: upload vm-builder
-        if: ${{ inputs.upload-vm-builder }}
+        if: ${{ inputs.upload-vm-builder == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: vm-builder
