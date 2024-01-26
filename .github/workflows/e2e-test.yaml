@@ -45,7 +45,7 @@ jobs:
         if: ${{ inputs.tag == '' }}
         id: get-tag
         env:
-          SHA: ${{ github.event.pull_request.head.sha }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           test -n "$SHA"
           sha="${SHA::7}"
