@@ -17,23 +17,63 @@ on:
           - k3d
           - kind
         default: k3d
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        description: 'Tag to use for images, skipping building'
+        required: false
+      push-yamls:
+        type: boolean
+        description: 'If true, pushes a tarball containing the rendered yaml manifests as an artifact'
+        required: false
 
 env:
-  PRESERVE_RUNNER_PODS: "true"
+  IMG_E2E_TEST: vm-postgres:15-bullseye
 
 defaults:
   run:
     shell: bash -euo pipefail {0}
 
 jobs:
-  vm-kernel:
-    uses: ./.github/workflows/vm-kernel.yaml
+  get-tag:
+    outputs:
+      tag: ${{ inputs.tag || steps.get-tag.outputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: get tag
+        if: ${{ inputs.tag == '' }}
+        id: get-tag
+        env:
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test -n "$SHA"
+          sha="${SHA::7}"
+          echo "tag=$sha.$GITHUB_RUN_ID" | tee -a $GITHUB_OUTPUT
+
+  build-images:
+    needs: get-tag
+    uses: ./.github/workflows/build-images.yaml
     with:
-      return-image-for-tag: ${{ inputs.kernel-image }}
+      skip: ${{ inputs.tag != '' }}
+      tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
+      kernel-image: ${{ inputs.kernel-image }}
+      # note: setting to preserve runner pods will mean that if !skip, they'll be built with those
+      # settings and used properly in the tests. But if skip (because inputs.tag != ''), then this
+      # setting will have no effect and the release images will be normal.
+      controller-preserve-runner-pods: true
+    secrets: inherit
+
+  build-test-vm:
+    needs: get-tag
+    uses: ./.github/workflows/build-test-vm.yaml
+    with:
+      skip: ${{ inputs.tag != '' }}
+      tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
     secrets: inherit
 
   e2e-tests:
-    needs: vm-kernel
+    needs: [ build-images, build-test-vm ]
     strategy:
       fail-fast: false
       matrix:
@@ -53,8 +93,6 @@ jobs:
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
         timeout-minutes: 10
 
-      - uses: docker/setup-buildx-action@v2
-
       - name: Install dependencies
         run: |
           make e2e-tools
@@ -67,33 +105,72 @@ jobs:
           kind version
           kuttl version
           docker version
-          docker buildx version
 
-      - name: Load VM kernel
+      - run: make render-release
         env:
-          IMAGE: ${{ needs.vm-kernel.outputs.image }}
+          IMG_CONTROLLER:       ${{ needs.build-images.outputs.controller }}
+          IMG_VXLAN_CONTROLLER: ${{ needs.build-images.outputs.vxlan-controller }}
+          IMG_RUNNER:           ${{ needs.build-images.outputs.runner }}
+          IMG_SCHEDULER:        ${{ needs.build-images.outputs.scheduler }}
+          IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs.autoscaler-agent }}
+
+      - name: upload manifests
+        if: ${{ inputs.push-yamls == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered_manifests
+          # nb: prefix before wildcard is removed from the uploaded files, so the artifact should
+          # contain e.g.
+          #   - autoscale-scheduler.yaml
+          #   - autoscaler-agent.yaml
+          #   ...
+          # ref https://github.com/actions/upload-artifact#upload-using-multiple-paths-and-exclusions
+          path: rendered_manifests/*
+          if-no-files-found: error
+          retention-days: 2 # minimum is 1 day; 0 is default. These are only used temporarily.
+
+      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
+      # The default value is ~/.docker
+      - name: set custom docker config directory
         run: |
-          docker pull --quiet $IMAGE
-          ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
-          docker rm -f ${ID}
-
-      # our docker builds use the output of 'git describe' for embedding git information
-      - run: git describe --long --dirty
-
-      # Explicitly build all the images beforehand. Building images while the cluster is up can
-      # sometimes affect the cluster. For more information:
-      # https://github.com/neondatabase/autoscaling/issues/120#issuecomment-1493405844
-      - run: make build
-      - run: make docker-build
-      - run: make docker-build-examples
+          mkdir -p .docker-custom
+          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
       - run: make ${{ matrix.cluster }}-setup
 
-      - run: make deploy
-        timeout-minutes: 10
-      - run: make example-vms
-        timeout-minutes: 10
+      - name: deploy components
+        timeout-minutes: 3
+        run: |
+          rendered () { echo "rendered_manifests/$1"; }
+
+          kubectl apply -f $(rendered multus.yaml)
+          kubectl -n kube-system rollout status daemonset kube-multus-ds
+          kubectl apply -f $(rendered whereabouts.yaml)
+          kubectl -n kube-system rollout status daemonset whereabouts
+          kubectl apply -f $(rendered neonvm.yaml)
+          kubectl -n neonvm-system rollout status daemonset  neonvm-device-plugin
+          kubectl -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
+          kubectl -n neonvm-system rollout status deployment neonvm-controller
+          kubectl apply -f $(rendered autoscale-scheduler.yaml)
+          kubectl -n kube-system rollout status deployment autoscale-scheduler
+          kubectl apply -f $(rendered autoscaler-agent.yaml)
+          kubectl -n kube-system rollout status daemonset autoscaler-agent
+
+      - name: load e2e test vm image
+        env:
+          TEST_IMAGE: ${{ needs.build-test-vm.outputs.vm-postgres-15-bullseye }}
+        timeout-minutes: 2
+        run: |
+          # Pull the docker image so we can re-tag it, because using a consistent tag inside the
+          # cluster means we can avoid dynamically editing the image used in the kuttl files.
+          docker pull "$TEST_IMAGE"
+          docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
+          make load-example-vms
+
       - run: make e2e
         timeout-minutes: 15
 
