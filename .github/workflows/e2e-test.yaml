@@ -169,7 +169,7 @@ jobs:
           # cluster means we can avoid dynamically editing the image used in the kuttl files.
           docker pull "$TEST_IMAGE"
           docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
-          make load-test-vm
+          make load-example-vms
 
       - run: make e2e
         timeout-minutes: 15
