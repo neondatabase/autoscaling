@@ -291,7 +291,7 @@ render-release: $(RENDERED) kustomize
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
 .PHONY: deploy
-deploy: check-local-context load-images manifests render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: check-local-context docker-build load-images manifests render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
 	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
@@ -307,24 +307,25 @@ deploy: check-local-context load-images manifests render-manifests kubectl ## De
 	$(KUBECTL) -n kube-system rollout status daemonset autoscaler-agent
 
 .PHONY: load-images
-load-images: kubectl kind k3d docker-build ## Push docker images to the local kind/k3d cluster
+load-images: check-local-context kubectl kind k3d ## Push docker images to the local kind/k3d cluster
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then make k3d-load;  fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ];  then make kind-load; fi
 
-.PHONY: load-test-vm
-load-test-vm: ## Load the testing VM image to the kind/k3d cluster.
+.PHONY: load-example-vms
+load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(E2E_TESTS_VM_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name $(CLUSTER_NAME); fi
 
 .PHONY: example-vms
-example-vms: docker-build-examples kind k3d kubectl ## Build and push the testing VM images to the kind/k3d cluster.
-	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(E2E_TESTS_VM_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
-	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name $(CLUSTER_NAME); fi
+example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
 
-.PHONY: pg14-disk-test
-pg14-disk-test: check-local-context docker-build-pg14-disk-test kind k3d kubectl ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
+.PHONY: load-pg14-disk-test
+load-pg14-disk-test: check-local-context kubectl kind k3d ## Load the pg14-disk-test VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG14_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(PG14_DISK_TEST_IMG) --name $(CLUSTER_NAME); fi
+
+.PHONY: pg14-disk-test
+pg14-disk-test: docker-build-pg14-disk-test load-pg14-disk-test ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
 
 .PHONY: kind-load
 kind-load: kind # Push docker images to the kind cluster.
