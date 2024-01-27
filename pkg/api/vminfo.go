@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	LabelEnableAutoMigration      = "autoscaling.neon.tech/auto-migration-enabled"
 	LabelTestingOnlyAlwaysMigrate = "autoscaling.neon.tech/testing-only-always-migrate"
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
@@ -34,6 +35,12 @@ func hasTrueLabel(obj metav1.ObjectMetaAccessor, labelName string) bool {
 // HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
 func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
 	return hasTrueLabel(obj, LabelEnableAutoscaling)
+}
+
+// HasAutoMigrationEnabled returns true iff the object has the label that enables "automatic"
+// scheduler-triggered migration, and it's set to "true"
+func HasAutoMigrationEnabled(obj metav1.ObjectMetaAccessor) bool {
+	return hasTrueLabel(obj, LabelEnableAutoMigration)
 }
 
 func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
@@ -75,6 +82,10 @@ type VmMemInfo struct {
 // values that either qualitatively change the handling for a VM *or* ar eexpected to largely be the
 // same for most VMs (e.g., ScalingConfig).
 type VmConfig struct {
+	// AutoMigrationEnabled indicates to the scheduler plugin that it's allowed to trigger migration
+	// for this VM. This defaults to false because otherwise we might disrupt VMs that don't have
+	// adequate networking support to preserve connections across live migration.
+	AutoMigrationEnabled bool `json:"autoMigrationEnabled"`
 	// AlwaysMigrate is a test-only debugging flag that, if present in the VM's labels, will always
 	// prompt it to mgirate, regardless of whether the VM actually *needs* to.
 	AlwaysMigrate  bool           `json:"alwaysMigrate"`
@@ -164,9 +175,10 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 			SlotSize: BytesFromResourceQuantity(vm.Spec.Guest.MemorySlotSize),
 		},
 		Config: VmConfig{
-			AlwaysMigrate:  HasAlwaysMigrateLabel(vm),
-			ScalingEnabled: HasAutoscalingEnabled(vm),
-			ScalingConfig:  nil, // set below, maybe
+			AutoMigrationEnabled: HasAutoMigrationEnabled(vm),
+			AlwaysMigrate:        HasAlwaysMigrateLabel(vm),
+			ScalingEnabled:       HasAutoscalingEnabled(vm),
+			ScalingConfig:        nil, // set below, maybe
 		},
 	}
 
@@ -384,13 +396,13 @@ func (cfg VmConfig) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
 		state.Write([]byte(fmt.Sprintf(
-			"api.VmConfig{AlwaysMigrate:%t, ScalingEnabled:%t, ScalingConfig:%#v}",
-			cfg.AlwaysMigrate, cfg.ScalingEnabled, cfg.ScalingConfig,
+			"api.VmConfig{AutoMigrationEnabled:%t, AlwaysMigrate:%t, ScalingEnabled:%t, ScalingConfig:%#v}",
+			cfg.AutoMigrationEnabled, cfg.AlwaysMigrate, cfg.ScalingEnabled, cfg.ScalingConfig,
 		)))
 	default:
 		state.Write([]byte(fmt.Sprintf(
-			"{AlwaysMigrate:%t ScalingEnabled:%t ScalingConfig:%+v}",
-			cfg.AlwaysMigrate, cfg.ScalingEnabled, cfg.ScalingConfig,
+			"{AutoMigrationEnabled:%t AlwaysMigrate:%t ScalingEnabled:%t ScalingConfig:%+v}",
+			cfg.AutoMigrationEnabled, cfg.AlwaysMigrate, cfg.ScalingEnabled, cfg.ScalingConfig,
 		)))
 	}
 }

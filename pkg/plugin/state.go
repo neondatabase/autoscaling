@@ -844,12 +844,17 @@ func (e *AutoscaleEnforcer) handleVMConfigUpdated(logger *zap.Logger, podName ut
 
 	// Broadly, we want to update the value of the vmPodState.Config field.
 	// But *also*, if autoscaling is newly disabled, we should update update the pod/node state.
+	// And if auto-migration is disabled, we should remove the VM from the migration queue.
 
 	oldCfg := ps.vm.Config
 	ps.vm.Config = newCfg
 
 	// worth logging all of this in case we hit issues.
 	logger.Info("Config updated for VM", zap.Any("oldCfg", newCfg), zap.Any("newCfg", newCfg))
+
+	if oldCfg.AutoMigrationEnabled && !newCfg.AutoMigrationEnabled {
+		ps.node.mq.removeIfPresent(ps.vm)
+	}
 
 	if oldCfg.ScalingEnabled && !newCfg.ScalingEnabled {
 		cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
