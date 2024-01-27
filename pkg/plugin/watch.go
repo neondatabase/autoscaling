@@ -288,13 +288,13 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
-				if oldInfo.ScalingEnabled && !newInfo.ScalingEnabled {
+				if oldInfo.Config.ScalingEnabled && !newInfo.Config.ScalingEnabled {
 					logger.Info("Received update to disable autoscaling for VM", util.VMNameFields(newVM))
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					callbacks.submitDisabledScaling(logger, name)
 				}
 
-				if (!oldInfo.ScalingEnabled || !newInfo.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
+				if (!oldInfo.Config.ScalingEnabled || !newInfo.Config.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
 					podName := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
 					logger.Info("Received update changing usage for VM", zap.Object("old", oldInfo.Using()), zap.Object("new", newInfo.Using()))
 					callbacks.submitNonAutoscalingVmUsageChanged(logger, newInfo, podName.Name)

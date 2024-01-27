@@ -100,9 +100,11 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					Max:      4,
 				},
 				// remaining fields are also unused:
-				ScalingConfig:  nil,
-				AlwaysMigrate:  false,
-				ScalingEnabled: true,
+				Config: api.VmConfig{
+					AlwaysMigrate:  false,
+					ScalingEnabled: true,
+					ScalingConfig:  nil,
+				},
 			},
 			core.Config{
 				ComputeUnit: api.Resources{VCPU: 250, Mem: 1 * slotSize},
