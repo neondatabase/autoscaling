@@ -101,9 +101,10 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				},
 				// remaining fields are also unused:
 				Config: api.VmConfig{
-					AlwaysMigrate:  false,
-					ScalingEnabled: true,
-					ScalingConfig:  nil,
+					AutoMigrationEnabled: false,
+					AlwaysMigrate:        false,
+					ScalingEnabled:       true,
+					ScalingConfig:        nil,
 				},
 			},
 			core.Config{

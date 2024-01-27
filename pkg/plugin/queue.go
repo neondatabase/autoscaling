@@ -30,6 +30,7 @@ func (mq migrationQueue) isNextInQueue(vm *vmPodState) bool {
 func (mq *migrationQueue) removeIfPresent(vm *vmPodState) {
 	if vm.MqIndex != -1 {
 		_ = heap.Remove(mq, vm.MqIndex)
+		vm.MqIndex = -1
 	}
 }
 

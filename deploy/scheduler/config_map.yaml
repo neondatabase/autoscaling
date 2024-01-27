@@ -39,6 +39,6 @@ data:
         "timeoutSeconds": 5
       },
       "migrationDeletionRetrySeconds": 5,
-      "doMigration": false,
+      "doMigration": true,
       "randomizeScores": true
     }

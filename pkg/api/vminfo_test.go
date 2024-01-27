@@ -27,16 +27,17 @@ func TestFormatting(t *testing.T) {
 			SlotSize: api.BytesFromResourceQuantity(slotSize),
 		},
 		Config: api.VmConfig{
-			AlwaysMigrate:  false,
-			ScalingEnabled: true,
+			AutoMigrationEnabled: true,
+			AlwaysMigrate:        false,
+			ScalingEnabled:       true,
 			ScalingConfig: &api.ScalingConfig{
 				LoadAverageFractionTarget: 0.7,
 				MemoryUsageFractionTarget: 0.7,
 			},
 		},
 	})
-	defaultFormat := "{Name:foo Namespace:bar Cpu:{Min:1 Max:5 Use:3.75} Mem:{Min:2 Max:6 Use:4 SlotSize:1Gi} Config:{AlwaysMigrate:false ScalingEnabled:true ScalingConfig:&{LoadAverageFractionTarget:0.7 MemoryUsageFractionTarget:0.7}}}"
-	goSyntaxRepr := `api.VmInfo{Name:"foo", Namespace:"bar", Cpu:api.VmCpuInfo{Min:api.MilliCPU(1000), Max:api.MilliCPU(5000), Use:api.MilliCPU(3750)}, Mem:api.VmMemInfo{Min:2, Max:6, Use:4, SlotSize:1073741824}, Config:api.VmConfig{AlwaysMigrate:false, ScalingEnabled:true, ScalingConfig:&api.ScalingConfig{LoadAverageFractionTarget:0.7, MemoryUsageFractionTarget:0.7}}}`
+	defaultFormat := "{Name:foo Namespace:bar Cpu:{Min:1 Max:5 Use:3.75} Mem:{Min:2 Max:6 Use:4 SlotSize:1Gi} Config:{AutoMigrationEnabled:true AlwaysMigrate:false ScalingEnabled:true ScalingConfig:&{LoadAverageFractionTarget:0.7 MemoryUsageFractionTarget:0.7}}}"
+	goSyntaxRepr := `api.VmInfo{Name:"foo", Namespace:"bar", Cpu:api.VmCpuInfo{Min:api.MilliCPU(1000), Max:api.MilliCPU(5000), Use:api.MilliCPU(3750)}, Mem:api.VmMemInfo{Min:2, Max:6, Use:4, SlotSize:1073741824}, Config:api.VmConfig{AutoMigrationEnabled:true, AlwaysMigrate:false, ScalingEnabled:true, ScalingConfig:&api.ScalingConfig{LoadAverageFractionTarget:0.7, MemoryUsageFractionTarget:0.7}}}`
 	cases := []struct {
 		name     string
 		expected string
