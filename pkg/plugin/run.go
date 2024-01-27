@@ -204,9 +204,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	mustMigrate := pod.vm.MigrationState == nil &&
 		// Check whether the pod *will* migrate, then update its resources, and THEN start its
 		// migration, using the possibly-changed resources.
-		e.updateMetricsAndCheckMustMigrate(logger, pod.vm, node, req.Metrics) &&
-		// Don't migrate if it's disabled
-		e.state.conf.migrationEnabled()
+		e.updateMetricsAndCheckMustMigrate(logger, pod.vm, node, req.Metrics)
 
 	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
 
@@ -315,11 +313,13 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	node *nodeState,
 	metrics *api.Metrics,
 ) bool {
-	// This pod should migrate if (a) we're looking for migrations and (b) it's next up in the
-	// priority queue. We will give it a chance later to veto if the metrics have changed too much
+	// This pod should migrate if (a) it's allowed to migrate, (b) node resource usage is high
+	// enough that we should migrate *something*, and (c) it's next up in the priority queue.
+	// We will give it a chance later to veto if the metrics have changed too much.
 	//
-	// A third condition, "the pod is marked to always migrate" causes it to migrate even if neither
-	// of the above conditions are met, so long as it has *previously* provided metrics.
+	// Alternatively, "the pod is marked to always migrate" causes it to migrate even if none of
+	// the above conditions are met, so long as it has *previously* provided metrics.
+	canMigrate := vm.Config.AutoMigrationEnabled && e.state.conf.migrationEnabled()
 	shouldMigrate := node.mq.isNextInQueue(vm) && node.tooMuchPressure(logger)
 	forcedMigrate := vm.Config.AlwaysMigrate && vm.Metrics != nil
 
@@ -332,7 +332,8 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 
 	node.mq.addOrUpdate(vm)
 
-	if !shouldMigrate && !forcedMigrate {
+	// nb: forcedMigrate takes priority over canMigrate
+	if (!canMigrate || !shouldMigrate) && !forcedMigrate {
 		return false
 	}
 
