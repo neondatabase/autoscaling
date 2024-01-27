@@ -569,6 +569,13 @@ func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName stri
 	logger.Info("Deleted node")
 }
 
+// handleStarted updates the state according to a pod that's already started, but may or may not
+// have been scheduled via the plugin.
+//
+// We need to handle this so that we maintain an accurate view of the resource usage in the cluster;
+// otherwise, we might (a) ignore resources from pods that weren't scheduled here, or (b) fail to
+// include pods that *were* scheduled here, but had spurious Unreserves.
+// (for more, see: https://github.com/neondatabase/autoscaling/pull/435)
 func (e *AutoscaleEnforcer) handleStarted(logger *zap.Logger, pod *corev1.Pod) {
 	nodeName := pod.Spec.NodeName
 
@@ -586,6 +593,14 @@ func (e *AutoscaleEnforcer) handleStarted(logger *zap.Logger, pod *corev1.Pod) {
 	_, _, _ = e.reserveResources(context.TODO(), logger, pod, "Pod started", false)
 }
 
+// reserveResources attempts to set aside resources on the node for the pod.
+//
+// If allowDeny is false, reserveResources is not "allowed" to reject the pod if there isn't enough
+// room - it must instead set aside resources that don't exist.
+//
+// If an unexpected error occurs, the first two return values are unspecified, and the error will be
+// non-nil. Otherwise, 'ok' will indicate whether the pod was accepted and the verdictSet will
+// provide messages describing the result, suitable for being logged.
 func (e *AutoscaleEnforcer) reserveResources(
 	ctx context.Context,
 	logger *zap.Logger,
@@ -764,6 +779,15 @@ func (e *AutoscaleEnforcer) handleDeletion(logger *zap.Logger, podName util.Name
 	)
 }
 
+// unreserveResources is *essentially* the inverse of reserveResources, but with two main
+// differences:
+//
+//  1. unreserveResources cannot "deny" unreserving, whereas reserveResources may choose whether to
+//     accept the additional reservation.
+//  2. unreserveResources returns additional information for logging.
+//
+// Also note that because unreserveResources is expected to be called by the plugin's Unreserve()
+// method, it may be called for pods that no longer exist.
 func (e *AutoscaleEnforcer) unreserveResources(
 	logger *zap.Logger,
 	podName util.NamespacedName,
