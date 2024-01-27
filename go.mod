@@ -50,6 +50,7 @@ require (
 	github.com/docker/docker v24.0.7+incompatible
 	github.com/docker/libnetwork v0.8.0-dev.2.0.20210525090646-64b7a4574d14
 	github.com/go-logr/logr v1.2.3
+	github.com/jpillora/backoff v1.0.0
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
 	github.com/k8snetworkplumbingwg/whereabouts v0.6.1
 	github.com/kdomanski/iso9660 v0.3.3

@@ -11,6 +11,10 @@ done
 
 # udev rule for auto-online hotplugged CPUs
 mkdir -p /lib/udev/rules.d
+# taken from 50-udev-default.rules
+echo 'SUBSYSTEM=="virtio-ports", KERNEL=="vport*", ATTR{name}=="?*", SYMLINK+="virtio-ports/$attr{name}"' > /lib/udev/rules.d/99-virtio-ports.rules
+
+echo 'ATTR{name}=="tech.neon.log.0" MODE="0666"' > /lib/udev/rules.d/99-neon-log-port.rules
 echo 'SUBSYSTEM=="cpu", ACTION=="add", TEST=="online", ATTR{online}=="0", ATTR{online}="1"' > /lib/udev/rules.d/99-hotplug-cpu.rules
 
 # system mounts

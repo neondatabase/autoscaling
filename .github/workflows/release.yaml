@@ -1,173 +1,89 @@
 name: release
 on:
+  # # UNCOMMENT TO ALLOW TESTING:
+  # pull_request:
   push:
     tags:
       - "v*.*.*"
 
-env:
-  AGENT_IMAGE: "neondatabase/autoscaler-agent"
-  SCHED_IMAGE: "neondatabase/autoscale-scheduler"
-
-  KUSTOMIZE_VERSION:        "4.5.7"
-  CONTROLLER_TOOLS_VERSION: "0.10.0"
-  CODE_GENERATOR_VERSION:   "0.25.16"
-  IMG:                      "neondatabase/neonvm-controller"
-  IMG_VXLAN:                "neondatabase/neonvm-vxlan-controller"
-  IMG_RUNNER:               "neondatabase/neonvm-runner"
-  VM_KERNEL_IMAGE:          "neondatabase/vm-kernel"
-
-  CLUSTER_AUTOSCALER_IMAGE: "neondatabase/cluster-autoscaler-neonvm"
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
 
 jobs:
-  vm-kernel:
-    uses: ./.github/workflows/vm-kernel.yaml
+  get-tag:
+    outputs:
+      tag: ${{ steps.get-tag.outputs.tag }}
+      dry-run: ${{ steps.get-tag.outputs.dry-run }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: get tag
+        id: get-tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.event.pull_request.head.sha || '' }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "dry-run=true" | tee -a $GITHUB_OUTPUT
+            sha="${SHA::7}"
+            day="$(date -u '+%+4Y%m%d')" # equivalent to %F (e.g. '2024-01-19') with no dashes (e.g. '20240119')
+            echo "tag=testrelease-$day.$sha.$GITHUB_RUN_ID" | tee -a $GITHUB_OUTPUT
+          else
+            echo "dry-run=false" | tee -a $GITHUB_OUTPUT
+            echo "tag=$REF_NAME" | tee -a $GITHUB_OUTPUT
+          fi
+
+  build-images:
+    uses: ./.github/workflows/build-images.yaml
+    needs: get-tag
     with:
-      tag: ${{ github.ref_name }}
+      tag: ${{ needs.get-tag.outputs.tag }}
+      build-cluster-autoscaler: true
+    secrets: inherit
+
+  build-test-vm:
+    uses: ./.github/workflows/build-test-vm.yaml
+    needs: get-tag
+    with:
+      tag: ${{ needs.get-tag.outputs.tag }}
+      upload-vm-builder: true
+    secrets: inherit
+
+  e2e:
+    needs: [ get-tag, build-images, build-test-vm ]
+    uses: ./.github/workflows/e2e-test.yaml
+    with:
+      tag: ${{ needs.get-tag.outputs.tag }}
+      push-yamls: true
+    secrets: inherit
 
   release:
-    needs: vm-kernel
-    runs-on: [ self-hosted, gen3, large ]
+    needs: [ get-tag, e2e ]
+    runs-on: ubuntu-latest
     steps:
-      - name: git checkout
-        uses: actions/checkout@v3
-      - name: get version and git info
-        id: get_vcs_info
-        run: |
-          echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          echo -n "git_info=" >> $GITHUB_OUTPUT
-          # note: --tags enables matching on lightweight (i.e. not annotated) tags, which normally
-          # wouldn't be necessary, except that actions/checkout@v3 does weird things to setup the
-          # repository that means that we actually end up checked out with *just* a lightweight tag
-          # to the tagged commit.
-          git describe --tags --long --dirty >> $GITHUB_OUTPUT
-      - name: get CA base git tag
-        id: get_ca_tag
-        run: |
-          echo -n "ca_git_tag=" >> $GITHUB_OUTPUT
-          cat cluster-autoscaler/ca.tag >> $GITHUB_OUTPUT
-      - name: install golang
-        uses: actions/setup-go@v4
+      - uses: actions/checkout@v3
+
+      - name: download vm-builder
+        uses: actions/download-artifact@v4
         with:
-          go-version-file: 'go.mod'
-        timeout-minutes: 10
+          name: vm-builder
+          path: .
 
-      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
-      # The default value is ~/.docker
-      - name: set custom docker config directory
-        run: |
-          mkdir -p .docker-custom
-          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
-
-      - name: check everything builds
-        run: go build ./...
-
-      - name: build binaries
-        run: |
-          make build
-
-      - name: docker - install qemu
-        uses: docker/setup-qemu-action@v2
-      - name: docker - setup buildx
-        uses: docker/setup-buildx-action@v2
-      - name: login to docker hub
-        uses: docker/login-action@v2
+      - name: download manifests
+        uses: actions/download-artifact@v4
         with:
-          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
-          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
-
-      - name: load vm kernel
-        env:
-          IMAGE: ${{ needs.vm-kernel.outputs.image }}
-        run: |
-          docker pull --quiet $IMAGE
-          ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
-          docker rm -f ${ID}
-
-      - name: build and push runner image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          file: neonvm/runner/Dockerfile
-          tags: ${{ env.IMG_RUNNER }}:${{ steps.get_vcs_info.outputs.version }}
-
-      - name: build and push controller image
-        uses: docker/build-push-action@v3
-        with:
-          build-args: VM_RUNNER_IMAGE=${{ env.IMG_RUNNER }}:${{ steps.get_vcs_info.outputs.version }}
-          context: .
-          platforms: linux/amd64
-          push: true
-          file: neonvm/Dockerfile
-          tags: ${{ env.IMG }}:${{ steps.get_vcs_info.outputs.version }}
-
-      - name: build and push vxlan controller image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          file: neonvm/tools/vxlan/Dockerfile
-          tags: ${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
-
-      - name: build and push autoscale-scheduler image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          file: build/autoscale-scheduler/Dockerfile
-          tags: ${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args: |
-            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
-
-      - name: build and push autoscaler-agent image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          file: build/autoscaler-agent/Dockerfile
-          tags: ${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          build-args: |
-            GIT_INFO=${{ steps.get_vcs_info.outputs.git_info }}
-
-      - name: render kubernetes resources
-        uses: stefanprodan/kube-tools@v1
-        with:
-          kustomize: ${{ env.KUSTOMIZE_VERSION }}
-          command: |
-            kustomize version --short
-            cd ${GITHUB_WORKSPACE}/neonvm/config/common/controller && kustomize edit set image controller=${{ env.IMG }}:${{ steps.get_vcs_info.outputs.version }}
-            cd ${GITHUB_WORKSPACE}/neonvm/config/default-vxlan/vxlan-controller && kustomize edit set image vxlan-controller=${{ env.IMG_VXLAN }}:${{ steps.get_vcs_info.outputs.version }}
-            cd ${GITHUB_WORKSPACE}/deploy/scheduler && kustomize edit set image autoscale-scheduler=${{ env.SCHED_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-            cd ${GITHUB_WORKSPACE}/deploy/agent && kustomize edit set image autoscaler-agent=${{ env.AGENT_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-            cd ${GITHUB_WORKSPACE}
-            mkdir -p rendered_manifests
-            kustomize build neonvm/config/default-vxlan/whereabouts > rendered_manifests/whereabouts.yaml
-            kustomize build neonvm/config/default-vxlan/multus-eks > rendered_manifests/multus-eks.yaml
-            kustomize build neonvm/config/default-vxlan/multus > rendered_manifests/multus.yaml
-            kustomize build neonvm/config/default-vxlan > rendered_manifests/neonvm.yaml
-            kustomize build deploy/scheduler > rendered_manifests/autoscale-scheduler.yaml
-            kustomize build deploy/agent > rendered_manifests/autoscaler-agent.yaml
-
-      - name: build and push cluster-autoscaler image
-        uses: docker/build-push-action@v3
-        with:
-          tags: ${{ env.CLUSTER_AUTOSCALER_IMAGE }}:${{ steps.get_vcs_info.outputs.version }}
-          context: cluster-autoscaler
-          push: true
-          build-args: |
-            CA_GIT_TAG=${{ steps.get_ca_tag.outputs.ca_git_tag }}
+          name: rendered_manifests
+          # files in the artifact will be expanded into the directory 'rendered_manifests'.
+          # See e2e-test.yaml: the individual yamls are flattened inside the artifact.
+          path: rendered_manifests
 
       - name: github release
+        if: ${{ needs.get-tag.outputs.dry-run == 'false' }}
         uses: softprops/action-gh-release@v1
         with:
           fail_on_unmatched_files: true
           files: |
-            bin/vm-builder
+            vm-builder
             rendered_manifests/autoscale-scheduler.yaml
             rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml
@@ -175,8 +91,3 @@ jobs:
             rendered_manifests/multus-eks.yaml
             rendered_manifests/whereabouts.yaml
             deploy/vmscrape.yaml
-
-      - name: remove custom docker config directory
-        if: always()
-        run: |
-          rm -rf .docker-custom
