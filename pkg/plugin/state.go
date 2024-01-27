@@ -677,7 +677,7 @@ func (e *AutoscaleEnforcer) reserveResources(
 		vmState = &vmPodState{
 			name:                     vmInfo.NamespacedName(),
 			memSlotSize:              vmInfo.Mem.SlotSize,
-			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
+			testingOnlyAlwaysMigrate: vmInfo.Config.AlwaysMigrate,
 			metrics:                  nil,
 			mqIndex:                  -1,
 			migrationState:           nil,
@@ -1333,13 +1333,13 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 				migrationState: nil,
 
 				memSlotSize:              vmInfo.Mem.SlotSize,
-				testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
+				testingOnlyAlwaysMigrate: vmInfo.Config.AlwaysMigrate,
 			},
 		}
 
 		// If scaling isn't enabled *or* the pod is involved in an ongoing migration, then we can be
 		// more precise about usage (because scaling is forbidden while migrating).
-		if !vmInfo.ScalingEnabled || migrationName != nil {
+		if !vmInfo.Config.ScalingEnabled || migrationName != nil {
 			ps.cpu.Buffer = 0
 			ps.cpu.Reserved = vmInfo.Cpu.Use
 

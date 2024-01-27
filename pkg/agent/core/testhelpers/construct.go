@@ -80,9 +80,11 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 			Use:      config.MinCU * uint16(config.ComputeUnit.Mem/config.MemorySlotSize),
 			Max:      config.MaxCU * uint16(config.ComputeUnit.Mem/config.MemorySlotSize),
 		},
-		ScalingConfig:  nil,
-		AlwaysMigrate:  false,
-		ScalingEnabled: true,
+		Config: api.VmConfig{
+			ScalingConfig:  nil,
+			AlwaysMigrate:  false,
+			ScalingEnabled: true,
+		},
 	}
 
 	for _, o := range opts {
