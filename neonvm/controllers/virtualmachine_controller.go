@@ -762,7 +762,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// one is still running.
 		//
 		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
-		// one* container inside the runner pod has finished; the other may still be running.
+		// one* container inside the runner pod has finished; the VM itself may still be running.
 		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
 			// clean up status, but keep the phase; we'll use it below (and possibly keep it around to
 			// be visible to the user if we don't intend to restart).
