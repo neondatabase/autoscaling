@@ -787,17 +787,17 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 	return nil
 }
 
-type runnerStatus string
+type runnerStatusKind string
 
 const (
-	runnerUnknown   runnerStatus = "Unknown"
-	runnerPending   runnerStatus = "Pending"
-	runnerRunning   runnerStatus = "Running"
-	runnerFailed    runnerStatus = "Failed"
-	runnerSucceeded runnerStatus = "Succeeded"
+	runnerUnknown   runnerStatusKind = "Unknown"
+	runnerPending   runnerStatusKind = "Pending"
+	runnerRunning   runnerStatusKind = "Running"
+	runnerFailed    runnerStatusKind = "Failed"
+	runnerSucceeded runnerStatusKind = "Succeeded"
 )
 
-func runnerContainerStatus(pod *corev1.Pod) runnerStatus {
+func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
 	switch pod.Status.Phase {
 	case "", corev1.PodPending:
 		return runnerPending
