@@ -429,7 +429,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			return err
 		}
 		// runner pod found, check phase
-		switch runnerContainerStatus(vmRunner) {
+		switch runnerStatus(vmRunner) {
 		case runnerRunning:
 			virtualmachine.Status.PodIP = vmRunner.Status.PodIP
 			virtualmachine.Status.Phase = vmv1.VmRunning
@@ -489,7 +489,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 		// runner pod found, check/update phase now
-		switch runnerContainerStatus(vmRunner) {
+		switch runnerStatus(vmRunner) {
 		case runnerRunning:
 			// update status by IP of runner pod
 			virtualmachine.Status.PodIP = vmRunner.Status.PodIP
@@ -609,7 +609,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 		// runner pod found, check that it's still up:
-		switch runnerContainerStatus(vmRunner) {
+		switch runnerStatus(vmRunner) {
 		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -797,7 +797,7 @@ const (
 	runnerSucceeded runnerStatusKind = "Succeeded"
 )
 
-func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
+func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	switch pod.Status.Phase {
 	case "", corev1.PodPending:
 		return runnerPending

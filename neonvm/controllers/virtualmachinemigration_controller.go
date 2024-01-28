@@ -297,7 +297,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 
 		// now inspect target pod status and update migration
-		switch runnerContainerStatus(targetRunner) {
+		switch runnerStatus(targetRunner) {
 		case runnerRunning:
 			// update migration status
 			migration.Status.SourcePodName = vm.Status.PodName
