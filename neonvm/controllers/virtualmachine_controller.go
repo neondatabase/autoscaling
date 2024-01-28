@@ -372,7 +372,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 		// VirtualMachine just created, change Phase to "Pending"
 		virtualmachine.Status.Phase = vmv1.VmPending
-		virtualmachine.Status.Restarts = &[]int32{0}[0] // set value to pointer to 0
+		virtualmachine.Status.RestartCount = &[]int32{0}[0] // set value to pointer to 0
 	case vmv1.VmPending:
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
@@ -765,7 +765,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
 		// one* container inside the runner pod has finished; the other may still be running.
 		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
-			// NB: Cleanup() leaves status .Phase and .Restarts (+ some others) but unsets other fields.
+			// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
 			virtualmachine.Cleanup()
 
 			shouldRestart := virtualmachine.Spec.RestartPolicy == vmv1.RestartPolicyAlways ||
@@ -774,7 +774,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			if shouldRestart {
 				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
 				virtualmachine.Status.Phase = vmv1.VmPending // reset to trigger restart
-				*virtualmachine.Status.Restarts += 1         // increment restart count
+				*virtualmachine.Status.RestartCount += 1     // increment restart count
 			}
 
 			// TODO for RestartPolicyNever: implement TTL or do nothing

@@ -2694,7 +2694,7 @@ spec:
                 type: string
               podName:
                 type: string
-              restarts:
+              restartCount:
                 description: Number of times the VM runner pod has been recreated
                 format: int32
                 type: integer

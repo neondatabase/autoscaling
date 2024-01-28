@@ -721,8 +721,8 @@ func (in *VirtualMachineStatus) DeepCopyInto(out *VirtualMachineStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.Restarts != nil {
-		in, out := &in.Restarts, &out.Restarts
+	if in.RestartCount != nil {
+		in, out := &in.RestartCount, &out.RestartCount
 		*out = new(int32)
 		**out = **in
 	}
