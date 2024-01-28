@@ -770,8 +770,15 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			virtualmachine.Cleanup()
 			virtualmachine.Status.Phase = phase
 
-			shouldRestart := virtualmachine.Spec.RestartPolicy == vmv1.RestartPolicyAlways ||
-				(virtualmachine.Spec.RestartPolicy == vmv1.RestartPolicyOnFailure && virtualmachine.Status.Phase == vmv1.VmFailed)
+			var shouldRestart bool
+			switch virtualmachine.Spec.RestartPolicy {
+			case vmv1.RestartPolicyAlways:
+				shouldRestart = true
+			case vmv1.RestartPolicyOnFailure:
+				shouldRestart = virtualmachine.Status.Phase == vmv1.VmFailed
+			case vmv1.RestartPolicyNever:
+				shouldRestart = false
+			}
 
 			if shouldRestart {
 				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
