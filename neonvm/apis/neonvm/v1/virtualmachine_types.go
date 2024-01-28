@@ -384,7 +384,7 @@ type VirtualMachineStatus struct {
 	Phase VmPhase `json:"phase,omitempty"`
 	// Number of times the VM runner pod has been recreated
 	// +optional
-	Restarts *int32 `json:"restarts,omitempty"`
+	RestartCount *int32 `json:"restartCount,omitempty"`
 	// +optional
 	PodName string `json:"podName,omitempty"`
 	// +optional
