@@ -669,6 +669,7 @@ func (r *Runner) DoSchedulerRequest(
 	reqData := &api.AgentRequest{
 		ProtoVersion: PluginProtocolVersion,
 		Pod:          r.podName,
+		ComputeUnit:  &r.global.config.Scaling.ComputeUnit,
 		Resources:    resources,
 		LastPermit:   lastPermit,
 		Metrics:      metrics,

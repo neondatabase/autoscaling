@@ -1,11 +1,10 @@
 # Image URL to use all building/pushing image targets
 IMG_CONTROLLER ?= controller:dev
+IMG_VXLAN_CONTROLLER ?= vxlan-controller:dev
 IMG_RUNNER ?= runner:dev
-IMG_VXLAN ?= vxlan-controller:dev
+IMG_SCHEDULER ?= autoscale-scheduler:dev
+IMG_AUTOSCALER_AGENT ?= autoscaler-agent:dev
 
-# Autoscaler related images
-AUTOSCALER_SCHEDULER_IMG ?= autoscale-scheduler:dev
-AUTOSCALER_AGENT_IMG ?= autoscaler-agent:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG14_DISK_TEST_IMG ?= pg14-disk-test:dev
 
@@ -147,9 +146,9 @@ docker-build: docker-build-controller docker-build-runner docker-build-vxlan-con
 docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_CONTROLLER)
 	docker push -q $(IMG_RUNNER)
-	docker push -q $(IMG_VXLAN)
-	docker push -q $(AUTOSCALER_SCHEDULER_IMG)
-	docker push -q $(AUTOSCALER_AGENT_IMG)
+	docker push -q $(IMG_VXLAN_CONTROLLER)
+	docker push -q $(IMG_SCHEDULER)
+	docker push -q $(IMG_AUTOSCALER_AGENT)
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
@@ -161,12 +160,12 @@ docker-build-runner: ## Build docker image for NeonVM runner
 
 .PHONY: docker-build-vxlan-controller
 docker-build-vxlan-controller: ## Build docker image for NeonVM vxlan controller
-	docker build -t $(IMG_VXLAN) -f neonvm/tools/vxlan/Dockerfile .
+	docker build -t $(IMG_VXLAN_CONTROLLER) -f neonvm/tools/vxlan/Dockerfile .
 
 .PHONY: docker-build-autoscaler-agent
 docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
 	docker buildx build \
-		--tag $(AUTOSCALER_AGENT_IMG) \
+		--tag $(IMG_AUTOSCALER_AGENT) \
 		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscaler-agent/Dockerfile \
@@ -175,7 +174,7 @@ docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
 .PHONY: docker-build-scheduler
 docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
 	docker buildx build \
-		--tag $(AUTOSCALER_SCHEDULER_IMG) \
+		--tag $(IMG_SCHEDULER) \
 		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscale-scheduler/Dockerfile \
@@ -256,9 +255,9 @@ $(RENDERED):
 render-manifests: $(RENDERED) kustomize
 	# Prepare:
 	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(AUTOSCALER_SCHEDULER_IMG) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(AUTOSCALER_AGENT_IMG) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
@@ -275,9 +274,9 @@ render-manifests: $(RENDERED) kustomize
 render-release: $(RENDERED) kustomize
 	# Prepare:
 	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)
-	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN)
-	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(AUTOSCALER_SCHEDULER_IMG)
-	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(AUTOSCALER_AGENT_IMG)
+	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER)
+	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER)
+	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
@@ -292,7 +291,7 @@ render-release: $(RENDERED) kustomize
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
 .PHONY: deploy
-deploy: check-local-context load-images manifests render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: check-local-context docker-build load-images manifests render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
 	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
@@ -308,28 +307,34 @@ deploy: check-local-context load-images manifests render-manifests kubectl ## De
 	$(KUBECTL) -n kube-system rollout status daemonset autoscaler-agent
 
 .PHONY: load-images
-load-images: kubectl kind k3d docker-build ## Push docker images to the local kind/k3d cluster
+load-images: check-local-context kubectl kind k3d ## Push docker images to the local kind/k3d cluster
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then make k3d-load;  fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ];  then make kind-load; fi
 
-.PHONY: example-vms
-example-vms: docker-build-examples kind k3d kubectl ## Build and push the testing VM images to the kind/k3d cluster.
+.PHONY: load-example-vms
+load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(E2E_TESTS_VM_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name $(CLUSTER_NAME); fi
 
-.PHONY: pg14-disk-test
-pg14-disk-test: check-local-context docker-build-pg14-disk-test kind k3d kubectl ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
+.PHONY: example-vms
+example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
+
+.PHONY: load-pg14-disk-test
+load-pg14-disk-test: check-local-context kubectl kind k3d ## Load the pg14-disk-test VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG14_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(PG14_DISK_TEST_IMG) --name $(CLUSTER_NAME); fi
+
+.PHONY: pg14-disk-test
+pg14-disk-test: docker-build-pg14-disk-test load-pg14-disk-test ## Build and push the pg14-disk-test VM test image to the kind/k3d cluster.
 
 .PHONY: kind-load
 kind-load: kind # Push docker images to the kind cluster.
 	$(KIND) load docker-image \
 		$(IMG_CONTROLLER) \
 		$(IMG_RUNNER) \
-		$(IMG_VXLAN) \
-		$(AUTOSCALER_SCHEDULER_IMG) \
-		$(AUTOSCALER_AGENT_IMG) \
+		$(IMG_VXLAN_CONTROLLER) \
+		$(IMG_SCHEDULER) \
+		$(IMG_AUTOSCALER_AGENT) \
 		--name $(CLUSTER_NAME)
 
 .PHONY: k3d-load
@@ -337,9 +342,9 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 	$(K3D) image import \
 		$(IMG_CONTROLLER) \
 		$(IMG_RUNNER) \
-		$(IMG_VXLAN) \
-		$(AUTOSCALER_SCHEDULER_IMG) \
-		$(AUTOSCALER_AGENT_IMG) \
+		$(IMG_VXLAN_CONTROLLER) \
+		$(IMG_SCHEDULER) \
+		$(IMG_AUTOSCALER_AGENT) \
 		--cluster $(CLUSTER_NAME) --mode direct
 
 ##@ End-to-End tests

@@ -105,7 +105,7 @@ jobs:
           elif [ -z "${CACHED_IMAGE}" ]; then
             # there's no image to retag
             RETAG_NEEDED=false
-          elif [ -n "${FORCED_TAG}"]; then
+          elif [ -n "${FORCED_TAG}" ]; then
             # we're asked to return image for a specific tag, so no need to retag
             RETAG_NEEDED=false
           elif [ "${FORCE_REBUILD}" == "true" ]; then
