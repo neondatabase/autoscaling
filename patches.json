@@ -27,13 +27,10 @@
     "@base": [
       { "path": ".k8sNodeGroupLabel", "value": "eks.amazonaws.com/nodegroup" },
       { "path": ".k8sAvailabilityZoneLabel", "value": "topology.kubernetes.io/zone" },
-      { "path": ".ignoreNamespaces", "value": ["overprovisioning"] },
-      { "path": ".doMigration", "value": true }
+      { "path": ".ignoreNamespaces", "value": ["overprovisioning"] }
     ],
     "dev-eu-central-1-alpha": [],
     "dev-eu-west-1-zeta": [],
-    "dev-us-east-2-beta": [
-      { "path": ".doMigration", "value": false }
-	]
+    "dev-us-east-2-beta": []
   }
 }
