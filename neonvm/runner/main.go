@@ -843,6 +843,9 @@ func drainLogsReader(reader *bufio.Reader, logger *zap.Logger) error {
 
 		err = errors.Join(err, err2)
 		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				return nil
+			}
 			if errors.Is(err, io.EOF) {
 				logger.Warn("EOF while reading from log serial")
 			} else {
