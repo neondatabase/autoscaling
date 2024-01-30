@@ -59,6 +59,8 @@ type VirtualMachineMigrationReconciler struct {
 	Recorder record.EventRecorder
 
 	Metrics ReconcilerMetrics
+
+	MaxConcurrentReconciles int
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -673,7 +675,7 @@ func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) e
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 8}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named(cntrlName).
 		Complete(reconciler)
 }
