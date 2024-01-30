@@ -28,6 +28,7 @@ RUN set -e \
 		flock \
 	&& mv /sbin/acpid         /neonvm/bin/ \
 	&& mv /sbin/udevd         /neonvm/bin/ \
+	&& mv /bin/udevadm        /neonvm/bin/ \
 	&& mv /sbin/agetty        /neonvm/bin/ \
 	&& mv /sbin/su-exec       /neonvm/bin/ \
 	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
@@ -86,7 +87,7 @@ RUN set -e \
 	&& mv /usr/bin/ssh-keygen /neonvm/bin/ \
 	&& mv /usr/sbin/sshd      /neonvm/bin/
 
-# init scripts
+# init scripts & configs
 COPY inittab     /neonvm/bin/inittab
 COPY vminit      /neonvm/bin/vminit
 COPY vmstart     /neonvm/bin/vmstart
@@ -96,6 +97,8 @@ COPY vector.yaml /neonvm/config/vector.yaml
 COPY chrony.conf /neonvm/config/chrony.conf
 COPY sshd_config /neonvm/config/sshd_config
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
+COPY udev-init.sh /neonvm/bin/udev-init.sh
+RUN chmod +rx /neonvm/bin/udev-init.sh
 
 # rootdisk modification
 FROM rootdisk AS rootdisk-mod

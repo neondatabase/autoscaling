@@ -74,6 +74,8 @@ type VirtualMachineReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+
+	Metrics ReconcilerMetrics `exhaustruct:"optional"`
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -890,20 +892,23 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 		ignoreExtra map[string]bool // use bool here so `if ignoreExtra[key] { ... }` works
 	}{
 		{
-			metaField:   "labels",
-			expected:    labelsForVirtualMachine(vm),
-			actual:      runnerPod.Labels,
-			ignoreExtra: map[string]bool{},
+			metaField: "labels",
+			expected:  labelsForVirtualMachine(vm, nil), // don't include runner version
+			actual:    runnerPod.Labels,
+			ignoreExtra: map[string]bool{
+				// Don't override the runner pod version - we need to keep it around without
+				// changing it; otherwise it's not useful!
+				vmv1.RunnerPodVersionLabel: true,
+			},
 		},
 		{
 			metaField: "annotations",
 			expected:  annotationsForVirtualMachine(vm),
 			actual:    runnerPod.Annotations,
 			ignoreExtra: map[string]bool{
-				"kubectl.kubernetes.io/default-container": true,
-				"k8s.v1.cni.cncf.io/networks":             true,
-				"k8s.v1.cni.cncf.io/network-status":       true,
-				"k8s.v1.cni.cncf.io/networks-status":      true,
+				"k8s.v1.cni.cncf.io/networks":        true,
+				"k8s.v1.cni.cncf.io/network-status":  true,
+				"k8s.v1.cni.cncf.io/networks-status": true,
 			},
 		},
 	}
@@ -1067,7 +1072,7 @@ func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) 
 
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
-func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
+func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine, runnerVersion *api.RunnerProtoVersion) map[string]string {
 	l := make(map[string]string, len(virtualmachine.Labels)+3)
 	for k, v := range virtualmachine.Labels {
 		l[k] = v
@@ -1075,7 +1080,9 @@ func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]str
 
 	l["app.kubernetes.io/name"] = "NeonVM"
 	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
-	l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", api.RunnerProtoV1)
+	if runnerVersion != nil {
+		l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", *runnerVersion)
+	}
 	return l
 }
 
@@ -1085,13 +1092,14 @@ func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[strin
 		"kubectl.kubernetes.io/last-applied-configuration": true,
 	}
 
-	a := make(map[string]string, len(virtualmachine.Annotations)+1)
+	a := make(map[string]string, len(virtualmachine.Annotations)+2)
 	for k, v := range virtualmachine.Annotations {
 		if !ignored[k] {
 			a[k] = v
 		}
 	}
 
+	a["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
 	return a
 }
@@ -1208,7 +1216,8 @@ func imageForVmRunner() (string, error) {
 }
 
 func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*corev1.Pod, error) {
-	labels := labelsForVirtualMachine(virtualmachine)
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(virtualmachine, &runnerVersion)
 	annotations := annotationsForVirtualMachine(virtualmachine)
 	affinity := affinityForVirtualMachine(virtualmachine)
 
@@ -1495,11 +1504,6 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 		}
 	}
 
-	if pod.ObjectMeta.Annotations == nil {
-		pod.ObjectMeta.Annotations = map[string]string{}
-	}
-	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
-
 	// use multus network to add extra network interface
 	if virtualmachine.Spec.ExtraNetwork != nil && virtualmachine.Spec.ExtraNetwork.Enable {
 		var nadNetwork string
@@ -1526,11 +1530,14 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	cntrlName := "virtualmachine"
+	reconciler := WithMetrics(r, r.Metrics, cntrlName)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 8}).
-		Complete(r)
+		Named(cntrlName).
+		Complete(reconciler)
 }
 
 func DeepEqual(v1, v2 interface{}) bool {

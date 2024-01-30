@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
   golangci:
     name: golangci-lint
@@ -40,7 +44,7 @@ jobs:
           go mod tidy
       - name: check diff
         run: |
-          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
             git ls-files --exclude-standard --others .
             git diff .
             echo "ERROR: 'go mod tidy' modified the source tree."
@@ -61,7 +65,7 @@ jobs:
           make manifests
       - name: check diff
         run: |
-          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
             git ls-files --exclude-standard --others .
             git diff .
             echo "ERROR: 'make manifests' modified the source tree."
@@ -79,7 +83,7 @@ jobs:
           make generate
       - name: check diff
         run: |
-          if ! (test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"); then
+          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
             git ls-files --exclude-standard --others .
             git diff .
             echo "ERROR: 'make generate' modified the source tree."
@@ -96,3 +100,17 @@ jobs:
         with:
           check_hidden: true
           skip: go.sum,*.patch # '*.patch' references cluster-autoscaler/ca.patch, but somehow skipping directly doesn't work...
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: reviewdog/action-actionlint@54e8faeff91fe07595b1ad3cfdc6aee0157bf51b # v1.40.0
+        env:
+          # SC2046 - Quote this to prevent word splitting.                - https://www.shellcheck.net/wiki/SC2046
+          # SC2086 - Double quote to prevent globbing and word splitting. - https://www.shellcheck.net/wiki/SC2086
+          SHELLCHECK_OPTS: --exclude=SC2046,SC2086
+        with:
+          fail_on_error: true
+          filter_mode: nofilter
+          level: error
