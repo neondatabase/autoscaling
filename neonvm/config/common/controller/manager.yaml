@@ -58,6 +58,7 @@ spec:
         - /manager
         args:
         - --leader-elect
+        - --concurrency-limit=8
         image: controller:dev
         name: manager
         securityContext:
