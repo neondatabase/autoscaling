@@ -113,6 +113,8 @@ func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) (*V
 // handling for a VM (e.g., AlwaysMigrate) or are expected to largely be the same for most VMs
 // (e.g., ScalingConfig).
 type VmConfig struct {
+	// AlwaysMigrate is a test-only debugging flag that, if present in the VM's labels, will always
+	// prompt it to migrate, regardless of whether the VM actually *needs* to.
 	AlwaysMigrate  bool           `json:"alwaysMigrate"`
 	ScalingEnabled bool           `json:"scalingEnabled"`
 	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
