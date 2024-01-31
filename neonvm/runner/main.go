@@ -61,6 +61,12 @@ const (
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
 
+	// See #775 and its links.
+	// * cache.writeback=off - forces writes to be synchronous (avoid hidden caching)
+	// * cache.direct=on     - forces using direct IO (don't abuse host's page cache!)
+	// * cache.no-flush=on   - ignores disk flush operations (not needed; our disks are ephemeral)
+	diskCacheSettings = "cache.writeback=off,cache.direct=on,cache.no-flush=on"
+
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
 	defaultNetworkCIDR       = "169.254.254.252/30"
@@ -595,7 +601,7 @@ func main() {
 	}
 
 	// disk details
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
 
 	if enableSSH {
@@ -618,7 +624,7 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				discard = ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, diskCacheSettings, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
