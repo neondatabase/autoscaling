@@ -209,7 +209,7 @@ func (s *nodeState) dump() nodeStateDump {
 		if p == nil {
 			mq = append(mq, nil)
 		} else {
-			v := podNameAndPointer{Obj: makePointerString(p), PodName: p.name}
+			v := podNameAndPointer{Obj: makePointerString(p), PodName: p.Name}
 			mq = append(mq, &v)
 		}
 	}
@@ -246,22 +246,22 @@ func (s *podState) dump() podStateDump {
 func (s *vmPodState) dump() vmPodStateDump {
 	// Copy some of the "may be nil" pointer fields
 	var metrics *api.Metrics
-	if s.metrics != nil {
-		m := *s.metrics
+	if s.Metrics != nil {
+		m := *s.Metrics
 		metrics = &m
 	}
 	var migrationState *podMigrationStateDump
-	if s.migrationState != nil {
+	if s.MigrationState != nil {
 		migrationState = &podMigrationStateDump{
-			MigrationName: s.migrationState.name,
+			MigrationName: s.MigrationState.Name,
 		}
 	}
 
 	return vmPodStateDump{
-		Name:                     s.name,
-		TestingOnlyAlwaysMigrate: s.testingOnlyAlwaysMigrate,
+		Name:                     s.Name,
+		TestingOnlyAlwaysMigrate: s.TestingOnlyAlwaysMigrate,
 		Metrics:                  metrics,
-		MqIndex:                  s.mqIndex,
+		MqIndex:                  s.MqIndex,
 		MigrationState:           migrationState,
 	}
 }

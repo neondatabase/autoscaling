@@ -179,35 +179,35 @@ type podState struct {
 }
 
 type vmPodState struct {
-	// name is the name of the VM, as given by the owner reference for the VM or VM migration that
+	// Name is the name of the VM, as given by the owner reference for the VM or VM migration that
 	// owns this pod
-	name util.NamespacedName
+	Name util.NamespacedName
 
-	// memSlotSize stores the value of the VM's .Spec.Guest.MemorySlotSize, for compatibility with
+	// MemSlotSize stores the value of the VM's .Spec.Guest.MemorySlotSize, for compatibility with
 	// earlier versions of the agent<->plugin protocol.
-	memSlotSize api.Bytes
+	MemSlotSize api.Bytes
 
-	// testingOnlyAlwaysMigrate is a test-only debugging flag that, if present in the pod's labels,
+	// TestingOnlyAlwaysMigrate is a test-only debugging flag that, if present in the pod's labels,
 	// will always prompt it to mgirate, regardless of whether the VM actually *needs* to.
-	testingOnlyAlwaysMigrate bool
+	TestingOnlyAlwaysMigrate bool
 
-	// metrics is the most recent metrics update we received for this pod. A nil pointer means that
-	// we have not yet received metrics.
-	metrics *api.Metrics
+	// Metrics is the most recent Metrics update we received for this pod. A nil pointer means that
+	// we have not yet received Metrics.
+	Metrics *api.Metrics
 
-	// mqIndex stores this pod's index in the migrationQueue. This value is -1 iff metrics is nil or
+	// MqIndex stores this pod's index in the migrationQueue. This value is -1 iff metrics is nil or
 	// it is currently migrating.
-	mqIndex int
+	MqIndex int
 
-	// migrationState gives current information about an ongoing migration, if this pod is currently
+	// MigrationState gives current information about an ongoing migration, if this pod is currently
 	// migrating.
-	migrationState *podMigrationState
+	MigrationState *podMigrationState
 }
 
 // podMigrationState tracks the information about an ongoing VM pod's migration
 type podMigrationState struct {
-	// name gives the name of the VirtualMachineMigration that this pod is involved in
-	name util.NamespacedName
+	// Name gives the name of the VirtualMachineMigration that this pod is involved in
+	Name util.NamespacedName
 }
 
 type podResourceState[T any] struct {
@@ -243,7 +243,7 @@ func (p *podState) kind() string {
 func (p *podState) logFields() []zap.Field {
 	podName := zap.Object("pod", p.name)
 	if p.vm != nil {
-		vmName := zap.Object("virtualmachine", p.vm.name)
+		vmName := zap.Object("virtualmachine", p.vm.Name)
 		return []zap.Field{podName, vmName}
 	} else {
 		return []zap.Field{podName}
@@ -322,7 +322,7 @@ func (s *vmPodState) checkOkToMigrate(oldMetrics api.Metrics) error {
 }
 
 func (s *vmPodState) currentlyMigrating() bool {
-	return s.migrationState != nil
+	return s.MigrationState != nil
 }
 
 // this method can only be called while holding a lock. If we don't have the necessary information
@@ -675,12 +675,12 @@ func (e *AutoscaleEnforcer) reserveResources(
 
 	if vmInfo != nil {
 		vmState = &vmPodState{
-			name:                     vmInfo.NamespacedName(),
-			memSlotSize:              vmInfo.Mem.SlotSize,
-			testingOnlyAlwaysMigrate: vmInfo.Config.AlwaysMigrate,
-			metrics:                  nil,
-			mqIndex:                  -1,
-			migrationState:           nil,
+			Name:                     vmInfo.NamespacedName(),
+			MemSlotSize:              vmInfo.Mem.SlotSize,
+			TestingOnlyAlwaysMigrate: vmInfo.Config.AlwaysMigrate,
+			Metrics:                  nil,
+			MqIndex:                  -1,
+			MigrationState:           nil,
 		}
 		cpuState = podResourceState[vmapi.MilliCPU]{
 			Reserved:         vmInfo.Using().VCPU,
@@ -797,7 +797,7 @@ func (e *AutoscaleEnforcer) unreserveResources(
 	}
 	logFields := []zap.Field{zap.String("node", ps.node.name)}
 	if ps.vm != nil {
-		logFields = append(logFields, zap.Object("virtualmachine", ps.vm.name))
+		logFields = append(logFields, zap.Object("virtualmachine", ps.vm.Name))
 	}
 
 	// Mark the resources as no longer reserved
@@ -841,7 +841,7 @@ func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName 
 		logger.Error("handleVMDisabledScaling called for non-VM Pod")
 		return
 	}
-	logger = logger.With(zap.Object("virtualmachine", ps.vm.name))
+	logger = logger.With(zap.Object("virtualmachine", ps.vm.Name))
 
 	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
 		handleAutoscalingDisabled()
@@ -881,7 +881,7 @@ func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName,
 		logger.Error("handlePodStartMigration called for non-VM Pod")
 		return
 	}
-	logger = logger.With(zap.Object("virtualmachine", ps.vm.name))
+	logger = logger.With(zap.Object("virtualmachine", ps.vm.Name))
 
 	// Reset buffer to zero, remove from migration queue (if in it), and set pod's migrationState
 	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
@@ -890,7 +890,7 @@ func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName,
 		handleStartMigration(source)
 
 	ps.node.mq.removeIfPresent(ps.vm)
-	ps.vm.migrationState = &podMigrationState{name: migrationName}
+	ps.vm.MigrationState = &podMigrationState{Name: migrationName}
 
 	ps.node.updateMetrics(e.metrics)
 
@@ -925,9 +925,9 @@ func (e *AutoscaleEnforcer) handlePodEndMigration(logger *zap.Logger, podName, m
 		logger.Error("handlePodEndMigration called for non-VM Pod")
 		return
 	}
-	logger = logger.With(zap.Object("virtualmachine", ps.vm.name))
+	logger = logger.With(zap.Object("virtualmachine", ps.vm.Name))
 
-	ps.vm.migrationState = nil
+	ps.vm.MigrationState = nil
 
 	//nolint:gocritic // NOTE: not *currently* needed, but this should be kept here as a reminder, in case that changes.
 	// ps.node.updateMetrics(e.metrics)
@@ -1105,12 +1105,12 @@ func (e *AutoscaleEnforcer) cleanupMigration(logger *zap.Logger, vmm *vmapi.Virt
 
 func (s *vmPodState) isBetterMigrationTarget(other *vmPodState) bool {
 	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
-	if s.metrics == nil || other.metrics == nil {
-		return s.metrics != nil && other.metrics == nil
+	if s.Metrics == nil || other.Metrics == nil {
+		return s.Metrics != nil && other.Metrics == nil
 	}
 
 	// TODO - this is just a first-pass approximation. Maybe it's ok for now? Maybe it's not. Idk.
-	return s.metrics.LoadAverage1Min < other.metrics.LoadAverage1Min
+	return s.Metrics.LoadAverage1Min < other.Metrics.LoadAverage1Min
 }
 
 // this method can only be called while holding a lock. It will be released temporarily while we
@@ -1127,7 +1127,7 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 	defer e.state.lock.Lock()
 
 	vmmName := util.NamespacedName{
-		Name:      fmt.Sprintf("schedplugin-%s", pod.vm.name.Name),
+		Name:      fmt.Sprintf("schedplugin-%s", pod.vm.Name.Name),
 		Namespace: pod.name.Namespace,
 	}
 
@@ -1176,7 +1176,7 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 			},
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
-			VmName: pod.vm.name.Name,
+			VmName: pod.vm.Name.Name,
 
 			// FIXME: NeonVM's VirtualMachineMigrationSpec has a bunch of boolean fields that aren't
 			// pointers, which means we need to explicitly set them when using the Go API.
@@ -1326,14 +1326,14 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 				Max:              vmInfo.Max().Mem,
 			},
 			vm: &vmPodState{
-				name: *vmName,
+				Name: *vmName,
 
-				mqIndex:        -1,
-				metrics:        nil,
-				migrationState: nil,
+				MqIndex:        -1,
+				Metrics:        nil,
+				MigrationState: nil,
 
-				memSlotSize:              vmInfo.Mem.SlotSize,
-				testingOnlyAlwaysMigrate: vmInfo.Config.AlwaysMigrate,
+				MemSlotSize:              vmInfo.Mem.SlotSize,
+				TestingOnlyAlwaysMigrate: vmInfo.Config.AlwaysMigrate,
 			},
 		}
 
