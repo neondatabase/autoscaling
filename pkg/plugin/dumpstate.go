@@ -134,19 +134,7 @@ type podStateDump struct {
 	Node pointerString                    `json:"node"`
 	CPU  podResourceState[vmapi.MilliCPU] `json:"cpu"`
 	Mem  podResourceState[api.Bytes]      `json:"mem"`
-	VM   *vmPodStateDump                  `json:"vm"`
-}
-
-type vmPodStateDump struct {
-	Name                     util.NamespacedName    `json:"name"`
-	TestingOnlyAlwaysMigrate bool                   `json:"testingOnlyAlwaysMigrate"`
-	Metrics                  *api.Metrics           `json:"metrics"`
-	MqIndex                  int                    `json:"mqIndex"`
-	MigrationState           *podMigrationStateDump `json:"migrationState"`
-}
-
-type podMigrationStateDump struct {
-	MigrationName util.NamespacedName `json:"migrationName"`
+	VM   *vmPodState                      `json:"vm"`
 }
 
 func makePointerString[T any](t *T) pointerString {
@@ -228,9 +216,9 @@ func (s *nodeState) dump() nodeStateDump {
 
 func (s *podState) dump() podStateDump {
 
-	var vm *vmPodStateDump
+	var vm *vmPodState
 	if s.vm != nil {
-		vm = &[]vmPodStateDump{s.vm.dump()}[0]
+		vm = &[]vmPodState{s.vm.dump()}[0]
 	}
 
 	return podStateDump{
@@ -243,22 +231,23 @@ func (s *podState) dump() podStateDump {
 	}
 }
 
-func (s *vmPodState) dump() vmPodStateDump {
+func (s *vmPodState) dump() vmPodState {
 	// Copy some of the "may be nil" pointer fields
 	var metrics *api.Metrics
 	if s.Metrics != nil {
 		m := *s.Metrics
 		metrics = &m
 	}
-	var migrationState *podMigrationStateDump
+	var migrationState *podMigrationState
 	if s.MigrationState != nil {
-		migrationState = &podMigrationStateDump{
-			MigrationName: s.MigrationState.Name,
+		migrationState = &podMigrationState{
+			Name: s.MigrationState.Name,
 		}
 	}
 
-	return vmPodStateDump{
+	return vmPodState{
 		Name:                     s.Name,
+		MemSlotSize:              s.MemSlotSize,
 		TestingOnlyAlwaysMigrate: s.TestingOnlyAlwaysMigrate,
 		Metrics:                  metrics,
 		MqIndex:                  s.MqIndex,
