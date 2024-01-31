@@ -321,7 +321,7 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	// A third condition, "the pod is marked to always migrate" causes it to migrate even if neither
 	// of the above conditions are met, so long as it has *previously* provided metrics.
 	shouldMigrate := node.mq.isNextInQueue(vm) && node.tooMuchPressure(logger)
-	forcedMigrate := vm.TestingOnlyAlwaysMigrate && vm.Metrics != nil
+	forcedMigrate := vm.Config.AlwaysMigrate && vm.Metrics != nil
 
 	logger.Info("Updating pod metrics", zap.Any("metrics", metrics))
 	oldMetrics := vm.Metrics

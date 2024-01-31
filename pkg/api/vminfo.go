@@ -75,6 +75,8 @@ type VmMemInfo struct {
 // values that either qualitatively change the handling for a VM *or* ar eexpected to largely be the
 // same for most VMs (e.g., ScalingConfig).
 type VmConfig struct {
+	// AlwaysMigrate is a test-only debugging flag that, if present in the VM's labels, will always
+	// prompt it to mgirate, regardless of whether the VM actually *needs* to.
 	AlwaysMigrate  bool           `json:"alwaysMigrate"`
 	ScalingEnabled bool           `json:"scalingEnabled"`
 	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
