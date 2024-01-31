@@ -181,27 +181,27 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	}
 
 	// Check that req.ComputeUnit.Mem is divisible by the VM's memory slot size
-	if req.ComputeUnit.Mem%pod.vm.memSlotSize != 0 {
+	if req.ComputeUnit.Mem%pod.vm.MemSlotSize != 0 {
 		return nil, 400, fmt.Errorf(
 			"computeUnit is not divisible by VM memory slot size: %v not divisible by %v",
 			req.ComputeUnit,
-			pod.vm.memSlotSize,
+			pod.vm.MemSlotSize,
 		)
 	}
 
 	// If the request was actually sending a quantity of *memory slots*, rather than bytes, then
 	// multiply memory resources to make it match the
 	if !req.ProtoVersion.RepresentsMemoryAsBytes() {
-		req.Resources.Mem *= pod.vm.memSlotSize
+		req.Resources.Mem *= pod.vm.MemSlotSize
 	}
 
 	node := pod.node
 	nodeName = node.name // set nodeName for deferred metrics
 
 	// Also, now that we know which VM this refers to (and which node it's on), add that to the logger for later.
-	logger = logger.With(zap.Object("virtualmachine", pod.vm.name), zap.String("node", nodeName))
+	logger = logger.With(zap.Object("virtualmachine", pod.vm.Name), zap.String("node", nodeName))
 
-	mustMigrate := pod.vm.migrationState == nil &&
+	mustMigrate := pod.vm.MigrationState == nil &&
 		// Check whether the pod *will* migrate, then update its resources, and THEN start its
 		// migration, using the possibly-changed resources.
 		e.updateMetricsAndCheckMustMigrate(logger, pod.vm, node, req.Metrics) &&
@@ -321,11 +321,11 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	// A third condition, "the pod is marked to always migrate" causes it to migrate even if neither
 	// of the above conditions are met, so long as it has *previously* provided metrics.
 	shouldMigrate := node.mq.isNextInQueue(vm) && node.tooMuchPressure(logger)
-	forcedMigrate := vm.testingOnlyAlwaysMigrate && vm.metrics != nil
+	forcedMigrate := vm.TestingOnlyAlwaysMigrate && vm.Metrics != nil
 
 	logger.Info("Updating pod metrics", zap.Any("metrics", metrics))
-	oldMetrics := vm.metrics
-	vm.metrics = metrics
+	oldMetrics := vm.Metrics
+	vm.Metrics = metrics
 	if vm.currentlyMigrating() {
 		return false // don't do anything else; it's already migrating.
 	}
