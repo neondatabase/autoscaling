@@ -187,9 +187,8 @@ type vmPodState struct {
 	// earlier versions of the agent<->plugin protocol.
 	MemSlotSize api.Bytes
 
-	// TestingOnlyAlwaysMigrate is a test-only debugging flag that, if present in the pod's labels,
-	// will always prompt it to mgirate, regardless of whether the VM actually *needs* to.
-	TestingOnlyAlwaysMigrate bool
+	// Config stores the values of per-VM settings for this VM
+	Config api.VmConfig
 
 	// Metrics is the most recent Metrics update we received for this pod. A nil pointer means that
 	// we have not yet received Metrics.
@@ -675,12 +674,12 @@ func (e *AutoscaleEnforcer) reserveResources(
 
 	if vmInfo != nil {
 		vmState = &vmPodState{
-			Name:                     vmInfo.NamespacedName(),
-			MemSlotSize:              vmInfo.Mem.SlotSize,
-			TestingOnlyAlwaysMigrate: vmInfo.Config.AlwaysMigrate,
-			Metrics:                  nil,
-			MqIndex:                  -1,
-			MigrationState:           nil,
+			Name:           vmInfo.NamespacedName(),
+			MemSlotSize:    vmInfo.Mem.SlotSize,
+			Config:         vmInfo.Config,
+			Metrics:        nil,
+			MqIndex:        -1,
+			MigrationState: nil,
 		}
 		cpuState = podResourceState[vmapi.MilliCPU]{
 			Reserved:         vmInfo.Using().VCPU,
@@ -1332,8 +1331,8 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 				Metrics:        nil,
 				MigrationState: nil,
 
-				MemSlotSize:              vmInfo.Mem.SlotSize,
-				TestingOnlyAlwaysMigrate: vmInfo.Config.AlwaysMigrate,
+				MemSlotSize: vmInfo.Mem.SlotSize,
+				Config:      vmInfo.Config,
 			},
 		}
 
