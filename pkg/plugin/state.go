@@ -819,13 +819,13 @@ func (e *AutoscaleEnforcer) unreserveResources(
 	return logFields, ps.kind(), currentlyMigrating, verdictSet{cpu: cpuVerdict, mem: memVerdict}
 }
 
-func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName util.NamespacedName) {
+func (e *AutoscaleEnforcer) handleVMConfigUpdated(logger *zap.Logger, podName util.NamespacedName, newCfg api.VmConfig) {
 	logger = logger.With(
-		zap.String("action", "VM scaling disabled"),
+		zap.String("action", "VM config updated"),
 		zap.Object("pod", podName),
 	)
 
-	logger.Info("Handling disabled autoscaling for VM pod")
+	logger.Info("Handling updated config for VM pod")
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
@@ -837,25 +837,36 @@ func (e *AutoscaleEnforcer) handleVMDisabledScaling(logger *zap.Logger, podName 
 	}
 	logger = logger.With(zap.String("node", ps.node.name))
 	if ps.vm == nil {
-		logger.Error("handleVMDisabledScaling called for non-VM Pod")
+		logger.Error("handleVMConfigUpdated called for non-VM Pod")
 		return
 	}
 	logger = logger.With(zap.Object("virtualmachine", ps.vm.Name))
 
-	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
-		handleAutoscalingDisabled()
-	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
-		handleAutoscalingDisabled()
+	// Broadly, we want to update the value of the vmPodState.Config field.
+	// But *also*, if autoscaling is newly disabled, we should update update the pod/node state.
 
-	ps.node.updateMetrics(e.metrics)
+	oldCfg := ps.vm.Config
+	ps.vm.Config = newCfg
 
-	logger.Info(
-		"Disabled autoscaling for VM pod",
-		zap.Object("verdict", verdictSet{
-			cpu: cpuVerdict,
-			mem: memVerdict,
-		}),
-	)
+	// worth logging all of this in case we hit issues.
+	logger.Info("Config updated for VM", zap.Any("oldCfg", newCfg), zap.Any("newCfg", newCfg))
+
+	if oldCfg.ScalingEnabled && !newCfg.ScalingEnabled {
+		cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
+			handleAutoscalingDisabled()
+		memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
+			handleAutoscalingDisabled()
+
+		ps.node.updateMetrics(e.metrics)
+
+		logger.Info(
+			"Disabled autoscaling for VM pod",
+			zap.Object("verdict", verdictSet{
+				cpu: cpuVerdict,
+				mem: memVerdict,
+			}),
+		)
+	}
 }
 
 func (e *AutoscaleEnforcer) handlePodStartMigration(logger *zap.Logger, podName, migrationName util.NamespacedName, source bool) {

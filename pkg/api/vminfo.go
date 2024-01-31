@@ -82,6 +82,14 @@ type VmConfig struct {
 	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
 }
 
+// Equals returns true if the two VmConfig structs are deep-equal to each other.
+func (c VmConfig) Equals(other VmConfig) bool {
+	return c.AlwaysMigrate == other.AlwaysMigrate &&
+		c.ScalingEnabled == other.ScalingEnabled &&
+		(c.ScalingConfig == nil) == (other.ScalingConfig == nil) &&
+		(c.ScalingConfig == nil || c.ScalingConfig.Equals(*other.ScalingConfig))
+}
+
 // Using returns the Resources that this VmInfo says the VM is using
 func (vm VmInfo) Using() Resources {
 	return Resources{
@@ -297,6 +305,12 @@ type ScalingConfig struct {
 	// we would like to be using. For example, with a value of 0.7, on a 4GB VM
 	// we'd like to be using 2.8GB of memory.
 	MemoryUsageFractionTarget float64 `json:"memoryUsageFractionTarget"`
+}
+
+// Equals returns true if the two ScalingConfig structs are deep-equal to each other.
+func (c ScalingConfig) Equals(other ScalingConfig) bool {
+	return c.LoadAverageFractionTarget == other.LoadAverageFractionTarget &&
+		c.MemoryUsageFractionTarget == other.MemoryUsageFractionTarget
 }
 
 func (c *ScalingConfig) Validate() error {
