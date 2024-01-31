@@ -3747,6 +3747,7 @@ spec:
         - --health-probe-bind-address=:8081
         - --metrics-bind-address=:8080
         - --leader-elect
+        - --concurrency-limit=32
         - --zap-devel=false
         - --zap-time-encoding=iso8601
         - --zap-log-level=info
@@ -3762,7 +3763,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.23.1
+        image: neondatabase/neonvm-controller:v0.23.2
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3947,7 +3948,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.23.1
+        image: neondatabase/neonvm-vxlan-controller:v0.23.2
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -3979,7 +3980,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.23.1
+        image: neondatabase/neonvm-vxlan-controller:v0.23.2
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
