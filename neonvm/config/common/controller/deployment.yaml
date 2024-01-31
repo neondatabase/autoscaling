@@ -53,12 +53,24 @@ spec:
         # seccompProfile:
         #   type: RuntimeDefault
       containers:
-      - command:
+      - name: manager
+        image: controller:dev
+        command:
         - /manager
         args:
-        - --leader-elect
-        image: controller:dev
-        name: manager
+        - "--health-probe-bind-address=:8081"
+        - "--metrics-bind-address=:8080"
+        - "--leader-elect"
+        - "--concurrency-limit=128"
+        - "--enable-container-mgr"
+        - "--zap-devel=false"
+        - "--zap-time-encoding=iso8601"
+        - "--zap-log-level=info"
+        - "--zap-stacktrace-level=panic"
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

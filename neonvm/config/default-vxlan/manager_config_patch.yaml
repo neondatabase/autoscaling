@@ -8,20 +8,6 @@ spec:
     spec:
       containers:
       - name: manager
-        ports:
-        - name: metrics
-          containerPort: 8080
-          protocol: TCP
-        args:
-        - "--health-probe-bind-address=:8081"
-        - "--metrics-bind-address=:8080"
-        - "--leader-elect"
-        - "--concurrency-limit=128"
-        - "--enable-container-mgr"
-        - "--zap-devel=false"
-        - "--zap-time-encoding=iso8601"
-        - "--zap-log-level=info"
-        - "--zap-stacktrace-level=panic"
         env:
         - name: NAD_IPAM_NAME
           value: $(NAD_IPAM_NAME)
