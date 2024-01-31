@@ -1302,25 +1302,25 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 			InitContainers: []corev1.Container{
 				{
 					Image:           virtualmachine.Spec.Guest.RootDisk.Image,
-					Name:            "init-rootdisk",
+					Name:            "init",
 					ImagePullPolicy: virtualmachine.Spec.Guest.RootDisk.ImagePullPolicy,
-					Args:            []string{"cp", "/disk.qcow2", "/vm/images/rootdisk.qcow2"},
 					VolumeMounts: []corev1.VolumeMount{{
 						Name:      "virtualmachineimages",
 						MountPath: "/vm/images",
 					}},
+					Command: []string{
+						"sh", "-c",
+						"cp /disk.qcow2 /vm/images/disk.img && sysctl -w net.ipv4.ip_forward=1; sleep 10",
+					},
 					SecurityContext: &corev1.SecurityContext{
 						// uid=36(qemu) gid=34(kvm) groups=34(kvm)
 						RunAsUser:  &[]int64{36}[0],
 						RunAsGroup: &[]int64{34}[0],
-					},
-				},
-				{
-					Image:   image,
-					Name:    "sysctl",
-					Command: []string{"sysctl", "-w", "net.ipv4.ip_forward=1"},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged: &[]bool{true}[0],
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{
+								"NET_ADMIN",
+							},
+						},
 					},
 				},
 			},
