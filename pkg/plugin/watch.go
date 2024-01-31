@@ -5,6 +5,7 @@ package plugin
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	"go.uber.org/zap"
@@ -179,7 +180,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 }
 
 type vmWatchCallbacks struct {
-	submitDisabledScaling              func(_ *zap.Logger, podName util.NamespacedName)
+	submitConfigUpdated                func(_ *zap.Logger, podName util.NamespacedName, newCfg api.VmConfig)
 	submitBoundsChanged                func(_ *zap.Logger, _ *api.VmInfo, podName string)
 	submitNonAutoscalingVmUsageChanged func(_ *zap.Logger, _ *api.VmInfo, podName string)
 }
@@ -288,10 +289,10 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					return
 				}
 
-				if oldInfo.Config.ScalingEnabled && !newInfo.Config.ScalingEnabled {
-					logger.Info("Received update to disable autoscaling for VM", util.VMNameFields(newVM))
+				if !reflect.DeepEqual(oldInfo.Config, newInfo.Config) {
+					logger.Info("Received config update for VM", util.VMNameFields(newVM))
 					name := util.NamespacedName{Namespace: newInfo.Namespace, Name: newVM.Status.PodName}
-					callbacks.submitDisabledScaling(logger, name)
+					callbacks.submitConfigUpdated(logger, name, newInfo.Config)
 				}
 
 				if (!oldInfo.Config.ScalingEnabled || !newInfo.Config.ScalingEnabled) && oldInfo.Using() != newInfo.Using() {
