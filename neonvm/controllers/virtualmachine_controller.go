@@ -1357,6 +1357,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 						}
 						cmd = append(
 							cmd,
+							"-qemu-disk-cache-settings", config.QEMUDiskCacheSettings,
 							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 						)

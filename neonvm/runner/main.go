@@ -61,12 +61,6 @@ const (
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
 
-	// See #775 and its links.
-	// * cache.writeback=off - forces writes to be synchronous (avoid hidden caching)
-	// * cache.direct=on     - forces using direct IO (don't abuse host's page cache!)
-	// * cache.no-flush=on   - ignores disk flush operations (not needed; our disks are ephemeral)
-	diskCacheSettings = "cache.writeback=off,cache.direct=on,cache.no-flush=on"
-
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
 	defaultNetworkCIDR       = "169.254.254.252/30"
@@ -494,11 +488,13 @@ func main() {
 	var kernelPath string
 	var appendKernelCmdline string
 	var skipCgroupManagement bool
+	var diskCacheSettings string
 	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
 	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
 	flag.BoolVar(&skipCgroupManagement, "skip-cgroup-management", false, "Don't try to manage CPU (use if running alongside container-mgr)")
+	flag.StringVar(&diskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Cache settings to add to -drive args for VM disks")
 	flag.Parse()
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
