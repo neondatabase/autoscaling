@@ -94,9 +94,8 @@ type VirtualMachineSpec struct {
 	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
 
 	// InitScript will be executed in the main container before VM is started.
-	// +kubebuilder:format:byte
 	// +optional
-	InitScript []byte `json:"initScript,omitempty"`
+	InitScript string `json:"initScript,omitempty"`
 
 	// List of disk that can be mounted by virtual machine.
 	// +optional

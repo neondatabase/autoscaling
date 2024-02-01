@@ -480,7 +480,7 @@ func checkDevTun() bool {
 	return mode&os.ModeCharDevice == os.ModeCharDevice
 }
 
-func runInitScript(script []byte, logger *zap.Logger) error {
+func runInitScript(script string, logger *zap.Logger) error {
 	if len(script) == 0 {
 		return nil
 	}
@@ -492,7 +492,7 @@ func runInitScript(script []byte, logger *zap.Logger) error {
 	}
 	defer os.Remove(tmpFile.Name()) // clean up
 
-	if _, err := tmpFile.Write(script); err != nil {
+	if _, err := tmpFile.Write([]byte(script)); err != nil {
 		return err
 	}
 
@@ -506,7 +506,7 @@ func runInitScript(script []byte, logger *zap.Logger) error {
 
 	logger.Info("running init script", zap.String("path", tmpFile.Name()))
 
-	if err := execFg(tmpFile.Name()); err != nil {
+	if err := execFg("/bin/sh", tmpFile.Name()); err != nil {
 		return err
 	}
 

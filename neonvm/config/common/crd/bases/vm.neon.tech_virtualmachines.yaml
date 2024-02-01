@@ -2488,7 +2488,6 @@ spec:
               initScript:
                 description: InitScript will be executed in the main container before
                   VM is started.
-                format: byte
                 type: string
               nodeSelector:
                 additionalProperties:
