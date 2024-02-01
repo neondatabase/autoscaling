@@ -667,6 +667,11 @@ func (in *VirtualMachineSpec) DeepCopyInto(out *VirtualMachineSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.InitScript != nil {
+		in, out := &in.InitScript, &out.InitScript
+		*out = make([]byte, len(*in))
+		copy(*out, *in)
+	}
 	if in.Disks != nil {
 		in, out := &in.Disks, &out.Disks
 		*out = make([]Disk, len(*in))

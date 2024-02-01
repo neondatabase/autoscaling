@@ -90,7 +90,13 @@ type VirtualMachineSpec struct {
 
 	Guest Guest `json:"guest"`
 
+	// Running init containers is constly, so InitScript field should be preferred over ExtraInitContainers
 	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
+
+	// InitScript will be executed in the main container before VM is started.
+	// +kubebuilder:format:byte
+	// +optional
+	InitScript []byte `json:"initScript,omitempty"`
 
 	// List of disk that can be mounted by virtual machine.
 	// +optional

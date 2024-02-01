@@ -1081,6 +1081,8 @@ spec:
                   Builder version).'
                 type: boolean
               extraInitContainers:
+                description: Running init containers is constly, so InitScript field
+                  should be preferred over ExtraInitContainers
                 items:
                   description: A single application container that you want to run
                     within a pod.
@@ -2483,6 +2485,11 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 type: array
+              initScript:
+                description: InitScript will be executed in the main container before
+                  VM is started.
+                format: byte
+                type: string
               nodeSelector:
                 additionalProperties:
                   type: string
