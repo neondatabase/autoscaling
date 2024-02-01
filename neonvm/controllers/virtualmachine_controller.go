@@ -1310,17 +1310,13 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 					}},
 					Command: []string{
 						"sh", "-c",
-						"cp /disk.qcow2 /vm/images/disk.img && sysctl -w net.ipv4.ip_forward=1; sleep 10",
+						"cp /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
+							/* uid=36(qemu) gid=34(kvm) groups=34(kvm) */
+							"chown 36:34 /vm/images/rootdisk.qcow2 && " +
+							"sysctl -w net.ipv4.ip_forward=1",
 					},
 					SecurityContext: &corev1.SecurityContext{
-						// uid=36(qemu) gid=34(kvm) groups=34(kvm)
-						RunAsUser:  &[]int64{36}[0],
-						RunAsGroup: &[]int64{34}[0],
-						Capabilities: &corev1.Capabilities{
-							Add: []corev1.Capability{
-								"NET_ADMIN",
-							},
-						},
+						Privileged: &[]bool{true}[0],
 					},
 				},
 			},
