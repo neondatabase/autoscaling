@@ -382,6 +382,9 @@ type VirtualMachineStatus struct {
 	// The phase of a VM is a simple, high-level summary of where the VM is in its lifecycle.
 	// +optional
 	Phase VmPhase `json:"phase,omitempty"`
+	// Number of times the VM runner pod has been recreated
+	// +optional
+	RestartCount *int32 `json:"restartCount,omitempty"`
 	// +optional
 	PodName string `json:"podName,omitempty"`
 	// +optional
@@ -444,6 +447,7 @@ func (p VmPhase) IsAlive() bool {
 // +kubebuilder:printcolumn:name="Pod",type=string,JSONPath=`.status.podName`
 // +kubebuilder:printcolumn:name="ExtraIP",type=string,JSONPath=`.status.extraNetIP`
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Restarts",type=string,JSONPath=`.status.restarts`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Node",type=string,priority=1,JSONPath=`.status.node`
 // +kubebuilder:printcolumn:name="Image",type=string,priority=1,JSONPath=`.spec.guest.rootDisk.image`
@@ -461,7 +465,6 @@ func (vm *VirtualMachine) Cleanup() {
 	vm.Status.Node = ""
 	vm.Status.CPUs = nil
 	vm.Status.MemorySize = nil
-	vm.Status.Phase = ""
 }
 
 //+kubebuilder:object:root=true

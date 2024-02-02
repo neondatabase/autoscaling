@@ -1,6 +1,6 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestAssert
-timeout: 300
+timeout: 30
 ---
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
@@ -8,7 +8,7 @@ metadata:
   name: example
 status:
   phase: Running
-  restartCount: 0
+  restartCount: 1
   conditions:
     - type: Available
       status: "True"
