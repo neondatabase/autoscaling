@@ -9,10 +9,6 @@ commands:
     user: root
     sysvInitAction: sysinit
     shell: 'mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql'
-  - name: generate-sshd-keys
-    user: root
-    sysvInitAction: sysinit
-    shell: '/bin/generate-sshd-keys.sh'
   - name: vm-monitor
     user: vm-monitor
     sysvInitAction: respawn
@@ -20,23 +16,12 @@ commands:
   - name: start-postgres
     user: postgres
     sysvInitAction: once
-    shell: 'PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf"'
-  - name: sshd
-    user: root
-    sysvInitAction: respawn
-    # if having trouble with ssh, try adding -dd to the ssh args.
-    shell: 'setsid -w /usr/sbin/sshd -D -E /run/sshd/log -h /run/sshd/ssh_host_ecdsa_key -h /run/sshd/ssh_host_ed25519_key -h /run/sshd/ssh_host_rsa_key'
+    shell: 'PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf" -l /dev/virtio-ports/tech.neon.log.0'
 files:
   - filename: postgresql.conf
     hostPath: postgresql.conf
   - filename: pg_hba.conf
     hostPath: pg_hba.conf
-  - filename: sshd_config
-    hostPath: sshd_config
-  - filename: ssh_id_rsa.pub
-    hostPath: ssh_id_rsa.pub
-  - filename: generate-sshd-keys.sh
-    hostPath: generate-sshd-keys.sh
   - filename: allocate-loop.c
     hostPath: allocate-loop.c
   - filename: cgconfig.conf
@@ -76,9 +61,6 @@ merge: |
   COPY cgconfig.conf         /etc/cgconfig.conf
   COPY postgresql.conf       /etc/postgresql.conf
   COPY pg_hba.conf           /etc/pg_hba.conf
-  COPY sshd_config           /etc/ssh/sshd_config
-  COPY ssh_id_rsa.pub        /etc/ssh/authorized_keys
-  COPY generate-sshd-keys.sh /bin/generate-sshd-keys.sh
 
   # General tools
   RUN set -e \
@@ -100,15 +82,6 @@ merge: |
       && mkdir -p ${PGDATA} /run/postgresql \
       && chown -R postgres:postgres ${PGDATA} /run/postgresql \
       && su-exec postgres pg_ctl init
-
-  # ssh stuff
-  # 'authorized_keys' needs to have the right mode bits, otherwise it'll get ignored by sshd
-  RUN set -e \
-      && apk add --no-cache \
-              openssh-server \
-      && chmod 600 /etc/ssh/authorized_keys
-  # TODO: this line is necessary because vm-builder doesn't transfer mode bits
-  RUN chmod +x /bin/generate-sshd-keys.sh
 
   COPY --from=allocate-loop-builder /bin/allocate-loop        /bin/allocate-loop
   COPY --from=monitor-builder       /workspace/bin/vm-monitor /bin/vm-monitor

@@ -22,12 +22,12 @@ const (
 	ContentTypeError string = "text/plain"
 )
 
-// The scheduler plugin currently supports v1.0 to v3.0 of the agent<->scheduler plugin protocol.
+// The scheduler plugin currently supports v1.0 to v4.0 of the agent<->scheduler plugin protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV4_0
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
@@ -149,31 +149,64 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)
 	}
 
+	// check that req.ComputeUnit has no zeros
+	if err := req.ComputeUnit.ValidateNonZero(); err != nil {
+		return nil, 400, fmt.Errorf("computeUnit fields must be non-zero: %w", err)
+	}
+
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
 
-	pod, ok := e.state.podMap[req.Pod]
+	pod, ok := e.state.pods[req.Pod]
 	if !ok {
-		logger.Warn("Received request for pod we don't know") // pod already in the logger's context
+		logger.Warn("Received request for Pod we don't know") // pod already in the logger's context
 		return nil, 404, errors.New("pod not found")
+	}
+	if pod.vm == nil {
+		logger.Error("Received request for non-VM Pod")
+		return nil, 400, errors.New("pod is not associated with a VM")
+	}
+
+	// Check that req.ComputeUnit.Mem is divisible by the VM's memory slot size
+	if req.ComputeUnit.Mem%pod.vm.memSlotSize != 0 {
+		return nil, 400, fmt.Errorf(
+			"computeUnit is not divisible by VM memory slot size: %v not divisible by %v",
+			req.ComputeUnit,
+			pod.vm.memSlotSize,
+		)
+	}
+
+	// If the request was actually sending a quantity of *memory slots*, rather than bytes, then
+	// multiply memory resources to make it match the
+	if !req.ProtoVersion.RepresentsMemoryAsBytes() {
+		req.Resources.Mem *= pod.vm.memSlotSize
 	}
 
 	node := pod.node
 	nodeName = node.name // set nodeName for deferred metrics
 
 	// Also, now that we know which VM this refers to (and which node it's on), add that to the logger for later.
-	logger = logger.With(zap.Object("virtualmachine", pod.vmName), zap.String("node", nodeName))
+	logger = logger.With(zap.Object("virtualmachine", pod.vm.name), zap.String("node", nodeName))
 
-	mustMigrate := pod.migrationState == nil &&
+	mustMigrate := pod.vm.migrationState == nil &&
 		// Check whether the pod *will* migrate, then update its resources, and THEN start its
 		// migration, using the possibly-changed resources.
-		e.updateMetricsAndCheckMustMigrate(logger, pod, node, req.Metrics) &&
+		e.updateMetricsAndCheckMustMigrate(logger, pod.vm, node, req.Metrics) &&
 		// Don't migrate if it's disabled
 		e.state.conf.migrationEnabled()
 
 	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
 
-	permit, status, err := e.handleResources(logger, pod, node, req.Resources, req.LastPermit, mustMigrate, supportsFractionalCPU)
+	permit, status, err := e.handleResources(
+		logger,
+		pod,
+		node,
+		req.ComputeUnit,
+		req.Resources,
+		req.LastPermit,
+		mustMigrate,
+		supportsFractionalCPU,
+	)
 	if err != nil {
 		return nil, status, err
 	}
@@ -205,6 +238,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	logger *zap.Logger,
 	pod *podState,
 	node *nodeState,
+	cu api.Resources,
 	req api.Resources,
 	lastPermit *api.Resources,
 	startingMigration bool,
@@ -216,48 +250,55 @@ func (e *AutoscaleEnforcer) handleResources(
 	}
 
 	// Check that we aren't being asked to do something during migration:
-	if pod.currentlyMigrating() {
+	if pod.vm.currentlyMigrating() {
 		// The agent shouldn't have asked for a change after already receiving notice that it's
 		// migrating.
-		if req.VCPU != pod.vCPU.Reserved || req.Mem != pod.memSlots.Reserved {
+		if req.VCPU != pod.cpu.Reserved || req.Mem != pod.mem.Reserved {
 			err := errors.New("cannot change resources: agent has already been informed that pod is migrating")
 			return api.Resources{}, 400, err
 		}
-		return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
+		return api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}, 200, nil
 	}
 
-	vCPUTransition := makeResourceTransitioner(&node.vCPU, &pod.vCPU)
-	memTransition := makeResourceTransitioner(&node.memSlots, &pod.memSlots)
-
 	if lastPermit != nil {
-		vCPUVerdict := vCPUTransition.handleLastPermit(lastPermit.VCPU)
-		memVerdict := memTransition.handleLastPermit(lastPermit.Mem)
+		cpuVerdict := makeResourceTransitioner(&node.cpu, &pod.cpu).
+			handleLastPermit(lastPermit.VCPU)
+		memVerdict := makeResourceTransitioner(&node.mem, &pod.mem).
+			handleLastPermit(lastPermit.Mem)
 		logger.Info(
 			"Handled last permit info from pod",
 			zap.Object("verdict", verdictSet{
-				cpu: vCPUVerdict,
+				cpu: cpuVerdict,
 				mem: memVerdict,
 			}),
 		)
 	}
 
-	vCPUVerdict := vCPUTransition.handleRequested(req.VCPU, startingMigration, !supportsFractionalCPU)
-	memVerdict := memTransition.handleRequested(req.Mem, startingMigration, false)
+	cpuFactor := cu.VCPU
+	if !supportsFractionalCPU {
+		cpuFactor = 1000
+	}
+	memFactor := cu.Mem
+
+	cpuVerdict := makeResourceTransitioner(&node.cpu, &pod.cpu).
+		handleRequested(req.VCPU, startingMigration, cpuFactor)
+	memVerdict := makeResourceTransitioner(&node.mem, &pod.mem).
+		handleRequested(req.Mem, startingMigration, memFactor)
 
 	logger.Info(
 		"Handled requested resources from pod",
 		zap.Object("verdict", verdictSet{
-			cpu: vCPUVerdict,
+			cpu: cpuVerdict,
 			mem: memVerdict,
 		}),
 	)
 
-	return api.Resources{VCPU: pod.vCPU.Reserved, Mem: pod.memSlots.Reserved}, 200, nil
+	return api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}, 200, nil
 }
 
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	logger *zap.Logger,
-	pod *podState,
+	vm *vmPodState,
 	node *nodeState,
 	metrics *api.Metrics,
 ) bool {
@@ -266,17 +307,17 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	//
 	// A third condition, "the pod is marked to always migrate" causes it to migrate even if neither
 	// of the above conditions are met, so long as it has *previously* provided metrics.
-	shouldMigrate := node.mq.isNextInQueue(pod) && node.tooMuchPressure(logger)
-	forcedMigrate := pod.testingOnlyAlwaysMigrate && pod.metrics != nil
+	shouldMigrate := node.mq.isNextInQueue(vm) && node.tooMuchPressure(logger)
+	forcedMigrate := vm.testingOnlyAlwaysMigrate && vm.metrics != nil
 
 	logger.Info("Updating pod metrics", zap.Any("metrics", metrics))
-	oldMetrics := pod.metrics
-	pod.metrics = metrics
-	if pod.currentlyMigrating() {
+	oldMetrics := vm.metrics
+	vm.metrics = metrics
+	if vm.currentlyMigrating() {
 		return false // don't do anything else; it's already migrating.
 	}
 
-	node.mq.addOrUpdate(pod)
+	node.mq.addOrUpdate(vm)
 
 	if !shouldMigrate && !forcedMigrate {
 		return false
@@ -285,11 +326,11 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	// Give the pod a chance to veto migration if its metrics have significantly changed...
 	var veto error
 	if oldMetrics != nil && !forcedMigrate {
-		veto = pod.checkOkToMigrate(*oldMetrics)
+		veto = vm.checkOkToMigrate(*oldMetrics)
 	}
 
 	// ... but override the veto if it's still the best candidate anyways.
-	stillFirst := node.mq.isNextInQueue(pod)
+	stillFirst := node.mq.isNextInQueue(vm)
 
 	if forcedMigrate || stillFirst || veto == nil {
 		if veto != nil {

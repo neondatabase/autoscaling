@@ -33,7 +33,7 @@ type eventSender struct {
 	// loop has finished. A side-effect of doing this naively is that the gauge will sometimes
 	// return durations that are much shorter than the *actual* previous send loop duration.
 	//
-	// In order to fix this, we store that *actual* previous duration in this field, but and only
+	// In order to fix this, we store that *actual* previous duration in this field, but only
 	// update the metric when either (a) the loop is done, or (b) the duration so far is already
 	// longer than the previous one.
 	//

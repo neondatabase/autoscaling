@@ -57,6 +57,10 @@ type VirtualMachineMigrationReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+
+	Metrics ReconcilerMetrics
+
+	MaxConcurrentReconciles int
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -218,8 +222,31 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		targetRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: migration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
+			// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
+			enableSSH := *vm.Spec.EnableSSH
+			var sshSecret *corev1.Secret
+			if enableSSH {
+				// We require the SSH secret to exist because we cannot unmount and
+				// mount the new secret into the VM after the live migration. If a
+				// VM's SSH secret is deleted accidentally then live migration is
+				// not possible.
+				if len(vm.Status.SSHSecretName) == 0 {
+					err := errors.New("VM has .Spec.EnableSSH but its .Status.SSHSecretName is empty")
+					log.Error(err, "Failed to get VM's SSH Secret")
+					r.Recorder.Event(migration, "Warning", "Failed", err.Error())
+					return ctrl.Result{}, err
+				}
+				sshSecret = &corev1.Secret{}
+				err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
+				if err != nil {
+					log.Error(err, "Failed to get VM's SSH Secret")
+					r.Recorder.Event(migration, "Warning", "Failed", fmt.Sprintf("Failed to get VM's SSH Secret: %v", err))
+					return ctrl.Result{}, err
+				}
+			}
+
 			// Define a new target pod
-			tpod, err := r.targetPodForVirtualMachine(vm, migration)
+			tpod, err := r.targetPodForVirtualMachine(vm, migration, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to generate Target Pod spec")
 				return ctrl.Result{}, err
@@ -274,8 +301,8 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 
 		// now inspect target pod status and update migration
-		switch targetRunner.Status.Phase {
-		case corev1.PodRunning:
+		switch runnerStatus(targetRunner) {
+		case runnerRunning:
 			// update migration status
 			migration.Status.SourcePodName = vm.Status.PodName
 			migration.Status.SourcePodIP = vm.Status.PodIP
@@ -320,7 +347,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				migration.Status.Phase = vmv1.VmmRunning
 				return r.updateMigrationStatus(ctx, migration)
 			}
-		case corev1.PodSucceeded:
+		case runnerSucceeded:
 			// target runner pod finished without error? but it shouldn't finish
 			message := fmt.Sprintf("Target Pod (%s) completed suddenly", targetRunner.Name)
 			log.Info(message)
@@ -332,7 +359,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 					Message: message})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
-		case corev1.PodFailed:
+		case runnerFailed:
 			message := fmt.Sprintf("Target Pod (%s) failed", targetRunner.Name)
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Failed", message)
@@ -343,7 +370,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 					Message: message})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
-		case corev1.PodUnknown:
+		case runnerUnknown:
 			message := fmt.Sprintf("Target Pod (%s) in Unknown phase", targetRunner.Name)
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Unknown", message)
@@ -643,19 +670,24 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 // Note that the Pods will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	cntrlName := "virtualmachinemigration"
+	reconciler := WithMetrics(r, r.Metrics, cntrlName)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 8}).
-		Complete(r)
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
+		Named(cntrlName).
+		Complete(reconciler)
 }
 
 // targetPodForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	vm *vmv1.VirtualMachine,
-	migration *vmv1.VirtualMachineMigration) (*corev1.Pod, error) {
+	migration *vmv1.VirtualMachineMigration,
+	sshSecret *corev1.Secret,
+) (*corev1.Pod, error) {
 
-	pod, err := podSpec(vm)
+	pod, err := podSpec(vm, sshSecret)
 	if err != nil {
 		return nil, err
 	}

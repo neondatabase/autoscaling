@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -32,6 +33,7 @@ import (
 	"github.com/containerd/cgroups/v3/cgroup2"
 	"github.com/digitalocean/go-qemu/qmp"
 	"github.com/docker/libnetwork/types"
+	"github.com/jpillora/backoff"
 	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
@@ -53,6 +55,11 @@ const (
 	runtimeDiskPath                = "/vm/images/runtime.iso"
 	mountedDiskPath                = "/vm/images"
 	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
+	logSerialSocket                = "/vm/log.sock"
+	bufferedReaderSize             = 4096
+
+	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
+	sshAuthorizedKeysMountPoint = "/vm/ssh"
 
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
@@ -194,7 +201,7 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
-func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk) error {
+func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk, enableSSH bool) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
@@ -234,8 +241,13 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 		}
 	}
 
+	var mounts []string
+	if enableSSH {
+		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
+		mounts = append(mounts, "/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
+	}
+
 	if len(disks) != 0 {
-		mounts := []string{}
 		for _, disk := range disks {
 			mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			switch {
@@ -257,11 +269,12 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 				// do nothing
 			}
 		}
-		mounts = append(mounts, "")
-		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(mounts, "\n"))), "mounts.sh")
-		if err != nil {
-			return err
-		}
+	}
+
+	mounts = append(mounts, "")
+	err = writer.AddFile(bytes.NewReader([]byte(strings.Join(mounts, "\n"))), "mounts.sh")
+	if err != nil {
+		return err
 	}
 
 	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
@@ -518,12 +531,17 @@ func main() {
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 
+	enableSSH := false
+	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
+		enableSSH = true
+	}
+
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{}
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
 	}
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks); err != nil {
+	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
 		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 
@@ -569,11 +587,23 @@ func main() {
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMPManual),
 		"-qmp", fmt.Sprintf("unix:%s,server,wait=off", qmpUnixSocketForSigtermHandler),
+		"-device", "virtio-serial",
+		"-chardev", fmt.Sprintf("socket,path=%s,server=on,wait=off,id=log", logSerialSocket),
+		"-device", "virtserialport,chardev=log,name=tech.neon.log.0",
 	}
 
 	// disk details
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
+
+	if enableSSH {
+		name := "ssh-authorized-keys"
+		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
+			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
+		}
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
+	}
+
 	for _, disk := range vmSpec.Disks {
 		switch {
 		case disk.EmptyDisk != nil:
@@ -678,6 +708,8 @@ func main() {
 	go terminateQemuOnSigterm(ctx, logger, &wg)
 	wg.Add(1)
 	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
+	wg.Add(1)
+	go forwardLogs(ctx, logger, &wg)
 
 	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
 	logger.Info("calling cgexec", zap.Strings("args", args))
@@ -781,6 +813,104 @@ func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cg
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
 		logger.Info("shut down cpu_change server", zap.Error(err))
+	}
+}
+
+func printWithNewline(slice []byte) error {
+	if len(slice) == 0 {
+		return nil
+	}
+
+	_, err := os.Stdout.Write(slice)
+	if err != nil {
+		return err
+	}
+
+	if slice[len(slice)-1] == '\n' {
+		return nil
+	}
+
+	_, err = os.Stdout.WriteString("\n")
+	return err
+}
+
+func drainLogsReader(reader *bufio.Reader, logger *zap.Logger) error {
+	for {
+		// ReadSlice actually can return no more than bufferedReaderSize bytes
+		slice, err := reader.ReadSlice('\n')
+		// If err != nil, slice might not have \n at the end
+		err2 := printWithNewline(slice)
+
+		err = errors.Join(err, err2)
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				return nil
+			}
+			if errors.Is(err, io.EOF) {
+				logger.Warn("EOF while reading from log serial")
+			} else {
+				logger.Error("failed to read from log serial", zap.Error(err))
+			}
+			return err
+		}
+	}
+}
+
+// forwardLogs writes from socket to stdout line by line
+func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	delay := 3 * time.Second
+	var conn net.Conn
+	var reader *bufio.Reader
+	b := &backoff.Backoff{
+		Min:    100 * time.Millisecond,
+		Max:    delay,
+		Factor: 2,
+		Jitter: true,
+	}
+
+	for {
+		func() {
+			if conn == nil {
+				var err error
+				conn, err = net.Dial("unix", logSerialSocket)
+				if err != nil {
+					logger.Error("failed to dial to logSerialSocket", zap.Error(err))
+					return
+				}
+				reader = bufio.NewReaderSize(conn, bufferedReaderSize)
+			}
+
+			b.Attempt()
+			err := conn.SetReadDeadline(time.Now().Add(delay))
+			if err != nil {
+				logger.Error("failed to set read deadline", zap.Error(err))
+				conn = nil
+				return
+			}
+
+			err = drainLogsReader(reader, logger)
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// We've hit the deadline, meaning the reading session was successful.
+				b.Reset()
+				return
+			}
+
+			if err != nil {
+				conn = nil
+			}
+		}()
+
+		select {
+		case <-ctx.Done():
+			if conn != nil {
+				conn.Close()
+			}
+			_ = drainLogsReader(reader, logger)
+			return
+		case <-time.After(b.Duration()):
+		}
 	}
 }
 
@@ -995,6 +1125,8 @@ func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.Wa
 	select {
 	case <-c:
 	case <-ctx.Done():
+		logger.Info("context canceled, not going to powerdown QEMU because it's already finished")
+		return
 	}
 
 	logger.Info("got signal, sending powerdown command to QEMU")
@@ -1214,6 +1346,19 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	// run dnsmasq for default Guest interface
 	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
 		logger.Error("could not run dnsmasq", zap.Error(err))
+		return nil, err
+	}
+
+	// Adding VM's IP address to the /etc/hosts, so we can access it easily from
+	// the pod. This is particularly useful for ssh into the VM from the runner
+	// pod.
+	f, err := os.OpenFile("/etc/hosts", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	record := fmt.Sprintf("%v guest-vm\n", ipVm)
+	if _, err := f.WriteString(record); err != nil {
 		return nil, err
 	}
 

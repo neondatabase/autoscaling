@@ -28,7 +28,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
@@ -45,7 +44,7 @@ import (
 //
 // Currently, each autoscaler-agent supports only one version at a time. In the future, this may
 // change.
-const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV4_0
 
 // Runner is per-VM Pod god object responsible for handling everything
 //
@@ -65,7 +64,7 @@ type Runner struct {
 	podName util.NamespacedName
 	podIP   string
 
-	memSlotSize *resource.Quantity
+	memSlotSize api.Bytes
 
 	// lock guards the values of all mutable fields - namely, scheduler and monitor (which may be
 	// read without the lock, but the lock must be acquired to lock them).
@@ -190,6 +189,10 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	execLogger := logger.Named("exec")
 
+	// Subtract a small random amount from core.Config.PluginRequestTick so that periodic requests
+	// tend to become distribted randomly over time.
+	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
+
 	coreExecLogger := execLogger.Named("core")
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
@@ -197,7 +200,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			ComputeUnit:                        r.global.config.Scaling.ComputeUnit,
 			DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
 			NeonVMRetryWait:                    time.Second * time.Duration(r.global.config.Scaling.RetryFailedRequestSeconds),
-			PluginRequestTick:                  time.Second * time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds),
+			PluginRequestTick:                  time.Second*time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds) - pluginRequestJitter,
 			PluginRetryWait:                    time.Second * time.Duration(r.global.config.Scheduler.RetryFailedRequestSeconds),
 			PluginDeniedRetryWait:              time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
 			MonitorDeniedDownscaleCooldown:     time.Second * time.Duration(r.global.config.Monitor.RetryDeniedDownscaleSeconds),
@@ -350,6 +353,16 @@ func (r *Runner) getMetricsLoop(
 ) {
 	timeout := time.Second * time.Duration(r.global.config.Metrics.RequestTimeoutSeconds)
 	waitBetweenDuration := time.Second * time.Duration(r.global.config.Metrics.SecondsBetweenRequests)
+
+	randomStartWait := util.NewTimeRange(time.Second, 0, int(r.global.config.Metrics.SecondsBetweenRequests)).Random()
+
+	logger.Info("Sleeping for random delay before making first metrics request", zap.Duration("delay", randomStartWait))
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(randomStartWait):
+	}
 
 	for {
 		metrics, err := r.doMetricsRequest(ctx, logger, timeout)
@@ -549,7 +562,7 @@ func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) erro
 	}, {
 		Op:    patch.OpReplace,
 		Path:  "/spec/guest/memorySlots/use",
-		Value: target.Mem,
+		Value: uint32(target.Mem / r.memSlotSize),
 	}}
 
 	patchPayload, err := json.Marshal(patches)
@@ -599,8 +612,8 @@ func (r *Runner) recordResourceChange(current, target api.Resources, metrics res
 		direction := getDirection(target.Mem > current.Mem)
 
 		// Avoid floating-point inaccuracy.
-		byteTotal := r.memSlotSize.Value() * int64(abs.Mem)
-		mib := int64(1 << 20)
+		byteTotal := abs.Mem
+		mib := api.Bytes(1 << 20)
 		floatMB := float64(byteTotal/mib) + float64(byteTotal%mib)/float64(mib)
 
 		metrics.mem.WithLabelValues(direction).Add(floatMB)
@@ -614,7 +627,7 @@ func doMonitorDownscale(
 	target api.Resources,
 ) (*api.DownscaleResult, error) {
 	r := dispatcher.runner
-	rawResources := target.ConvertToAllocation(r.memSlotSize)
+	rawResources := target.ConvertToAllocation()
 
 	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
 
@@ -635,7 +648,7 @@ func doMonitorUpscale(
 	target api.Resources,
 ) error {
 	r := dispatcher.runner
-	rawResources := target.ConvertToAllocation(r.memSlotSize)
+	rawResources := target.ConvertToAllocation()
 
 	timeout := time.Second * time.Duration(r.global.config.Monitor.ResponseTimeoutSeconds)
 
@@ -656,6 +669,7 @@ func (r *Runner) DoSchedulerRequest(
 	reqData := &api.AgentRequest{
 		ProtoVersion: PluginProtocolVersion,
 		Pod:          r.podName,
+		ComputeUnit:  r.global.config.Scaling.ComputeUnit,
 		Resources:    resources,
 		LastPermit:   lastPermit,
 		Metrics:      metrics,

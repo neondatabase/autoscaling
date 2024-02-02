@@ -28,6 +28,7 @@ RUN set -e \
 		flock \
 	&& mv /sbin/acpid         /neonvm/bin/ \
 	&& mv /sbin/udevd         /neonvm/bin/ \
+	&& mv /bin/udevadm        /neonvm/bin/ \
 	&& mv /sbin/agetty        /neonvm/bin/ \
 	&& mv /sbin/su-exec       /neonvm/bin/ \
 	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
@@ -79,7 +80,14 @@ RUN set -e \
        && cp -f /usr/lib/libtasn1.so.6 /neonvm/lib/ \
        && cp -f /usr/lib/libunistring.so.2 /neonvm/lib/
 
-# init scripts
+# ssh server
+RUN set -e \
+	&& apk add --no-cache --no-progress --quiet \
+		openssh-server \
+	&& mv /usr/bin/ssh-keygen /neonvm/bin/ \
+	&& mv /usr/sbin/sshd      /neonvm/bin/
+
+# init scripts & configs
 COPY inittab     /neonvm/bin/inittab
 COPY vminit      /neonvm/bin/vminit
 COPY vmstart     /neonvm/bin/vmstart
@@ -87,17 +95,25 @@ COPY vmshutdown  /neonvm/bin/vmshutdown
 COPY vmacpi      /neonvm/acpi/vmacpi
 COPY vector.yaml /neonvm/config/vector.yaml
 COPY chrony.conf /neonvm/config/chrony.conf
+COPY sshd_config /neonvm/config/sshd_config
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
+COPY udev-init.sh /neonvm/bin/udev-init.sh
+RUN chmod +rx /neonvm/bin/udev-init.sh
 
 # rootdisk modification
 FROM rootdisk AS rootdisk-mod
 COPY --from=vm-runtime /neonvm /neonvm
+# setup chrony
 RUN set -e \
     && /neonvm/bin/id -g chrony > /dev/null 2>&1 || /neonvm/bin/addgroup chrony \
     && /neonvm/bin/id -u chrony > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G chrony -g 'chrony' -s /neonvm/bin/nologin chrony \
     && /neonvm/bin/mkdir -p /var/lib/chrony \
     && /neonvm/bin/chown chrony:chrony /var/lib/chrony \
     && /neonvm/bin/mkdir -p /var/log/chrony
+# setup sshd user and group to support sshd UsePrivilegeSeparation
+RUN set -e \
+    && /neonvm/bin/id -g sshd > /dev/null 2>&1 || /neonvm/bin/addgroup sshd \
+    && /neonvm/bin/id -u sshd > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
 
 FROM vm-runtime AS builder
 ARG DISK_SIZE
@@ -105,6 +121,8 @@ COPY --from=rootdisk-mod / /rootdisk
 RUN set -e \
     && mkdir -p /rootdisk/etc \
     && mkdir -p /rootdisk/etc/vector \
+    && mkdir -p /rootdisk/etc/ssh \
+    && mkdir -p /rootdisk/var/empty \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2

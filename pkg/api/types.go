@@ -68,8 +68,18 @@ const (
 	//
 	// * Removes PluginResponse.ComputeUnit (agent is now responsible for source of truth)
 	//
-	// Currently the latest version.
+	// Last used in release version v0.22.0.
 	PluginProtoV3_0
+
+	// PluginProtoV4_0 represents v4.0 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v3.0:
+	//
+	// * Memory quantities now use "number of bytes" instead of "number of memory slots"
+	// * Adds AgentRequest.ComputeUnit
+	//
+	// Currently the latest version.
+	PluginProtoV4_0
 
 	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
 	// protocol
@@ -96,6 +106,8 @@ func (v PluginProtoVersion) String() string {
 		return "v2.1"
 	case PluginProtoV3_0:
 		return "v3.0"
+	case PluginProtoV4_0:
+		return "v4.0"
 	default:
 		diff := v - latestPluginProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)
@@ -127,6 +139,22 @@ func (v PluginProtoVersion) PluginSendsComputeUnit() bool {
 	return v < PluginProtoV3_0
 }
 
+// AgentSendsComputeUnit returns whether this version of the protocol expects the autoscaler-agent
+// to send the value of its configured Compute Unit in its AgentRequest.
+//
+// This is true for version v4.0 and greater.
+func (v PluginProtoVersion) AgentSendsComputeUnit() bool {
+	return v >= PluginProtoV4_0
+}
+
+// RepresentsMemoryAsBytes returns whether this version of the protocol uses byte quantities to
+// refer to memory amounts, rather than a number of memory slots.
+//
+// This is true for version v4.0 and greater.
+func (v PluginProtoVersion) RepresentsMemoryAsBytes() bool {
+	return v >= PluginProtoV4_0
+}
+
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
 //
 // All AgentRequests expect a PluginResponse.
@@ -137,6 +165,12 @@ type AgentRequest struct {
 	ProtoVersion PluginProtoVersion `json:"protoVersion"`
 	// Pod is the namespaced name of the pod making the request
 	Pod util.NamespacedName `json:"pod"`
+	// ComputeUnit gives the value of the agent's configured compute unit to use for the VM.
+	//
+	// If the requested resources are not a multiple of ComputeUnit, the scheduler plugin will make
+	// a best-effort attempt to return a value satisfying the request. Any approved increases will
+	// be a multiple of ComputeUnit, but otherwise the plugin does not check.
+	ComputeUnit Resources `json:"computeUnit"`
 	// Resources gives a requested or notified change in resources allocated to the VM.
 	//
 	// The requested amount MAY be equal to the current amount, in which case it serves as a
@@ -164,7 +198,58 @@ func (r AgentRequest) ProtocolRange() VersionRange[PluginProtoVersion] {
 	}
 }
 
-// Resources represents an amount of CPU and memory (via memory slots)
+// Bytes represents a number of bytes, with custom marshaling / unmarshaling that goes through
+// resource.Quantity in order to have simplified values over wire
+type Bytes uint64
+
+// BytesFromResourceQuantity converts resource.Quantity into Bytes
+func BytesFromResourceQuantity(r resource.Quantity) Bytes {
+	return Bytes(uint64(r.Value()))
+}
+
+// ToResourceQuantity converts a Bytes to resource.Quantity - typically used for formatting and/or
+// serialization
+func (b Bytes) ToResourceQuantity() *resource.Quantity {
+	return resource.NewQuantity(int64(b), resource.BinarySI)
+}
+
+// AsFloat64 converts a Bytes into float64 of the same amount
+func (b Bytes) AsFloat64() float64 {
+	return float64(b)
+}
+
+func (b *Bytes) UnmarshalJSON(data []byte) error {
+	var quantity resource.Quantity
+	err := json.Unmarshal(data, &quantity)
+	if err != nil {
+		return err
+	}
+
+	*b = BytesFromResourceQuantity(quantity)
+	return nil
+}
+
+func (b Bytes) MarshalJSON() ([]byte, error) {
+	// To (temporarily) support multiple API versions, we should output smaller values as integers.
+	// Otherwise, resource.Quantity will always format as a string, which is incompatible with
+	// earllier versions of the agent<->scheduler plugin API.
+	if b < 1024 {
+		return json.Marshal(uint64(b))
+	}
+
+	return json.Marshal(b.ToResourceQuantity())
+}
+
+func (b Bytes) Format(state fmt.State, verb rune) {
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf("%v", uint64(b))))
+	default:
+		state.Write([]byte(b.ToResourceQuantity().String()))
+	}
+}
+
+// Resources represents an amount of CPU and memory
 //
 // When used in an AgentRequest, it represents the desired total amount of resources. When
 // a resource is increasing, the autoscaler-agent "requests" the change to confirm that the
@@ -180,15 +265,14 @@ func (r AgentRequest) ProtocolRange() VersionRange[PluginProtoVersion] {
 // In all cases, each resource type is considered separately from the others.
 type Resources struct {
 	VCPU vmapi.MilliCPU `json:"vCPUs"`
-	// Mem gives the number of slots of memory (typically 1G ea.) requested. The slot size is set by
-	// the value of the VM's VirtualMachineSpec.Guest.MemorySlotSize.
-	Mem uint16 `json:"mem"`
+	// Mem gives the number of bytes of memory requested
+	Mem Bytes `json:"mem"`
 }
 
 // MarshalLogObject implements zapcore.ObjectMarshaler, so that Resources can be used with zap.Object
 func (r Resources) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("vCPU", fmt.Sprintf("%v", r.VCPU))
-	enc.AddUint16("mem", r.Mem)
+	enc.AddString("mem", fmt.Sprintf("%v", r.Mem))
 	return nil
 }
 
@@ -262,7 +346,7 @@ func (r Resources) SaturatingSub(other Resources) Resources {
 func (r Resources) Mul(factor uint16) Resources {
 	return Resources{
 		VCPU: vmapi.MilliCPU(factor) * r.VCPU,
-		Mem:  factor * r.Mem,
+		Mem:  Bytes(factor) * r.Mem,
 	}
 }
 
@@ -283,11 +367,11 @@ func (r Resources) IncreaseFrom(old Resources) MoreResources {
 	}
 }
 
-// ConvertToRaw produces the Allocation equivalent to these Resources with the given slot size
-func (r Resources) ConvertToAllocation(memSlotSize *resource.Quantity) Allocation {
+// ConvertToRaw produces the Allocation equivalent to these Resources
+func (r Resources) ConvertToAllocation() Allocation {
 	return Allocation{
 		Cpu: r.VCPU.ToResourceQuantity().AsApproximateFloat64(),
-		Mem: uint64(int64(r.Mem) * memSlotSize.Value()),
+		Mem: uint64(r.Mem),
 	}
 }
 

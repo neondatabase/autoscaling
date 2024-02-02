@@ -19,8 +19,11 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +33,7 @@ import (
 	"time"
 
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"golang.org/x/crypto/ssh"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -70,6 +74,10 @@ type VirtualMachineReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+
+	Metrics ReconcilerMetrics `exhaustruct:"optional"`
+
+	MaxConcurrentReconciles int
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -81,6 +89,7 @@ type VirtualMachineReconciler struct {
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachines/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;list;watch
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools/finalizers,verbs=update
@@ -319,6 +328,14 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		meta.SetStatusCondition(&virtualmachine.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 	}
 
+	// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
+	enableSSH := *virtualmachine.Spec.EnableSSH
+
+	// Generate ssh secret name
+	if enableSSH && len(virtualmachine.Status.SSHSecretName) == 0 {
+		virtualmachine.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", virtualmachine.Name)
+	}
+
 	// Generate runner pod name
 	if len(virtualmachine.Status.PodName) == 0 {
 		virtualmachine.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", virtualmachine.Name))
@@ -364,8 +381,36 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
+			var sshSecret *corev1.Secret
+			if enableSSH {
+				// Check if the ssh secret already exists, if not create a new one
+				sshSecret = &corev1.Secret{}
+				err := r.Get(ctx, types.NamespacedName{
+					Name:      virtualmachine.Status.SSHSecretName,
+					Namespace: virtualmachine.Namespace,
+				}, sshSecret)
+				if err != nil && apierrors.IsNotFound(err) {
+					// Define a new ssh secret
+					sshSecret, err = r.sshSecretForVirtualMachine(virtualmachine)
+					if err != nil {
+						log.Error(err, "Failed to define new SSH Secret for VirtualMachine")
+						return err
+					}
+
+					log.Info("Creating a new SSH Secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+					if err = r.Create(ctx, sshSecret); err != nil {
+						log.Error(err, "Failed to create new SSH secret", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+						return err
+					}
+					log.Info("SSH Secret was created", "Secret.Namespace", sshSecret.Namespace, "Secret.Name", sshSecret.Name)
+				} else if err != nil {
+					log.Error(err, "Failed to get SSH Secret")
+					return err
+				}
+			}
+
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(virtualmachine)
+			pod, err := r.podForVirtualMachine(virtualmachine, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
@@ -378,16 +423,18 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
-			r.Recorder.Event(virtualmachine, "Normal", "Created",
-				fmt.Sprintf("VirtualMachine %s created, pod %s",
-					virtualmachine.Name, pod.Name))
+			msg := fmt.Sprintf("VirtualMachine %s created, Pod %s", virtualmachine.Name, pod.Name)
+			if sshSecret != nil {
+				msg = fmt.Sprintf("%s, SSH Secret %s", msg, sshSecret.Name)
+			}
+			r.Recorder.Event(virtualmachine, "Normal", "Created", msg)
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")
 			return err
 		}
 		// runner pod found, check phase
-		switch vmRunner.Status.Phase {
-		case corev1.PodRunning:
+		switch runnerStatus(vmRunner) {
+		case runnerRunning:
 			virtualmachine.Status.PodIP = vmRunner.Status.PodIP
 			virtualmachine.Status.Phase = vmv1.VmRunning
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -395,21 +442,21 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodSucceeded:
+		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodFailed:
+		case runnerFailed:
 			virtualmachine.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodUnknown:
+		case runnerUnknown:
 			virtualmachine.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
@@ -446,8 +493,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 		// runner pod found, check/update phase now
-		switch vmRunner.Status.Phase {
-		case corev1.PodRunning:
+		switch runnerStatus(vmRunner) {
+		case runnerRunning:
 			// update status by IP of runner pod
 			virtualmachine.Status.PodIP = vmRunner.Status.PodIP
 			// update phase
@@ -514,21 +561,21 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				virtualmachine.Status.Phase = vmv1.VmScaling
 			}
 
-		case corev1.PodSucceeded:
+		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodFailed:
+		case runnerFailed:
 			virtualmachine.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
-		case corev1.PodUnknown:
+		case runnerUnknown:
 			virtualmachine.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
@@ -566,8 +613,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 		// runner pod found, check that it's still up:
-		switch vmRunner.Status.Phase {
-		case corev1.PodSucceeded:
+		switch runnerStatus(vmRunner) {
+		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
@@ -575,7 +622,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
 			return nil
-		case corev1.PodFailed:
+		case runnerFailed:
 			virtualmachine.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
@@ -583,7 +630,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
 			return nil
-		case corev1.PodUnknown:
+		case runnerUnknown:
 			virtualmachine.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
@@ -701,55 +748,149 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 
 	case vmv1.VmSucceeded, vmv1.VmFailed:
-		switch virtualmachine.Spec.RestartPolicy {
-		case vmv1.RestartPolicyAlways:
-			log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
-			// get runner to delete
-			vmRunner := &corev1.Pod{}
-			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
-			if err == nil {
-				// delete current runner
-				if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
-					return err
-				}
-			} else if !apierrors.IsNotFound(err) {
+		// Always delete runner pod. Otherwise, we could end up with one container succeeded/failed
+		// but the other one still running (meaning that the pod still ends up Running).
+		vmRunner := &corev1.Pod{}
+		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+		if err == nil {
+			// delete current runner
+			if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
 				return err
 			}
-			// do cleanup
-			virtualmachine.Cleanup()
-		case vmv1.RestartPolicyOnFailure:
-			log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
-			// get runner to delete
-			found := true
-			vmRunner := &corev1.Pod{}
-			err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
-			if apierrors.IsNotFound(err) {
-				found = false
-			} else if err != nil {
-				return err
-			}
-			// delete runner only when VM failed
-			if found && virtualmachine.Status.Phase == vmv1.VmFailed {
-				// delete current runner
-				if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
-					return err
-				}
-			}
-			// do cleanup when VM failed OR pod not found (deleted manually?) when VM succeeded
-			if virtualmachine.Status.Phase == vmv1.VmFailed || (!found && virtualmachine.Status.Phase == vmv1.VmSucceeded) {
-				virtualmachine.Cleanup()
-			}
-		case vmv1.RestartPolicyNever:
-			// TODO: implement TTL or do nothing
-		default:
-			// do nothing
+		} else if !apierrors.IsNotFound(err) {
+			return err
 		}
 
+		// We must keep the VM status the same until we know the neonvm-runner container has been
+		// terminated, otherwise we could end up starting a new runner pod while the VM in the old
+		// one is still running.
+		//
+		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
+		// one* container inside the runner pod has finished; the VM itself may still be running.
+		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
+			// clean up status, but keep the phase; we'll use it below (and possibly keep it around to
+			// be visible to the user if we don't intend to restart).
+			phase := virtualmachine.Status.Phase
+			virtualmachine.Cleanup()
+			virtualmachine.Status.Phase = phase
+
+			var shouldRestart bool
+			switch virtualmachine.Spec.RestartPolicy {
+			case vmv1.RestartPolicyAlways:
+				shouldRestart = true
+			case vmv1.RestartPolicyOnFailure:
+				shouldRestart = virtualmachine.Status.Phase == vmv1.VmFailed
+			case vmv1.RestartPolicyNever:
+				shouldRestart = false
+			}
+
+			if shouldRestart {
+				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
+				virtualmachine.Status.Phase = "" // reset to trigger restart
+			}
+
+			// TODO for RestartPolicyNever: implement TTL or do nothing
+		}
 	default:
 		// do nothing
 	}
 
 	return nil
+}
+
+type runnerStatusKind string
+
+const (
+	runnerUnknown   runnerStatusKind = "Unknown"
+	runnerPending   runnerStatusKind = "Pending"
+	runnerRunning   runnerStatusKind = "Running"
+	runnerFailed    runnerStatusKind = "Failed"
+	runnerSucceeded runnerStatusKind = "Succeeded"
+)
+
+// runnerStatus returns a description of the status of the VM inside the runner pod.
+//
+// This is *similar* to the value of pod.Status.Phase, but takes into consideration the statuses of
+// the individual containers within the pod. This is because Kubernetes sets the pod phase to Failed
+// or Succeeded only if *all* pods have exited, whereas we'd like to consider the VM to be Failed or
+// Succeeded if *any* pod has exited.
+//
+// The full set of outputs is:
+//
+//   - runnerUnknown, if pod.Status.Phase is Unknown
+//   - runnerPending, if pod.Status.Phase is "" or Pending
+//   - runnerRunning, if pod.Status.Phase is Running, and no containers have exited
+//   - runnerFailed, if pod.Status.Phase is Failed, or if any container has failed, or if any
+//     container other than neonvm-runner has exited
+//   - runnerSucceeded, if pod.Status.Phase is Succeeded, or if neonvm-runner has exited
+//     successfully
+func runnerStatus(pod *corev1.Pod) runnerStatusKind {
+	switch pod.Status.Phase {
+	case "", corev1.PodPending:
+		return runnerPending
+	case corev1.PodSucceeded:
+		return runnerSucceeded
+	case corev1.PodFailed:
+		return runnerFailed
+	case corev1.PodUnknown:
+		return runnerUnknown
+
+	// See comment above for context on this logic
+	case corev1.PodRunning:
+		nonRunnerContainerSucceeded := false
+		runnerContainerSucceeded := false
+
+		for _, stat := range pod.Status.ContainerStatuses {
+			if stat.State.Terminated != nil {
+				failed := stat.State.Terminated.ExitCode != 0
+				isRunner := stat.Name == "neonvm-runner"
+
+				if failed {
+					// return that the "runner" has failed if any container has.
+					return runnerFailed
+				} else /* succeeded */ {
+					if isRunner {
+						// neonvm-runner succeeded. We'll return runnerSucceeded if no other
+						// container has failed.
+						runnerContainerSucceeded = true
+					} else {
+						// Other container has succeeded. We'll return runnerSucceeded if
+						// neonvm-runner has succeeded, but runnerFailed if this exited while
+						// neonvm-runner is still going.
+						nonRunnerContainerSucceeded = true
+					}
+				}
+			}
+		}
+
+		if runnerContainerSucceeded {
+			return runnerSucceeded
+		} else if nonRunnerContainerSucceeded {
+			return runnerFailed
+		} else {
+			return runnerRunning
+		}
+
+	default:
+		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
+	}
+}
+
+// runnerContainerStopped returns true iff the neonvm-runner container has exited.
+//
+// The guarantee is simple: It is only safe to start a new runner pod for a VM if
+// runnerContainerStopped returns true (otherwise, we may end up with >1 instance of the same VM).
+func runnerContainerStopped(pod *corev1.Pod) bool {
+	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		return true
+	}
+
+	for _, stat := range pod.Status.ContainerStatuses {
+		if stat.Name == "neonvm-runner" {
+			return stat.State.Terminated != nil
+		}
+	}
+	return false
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
@@ -794,20 +935,23 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 		ignoreExtra map[string]bool // use bool here so `if ignoreExtra[key] { ... }` works
 	}{
 		{
-			metaField:   "labels",
-			expected:    labelsForVirtualMachine(vm),
-			actual:      runnerPod.Labels,
-			ignoreExtra: map[string]bool{},
+			metaField: "labels",
+			expected:  labelsForVirtualMachine(vm, nil), // don't include runner version
+			actual:    runnerPod.Labels,
+			ignoreExtra: map[string]bool{
+				// Don't override the runner pod version - we need to keep it around without
+				// changing it; otherwise it's not useful!
+				vmv1.RunnerPodVersionLabel: true,
+			},
 		},
 		{
 			metaField: "annotations",
 			expected:  annotationsForVirtualMachine(vm),
 			actual:    runnerPod.Annotations,
 			ignoreExtra: map[string]bool{
-				"kubectl.kubernetes.io/default-container": true,
-				"k8s.v1.cni.cncf.io/networks":             true,
-				"k8s.v1.cni.cncf.io/network-status":       true,
-				"k8s.v1.cni.cncf.io/networks-status":      true,
+				"k8s.v1.cni.cncf.io/networks":        true,
+				"k8s.v1.cni.cncf.io/network-status":  true,
+				"k8s.v1.cni.cncf.io/networks-status": true,
 			},
 		},
 	}
@@ -915,9 +1059,10 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
-	virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
-
-	pod, err := podSpec(virtualmachine)
+	virtualmachine *vmv1.VirtualMachine,
+	sshSecret *corev1.Secret,
+) (*corev1.Pod, error) {
+	pod, err := podSpec(virtualmachine, sshSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -931,9 +1076,46 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 	return pod, nil
 }
 
+func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
+	secret, err := sshSecretSpec(virtualmachine)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Secret
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(virtualmachine, secret, r.Scheme); err != nil {
+		return nil, err
+	}
+	return secret, nil
+}
+
+func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
+	// using ed25519 signatures it takes ~16us to finish
+	publicKey, privateKey, err := sshKeygen()
+	if err != nil {
+		return nil, err
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      virtualmachine.Status.SSHSecretName,
+			Namespace: virtualmachine.Namespace,
+		},
+		Immutable: &[]bool{true}[0],
+		Type:      corev1.SecretTypeSSHAuth,
+		Data: map[string][]byte{
+			"ssh-publickey":  publicKey,
+			"ssh-privatekey": privateKey,
+		},
+	}
+
+	return secret, nil
+}
+
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
-func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
+func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine, runnerVersion *api.RunnerProtoVersion) map[string]string {
 	l := make(map[string]string, len(virtualmachine.Labels)+3)
 	for k, v := range virtualmachine.Labels {
 		l[k] = v
@@ -941,7 +1123,9 @@ func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]str
 
 	l["app.kubernetes.io/name"] = "NeonVM"
 	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
-	l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", api.RunnerProtoV1)
+	if runnerVersion != nil {
+		l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", *runnerVersion)
+	}
 	return l
 }
 
@@ -951,13 +1135,14 @@ func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[strin
 		"kubectl.kubernetes.io/last-applied-configuration": true,
 	}
 
-	a := make(map[string]string, len(virtualmachine.Annotations)+1)
+	a := make(map[string]string, len(virtualmachine.Annotations)+2)
 	for k, v := range virtualmachine.Annotations {
 		if !ignored[k] {
 			a[k] = v
 		}
 	}
 
+	a["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
 	return a
 }
@@ -1073,8 +1258,9 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
-func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
-	labels := labelsForVirtualMachine(virtualmachine)
+func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*corev1.Pod, error) {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(virtualmachine, &runnerVersion)
 	annotations := annotationsForVirtualMachine(virtualmachine)
 	affinity := affinityForVirtualMachine(virtualmachine)
 
@@ -1211,6 +1397,51 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		},
 	}
 
+	if sshSecret != nil {
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{
+				Name:      "ssh-privatekey",
+				MountPath: "/mnt/ssh",
+			},
+			corev1.VolumeMount{
+				Name:      "ssh-publickey",
+				MountPath: "/vm/ssh",
+			},
+		)
+		pod.Spec.Volumes = append(pod.Spec.Volumes,
+			corev1.Volume{
+				Name: "ssh-privatekey",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: sshSecret.Name,
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "ssh-privatekey",
+								Path: "id_ed25519",
+								Mode: &[]int32{0600}[0],
+							},
+						},
+					},
+				},
+			},
+			corev1.Volume{
+				Name: "ssh-publickey",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: sshSecret.Name,
+						Items: []corev1.KeyToPath{
+							{
+								Key:  "ssh-publickey",
+								Path: "authorized_keys",
+								Mode: &[]int32{0644}[0],
+							},
+						},
+					},
+				},
+			},
+		)
+	}
+
 	// If a custom neonvm-runner image is requested, use that instead:
 	if virtualmachine.Spec.RunnerImage != nil {
 		pod.Spec.Containers[0].Image = *virtualmachine.Spec.RunnerImage
@@ -1316,11 +1547,6 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 		}
 	}
 
-	if pod.ObjectMeta.Annotations == nil {
-		pod.ObjectMeta.Annotations = map[string]string{}
-	}
-	pod.ObjectMeta.Annotations["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
-
 	// use multus network to add extra network interface
 	if virtualmachine.Spec.ExtraNetwork != nil && virtualmachine.Spec.ExtraNetwork.Enable {
 		var nadNetwork string
@@ -1347,11 +1573,14 @@ func podSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Pod, error) {
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	cntrlName := "virtualmachine"
+	reconciler := WithMetrics(r, r.Metrics, cntrlName)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 8}).
-		Complete(r)
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
+		Named(cntrlName).
+		Complete(reconciler)
 }
 
 func DeepEqual(v1, v2 interface{}) bool {
@@ -1400,4 +1629,47 @@ func getEnvVarValue(envVarName string) (string, error) {
 		return "", fmt.Errorf("unable to find %s environment variable", envVarName)
 	}
 	return value, nil
+}
+
+// sshKeygen generates a pair of public and private keys using the ed25519
+// algorithm. It returns the generated public key and private key as byte
+// slices. If an error occurs during key generation or encoding, it returns nil
+// for both keys and the error.
+func sshKeygen() (publicKeyBytes []byte, privateKeyBytes []byte, err error) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	publicKeyBytes, err = encodePublicKey(publicKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	privateKeyBytes, err = encodePrivateKey(privateKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return
+}
+
+func encodePrivateKey(privateKey ed25519.PrivateKey) ([]byte, error) {
+	privBlock, err := ssh.MarshalPrivateKey(privateKey, "")
+	if err != nil {
+		return nil, err
+	}
+	privatePEM := pem.EncodeToMemory(privBlock)
+
+	return privatePEM, nil
+}
+
+func encodePublicKey(publicKey ed25519.PublicKey) ([]byte, error) {
+	sshPublicKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	pubKeyBytes := ssh.MarshalAuthorizedKey(sshPublicKey)
+	return pubKeyBytes, nil
 }
