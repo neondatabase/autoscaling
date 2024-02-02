@@ -16,7 +16,7 @@ spec:
         - "--health-probe-bind-address=:8081"
         - "--metrics-bind-address=:8080"
         - "--leader-elect"
-        - "--concurrency-limit=8"
+        - "--concurrency-limit=128"
         - "--zap-devel=false"
         - "--zap-time-encoding=iso8601"
         - "--zap-log-level=info"
