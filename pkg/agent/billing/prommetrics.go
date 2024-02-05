@@ -60,6 +60,7 @@ func (m PromMetrics) MustRegister(reg *prometheus.Registry) {
 	reg.MustRegister(m.vmsProcessedTotal)
 	reg.MustRegister(m.vmsCurrent)
 	reg.MustRegister(m.queueSizeCurrent)
+	reg.MustRegister(m.lastSendDuration)
 	reg.MustRegister(m.sendErrorsTotal)
 }
 
