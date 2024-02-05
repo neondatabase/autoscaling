@@ -647,6 +647,37 @@ func buildQEMUCmd(
 	return qemuCmd
 }
 
+func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
+	// resize rootDisk image of size specified and new size more than current
+	type QemuImgOutputPartial struct {
+		VirtualSize int64 `json:"virtual-size"`
+	}
+	// get current disk size by qemu-img info command
+	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
+	if err != nil {
+		return fmt.Errorf("could not get root image size: %w", err)
+	}
+	var imageSize QemuImgOutputPartial
+	if err := json.Unmarshal(qemuImgOut, &imageSize); err != nil {
+		return fmt.Errorf("could not unmarshal QEMU image size: %w", err)
+	}
+	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
+
+	// going to resize
+	if !vmSpec.Guest.RootDisk.Size.IsZero() {
+		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
+			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
+			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
+				return fmt.Errorf("could not resize rootDisk: %w", err)
+			}
+		} else {
+			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
 
@@ -702,31 +733,9 @@ func main() {
 		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 
-	// resize rootDisk image of size specified and new size more than current
-	type QemuImgOutputPartial struct {
-		VirtualSize int64 `json:"virtual-size"`
-	}
-	// get current disk size by qemu-img info command
-	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
+	err = resizeRootDisk(logger, vmSpec)
 	if err != nil {
-		logger.Fatal("could not get root image size", zap.Error(err))
-	}
-	var imageSize QemuImgOutputPartial
-	if err := json.Unmarshal(qemuImgOut, &imageSize); err != nil {
-		logger.Fatal("Failed to unmarhsal QEMU image size", zap.Error(err))
-	}
-	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
-
-	// going to resize
-	if !vmSpec.Guest.RootDisk.Size.IsZero() {
-		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
-			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
-			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
-				logger.Fatal("Failed to resize rootDisk", zap.Error(err))
-			}
-		} else {
-			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
-		}
+		logger.Fatal("Failed to resize rootDisk", zap.Error(err))
 	}
 
 	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
