@@ -202,6 +202,7 @@ func resolvePath() string {
 }
 
 func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk, enableSSH bool) error {
+
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
@@ -349,7 +350,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		if err != nil {
 			return err
 		}
-		ext4blockCount = int64(math.Ceil(float64(ext4blocksMin) + float64((dirSize / ext4blockSize))))
+		ext4blockCount = int64(math.Ceil(float64(ext4blocksMin) + float64(dirSize/ext4blockSize)))
 	} else {
 		return errors.New("diskSize or contentPath should be specified")
 	}
@@ -513,43 +514,15 @@ func runInitScript(script string, logger *zap.Logger) error {
 	return nil
 }
 
-func main() {
-	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
-
-	var vmSpecDump string
-	var vmStatusDump string
-	var kernelPath string
-	var appendKernelCmdline string
-	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
-	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
-	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
-	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
-	flag.Parse()
-
-	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
-	if !ok {
-		logger.Fatal("environment variable K8S_POD_NAME missing")
-	}
-
-	vmSpecJson, err := base64.StdEncoding.DecodeString(vmSpecDump)
-	if err != nil {
-		logger.Fatal("Failed to decode VirtualMachine Spec dump", zap.Error(err))
-	}
-	vmStatusJson, err := base64.StdEncoding.DecodeString(vmStatusDump)
-	if err != nil {
-		logger.Fatal("Failed to decode VirtualMachine Status dump", zap.Error(err))
-	}
-
-	vmSpec := &vmv1.VirtualMachineSpec{}
-	if err := json.Unmarshal(vmSpecJson, vmSpec); err != nil {
-		logger.Fatal("Failed to unmarshal VM spec", zap.Error(err))
-	}
-	var vmStatus vmv1.VirtualMachineStatus
-	if err := json.Unmarshal(vmStatusJson, &vmStatus); err != nil {
-		logger.Fatal("Failed to unmarshal VM Status", zap.Error(err))
-	}
-
-	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
+func buildQEMUCmd(
+	vmSpec *vmv1.VirtualMachineSpec,
+	vmStatus *vmv1.VirtualMachineStatus,
+	kernelPath string,
+	appendKernelCmdline string,
+	logger *zap.Logger,
+	qemuCPUs QemuCPUs,
+	enableSSH bool,
+) []string {
 
 	cpus := []string{}
 	cpus = append(cpus, fmt.Sprintf("cpus=%d", qemuCPUs.min))
@@ -564,53 +537,6 @@ func main() {
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 
-	enableSSH := false
-	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
-		enableSSH = true
-	}
-
-	err = runInitScript(vmSpec.InitScript, logger)
-	if err != nil {
-		logger.Fatal("Failed to run init script", zap.Error(err))
-	}
-
-	// create iso9660 disk with runtime options (command, args, envs, mounts)
-	sysctl := []string{}
-	if vmSpec.Guest.Settings != nil {
-		sysctl = vmSpec.Guest.Settings.Sysctl
-	}
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
-		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
-	}
-
-	// resize rootDisk image of size specified and new size more than current
-	type QemuImgOutputPartial struct {
-		VirtualSize int64 `json:"virtual-size"`
-	}
-	// get current disk size by qemu-img info command
-	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
-	if err != nil {
-		logger.Fatal("could not get root image size", zap.Error(err))
-	}
-	var imageSize QemuImgOutputPartial
-	if err := json.Unmarshal(qemuImgOut, &imageSize); err != nil {
-		logger.Fatal("Failed to unmarhsal QEMU image size", zap.Error(err))
-	}
-	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
-
-	// going to resize
-	if !vmSpec.Guest.RootDisk.Size.IsZero() {
-		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
-			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
-			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
-				logger.Fatal("Failed to resize rootDisk", zap.Error(err))
-			}
-		} else {
-			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
-		}
-	}
-
-	// prepare qemu command line
 	qemuCmd := []string{
 		"-runas", "qemu",
 		"-machine", "q35",
@@ -717,6 +643,95 @@ func main() {
 	if os.Getenv("RECEIVE_MIGRATION") == "true" {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
+
+	return qemuCmd
+}
+
+func main() {
+	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
+
+	var vmSpecDump string
+	var vmStatusDump string
+	var kernelPath string
+	var appendKernelCmdline string
+	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
+	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
+	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
+	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
+	flag.Parse()
+
+	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
+	if !ok {
+		logger.Fatal("environment variable K8S_POD_NAME missing")
+	}
+
+	vmSpecJson, err := base64.StdEncoding.DecodeString(vmSpecDump)
+	if err != nil {
+		logger.Fatal("Failed to decode VirtualMachine Spec dump", zap.Error(err))
+	}
+	vmStatusJson, err := base64.StdEncoding.DecodeString(vmStatusDump)
+	if err != nil {
+		logger.Fatal("Failed to decode VirtualMachine Status dump", zap.Error(err))
+	}
+
+	vmSpec := &vmv1.VirtualMachineSpec{}
+	if err := json.Unmarshal(vmSpecJson, vmSpec); err != nil {
+		logger.Fatal("Failed to unmarshal VM spec", zap.Error(err))
+	}
+	var vmStatus vmv1.VirtualMachineStatus
+	if err := json.Unmarshal(vmStatusJson, &vmStatus); err != nil {
+		logger.Fatal("Failed to unmarshal VM Status", zap.Error(err))
+	}
+
+	enableSSH := false
+	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
+		enableSSH = true
+	}
+
+	err = runInitScript(vmSpec.InitScript, logger)
+	if err != nil {
+		logger.Fatal("Failed to run init script", zap.Error(err))
+	}
+
+	// create iso9660 disk with runtime options (command, args, envs, mounts)
+	sysctl := []string{}
+	if vmSpec.Guest.Settings != nil {
+		sysctl = vmSpec.Guest.Settings.Sysctl
+	}
+	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
+		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
+	}
+
+	// resize rootDisk image of size specified and new size more than current
+	type QemuImgOutputPartial struct {
+		VirtualSize int64 `json:"virtual-size"`
+	}
+	// get current disk size by qemu-img info command
+	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
+	if err != nil {
+		logger.Fatal("could not get root image size", zap.Error(err))
+	}
+	var imageSize QemuImgOutputPartial
+	if err := json.Unmarshal(qemuImgOut, &imageSize); err != nil {
+		logger.Fatal("Failed to unmarhsal QEMU image size", zap.Error(err))
+	}
+	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
+
+	// going to resize
+	if !vmSpec.Guest.RootDisk.Size.IsZero() {
+		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
+			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
+			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
+				logger.Fatal("Failed to resize rootDisk", zap.Error(err))
+			}
+		} else {
+			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
+		}
+	}
+
+	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
+
+	qemuCmd := buildQEMUCmd(vmSpec, &vmStatus, kernelPath, appendKernelCmdline, logger, qemuCPUs, enableSSH)
 
 	selfCgroupPath, err := getSelfCgroupPath(logger)
 	if err != nil {
