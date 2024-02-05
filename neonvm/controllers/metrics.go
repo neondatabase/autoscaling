@@ -41,7 +41,7 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 		),
 		runnerCreationToVMRunningTime: prometheus.NewHistogram(
 			prometheus.HistogramOpts{
-				Name:    "runner_creation_to_vm_running_duration_seconds",
+				Name:    "vm_runner_creation_to_vm_running_duration_seconds",
 				Help:    "Time duration from runner Pod.CreationTimestamp to the moment when VirtualMachine.Status.Phase becomes Running",
 				Buckets: buckets,
 			},

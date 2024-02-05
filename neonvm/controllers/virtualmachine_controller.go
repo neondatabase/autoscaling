@@ -449,12 +449,14 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
 			{
+				// Calculating VM startup latency metrics
 				now := time.Now()
 				d := now.Sub(vmRunner.CreationTimestamp.Time)
 				r.Metrics.runnerCreationToVMRunningTime.Observe(d.Seconds())
 				if !virtualmachine.HasRestarted() {
 					d := now.Sub(virtualmachine.CreationTimestamp.Time)
 					r.Metrics.vmCreationToVMRunningTime.Observe(d.Seconds())
+					log.Info("VM creation to VM running time", "duration(sec)", d.Seconds())
 				}
 			}
 		case runnerSucceeded:
