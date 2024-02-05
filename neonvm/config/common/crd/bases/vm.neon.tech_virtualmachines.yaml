@@ -1081,7 +1081,7 @@ spec:
                   Builder version).'
                 type: boolean
               extraInitContainers:
-                description: Running init containers is constly, so InitScript field
+                description: Running init containers is costly, so InitScript field
                   should be preferred over ExtraInitContainers
                 items:
                   description: A single application container that you want to run

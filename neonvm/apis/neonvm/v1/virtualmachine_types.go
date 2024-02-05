@@ -90,7 +90,7 @@ type VirtualMachineSpec struct {
 
 	Guest Guest `json:"guest"`
 
-	// Running init containers is constly, so InitScript field should be preferred over ExtraInitContainers
+	// Running init containers is costly, so InitScript field should be preferred over ExtraInitContainers
 	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
 
 	// InitScript will be executed in the main container before VM is started.
