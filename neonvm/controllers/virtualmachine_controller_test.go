@@ -99,6 +99,11 @@ var _ = Describe("VirtualMachine controller", func() {
 				Client:   k8sClient,
 				Scheme:   k8sClient.Scheme(),
 				Recorder: nil,
+				Config: &ReconcilerConfig{
+					IsK3s:                   false,
+					UseContainerMgr:         true,
+					MaxConcurrentReconciles: 1,
+				},
 			}
 
 			_, err = virtualmachineReconciler.Reconcile(ctx, reconcile.Request{

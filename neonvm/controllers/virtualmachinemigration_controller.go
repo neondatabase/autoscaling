@@ -57,6 +57,7 @@ type VirtualMachineMigrationReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+	Config   *ReconcilerConfig
 
 	Metrics ReconcilerMetrics
 }
@@ -299,7 +300,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 
 		// now inspect target pod status and update migration
-		switch runnerContainerStatus(targetRunner) {
+		switch runnerStatus(targetRunner) {
 		case runnerRunning:
 			// update migration status
 			migration.Status.SourcePodName = vm.Status.PodName
@@ -673,7 +674,7 @@ func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) e
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 8}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
 		Complete(reconciler)
 }
@@ -685,7 +686,7 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
 
-	pod, err := podSpec(vm, sshSecret)
+	pod, err := podSpec(vm, sshSecret, r.Config)
 	if err != nil {
 		return nil, err
 	}

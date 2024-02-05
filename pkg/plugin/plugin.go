@@ -131,27 +131,24 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 	pwc := podWatchCallbacks{
-		submitPodStarted: func(logger *zap.Logger, pod *corev1.Pod) {
-			pushToQueue(logger, func() { p.handlePodStarted(hlogger, pod) })
+		submitStarted: func(logger *zap.Logger, pod *corev1.Pod) {
+			pushToQueue(logger, func() { p.handleStarted(hlogger, pod) })
 		},
-		submitVMDeletion: func(logger *zap.Logger, pod util.NamespacedName) {
-			pushToQueue(logger, func() { p.handleVMDeletion(hlogger, pod) })
+		submitDeletion: func(logger *zap.Logger, name util.NamespacedName) {
+			pushToQueue(logger, func() { p.handleDeletion(hlogger, name) })
 		},
-		submitPodDeletion: func(logger *zap.Logger, name util.NamespacedName) {
-			pushToQueue(logger, func() { p.handlePodDeletion(hlogger, name) })
-		},
-		submitPodStartMigration: func(logger *zap.Logger, podName, migrationName util.NamespacedName, source bool) {
+		submitStartMigration: func(logger *zap.Logger, podName, migrationName util.NamespacedName, source bool) {
 			pushToQueue(logger, func() { p.handlePodStartMigration(logger, podName, migrationName, source) })
 		},
-		submitPodEndMigration: func(logger *zap.Logger, podName, migrationName util.NamespacedName) {
+		submitEndMigration: func(logger *zap.Logger, podName, migrationName util.NamespacedName) {
 			pushToQueue(logger, func() { p.handlePodEndMigration(logger, podName, migrationName) })
 		},
 	}
 	vwc := vmWatchCallbacks{
-		submitVMDisabledScaling: func(logger *zap.Logger, pod util.NamespacedName) {
+		submitDisabledScaling: func(logger *zap.Logger, pod util.NamespacedName) {
 			pushToQueue(logger, func() { p.handleVMDisabledScaling(hlogger, pod) })
 		},
-		submitVMBoundsChanged: func(logger *zap.Logger, vm *api.VmInfo, podName string) {
+		submitBoundsChanged: func(logger *zap.Logger, vm *api.VmInfo, podName string) {
 			pushToQueue(logger, func() { p.handleUpdatedScalingBounds(hlogger, vm, podName) })
 		},
 		submitNonAutoscalingVmUsageChanged: func(logger *zap.Logger, vm *api.VmInfo, podName string) {
@@ -773,152 +770,23 @@ func (e *AutoscaleEnforcer) Reserve(
 		return nil // success; allow the Pod onto the node.
 	}
 
-	vmInfo, err := e.getVmInfo(logger, pod, "Reserve")
-	if err != nil {
-		logger.Error("Error getting VM info for pod", zap.Error(err))
-		return framework.NewStatus(
-			framework.UnschedulableAndUnresolvable,
-			fmt.Sprintf("Error getting pod vmInfo: %s", err),
-		)
-	}
-
 	// Double-check that the SchedulerName matches what we're expecting
 	if status := e.checkSchedulerName(logger, pod); status != nil {
 		return status
 	}
 
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
-
-	node, err := e.state.getOrFetchNodeState(ctx, logger, e.metrics, e.nodeStore, nodeName)
+	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", true)
 	if err != nil {
-		logger.Error("Error getting node state", zap.Error(err))
-		return framework.NewStatus(
-			framework.Error,
-			fmt.Sprintf("Error getting node state: %s", err),
-		)
+		return framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
 	}
 
-	var add api.Resources
-	if vmInfo != nil {
-		add = vmInfo.Using()
+	if ok {
+		logger.Info("Allowing reserve Pod", zap.Object("verdict", verdict))
+		return nil // nil is success
 	} else {
-		add = extractPodResources(pod)
+		logger.Error("Rejecting reserve Pod (not enough resources)", zap.Object("verdict", verdict))
+		return framework.NewStatus(framework.Unschedulable, "Not enough resources to reserve non-VM pod")
 	}
-
-	if add.VCPU > node.remainingReservableCPU() || add.Mem > node.remainingReservableMem() {
-		cpuShortVerdict := "NOT ENOUGH"
-		if add.VCPU <= node.remainingReservableCPU() {
-			cpuShortVerdict = "OK"
-		}
-		memShortVerdict := "NOT ENOUGH"
-		if add.Mem <= node.remainingReservableMem() {
-			memShortVerdict = "OK"
-		}
-
-		cpuVerdict := fmt.Sprintf(
-			"need %v, %v of %v used, so %v available (%s)",
-			add.VCPU, node.cpu.Reserved, node.cpu.Total, node.remainingReservableCPU(), cpuShortVerdict,
-		)
-		memVerdict := fmt.Sprintf(
-			"need %v, %v of %v used, so %v available (%s)",
-			add.Mem, node.mem.Reserved, node.mem.Total, node.remainingReservableMem(), memShortVerdict,
-		)
-
-		logger.Error(
-			"Can't reserve resources for Pod (not enough available)",
-			zap.Object("verdict", verdictSet{
-				cpu: cpuVerdict,
-				mem: memVerdict,
-			}),
-		)
-		return framework.NewStatus(framework.Unschedulable, "Not enough resources to reserve pod")
-	}
-
-	// Construct the final state
-
-	var cpuState podResourceState[vmapi.MilliCPU]
-	var memState podResourceState[api.Bytes]
-	var vmState *vmPodState
-
-	if vmInfo != nil {
-		vmState = &vmPodState{
-			name:                     vmInfo.NamespacedName(),
-			memSlotSize:              vmInfo.Mem.SlotSize,
-			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
-			mostRecentComputeUnit:    nil,
-			metrics:                  nil,
-			mqIndex:                  -1,
-			migrationState:           nil,
-		}
-		cpuState = podResourceState[vmapi.MilliCPU]{
-			Reserved:         vmInfo.Using().VCPU,
-			Buffer:           0,
-			CapacityPressure: 0,
-			Min:              vmInfo.Min().VCPU,
-			Max:              vmInfo.Max().VCPU,
-		}
-		memState = podResourceState[api.Bytes]{
-			Reserved:         vmInfo.Using().Mem,
-			Buffer:           0,
-			CapacityPressure: 0,
-			Min:              vmInfo.Min().Mem,
-			Max:              vmInfo.Max().Mem,
-		}
-	} else {
-		cpuState = podResourceState[vmapi.MilliCPU]{
-			Reserved:         add.VCPU,
-			Buffer:           0,
-			CapacityPressure: 0,
-			Min:              add.VCPU,
-			Max:              add.VCPU,
-		}
-		memState = podResourceState[api.Bytes]{
-			Reserved:         add.Mem,
-			Buffer:           0,
-			CapacityPressure: 0,
-			Min:              add.Mem,
-			Max:              add.Mem,
-		}
-	}
-
-	podName := util.GetNamespacedName(pod)
-
-	ps := &podState{
-		name: podName,
-		node: node,
-		cpu:  cpuState,
-		mem:  memState,
-		vm:   vmState,
-	}
-	newNodeReservedCPU := node.cpu.Reserved + ps.cpu.Reserved
-	newNodeReservedMem := node.mem.Reserved + ps.mem.Reserved
-
-	cpuVerdict := fmt.Sprintf(
-		"node reserved %v + %v -> %v of total %v",
-		node.cpu.Reserved, ps.cpu.Reserved, newNodeReservedCPU, node.cpu.Total,
-	)
-	memVerdict := fmt.Sprintf(
-		"node reserved %v + %v -> %v of total %v",
-		node.mem.Reserved, ps.mem.Reserved, newNodeReservedMem, node.mem.Total,
-	)
-
-	logger.Info(
-		"Allowing reserve VM pod",
-		zap.Object("verdict", verdictSet{
-			cpu: cpuVerdict,
-			mem: memVerdict,
-		}),
-	)
-
-	node.cpu.Reserved = newNodeReservedCPU
-	node.mem.Reserved = newNodeReservedMem
-
-	node.pods[podName] = ps
-	e.state.pods[podName] = ps
-
-	node.updateMetrics(e.metrics)
-	return nil // nil is success
 }
 
 // Unreserve marks a pod as no longer on-track to being bound to a node, so we can release the
@@ -948,42 +816,11 @@ func (e *AutoscaleEnforcer) Unreserve(
 		return
 	}
 
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
+	logFields, kind, migrating, verdict := e.unreserveResources(logger, podName)
 
-	ps, ok := e.state.pods[podName]
-	if ok {
-		logger = logger.With(zap.String("node", ps.node.name))
-		if ps.vm != nil {
-			logger = logger.With(zap.Object("virtualmachine", ps.vm.name))
-		}
-
-		// Mark the resources as no longer reserved
-		currentlyMigrating := ps.vm != nil && ps.vm.currentlyMigrating()
-
-		cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
-			handleDeleted(currentlyMigrating)
-		memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
-			handleDeleted(currentlyMigrating)
-
-		// Delete our record of the pod
-		delete(e.state.pods, podName)
-		delete(ps.node.pods, podName)
-		if ps.vm != nil {
-			ps.node.mq.removeIfPresent(ps.vm)
-		}
-
-		logger.Info(
-			"Unreserved Pod",
-			zap.Object("verdict", verdictSet{
-				cpu: cpuVerdict,
-				mem: memVerdict,
-			}),
-		)
-
-		ps.node.updateMetrics(e.metrics)
-	} else {
-		logger.Warn("Cannot find Pod in global pods map")
-		return
-	}
+	logger.With(logFields...).Info(
+		fmt.Sprintf("Unreserved %s Pod", kind),
+		zap.Bool("migrating", migrating),
+		zap.Object("verdict", verdict),
+	)
 }
