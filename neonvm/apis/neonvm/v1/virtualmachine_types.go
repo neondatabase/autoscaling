@@ -17,8 +17,13 @@ limitations under the License.
 package v1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -47,6 +52,13 @@ const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 type VirtualMachineUsage struct {
 	CPU    *resource.Quantity `json:"cpu"`
 	Memory *resource.Quantity `json:"memory"`
+}
+
+type NetworkBytes uint64
+
+type VirtualMachineNetworkUsage struct {
+	IngressBytes NetworkBytes `json:"ingress_bytes"`
+	EgressBytes  NetworkBytes `json:"egress_bytes"`
 }
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -117,6 +129,10 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=true
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
+	// Enable network monitoring on the VM
+	// +kubebuilder:default:=false
+	// +optional
+	EnableNetworkMonitoring *bool `json:"enableNetworkMonitoring,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
@@ -436,6 +452,30 @@ func (p VmPhase) IsAlive() bool {
 	}
 }
 
+type NetworkUsageEndpointNotFoundError struct {
+}
+
+func (e NetworkUsageEndpointNotFoundError) Error() string {
+	return "network_usage endpoint not found"
+}
+
+func (e NetworkUsageEndpointNotFoundError) Unwrap() error {
+	return nil
+}
+
+// +kubebuilder:object:generate=false
+type NetworkUsageTimeoutError struct {
+	Err error
+}
+
+func (e NetworkUsageTimeoutError) Error() string {
+	return fmt.Sprintf("Fetching network usage timed out: %s", e.Err.Error())
+}
+
+func (e NetworkUsageTimeoutError) Unwrap() error {
+	return e.Err
+}
+
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
@@ -457,6 +497,45 @@ type VirtualMachine struct {
 
 	Spec   VirtualMachineSpec   `json:"spec,omitempty"`
 	Status VirtualMachineStatus `json:"status,omitempty"`
+}
+
+func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context, timeout time.Duration) (*VirtualMachineNetworkUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("http://%s:%d/network_usage", vm.Status.PodIP, vm.Spec.RunnerPort),
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("error initializing http request to fetch network usage: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		//nolint:errorlint // This is ok because http guarantees everything is a url.Error
+		urlErr := err.(*url.Error)
+		if urlErr.Timeout() {
+			return nil, NetworkUsageTimeoutError{err}
+		}
+		return nil, fmt.Errorf("error performing http request to fetch network usage: %w", err)
+	}
+	if resp.StatusCode != 200 {
+		if resp.StatusCode == 404 {
+			return nil, NetworkUsageEndpointNotFoundError{}
+		}
+		return nil, fmt.Errorf("received non-200 response fetching network usage")
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading http response body: %w", err)
+	}
+	var result VirtualMachineNetworkUsage
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("error unmarshaling http response as VirtualMachineNetworkUsage: %w", err)
+	}
+	return &result, nil
 }
 
 func (vm *VirtualMachine) Cleanup() {

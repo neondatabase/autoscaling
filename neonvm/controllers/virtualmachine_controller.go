@@ -1400,11 +1400,20 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 				containerMgr := corev1.Container{
 					Image: image,
 					Name:  "neonvm-container-mgr",
-					Command: []string{
-						"container-mgr",
-						"-port", strconv.Itoa(int(virtualmachine.Spec.RunnerPort)),
-						"-init-milli-cpu", strconv.Itoa(int(*virtualmachine.Spec.Guest.CPUs.Use)),
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: &[]bool{true}[0],
 					},
+					Command: func() []string {
+						cmd := []string{
+							"container-mgr",
+							"-port", strconv.Itoa(int(virtualmachine.Spec.RunnerPort)),
+							"-init-milli-cpu", strconv.Itoa(int(*virtualmachine.Spec.Guest.CPUs.Use)),
+						}
+						if *virtualmachine.Spec.EnableNetworkMonitoring {
+							cmd = append(cmd, "-enable-network-monitoring")
+						}
+						return cmd
+					}(),
 					Env: []corev1.EnvVar{
 						{
 							Name: "K8S_POD_UID",
@@ -1444,6 +1453,16 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 							Name:      "containerdsock",
 							MountPath: config.criEndpointSocketPath(),
 						},
+						{
+							Name:      "sysfscgroup",
+							MountPath: "/sys/fs/cgroup",
+							// MountPropagationNone means that the volume in a container will
+							// not receive new mounts from the host or other containers, and filesystems
+							// mounted inside the container won't be propagated to the host or other
+							// containers.
+							// Note that this mode corresponds to "private" in Linux terminology.
+							MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
+						},
 					},
 				}
 
@@ -1481,9 +1500,9 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 				}
 
 				if config.UseContainerMgr {
-					return []corev1.Volume{images, containerdSock}
+					return []corev1.Volume{images, containerdSock, cgroup}
 				} else {
-					return []corev1.Volume{images, cgroup}
+					return []corev1.Volume{images}
 				}
 			}(),
 		},

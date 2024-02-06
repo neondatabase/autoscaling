@@ -1077,6 +1077,10 @@ spec:
                 default: true
                 description: Use KVM acceleation
                 type: boolean
+              enableNetworkMonitoring:
+                default: false
+                description: Enable network monitoring on the VM
+                type: boolean
               enableSSH:
                 default: true
                 description: 'Enable SSH on the VM. It works only if the VM image

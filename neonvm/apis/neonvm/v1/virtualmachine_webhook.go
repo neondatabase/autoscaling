@@ -163,6 +163,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.podResources", func(v *VirtualMachine) any { return v.Spec.PodResources }},
 		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},
 		{".spec.enableSSH", func(v *VirtualMachine) any { return v.Spec.EnableSSH }},
+		{".spec.enableNetworkMonitoring", func(v *VirtualMachine) any { return v.Spec.EnableNetworkMonitoring }},
 	}
 
 	for _, info := range immutableFields {

@@ -87,6 +87,14 @@ func (c *Crictl) Inspect(logger *zap.Logger, containerID string) (*CrictlContain
 	return &container, nil
 }
 
+func (c *Crictl) InspectPod(logger *zap.Logger, podID string) (*CrictlPodInspect, error) {
+	var pod CrictlPodInspect
+	if err := c.run(logger, &pod, "inspectp", podID); err != nil {
+		return nil, err
+	}
+	return &pod, nil
+}
+
 // CrictlContainerInspect represents the JSON output of 'crictl inspect', limited to the subset we
 // care about.
 type CrictlContainerInspect struct {
@@ -108,6 +116,23 @@ type CrictlContainerResourcesCPU struct {
 	Period uint64 `json:"period"`
 	Quota  uint64 `json:"quota"`
 	Shares uint64 `json:"shares"`
+}
+
+// CrictlPodInspect represents the JSON output of `crictl inspectp`, limited to the subset we care about.
+type CrictlPodInspect struct {
+	Info CrictlPodInfo `json:"info"`
+}
+
+type CrictlPodInfo struct {
+	Config CrictlPodConfig `json:"config"`
+}
+
+type CrictlPodConfig struct {
+	Linux CrictlPodLinux `json:"linux"`
+}
+
+type CrictlPodLinux struct {
+	CgroupParent string `json:"cgroup_parent"`
 }
 
 func (c *Crictl) run(logger *zap.Logger, output any, args ...string) error {

@@ -23,6 +23,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/rlimit"
 	"go.uber.org/zap"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -71,8 +75,10 @@ func main() {
 
 	var httpPort int
 	var initMilliCPU int
+	var enableNetworkMonitoring bool
 	flag.IntVar(&httpPort, "port", -1, "Port for the CPU http server")
 	flag.IntVar(&initMilliCPU, "init-milli-cpu", -1, "Initial milli-CPU to use for the VM")
+	flag.BoolVar(&enableNetworkMonitoring, "enable-network-monitoring", false, "Enable the eBPF function that measures ingress/egress traffic")
 	flag.Parse()
 
 	if httpPort < 0 {
@@ -139,14 +145,205 @@ func main() {
 		logger.Fatal("could not set initial runner container CPU", zap.Error(err))
 	}
 
+	var counters *ebpf.Map
+	if enableNetworkMonitoring {
+		podInspect, err := crictl.InspectPod(logger, criPodID)
+		if err != nil {
+			logger.Fatal(
+				"failed to run crictl command to get cgroup path for container",
+				zap.String("containerID", criRunnerContainerID),
+				zap.Error(err),
+			)
+		}
+		links, cs, err := attachBPF(logger, podInspect.Info.Config.Linux.CgroupParent)
+		counters = cs // To prevent shadowing
+		if err != nil {
+			logger.Fatal("Failed to attach BPF", zap.Error(err))
+		}
+		defer links[NETWORK_INGRESS].Close()
+		defer links[NETWORK_EGRESS].Close()
+		defer counters.Close()
+	}
+
 	srvState := cpuServerState{
 		podID:        criPodID,
 		containerID:  criRunnerContainerID,
 		lastMilliCPU: atomic.Uint32{},
 	}
 	srvState.lastMilliCPU.Store(uint32(initMilliCPU))
+	srvState.listenForHTTPRequests(context.TODO(), logger, crictl, int32(httpPort), counters)
+}
 
-	srvState.listenForCPUChanges(context.TODO(), logger, crictl, int32(httpPort))
+type NetworkDirection uint32
+
+const (
+	NETWORK_INGRESS NetworkDirection = 0
+	NETWORK_EGRESS  NetworkDirection = 1
+)
+
+func generateBPF(logger *zap.Logger, counters *ebpf.Map, direction NetworkDirection) (*ebpf.Program, error) {
+	const (
+		ENABLE_DEBUG_PRINTING bool = false
+
+		// Below are offsets into `struct __sk_buff`, defined in uapi/linux/bpf.h
+		// https://elixir.bootlin.com/linux/v4.15/source/include/uapi/linux/bpf.h#L799
+		LEN_OFFSET        = 0
+		REMOTE_IP4_OFFSET = 92
+
+		CLASS_A_MASK int32 = 255              // bswap(255.0.0.0)
+		CLASS_B_MASK int32 = 255 + (240 << 8) // bswap(255.240.0.0)
+		CLASS_C_MASK int32 = 255 + (255 << 8) // bswap(255.255.0.0)
+
+		CLASS_A_ADDRESS  int32 = 10                                     // bswap(10.0.0.0)
+		CLASS_B_ADDRESS  int32 = 172 + (16 << 8)                        // bswap(172.16.0.0)
+		CLASS_C_ADDRESS  int32 = 192 + (168 << 8)                       // bswap(192.168.0.0)
+		LOOPBACK_ADDRESS int32 = 127 + (0 << 8) + (0 << 16) + (1 << 24) // bswap(127.0.0.1)
+	)
+
+	insns := asm.Instructions{
+		// R1 contains a pointer to an __sk_buff (defined in bpf.h)
+		// Load length, and remote_ip4 into R6 and R7
+		asm.LoadMem(asm.R6, asm.R1, LEN_OFFSET, asm.Word),
+		asm.LoadMem(asm.R7, asm.R1, REMOTE_IP4_OFFSET, asm.Word),
+	}
+
+	if ENABLE_DEBUG_PRINTING {
+		insns = append(insns,
+			// Store the string "%d\n\0" to the stack
+			asm.Mov.Reg(asm.R1, asm.RFP),
+			asm.Add.Imm(asm.R1, -4),
+			asm.StoreImm(asm.R1, 0, 0x000a6425, asm.Word),
+			// Store the size of the string in R2 (which is 4
+			// including the null terminator)
+			asm.Mov.Imm(asm.R2, 4),
+			// Store the value we want to print (the IP address) in R3
+			asm.Mov.Reg(asm.R3, asm.R7),
+			asm.FnTracePrintk.Call(),
+		)
+	}
+
+	insns = append(insns,
+		// Check if remote address is one of:
+		// - empty address (0.0.0.0)
+		// - loopback address (127.0.0.1)
+		// - class A private network (10.0.0.0/8)
+		// - class B private network (172.16.0.0/12)
+		// - class C private network (192.168.0.0/16)
+		// If it is any of these, exit
+		asm.JEq.Imm32(asm.R7, 0, "exit"),
+		asm.JEq.Imm32(asm.R7, LOOPBACK_ADDRESS, "exit"),
+		asm.Mov.Reg32(asm.R8, asm.R7),
+		asm.And.Imm32(asm.R8, CLASS_A_MASK),
+		asm.JEq.Imm32(asm.R8, CLASS_A_ADDRESS, "exit"),
+		asm.Mov.Reg32(asm.R8, asm.R7),
+		asm.And.Imm32(asm.R8, CLASS_B_MASK),
+		asm.JEq.Imm32(asm.R8, CLASS_B_ADDRESS, "exit"),
+		asm.Mov.Reg32(asm.R8, asm.R7),
+		asm.And.Imm32(asm.R8, CLASS_C_MASK),
+		asm.JEq.Imm32(asm.R8, CLASS_C_ADDRESS, "exit"),
+
+		// Load the map into R1
+		// By the way: isn't it funny how we're putting a file descriptor
+		// here? Even though this program is getting shared among multiple
+		// processes?
+		// Well, it turns out that when this program gets loaded into the kernel
+		// there's a special pass that converts these LoadMapPtr calls from FDs
+		// into pointers to kernel memory. Pretty nifty!
+		asm.LoadMapPtr(asm.R1, counters.FD()),
+
+		// bpf_map_lookup_elem takes a pointer to the key, so we
+		// have to spill the key to the stack. The key is the
+		// network direction (i.e. 0 for ingress and 1 for egress).
+		asm.Mov.Reg(asm.R2, asm.RFP),
+		asm.Add.Imm(asm.R2, -4),
+		asm.StoreImm(asm.R2, 0, int64(direction), asm.Word),
+		// Now we have a pointer to the map in R1 and
+		// a pointer to the key in R2.
+		asm.FnMapLookupElem.Call(),
+		asm.JEq.Imm(asm.R0, 0, "exit"),
+		// R0 now holds a pointer to the counter
+		// Atomically add the packet length (stored in R6) to it
+		asm.StoreXAdd(asm.R0, asm.R6, asm.DWord),
+		asm.Mov.Imm(asm.R0, 1).WithSymbol("exit"),
+		asm.Return(),
+	)
+
+	//nolint:exhaustruct // This has a whole bunch of optional configuration options that we don't care about
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
+		Name:         "neon_network_monitor",
+		Type:         ebpf.CGroupSKB,
+		License:      "Apache-2.0",
+		Instructions: insns,
+	})
+	if err != nil {
+		logger.Fatal("Failed to attach eBPF program", zap.Error(err))
+		return nil, err
+	}
+	return prog, nil
+}
+
+// Attaches a BPF program to the given cgroup which checks each packet to see if it comes
+// from/is going to the external network. These counts are exposed through a map which
+// can be read.
+func attachBPF(logger *zap.Logger, cgroupPath string) ([]link.Link, *ebpf.Map, error) {
+	const (
+		MAP_KEY_SIZE     = 4
+		MAP_VAL_SIZE     = 8
+		cgroupMountPoint = "/sys/fs/cgroup"
+	)
+
+	cgroupPath = fmt.Sprintf("%s/%s", cgroupMountPoint, cgroupPath)
+
+	if err := rlimit.RemoveMemlock(); err != nil {
+		logger.Fatal("Failed to remove memlock", zap.Error(err))
+		return nil, nil, err
+	}
+
+	//nolint:exhaustruct // This has a whole bunch of optional configuration options that we don't care about
+	counters, err := ebpf.NewMap(&ebpf.MapSpec{
+		Type:       ebpf.Array,
+		KeySize:    MAP_KEY_SIZE,
+		ValueSize:  MAP_VAL_SIZE,
+		MaxEntries: 2,
+	})
+	if err != nil {
+		logger.Fatal("Failed to create eBPF map", zap.Error(err))
+		return nil, nil, err
+	}
+
+	ingressProgram, err := generateBPF(logger, counters, NETWORK_INGRESS)
+	if err != nil {
+		counters.Close()
+		return nil, nil, err
+	}
+	ingressLink, err := link.AttachCgroup(link.CgroupOptions{
+		Path:    cgroupPath,
+		Attach:  ebpf.AttachCGroupInetIngress,
+		Program: ingressProgram,
+	})
+	if err != nil {
+		logger.Fatal("Failed to link ingress program", zap.Error(err))
+		return nil, nil, err
+	}
+
+	egressProgram, err := generateBPF(logger, counters, NETWORK_EGRESS)
+	if err != nil {
+		counters.Close()
+		return nil, nil, err
+	}
+
+	egressLink, err := link.AttachCgroup(link.CgroupOptions{
+		Path:    cgroupPath,
+		Attach:  ebpf.AttachCGroupInetEgress,
+		Program: egressProgram,
+	})
+	if err != nil {
+		logger.Fatal("Failed to link egress program", zap.Error(err))
+		counters.Close()
+		return nil, nil, err
+	}
+	logger.Info("Successfully attached eBPF programs")
+	return []link.Link{ingressLink, egressLink}, counters, nil
 }
 
 type cpuServerState struct {
@@ -155,7 +352,7 @@ type cpuServerState struct {
 	lastMilliCPU atomic.Uint32
 }
 
-func (s *cpuServerState) listenForCPUChanges(ctx context.Context, logger *zap.Logger, crictl *Crictl, port int32) {
+func (s *cpuServerState) listenForHTTPRequests(ctx context.Context, logger *zap.Logger, crictl *Crictl, port int32, counters *ebpf.Map) {
 	mux := http.NewServeMux()
 	loggerHandlers := logger.Named("http-handlers")
 	cpuChangeLogger := loggerHandlers.Named("cpu_change")
@@ -170,6 +367,13 @@ func (s *cpuServerState) listenForCPUChanges(ctx context.Context, logger *zap.Lo
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		s.handleCPUCurrent(cpuCurrentLogger, crictl, w, r)
 	})
+	if counters != nil {
+		networkUsageLogger := loggerHandlers.Named("network_usage")
+		logger.Info("Listening for network_usage")
+		mux.HandleFunc("/network_usage", func(w http.ResponseWriter, r *http.Request) {
+			handleGetNetworkUsage(networkUsageLogger, w, r, counters)
+		})
+	}
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
 		Handler:           mux,
@@ -184,14 +388,48 @@ func (s *cpuServerState) listenForCPUChanges(ctx context.Context, logger *zap.Lo
 	select {
 	case err := <-errChan:
 		if errors.Is(err, http.ErrServerClosed) {
-			logger.Info("cpu_change server closed")
+			logger.Info("http server closed")
 		} else if err != nil {
-			logger.Fatal("cpu_change server exited with error", zap.Error(err))
+			logger.Fatal("http exited with error", zap.Error(err))
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
-		logger.Info("shut down cpu_change server", zap.Error(err))
+		logger.Info("shut down http server", zap.Error(err))
 	}
+}
+
+func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Request, counters *ebpf.Map) {
+	if r.Method != "GET" {
+		logger.Error("unexpected method", zap.String("method", r.Method))
+		w.WriteHeader(400)
+		return
+	}
+
+	var counts vmv1.VirtualMachineNetworkUsage
+	if err := counters.Lookup(NETWORK_INGRESS, &counts.IngressBytes); err != nil {
+		logger.Error("error reading ingress byte counts", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+	if err := counters.Lookup(NETWORK_EGRESS, &counts.EgressBytes); err != nil {
+		logger.Error("error reading egress byte counts", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+	body, err := json.Marshal(counts)
+	if err != nil {
+		logger.Error("could not marshal byte counts", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	if _, err := w.Write(body); err != nil {
+		logger.Error("could not write body", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+	logger.Info("Responded with byte counts", zap.String("byte_counts", string(body)))
 }
 
 func (s *cpuServerState) handleCPUChange(logger *zap.Logger, crictl *Crictl, w http.ResponseWriter, r *http.Request) {
