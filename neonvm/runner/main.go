@@ -523,7 +523,7 @@ func buildQEMUCmd(
 	logger *zap.Logger,
 	qemuCPUs QemuCPUs,
 	enableSSH bool,
-) []string {
+) ([]string, error) {
 
 	cpus := []string{}
 	cpus = append(cpus, fmt.Sprintf("cpus=%d", qemuCPUs.min))
@@ -564,7 +564,7 @@ func buildQEMUCmd(
 	if enableSSH {
 		name := "ssh-authorized-keys"
 		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
-			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
+			return nil, fmt.Errorf("failed to create ISO9660 image: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
 	}
@@ -575,7 +575,7 @@ func buildQEMUCmd(
 			logger.Info("creating QCOW2 image with empty ext4 filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
-				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
+				return nil, fmt.Errorf("failed to create QCOW2 image: %w", err)
 			}
 			discard := ""
 			if disk.EmptyDisk.Discard {
@@ -587,7 +587,7 @@ func buildQEMUCmd(
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 			logger.Info("creating iso9660 image", zap.String("diskPath", dPath), zap.String("diskName", disk.Name), zap.String("mountPath", mnt))
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
-				logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
+				return nil, fmt.Errorf("failed to create ISO9660 image: %w", err)
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
 		default:
@@ -612,7 +612,7 @@ func buildQEMUCmd(
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
 	if err != nil {
-		logger.Fatal("cannot set up default network", zap.Error(err))
+		return nil, fmt.Errorf("cannot set up default network: %w", err)
 	}
 	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,script=no,downscript=no,vhost=on", defaultNetworkTapName))
 	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
@@ -621,7 +621,7 @@ func buildQEMUCmd(
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
 		macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface)
 		if err != nil {
-			logger.Fatal("cannot set up overlay network", zap.Error(err))
+			return nil, fmt.Errorf("cannot set up overlay network: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
 		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
@@ -645,7 +645,7 @@ func buildQEMUCmd(
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	return qemuCmd
+	return qemuCmd, nil
 }
 
 func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
@@ -765,8 +765,9 @@ func main() {
 	var qemuCmd []string
 
 	eg.Go(func() error {
-		qemuCmd = buildQEMUCmd(vmSpec, &vmStatus, kernelPath, appendKernelCmdline, logger, qemuCPUs, enableSSH)
-		return nil
+		var err error
+		qemuCmd, err = buildQEMUCmd(vmSpec, &vmStatus, kernelPath, appendKernelCmdline, logger, qemuCPUs, enableSSH)
+		return err
 	})
 
 	eg.Go(func() error {
