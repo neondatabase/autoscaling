@@ -1500,9 +1500,9 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 				}
 
 				if config.UseContainerMgr {
-					return []corev1.Volume{images, containerdSock, cgroup}
+					return []corev1.Volume{images, cgroup, containerdSock}
 				} else {
-					return []corev1.Volume{images}
+					return []corev1.Volume{images, cgroup}
 				}
 			}(),
 		},
