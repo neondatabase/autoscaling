@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,39 +26,35 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 		1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 40, 50, 60}
 
 	m := ReconcilerMetrics{
-		failing: prometheus.NewGaugeVec(
+		failing: util.RegisterMetric(metrics.Registry, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "reconcile_failing_objects",
 				Help: "Number of objects that are failing to reconcile for each specific controller",
 			},
 			[]string{"controller"},
-		),
-		vmCreationToRunnerCreationTime: prometheus.NewHistogram(
+		)),
+		vmCreationToRunnerCreationTime: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Name:    "vm_creation_to_runner_creation_duration_seconds",
 				Help:    "Time duration from VirtualMachine.CreationTimestamp to runner Pod.CreationTimestamp",
 				Buckets: buckets,
 			},
-		),
-		runnerCreationToVMRunningTime: prometheus.NewHistogram(
+		)),
+		runnerCreationToVMRunningTime: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Name:    "vm_runner_creation_to_vm_running_duration_seconds",
 				Help:    "Time duration from runner Pod.CreationTimestamp to the moment when VirtualMachine.Status.Phase becomes Running",
 				Buckets: buckets,
 			},
-		),
-		vmCreationToVMRunningTime: prometheus.NewHistogram(
+		)),
+		vmCreationToVMRunningTime: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Name:    "vm_creation_to_vm_running_duration_seconds",
 				Help:    "Time duration from VirtualMachine.CreationTimeStamp to the moment when VirtualMachine.Status.Phase becomes Running",
 				Buckets: buckets,
 			},
-		),
+		)),
 	}
-	metrics.Registry.MustRegister(m.failing)
-	metrics.Registry.MustRegister(m.vmCreationToRunnerCreationTime)
-	metrics.Registry.MustRegister(m.runnerCreationToVMRunningTime)
-	metrics.Registry.MustRegister(m.vmCreationToVMRunningTime)
 	return m
 }
 
