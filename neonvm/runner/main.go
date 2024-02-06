@@ -38,6 +38,7 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -719,28 +720,7 @@ func main() {
 		enableSSH = true
 	}
 
-	err = runInitScript(vmSpec.InitScript, logger)
-	if err != nil {
-		logger.Fatal("Failed to run init script", zap.Error(err))
-	}
-
-	// create iso9660 disk with runtime options (command, args, envs, mounts)
-	sysctl := []string{}
-	if vmSpec.Guest.Settings != nil {
-		sysctl = vmSpec.Guest.Settings.Sysctl
-	}
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
-		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
-	}
-
-	err = resizeRootDisk(logger, vmSpec)
-	if err != nil {
-		logger.Fatal("Failed to resize rootDisk", zap.Error(err))
-	}
-
 	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
-
-	qemuCmd := buildQEMUCmd(vmSpec, &vmStatus, kernelPath, appendKernelCmdline, logger, qemuCPUs, enableSSH)
 
 	selfCgroupPath, err := getSelfCgroupPath(logger)
 	if err != nil {
@@ -758,11 +738,50 @@ func main() {
 	// be equal to the source pod, not this one, which may be... somewhat confusing.
 	cgroupPath := fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
 
-	logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
+	eg := errgroup.Group{}
+	eg.Go(func() error {
+		err = runInitScript(vmSpec.InitScript, logger)
+		return fmt.Errorf("init script failed: %w", err)
+	})
 
-	if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
-		logger.Fatal("Failed to set cgroup limit", zap.Error(err))
+	eg.Go(func() error {
+		// create iso9660 disk with runtime options (command, args, envs, mounts)
+		sysctl := []string{}
+		if vmSpec.Guest.Settings != nil {
+			sysctl = vmSpec.Guest.Settings.Sysctl
+		}
+		if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
+			logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
+		}
+
+		return nil
+	})
+
+	eg.Go(func() error {
+		err = resizeRootDisk(logger, vmSpec)
+		return fmt.Errorf("resize rootDisk failed: %w", err)
+	})
+
+	var qemuCmd []string
+
+	eg.Go(func() error {
+		qemuCmd = buildQEMUCmd(vmSpec, &vmStatus, kernelPath, appendKernelCmdline, logger, qemuCPUs, enableSSH)
+		return nil
+	})
+
+	eg.Go(func() error {
+		logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
+
+		if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
+			logger.Fatal("Failed to set cgroup limit", zap.Error(err))
+		}
+		return err
+	})
+
+	if err := eg.Wait(); err != nil {
+		logger.Fatal("Failed to prepare QEMU", zap.Error(err))
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
 
