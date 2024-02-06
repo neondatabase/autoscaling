@@ -1349,7 +1349,14 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	// prepare dnsmask command line (instead of config file)
 	logger.Info("run dnsmasq for interface", zap.String("name", defaultNetworkBridgeName))
 	dnsMaskCmd := []string{
+		// No DNS, DHCP only
 		"--port=0",
+
+		// Because we don't provide DNS, no need to load resolv.conf. This helps to
+		// avoid "dnsmasq: failed to create inotify: No file descriptors available"
+		// errors.
+		"--no-resolv",
+
 		"--bind-interfaces",
 		"--dhcp-authoritative",
 		fmt.Sprintf("--interface=%s", defaultNetworkBridgeName),
