@@ -430,6 +430,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				msg = fmt.Sprintf("%s, SSH Secret %s", msg, sshSecret.Name)
 			}
 			r.Recorder.Event(virtualmachine, "Normal", "Created", msg)
+			if !virtualmachine.HasRestarted() {
+				d := pod.CreationTimestamp.Time.Sub(virtualmachine.CreationTimestamp.Time)
+				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
+			}
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")
 			return err
@@ -444,6 +448,17 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
+			{
+				// Calculating VM startup latency metrics
+				now := time.Now()
+				d := now.Sub(vmRunner.CreationTimestamp.Time)
+				r.Metrics.runnerCreationToVMRunningTime.Observe(d.Seconds())
+				if !virtualmachine.HasRestarted() {
+					d := now.Sub(virtualmachine.CreationTimestamp.Time)
+					r.Metrics.vmCreationToVMRunningTime.Observe(d.Seconds())
+					log.Info("VM creation to VM running time", "duration(sec)", d.Seconds())
+				}
+			}
 		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,

@@ -467,6 +467,10 @@ func (vm *VirtualMachine) Cleanup() {
 	vm.Status.MemorySize = nil
 }
 
+func (vm *VirtualMachine) HasRestarted() bool {
+	return vm.Status.RestartCount != nil && *vm.Status.RestartCount > 0
+}
+
 //+kubebuilder:object:root=true
 
 // VirtualMachineList contains a list of VirtualMachine
