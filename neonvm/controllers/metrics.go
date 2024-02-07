@@ -4,12 +4,13 @@ import (
 	"context"
 	"sync"
 
-	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type ReconcilerMetrics struct {
