@@ -1,7 +1,7 @@
 name: release
 on:
-  # # UNCOMMENT TO ALLOW TESTING:
-  # pull_request:
+  # UNCOMMENT TO ALLOW TESTING:
+  pull_request:
   push:
     tags:
       - "v*.*.*"
