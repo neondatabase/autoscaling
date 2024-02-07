@@ -115,7 +115,8 @@ jobs:
           IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs.autoscaler-agent }}
 
       - name: upload manifests
-        if: ${{ inputs.push-yamls == 'true' }}
+        # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
+        if: ${{ format('{0}', inputs.push-yamls) == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: rendered_manifests
