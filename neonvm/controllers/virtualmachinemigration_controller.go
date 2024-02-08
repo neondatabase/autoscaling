@@ -668,15 +668,16 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 // SetupWithManager sets up the controller with the Manager.
 // Note that the Pods will be also watched in order to ensure its
 // desirable state on the cluster
-func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) (func() ReconcileSnapshot, error) {
 	cntrlName := "virtualmachinemigration"
-	reconciler := WithMetrics(r, r.Metrics, cntrlName)
-	return ctrl.NewControllerManagedBy(mgr).
+	reconciler, snapshot := WithMetrics(r, r.Metrics, cntrlName)
+	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
 		Complete(reconciler)
+	return snapshot, err
 }
 
 // targetPodForVirtualMachine returns a VirtualMachine Pod object

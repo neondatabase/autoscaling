@@ -68,15 +68,46 @@ type wrappedReconciler struct {
 	failing map[client.ObjectKey]struct{}
 }
 
+// ReocncileSnapshot provides a glimpse into the current state of ongoing reconciles
+//
+// This type is (transitively) returned by the controller's "dump state" HTTP endpoint, and exists
+// to allow us to get deeper information on the metrics - we can't expose information for every
+// VirtualMachine into the metrics (it'd be too high cardinality), but we *can* make it availalbe
+// when requested.
+type ReconcileSnapshot struct {
+	// ControllerName is the name of the controller: virtualmachine or virtualmachinemigration.
+	ControllerName string
+
+	// Failing is the list of objects currenly failing to reconcile
+	Failing []string
+}
+
 // WithMetrics wraps a given Reconciler with metrics capabilities.
-func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) reconcile.Reconciler {
-	return &wrappedReconciler{
+func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) (reconcile.Reconciler, func() ReconcileSnapshot) {
+	r := &wrappedReconciler{
 		Reconciler:     reconciler,
 		Metrics:        rm,
 		ControllerName: cntrlName,
 		lock:           sync.Mutex{},
 		failing:        make(map[client.ObjectKey]struct{}),
 	}
+
+	snapshot := func() ReconcileSnapshot {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+
+		failing := make([]string, 0, len(r.failing))
+		for namespacedName := range r.failing {
+			failing = append(failing, namespacedName.String())
+		}
+
+		return ReconcileSnapshot{
+			ControllerName: cntrlName,
+			Failing:        failing,
+		}
+	}
+
+	return r, snapshot
 }
 
 func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
