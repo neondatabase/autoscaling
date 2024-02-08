@@ -1,0 +1,27 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 60
+commands:
+  - script: kubectl get pods -n "$NAMESPACE" --no-headers=true -l vm.neon.tech/name=example | [ $(wc -l) -eq 1 ]
+---
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+status:
+  phase: Running
+  conditions:
+    - type: Available
+      status: "True"
+  cpus: 250m
+  memorySize: 1Gi
+  restartCount: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app.kubernetes.io/name: NeonVM
+    vm.neon.tech/name: example
+status:
+  phase: Running
