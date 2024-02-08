@@ -168,32 +168,13 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	// update status after reconcile loop (try 10 times)
-	statusNow := statusBefore.DeepCopy()
-	statusNew := virtualmachine.Status.DeepCopy()
-	try := 1
-	for try < 10 {
-		if !DeepEqual(statusNow, statusNew) {
-			// update VirtualMachine status
-			// log.Info("DEBUG", "StatusNow", statusNow, "StatusNew", statusNew, "attempt", try)
-			if err := r.Status().Update(ctx, &virtualmachine); err != nil {
-				if apierrors.IsConflict(err) {
-					try++
-					time.Sleep(time.Second)
-					// re-get statusNow from current state
-					statusNow = virtualmachine.Status.DeepCopy()
-					continue
-				}
-				log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
-					"virtualmachine", virtualmachine.Name)
-				return ctrl.Result{}, err
-			}
+	// If the status changed, try to update the object
+	if !DeepEqual(statusBefore, virtualmachine.Status) {
+		if err := r.Status().Update(ctx, &virtualmachine); err != nil {
+			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
+				"virtualmachine", virtualmachine.Name)
+			return ctrl.Result{}, err
 		}
-		// status updated (before and now are equal)
-		break
-	}
-	if try >= 10 {
-		return ctrl.Result{}, fmt.Errorf("unable update .status for virtualmachine %s in %d attempts", virtualmachine.Name, try)
 	}
 
 	return ctrl.Result{RequeueAfter: time.Second}, nil
