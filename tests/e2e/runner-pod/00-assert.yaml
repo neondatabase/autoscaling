@@ -23,5 +23,11 @@ metadata:
   labels:
     app.kubernetes.io/name: NeonVM
     vm.neon.tech/name: example
+  ownerReferences:
+  - apiVersion: vm.neon.tech/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: VirtualMachine
+    name: example
 status:
   phase: Running
