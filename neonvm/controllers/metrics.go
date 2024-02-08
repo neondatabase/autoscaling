@@ -72,13 +72,13 @@ type wrappedReconciler struct {
 //
 // This type is (transitively) returned by the controller's "dump state" HTTP endpoint, and exists
 // to allow us to get deeper information on the metrics - we can't expose information for every
-// VirtualMachine into the metrics (it'd be too high cardinality), but we *can* make it availalbe
+// VirtualMachine into the metrics (it'd be too high cardinality), but we *can* make it available
 // when requested.
 type ReconcileSnapshot struct {
 	// ControllerName is the name of the controller: virtualmachine or virtualmachinemigration.
 	ControllerName string
 
-	// Failing is the list of objects currenly failing to reconcile
+	// Failing is the list of objects currently failing to reconcile
 	Failing []string
 }
 
