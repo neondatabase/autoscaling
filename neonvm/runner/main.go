@@ -487,10 +487,12 @@ func main() {
 	var vmStatusDump string
 	var kernelPath string
 	var appendKernelCmdline string
+	var skipCgroupManagement bool
 	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
 	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
+	flag.BoolVar(&skipCgroupManagement, "skip-cgroup-management", false, "Don't try to manage CPU (use if running alongside container-mgr)")
 	flag.Parse()
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
@@ -680,40 +682,56 @@ func main() {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	selfCgroupPath, err := getSelfCgroupPath(logger)
-	if err != nil {
-		logger.Fatal("Failed to get self cgroup path", zap.Error(err))
-	}
-	// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
-	// that the cgroup '/neonvm-qemu-...' still works.
-	if selfCgroupPath == "/" {
-		selfCgroupPath = ""
-	}
-	// ... but also we should have some uniqueness just in case, so we're not sharing a root level
-	// cgroup if that *is* what's happening. This *should* only be relevant for local clusters.
-	//
-	// We don't want to just use the VM spec's .status.PodName because during migrations that will
-	// be equal to the source pod, not this one, which may be... somewhat confusing.
-	cgroupPath := fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
+	var cgroupPath string
 
-	logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
+	if !skipCgroupManagement {
+		selfCgroupPath, err := getSelfCgroupPath(logger)
+		if err != nil {
+			logger.Fatal("Failed to get self cgroup path", zap.Error(err))
+		}
+		// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
+		// that the cgroup '/neonvm-qemu-...' still works.
+		if selfCgroupPath == "/" {
+			selfCgroupPath = ""
+		}
+		// ... but also we should have some uniqueness just in case, so we're not sharing a root level
+		// cgroup if that *is* what's happening. This *should* only be relevant for local clusters.
+		//
+		// We don't want to just use the VM spec's .status.PodName because during migrations that will
+		// be equal to the source pod, not this one, which may be... somewhat confusing.
+		cgroupPath = fmt.Sprintf("%s/neonvm-qemu-%s", selfCgroupPath, selfPodName)
 
-	if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
-		logger.Fatal("Failed to set cgroup limit", zap.Error(err))
+		logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
+
+		if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
+			logger.Fatal("Failed to set cgroup limit", zap.Error(err))
+		}
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-	wg.Add(1)
-	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
+	if !skipCgroupManagement {
+		wg.Add(1)
+		go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
+	}
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 
-	args := append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
-	logger.Info("calling cgexec", zap.Strings("args", args))
-	if err := execFg("cgexec", args...); err != nil {
+	var bin string
+	var cmd []string
+	if !skipCgroupManagement {
+		bin = "cgexec"
+		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
+	} else {
+		bin = QEMU_BIN
+		cmd = qemuCmd
+	}
+
+	logger.Info(fmt.Sprintf("calling %s", bin), zap.Strings("args", cmd))
+	if err := execFg(bin, cmd...); err != nil {
 		logger.Error("QEMU exited with error", zap.Error(err))
 	} else {
 		logger.Info("QEMU exited without error")
@@ -1331,7 +1349,14 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	// prepare dnsmask command line (instead of config file)
 	logger.Info("run dnsmasq for interface", zap.String("name", defaultNetworkBridgeName))
 	dnsMaskCmd := []string{
+		// No DNS, DHCP only
 		"--port=0",
+
+		// Because we don't provide DNS, no need to load resolv.conf. This helps to
+		// avoid "dnsmasq: failed to create inotify: No file descriptors available"
+		// errors.
+		"--no-resolv",
+
 		"--bind-interfaces",
 		"--dhcp-authoritative",
 		fmt.Sprintf("--interface=%s", defaultNetworkBridgeName),

@@ -57,10 +57,9 @@ type VirtualMachineMigrationReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+	Config   *ReconcilerConfig
 
 	Metrics ReconcilerMetrics
-
-	MaxConcurrentReconciles int
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -675,7 +674,7 @@ func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) e
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
 		Complete(reconciler)
 }
@@ -687,7 +686,7 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
 
-	pod, err := podSpec(vm, sshSecret)
+	pod, err := podSpec(vm, sshSecret, r.Config)
 	if err != nil {
 		return nil, err
 	}

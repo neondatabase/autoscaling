@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func RegisterMetric[P prometheus.Collector](reg *prometheus.Registry, collector P) P {
+func RegisterMetric[P prometheus.Collector](reg prometheus.Registerer, collector P) P {
 	reg.MustRegister(collector)
 	return collector
 }

@@ -47,6 +47,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/tools/record"
 
@@ -74,10 +75,9 @@ type VirtualMachineReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+	Config   *ReconcilerConfig
 
 	Metrics ReconcilerMetrics `exhaustruct:"optional"`
-
-	MaxConcurrentReconciles int
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -88,6 +88,7 @@ type VirtualMachineReconciler struct {
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachines/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachines/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups=core,resources=nodes,verbs=list
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;list;watch
@@ -376,6 +377,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 		// VirtualMachine just created, change Phase to "Pending"
 		virtualmachine.Status.Phase = vmv1.VmPending
+		virtualmachine.Status.RestartCount = &[]int32{0}[0] // set value to pointer to 0
 	case vmv1.VmPending:
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
@@ -428,6 +430,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				msg = fmt.Sprintf("%s, SSH Secret %s", msg, sshSecret.Name)
 			}
 			r.Recorder.Event(virtualmachine, "Normal", "Created", msg)
+			if !virtualmachine.HasRestarted() {
+				d := pod.CreationTimestamp.Time.Sub(virtualmachine.CreationTimestamp.Time)
+				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
+			}
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")
 			return err
@@ -442,6 +448,17 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
+			{
+				// Calculating VM startup latency metrics
+				now := time.Now()
+				d := now.Sub(vmRunner.CreationTimestamp.Time)
+				r.Metrics.runnerCreationToVMRunningTime.Observe(d.Seconds())
+				if !virtualmachine.HasRestarted() {
+					d := now.Sub(virtualmachine.CreationTimestamp.Time)
+					r.Metrics.vmCreationToVMRunningTime.Observe(d.Seconds())
+					log.Info("VM creation to VM running time", "duration(sec)", d.Seconds())
+				}
+			}
 		case runnerSucceeded:
 			virtualmachine.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
@@ -685,7 +702,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				fmt.Sprintf("One CPU was unplugged from VM %s",
 					virtualmachine.Name))
 		} else if supportsCgroup && *specCPU != cgroupUsage.VCPUs {
-			log.Info("Update runner pod cgroups")
+			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", *specCPU)
 			if err := setRunnerCgroup(ctx, virtualmachine, *specCPU); err != nil {
 				return err
 			}
@@ -768,11 +785,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
 		// one* container inside the runner pod has finished; the VM itself may still be running.
 		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
-			// clean up status, but keep the phase; we'll use it below (and possibly keep it around to
-			// be visible to the user if we don't intend to restart).
-			phase := virtualmachine.Status.Phase
+			// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
 			virtualmachine.Cleanup()
-			virtualmachine.Status.Phase = phase
 
 			var shouldRestart bool
 			switch virtualmachine.Spec.RestartPolicy {
@@ -786,7 +800,8 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 			if shouldRestart {
 				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
-				virtualmachine.Status.Phase = "" // reset to trigger restart
+				virtualmachine.Status.Phase = vmv1.VmPending // reset to trigger restart
+				*virtualmachine.Status.RestartCount += 1     // increment restart count
 			}
 
 			// TODO for RestartPolicyNever: implement TTL or do nothing
@@ -1062,7 +1077,7 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
-	pod, err := podSpec(virtualmachine, sshSecret)
+	pod, err := podSpec(virtualmachine, sshSecret, r.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -1258,7 +1273,7 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
-func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*corev1.Pod, error) {
+func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *ReconcilerConfig) (*corev1.Pod, error) {
 	runnerVersion := api.RunnerProtoV1
 	labels := labelsForVirtualMachine(virtualmachine, &runnerVersion)
 	annotations := annotationsForVirtualMachine(virtualmachine)
@@ -1323,68 +1338,144 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 					},
 				},
 			},
-			Containers: []corev1.Container{{
-				Image:           image,
-				Name:            "neonvm-runner",
-				ImagePullPolicy: corev1.PullIfNotPresent,
-				// Ensure restrictive context for the container
-				// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
-				SecurityContext: &corev1.SecurityContext{
-					Privileged: &[]bool{false}[0],
-					Capabilities: &corev1.Capabilities{
-						Add: []corev1.Capability{
-							"NET_ADMIN",
-							"SYS_ADMIN",
-							"SYS_RESOURCE",
+			// generate containers as an inline function so the context isn't isolated
+			Containers: func() []corev1.Container {
+				runner := corev1.Container{
+					Image:           image,
+					Name:            "neonvm-runner",
+					ImagePullPolicy: corev1.PullIfNotPresent,
+					// Ensure restrictive context for the container
+					// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: &[]bool{false}[0],
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{
+								"NET_ADMIN",
+								"SYS_ADMIN",
+								"SYS_RESOURCE",
+							},
 						},
 					},
-				},
-				Ports: []corev1.ContainerPort{{
-					ContainerPort: virtualmachine.Spec.QMP,
-					Name:          "qmp",
-				}, {
-					ContainerPort: virtualmachine.Spec.QMPManual,
-					Name:          "qmp-manual",
-				}},
-				Command: []string{
-					"runner",
-					"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
-					"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
-				},
-				Env: []corev1.EnvVar{{
-					Name: "K8S_POD_NAME",
-					ValueFrom: &corev1.EnvVarSource{
-						FieldRef: &corev1.ObjectFieldSelector{
-							FieldPath: "metadata.name",
+					Ports: []corev1.ContainerPort{{
+						ContainerPort: virtualmachine.Spec.QMP,
+						Name:          "qmp",
+					}, {
+						ContainerPort: virtualmachine.Spec.QMPManual,
+						Name:          "qmp-manual",
+					}},
+					Command: func() []string {
+						cmd := []string{"runner"}
+						// intentionally add this first, so it's easier to see among the very long
+						// args that follow.
+						if config.UseContainerMgr {
+							cmd = append(cmd, "-skip-cgroup-management")
+						}
+						cmd = append(
+							cmd,
+							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
+							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
+						)
+						return cmd
+					}(),
+					Env: []corev1.EnvVar{{
+						Name: "K8S_POD_NAME",
+						ValueFrom: &corev1.EnvVarSource{
+							FieldRef: &corev1.ObjectFieldSelector{
+								FieldPath: "metadata.name",
+							},
+						},
+					}},
+					VolumeMounts: func() []corev1.VolumeMount {
+						images := corev1.VolumeMount{
+							Name:      "virtualmachineimages",
+							MountPath: "/vm/images",
+						}
+						cgroups := corev1.VolumeMount{
+							Name:      "sysfscgroup",
+							MountPath: "/sys/fs/cgroup",
+							// MountPropagationNone means that the volume in a container will
+							// not receive new mounts from the host or other containers, and filesystems
+							// mounted inside the container won't be propagated to the host or other
+							// containers.
+							// Note that this mode corresponds to "private" in Linux terminology.
+							MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
+						}
+
+						if config.UseContainerMgr {
+							return []corev1.VolumeMount{images}
+						} else {
+							// the /sys/fs/cgroup mount is only necessary if neonvm-runner has to
+							// do is own cpu limiting
+							return []corev1.VolumeMount{images, cgroups}
+						}
+					}(),
+					Resources: virtualmachine.Spec.PodResources,
+				}
+				containerMgr := corev1.Container{
+					Image: image,
+					Name:  "neonvm-container-mgr",
+					Command: []string{
+						"container-mgr",
+						"-port", strconv.Itoa(int(virtualmachine.Spec.RunnerPort)),
+						"-init-milli-cpu", strconv.Itoa(int(*virtualmachine.Spec.Guest.CPUs.Use)),
+					},
+					Env: []corev1.EnvVar{
+						{
+							Name: "K8S_POD_UID",
+							ValueFrom: &corev1.EnvVarSource{
+								FieldRef: &corev1.ObjectFieldSelector{
+									FieldPath: "metadata.uid",
+								},
+							},
+						},
+						{
+							Name:  "CRI_ENDPOINT",
+							Value: fmt.Sprintf("unix://%s", config.criEndpointSocketPath()),
 						},
 					},
-				}},
-				VolumeMounts: []corev1.VolumeMount{
-					{
-						Name:      "virtualmachineimages",
-						MountPath: "/vm/images",
+					LivenessProbe: &corev1.Probe{
+						InitialDelaySeconds: 10,
+						ProbeHandler: corev1.ProbeHandler{
+							HTTPGet: &corev1.HTTPGetAction{
+								Path: "/healthz",
+								Port: intstr.FromInt(int(virtualmachine.Spec.RunnerPort)),
+							},
+						},
 					},
-					{
-						Name:      "sysfscgroup",
-						MountPath: "/sys/fs/cgroup",
-						// MountPropagationNone means that the volume in a container will
-						// not receive new mounts from the host or other containers, and filesystems
-						// mounted inside the container won't be propagated to the host or other
-						// containers.
-						// Note that this mode corresponds to "private" in Linux terminology.
-						MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("50m"),
+							corev1.ResourceMemory: resource.MustParse("50Mi"),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"), // cpu limit > request, because usage is spiky
+							corev1.ResourceMemory: resource.MustParse("50Mi"),
+						},
 					},
-				},
-				Resources: virtualmachine.Spec.PodResources,
-			}},
-			Volumes: []corev1.Volume{
-				{
+					// socket for crictl to connect to
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "containerdsock",
+							MountPath: config.criEndpointSocketPath(),
+						},
+					},
+				}
+
+				if config.UseContainerMgr {
+					return []corev1.Container{runner, containerMgr}
+				} else {
+					// Return only the runner if we aren't supposed to use container-mgr
+					return []corev1.Container{runner}
+				}
+			}(),
+			Volumes: func() []corev1.Volume {
+				images := corev1.Volume{
 					Name: "virtualmachineimages",
 					VolumeSource: corev1.VolumeSource{
 						EmptyDir: &corev1.EmptyDirVolumeSource{},
 					},
-				},
-				{
+				}
+				cgroup := corev1.Volume{
 					Name: "sysfscgroup",
 					VolumeSource: corev1.VolumeSource{
 						HostPath: &corev1.HostPathVolumeSource{
@@ -1392,8 +1483,23 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 							Type: &[]corev1.HostPathType{corev1.HostPathDirectory}[0],
 						},
 					},
-				},
-			},
+				}
+				containerdSock := corev1.Volume{
+					Name: "containerdsock",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: config.criEndpointSocketPath(),
+							Type: &[]corev1.HostPathType{corev1.HostPathSocket}[0],
+						},
+					},
+				}
+
+				if config.UseContainerMgr {
+					return []corev1.Volume{images, containerdSock}
+				} else {
+					return []corev1.Volume{images, cgroup}
+				}
+			}(),
 		},
 	}
 
@@ -1445,6 +1551,9 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret) (*co
 	// If a custom neonvm-runner image is requested, use that instead:
 	if virtualmachine.Spec.RunnerImage != nil {
 		pod.Spec.Containers[0].Image = *virtualmachine.Spec.RunnerImage
+		if config.UseContainerMgr {
+			pod.Spec.Containers[1].Image = *virtualmachine.Spec.RunnerImage
+		}
 	}
 
 	// If a custom kernel is used, add that image:
@@ -1578,7 +1687,7 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
 		Complete(reconciler)
 }

@@ -15,6 +15,7 @@ metadata:
   name: example
 status:
   phase: Running
+  restartCount: 0
   conditions:
     - type: Available
       status: "True"
