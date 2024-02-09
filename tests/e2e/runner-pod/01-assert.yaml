@@ -13,6 +13,8 @@ status:
   conditions:
     - type: Available
       status: "True"
+    - type: Degraded
+      status: "True"
   cpus: 250m
   memorySize: 1Gi
   restartCount: 1
