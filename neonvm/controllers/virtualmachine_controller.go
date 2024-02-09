@@ -321,6 +321,11 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 	// Generate runner pod name
 	if len(virtualmachine.Status.PodName) == 0 {
 		virtualmachine.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", virtualmachine.Name))
+		// Update the .Status on API Server to avoid creating multiple pods for a single VM
+		// See https://github.com/neondatabase/autoscaling/issues/794 for the context
+		if err := r.Status().Update(ctx, virtualmachine); err != nil {
+			return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
+		}
 	}
 
 	switch virtualmachine.Status.Phase {
