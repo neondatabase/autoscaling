@@ -201,7 +201,7 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
-func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk, enableSSH bool) error {
+func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk, enableSSH bool, shmsize *resource.Quantity) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
@@ -278,6 +278,10 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 				// do nothing
 			}
 		}
+	}
+
+	if shmsize != nil {
+		mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o remount,size=%d /dev/shm`, shmsize.Value()))
 	}
 
 	mounts = append(mounts, "")
@@ -563,8 +567,9 @@ func main() {
 		cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *qemuCPUs.max, *qemuCPUs.max))
 	}
 
+	initialMemorySize := vmSpec.Guest.MemorySlotSize.Value() * int64(*vmSpec.Guest.MemorySlots.Min)
 	memory := []string{}
-	memory = append(memory, fmt.Sprintf("size=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Min)))
+	memory = append(memory, fmt.Sprintf("size=%db", initialMemorySize))
 	if vmSpec.Guest.MemorySlots.Max != nil {
 		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
@@ -575,12 +580,28 @@ func main() {
 		enableSSH = true
 	}
 
+	// By default, Linux sets the size of /dev/shm to 1/2 of the physical memory.  If
+	// swap is configured, we want to set /dev/shm higher, because we can autoscale
+	// the memory up.
+	//
+	// See https://github.com/neondatabase/autoscaling/issues/800
+	var swapSize resource.Quantity
+	for _, disk := range vmSpec.Disks {
+		if disk.Swap != nil {
+			swapSize.Add(disk.Swap.Size)
+		}
+	}
+	var shmSize *resource.Quantity
+	if swapSize.Value() > initialMemorySize/2 {
+		shmSize = &swapSize
+	}
+
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{}
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
 	}
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
+	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH, shmSize); err != nil {
 		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 
