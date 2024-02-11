@@ -1637,6 +1637,16 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 					},
 				},
 			})
+		case disk.Swap != nil:
+			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: disk.Name,
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						SizeLimit: &disk.Swap.Size,
+					},
+				},
+			})
 		default:
 			// do nothing
 		}

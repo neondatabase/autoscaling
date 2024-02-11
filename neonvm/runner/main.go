@@ -249,7 +249,9 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
-			mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
+			if disk.MountPath != "" {
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
+			}
 			switch {
 			case disk.EmptyDisk != nil:
 				opts := ""
@@ -260,6 +262,13 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
 				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
+			case disk.Swap != nil:
+				opts := ""
+				if disk.Swap.Discard {
+					opts = "-d"
+				}
+
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/swapon %s $(/neonvm/bin/blkid -L %s)`, opts, disk.Name))
 			case disk.ConfigMap != nil || disk.Secret != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
 			case disk.Tmpfs != nil:
@@ -335,6 +344,34 @@ func calcDirUsage(dirPath string) (int64, error) {
 		size += s
 	}
 	return size, nil
+}
+
+func createSwap(diskName string, diskPath string, diskSize *resource.Quantity) error {
+	if diskSize == nil {
+		return errors.New("diskSize should be specified")
+	}
+
+	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", "swap.raw", fmt.Sprintf("%d", diskSize.Value())); err != nil {
+		return err
+	}
+	if err := execFg("mkswap", "-L", diskName, "swap.raw"); err != nil {
+		return err
+	}
+
+	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "swap.raw", diskPath); err != nil {
+		return err
+	}
+
+	if err := execFg("rm", "-f", "swap.raw"); err != nil {
+		return err
+	}
+
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	if err := execFg("chown", "36:34", diskPath); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, contentPath *string) error {
@@ -616,6 +653,17 @@ func main() {
 			}
 			discard := ""
 			if disk.EmptyDisk.Discard {
+				discard = ",discard=unmap"
+			}
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))
+		case disk.Swap != nil:
+			logger.Info("creating QCOW2 image for swap", zap.String("diskName", disk.Name))
+			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
+			if err := createSwap(disk.Name, dPath, &disk.Swap.Size); err != nil {
+				logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
+			}
+			discard := ""
+			if disk.Swap.Discard {
 				discard = ",discard=unmap"
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))

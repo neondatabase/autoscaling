@@ -340,11 +340,20 @@ type DiskSource struct {
 	// TmpfsDisk represents a tmpfs.
 	// +optional
 	Tmpfs *TmpfsDiskSource `json:"tmpfs,omitempty"`
+	// Swap is similar to EmptyDisk, but is initialized with mkswap
+	// +optional
+	Swap *SwapDiskSource `json:"swap,omitempty"`
 }
 
 type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
 	// Discard enables the "discard" mount option for the filesystem
+	Discard bool `json:"discard,omitempty"`
+}
+
+type SwapDiskSource struct {
+	Size resource.Quantity `json:"size"`
+	// Discard enables the "swapon --discard" option
 	Discard bool `json:"discard,omitempty"`
 }
 
