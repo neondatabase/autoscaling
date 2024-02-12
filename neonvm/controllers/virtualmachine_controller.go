@@ -1592,6 +1592,22 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 		pod.Spec.Containers[0].Ports = append(pod.Spec.Containers[0].Ports, cPort)
 	}
 
+	if swapSize := virtualmachine.Spec.Guest.Settings.Swap; swapSize != nil {
+		diskName := "swapdisk"
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+			Name:      diskName,
+			MountPath: fmt.Sprintf("/vm/mounts/%s", diskName),
+		})
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: diskName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					SizeLimit: swapSize,
+				},
+			},
+		})
+	}
+
 	for _, disk := range virtualmachine.Spec.Disks {
 
 		mnt := corev1.VolumeMount{
@@ -1634,16 +1650,6 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{
 						SizeLimit: &disk.EmptyDisk.Size,
-					},
-				},
-			})
-		case disk.Swap != nil:
-			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
-			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-				Name: disk.Name,
-				VolumeSource: corev1.VolumeSource{
-					EmptyDir: &corev1.EmptyDirVolumeSource{
-						SizeLimit: &disk.Swap.Size,
 					},
 				},
 			})

@@ -1056,22 +1056,6 @@ spec:
                             pod''s namespace to use. More info: https://kubernetes.io/docs/concepts/storage/volumes#secret'
                           type: string
                       type: object
-                    swap:
-                      description: Swap is similar to EmptyDisk, but is initialized
-                        with mkswap
-                      properties:
-                        discard:
-                          description: Discard enables the "swapon --discard" option
-                          type: boolean
-                        size:
-                          anyOf:
-                          - type: integer
-                          - type: string
-                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                          x-kubernetes-int-or-string: true
-                      required:
-                      - size
-                      type: object
                     tmpfs:
                       description: TmpfsDisk represents a tmpfs.
                       properties:
@@ -2482,6 +2466,13 @@ spec:
                   settings:
                     description: Additional settings for the VM. Cannot be updated.
                     properties:
+                      swap:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Swap adds a swap disk with the provided size.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
                       sysctl:
                         description: Individual lines to add to a sysctl.conf file.
                           See sysctl.conf(5) for more
