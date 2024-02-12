@@ -136,7 +136,7 @@ scheduler plugin, which serves these requests on port `10299`. Each request sent
 
 In general, a `PluginResponse` primarily provides a `Permit`, which grants permission for the
 `autoscaler-agent` to assign the VM some amount of resources. By tracking total resource allocation
-on each node, the scheduler can prevent a scale up request to avoid having undesired over-commit.
+on each node, the scheduler can reject a scale up request to avoid having undesired over-commit.
 
 ### Agent-Scheduler protocol steps
 
