@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -126,12 +127,7 @@ func RunBillingMetricsCollector(
 	func() {
 		ctx, cancel := context.WithTimeout(backgroundCtx, time.Second*time.Duration(conf.CollectEverySeconds/2))
 		defer cancel()
-		state.collect(
-			ctx,
-			logger,
-			store,
-			metrics,
-		)
+		state.collect(ctx, logger, store, metrics)
 	}()
 
 	for {
@@ -145,12 +141,7 @@ func RunBillingMetricsCollector(
 			func() {
 				ctx, cancel := context.WithTimeout(backgroundCtx, time.Second*time.Duration(conf.CollectEverySeconds/2))
 				defer cancel()
-				state.collect(
-					ctx,
-					logger,
-					store,
-					metrics,
-				)
+				state.collect(ctx, logger, store, metrics)
 			}()
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
@@ -161,26 +152,35 @@ func RunBillingMetricsCollector(
 	}
 }
 
-func collectMetricsForVM(ctx context.Context, logger *zap.Logger, vm *vmapi.VirtualMachine, metricsChan chan vmMetricsKV, promMetrics *PromMetrics) {
-	byteCounts, err := vm.GetNetworkUsage(ctx, 500*time.Millisecond)
-	if err != nil {
-		logger.Error("Failed to collect network usage", util.VMNameFields(vm), zap.Error(err))
+func collectMetricsForVM(
+	ctx context.Context,
+	logger *zap.Logger,
+	vm *vmapi.VirtualMachine,
+	metricsChan chan vmMetricsKV,
+	promMetrics *PromMetrics,
+) {
+	byteCounts := &vmapi.VirtualMachineNetworkUsage{
+		IngressBytes: 0,
+		EgressBytes:  0,
+	}
+	if vm.Spec.EnableNetworkMonitoring != nil && *vm.Spec.EnableNetworkMonitoring {
+		bc, err := vm.GetNetworkUsage(ctx, 500*time.Millisecond)
+		if err != nil {
+			logger.Error("Failed to collect network usage", util.VMNameFields(vm), zap.Error(err))
 
-		var rootErr string
-		//nolint:errorlint // This is ok because vmapi guarantees the error types
-		switch err.(type) {
-		case vmapi.NetworkUsageEndpointNotFoundError:
-			rootErr = "Endpoint not found"
-		case vmapi.NetworkUsageTimeoutError:
-			rootErr = "Timeout"
-		default:
-			rootErr = util.RootError(err).Error()
-		}
-		promMetrics.fetchNetworkUsageErrorsTotal.WithLabelValues(rootErr).Inc()
-
-		byteCounts = &vmapi.VirtualMachineNetworkUsage{
-			IngressBytes: 0,
-			EgressBytes:  0,
+			var rootErr string
+			//nolint:errorlint // This is ok because vmapi guarantees the error types
+			switch e := err.(type) {
+			case vmapi.NetworkUsageJSONError:
+				rootErr = "JSON unmarshaling"
+			case vmapi.NetworkUsageStatusCodeError:
+				rootErr = fmt.Sprintf("HTTP code %d", e.StatusCode)
+			default:
+				rootErr = util.RootError(err).Error()
+			}
+			promMetrics.fetchNetworkUsageErrorsTotal.WithLabelValues(rootErr).Inc()
+		} else {
+			byteCounts = bc
 		}
 	}
 	endpointID := vm.Annotations[api.AnnotationBillingEndpointID]
@@ -344,11 +344,15 @@ func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname s
 	now := time.Now()
 
 	countInBatch := 0
-	batchSize := 4 * len(s.historical)
+	batchSize := 2 * len(s.historical)
+	for _, history := range s.historical {
+		history.finalizeCurrentTimeSlice()
+		if history.totalIngressBytes != 0 || history.totalEgressBytes != 0 {
+			batchSize += 2
+		}
+	}
 
 	for key, history := range s.historical {
-		history.finalizeCurrentTimeSlice()
-
 		countInBatch += 1
 		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
@@ -371,26 +375,28 @@ func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname s
 			StopTime:       now,
 			Value:          int(math.Round(history.total.activeTime.Seconds())),
 		})))
-		countInBatch += 1
-		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
-			MetricName:     conf.IngressBytesMetricName,
-			Type:           "", // set by billing.Enrich
-			IdempotencyKey: "", // set by billing.Enrich
-			EndpointID:     key.endpointID,
-			StartTime:      s.pushWindowStart,
-			StopTime:       now,
-			Value:          int(history.totalIngressBytes),
-		})))
-		countInBatch += 1
-		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
-			MetricName:     conf.EgressBytesMetricName,
-			Type:           "", // set by billing.Enrich
-			IdempotencyKey: "", // set by billing.Enrich
-			EndpointID:     key.endpointID,
-			StartTime:      s.pushWindowStart,
-			StopTime:       now,
-			Value:          int(history.totalEgressBytes),
-		})))
+		if history.totalIngressBytes != 0 || history.totalEgressBytes != 0 {
+			countInBatch += 1
+			queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+				MetricName:     conf.IngressBytesMetricName,
+				Type:           "", // set by billing.Enrich
+				IdempotencyKey: "", // set by billing.Enrich
+				EndpointID:     key.endpointID,
+				StartTime:      s.pushWindowStart,
+				StopTime:       now,
+				Value:          int(history.totalIngressBytes),
+			})))
+			countInBatch += 1
+			queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+				MetricName:     conf.EgressBytesMetricName,
+				Type:           "", // set by billing.Enrich
+				IdempotencyKey: "", // set by billing.Enrich
+				EndpointID:     key.endpointID,
+				StartTime:      s.pushWindowStart,
+				StopTime:       now,
+				Value:          int(history.totalEgressBytes),
+			})))
+		}
 	}
 
 	s.pushWindowStart = now

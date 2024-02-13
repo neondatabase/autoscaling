@@ -171,6 +171,7 @@ func main() {
 		lastMilliCPU: atomic.Uint32{},
 	}
 	srvState.lastMilliCPU.Store(uint32(initMilliCPU))
+
 	srvState.listenForHTTPRequests(context.TODO(), logger, crictl, int32(httpPort), counters)
 }
 
@@ -276,7 +277,7 @@ func generateBPF(logger *zap.Logger, counters *ebpf.Map, direction NetworkDirect
 		Instructions: insns,
 	})
 	if err != nil {
-		logger.Fatal("Failed to attach eBPF program", zap.Error(err))
+		logger.Fatal("Failed to load eBPF program into the kernel", zap.Error(err))
 		return nil, err
 	}
 	return prog, nil
@@ -424,11 +425,7 @@ func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Add("Content-Type", "application/json")
-	if _, err := w.Write(body); err != nil {
-		logger.Error("could not write body", zap.Error(err))
-		w.WriteHeader(500)
-		return
-	}
+	w.Write(body) //nolint:errcheck // Not much to do with the error here. TODO: log it?
 	logger.Info("Responded with byte counts", zap.String("byte_counts", string(body)))
 }
 

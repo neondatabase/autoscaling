@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -452,28 +451,39 @@ func (p VmPhase) IsAlive() bool {
 	}
 }
 
-type NetworkUsageEndpointNotFoundError struct {
-}
-
-func (e NetworkUsageEndpointNotFoundError) Error() string {
-	return "network_usage endpoint not found"
-}
-
-func (e NetworkUsageEndpointNotFoundError) Unwrap() error {
-	return nil
-}
-
 // +kubebuilder:object:generate=false
-type NetworkUsageTimeoutError struct {
+type NetworkUsageJSONError struct {
 	Err error
 }
 
-func (e NetworkUsageTimeoutError) Error() string {
-	return fmt.Sprintf("Fetching network usage timed out: %s", e.Err.Error())
+func (e NetworkUsageJSONError) Error() string {
+	return fmt.Sprintf("Error unmarshaling network usage: %s", e.Err.Error())
 }
 
-func (e NetworkUsageTimeoutError) Unwrap() error {
+func (e NetworkUsageJSONError) Unwrap() error {
 	return e.Err
+}
+
+// +kubebuilder:object:generate=false
+type NetworkUsageRequestError struct {
+	Err error
+}
+
+func (e NetworkUsageRequestError) Error() string {
+	return fmt.Sprintf("Error fetching network usage: %s", e.Err.Error())
+}
+
+func (e NetworkUsageRequestError) Unwrap() error {
+	return e.Err
+}
+
+// +kubebuilder:object:generate=false
+type NetworkUsageStatusCodeError struct {
+	StatusCode int
+}
+
+func (e NetworkUsageStatusCodeError) Error() string {
+	return fmt.Sprintf("Unexpected HTTP status code when fetching network usage: %d", e.StatusCode)
 }
 
 //+genclient
@@ -513,18 +523,10 @@ func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context, timeout time.Dura
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		//nolint:errorlint // This is ok because http guarantees everything is a url.Error
-		urlErr := err.(*url.Error)
-		if urlErr.Timeout() {
-			return nil, NetworkUsageTimeoutError{err}
-		}
-		return nil, fmt.Errorf("error performing http request to fetch network usage: %w", err)
+		return nil, NetworkUsageRequestError{Err: err}
 	}
 	if resp.StatusCode != 200 {
-		if resp.StatusCode == 404 {
-			return nil, NetworkUsageEndpointNotFoundError{}
-		}
-		return nil, fmt.Errorf("received non-200 response fetching network usage")
+		return nil, NetworkUsageStatusCodeError{StatusCode: resp.StatusCode}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -533,7 +535,7 @@ func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context, timeout time.Dura
 	}
 	var result VirtualMachineNetworkUsage
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("error unmarshaling http response as VirtualMachineNetworkUsage: %w", err)
+		return nil, NetworkUsageJSONError{Err: err}
 	}
 	return &result, nil
 }

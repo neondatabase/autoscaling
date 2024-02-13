@@ -1400,9 +1400,6 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 				containerMgr := corev1.Container{
 					Image: image,
 					Name:  "neonvm-container-mgr",
-					SecurityContext: &corev1.SecurityContext{
-						Privileged: &[]bool{true}[0],
-					},
 					Command: func() []string {
 						cmd := []string{
 							"container-mgr",
@@ -1414,6 +1411,9 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 						}
 						return cmd
 					}(),
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: &[]bool{true}[0],
+					},
 					Env: []corev1.EnvVar{
 						{
 							Name: "K8S_POD_UID",
