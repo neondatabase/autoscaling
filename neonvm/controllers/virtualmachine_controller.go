@@ -1592,7 +1592,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 		pod.Spec.Containers[0].Ports = append(pod.Spec.Containers[0].Ports, cPort)
 	}
 
-	if swapSize := virtualmachine.Spec.Guest.Settings.Swap; swapSize != nil {
+	if settings := virtualmachine.Spec.Guest.Settings; settings != nil && settings.Swap != nil {
 		diskName := "swapdisk"
 		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
 			Name:      diskName,
@@ -1602,7 +1602,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 			Name: diskName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
-					SizeLimit: swapSize,
+					SizeLimit: settings.Swap,
 				},
 			},
 		})

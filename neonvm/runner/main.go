@@ -588,20 +588,22 @@ func main() {
 		enableSSH = true
 	}
 
-	// By default, Linux sets the size of /dev/shm to 1/2 of the physical memory.  If
-	// swap is configured, we want to set /dev/shm higher, because we can autoscale
-	// the memory up.
-	//
-	// See https://github.com/neondatabase/autoscaling/issues/800
-	var shmSize *resource.Quantity
-	if vmSpec.Guest.Settings.Swap != nil && vmSpec.Guest.Settings.Swap.Value() > initialMemorySize/2 {
-		shmSize = vmSpec.Guest.Settings.Swap
-	}
-
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{}
+	var shmSize *resource.Quantity
+	var swapSize *resource.Quantity
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
+		swapSize = vmSpec.Guest.Settings.Swap
+
+		// By default, Linux sets the size of /dev/shm to 1/2 of the physical memory.  If
+		// swap is configured, we want to set /dev/shm higher, because we can autoscale
+		// the memory up.
+		//
+		// See https://github.com/neondatabase/autoscaling/issues/800
+		if vmSpec.Guest.Settings.Swap != nil && vmSpec.Guest.Settings.Swap.Value() > initialMemorySize/2 {
+			shmSize = vmSpec.Guest.Settings.Swap
+		}
 	}
 	err = createISO9660runtime(
 		runtimeDiskPath,
@@ -611,7 +613,7 @@ func main() {
 		vmSpec.Guest.Env,
 		vmSpec.Disks,
 		enableSSH,
-		vmSpec.Guest.Settings.Swap,
+		swapSize,
 		shmSize,
 	)
 	if err != nil {
@@ -677,7 +679,7 @@ func main() {
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
 	}
 
-	if swapSize := vmSpec.Guest.Settings.Swap; swapSize != nil {
+	if swapSize != nil {
 		diskName := "swapdisk"
 		logger.Info("creating QCOW2 image for swap", zap.String("diskName", diskName))
 		dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, diskName)
