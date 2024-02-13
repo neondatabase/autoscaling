@@ -59,81 +59,124 @@ main () {
 
     cmd kubectl config set-context "$cluster"
 
-    if [ "$(check_deploy multus)" = 'yes' ]; then
-        log 'Deploying multus...'
-        cmd kubectl --context="$cluster" apply -f multus-eks.yaml
-        cmd kubectl --context="$cluster" -n kube-system rollout status daemonset kube-multus-ds
-        log 'Multus deploy finished.'
+    if [ "$(confirm 'Dry-run deploy multus?')" = 'yes' ]; then
+        check_diff multus-eks.yaml
+        if [ "$(confirm 'Deploy multus?')" = 'yes' ]; then
+            log 'Deploying multus...'
+            cmd kubectl --context="$cluster" apply -f multus-eks.yaml
+            cmd kubectl --context="$cluster" -n kube-system rollout status daemonset kube-multus-ds
+            log 'Multus deploy finished.'
+        else
+            log 'Skipping.'
+        fi
     else
         log 'Skipping.'
     fi
     
-    if [ "$(check_deploy whereabouts)" = 'yes' ]; then
-        log 'Deploying whereabouts...'
-        cmd kubectl --context="$cluster" apply -f whereabouts.yaml
-        cmd kubectl --context="$cluster" -n kube-system rollout status daemonset whereabouts
-        log 'Whereabouts deploy finished.'
+    if [ "$(confirm 'Dry-run deploy whereabouts?')" = 'yes' ]; then
+        check_diff whereabouts.yaml
+        if [ "$(confirm 'Deploy whereabouts?')" = 'yes' ]; then
+            log 'Deploying whereabouts...'
+            cmd kubectl --context="$cluster" apply -f whereabouts.yaml
+            cmd kubectl --context="$cluster" -n kube-system rollout status daemonset whereabouts
+            log 'Whereabouts deploy finished.'
+        else
+            log 'Skipping.'
+        fi
     else
         log 'Skipping.'
     fi
     
-    if [ "$(check_deploy vmscrape)" = 'yes' ]; then
-        log 'Deploying vmscrape...'
-        cmd kubectl --context="$cluster" apply -f vmscrape.yaml
-        log 'vmscrape deploy finished.'
+    if [ "$(confirm 'Dry-run deploy vmscrape?')" = 'yes' ]; then
+        check_diff vmscrape.yaml
+        if [ "$(confirm 'Deploy vmscrape?')" = 'yes' ]; then
+            log 'Deploying vmscrape...'
+            cmd kubectl --context="$cluster" apply -f vmscrape.yaml
+            log 'vmscrape deploy finished.'
+        else
+            log 'Skipping.'
+        fi
     else
         log 'Skipping.'
     fi
     
-    if [ "$(check_deploy neonvm)" = 'yes' ]; then
-        log 'Deploying neonvm...'
-        cmd kubectl apply -f neonvm.yaml
-        cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset  neonvm-device-plugin
-        cmd kubectl --context="$cluster" -n neonvm-system rollout status deployment neonvm-controller
-        cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
-        log 'Whereabouts deploy finished.'
+    if [ "$(confirm 'Dry-run deploy neonvm?')" = 'yes' ]; then
+        check_diff neonvm.yaml
+        if [ "$(confirm 'Deploy neonvm?')" = 'yes' ]; then
+            log 'Deploying neonvm...'
+            cmd kubectl apply -f neonvm.yaml
+            cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset  neonvm-device-plugin
+            cmd kubectl --context="$cluster" -n neonvm-system rollout status deployment neonvm-controller
+            cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
+            log 'Whereabouts deploy finished.'
+        else
+            log 'Skipping.'
+        fi
     else
         log 'Skipping.'
     fi
     
-    if [ "$(check_deploy autoscale-scheduler)" = 'yes' ]; then
+    if [ "$(confirm 'Dry-run deploy autoscale-scheduler?')" = 'yes' ]; then
         log 'Baking scheduler...'
         cmd bash -e -o pipefail -c "./build.sh autoscale-scheduler > $cluster/autoscale-scheduler.yaml"
-        log 'Deploying scheduler...'
-        cmd kubectl --context="$cluster" apply -f "$cluster/autoscale-scheduler.yaml"
-        cmd kubectl --context="$cluster" -n kube-system rollout status deployment autoscale-scheduler
-        log 'Scheduler deploy finished.'
+        check_diff "$cluster/autoscale-scheduler.yaml"
+        if [ "$(confirm 'Deploy autoscale-scheduler?')" = 'yes' ]; then
+            log 'Deploying scheduler...'
+            cmd kubectl --context="$cluster" apply -f "$cluster/autoscale-scheduler.yaml"
+            cmd kubectl --context="$cluster" -n kube-system rollout status deployment autoscale-scheduler
+            log 'Scheduler deploy finished.'
+        else
+            log 'Skipping.'
+        fi
     else
         log 'Skipping.'
     fi
     
-    if [ "$(check_deploy autoscaler-agent)" = 'yes' ]; then
+    if [ "$(confirm 'Dry-run deploy autoscaler-agent?')" = 'yes' ]; then
         log 'Baking autoscaler-agent...'
         cmd bash -e -o pipefail -c "./build.sh autoscaler-agent > $cluster/autoscaler-agent.yaml"
-        log 'Deploying autoscaler-agent...'
-        cmd kubectl --context="$cluster" apply -f "$cluster/autoscaler-agent.yaml"
-        cmd kubectl --context="$cluster" -n kube-system rollout status daemonset autoscaler-agent
-        log 'Autoscaler-agent deploy finished.'
+        check_diff "$cluster/autoscaler-agent.yaml"
+        if [ "$(confirm 'Deploy autoscaler-agent?')" = 'yes' ]; then
+            log 'Deploying autoscaler-agent...'
+            cmd kubectl --context="$cluster" apply -f "$cluster/autoscaler-agent.yaml"
+            cmd kubectl --context="$cluster" -n kube-system rollout status daemonset autoscaler-agent
+            log 'Autoscaler-agent deploy finished.'
+        else
+            log 'Skipping.'
+        fi
     else
         log 'Skipping.'
     fi
+
+    log 'All done! 😊'
 }
 
 check_deps () {
     log 'check deps...'
 
-    ( set -u; echo "$EDITOR" ) 2>/dev/null >/dev/null || echo "missing env var EDITOR"
-    which bash grep date sed jq yq kubectl >/dev/null
+    which bash grep date sed sponge jq yq kubectl >/dev/null
 
     # Check that 'yq' is the type we expect. There's a couple variants.
     # On arch linux, this is the 'yq' package (nb: not 'go-yq')
     ( yq --help | grep -q 'https://github.com/kislyuk/yq' ) 2>/dev/null 1>/dev/null || echo "must have 'yq' installed, from 'https://github.com/kislyuk/yq'"
+
+    # Check if 'delta' exists
+    if ( which delta ) 2>/dev/null >/dev/null ; then
+        DIFF_PROGRAM='delta'
+    elif ( which diff ) 2>/dev/null >/dev/null ; then
+        DIFF_PROGRAM='diff'
+    else
+        err "expected to find either 'delta' or 'diff' in \$PATH"
+        exit 1
+    fi
 }
 
-# Usage: check_deploy <name>
-check_deploy () {
+# Usage: confirm <message>
+#
+# Options are [Y]es or [S]kip
+confirm () {
     while true; do
-        echo -en "\e[1m$(date -u '+%F %T') \e[32m::\e[39m Deploy $1? ([Y]es/[S]kip): \e[0m" >/dev/tty
+        echo -en "\e[1m$(date -u '+%F %T') \e[32m::\e[39m $1 ([Y]es/[S]kip): \e[0m" >/dev/tty
         read response
         case "$response" in
             'Y' | 'y' | 'Yes' | 'yes')
@@ -149,6 +192,25 @@ check_deploy () {
                 ;;
         esac
     done
+}
+
+# Usage: check_diff <cluster> <file>
+check_diff () {
+    file="$1"
+    cluster="$2"
+    (
+        set +e
+        cmd sh -c "KUBECTL_EXTERNAL_DIFF=\"./deploy-diff-helper.sh $DIFF_PROGRAM\" kubectl --context=$cluster diff -f $file"
+        status="$?"
+        if [ "$status" -eq 0 ] || [ "$status" -eq 1 ]; then
+            # 'kubectl diff' says it'll return 0 or 1 depending on the diff; >1 for any other error.
+            return 0
+        else
+            return "$status"
+        fi
+    )
+
+
 }
 
 main "$@"
