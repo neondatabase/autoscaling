@@ -60,7 +60,7 @@ main () {
     cmd kubectl config set-context "$cluster"
 
     if [ "$(confirm 'Dry-run deploy multus?')" = 'yes' ]; then
-        check_diff multus-eks.yaml
+        check_diff "$cluster" multus-eks.yaml
         if [ "$(confirm 'Deploy multus?')" = 'yes' ]; then
             log 'Deploying multus...'
             cmd kubectl --context="$cluster" apply -f multus-eks.yaml
@@ -74,7 +74,7 @@ main () {
     fi
     
     if [ "$(confirm 'Dry-run deploy whereabouts?')" = 'yes' ]; then
-        check_diff whereabouts.yaml
+        check_diff "$cluster" whereabouts.yaml
         if [ "$(confirm 'Deploy whereabouts?')" = 'yes' ]; then
             log 'Deploying whereabouts...'
             cmd kubectl --context="$cluster" apply -f whereabouts.yaml
@@ -88,7 +88,7 @@ main () {
     fi
     
     if [ "$(confirm 'Dry-run deploy vmscrape?')" = 'yes' ]; then
-        check_diff vmscrape.yaml
+        check_diff "$cluster" vmscrape.yaml
         if [ "$(confirm 'Deploy vmscrape?')" = 'yes' ]; then
             log 'Deploying vmscrape...'
             cmd kubectl --context="$cluster" apply -f vmscrape.yaml
@@ -101,14 +101,14 @@ main () {
     fi
     
     if [ "$(confirm 'Dry-run deploy neonvm?')" = 'yes' ]; then
-        check_diff neonvm.yaml
+        check_diff "$cluster" neonvm.yaml
         if [ "$(confirm 'Deploy neonvm?')" = 'yes' ]; then
             log 'Deploying neonvm...'
             cmd kubectl apply -f neonvm.yaml
             cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset  neonvm-device-plugin
             cmd kubectl --context="$cluster" -n neonvm-system rollout status deployment neonvm-controller
             cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
-            log 'Whereabouts deploy finished.'
+            log 'Neonvm deploy finished.'
         else
             log 'Skipping.'
         fi
@@ -119,7 +119,7 @@ main () {
     if [ "$(confirm 'Dry-run deploy autoscale-scheduler?')" = 'yes' ]; then
         log 'Baking scheduler...'
         cmd bash -e -o pipefail -c "./build.sh autoscale-scheduler > $cluster/autoscale-scheduler.yaml"
-        check_diff "$cluster/autoscale-scheduler.yaml"
+        check_diff "$cluster" "$cluster/autoscale-scheduler.yaml"
         if [ "$(confirm 'Deploy autoscale-scheduler?')" = 'yes' ]; then
             log 'Deploying scheduler...'
             cmd kubectl --context="$cluster" apply -f "$cluster/autoscale-scheduler.yaml"
@@ -135,7 +135,7 @@ main () {
     if [ "$(confirm 'Dry-run deploy autoscaler-agent?')" = 'yes' ]; then
         log 'Baking autoscaler-agent...'
         cmd bash -e -o pipefail -c "./build.sh autoscaler-agent > $cluster/autoscaler-agent.yaml"
-        check_diff "$cluster/autoscaler-agent.yaml"
+        check_diff "$cluster" "$cluster/autoscaler-agent.yaml"
         if [ "$(confirm 'Deploy autoscaler-agent?')" = 'yes' ]; then
             log 'Deploying autoscaler-agent...'
             cmd kubectl --context="$cluster" apply -f "$cluster/autoscaler-agent.yaml"
@@ -196,8 +196,8 @@ confirm () {
 
 # Usage: check_diff <cluster> <file>
 check_diff () {
-    file="$1"
-    cluster="$2"
+    cluster="$1"
+    file="$2"
     (
         set +e
         cmd sh -c "KUBECTL_EXTERNAL_DIFF=\"./deploy-diff-helper.sh $DIFF_PROGRAM\" kubectl --context=$cluster diff -f $file"
