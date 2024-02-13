@@ -1,0 +1,56 @@
+# Input to vm-builder
+---
+commands:
+  - name: cgconfigparser
+    user: root
+    sysvInitAction: sysinit
+    shell: "/usr/sbin/cgconfigparser -l /etc/cgconfig.conf -s 1664"
+  - name: vm-monitor
+    user: vm-monitor
+    sysvInitAction: respawn
+    shell: 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test --addr="0.0.0.0:10301"'
+build: |
+  # Build vm-monitor
+  FROM rust:1.74-alpine as monitor-builder
+  WORKDIR /workspace
+
+  RUN apk add musl-dev git openssl-dev
+
+  # Which branch to pull from
+  ENV BRANCH main
+
+  # Ensures we reclone upon new commits
+  # https://stackoverflow.com/questions/35134713
+  ADD "https://api.github.com/repos/neondatabase/neon/commits/$BRANCH" latest_commit
+
+  RUN git clone --depth 1 --branch $BRANCH https://github.com/neondatabase/neon.git
+  RUN cargo build --release --manifest-path neon/libs/vm_monitor/Cargo.toml
+  # Move binary so we can cargo clean
+  RUN mkdir -p /workspace/bin && cp /workspace/neon/target/release/vm-monitor /workspace/bin
+  # Cargo clean dramatically reduces the size of the image
+  RUN cargo clean --release --manifest-path neon/libs/vm_monitor/Cargo.toml
+
+merge: |
+  RUN adduser vm-monitor --disabled-password --no-create-home
+
+  RUN set -e \
+      && apk add --no-cache \
+              ca-certificates \
+              util-linux-misc \
+              coreutils \
+              cgroup-tools
+
+  # postgresql and tools
+  RUN set -e \
+        && apk add --no-cache \
+                su-exec \
+                postgresql14 \
+                postgresql15 \
+                postgresql16 \
+                curl \
+                wget
+    
+  COPY --from=monitor-builder       /workspace/bin/vm-monitor /bin/vm-monitor
+
+  # set the greeting message on ssh logins
+  RUN echo -e 'Welcome to Alpine!\n ~ This is the pg_tools VM :) ~' >/etc/motd
