@@ -60,7 +60,8 @@ main () {
     cmd kubectl config set-context "$cluster"
 
     if [ "$(confirm 'Dry-run deploy multus?')" = 'yes' ]; then
-        check_diff "$cluster" multus-eks.yaml
+        cmd cp multus-eks.yaml "$cluster/multus-eks.yaml"
+        check_diff "$cluster" "$cluster/multus-eks.yaml"
         if [ "$(confirm 'Deploy multus?')" = 'yes' ]; then
             log 'Deploying multus...'
             cmd kubectl --context="$cluster" apply -f multus-eks.yaml
@@ -74,7 +75,8 @@ main () {
     fi
     
     if [ "$(confirm 'Dry-run deploy whereabouts?')" = 'yes' ]; then
-        check_diff "$cluster" whereabouts.yaml
+        cmd cp whereabouts.yaml "$cluster/whereabouts.yaml"
+        check_diff "$cluster" "$cluster/whereabouts.yaml"
         if [ "$(confirm 'Deploy whereabouts?')" = 'yes' ]; then
             log 'Deploying whereabouts...'
             cmd kubectl --context="$cluster" apply -f whereabouts.yaml
@@ -88,7 +90,8 @@ main () {
     fi
     
     if [ "$(confirm 'Dry-run deploy vmscrape?')" = 'yes' ]; then
-        check_diff "$cluster" vmscrape.yaml
+        cmd cp vmscrape.yaml "$cluster/vmscrape.yaml"
+        check_diff "$cluster" "$cluster/vmscrape.yaml"
         if [ "$(confirm 'Deploy vmscrape?')" = 'yes' ]; then
             log 'Deploying vmscrape...'
             cmd kubectl --context="$cluster" apply -f vmscrape.yaml
@@ -101,7 +104,8 @@ main () {
     fi
     
     if [ "$(confirm 'Dry-run deploy neonvm?')" = 'yes' ]; then
-        check_diff "$cluster" neonvm.yaml
+        cmd cp neonvm.yaml "$cluster/neonvm.yaml"
+        check_diff "$cluster" "$cluster/neonvm.yaml"
         if [ "$(confirm 'Deploy neonvm?')" = 'yes' ]; then
             log 'Deploying neonvm...'
             cmd kubectl apply -f neonvm.yaml

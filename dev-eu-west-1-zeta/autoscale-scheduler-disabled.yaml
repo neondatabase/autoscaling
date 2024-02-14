@@ -81,10 +81,10 @@ data:
       leaderElect: false
     profiles:
       - schedulerName: autoscale-scheduler
-        plugins:
-          multiPoint:
-            enabled:
-              - name: AutoscaleEnforcer
+        # plugins:
+        #   multiPoint:
+        #     enabled:
+        #       - name: AutoscaleEnforcer
 kind: ConfigMap
 metadata:
   name: autoscale-scheduler-config
@@ -94,7 +94,8 @@ apiVersion: v1
 data:
   autoscale-enforcer-config.json: |
     {
-      "computeUnit": { "vCPUs": 0.25, "mem": "1Gi" },
+      "memBlockSize": "1Gi",
+      "computeUnit": { "vCPUs": 0.25, "mem": 1 },
       "nodeConfig": {
         "cpu": { "watermark": 0.9 },
         "memory": { "watermark": 0.9 },
@@ -136,12 +137,13 @@ spec:
         component: scheduler
         name: autoscale-scheduler
         tier: control-plane
+        scheduler-plugin-disabled: "true"
     spec:
       containers:
       - command:
         - /usr/bin/kube-scheduler
         - --config=/etc/kubernetes/autoscale-scheduler-config/scheduler-config.yaml
-        image: neondatabase/autoscale-scheduler:v0.24.0
+        image: neondatabase/autoscale-scheduler:v0.22.0
         livenessProbe:
           httpGet:
             path: /healthz
