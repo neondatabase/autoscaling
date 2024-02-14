@@ -27,6 +27,7 @@ import (
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/containerd/cgroups"
 	"go.uber.org/zap"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -288,10 +289,14 @@ func generateBPF(logger *zap.Logger, counters *ebpf.Map, direction NetworkDirect
 // can be read.
 func attachBPF(logger *zap.Logger, cgroupPath string) ([]link.Link, *ebpf.Map, error) {
 	const (
-		MAP_KEY_SIZE     = 4
-		MAP_VAL_SIZE     = 8
-		cgroupMountPoint = "/sys/fs/cgroup"
+		MAP_KEY_SIZE = 4
+		MAP_VAL_SIZE = 8
 	)
+
+	cgroupMountPoint := "/sys/fs/cgroup/systemd"
+	if cgroups.Mode() == cgroups.Unified {
+		cgroupMountPoint = "/sys/fs/cgroup"
+	}
 
 	cgroupPath = fmt.Sprintf("%s/%s", cgroupMountPoint, cgroupPath)
 
