@@ -3781,7 +3781,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: sharnoff/neonvm-controller:v0.24.0-ebpf_crictl.49c9b52
+        image: sharnoff/neonvm-controller:v0.24.0-ebpf_crictl.6972b51
         livenessProbe:
           httpGet:
             path: /healthz
