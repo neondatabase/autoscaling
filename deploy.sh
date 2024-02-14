@@ -6,8 +6,6 @@
 
 set -eu -o pipefail
 
-ENVIRONMENT='dev'
-
 log () {
     echo -en "\e[1m"
     echo -n "$(date -u '+%F %T')"
