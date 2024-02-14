@@ -548,6 +548,9 @@ spec:
     - jsonPath: .status.phase
       name: Status
       type: string
+    - jsonPath: .status.restarts
+      name: Restarts
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -3208,6 +3211,10 @@ spec:
                 type: string
               podName:
                 type: string
+              restartCount:
+                description: Number of times the VM runner pod has been recreated
+                format: int32
+                type: integer
               sshSecretName:
                 type: string
             type: object
@@ -3294,6 +3301,12 @@ rules:
   verbs:
   - create
   - patch
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - list
 - apiGroups:
   - ""
   resources:
@@ -3763,7 +3776,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.23.2
+        image: neondatabase/neonvm-controller:v0.24.0
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3948,7 +3961,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.23.2
+        image: neondatabase/neonvm-vxlan-controller:v0.24.0
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -3980,7 +3993,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.23.2
+        image: neondatabase/neonvm-vxlan-controller:v0.24.0
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
