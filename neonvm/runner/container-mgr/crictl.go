@@ -110,6 +110,31 @@ type CrictlContainerResourcesCPU struct {
 	Shares uint64 `json:"shares"`
 }
 
+func (c *Crictl) InspectPod(logger *zap.Logger, podID string) (*CrictlPodInspect, error) {
+	var pod CrictlPodInspect
+	if err := c.run(logger, &pod, "inspectp", podID); err != nil {
+		return nil, err
+	}
+	return &pod, nil
+}
+
+// CrictlPodInspect represents the JSON output of `crictl inspectp`, limited to the subset we care about.
+type CrictlPodInspect struct {
+	Info CrictlPodInfo `json:"info"`
+}
+
+type CrictlPodInfo struct {
+	Config CrictlPodConfig `json:"config"`
+}
+
+type CrictlPodConfig struct {
+	Linux CrictlPodLinux `json:"linux"`
+}
+
+type CrictlPodLinux struct {
+	CgroupParent string `json:"cgroup_parent"`
+}
+
 func (c *Crictl) run(logger *zap.Logger, output any, args ...string) error {
 	actualArgs := []string{
 		"--runtime-endpoint",

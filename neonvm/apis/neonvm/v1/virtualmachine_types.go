@@ -17,8 +17,12 @@ limitations under the License.
 package v1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -47,6 +51,13 @@ const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 type VirtualMachineUsage struct {
 	CPU    *resource.Quantity `json:"cpu"`
 	Memory *resource.Quantity `json:"memory"`
+}
+
+type NetworkBytes uint64
+
+type VirtualMachineNetworkUsage struct {
+	IngressBytes NetworkBytes `json:"ingress_bytes"`
+	EgressBytes  NetworkBytes `json:"egress_bytes"`
 }
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -117,6 +128,10 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=true
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
+	// Enable network monitoring on the VM
+	// +kubebuilder:default:=false
+	// +optional
+	EnableNetworkMonitoring *bool `json:"enableNetworkMonitoring,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
@@ -440,6 +455,41 @@ func (p VmPhase) IsAlive() bool {
 	}
 }
 
+// +kubebuilder:object:generate=false
+type NetworkUsageJSONError struct {
+	Err error
+}
+
+func (e NetworkUsageJSONError) Error() string {
+	return fmt.Sprintf("Error unmarshaling network usage: %s", e.Err.Error())
+}
+
+func (e NetworkUsageJSONError) Unwrap() error {
+	return e.Err
+}
+
+// +kubebuilder:object:generate=false
+type NetworkUsageRequestError struct {
+	Err error
+}
+
+func (e NetworkUsageRequestError) Error() string {
+	return fmt.Sprintf("Error fetching network usage: %s", e.Err.Error())
+}
+
+func (e NetworkUsageRequestError) Unwrap() error {
+	return e.Err
+}
+
+// +kubebuilder:object:generate=false
+type NetworkUsageStatusCodeError struct {
+	StatusCode int
+}
+
+func (e NetworkUsageStatusCodeError) Error() string {
+	return fmt.Sprintf("Unexpected HTTP status code when fetching network usage: %d", e.StatusCode)
+}
+
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
@@ -461,6 +511,37 @@ type VirtualMachine struct {
 
 	Spec   VirtualMachineSpec   `json:"spec,omitempty"`
 	Status VirtualMachineStatus `json:"status,omitempty"`
+}
+
+func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context, timeout time.Duration) (*VirtualMachineNetworkUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("http://%s:%d/network_usage", vm.Status.PodIP, vm.Spec.RunnerPort),
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("error initializing http request to fetch network usage: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, NetworkUsageRequestError{Err: err}
+	}
+	if resp.StatusCode != 200 {
+		return nil, NetworkUsageStatusCodeError{StatusCode: resp.StatusCode}
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading http response body: %w", err)
+	}
+	var result VirtualMachineNetworkUsage
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, NetworkUsageJSONError{Err: err}
+	}
+	return &result, nil
 }
 
 func (vm *VirtualMachine) Cleanup() {

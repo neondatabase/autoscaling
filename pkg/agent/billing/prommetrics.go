@@ -11,11 +11,12 @@ import (
 )
 
 type PromMetrics struct {
-	vmsProcessedTotal *prometheus.CounterVec
-	vmsCurrent        *prometheus.GaugeVec
-	queueSizeCurrent  prometheus.Gauge
-	lastSendDuration  prometheus.Gauge
-	sendErrorsTotal   *prometheus.CounterVec
+	vmsProcessedTotal            *prometheus.CounterVec
+	vmsCurrent                   *prometheus.GaugeVec
+	queueSizeCurrent             prometheus.Gauge
+	lastSendDuration             prometheus.Gauge
+	sendErrorsTotal              *prometheus.CounterVec
+	fetchNetworkUsageErrorsTotal *prometheus.CounterVec
 }
 
 func NewPromMetrics() PromMetrics {
@@ -53,6 +54,13 @@ func NewPromMetrics() PromMetrics {
 			},
 			[]string{"cause"},
 		),
+		fetchNetworkUsageErrorsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_agent_billing_fetch_network_usage_errors_total",
+				Help: "Total errors from attempting to fetch network usage",
+			},
+			[]string{"cause"},
+		),
 	}
 }
 
@@ -62,6 +70,7 @@ func (m PromMetrics) MustRegister(reg *prometheus.Registry) {
 	reg.MustRegister(m.queueSizeCurrent)
 	reg.MustRegister(m.lastSendDuration)
 	reg.MustRegister(m.sendErrorsTotal)
+	reg.MustRegister(m.fetchNetworkUsageErrorsTotal)
 }
 
 type batchMetrics struct {
