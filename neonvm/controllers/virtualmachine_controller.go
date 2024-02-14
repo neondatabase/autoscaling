@@ -788,6 +788,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
 				virtualmachine.Status.Phase = vmv1.VmPending // reset to trigger restart
 				*virtualmachine.Status.RestartCount += 1     // increment restart count
+				r.Metrics.vmRestartCounts.Inc()
 			}
 
 			// TODO for RestartPolicyNever: implement TTL or do nothing
