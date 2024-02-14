@@ -1594,6 +1594,10 @@ spec:
                 default: true
                 description: Use KVM acceleation
                 type: boolean
+              enableNetworkMonitoring:
+                default: false
+                description: Enable network monitoring on the VM
+                type: boolean
               enableSSH:
                 default: true
                 description: 'Enable SSH on the VM. It works only if the VM image
@@ -3777,7 +3781,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.24.0
+        image: sharnoff/neonvm-controller:v0.24.0-ebpf_crictl.49c9b52
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3962,7 +3966,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.24.0
+        image: sharnoff/neonvm-vxlan-controller:v0.24.0-ebpf_crictl.49c9b52
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -3994,7 +3998,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.24.0
+        image: sharnoff/neonvm-vxlan-controller:v0.24.0-ebpf_crictl.49c9b52
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
