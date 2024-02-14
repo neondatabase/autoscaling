@@ -925,7 +925,9 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 			if conn != nil {
 				conn.Close()
 			}
-			_ = drainLogsReader(reader, logger)
+			if reader != nil {
+				_ = drainLogsReader(reader, logger)
+			}
 			return
 		case <-time.After(b.Duration()):
 		}
