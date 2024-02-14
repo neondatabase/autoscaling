@@ -293,7 +293,7 @@ func attachBPF(logger *zap.Logger, cgroupPath string) ([]link.Link, *ebpf.Map, e
 		MAP_VAL_SIZE = 8
 	)
 
-	cgroupMountPoint := "/sys/fs/cgroup/systemd"
+	cgroupMountPoint := "/sys/fs/cgroup/net_cls,net_prio"
 	if cgroups.Mode() == cgroups.Unified {
 		cgroupMountPoint = "/sys/fs/cgroup"
 	}
@@ -327,6 +327,8 @@ func attachBPF(logger *zap.Logger, cgroupPath string) ([]link.Link, *ebpf.Map, e
 		Attach:  ebpf.AttachCGroupInetIngress,
 		Program: ingressProgram,
 	})
+
+	logger.Info("Attempting to link to cgroup", zap.String("cgroup_path", cgroupPath))
 	if err != nil {
 		logger.Fatal("Failed to link ingress program", zap.Error(err))
 		return nil, nil, err
