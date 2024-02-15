@@ -81,7 +81,7 @@ make deploy
 Build and load the test VM:
 
 ```sh
-make pg14-disk-test
+make pg16-disk-test
 ```
 
 Start the test VM:
@@ -113,7 +113,7 @@ cgexec -g memory:neon-test allocate-loop 256 2280
 # run it in the neon-test cgroup  ;  use 256 <-> 2280 MiB
 ```
 
-[`allocate-loop`]: vm-examples/pg14-disk-test/allocate-loop.c
+[`allocate-loop`]: vm-examples/pg16-disk-test/allocate-loop.c
 
 ### Testing
 
