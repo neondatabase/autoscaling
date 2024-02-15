@@ -324,9 +324,8 @@ func makePerVMMetricsLabels(namespace string, vmName string, endpointID string, 
 		"endpoint_id":  endpointID,
 		"project_id":   projectID,
 	}
-	valueTypeStr := string(valueType)
 	if len(valueType) > 0 {
-		labels["value"] = valueTypeStr
+		labels["value"] = string(valueType)
 	}
 	return labels
 }
