@@ -480,7 +480,7 @@ func checkDevTun() bool {
 	return mode&os.ModeCharDevice == os.ModeCharDevice
 }
 
-func runInitScript(script string, logger *zap.Logger) error {
+func runInitScript(logger *zap.Logger, script string) error {
 	if len(script) == 0 {
 		return nil
 	}
@@ -500,6 +500,7 @@ func runInitScript(script string, logger *zap.Logger) error {
 		return err
 	}
 
+	// Add execute permission to the file
 	if err := os.Chmod(tmpFile.Name(), 0755); err != nil {
 		return err
 	}
@@ -569,7 +570,7 @@ func main() {
 		enableSSH = true
 	}
 
-	err = runInitScript(vmSpec.InitScript, logger)
+	err = runInitScript(logger, vmSpec.InitScript)
 	if err != nil {
 		logger.Fatal("Failed to run init script", zap.Error(err))
 	}
