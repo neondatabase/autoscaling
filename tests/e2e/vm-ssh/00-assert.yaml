@@ -1,0 +1,35 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 90
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      kubectl exec -n "$NAMESPACE" $pod -- ssh guest-vm true
+---
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+status:
+  phase: Running
+  restartCount: 0
+  conditions:
+    - type: Available
+      status: "True"
+  cpus: 250m
+  memorySize: 1Gi
+  sshSecretName: ssh-neonvm-example
+---
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/ssh-auth
+immutable: true
+metadata:
+  name: ssh-neonvm-example
+  ownerReferences:
+  - apiVersion: vm.neon.tech/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: VirtualMachine
+    name: example

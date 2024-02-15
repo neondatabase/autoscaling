@@ -33,7 +33,7 @@ spec:
           value: $(NAD_RUNNER_NAMESPACE)
         resources:
           limits:
-            cpu: 4
+            cpu: 8
             memory: 2Gi
           requests:
             cpu: 2

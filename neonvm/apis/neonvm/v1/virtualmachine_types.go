@@ -169,6 +169,10 @@ type GuestSettings struct {
 	// Individual lines to add to a sysctl.conf file. See sysctl.conf(5) for more
 	// +optional
 	Sysctl []string `json:"sysctl,omitempty"`
+
+	// Swap adds a swap disk with the provided size.
+	// +optional
+	Swap *resource.Quantity `json:"swap,omitempty"`
 }
 
 type CPUs struct {
