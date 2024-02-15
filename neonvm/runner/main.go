@@ -500,11 +500,6 @@ func runInitScript(logger *zap.Logger, script string) error {
 		return err
 	}
 
-	// Add execute permission to the file
-	if err := os.Chmod(tmpFile.Name(), 0755); err != nil {
-		return err
-	}
-
 	logger.Info("running init script", zap.String("path", tmpFile.Name()))
 
 	if err := execFg("/bin/sh", tmpFile.Name()); err != nil {
