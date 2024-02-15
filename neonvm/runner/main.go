@@ -881,11 +881,20 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	delay := 3 * time.Second
 	var conn net.Conn
 	var reader *bufio.Reader
+
 	b := &backoff.Backoff{
 		Min:    100 * time.Millisecond,
 		Max:    delay,
 		Factor: 2,
 		Jitter: true,
+	}
+
+	// Wait a bit to reduce the chance we attempt dialing before
+	// QEMU is started
+	select {
+	case <-time.After(500 * time.Millisecond):
+	case <-ctx.Done():
+		logger.Warn("QEMU shut down too soon to start forwarding logs")
 	}
 
 	for {
