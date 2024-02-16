@@ -76,10 +76,10 @@ type wrappedReconciler struct {
 // when requested.
 type ReconcileSnapshot struct {
 	// ControllerName is the name of the controller: virtualmachine or virtualmachinemigration.
-	ControllerName string
+	ControllerName string `json:"controllerName"`
 
 	// Failing is the list of objects currently failing to reconcile
-	Failing []string
+	Failing []string `json:"failing"`
 }
 
 // WithMetrics wraps a given Reconciler with metrics capabilities, also returning a function that
