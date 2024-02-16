@@ -92,11 +92,7 @@ type ReconcileSnapshot struct {
 
 // WithMetrics wraps a given Reconciler with metrics capabilities, also returning a function that
 // produces a snapshot of the metrics, for easier inspection.
-func WithMetrics(
-	reconciler reconcile.Reconciler,
-	rm ReconcilerMetrics,
-	cntrlName string,
-) ReconcilerWithMetrics {
+func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) ReconcilerWithMetrics {
 	return &wrappedReconciler{
 		Reconciler:     reconciler,
 		Metrics:        rm,
