@@ -529,6 +529,35 @@ func checkDevTun() bool {
 	return mode&os.ModeCharDevice == os.ModeCharDevice
 }
 
+func runInitScript(logger *zap.Logger, script string) error {
+	if len(script) == 0 {
+		return nil
+	}
+
+	// creates a tmp file with the script content
+	tmpFile, err := os.CreateTemp(os.TempDir(), "init-script-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile.Name()) // clean up
+
+	if _, err := tmpFile.Write([]byte(script)); err != nil {
+		return err
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	logger.Info("running init script", zap.String("path", tmpFile.Name()))
+
+	if err := execFg("/bin/sh", tmpFile.Name()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
 	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
 
@@ -586,6 +615,11 @@ func main() {
 	enableSSH := false
 	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
 		enableSSH = true
+	}
+
+	err = runInitScript(logger, vmSpec.InitScript)
+	if err != nil {
+		logger.Fatal("Failed to run init script", zap.Error(err))
 	}
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
