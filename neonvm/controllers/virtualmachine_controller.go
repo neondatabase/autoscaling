@@ -1299,6 +1299,11 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 			ServiceAccountName:            virtualmachine.Spec.ServiceAccountName,
 			SchedulerName:                 virtualmachine.Spec.SchedulerName,
 			Affinity:                      affinity,
+			SecurityContext: &corev1.PodSecurityContext{
+				Sysctls: []corev1.Sysctl{
+					{Name: "net.ipv4.ip_forward", Value: "1"},
+				},
+			},
 			InitContainers: []corev1.Container{
 				{
 					Image:           virtualmachine.Spec.Guest.RootDisk.Image,
@@ -1310,13 +1315,12 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 					}},
 					Command: []string{
 						"sh", "-c",
-						"cp /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
-							/* uid=36(qemu) gid=34(kvm) groups=34(kvm) */
-							"chown 36:34 /vm/images/rootdisk.qcow2 && " +
-							"sysctl -w net.ipv4.ip_forward=1",
+						"cp /disk.qcow2 /vm/images/rootdisk.qcow2",
 					},
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: &[]bool{true}[0],
+						// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+						RunAsUser:  &[]int64{36}[0],
+						RunAsGroup: &[]int64{34}[0],
 					},
 				},
 			},
