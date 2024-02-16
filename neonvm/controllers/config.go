@@ -16,6 +16,12 @@ type ReconcilerConfig struct {
 	UseContainerMgr bool
 
 	MaxConcurrentReconciles int
+
+	// QEMUDiskCacheSettings sets the values of the 'cache.*' settings used for QEMU disks.
+	//
+	// This field is passed to neonvm-runner as the `-qemu-disk-cache-settings` arg, and is directly
+	// used in setting up the VM disks via QEMU's `-drive` flag.
+	QEMUDiskCacheSettings string
 }
 
 func (c *ReconcilerConfig) criEndpointSocketPath() string {

@@ -566,11 +566,13 @@ func main() {
 	var kernelPath string
 	var appendKernelCmdline string
 	var skipCgroupManagement bool
+	var diskCacheSettings string
 	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
 	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
 	flag.BoolVar(&skipCgroupManagement, "skip-cgroup-management", false, "Don't try to manage CPU (use if running alongside container-mgr)")
+	flag.StringVar(&diskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Cache settings to add to -drive args for VM disks")
 	flag.Parse()
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
@@ -702,7 +704,7 @@ func main() {
 	}
 
 	// disk details
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
 
 	if enableSSH {
@@ -735,7 +737,7 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				discard = ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, diskCacheSettings, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
