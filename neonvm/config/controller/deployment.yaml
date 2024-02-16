@@ -23,26 +23,22 @@ spec:
       labels:
         control-plane: controller
     spec:
-      # TODO(user): Uncomment the following code to configure the nodeAffinity expression
-      # according to the platforms which are supported by your solution. 
-      # It is considered best practice to support multiple architectures. You can
-      # build your manager image using the makefile target docker-buildx.
-      # affinity:
-      #   nodeAffinity:
-      #     requiredDuringSchedulingIgnoredDuringExecution:
-      #       nodeSelectorTerms:
-      #         - matchExpressions:
-      #           - key: kubernetes.io/arch
-      #             operator: In
-      #             values:
-      #               - amd64
-      #               - arm64
-      #               - ppc64le
-      #               - s390x
-      #           - key: kubernetes.io/os
-      #             operator: In
-      #             values:
-      #               - linux
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values:
+                    - amd64
+                    - arm64
+                    - ppc64le
+                    - s390x
+                - key: kubernetes.io/os
+                  operator: In
+                  values:
+                    - linux
       securityContext:
         runAsNonRoot: true
         # TODO(user): For common cases that do not require escalating privileges
@@ -53,12 +49,45 @@ spec:
         # seccompProfile:
         #   type: RuntimeDefault
       containers:
-      - command:
+      - name: manager
+        image: controller:dev
+        command:
         - /manager
         args:
-        - --leader-elect
-        image: controller:dev
-        name: manager
+        - "--health-probe-bind-address=:8081"
+        - "--metrics-bind-address=:8080"
+        - "--leader-elect"
+        - "--concurrency-limit=128"
+        - "--enable-container-mgr"
+        - "--zap-devel=false"
+        - "--zap-time-encoding=iso8601"
+        - "--zap-log-level=info"
+        - "--zap-stacktrace-level=panic"
+        # See #775 and its links.
+        # * cache.writeback=on - don't set O_DSYNC (don't flush every write)
+        # * cache.direct=on    - use O_DIRECT (don't abuse host's page cache!)
+        # * cache.no-flush=on  - ignores disk flush operations (not needed; our disks are ephemeral)
+        - "--qemu-disk-cache-settings=cache.writeback=on,cache.direct=on,cache.no-flush=on"
+        env:
+        - name: NAD_IPAM_NAME
+          value: $(NAD_IPAM_NAME)
+        - name: NAD_IPAM_NAMESPACE
+          value: $(NAD_IPAM_NAMESPACE)
+        - name: NAD_RUNNER_NAME
+          value: $(NAD_RUNNER_NAME)
+        - name: NAD_RUNNER_NAMESPACE
+          value: $(NAD_RUNNER_NAMESPACE)
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -80,10 +109,38 @@ spec:
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
           limits:
-            cpu: 2000m
-            memory: 1024Mi
+            cpu: 8
+            memory: 2Gi
           requests:
+            cpu: 2
+            memory: 1Gi
+      - name: kube-rbac-proxy
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - "ALL"
+        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.13.0
+        args:
+        - "--secure-listen-address=0.0.0.0:8443"
+        - "--upstream=http://127.0.0.1:8080/"
+        - "--logtostderr=true"
+        - "--v=0"
+        ports:
+        - containerPort: 8443
+          protocol: TCP
+          name: https
+        resources:
+          limits:
             cpu: 500m
-            memory: 512Mi
+            memory: 128Mi
+          requests:
+            cpu: 5m
+            memory: 64Mi
       serviceAccountName: controller
       terminationGracePeriodSeconds: 10
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: webhook-server-cert
