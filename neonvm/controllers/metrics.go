@@ -68,7 +68,7 @@ type wrappedReconciler struct {
 	failing map[client.ObjectKey]struct{}
 }
 
-// ReocncileSnapshot provides a glimpse into the current state of ongoing reconciles
+// ReconcileSnapshot provides a glimpse into the current state of ongoing reconciles
 //
 // This type is (transitively) returned by the controller's "dump state" HTTP endpoint, and exists
 // to allow us to get deeper information on the metrics - we can't expose information for every
