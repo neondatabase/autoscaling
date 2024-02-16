@@ -13,20 +13,20 @@ namePrefix: neonvm-
 #  someName: someValue
 
 bases:
-- ../common/namespace
-- ../common/crd
-- ../common/rbac
-- ../common/controller
+- namespace
+- crd
+- rbac
+- controller
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
 # crd/kustomization.yaml
-- ../common/webhook
+- webhook
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER'. 'WEBHOOK' components are required.
-- ../common/certmanager
+- certmanager
 # [PROMETHEUS] To enable prometheus monitor, uncomment all sections with 'PROMETHEUS'.
 #- ../common/prometheus
 - vxlan-controller
 - network
-- ../common/device-plugin
+- device-plugin
 
 patchesStrategicMerge:
 - manager_config_patch.yaml
