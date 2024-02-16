@@ -68,6 +68,14 @@ type wrappedReconciler struct {
 	failing map[client.ObjectKey]struct{}
 }
 
+// ReconcilerWithMetrics is a Reconciler produced by WithMetrics that can return a snapshot of the
+// state backing the metrics.
+type ReconcilerWithMetrics interface {
+	reconcile.Reconciler
+
+	Snapshot() ReconcileSnapshot
+}
+
 // ReconcileSnapshot provides a glimpse into the current state of ongoing reconciles
 //
 // This type is (transitively) returned by the controller's "dump state" HTTP endpoint, and exists
@@ -88,7 +96,7 @@ func WithMetrics(
 	reconciler reconcile.Reconciler,
 	rm ReconcilerMetrics,
 	cntrlName string,
-) (reconcile.Reconciler, func() ReconcileSnapshot) {
+) ReconcilerWithMetrics {
 	r := &wrappedReconciler{
 		Reconciler:     reconciler,
 		Metrics:        rm,
@@ -97,22 +105,7 @@ func WithMetrics(
 		failing:        make(map[client.ObjectKey]struct{}),
 	}
 
-	snapshot := func() ReconcileSnapshot {
-		r.lock.Lock()
-		defer r.lock.Unlock()
-
-		failing := make([]string, 0, len(r.failing))
-		for namespacedName := range r.failing {
-			failing = append(failing, namespacedName.String())
-		}
-
-		return ReconcileSnapshot{
-			ControllerName: cntrlName,
-			Failing:        failing,
-		}
-	}
-
-	return r, snapshot
+	return r
 }
 
 func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -133,4 +126,19 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	d.Metrics.failing.WithLabelValues(d.ControllerName).Set(float64(len(d.failing)))
 
 	return res, err
+}
+
+func (r *wrappedReconciler) Snapshot() ReconcileSnapshot {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	failing := make([]string, 0, len(r.failing))
+	for namespacedName := range r.failing {
+		failing = append(failing, namespacedName.String())
+	}
+
+	return ReconcileSnapshot{
+		ControllerName: r.ControllerName,
+		Failing:        failing,
+	}
 }

@@ -159,14 +159,14 @@ func main() {
 		MaxConcurrentReconciles: concurrencyLimit,
 	}
 
-	virtualmachineReconciler := &controllers.VirtualMachineReconciler{
+	vmReconciler := &controllers.VirtualMachineReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
 		Config:   rc,
 		Metrics:  reconcilerMetrics,
 	}
-	virtualmachineSnapshot, err := virtualmachineReconciler.SetupWithManager(mgr)
+	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
 		os.Exit(1)
@@ -176,14 +176,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	virtualmachinemigrationReconciler := &controllers.VirtualMachineMigrationReconciler{
+	migrationReconciler := &controllers.VirtualMachineMigrationReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
 		Config:   rc,
 		Metrics:  reconcilerMetrics,
 	}
-	virtualmachinemigrationSnapshot, err := virtualmachinemigrationReconciler.SetupWithManager(mgr)
+	migrationReconcilerMetrics, err := migrationReconciler.SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
 		os.Exit(1)
@@ -203,7 +203,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	dbgSrv := debugServerFunc(virtualmachineSnapshot, virtualmachinemigrationSnapshot)
+	dbgSrv := debugServerFunc(vmReconcilerMetrics, migrationReconcilerMetrics)
 	if err := mgr.Add(dbgSrv); err != nil {
 		setupLog.Error(err, "unable to set up debug server")
 		os.Exit(1)
@@ -237,7 +237,7 @@ func checkIfRunningInK3sCluster(cfg *rest.Config) (bool, error) {
 	return false, nil
 }
 
-func debugServerFunc(snapshots ...func() controllers.ReconcileSnapshot) manager.RunnableFunc {
+func debugServerFunc(reconcilers ...controllers.ReconcilerWithMetrics) manager.RunnableFunc {
 	return manager.RunnableFunc(func(ctx context.Context) error {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -249,9 +249,9 @@ func debugServerFunc(snapshots ...func() controllers.ReconcileSnapshot) manager.
 				return
 			}
 
-			response := make([]controllers.ReconcileSnapshot, 0, len(snapshots))
-			for _, s := range snapshots {
-				response = append(response, s())
+			response := make([]controllers.ReconcileSnapshot, 0, len(reconcilers))
+			for _, r := range reconcilers {
+				response = append(response, r.Snapshot())
 			}
 
 			responseBody, err := json.Marshal(&response)
