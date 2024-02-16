@@ -25,7 +25,7 @@ spec:
         #
         # See #775 and its links.
         # * cache.writeback=on - don't set O_DSYNC (don't flush every write)
-        # * cache.direct=on    - forces using direct IO (don't abuse host's page cache!)
+        # * cache.direct=on    - use O_DIRECT (don't abuse host's page cache!)
         # * cache.no-flush=on  - ignores disk flush operations (not needed; our disks are ephemeral)
         - "--qemu-disk-cache-settings=cache.writeback=on,cache.direct=on,cache.no-flush=on"
         env:
