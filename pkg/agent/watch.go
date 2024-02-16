@@ -317,7 +317,9 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	return metrics
 }
 
-func makeVMRestartCountMetrics(vm *vmapi.VirtualMachine) []vmMetric {
+// makeVMRestartMetrics makes metrics related to VM restarts. Currently, it
+// only includes one metrics, which is restartCount.
+func makeVMRestartMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	if vm.Status.RestartCount == nil {
 		return nil
 	}
@@ -347,7 +349,7 @@ func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName
 		perVMMetrics.memory.With(m.labels).Set(m.value)
 	}
 
-	restartCountMetrics := makeVMRestartCountMetrics(vm)
+	restartCountMetrics := makeVMRestartMetrics(vm)
 	for _, m := range restartCountMetrics {
 		perVMMetrics.restartCount.With(m.labels).Set(m.value)
 	}
@@ -386,8 +388,8 @@ func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmapi.VirtualMach
 	newMemMetrics := makeVMMemMetrics(newVM)
 	updateMetrics(perVMMetrics.memory, oldMemMetrics, newMemMetrics)
 
-	oldRestartCountMetrics := makeVMRestartCountMetrics(oldVM)
-	newRestartCountMetrics := makeVMRestartCountMetrics(newVM)
+	oldRestartCountMetrics := makeVMRestartMetrics(oldVM)
+	newRestartCountMetrics := makeVMRestartMetrics(newVM)
 	updateMetrics(perVMMetrics.restartCount, oldRestartCountMetrics, newRestartCountMetrics)
 }
 
@@ -406,7 +408,7 @@ func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeN
 		perVMMetrics.memory.Delete(m.labels)
 	}
 
-	restartCountMetrics := makeVMRestartCountMetrics(vm)
+	restartCountMetrics := makeVMRestartMetrics(vm)
 	for _, m := range restartCountMetrics {
 		perVMMetrics.restartCount.Delete(m.labels)
 	}
