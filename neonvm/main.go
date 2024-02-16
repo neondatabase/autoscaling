@@ -18,8 +18,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -159,13 +161,15 @@ func main() {
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
 	}
 
-	if err = (&controllers.VirtualMachineReconciler{
+	vmReconciler := &controllers.VirtualMachineReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
 		Config:   rc,
 		Metrics:  reconcilerMetrics,
-	}).SetupWithManager(mgr); err != nil {
+	}
+	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
+	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
 		os.Exit(1)
 	}
@@ -173,13 +177,16 @@ func main() {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
 		os.Exit(1)
 	}
-	if err = (&controllers.VirtualMachineMigrationReconciler{
+
+	migrationReconciler := &controllers.VirtualMachineMigrationReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
 		Config:   rc,
 		Metrics:  reconcilerMetrics,
-	}).SetupWithManager(mgr); err != nil {
+	}
+	migrationReconcilerMetrics, err := migrationReconciler.SetupWithManager(mgr)
+	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
 		os.Exit(1)
 	}
@@ -195,6 +202,12 @@ func main() {
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
+		os.Exit(1)
+	}
+
+	dbgSrv := debugServerFunc(vmReconcilerMetrics, migrationReconcilerMetrics)
+	if err := mgr.Add(dbgSrv); err != nil {
+		setupLog.Error(err, "unable to set up debug server")
 		os.Exit(1)
 	}
 
@@ -224,4 +237,48 @@ func checkIfRunningInK3sCluster(cfg *rest.Config) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func debugServerFunc(reconcilers ...controllers.ReconcilerWithMetrics) manager.RunnableFunc {
+	return manager.RunnableFunc(func(ctx context.Context) error {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+
+			if r.Method != http.MethodGet {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				_, _ = w.Write([]byte(fmt.Sprintf("request method must be %s", http.MethodGet)))
+				return
+			}
+
+			response := make([]controllers.ReconcileSnapshot, 0, len(reconcilers))
+			for _, r := range reconcilers {
+				response = append(response, r.Snapshot())
+			}
+
+			responseBody, err := json.Marshal(&response)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(fmt.Sprintf("failed to marshal JSON response: %s", err)))
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(responseBody)
+		})
+
+		server := &http.Server{
+			Addr:    "0.0.0.0:7778",
+			Handler: mux,
+		}
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		go func() {
+			<-ctx.Done()
+			_ = server.Shutdown(context.TODO())
+		}()
+
+		return server.ListenAndServe()
+	})
 }
