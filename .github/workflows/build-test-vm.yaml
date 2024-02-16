@@ -23,12 +23,12 @@ on:
         required: false
         default: false
     outputs:
-      vm-postgres-15-bullseye:
-        description: 'image name for postgres:15-bullseye, VM-ified'
-        value: ${{ jobs.tags.outputs.vm-postgres-15-bullseye }}
+      vm-postgres-16-bullseye:
+        description: 'image name for postgres:16-bullseye, VM-ified'
+        value: ${{ jobs.tags.outputs.vm-postgres-16-bullseye }}
 
 env:
-  IMG_POSTGRES_15_BULLSEYE: "neondatabase/vm-postgres-15-bullseye"
+  IMG_POSTGRES_16_BULLSEYE: "neondatabase/vm-postgres-16-bullseye"
 
 defaults:
   run:
@@ -37,12 +37,12 @@ defaults:
 jobs:
   tags:
     outputs:
-      vm-postgres-15-bullseye: ${{ steps.show-tags.outputs.vm-postgres-15-bullseye }}
+      vm-postgres-16-bullseye: ${{ steps.show-tags.outputs.vm-postgres-16-bullseye }}
     runs-on: ubuntu-latest
     steps:
       - id: show-tags
         run: |
-          echo "vm-postgres-15-bullseye=${{ env.IMG_POSTGRES_15_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
@@ -83,12 +83,12 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: build ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
+      - name: build ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
         run: |
-          ./bin/vm-builder -src postgres:15-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
-      - name: docker push ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
+          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
+      - name: docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
         run: |
-          docker push ${{ needs.tags.outputs.vm-postgres-15-bullseye }}
+          docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
 
       - name: Remove custom docker config directory
         if: always()
