@@ -90,8 +90,10 @@ type ReconcileSnapshot struct {
 	Failing []string `json:"failing"`
 }
 
-// WithMetrics wraps a given Reconciler with metrics capabilities, also returning a function that
-// produces a snapshot of the metrics, for easier inspection.
+// WithMetrics wraps a given Reconciler with metrics capabilities.
+//
+// The returned reconciler also provides a way to get a snapshot of the state of ongoing reconciles,
+// to see the data backing the metrics.
 func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) ReconcilerWithMetrics {
 	return &wrappedReconciler{
 		Reconciler:     reconciler,
