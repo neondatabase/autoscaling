@@ -97,15 +97,13 @@ func WithMetrics(
 	rm ReconcilerMetrics,
 	cntrlName string,
 ) ReconcilerWithMetrics {
-	r := &wrappedReconciler{
+	return &wrappedReconciler{
 		Reconciler:     reconciler,
 		Metrics:        rm,
 		ControllerName: cntrlName,
 		lock:           sync.Mutex{},
 		failing:        make(map[client.ObjectKey]struct{}),
 	}
-
-	return r
 }
 
 func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
