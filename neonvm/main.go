@@ -270,14 +270,13 @@ func debugServerFunc(snapshots ...func() controllers.ReconcileSnapshot) manager.
 			Handler: mux,
 		}
 		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 
 		go func() {
 			<-ctx.Done()
 			_ = server.Shutdown(context.TODO())
 		}()
 
-		err := server.ListenAndServe()
-		cancel() // avoid leaking the goroutine. It's *probably* fine, but good practice.
-		return err
+		return server.ListenAndServe()
 	})
 }
