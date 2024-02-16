@@ -91,9 +91,9 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./neonvm/..." \
-		output:crd:artifacts:config=neonvm/config/common/crd/bases \
-		output:rbac:artifacts:config=neonvm/config/common/rbac \
-		output:webhook:artifacts:config=neonvm/config/common/webhook
+		output:crd:artifacts:config=neonvm/config/crd/bases \
+		output:rbac:artifacts:config=neonvm/config/rbac \
+		output:webhook:artifacts:config=neonvm/config/webhook
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -241,11 +241,11 @@ check-local-context: ## Asserts that the current kubectl context is pointing at 
 
 .PHONY: install
 install: check-local-context manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	$(KUSTOMIZE) build neonvm/config/common/crd | kubectl apply -f -
+	$(KUSTOMIZE) build neonvm/config/crd | kubectl apply -f -
 
 .PHONY: uninstall
 uninstall: check-local-context manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
-	$(KUSTOMIZE) build neonvm/config/common/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+	$(KUSTOMIZE) build neonvm/config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 BUILDTS := $(shell date +%s)
 RENDERED ?= $(shell pwd)/rendered_manifests
@@ -254,39 +254,39 @@ $(RENDERED):
 .PHONY: render-manifests
 render-manifests: $(RENDERED) kustomize
 	# Prepare:
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/whereabouts > $(RENDERED)/whereabouts.yaml
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > $(RENDERED)/multus.yaml
-	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
+	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build deploy/scheduler > $(RENDERED)/autoscale-scheduler.yaml
 	$(KUSTOMIZE) build deploy/agent > $(RENDERED)/autoscaler-agent.yaml
 	# Cleanup:
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
-	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 
 render-release: $(RENDERED) kustomize
 	# Prepare:
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)
-	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER)
+	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)
+	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER)
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER)
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/whereabouts > $(RENDERED)/whereabouts.yaml
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/default-vxlan/multus > $(RENDERED)/multus.yaml
-	$(KUSTOMIZE) build neonvm/config/default-vxlan > $(RENDERED)/neonvm.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
+	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build deploy/scheduler > $(RENDERED)/autoscale-scheduler.yaml
 	$(KUSTOMIZE) build deploy/agent > $(RENDERED)/autoscaler-agent.yaml
 	# Cleanup:
-	cd neonvm/config/common/controller && $(KUSTOMIZE) edit set image controller=controller:dev
-	cd neonvm/config/default-vxlan/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev
+	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=controller:dev
+	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
