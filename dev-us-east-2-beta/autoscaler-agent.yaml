@@ -50,8 +50,7 @@ data:
     ,\n    \"cpuMetricName\": \"effective_compute_seconds\",\n    \"activeTimeMetricName\"\
     : \"active_time_seconds\",\n    \"collectEverySeconds\": 4,\n    \"accumulateEverySeconds\"\
     : 24,\n    \"pushEverySeconds\": 30,\n    \"pushRequestTimeoutSeconds\": 30,\n\
-    \    \"maxBatchSize\": 200,\n    \"ingressBytesMetricName\": \"temp-test-ingress-bytes\"\
-    ,\n    \"egressBytesMetricName\": \"temp-test-egress-bytes\"\n  }\n}"
+    \    \"maxBatchSize\": 200\n  }\n}"
 kind: ConfigMap
 metadata:
   name: autoscaler-agent-config
@@ -83,7 +82,7 @@ spec:
               fieldPath: status.podIP
         - name: CONFIG_PATH
           value: /etc/autoscaler-agent-config/config.json
-        image: sharnoff/autoscaler-agent:v0.24.0-ebpf_crictl.49c9b52
+        image: neondatabase/autoscaler-agent:v0.25.0
         name: autoscaler-agent
         ports:
         - containerPort: 9100

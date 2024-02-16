@@ -1594,10 +1594,6 @@ spec:
                 default: true
                 description: Use KVM acceleation
                 type: boolean
-              enableNetworkMonitoring:
-                default: false
-                description: Enable network monitoring on the VM
-                type: boolean
               enableSSH:
                 default: true
                 description: 'Enable SSH on the VM. It works only if the VM image
@@ -1605,6 +1601,8 @@ spec:
                   Builder version).'
                 type: boolean
               extraInitContainers:
+                description: Running init containers is costly, so InitScript field
+                  should be preferred over ExtraInitContainers
                 items:
                   description: A single application container that you want to run
                     within a pod.
@@ -2987,6 +2985,13 @@ spec:
                   settings:
                     description: Additional settings for the VM. Cannot be updated.
                     properties:
+                      swap:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Swap adds a swap disk with the provided size.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
                       sysctl:
                         description: Individual lines to add to a sysctl.conf file.
                           See sysctl.conf(5) for more
@@ -3007,6 +3012,10 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 type: array
+              initScript:
+                description: InitScript will be executed in the main container before
+                  VM is started.
+                type: string
               nodeSelector:
                 additionalProperties:
                   type: string
@@ -3770,6 +3779,7 @@ spec:
         - --zap-time-encoding=iso8601
         - --zap-log-level=info
         - --zap-stacktrace-level=panic
+        - --qemu-disk-cache-settings=cache.writeback=on,cache.direct=on,cache.no-flush=on
         command:
         - /manager
         env:
@@ -3781,7 +3791,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: sharnoff/neonvm-controller:v0.24.0-ebpf_crictl.6972b51
+        image: neondatabase/neonvm-controller:v0.25.0
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3804,7 +3814,7 @@ spec:
           periodSeconds: 10
         resources:
           limits:
-            cpu: 4
+            cpu: 8
             memory: 2Gi
           requests:
             cpu: 2
@@ -3966,7 +3976,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: sharnoff/neonvm-vxlan-controller:v0.24.0-ebpf_crictl.49c9b52
+        image: neondatabase/neonvm-vxlan-controller:v0.25.0
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -3998,7 +4008,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: sharnoff/neonvm-vxlan-controller:v0.24.0-ebpf_crictl.49c9b52
+        image: neondatabase/neonvm-vxlan-controller:v0.25.0
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:

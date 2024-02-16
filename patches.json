@@ -21,10 +21,7 @@
     "dev-eu-west-1-zeta": [
       { "path": ".billing.url", "value": "http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1" }
     ],
-    "dev-us-east-2-beta": [
-		{ "path": ".billing.ingressBytesMetricName", "value": "temp-test-ingress-bytes" },
-		{ "path": ".billing.egressBytesMetricName", "value": "temp-test-egress-bytes" }
-	]
+    "dev-us-east-2-beta": []
   },
   "autoscale-scheduler": {
     "@base": [
