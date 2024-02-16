@@ -218,7 +218,7 @@ endif
 
 .PHONY: kernel
 kernel: ## Build linux kernel.
-	rm -f neonvm/hack/vmlinuz neonvm/hack/kernel/vmlinuz; \
+	rm -f neonvm/hack/kernel/vmlinuz; \
 	linux_config=$$(ls neonvm/hack/kernel/linux-config-*) \
 	kernel_version=$${linux_config##*-} \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
