@@ -892,7 +892,7 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	// Wait a bit to reduce the chance we attempt dialing before
 	// QEMU is started
 	select {
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond):
 	case <-ctx.Done():
 		logger.Warn("QEMU shut down too soon to start forwarding logs")
 	}
