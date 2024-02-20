@@ -48,6 +48,7 @@ require (
 	github.com/containernetworking/cni v1.1.1
 	github.com/coreos/go-iptables v0.6.0
 	github.com/digitalocean/go-qemu v0.0.0-20220826173844-d5f5e3ceed89
+	github.com/docker/cli v25.0.3+incompatible
 	github.com/docker/docker v24.0.9+incompatible
 	github.com/docker/libnetwork v0.8.0-dev.2.0.20210525090646-64b7a4574d14
 	github.com/go-logr/logr v1.4.1
@@ -118,6 +119,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/digitalocean/go-libvirt v0.0.0-20220804181439-8648fbde413e // indirect
 	github.com/docker/distribution v2.8.2+incompatible // indirect
+	github.com/docker/docker-credential-helpers v0.8.1 // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.1 // indirect
