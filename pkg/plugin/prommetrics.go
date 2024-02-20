@@ -58,7 +58,7 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Name: "autoscaling_plugin_resource_requests_total",
 				Help: "Number of resource requests received by the scheduler plugin",
 			},
-			[]string{"client_addr", "code"},
+			[]string{"code"},
 		)),
 		validResourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
