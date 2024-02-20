@@ -18,6 +18,7 @@ type ReconcilerMetrics struct {
 	vmCreationToRunnerCreationTime prometheus.Histogram
 	runnerCreationToVMRunningTime  prometheus.Histogram
 	vmCreationToVMRunningTime      prometheus.Histogram
+	vmRestartCounts                prometheus.Counter
 }
 
 func MakeReconcilerMetrics() ReconcilerMetrics {
@@ -53,6 +54,12 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Name:    "vm_creation_to_vm_running_duration_seconds",
 				Help:    "Time duration from VirtualMachine.CreationTimeStamp to the moment when VirtualMachine.Status.Phase becomes Running",
 				Buckets: buckets,
+			},
+		)),
+		vmRestartCounts: util.RegisterMetric(metrics.Registry, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "vm_restarts_count",
+				Help: "Total number of VM restarts across the cluster captured by VirtualMachine reconciler",
 			},
 		)),
 	}

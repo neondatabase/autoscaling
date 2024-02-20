@@ -317,6 +317,23 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	return metrics
 }
 
+// makeVMRestartMetrics makes metrics related to VM restarts. Currently, it
+// only includes one metrics, which is restartCount.
+func makeVMRestartMetrics(vm *vmapi.VirtualMachine) []vmMetric {
+	if vm.Status.RestartCount == nil {
+		return nil
+	}
+	endpointID := vm.Labels[endpointLabel]
+	projectID := vm.Labels[projectLabel]
+	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, endpointID, projectID, "")
+	return []vmMetric{
+		{
+			labels: labels,
+			value:  float64(*vm.Status.RestartCount),
+		},
+	}
+}
+
 func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName string) {
 	if vm.Status.Node != nodeName {
 		return
@@ -330,6 +347,11 @@ func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName
 	memMetrics := makeVMMemMetrics(vm)
 	for _, m := range memMetrics {
 		perVMMetrics.memory.With(m.labels).Set(m.value)
+	}
+
+	restartCountMetrics := makeVMRestartMetrics(vm)
+	for _, m := range restartCountMetrics {
+		perVMMetrics.restartCount.With(m.labels).Set(m.value)
 	}
 }
 
@@ -365,6 +387,10 @@ func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmapi.VirtualMach
 	oldMemMetrics := makeVMMemMetrics(oldVM)
 	newMemMetrics := makeVMMemMetrics(newVM)
 	updateMetrics(perVMMetrics.memory, oldMemMetrics, newMemMetrics)
+
+	oldRestartCountMetrics := makeVMRestartMetrics(oldVM)
+	newRestartCountMetrics := makeVMRestartMetrics(newVM)
+	updateMetrics(perVMMetrics.restartCount, oldRestartCountMetrics, newRestartCountMetrics)
 }
 
 func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName string) {
@@ -380,5 +406,10 @@ func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeN
 	memMetrics := makeVMMemMetrics(vm)
 	for _, m := range memMetrics {
 		perVMMetrics.memory.Delete(m.labels)
+	}
+
+	restartCountMetrics := makeVMRestartMetrics(vm)
+	for _, m := range restartCountMetrics {
+		perVMMetrics.restartCount.Delete(m.labels)
 	}
 }

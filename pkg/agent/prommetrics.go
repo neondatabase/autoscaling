@@ -254,8 +254,9 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 }
 
 type PerVMMetrics struct {
-	cpu    *prometheus.GaugeVec
-	memory *prometheus.GaugeVec
+	cpu          *prometheus.GaugeVec
+	memory       *prometheus.GaugeVec
+	restartCount *prometheus.GaugeVec
 }
 
 type vmResourceValueType string
@@ -299,19 +300,34 @@ func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
 				"value",        // vmResourceValue: min, spec_use, status_use, max
 			},
 		)),
+		restartCount: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_vm_restart_count",
+				Help: "Number of times that the VM has restarted",
+			},
+			[]string{
+				"vm_namespace", // .metadata.namespace
+				"vm_name",      // .metadata.name
+				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
+				"project_id",   // .metadata.labels["neon/project-id"]
+			},
+		)),
 	}
 
 	return metrics, reg
 }
 
 func makePerVMMetricsLabels(namespace string, vmName string, endpointID string, projectID string, valueType vmResourceValueType) prometheus.Labels {
-	return prometheus.Labels{
+	labels := prometheus.Labels{
 		"vm_namespace": namespace,
 		"vm_name":      vmName,
 		"endpoint_id":  endpointID,
 		"project_id":   projectID,
-		"value":        string(valueType),
 	}
+	if len(valueType) > 0 {
+		labels["value"] = string(valueType)
+	}
+	return labels
 }
 
 // vmMetric is a data object that represents a single metric

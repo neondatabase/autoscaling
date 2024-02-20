@@ -1,0 +1,6 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  # Log pod changes at RequestResponse level
+  - level: Metadata 
+    namespaces: ["default"]
