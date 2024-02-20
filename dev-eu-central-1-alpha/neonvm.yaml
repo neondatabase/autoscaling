@@ -3790,7 +3790,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.25.0
+        image: neondatabase/neonvm-controller:v0.25.1
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3975,7 +3975,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.25.0
+        image: neondatabase/neonvm-vxlan-controller:v0.25.1
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -4007,7 +4007,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.25.0
+        image: neondatabase/neonvm-vxlan-controller:v0.25.1
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
