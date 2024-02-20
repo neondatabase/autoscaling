@@ -16,6 +16,7 @@ import (
 	"text/template"
 
 	"github.com/alessio/shellescape"
+	"github.com/distribution/reference"
 	cliconfig "github.com/docker/cli/cli/config"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -194,8 +195,21 @@ func main() {
 		// pull source image
 		// use a closure so deferred close is closer
 		err := func() error {
+			named, err := reference.ParseNormalizedNamed(*srcImage)
+			if err != nil {
+				return err
+			}
+			registry := reference.Domain(named)
+
+			imagePullOptions := types.ImagePullOptions{}
+			if authConfig, ok := authConfigs[registry]; ok {
+				imagePullOptions.RegistryAuth = authConfig.IdentityToken
+			} else {
+				log.Printf("No docker credentials found for %s", registry)
+			}
+
 			log.Printf("Pull source docker image: %s", *srcImage)
-			pull, err := cli.ImagePull(ctx, *srcImage, types.ImagePullOptions{})
+			pull, err := cli.ImagePull(ctx, *srcImage, imagePullOptions)
 			if err != nil {
 				return err
 			}
