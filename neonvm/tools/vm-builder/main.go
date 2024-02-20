@@ -16,8 +16,10 @@ import (
 	"text/template"
 
 	"github.com/alessio/shellescape"
+	cliconfig "github.com/docker/cli/cli/config"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"golang.org/x/term"
@@ -141,6 +143,22 @@ func main() {
 			log.Fatalln(err)
 			os.Exit(1)
 		}
+	}
+
+	log.Println("Load docker credentials")
+	dockerConfig, err := cliconfig.Load("")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	credentials, err := dockerConfig.GetAllCredentials()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	authConfigs := make(map[string]registry.AuthConfig)
+	for key, value := range credentials {
+		log.Printf("Found docker credentials for %s", key)
+		authConfigs[key] = registry.AuthConfig(value)
 	}
 
 	ctx := context.Background()
@@ -288,9 +306,8 @@ func main() {
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
 	opt := types.ImageBuildOptions{
-		Tags: []string{
-			dstIm,
-		},
+		AuthConfigs:    authConfigs,
+		Tags:           []string{dstIm},
 		BuildArgs:      buildArgs,
 		SuppressOutput: *quiet,
 		NoCache:        false,
