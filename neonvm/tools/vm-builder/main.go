@@ -16,6 +16,7 @@ import (
 	"text/template"
 
 	"github.com/alessio/shellescape"
+	"github.com/distribution/reference"
 	cliconfig "github.com/docker/cli/cli/config"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -198,8 +199,39 @@ func main() {
 		// pull source image
 		// use a closure so deferred close is closer
 		err := func() error {
+			named, err := reference.ParseNormalizedNamed(*srcImage)
+			if err != nil {
+				return err
+			}
+			reg := reference.Domain(named)
+
+			imagePullOptions := types.ImagePullOptions{}
+			if authConfig, ok := authConfigs[reg]; ok {
+				encoded, err := registry.EncodeAuthConfig(authConfig)
+				if err != nil {
+					return err
+				}
+				imagePullOptions.RegistryAuth = encoded
+			} else {
+				// Special case handling of docker.io weirdness.
+				// ref https://github.com/moby/moby/blob/e7347f8a8c2fd3d2abd34b638d6fc8c18b0278d1/registry/config.go#L26-L49
+				// (and other handling around index.docker.io in that file...)
+				//
+				// See also e.g. https://github.com/containrrr/watchtower/issues/1176
+				legacyConfig, hasLegacyDockerConfig := authConfigs["https://index.docker.io/v1/"]
+				if hasLegacyDockerConfig && (reg == "docker.io" || reg == "registry-1.docker.io") {
+					encoded, err := registry.EncodeAuthConfig(legacyConfig)
+					if err != nil {
+						return err
+					}
+					imagePullOptions.RegistryAuth = encoded
+				} else {
+					log.Printf("No docker credentials found for %s", reg)
+				}
+			}
+
 			log.Printf("Pull source docker image: %s", *srcImage)
-			pull, err := cli.ImagePull(ctx, *srcImage, types.ImagePullOptions{})
+			pull, err := cli.ImagePull(ctx, *srcImage, imagePullOptions)
 			if err != nil {
 				return err
 			}
