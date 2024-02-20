@@ -38,7 +38,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.
 
 		var finalStatus int
 		defer func() {
-			e.metrics.resourceRequests.WithLabelValues(r.RemoteAddr, strconv.Itoa(finalStatus)).Inc()
+			e.metrics.resourceRequests.WithLabelValues(strconv.Itoa(finalStatus)).Inc()
 		}()
 
 		// Catch any potential panics and report them as 500s
