@@ -40,8 +40,6 @@ type ExecutorCore struct {
 
 	core *core.State
 
-	actions       *timedActions
-	lastActionsID timedActionsID
 	onNextActions func()
 
 	updates *util.Broadcaster
@@ -58,8 +56,6 @@ func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config Config) *Exe
 		mu:            sync.Mutex{},
 		stateLogger:   stateLogger,
 		core:          core.NewState(vm, config.Core),
-		actions:       nil, // (*ExecutorCore).getActions() checks if this is nil
-		lastActionsID: -1,
 		onNextActions: config.OnNextActions,
 		updates:       util.NewBroadcaster(),
 	}
@@ -79,37 +75,11 @@ func (c *ExecutorCore) WithClients(clients ClientSet) ExecutorCoreWithClients {
 	}
 }
 
-// timedActions stores the core.ActionSet in ExecutorCore alongside a unique ID
-type timedActions struct {
-	// id stores a unique ID associated with the cached actions, so that we can use optimistic
-	// locking to make sure we're never taking an action that is not the *current* recommendation,
-	// because otherwise guaranteeing correctness of core.State is really difficult.
-	//
-	// id is exclusively used by (*ExecutorCore).updateIfActionsUnchanged().
-	id      timedActionsID
-	actions core.ActionSet
-}
-
-type timedActionsID int64
-
-// fetch the currently cached actions, or recalculate if they've since been invalidated
-func (c *ExecutorCore) getActions() timedActions {
+func (c *ExecutorCore) withLock(with func(*core.State)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.actions == nil {
-		id := c.lastActionsID + 1
-		c.onNextActions()
-
-		// NOTE: Even though we cache the actions generated using time.Now(), it's *generally* ok.
-		now := time.Now()
-		c.stateLogger.Debug("Recalculating ActionSet", zap.Time("now", now), zap.Any("state", c.core.Dump()))
-		c.actions = &timedActions{id: id, actions: c.core.NextActions(now)}
-		c.lastActionsID = id
-		c.stateLogger.Debug("New ActionSet", zap.Time("now", now), zap.Any("actions", c.actions.actions))
-	}
-
-	return *c.actions
+	with(c.core)
 }
 
 func (c *ExecutorCore) update(with func(*core.State)) {
@@ -117,26 +87,7 @@ func (c *ExecutorCore) update(with func(*core.State)) {
 	defer c.mu.Unlock()
 
 	c.updates.Broadcast()
-	c.actions = nil
 	with(c.core)
-}
-
-// updateIfActionsUnchanged is like update, but if the actions have been changed, then the function
-// is not called and this returns false.
-//
-// Otherwise, if the actions are up-to-date, then this is equivalent to c.update(with), and returns true.
-func (c *ExecutorCore) updateIfActionsUnchanged(actions timedActions, with func(*core.State)) (updated bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if actions.id != c.lastActionsID {
-		return false
-	}
-
-	c.updates.Broadcast()
-	c.actions = nil
-	with(c.core)
-	return true
 }
 
 // may change in the future
