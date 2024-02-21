@@ -98,7 +98,7 @@ allocated to the vm. You can run it with:
 ```sh
 scripts/run-bench.sh
 # or:
-VM_NAME=postgres14-disk-test scripts/run-bench.sh
+VM_NAME=postgres16-disk-test scripts/run-bench.sh
 ```
 
 ### Running `allocate-loop`
