@@ -81,7 +81,7 @@ make deploy
 Build and load the test VM:
 
 ```sh
-make pg14-disk-test
+make pg16-disk-test
 ```
 
 Start the test VM:
@@ -98,7 +98,7 @@ allocated to the vm. You can run it with:
 ```sh
 scripts/run-bench.sh
 # or:
-VM_NAME=postgres14-disk-test scripts/run-bench.sh
+VM_NAME=postgres16-disk-test scripts/run-bench.sh
 ```
 
 ### Running `allocate-loop`
@@ -113,7 +113,7 @@ cgexec -g memory:neon-test allocate-loop 256 2280
 # run it in the neon-test cgroup  ;  use 256 <-> 2280 MiB
 ```
 
-[`allocate-loop`]: vm-examples/pg14-disk-test/allocate-loop.c
+[`allocate-loop`]: vm-examples/pg16-disk-test/allocate-loop.c
 
 ### Testing
 

@@ -118,8 +118,8 @@ discussed more in the [high-level consequences] section below.
 * `scripts-common.sh` — file with a handful of useful functions, used both in `build` and `scripts`
 * `vm-deploy.yaml` — sample creation of a single VM, for testing autoscaling
 * `vm-examples/` — collection of VMs:
-    * `pg14-disk-test/` — VM with Postgres 14 and and ssh access
-      * Refer to [`vm-examples/pg14-disk-test/README.md`](./vm-examples/pg14-disk-test)  for more information.
+    * `pg16-disk-test/` — VM with Postgres 16 and and ssh access
+      * Refer to [`vm-examples/pg16-disk-test/README.md`](./vm-examples/pg16-disk-test)  for more information.
 
 [cluster-autoscaler]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler
 
