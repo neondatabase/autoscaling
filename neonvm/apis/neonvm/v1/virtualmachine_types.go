@@ -90,7 +90,12 @@ type VirtualMachineSpec struct {
 
 	Guest Guest `json:"guest"`
 
+	// Running init containers is costly, so InitScript field should be preferred over ExtraInitContainers
 	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
+
+	// InitScript will be executed in the main container before VM is started.
+	// +optional
+	InitScript string `json:"initScript,omitempty"`
 
 	// List of disk that can be mounted by virtual machine.
 	// +optional
@@ -169,6 +174,10 @@ type GuestSettings struct {
 	// Individual lines to add to a sysctl.conf file. See sysctl.conf(5) for more
 	// +optional
 	Sysctl []string `json:"sysctl,omitempty"`
+
+	// Swap adds a swap disk with the provided size.
+	// +optional
+	Swap *resource.Quantity `json:"swap,omitempty"`
 }
 
 type CPUs struct {

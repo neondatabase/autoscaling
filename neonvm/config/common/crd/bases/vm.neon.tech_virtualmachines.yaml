@@ -1084,6 +1084,8 @@ spec:
                   Builder version).'
                 type: boolean
               extraInitContainers:
+                description: Running init containers is costly, so InitScript field
+                  should be preferred over ExtraInitContainers
                 items:
                   description: A single application container that you want to run
                     within a pod.
@@ -2466,6 +2468,13 @@ spec:
                   settings:
                     description: Additional settings for the VM. Cannot be updated.
                     properties:
+                      swap:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Swap adds a swap disk with the provided size.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
                       sysctl:
                         description: Individual lines to add to a sysctl.conf file.
                           See sysctl.conf(5) for more
@@ -2486,6 +2495,10 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 type: array
+              initScript:
+                description: InitScript will be executed in the main container before
+                  VM is started.
+                type: string
               nodeSelector:
                 additionalProperties:
                   type: string

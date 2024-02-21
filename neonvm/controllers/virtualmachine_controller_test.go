@@ -103,6 +103,7 @@ var _ = Describe("VirtualMachine controller", func() {
 					IsK3s:                   false,
 					UseContainerMgr:         true,
 					MaxConcurrentReconciles: 1,
+					QEMUDiskCacheSettings:   "cache=none",
 				},
 			}
 

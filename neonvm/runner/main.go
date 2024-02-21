@@ -201,7 +201,17 @@ func resolvePath() string {
 	return pathAfterSystemdDetection
 }
 
-func createISO9660runtime(diskPath string, command, args, sysctl []string, env []vmv1.EnvVar, disks []vmv1.Disk, enableSSH bool) error {
+func createISO9660runtime(
+	diskPath string,
+	command []string,
+	args []string,
+	sysctl []string,
+	env []vmv1.EnvVar,
+	disks []vmv1.Disk,
+	enableSSH bool,
+	swapSize *resource.Quantity,
+	shmsize *resource.Quantity,
+) error {
 	writer, err := iso9660.NewWriter()
 	if err != nil {
 		return err
@@ -247,9 +257,16 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 		mounts = append(mounts, "/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
 	}
 
+	if swapSize != nil {
+		// nb: busybox swapon only supports '-d', not its long form '--discard'.
+		mounts = append(mounts, `/neonvm/bin/swapon -d $(/neonvm/bin/blkid -L swapdisk)`)
+	}
+
 	if len(disks) != 0 {
 		for _, disk := range disks {
-			mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
+			if disk.MountPath != "" {
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
+			}
 			switch {
 			case disk.EmptyDisk != nil:
 				opts := ""
@@ -269,6 +286,10 @@ func createISO9660runtime(diskPath string, command, args, sysctl []string, env [
 				// do nothing
 			}
 		}
+	}
+
+	if shmsize != nil {
+		mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o remount,size=%d /dev/shm`, shmsize.Value()))
 	}
 
 	mounts = append(mounts, "")
@@ -335,6 +356,34 @@ func calcDirUsage(dirPath string) (int64, error) {
 		size += s
 	}
 	return size, nil
+}
+
+func createSwap(diskName string, diskPath string, diskSize *resource.Quantity) error {
+	if diskSize == nil {
+		return errors.New("diskSize should be specified")
+	}
+
+	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", "swap.raw", fmt.Sprintf("%d", diskSize.Value())); err != nil {
+		return err
+	}
+	if err := execFg("mkswap", "-L", diskName, "swap.raw"); err != nil {
+		return err
+	}
+
+	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "swap.raw", diskPath); err != nil {
+		return err
+	}
+
+	if err := execFg("rm", "-f", "swap.raw"); err != nil {
+		return err
+	}
+
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	if err := execFg("chown", "36:34", diskPath); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, contentPath *string) error {
@@ -480,6 +529,35 @@ func checkDevTun() bool {
 	return mode&os.ModeCharDevice == os.ModeCharDevice
 }
 
+func runInitScript(logger *zap.Logger, script string) error {
+	if len(script) == 0 {
+		return nil
+	}
+
+	// creates a tmp file with the script content
+	tmpFile, err := os.CreateTemp(os.TempDir(), "init-script-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile.Name()) // clean up
+
+	if _, err := tmpFile.Write([]byte(script)); err != nil {
+		return err
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	logger.Info("running init script", zap.String("path", tmpFile.Name()))
+
+	if err := execFg("/bin/sh", tmpFile.Name()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
 	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
 
@@ -488,11 +566,13 @@ func main() {
 	var kernelPath string
 	var appendKernelCmdline string
 	var skipCgroupManagement bool
+	var diskCacheSettings string
 	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
 	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
 	flag.BoolVar(&skipCgroupManagement, "skip-cgroup-management", false, "Don't try to manage CPU (use if running alongside container-mgr)")
+	flag.StringVar(&diskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Cache settings to add to -drive args for VM disks")
 	flag.Parse()
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
@@ -526,8 +606,9 @@ func main() {
 		cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *qemuCPUs.max, *qemuCPUs.max))
 	}
 
+	initialMemorySize := vmSpec.Guest.MemorySlotSize.Value() * int64(*vmSpec.Guest.MemorySlots.Min)
 	memory := []string{}
-	memory = append(memory, fmt.Sprintf("size=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Min)))
+	memory = append(memory, fmt.Sprintf("size=%db", initialMemorySize))
 	if vmSpec.Guest.MemorySlots.Max != nil {
 		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
@@ -538,12 +619,40 @@ func main() {
 		enableSSH = true
 	}
 
+	err = runInitScript(logger, vmSpec.InitScript)
+	if err != nil {
+		logger.Fatal("Failed to run init script", zap.Error(err))
+	}
+
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{}
+	var shmSize *resource.Quantity
+	var swapSize *resource.Quantity
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
+		swapSize = vmSpec.Guest.Settings.Swap
+
+		// By default, Linux sets the size of /dev/shm to 1/2 of the physical memory.  If
+		// swap is configured, we want to set /dev/shm higher, because we can autoscale
+		// the memory up.
+		//
+		// See https://github.com/neondatabase/autoscaling/issues/800
+		if vmSpec.Guest.Settings.Swap != nil && vmSpec.Guest.Settings.Swap.Value() > initialMemorySize/2 {
+			shmSize = vmSpec.Guest.Settings.Swap
+		}
 	}
-	if err = createISO9660runtime(runtimeDiskPath, vmSpec.Guest.Command, vmSpec.Guest.Args, sysctl, vmSpec.Guest.Env, vmSpec.Disks, enableSSH); err != nil {
+	err = createISO9660runtime(
+		runtimeDiskPath,
+		vmSpec.Guest.Command,
+		vmSpec.Guest.Args,
+		sysctl,
+		vmSpec.Guest.Env,
+		vmSpec.Disks,
+		enableSSH,
+		swapSize,
+		shmSize,
+	)
+	if err != nil {
 		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
 	}
 
@@ -595,7 +704,7 @@ func main() {
 	}
 
 	// disk details
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,cache=none", rootDiskPath))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
 
 	if enableSSH {
@@ -604,6 +713,16 @@ func main() {
 			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
+	}
+
+	if swapSize != nil {
+		diskName := "swapdisk"
+		logger.Info("creating QCOW2 image for swap", zap.String("diskName", diskName))
+		dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, diskName)
+		if err := createSwap(diskName, dPath, swapSize); err != nil {
+			logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
+		}
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none,discard=unmap", diskName, dPath))
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -618,7 +737,7 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				discard = ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,cache=none%s", disk.Name, dPath, discard))
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, diskCacheSettings, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -881,11 +1000,20 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	delay := 3 * time.Second
 	var conn net.Conn
 	var reader *bufio.Reader
+
 	b := &backoff.Backoff{
 		Min:    100 * time.Millisecond,
 		Max:    delay,
 		Factor: 2,
 		Jitter: true,
+	}
+
+	// Wait a bit to reduce the chance we attempt dialing before
+	// QEMU is started
+	select {
+	case <-time.After(200 * time.Millisecond):
+	case <-ctx.Done():
+		logger.Warn("QEMU shut down too soon to start forwarding logs")
 	}
 
 	for {
@@ -925,7 +1053,9 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 			if conn != nil {
 				conn.Close()
 			}
-			_ = drainLogsReader(reader, logger)
+			if reader != nil {
+				_ = drainLogsReader(reader, logger)
+			}
 			return
 		case <-time.After(b.Duration()):
 		}

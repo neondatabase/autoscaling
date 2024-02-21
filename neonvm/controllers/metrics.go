@@ -18,6 +18,7 @@ type ReconcilerMetrics struct {
 	vmCreationToRunnerCreationTime prometheus.Histogram
 	runnerCreationToVMRunningTime  prometheus.Histogram
 	vmCreationToVMRunningTime      prometheus.Histogram
+	vmRestartCounts                prometheus.Counter
 }
 
 func MakeReconcilerMetrics() ReconcilerMetrics {
@@ -55,6 +56,12 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Buckets: buckets,
 			},
 		)),
+		vmRestartCounts: util.RegisterMetric(metrics.Registry, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "vm_restarts_count",
+				Help: "Total number of VM restarts across the cluster captured by VirtualMachine reconciler",
+			},
+		)),
 	}
 	return m
 }
@@ -68,8 +75,33 @@ type wrappedReconciler struct {
 	failing map[client.ObjectKey]struct{}
 }
 
+// ReconcilerWithMetrics is a Reconciler produced by WithMetrics that can return a snapshot of the
+// state backing the metrics.
+type ReconcilerWithMetrics interface {
+	reconcile.Reconciler
+
+	Snapshot() ReconcileSnapshot
+}
+
+// ReconcileSnapshot provides a glimpse into the current state of ongoing reconciles
+//
+// This type is (transitively) returned by the controller's "dump state" HTTP endpoint, and exists
+// to allow us to get deeper information on the metrics - we can't expose information for every
+// VirtualMachine into the metrics (it'd be too high cardinality), but we *can* make it available
+// when requested.
+type ReconcileSnapshot struct {
+	// ControllerName is the name of the controller: virtualmachine or virtualmachinemigration.
+	ControllerName string `json:"controllerName"`
+
+	// Failing is the list of objects currently failing to reconcile
+	Failing []string `json:"failing"`
+}
+
 // WithMetrics wraps a given Reconciler with metrics capabilities.
-func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) reconcile.Reconciler {
+//
+// The returned reconciler also provides a way to get a snapshot of the state of ongoing reconciles,
+// to see the data backing the metrics.
+func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) ReconcilerWithMetrics {
 	return &wrappedReconciler{
 		Reconciler:     reconciler,
 		Metrics:        rm,
@@ -97,4 +129,19 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	d.Metrics.failing.WithLabelValues(d.ControllerName).Set(float64(len(d.failing)))
 
 	return res, err
+}
+
+func (r *wrappedReconciler) Snapshot() ReconcileSnapshot {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	failing := make([]string, 0, len(r.failing))
+	for namespacedName := range r.failing {
+		failing = append(failing, namespacedName.String())
+	}
+
+	return ReconcileSnapshot{
+		ControllerName: r.ControllerName,
+		Failing:        failing,
+	}
 }

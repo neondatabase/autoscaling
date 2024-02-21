@@ -168,32 +168,13 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	// update status after reconcile loop (try 10 times)
-	statusNow := statusBefore.DeepCopy()
-	statusNew := virtualmachine.Status.DeepCopy()
-	try := 1
-	for try < 10 {
-		if !DeepEqual(statusNow, statusNew) {
-			// update VirtualMachine status
-			// log.Info("DEBUG", "StatusNow", statusNow, "StatusNew", statusNew, "attempt", try)
-			if err := r.Status().Update(ctx, &virtualmachine); err != nil {
-				if apierrors.IsConflict(err) {
-					try++
-					time.Sleep(time.Second)
-					// re-get statusNow from current state
-					statusNow = virtualmachine.Status.DeepCopy()
-					continue
-				}
-				log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
-					"virtualmachine", virtualmachine.Name)
-				return ctrl.Result{}, err
-			}
+	// If the status changed, try to update the object
+	if !DeepEqual(statusBefore, virtualmachine.Status) {
+		if err := r.Status().Update(ctx, &virtualmachine); err != nil {
+			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
+				"virtualmachine", virtualmachine.Name)
+			return ctrl.Result{}, err
 		}
-		// status updated (before and now are equal)
-		break
-	}
-	if try >= 10 {
-		return ctrl.Result{}, fmt.Errorf("unable update .status for virtualmachine %s in %d attempts", virtualmachine.Name, try)
 	}
 
 	return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -340,6 +321,11 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 	// Generate runner pod name
 	if len(virtualmachine.Status.PodName) == 0 {
 		virtualmachine.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", virtualmachine.Name))
+		// Update the .Status on API Server to avoid creating multiple pods for a single VM
+		// See https://github.com/neondatabase/autoscaling/issues/794 for the context
+		if err := r.Status().Update(ctx, virtualmachine); err != nil {
+			return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
+		}
 	}
 
 	switch virtualmachine.Status.Phase {
@@ -802,6 +788,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
 				virtualmachine.Status.Phase = vmv1.VmPending // reset to trigger restart
 				*virtualmachine.Status.RestartCount += 1     // increment restart count
+				r.Metrics.vmRestartCounts.Inc()
 			}
 
 			// TODO for RestartPolicyNever: implement TTL or do nothing
@@ -1316,23 +1303,19 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 			InitContainers: []corev1.Container{
 				{
 					Image:           virtualmachine.Spec.Guest.RootDisk.Image,
-					Name:            "init-rootdisk",
+					Name:            "init",
 					ImagePullPolicy: virtualmachine.Spec.Guest.RootDisk.ImagePullPolicy,
-					Args:            []string{"cp", "/disk.qcow2", "/vm/images/rootdisk.qcow2"},
 					VolumeMounts: []corev1.VolumeMount{{
 						Name:      "virtualmachineimages",
 						MountPath: "/vm/images",
 					}},
-					SecurityContext: &corev1.SecurityContext{
-						// uid=36(qemu) gid=34(kvm) groups=34(kvm)
-						RunAsUser:  &[]int64{36}[0],
-						RunAsGroup: &[]int64{34}[0],
+					Command: []string{
+						"sh", "-c",
+						"cp /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
+							/* uid=36(qemu) gid=34(kvm) groups=34(kvm) */
+							"chown 36:34 /vm/images/rootdisk.qcow2 && " +
+							"sysctl -w net.ipv4.ip_forward=1",
 					},
-				},
-				{
-					Image:   image,
-					Name:    "sysctl",
-					Command: []string{"sysctl", "-w", "net.ipv4.ip_forward=1"},
 					SecurityContext: &corev1.SecurityContext{
 						Privileged: &[]bool{true}[0],
 					},
@@ -1372,6 +1355,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 						}
 						cmd = append(
 							cmd,
+							"-qemu-disk-cache-settings", config.QEMUDiskCacheSettings,
 							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 						)
@@ -1606,6 +1590,22 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 		pod.Spec.Containers[0].Ports = append(pod.Spec.Containers[0].Ports, cPort)
 	}
 
+	if settings := virtualmachine.Spec.Guest.Settings; settings != nil && settings.Swap != nil {
+		diskName := "swapdisk"
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+			Name:      diskName,
+			MountPath: fmt.Sprintf("/vm/mounts/%s", diskName),
+		})
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: diskName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					SizeLimit: settings.Swap,
+				},
+			},
+		})
+	}
+
 	for _, disk := range virtualmachine.Spec.Disks {
 
 		mnt := corev1.VolumeMount{
@@ -1681,15 +1681,16 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 // SetupWithManager sets up the controller with the Manager.
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
-func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachine"
 	reconciler := WithMetrics(r, r.Metrics, cntrlName)
-	return ctrl.NewControllerManagedBy(mgr).
+	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
 		Complete(reconciler)
+	return reconciler, err
 }
 
 func DeepEqual(v1, v2 interface{}) bool {

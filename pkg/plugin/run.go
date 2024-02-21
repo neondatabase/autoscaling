@@ -34,9 +34,22 @@ const (
 func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.Logger) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		logger := logger // copy locally, so that we can add fields and refer to it in defers
+
 		var finalStatus int
 		defer func() {
-			e.metrics.resourceRequests.WithLabelValues(r.RemoteAddr, strconv.Itoa(finalStatus)).Inc()
+			e.metrics.resourceRequests.WithLabelValues(strconv.Itoa(finalStatus)).Inc()
+		}()
+
+		// Catch any potential panics and report them as 500s
+		defer func() {
+			if err := recover(); err != nil {
+				msg := "request handler panicked"
+				logger.Error(msg, zap.String("error", fmt.Sprint(err)))
+				finalStatus = 500
+				w.WriteHeader(finalStatus)
+				_, _ = w.Write([]byte(msg))
+			}
 		}()
 
 		if r.Method != "POST" {
@@ -58,7 +71,7 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.
 			return
 		}
 
-		logger := logger.With(zap.Object("pod", req.Pod))
+		logger = logger.With(zap.Object("pod", req.Pod))
 		logger.Info(
 			"Received autoscaler-agent request",
 			zap.String("client", r.RemoteAddr), zap.Any("request", req),

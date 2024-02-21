@@ -785,7 +785,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		return nil // nil is success
 	} else {
 		logger.Error("Rejecting reserve Pod (not enough resources)", zap.Object("verdict", verdict))
-		return framework.NewStatus(framework.Unschedulable, "Not enough resources to reserve non-VM pod")
+		return framework.NewStatus(framework.Unschedulable, "Not enough resources to reserve Pod")
 	}
 }
 
