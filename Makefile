@@ -33,14 +33,13 @@ GIT_INFO := $(shell git describe --long --dirty)
 # in CI environment use 'neonvm' as cluster name
 # in other cases add $USER as cluster name suffix
 # or fallback to 'neonvm' if $USER variable absent
-# ifdef CI
-#   CLUSTER_NAME = neonvm
-# else ifdef USER
-#   CLUSTER_NAME = neonvm-$(USER)
-# else
-#   CLUSTER_NAME = neonvm
-# endif
-CLUSTER_NAME=neon-local
+ifdef CI
+  CLUSTER_NAME = neonvm
+else ifdef USER
+  CLUSTER_NAME = neonvm-$(USER)
+else
+  CLUSTER_NAME = neonvm
+endif
 
 .PHONY: all
 all: build lint
