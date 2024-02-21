@@ -19,11 +19,6 @@ import (
 //////////////////
 
 type Config struct {
-	// ComputeUnit is the desired ratio between CPU and memory that autoscaler-agents should uphold
-	//
-	// This value is sent to autoscaler-agents in every response, as part of api.PluginResponse.
-	ComputeUnit api.Resources `json:"computeUnit"`
-
 	// NodeConfig defines our policies around node resources and scoring
 	NodeConfig nodeConfig `json:"nodeConfig"`
 
@@ -121,10 +116,6 @@ func (c *Config) migrationEnabled() bool {
 
 // if the returned error is not nil, the string is a JSON path to the invalid value
 func (c *Config) validate() (string, error) {
-	if err := c.ComputeUnit.ValidateNonZero(); err != nil {
-		return "computeUnit", err
-	}
-
 	if path, err := c.NodeConfig.validate(); err != nil {
 		return fmt.Sprintf("nodeConfig.%s", path), err
 	}

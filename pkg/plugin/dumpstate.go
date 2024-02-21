@@ -140,7 +140,6 @@ type podStateDump struct {
 type vmPodStateDump struct {
 	Name                     util.NamespacedName    `json:"name"`
 	TestingOnlyAlwaysMigrate bool                   `json:"testingOnlyAlwaysMigrate"`
-	MostRecentComputeUnit    *api.Resources         `json:"mostRecentComputeUnit"`
 	Metrics                  *api.Metrics           `json:"metrics"`
 	MqIndex                  int                    `json:"mqIndex"`
 	MigrationState           *podMigrationStateDump `json:"migrationState"`
@@ -246,11 +245,6 @@ func (s *podState) dump() podStateDump {
 
 func (s *vmPodState) dump() vmPodStateDump {
 	// Copy some of the "may be nil" pointer fields
-	var mostRecentComputeUnit *api.Resources
-	if s.mostRecentComputeUnit != nil {
-		mrcu := *s.mostRecentComputeUnit
-		mostRecentComputeUnit = &mrcu
-	}
 	var metrics *api.Metrics
 	if s.metrics != nil {
 		m := *s.metrics
@@ -266,7 +260,6 @@ func (s *vmPodState) dump() vmPodStateDump {
 	return vmPodStateDump{
 		Name:                     s.name,
 		TestingOnlyAlwaysMigrate: s.testingOnlyAlwaysMigrate,
-		MostRecentComputeUnit:    mostRecentComputeUnit,
 		Metrics:                  metrics,
 		MqIndex:                  s.mqIndex,
 		MigrationState:           migrationState,

@@ -25,7 +25,6 @@ metadata:
 data:
   autoscale-enforcer-config.json: |
     {
-      "computeUnit": { "vCPUs": 0.25, "mem": "1Gi" },
       "nodeConfig": {
         "cpu": { "watermark": 0.9 },
         "memory": { "watermark": 0.9 },

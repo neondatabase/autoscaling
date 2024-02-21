@@ -191,10 +191,6 @@ type vmPodState struct {
 	// will always prompt it to mgirate, regardless of whether the VM actually *needs* to.
 	testingOnlyAlwaysMigrate bool
 
-	// mostRecentComputeUnit stores the "compute unit" that this pod's autoscaler-agent most
-	// recently observed (and so, what future AgentRequests are expected to abide by)
-	mostRecentComputeUnit *api.Resources
-
 	// metrics is the most recent metrics update we received for this pod. A nil pointer means that
 	// we have not yet received metrics.
 	metrics *api.Metrics
@@ -682,7 +678,6 @@ func (e *AutoscaleEnforcer) reserveResources(
 			name:                     vmInfo.NamespacedName(),
 			memSlotSize:              vmInfo.Mem.SlotSize,
 			testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,
-			mostRecentComputeUnit:    nil,
 			metrics:                  nil,
 			mqIndex:                  -1,
 			migrationState:           nil,
@@ -965,11 +960,8 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(logger *zap.Logger, vm *a
 		return
 	}
 
-	// FIXME: this definition of receivedContact may be inaccurate if there was an error with the
-	// autoscaler-agent's request.
-	receivedContact := ps.vm.mostRecentComputeUnit != nil
-	cpuVerdict := handleUpdatedLimits(&ps.node.cpu, &ps.cpu, receivedContact, vm.Cpu.Min, vm.Cpu.Max)
-	memVerdict := handleUpdatedLimits(&ps.node.mem, &ps.mem, receivedContact, vm.Min().Mem, vm.Max().Mem)
+	cpuVerdict := handleUpdatedLimits(&ps.node.cpu, &ps.cpu, vm.Cpu.Min, vm.Cpu.Max)
+	memVerdict := handleUpdatedLimits(&ps.node.mem, &ps.mem, vm.Min().Mem, vm.Max().Mem)
 
 	ps.node.updateMetrics(e.metrics)
 
@@ -1346,10 +1338,9 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			vm: &vmPodState{
 				name: util.GetNamespacedName(vm),
 
-				mqIndex:               -1,
-				metrics:               nil,
-				mostRecentComputeUnit: nil,
-				migrationState:        nil,
+				mqIndex:        -1,
+				metrics:        nil,
+				migrationState: nil,
 
 				memSlotSize:              vmInfo.Mem.SlotSize,
 				testingOnlyAlwaysMigrate: vmInfo.AlwaysMigrate,

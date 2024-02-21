@@ -162,11 +162,9 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)
 	}
 
-	// Check that req.ComputeUnit == nil matches whether the protocol version supports it.
-	if req.ComputeUnit == nil && req.ProtoVersion.AgentSendsComputeUnit() {
-		return nil, 400, fmt.Errorf("computeUnit required for protocol version %v", req.ProtoVersion)
-	} else if req.ComputeUnit != nil && !req.ProtoVersion.AgentSendsComputeUnit() {
-		return nil, 400, fmt.Errorf("computeUnit field not supported for protocol version %v", req.ProtoVersion)
+	// check that req.ComputeUnit has no zeros
+	if err := req.ComputeUnit.ValidateNonZero(); err != nil {
+		return nil, 400, fmt.Errorf("computeUnit fields must be non-zero: %w", err)
 	}
 
 	e.state.lock.Lock()
@@ -183,7 +181,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	}
 
 	// Check that req.ComputeUnit.Mem is divisible by the VM's memory slot size
-	if req.ComputeUnit != nil && req.ComputeUnit.Mem%pod.vm.memSlotSize != 0 {
+	if req.ComputeUnit.Mem%pod.vm.memSlotSize != 0 {
 		return nil, 400, fmt.Errorf(
 			"computeUnit is not divisible by VM memory slot size: %v not divisible by %v",
 			req.ComputeUnit,
@@ -195,11 +193,6 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	// multiply memory resources to make it match the
 	if !req.ProtoVersion.RepresentsMemoryAsBytes() {
 		req.Resources.Mem *= pod.vm.memSlotSize
-	}
-
-	computeUnit := e.state.conf.ComputeUnit
-	if req.ComputeUnit != nil {
-		computeUnit = *req.ComputeUnit
 	}
 
 	node := pod.node
@@ -221,7 +214,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		logger,
 		pod,
 		node,
-		computeUnit,
+		req.ComputeUnit,
 		req.Resources,
 		req.LastPermit,
 		mustMigrate,
@@ -248,43 +241,10 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	}
 
 	resp := api.PluginResponse{
-		Permit:      permit,
-		Migrate:     migrateDecision,
-		ComputeUnit: getComputeUnitForResponse(e.state.conf.ComputeUnit, req.ProtoVersion),
+		Permit:  permit,
+		Migrate: migrateDecision,
 	}
-
-	// If the selected protocol version is using memory slots, rather than byte quantities, then we
-	// should convert the values before responding.
-	if !req.ProtoVersion.RepresentsMemoryAsBytes() {
-		resp.Permit.Mem /= pod.vm.memSlotSize
-		if resp.ComputeUnit != nil {
-			resp.ComputeUnit.Mem /= pod.vm.memSlotSize
-		}
-	}
-
-	pod.vm.mostRecentComputeUnit = &e.state.conf.ComputeUnit
 	return &resp, 200, nil
-}
-
-// getComputeUnitForResponse tries to return compute unit that the agent supports
-//
-// If the plugin is not supposed to send a compute unit in this version of the protocol, then we
-// return nil.
-// Else if our compute unit has a fractional CPU but the agent doesn't support that, we multiply the
-// result until it's no longer fractional.
-func getComputeUnitForResponse(computeUnit api.Resources, protoVersion api.PluginProtoVersion) *api.Resources {
-	if !protoVersion.PluginSendsComputeUnit() {
-		return nil
-	}
-
-	if !protoVersion.SupportsFractionalCPU() {
-		initialCU := computeUnit
-		for i := uint16(2); computeUnit.VCPU%1000 != 0; i++ {
-			computeUnit = initialCU.Mul(i)
-		}
-	}
-
-	return &computeUnit
 }
 
 func (e *AutoscaleEnforcer) handleResources(
@@ -311,23 +271,6 @@ func (e *AutoscaleEnforcer) handleResources(
 			return api.Resources{}, 400, err
 		}
 		return api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}, 200, nil
-	}
-
-	// Check that the resources correspond to an integer number of compute units, based on what the
-	// pod was most recently informed of. The resources may only be mismatched if one of them is at
-	// the minimum or maximum of what's allowed for this VM.
-	if pod.vm.mostRecentComputeUnit != nil {
-		cu := *pod.vm.mostRecentComputeUnit
-		dividesCleanly := req.VCPU%cu.VCPU == 0 && req.Mem%cu.Mem == 0 && uint32(req.VCPU/cu.VCPU) == uint32(req.Mem/cu.Mem)
-		atMin := req.VCPU == pod.cpu.Min || req.Mem == pod.mem.Min
-		atMax := req.VCPU == pod.cpu.Max || req.Mem == pod.mem.Max
-		if !dividesCleanly && !(atMin || atMax) {
-			contextString := "If the VM's bounds did not just change, then this indicates a bug in the autoscaler-agent."
-			logger.Warn(
-				"Pod requested resources do not divide cleanly by previous compute unit",
-				zap.Object("requested", req), zap.Object("computeUnit", cu), zap.String("context", contextString),
-			)
-		}
 	}
 
 	if lastPermit != nil {
