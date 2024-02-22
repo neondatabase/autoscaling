@@ -161,14 +161,7 @@ func main() {
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
 	}
 
-	vmReconciler := &controllers.VirtualMachineReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
-		Config:   rc,
-		Metrics:  reconcilerMetrics,
-	}
-	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
+	vmReconciler, err := controllers.SetupReconciler(mgr, "virtualmachine", rc, reconcilerMetrics)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
 		os.Exit(1)
@@ -178,14 +171,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	migrationReconciler := &controllers.VirtualMachineMigrationReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
-		Config:   rc,
-		Metrics:  reconcilerMetrics,
-	}
-	migrationReconcilerMetrics, err := migrationReconciler.SetupWithManager(mgr)
+	migrationReconciler, err := controllers.SetupReconciler(mgr, "virtualmachinemigration", rc, reconcilerMetrics)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
 		os.Exit(1)
@@ -205,7 +191,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	dbgSrv := debugServerFunc(vmReconcilerMetrics, migrationReconcilerMetrics)
+	dbgSrv := debugServerFunc(vmReconciler, migrationReconciler)
 	if err := mgr.Add(dbgSrv); err != nil {
 		setupLog.Error(err, "unable to set up debug server")
 		os.Exit(1)
