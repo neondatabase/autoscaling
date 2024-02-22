@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime/debug"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -86,7 +85,7 @@ type VirtualMachineMigrationReconciler struct {
 // - About Operator Pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
 // - About Controllers: https://kubernetes.io/docs/concepts/architecture/controller/
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
-func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
+func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	// Fetch the VirtualMachineMigration instance
@@ -148,7 +147,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 
 	// Fetch the corresponding VirtualMachine instance
 	vm := new(vmv1.VirtualMachine)
-	err = r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
+	err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
 	if err != nil {
 		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
 		if apierrors.IsNotFound(err) {
