@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -108,8 +109,15 @@ type VirtualMachineReconciler struct {
 // - About Operator Pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
 // - About Controllers: https://kubernetes.io/docs/concepts/architecture/controller/
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
-func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
 	log := log.FromContext(ctx)
+
+	defer func() {
+		if v := recover(); v != nil {
+			err = fmt.Errorf("Reconcile panicked: %v", v)
+			log.Error(err, "stack", string(debug.Stack()))
+		}
+	}()
 
 	var virtualmachine vmv1.VirtualMachine
 	if err := r.Get(ctx, req.NamespacedName, &virtualmachine); err != nil {
