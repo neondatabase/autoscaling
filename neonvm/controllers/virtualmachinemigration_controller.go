@@ -89,13 +89,6 @@ type VirtualMachineMigrationReconciler struct {
 func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
 	log := log.FromContext(ctx)
 
-	defer func() {
-		if v := recover(); v != nil {
-			err = fmt.Errorf("Reconcile panicked: %v", v)
-			log.Error(err, "stack", string(debug.Stack()))
-		}
-	}()
-
 	// Fetch the VirtualMachineMigration instance
 	// The purpose is check if the Custom Resource for the Kind VirtualMachineMigration
 	// is applied on the cluster if not we return nil to stop the reconciliation
@@ -678,7 +671,7 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 // desirable state on the cluster
 func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachinemigration"
-	reconciler := WithMetrics(r, r.Metrics, cntrlName)
+	reconciler := WithMetrics(withCatchPanic(r), r.Metrics, cntrlName)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).

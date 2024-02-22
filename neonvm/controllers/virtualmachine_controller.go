@@ -112,13 +112,6 @@ type VirtualMachineReconciler struct {
 func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
 	log := log.FromContext(ctx)
 
-	defer func() {
-		if v := recover(); v != nil {
-			err = fmt.Errorf("Reconcile panicked: %v", v)
-			log.Error(err, "stack", string(debug.Stack()))
-		}
-	}()
-
 	var virtualmachine vmv1.VirtualMachine
 	if err := r.Get(ctx, req.NamespacedName, &virtualmachine); err != nil {
 		// Error reading the object - requeue the request.
@@ -1695,7 +1688,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 // desirable state on the cluster
 func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachine"
-	reconciler := WithMetrics(r, r.Metrics, cntrlName)
+	reconciler := WithMetrics(withCatchPanic(r), r.Metrics, cntrlName)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
