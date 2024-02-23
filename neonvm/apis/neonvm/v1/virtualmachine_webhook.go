@@ -48,24 +48,24 @@ func (r *VirtualMachine) Default() {
 	if r.Spec.Guest.CPUs.Use == nil {
 		r.Spec.Guest.CPUs.Use = new(MilliCPU)
 		*r.Spec.Guest.CPUs.Use = *r.Spec.Guest.CPUs.Min
-		virtualmachinelog.Info("defaulting guest CPU settings", ".spec.guest.cpus.use", *r.Spec.Guest.CPUs.Use)
+		virtualmachinelog.Info("defaulting guest CPU settings", ".spec.guest.cpus.use", *r.Spec.Guest.CPUs.Use, "VirtualMachine", r.Name)
 	}
 	if r.Spec.Guest.CPUs.Max == nil {
 		r.Spec.Guest.CPUs.Max = new(MilliCPU)
 		*r.Spec.Guest.CPUs.Max = *r.Spec.Guest.CPUs.Min
-		virtualmachinelog.Info("defaulting guest CPU settings", ".spec.guest.cpus.max", *r.Spec.Guest.CPUs.Max)
+		virtualmachinelog.Info("defaulting guest CPU settings", ".spec.guest.cpus.max", *r.Spec.Guest.CPUs.Max, "VirtualMachine", r.Name)
 	}
 
 	// Memory spec defaulter
 	if r.Spec.Guest.MemorySlots.Use == nil {
 		r.Spec.Guest.MemorySlots.Use = new(int32)
 		*r.Spec.Guest.MemorySlots.Use = *r.Spec.Guest.MemorySlots.Min
-		virtualmachinelog.Info("defaulting guest memory settings", ".spec.guest.memorySlots.use", *r.Spec.Guest.MemorySlots.Use)
+		virtualmachinelog.Info("defaulting guest memory settings", ".spec.guest.memorySlots.use", *r.Spec.Guest.MemorySlots.Use, "VirtualMachine", r.Name)
 	}
 	if r.Spec.Guest.MemorySlots.Max == nil {
 		r.Spec.Guest.MemorySlots.Max = new(int32)
 		*r.Spec.Guest.MemorySlots.Max = *r.Spec.Guest.MemorySlots.Min
-		virtualmachinelog.Info("defaulting guest memory settings", ".spec.guest.memorySlots.max", *r.Spec.Guest.MemorySlots.Max)
+		virtualmachinelog.Info("defaulting guest memory settings", ".spec.guest.memorySlots.max", *r.Spec.Guest.MemorySlots.Max, "VirtualMachine", r.Name)
 	}
 }
 
