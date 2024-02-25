@@ -19,7 +19,7 @@ func withCatchPanic(r reconcile.Reconciler) reconcile.Reconciler {
 }
 
 func (r *catchPanicReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
-	log := log.FromContext(ctx) // TODO: is this valid?
+	log := log.FromContext(ctx)
 
 	defer func() {
 		if v := recover(); v != nil {
