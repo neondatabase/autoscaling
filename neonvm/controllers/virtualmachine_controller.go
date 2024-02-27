@@ -235,20 +235,6 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 	}
 }
 
-func runnerSupportsCgroup(pod *corev1.Pod) bool {
-	val, ok := pod.Labels[vmv1.RunnerPodVersionLabel]
-	if !ok {
-		return false
-	}
-
-	uintVal, err := strconv.ParseUint(val, 10, 32)
-	if err != nil {
-		return false
-	}
-
-	return api.RunnerProtoVersion(uintVal).SupportsCgroupFractionalCPU()
-}
-
 func (r *VirtualMachineReconciler) updateVMStatusCPU(
 	ctx context.Context,
 	virtualmachine *vmv1.VirtualMachine,
@@ -514,14 +500,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			pluggedCPU := uint32(len(cpuSlotsPlugged))
 
 			// get cgroups CPU details from runner pod
-			var cgroupUsage *api.VCPUCgroup
-			supportsCgroup := runnerSupportsCgroup(vmRunner)
-			if supportsCgroup {
-				cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
-				if err != nil {
-					log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
-					return err
-				}
+			cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+			if err != nil {
+				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+				return err
 			}
 
 			// update status by CPUs used in the VM
@@ -540,19 +522,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// compare guest spec and count of plugged
 
 			specUseCPU := virtualmachine.Spec.Guest.CPUs.Use
-			scaleCgroupCPU := supportsCgroup && *specUseCPU != cgroupUsage.VCPUs
+			scaleCgroupCPU := *specUseCPU != cgroupUsage.VCPUs
 			scaleQemuCPU := specUseCPU.RoundedUp() != pluggedCPU
 			if scaleCgroupCPU || scaleQemuCPU {
-				if !supportsCgroup {
-					log.Info("VM goes into scaling mode, CPU count needs to be changed",
-						"CPUs on board", pluggedCPU,
-						"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use)
-				} else {
-					log.Info("VM goes into scaling mode, CPU count needs to be changed",
-						"CPUs on runner pod cgroup", cgroupUsage.VCPUs,
-						"CPUs on board", pluggedCPU,
-						"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use)
-				}
+				log.Info("VM goes into scaling mode, CPU count needs to be changed",
+					"CPUs on runner pod cgroup", cgroupUsage.VCPUs,
+					"CPUs on board", pluggedCPU,
+					"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use)
 				virtualmachine.Status.Phase = vmv1.VmScaling
 			}
 
@@ -658,14 +634,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		specCPU := virtualmachine.Spec.Guest.CPUs.Use
 		pluggedCPU := uint32(len(cpuSlotsPlugged))
 
-		var cgroupUsage *api.VCPUCgroup
-		supportsCgroup := runnerSupportsCgroup(vmRunner)
-		if supportsCgroup {
-			cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
-			if err != nil {
-				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
-				return err
-			}
+		cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+		if err != nil {
+			log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+			return err
 		}
 
 		// compare guest spec to count of plugged and runner pod cgroups
@@ -687,7 +659,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
 				fmt.Sprintf("One CPU was unplugged from VM %s",
 					virtualmachine.Name))
-		} else if supportsCgroup && *specCPU != cgroupUsage.VCPUs {
+		} else if *specCPU != cgroupUsage.VCPUs {
 			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", *specCPU)
 			if err := setRunnerCgroup(ctx, virtualmachine, *specCPU); err != nil {
 				return err
