@@ -17,6 +17,7 @@ first checking if the /register endpoint returned a 404.
 | Release | autoscaler-agent | VM monitor |
 |---------|------------------|------------|
 | _Current_ | v1.0 only | v1.0 only |
+| v0.26.0 | v1.0 only | v1.0 only |
 | v0.25.0 | v1.0 only | v1.0 only |
 | v0.24.0 | v1.0 only | v1.0 only |
 | v0.23.0 | v1.0 only | v1.0 only |
@@ -39,6 +40,7 @@ number.
 | Release | autoscaler-agent | Scheduler plugin |
 |---------|------------------|------------------|
 | _Current_ | v4.0 only | v3.0-v4.0 |
+| v0.26.0 | v4.0 only | v3.0-v4.0 |
 | v0.25.0 | v4.0 only | v1.0-v4.0 |
 | v0.24.0 | v4.0 only | v1.0-v4.0 |
 | v0.23.0 | **v4.0 only** | **v1.0-v4.0** |
@@ -96,6 +98,7 @@ Note: Components v0.6.0 and below did not have a versioned protocol between the 
 | Release | controller | runner |
 |---------|------------|--------|
 | _Current_ | 0 - 1 | 1 |
+| v0.26.0 | 0 - 1 | 1 |
 | v0.25.0 | 0 - 1 | 1 |
 | v0.24.0 | 0 - 1 | 1 |
 | v0.23.0 | 0 - 1 | 1 |
