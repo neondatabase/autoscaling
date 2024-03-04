@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 #
 # Helper script to build various YAML files.
+#
+# Usage: ./build.sh <CONTEXT> <TARGET>
 
 set -eu -o pipefail
 
 main () {
-    if [ "$#" -ne 1 ]; then
-        echo "Expected exactly one argument" >&2
+    if [ "$#" -ne 2 ]; then
+        echo "Expected exactly two arguments" >&2
         exit 1
     fi
 
-    case "$1" in
+    CONTEXT="$1"
+
+    case "$2" in
         autoscaler-agent)
             do-build autoscaler-agent 'autoscaler-agent-config' 'config.json'
             ;;
@@ -24,13 +28,6 @@ main () {
     esac
 }
 
-context () {
-    if ! ( set -u; echo "$CONTEXT" ) 2>/dev/null >/dev/null; then
-        CONTEXT="$(kubectl config current-context)"
-    fi
-    echo "$CONTEXT"
-}
-
 # Usage: do-build <target> <config k8s name> <config filename>
 do-build () {
     target="$1"
@@ -41,14 +38,14 @@ do-build () {
     cfg_selector=".data[\"$config_filename\"]"
 
     base_changes="$(cat patches.json | jq -e --arg target "$target" '.[$target]["@base"]')"
-    ctx_changes="$(cat patches.json | jq -e --arg ctx "$(context)" --arg target "$target" '.[$target][$ctx]' || {
-        echo "context not found $(context)" >/dev/tty;
+    ctx_changes="$(cat patches.json | jq -e --arg ctx "$CONTEXT" --arg target "$target" '.[$target][$ctx]' || {
+        echo "context not found $CONTEXT" >/dev/tty;
         exit 1
     })"
     changes="$(echo "[$base_changes, $ctx_changes]" | jq '.[0] + .[1]')"
 
     config_filter="select($obj_selector) | $cfg_selector"
-    changes="$(cat patches.json | jq --arg ctx "$(context)" --arg target "$target" '.[$target] | .["@base"] + .[$ctx]')"
+    changes="$(cat patches.json | jq --arg ctx "$CONTEXT" --arg target "$target" '.[$target] | .["@base"] + .[$ctx]')"
     new_config="$(cat $target.yaml | yq -r "$config_filter" | apply-changes "$changes")"
     cat $target.yaml | yq --yaml-output --indentless-lists --arg new "$new_config" "if $obj_selector then $cfg_selector = \$new else . end"
 }

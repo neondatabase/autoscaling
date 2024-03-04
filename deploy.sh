@@ -120,7 +120,7 @@ main () {
     
     if [ "$(confirm 'Dry-run deploy autoscale-scheduler?')" = 'yes' ]; then
         log 'Baking scheduler...'
-        cmd bash -e -o pipefail -c "./build.sh autoscale-scheduler > $cluster/autoscale-scheduler.yaml"
+        cmd bash -e -o pipefail -c "./build.sh $cluster autoscale-scheduler > $cluster/autoscale-scheduler.yaml"
         check_diff "$cluster" "$cluster/autoscale-scheduler.yaml"
         if [ "$(confirm 'Deploy autoscale-scheduler?')" = 'yes' ]; then
             log 'Deploying scheduler...'
@@ -136,7 +136,7 @@ main () {
     
     if [ "$(confirm 'Dry-run deploy autoscaler-agent?')" = 'yes' ]; then
         log 'Baking autoscaler-agent...'
-        cmd bash -e -o pipefail -c "./build.sh autoscaler-agent > $cluster/autoscaler-agent.yaml"
+        cmd bash -e -o pipefail -c "./build.sh $cluster autoscaler-agent > $cluster/autoscaler-agent.yaml"
         check_diff "$cluster" "$cluster/autoscaler-agent.yaml"
         if [ "$(confirm 'Deploy autoscaler-agent?')" = 'yes' ]; then
             log 'Deploying autoscaler-agent...'
