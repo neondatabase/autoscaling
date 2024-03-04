@@ -3741,7 +3741,7 @@ metadata:
   name: neonvm-controller
   namespace: neonvm-system
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       control-plane: controller
@@ -3791,7 +3791,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.25.1
+        image: neondatabase/neonvm-controller:v0.26.0
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3800,11 +3800,11 @@ spec:
           periodSeconds: 20
         name: manager
         ports:
-        - containerPort: 9443
-          name: webhook-server
-          protocol: TCP
         - containerPort: 8080
           name: metrics
+          protocol: TCP
+        - containerPort: 9443
+          name: webhook-server
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -3976,7 +3976,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.25.1
+        image: neondatabase/neonvm-vxlan-controller:v0.26.0
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -4008,7 +4008,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.25.1
+        image: neondatabase/neonvm-vxlan-controller:v0.26.0
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
