@@ -62,7 +62,7 @@ main () {
         check_diff "$cluster" "$cluster/multus-eks.yaml"
         if [ "$(confirm 'Deploy multus?')" = 'yes' ]; then
             log 'Deploying multus...'
-            cmd kubectl --context="$cluster" apply -f multus-eks.yaml
+            cmd kubectl --context="$cluster" apply -f "$cluster/multus-eks.yaml"
             cmd kubectl --context="$cluster" -n kube-system rollout status daemonset kube-multus-ds
             log 'Multus deploy finished.'
         else
@@ -77,7 +77,7 @@ main () {
         check_diff "$cluster" "$cluster/whereabouts.yaml"
         if [ "$(confirm 'Deploy whereabouts?')" = 'yes' ]; then
             log 'Deploying whereabouts...'
-            cmd kubectl --context="$cluster" apply -f whereabouts.yaml
+            cmd kubectl --context="$cluster" apply -f "$cluster/whereabouts.yaml"
             cmd kubectl --context="$cluster" -n kube-system rollout status daemonset whereabouts
             log 'Whereabouts deploy finished.'
         else
@@ -92,7 +92,7 @@ main () {
         check_diff "$cluster" "$cluster/vmscrape.yaml"
         if [ "$(confirm 'Deploy vmscrape?')" = 'yes' ]; then
             log 'Deploying vmscrape...'
-            cmd kubectl --context="$cluster" apply -f vmscrape.yaml
+            cmd kubectl --context="$cluster" apply -f "$cluster/vmscrape.yaml"
             log 'vmscrape deploy finished.'
         else
             log 'Skipping.'
@@ -106,7 +106,7 @@ main () {
         check_diff "$cluster" "$cluster/neonvm.yaml"
         if [ "$(confirm 'Deploy neonvm?')" = 'yes' ]; then
             log 'Deploying neonvm...'
-            cmd kubectl apply -f neonvm.yaml
+            cmd kubectl --context="$cluster" apply -f "$cluster/neonvm.yaml"
             cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset  neonvm-device-plugin
             cmd kubectl --context="$cluster" -n neonvm-system rollout status deployment neonvm-controller
             cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
@@ -120,7 +120,7 @@ main () {
     
     if [ "$(confirm 'Dry-run deploy autoscale-scheduler?')" = 'yes' ]; then
         log 'Baking scheduler...'
-        cmd bash -e -o pipefail -c "./build.sh autoscale-scheduler > $cluster/autoscale-scheduler.yaml"
+        cmd bash -e -o pipefail -c "./build.sh $cluster autoscale-scheduler > $cluster/autoscale-scheduler.yaml"
         check_diff "$cluster" "$cluster/autoscale-scheduler.yaml"
         if [ "$(confirm 'Deploy autoscale-scheduler?')" = 'yes' ]; then
             log 'Deploying scheduler...'
@@ -136,7 +136,7 @@ main () {
     
     if [ "$(confirm 'Dry-run deploy autoscaler-agent?')" = 'yes' ]; then
         log 'Baking autoscaler-agent...'
-        cmd bash -e -o pipefail -c "./build.sh autoscaler-agent > $cluster/autoscaler-agent.yaml"
+        cmd bash -e -o pipefail -c "./build.sh $cluster autoscaler-agent > $cluster/autoscaler-agent.yaml"
         check_diff "$cluster" "$cluster/autoscaler-agent.yaml"
         if [ "$(confirm 'Deploy autoscaler-agent?')" = 'yes' ]; then
             log 'Deploying autoscaler-agent...'
