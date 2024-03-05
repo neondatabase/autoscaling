@@ -393,7 +393,7 @@ type VirtualMachineStatus struct {
 	Phase VmPhase `json:"phase,omitempty"`
 	// Number of times the VM runner pod has been recreated
 	// +optional
-	RestartCount *int32 `json:"restartCount,omitempty"`
+	RestartCount int32 `json:"restartCount"`
 	// +optional
 	PodName string `json:"podName,omitempty"`
 	// +optional
@@ -477,7 +477,7 @@ func (vm *VirtualMachine) Cleanup() {
 }
 
 func (vm *VirtualMachine) HasRestarted() bool {
-	return vm.Status.RestartCount != nil && *vm.Status.RestartCount > 0
+	return vm.Status.RestartCount > 0
 }
 
 //+kubebuilder:object:root=true
