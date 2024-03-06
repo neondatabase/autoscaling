@@ -765,7 +765,7 @@ func main() {
 		if err := createSwap(diskName, dPath, swapSize); err != nil {
 			logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, qemuDiskArgs(diskName, dPath, diskCacheSettings+",media=disk,cache=none", "", &diskIdxCnt)...)
+		qemuCmd = append(qemuCmd, qemuDiskArgs(diskName, dPath, diskCacheSettings+",media=disk,cache=none,discard=unmap", "", &diskIdxCnt)...)
 	}
 
 	for _, disk := range vmSpec.Disks {
