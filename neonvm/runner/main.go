@@ -251,20 +251,24 @@ func createISO9660runtime(
 		}
 	}
 
+	diskCnt := 2 // root device + runtime included
+
 	var mounts []string
 	if enableSSH {
 		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
 		mounts = append(mounts, "/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
+		diskCnt += 1
 	}
 
 	if swapSize != nil {
 		// nb: busybox swapon only supports '-d', not its long form '--discard'.
 		mounts = append(mounts, `/neonvm/bin/swapon -d $(/neonvm/bin/blkid -L swapdisk)`)
+		diskCnt += 1
 	}
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
-			if disk.MountPath != "" {
+			if disk.MountPath != "" && disk.RawDisk == nil {
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			}
 			switch {
@@ -277,11 +281,19 @@ func createISO9660runtime(
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
 				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
+				diskCnt += 1
+			case disk.RawDisk != nil:
+				device := fmt.Sprintf("/dev/vd%s", string(rune(int('a')+diskCnt)))
+				// If the serial matches the record, soft-link it to the mountPath.
+				mounts = append(mounts, fmt.Sprintf(`(/neonvm/bin/udevadm info --query=all --name=%s -a | grep 'ATTR{serial}==%q') && /neonvm/bin/ln -s %s %s && /neonvm/bin/chmod 0777 %s`, device, disk.Name, device, disk.MountPath, disk.MountPath))
+				diskCnt += 1
 			case disk.ConfigMap != nil || disk.Secret != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
+				diskCnt += 1
 			case disk.Tmpfs != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -t tmpfs -o size=%d %s %s`, disk.Tmpfs.Size.Value(), disk.Name, disk.MountPath))
+				diskCnt += 1
 			default:
 				// do nothing
 			}
@@ -571,7 +583,7 @@ func runInitScript(logger *zap.Logger, script string) error {
 	return nil
 }
 
-func qemuDiskArgs(id string, file string, extraOptions string, deviceExtraOptions string) []string {
+func qemuDiskArgs(id string, file string, extraOptions string, deviceExtraOptions string, diskIdxCnt *int) []string {
 	if extraOptions != "" && extraOptions[0] != ',' {
 		extraOptions = "," + extraOptions
 	}
@@ -580,8 +592,9 @@ func qemuDiskArgs(id string, file string, extraOptions string, deviceExtraOption
 	}
 
 	args := []string{}
-	args = append(args, "-drive", fmt.Sprintf("id=%s,file=%s,if=none,%s", id, file, extraOptions))
+	args = append(args, "-drive", fmt.Sprintf("id=%s,file=%s,if=none,index=%d%s", id, file, *diskIdxCnt, extraOptions))
 	args = append(args, "-device", fmt.Sprintf("virtio-blk,drive=%s%s", id, deviceExtraOptions))
+	*diskIdxCnt += 1
 
 	return args
 }
@@ -731,16 +744,18 @@ func main() {
 		"-device", "virtserialport,chardev=log,name=tech.neon.log.0",
 	}
 
+	diskIdxCnt := 0
+
 	// disk details
-	qemuCmd = append(qemuCmd, qemuDiskArgs("rootdisk", rootDiskPath, diskCacheSettings+",media=disk", "")...)
-	qemuCmd = append(qemuCmd, qemuDiskArgs("runtime", runtimeDiskPath, "media=cdrom,readonly=on,cache=none", "")...)
+	qemuCmd = append(qemuCmd, qemuDiskArgs("rootdisk", rootDiskPath, diskCacheSettings+",media=disk", "", &diskIdxCnt)...)
+	qemuCmd = append(qemuCmd, qemuDiskArgs("runtime", runtimeDiskPath, "media=cdrom,readonly=on,cache=none", "", &diskIdxCnt)...)
 
 	if enableSSH {
 		name := "ssh-authorized-keys"
 		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
 			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, qemuDiskArgs(name, sshAuthorizedKeysDiskPath, ",media=cdrom,cache=none", "")...)
+		qemuCmd = append(qemuCmd, qemuDiskArgs(name, sshAuthorizedKeysDiskPath, ",media=cdrom,cache=none", "", &diskIdxCnt)...)
 	}
 
 	if swapSize != nil {
@@ -750,7 +765,7 @@ func main() {
 		if err := createSwap(diskName, dPath, swapSize); err != nil {
 			logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, qemuDiskArgs(diskName, dPath, diskCacheSettings+",media=disk,cache=none", "")...)
+		qemuCmd = append(qemuCmd, qemuDiskArgs(diskName, dPath, diskCacheSettings+",media=disk,cache=none", "", &diskIdxCnt)...)
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -766,14 +781,14 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				extraOptions += ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, extraOptions, "")...)
+			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, extraOptions, "", &diskIdxCnt)...)
 		case disk.RawDisk != nil:
 			logger.Info("creating QCOW2 image with no filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createRawQCOW2(dPath, &disk.RawDisk.Size); err != nil {
 				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, "", fmt.Sprintf("serial=%s", disk.Name))...)
+			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, "", fmt.Sprintf("serial=%s", disk.Name), &diskIdxCnt)...)
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -781,7 +796,7 @@ func main() {
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
 				logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, "media=cdrom,cache=none", "")...)
+			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, "media=cdrom,cache=none", "", &diskIdxCnt)...)
 		default:
 			// do nothing
 		}
