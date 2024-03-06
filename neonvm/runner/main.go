@@ -386,7 +386,7 @@ func createSwap(diskName string, diskPath string, diskSize *resource.Quantity) e
 	return nil
 }
 
-func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, contentPath *string) error {
+func createExt4QCOW2(diskName string, diskPath string, diskSize *resource.Quantity, contentPath *string) error {
 	ext4blocksMin := int64(64)
 	ext4blockSize := int64(4096)
 	ext4blockCount := int64(0)
@@ -418,6 +418,19 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 	}
 
 	if err := execFg("rm", "-f", "ext4.raw"); err != nil {
+		return err
+	}
+
+	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
+	if err := execFg("chown", "36:34", diskPath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createRawQCOW2(diskPath string, diskSize *resource.Quantity) error {
+	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "qcow2", diskPath, fmt.Sprintf("%d", diskSize.Value())); err != nil {
 		return err
 	}
 
@@ -745,8 +758,8 @@ func main() {
 		case disk.EmptyDisk != nil:
 			logger.Info("creating QCOW2 image with empty ext4 filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
-			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
-				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
+			if err := createExt4QCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
+				logger.Fatal("Failed to create QCOW2 Ext4 image", zap.Error(err))
 			}
 			extraOptions := ""
 			extraOptions += diskCacheSettings
@@ -754,6 +767,13 @@ func main() {
 				extraOptions += ",discard=unmap"
 			}
 			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, extraOptions, "")...)
+		case disk.RawDisk != nil:
+			logger.Info("creating QCOW2 image with no filesystem", zap.String("diskName", disk.Name))
+			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
+			if err := createRawQCOW2(dPath, &disk.RawDisk.Size); err != nil {
+				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
+			}
+			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, "", fmt.Sprintf("serial=%s", disk.Name))...)
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
