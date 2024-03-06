@@ -558,6 +558,21 @@ func runInitScript(logger *zap.Logger, script string) error {
 	return nil
 }
 
+func qemuDiskArgs(id string, file string, extraOptions string, deviceExtraOptions string) []string {
+	if extraOptions != "" && extraOptions[0] != ',' {
+		extraOptions = "," + extraOptions
+	}
+	if deviceExtraOptions != "" && deviceExtraOptions[0] != ',' {
+		deviceExtraOptions = "," + deviceExtraOptions
+	}
+
+	args := []string{}
+	args = append(args, "-drive", fmt.Sprintf("id=%s,file=%s,if=none,%s", id, file, extraOptions))
+	args = append(args, "-device", fmt.Sprintf("virtio-blk,drive=%s%s", id, deviceExtraOptions))
+
+	return args
+}
+
 func main() {
 	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
 
@@ -704,15 +719,15 @@ func main() {
 	}
 
 	// disk details
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
+	qemuCmd = append(qemuCmd, qemuDiskArgs("rootdisk", rootDiskPath, diskCacheSettings+",media=disk", "")...)
+	qemuCmd = append(qemuCmd, qemuDiskArgs("runtime", runtimeDiskPath, "media=cdrom,readonly=on,cache=none", "")...)
 
 	if enableSSH {
 		name := "ssh-authorized-keys"
 		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
 			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
+		qemuCmd = append(qemuCmd, qemuDiskArgs(name, sshAuthorizedKeysDiskPath, ",media=cdrom,cache=none", "")...)
 	}
 
 	if swapSize != nil {
@@ -722,7 +737,7 @@ func main() {
 		if err := createSwap(diskName, dPath, swapSize); err != nil {
 			logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", diskName, dPath, diskCacheSettings))
+		qemuCmd = append(qemuCmd, qemuDiskArgs(diskName, dPath, diskCacheSettings+",media=disk,cache=none", "")...)
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -733,11 +748,12 @@ func main() {
 			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
 				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
 			}
-			discard := ""
+			extraOptions := ""
+			extraOptions += diskCacheSettings
 			if disk.EmptyDisk.Discard {
-				discard = ",discard=unmap"
+				extraOptions += ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, diskCacheSettings, discard))
+			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, extraOptions, "")...)
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -745,7 +761,7 @@ func main() {
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
 				logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
+			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, "media=cdrom,cache=none", "")...)
 		default:
 			// do nothing
 		}
