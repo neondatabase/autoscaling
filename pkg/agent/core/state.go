@@ -625,8 +625,8 @@ func (s *state) calculateMonitorDownscaleAction(
 }
 
 func (s *state) scalingConfig() api.ScalingConfig {
-	if s.VM.ScalingConfig != nil {
-		return *s.VM.ScalingConfig
+	if s.VM.Config.ScalingConfig != nil {
+		return *s.VM.Config.ScalingConfig
 	} else {
 		return s.Config.DefaultScalingConfig
 	}

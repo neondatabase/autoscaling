@@ -145,8 +145,8 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 	vwc := vmWatchCallbacks{
-		submitDisabledScaling: func(logger *zap.Logger, pod util.NamespacedName) {
-			pushToQueue(logger, func() { p.handleVMDisabledScaling(hlogger, pod) })
+		submitConfigUpdated: func(logger *zap.Logger, pod util.NamespacedName, newCfg api.VmConfig) {
+			pushToQueue(logger, func() { p.handleVMConfigUpdated(hlogger, pod, newCfg) })
 		},
 		submitBoundsChanged: func(logger *zap.Logger, vm *api.VmInfo, podName string) {
 			pushToQueue(logger, func() { p.handleUpdatedScalingBounds(hlogger, vm, podName) })
