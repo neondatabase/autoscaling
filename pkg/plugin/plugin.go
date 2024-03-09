@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"github.com/tychoish/fun/pubsub"
@@ -133,8 +134,8 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 	pwc := podWatchCallbacks{
-		submitStarted: func(logger *zap.Logger, pod *corev1.Pod) {
-			pushToQueue(logger, pod.Name, func() { p.handleStarted(hlogger, pod) })
+		submitStarted: func(logger *zap.Logger, pod *corev1.Pod, vmRelistCount watch.RelistCount) {
+			pushToQueue(logger, pod.Name, func() { p.handleStarted(hlogger, pod, vmRelistCount) })
 		},
 		submitDeletion: func(logger *zap.Logger, name util.NamespacedName) {
 			// NOTE: It's important that the name we use here is the same as the one we use for
@@ -178,19 +179,22 @@ func makeAutoscaleEnforcerPlugin(
 
 	p.nodeStore = watch.NewIndexedStore(nodeStore, watch.NewFlatNameIndex[corev1.Node]())
 
+	var podIndexPtr atomic.Pointer[watch.IndexedStore[corev1.Pod, *watch.NameIndex[corev1.Pod]]]
+
+	logger.Info("Starting VM watcher")
+	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, vwc, &podIndexPtr)
+	if err != nil {
+		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
+	}
+
 	logger.Info("Starting pod watcher")
-	podStore, err := p.watchPodEvents(ctx, logger, watchMetrics, pwc)
+	podStore, err := p.watchPodEvents(ctx, logger, watchMetrics, pwc, vmStore)
 	if err != nil {
 		return nil, fmt.Errorf("Error starting pod watcher: %w", err)
 	}
 
 	podIndex := watch.NewIndexedStore(podStore, watch.NewNameIndex[corev1.Pod]())
-
-	logger.Info("Starting VM watcher")
-	vmStore, err := p.watchVMEvents(ctx, logger, watchMetrics, vwc, podIndex)
-	if err != nil {
-		return nil, fmt.Errorf("Error starting VM watcher: %w", err)
-	}
+	podIndexPtr.Store(&podIndex)
 
 	logger.Info("Starting VM Migration watcher")
 	if _, err := p.watchMigrationEvents(ctx, logger, watchMetrics, mwc); err != nil {
@@ -284,7 +288,12 @@ func (e *AutoscaleEnforcer) Name() string {
 // getVmInfo is a helper for the plugin-related functions
 //
 // This function returns nil, nil if the pod is not associated with a NeonVM virtual machine.
-func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, action string) (*api.VmInfo, error) {
+func (e *AutoscaleEnforcer) getVmInfo(
+	logger *zap.Logger,
+	pod *corev1.Pod,
+	action string,
+	relistCount *watch.RelistCount,
+) (*api.VmInfo, error) {
 	vmName := util.TryPodOwnerVirtualMachine(pod)
 	if vmName == nil {
 		return nil, nil
@@ -296,8 +305,13 @@ func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, actio
 
 	vm, ok := e.vmStore.GetIndexed(accessor)
 	if !ok {
+		var logMsgSuffix string
+		if relistCount != nil {
+			logMsgSuffix = " if it hasn't already been done"
+		}
+
 		logger.Warn(
-			"VM is missing from local store. Relisting",
+			fmt.Sprintf("VM is missing from local store. Relisting%s", logMsgSuffix),
 			zap.Object("pod", util.GetNamespacedName(pod)),
 			zap.Object("virtualmachine", vmName),
 		)
@@ -310,8 +324,15 @@ func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, actio
 		timer := time.NewTimer(timeout)
 		defer timer.Stop()
 
+		var relistFinished <-chan struct{}
+		if relistCount != nil {
+			relistFinished = e.vmStore.RelistIfHaventSince(*relistCount)
+		} else {
+			relistFinished = e.vmStore.Relist()
+		}
+
 		select {
-		case <-e.vmStore.Relist():
+		case <-relistFinished:
 		case <-timer.C:
 			return nil, fmt.Errorf("Timed out waiting on VM store relist (timeout = %s)", timeout)
 		}
@@ -432,7 +453,7 @@ func (e *AutoscaleEnforcer) Filter(
 		logger.Warn("Received Filter request for pod in ignored namespace, continuing anyways.")
 	}
 
-	vmInfo, err := e.getVmInfo(logger, pod, "Filter")
+	vmInfo, err := e.getVmInfo(logger, pod, "Filter", nil)
 	if err != nil {
 		logger.Error("Error getting VM info for Pod", zap.Error(err))
 		return framework.NewStatus(
@@ -628,7 +649,7 @@ func (e *AutoscaleEnforcer) Score(
 		return framework.MinNodeScore, status
 	}
 
-	vmInfo, err := e.getVmInfo(logger, pod, "Score")
+	vmInfo, err := e.getVmInfo(logger, pod, "Score", nil)
 	if err != nil {
 		logger.Error("Error getting VM info for Pod", zap.Error(err))
 		return 0, framework.NewStatus(framework.Error, "Error getting info for pod")
@@ -809,7 +830,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		return status
 	}
 
-	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", true)
+	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", true, nil)
 	if err != nil {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
 	}

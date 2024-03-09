@@ -5,6 +5,7 @@ package plugin
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -62,7 +63,7 @@ func (e *AutoscaleEnforcer) watchNodeEvents(
 }
 
 type podWatchCallbacks struct {
-	submitStarted        func(*zap.Logger, *corev1.Pod)
+	submitStarted        func(*zap.Logger, *corev1.Pod, watch.RelistCount)
 	submitDeletion       func(*zap.Logger, util.NamespacedName)
 	submitStartMigration func(_ *zap.Logger, podName, migrationName util.NamespacedName, source bool)
 	submitEndMigration   func(_ *zap.Logger, podName, migrationName util.NamespacedName)
@@ -80,6 +81,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
 	callbacks podWatchCallbacks,
+	vmStore *watch.Store[vmapi.VirtualMachine],
 ) (*watch.Store[corev1.Pod], error) {
 	logger := parentLogger.Named("pod-watch")
 
@@ -122,7 +124,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 						// definitely don't miss anything).
 						logger.Warn("Received add event for new Pod already running", zap.Object("pod", name))
 					}
-					callbacks.submitStarted(logger, pod)
+					callbacks.submitStarted(logger, pod, vmStore.RelistCountUpperBound())
 				}
 			},
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
@@ -136,7 +138,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 				// Check if a pod is now running.
 				if oldPod.Status.Phase == corev1.PodPending && newPod.Status.Phase == corev1.PodRunning {
 					logger.Info("Received update event for Pod now running", zap.Object("pod", name))
-					callbacks.submitStarted(logger, newPod)
+					callbacks.submitStarted(logger, newPod, vmStore.RelistCountUpperBound())
 				}
 
 				// Check if pod is "completed" - handle that the same as deletion.
@@ -217,7 +219,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
 	callbacks vmWatchCallbacks,
-	podIndex watch.IndexedStore[corev1.Pod, *watch.NameIndex[corev1.Pod]],
+	podIndexPtr *atomic.Pointer[watch.IndexedStore[corev1.Pod, *watch.NameIndex[corev1.Pod]]],
 ) (*watch.Store[vmapi.VirtualMachine], error) {
 	logger := parentLogger.Named("vm-watch")
 
@@ -253,15 +255,17 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 					// about it if we can't.
 					var runnerPod runtime.Object
 					if podName := newVM.Status.PodName; podName != "" {
-						// NB: index.Get returns nil if not found, so we only have a non-nil
-						// runnerPod if it's currently known.
-						rp, _ := podIndex.GetIndexed(func(index *watch.NameIndex[corev1.Pod]) (*corev1.Pod, bool) {
-							return index.Get(newVM.Namespace, podName)
-						})
-						// avoid typed nils by only assigning if non-nil
-						// See <https://github.com/neondatabase/autoscaling/issues/689> for more.
-						if rp != nil {
-							runnerPod = rp
+						if podIndex := podIndexPtr.Load(); podIndex != nil {
+							// NB: index.Get returns nil if not found, so we only have a non-nil
+							// runnerPod if it's currently known.
+							rp, _ := podIndex.GetIndexed(func(index *watch.NameIndex[corev1.Pod]) (*corev1.Pod, bool) {
+								return index.Get(newVM.Namespace, podName)
+							})
+							// avoid typed nils by only assigning if non-nil
+							// See <https://github.com/neondatabase/autoscaling/issues/689> for more.
+							if rp != nil {
+								runnerPod = rp
+							}
 						}
 					}
 
