@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -20,7 +21,24 @@ type relistInfo struct {
 	//
 	// Refer to the usage in (*relistExecutor).CollectTriggeredRequests() for more.
 	relisted chan struct{}
+
+	// relistCount is the number of instances of relisted that have been closed.
+	//
+	// Externally, we only guarantee that this is monotonically increasing; internally, it's
+	// associated each time with a single instance of `relisted`, so that RelistIfHaventSince can
+	// hook into ongoing execution.
+	relistCount RelistCount
+
+	// executor stores a reference to the current relistExecutor, if there is one active.
+	executor *relistExecutor
 }
+
+// RelistCount is a monotonically increasing value to track (approximately) the number of relists
+// that have happened
+//
+// RelistCounts are returned by (*Store[T]).RelistCount{Upper,Lower}Bound() and typically used in
+// (*Store[T]).RelistIfHaventSince(). Refer to those functions for more info.
+type RelistCount int64
 
 func newRelistInfo(incRequestedMetric func()) *relistInfo {
 	return &relistInfo{
@@ -28,6 +46,8 @@ func newRelistInfo(incRequestedMetric func()) *relistInfo {
 		incRequestedMetric: incRequestedMetric,
 		triggerRelist:      make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:           make(chan struct{}),
+		relistCount:        0,
+		executor:           nil,
 	}
 }
 
@@ -39,7 +59,10 @@ func (r *relistInfo) Triggered() <-chan struct{} {
 func (r *relistInfo) Relist() <-chan struct{} {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.lockedRelist()
+}
 
+func (r *relistInfo) lockedRelist() <-chan struct{} {
 	// Because triggerRelist has capacity=1, failing to immediately send to the channel means that
 	// there's already a signal to request relisting that has not yet been processed.
 	select {
@@ -56,6 +79,51 @@ func (r *relistInfo) Relist() <-chan struct{} {
 	// closed, the relevant List call *must* have happened after any attempted send on
 	// r.triggerRelist.
 	return r.relisted
+}
+
+var closedChan = makeClosedChan()
+
+func makeClosedChan() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
+
+func (r *relistInfo) RelistIfHaventSince(c RelistCount) <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if c < r.relistCount {
+		return closedChan
+	}
+
+	upperBound := r.lockedRelistCountUpperBound()
+	// we know c >= r.relistCount, so if c < upperBound we know that the higher upper bound comes
+	// from the executor.
+	if c < upperBound {
+		// doesn't matter which channel we return (they'll all get closed at once)
+		// So it's easiest just to return the first.
+		return r.executor.signalComplete[0]
+	}
+
+	// Otherwise, the relist hasn't already happened, and there isn't one in progress that will
+	// satisfy what we're looking for, so we need to start a fresh one.
+	return r.lockedRelist()
+}
+
+func (r *relistInfo) RelistCountUpperBound() RelistCount {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lockedRelistCountUpperBound()
+}
+
+func (r *relistInfo) lockedRelistCountUpperBound() RelistCount {
+	c := r.relistCount
+	if r.executor != nil {
+		c += RelistCount(len(r.executor.signalComplete))
+	}
+
+	return c
 }
 
 type relistExecutor struct {
@@ -84,11 +152,21 @@ type relistExecutor struct {
 // and part of that is storing any individual request channels that get collected as part of
 // retrying on failure.
 func (r *relistInfo) Executor() *relistExecutor {
-	return &relistExecutor{
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.executor != nil {
+		panic(fmt.Errorf("(*relistInfo).Executor() called without previous executor Complete()'d"))
+	}
+
+	e := &relistExecutor{
 		r:              r,
 		signalComplete: make([]chan struct{}, 0, 1),
 		firstIteration: true,
 	}
+
+	r.executor = e
+	return e
 }
 
 // CollectTriggeredRequests SHOULD be called before each attempt at relisting, until one is
@@ -121,9 +199,16 @@ func (e *relistExecutor) CollectTriggeredRequests() {
 
 // Complete closes any and all channels that were previously returned by (*relistInfo).relist() and
 // collected as part of this executor.
-func (r *relistExecutor) Complete() {
-	for _, ch := range r.signalComplete {
+func (e *relistExecutor) Complete() {
+	e.r.mu.Lock()
+	defer e.r.mu.Unlock()
+
+	for _, ch := range e.signalComplete {
 		close(ch)
 	}
-	r.signalComplete = nil
+	e.r.relistCount += RelistCount(len(e.signalComplete))
+
+	// decouple this executor
+	e.r.executor = nil
+	e.r = nil
 }

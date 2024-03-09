@@ -561,6 +561,32 @@ func (w *Store[T]) Relist() <-chan struct{} {
 	return w.relist.Relist()
 }
 
+// RelistIfHaventSince triggers re-listing the WatchStore, only if relisting hasn't already happened
+// since the call to (*Store[T]).RelistCountUpperBound() that returned the RelistCount.
+func (w *Store[T]) RelistIfHaventSince(c RelistCount) <-chan struct{} {
+	return w.relist.RelistIfHaventSince(c)
+}
+
+// RelistCountUpperBound returns the upper bound on the "relist count", which is a monotonically
+// increasing number associated with the number of relists.
+//
+// When used in combination with (*Store[T]).RelistIfHaventSince(), it allows the caller to be
+// certain that relisting *has* occurred, without creating duplicate work if it's not necessary.
+// Typical usage might be something like:
+//
+//		count := store.RelistCountUpperBound()
+//		// ... do some work ...
+//		select {
+//		case <-store.RelistIfHaventSince(count):
+//		    // done: We now know that the contents of 'store' are more recent than the call to
+//		    // 'RelistCountUpperBound'.
+//	    case <-time.After(timeout):
+//	        // error - timed out
+//		}
+func (w *Store[T]) RelistCountUpperBound() RelistCount {
+	return w.relist.RelistCountUpperBound()
+}
+
 func (w *Store[T]) Stop() {
 	w.stopSignal.Send(struct{}{})
 	w.stopped.Store(true)
