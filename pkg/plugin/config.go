@@ -26,6 +26,10 @@ type Config struct {
 	// version handled.
 	SchedulerName string `json:"schedulerName"`
 
+	// EventQueueWorkers sets the number of worker threads responsible for handling items from the
+	// event queue.
+	EventQueueWorkers int `json:"eventQueueWorkers"`
+
 	// RandomizeScores, if true, will cause the scheduler to score a node with a random number in
 	// the range [minScore + 1, trueScore], instead of the trueScore
 	RandomizeScores bool `json:"randomizeScores"`
@@ -122,6 +126,10 @@ func (c *Config) validate() (string, error) {
 
 	if c.SchedulerName == "" {
 		return "schedulerName", errors.New("string cannot be empty")
+	}
+
+	if c.EventQueueWorkers <= 0 {
+		return "eventQueueWorkers", errors.New("value must be > 0")
 	}
 
 	if c.DumpState != nil {
