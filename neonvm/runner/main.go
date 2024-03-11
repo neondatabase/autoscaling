@@ -583,7 +583,7 @@ func runInitScript(logger *zap.Logger, script string) error {
 	return nil
 }
 
-func qemuDiskArgs(id string, file string, extraOptions string, deviceExtraOptions string, diskIdxCnt *int) []string {
+func qemuDiskArgs(id string, file string, index int, extraOptions string, deviceExtraOptions string) []string {
 	if extraOptions != "" && extraOptions[0] != ',' {
 		extraOptions = "," + extraOptions
 	}
@@ -592,9 +592,8 @@ func qemuDiskArgs(id string, file string, extraOptions string, deviceExtraOption
 	}
 
 	args := []string{}
-	args = append(args, "-drive", fmt.Sprintf("id=%s,file=%s,if=none,index=%d%s", id, file, *diskIdxCnt, extraOptions))
+	args = append(args, "-drive", fmt.Sprintf("id=%s,file=%s,if=none,index=%d%s", id, file, index, extraOptions))
 	args = append(args, "-device", fmt.Sprintf("virtio-blk,drive=%s%s", id, deviceExtraOptions))
-	*diskIdxCnt += 1
 
 	return args
 }
@@ -746,16 +745,22 @@ func main() {
 
 	diskIdxCnt := 0
 
+	newQemuDisk := func(id string, file string, extraOptions string, deviceExtraOptions string) []string {
+		result := qemuDiskArgs(id, file, diskIdxCnt, extraOptions, deviceExtraOptions)
+		diskIdxCnt += 1
+		return result
+	}
+
 	// disk details
-	qemuCmd = append(qemuCmd, qemuDiskArgs("rootdisk", rootDiskPath, diskCacheSettings+",media=disk", "", &diskIdxCnt)...)
-	qemuCmd = append(qemuCmd, qemuDiskArgs("runtime", runtimeDiskPath, "media=cdrom,readonly=on,cache=none", "", &diskIdxCnt)...)
+	qemuCmd = append(qemuCmd, newQemuDisk("rootdisk", rootDiskPath, diskCacheSettings+",media=disk", "")...)
+	qemuCmd = append(qemuCmd, newQemuDisk("runtime", runtimeDiskPath, "media=cdrom,readonly=on,cache=none", "")...)
 
 	if enableSSH {
 		name := "ssh-authorized-keys"
 		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
 			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, qemuDiskArgs(name, sshAuthorizedKeysDiskPath, ",media=cdrom,cache=none", "", &diskIdxCnt)...)
+		qemuCmd = append(qemuCmd, newQemuDisk(name, sshAuthorizedKeysDiskPath, ",media=cdrom,cache=none", "")...)
 	}
 
 	if swapSize != nil {
@@ -765,7 +770,7 @@ func main() {
 		if err := createSwap(diskName, dPath, swapSize); err != nil {
 			logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, qemuDiskArgs(diskName, dPath, diskCacheSettings+",media=disk,cache=none,discard=unmap", "", &diskIdxCnt)...)
+		qemuCmd = append(qemuCmd, newQemuDisk(diskName, dPath, diskCacheSettings+",media=disk,cache=none,discard=unmap", "")...)
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -781,14 +786,14 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				extraOptions += ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, extraOptions, "", &diskIdxCnt)...)
+			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, extraOptions, "")...)
 		case disk.RawDisk != nil:
 			logger.Info("creating QCOW2 image with no filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createRawQCOW2(dPath, &disk.RawDisk.Size); err != nil {
 				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, "", fmt.Sprintf("serial=%s", disk.Name), &diskIdxCnt)...)
+			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, "", fmt.Sprintf("serial=%s", disk.Name))...)
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -796,7 +801,7 @@ func main() {
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
 				logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, qemuDiskArgs(disk.Name, dPath, "media=cdrom,cache=none", "", &diskIdxCnt)...)
+			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, "media=cdrom,cache=none", "")...)
 		default:
 			// do nothing
 		}
