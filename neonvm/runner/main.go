@@ -286,7 +286,8 @@ func createISO9660runtime(
 			case disk.RawDisk != nil:
 				device := fmt.Sprintf("/dev/vd%s", string(rune(int('a')+diskCnt)))
 				// If the serial matches the record, soft-link it to the mountPath.
-				mounts = append(mounts, fmt.Sprintf(`(/neonvm/bin/udevadm info --query=all --name=%s -a | grep 'ATTR{serial}==%q') && /neonvm/bin/ln -s %s %s && /neonvm/bin/chmod 0777 %s`, device, disk.Name, device, disk.MountPath, disk.MountPath))
+				mntCmd := fmt.Sprintf(`(/neonvm/bin/udevadm info --query=all --name=%s -a | grep 'ATTR{serial}==%q') && /neonvm/bin/ln -s %s %s && /neonvm/bin/chmod 0777 %s`, device, disk.Name, device, disk.MountPath, disk.MountPath)
+				mounts = append(mounts, mntCmd)
 				diskCnt += 1
 			case disk.ConfigMap != nil || disk.Secret != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
