@@ -212,7 +212,7 @@ func makeAutoscaleEnforcerPlugin(
 
 	for i := 0; i < config.EventQueueWorkers; i += 1 {
 		// copy the loop variable to avoid it escaping pre Go 1.22
-		go func(idx int) {
+		go func(ctx context.Context, idx int) {
 			for {
 				callback, err := queueSet.wait(ctx, idx) // NB: wait pulls from the front of the queue
 				if err != nil {
@@ -222,7 +222,7 @@ func makeAutoscaleEnforcerPlugin(
 
 				callback()
 			}
-		}(i)
+		}(ctx, i)
 	}
 
 	if err := util.StartPrometheusMetricsServer(ctx, logger.Named("prometheus"), 9100, promReg); err != nil {
