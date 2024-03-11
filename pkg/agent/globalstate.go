@@ -153,8 +153,11 @@ func (s *agentState) handleVMEventAdded(
 			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
 			stateUpdatedAt:     now,
 
-			startTime:                 now,
-			lastSuccessfulMonitorComm: nil,
+			startTime:                    now,
+			lastSuccessfulMonitorComm:    nil,
+			UnsuccessfulMonitorCommCnt:   0,
+			UnsuccessfulNeonVMCommCnt:    0,
+			UnsuccessfulSchedulerCommCnt: 0,
 		},
 	}
 
@@ -408,7 +411,10 @@ type podStatus struct {
 	endState          *podStatusEndState
 	previousEndStates []podStatusEndState
 
-	lastSuccessfulMonitorComm *time.Time
+	lastSuccessfulMonitorComm    *time.Time
+	UnsuccessfulMonitorCommCnt   uint
+	UnsuccessfulNeonVMCommCnt    uint
+	UnsuccessfulSchedulerCommCnt uint
 
 	// vmInfo stores the latest information about the VM, as given by the global VM watcher.
 	//
@@ -432,7 +438,10 @@ type podStatusDump struct {
 	EndState          *podStatusEndState  `json:"endState"`
 	PreviousEndStates []podStatusEndState `json:"previousEndStates"`
 
-	LastSuccessfulMonitorComm *time.Time `json:"lastSuccessfulMonitorComm"`
+	LastSuccessfulMonitorComm    *time.Time `json:"lastSuccessfulMonitorComm"`
+	UnSuccessfulMonitorCommCnt   uint       `json:"unsuccessfulMonitorCommCnt"`
+	UnSuccessfulNeonVMCommCnt    uint       `json:"unsuccessfulNeonVMCommCnt"`
+	UnSuccessfulSchedulerCommCnt uint       `json:"unsuccessfulSchedulerCommCnt"`
 
 	VMInfo api.VmInfo `json:"vmInfo"`
 
@@ -466,6 +475,22 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	newStatus := with(s.podStatus)
 	now := time.Now()
 
+	isStuck := func() bool {
+		if newStatus.monitorStuckAt(global.config).Before(now) {
+			return true
+		}
+		if newStatus.UnsuccessfulMonitorCommCnt > global.config.Monitor.MaxUnsuccessfulRequestCnt {
+			return true
+		}
+		if newStatus.UnsuccessfulSchedulerCommCnt > global.config.Scheduler.MaxUnsuccessfulRequestCnt {
+			return true
+		}
+		if newStatus.UnsuccessfulNeonVMCommCnt > global.config.NeonVM.MaxUnsuccessfulRequestCnt {
+			return true
+		}
+		return false
+	}
+
 	// Calculate the new state:
 	var newState runnerMetricState
 	if s.deleted {
@@ -480,7 +505,7 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 		case podStatusExitPanicked:
 			newState = runnerMetricStatePanicked
 		}
-	} else if newStatus.monitorStuckAt(global.config).Before(now) {
+	} else if isStuck() {
 		newState = runnerMetricStateStuck
 	} else {
 		newState = runnerMetricStateOk
@@ -593,6 +618,9 @@ func (s *lockedPodStatus) dump() podStatusDump {
 		State:          s.state,
 		StateUpdatedAt: s.stateUpdatedAt,
 
-		LastSuccessfulMonitorComm: s.lastSuccessfulMonitorComm,
+		LastSuccessfulMonitorComm:    s.lastSuccessfulMonitorComm,
+		UnSuccessfulMonitorCommCnt:   s.UnsuccessfulMonitorCommCnt,
+		UnSuccessfulNeonVMCommCnt:    s.UnsuccessfulNeonVMCommCnt,
+		UnSuccessfulSchedulerCommCnt: s.UnsuccessfulSchedulerCommCnt,
 	}
 }

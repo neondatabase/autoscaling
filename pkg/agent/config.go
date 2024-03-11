@@ -16,6 +16,7 @@ type Config struct {
 	Metrics   MetricsConfig    `json:"metrics"`
 	Scheduler SchedulerConfig  `json:"scheduler"`
 	Monitor   MonitorConfig    `json:"monitor"`
+	NeonVM    NeonVMConfig     `json:"neonvm"`
 	Billing   *billing.Config  `json:"billing,omitempty"`
 	DumpState *DumpStateConfig `json:"dumpState"`
 }
@@ -40,6 +41,8 @@ type MonitorConfig struct {
 	// MaxHealthCheckSequentialFailuresSeconds gives the duration, in seconds, after which we
 	// should restart the connection to the vm-monitor if health checks aren't succeeding.
 	MaxHealthCheckSequentialFailuresSeconds uint `json:"maxHealthCheckSequentialFailuresSeconds"`
+
+	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
 
 	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait before retrying a
 	// request that previously failed.
@@ -110,6 +113,12 @@ type SchedulerConfig struct {
 	RetryDeniedUpscaleSeconds uint `json:"retryDeniedUpscaleSeconds"`
 	// RequestPort defines the port to access the scheduler's ✨special✨ API with
 	RequestPort uint16 `json:"requestPort"`
+
+	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
+}
+
+type NeonVMConfig struct {
+	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
 }
 
 func ReadConfig(path string) (*Config, error) {

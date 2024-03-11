@@ -51,6 +51,29 @@ func (iface *execPluginInterface) Request(
 		iface.runner.recordResourceChange(*lastPermit, resp.Permit, iface.runner.global.metrics.schedulerApprovedChange)
 	}
 
+	successful := func() bool {
+		if err != nil {
+			return false
+		}
+		if resp.Permit == target {
+			return true
+		}
+		if lastPermit != nil {
+			if resp.Permit == *lastPermit {
+				return false
+			}
+		}
+		return true
+	}()
+	iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
+		if successful {
+			ps.UnsuccessfulSchedulerCommCnt = 0
+		} else {
+			ps.UnsuccessfulSchedulerCommCnt++
+		}
+		return ps
+	})
+
 	return resp, err
 }
 
@@ -74,6 +97,14 @@ func (iface *execNeonVMInterface) Request(ctx context.Context, logger *zap.Logge
 	if err != nil {
 		return fmt.Errorf("Error making VM patch request: %w", err)
 	}
+	iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
+		if err == nil {
+			ps.UnsuccessfulNeonVMCommCnt = 0
+		} else {
+			ps.UnsuccessfulNeonVMCommCnt++
+		}
+		return ps
+	})
 
 	return nil
 }
@@ -150,6 +181,15 @@ func (h *execMonitorHandle) Downscale(
 		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
 	}
 
+	h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
+		if err != nil && result.Ok {
+			ps.UnsuccessfulMonitorCommCnt = 0
+		} else {
+			ps.UnsuccessfulMonitorCommCnt++
+		}
+		return ps
+	})
+
 	return result, err
 }
 
@@ -167,6 +207,15 @@ func (h *execMonitorHandle) Upscale(ctx context.Context, logger *zap.Logger, cur
 	if err == nil {
 		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
 	}
+
+	h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
+		if err != nil {
+			ps.UnsuccessfulMonitorCommCnt = 0
+		} else {
+			ps.UnsuccessfulMonitorCommCnt++
+		}
+		return ps
+	})
 
 	return err
 }
