@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -583,19 +584,60 @@ func runInitScript(logger *zap.Logger, script string) error {
 	return nil
 }
 
-func qemuDiskArgs(id string, file string, index int, extraOptions string, deviceExtraOptions string) []string {
-	if extraOptions != "" && extraOptions[0] != ',' {
-		extraOptions = "," + extraOptions
+// sort the options and convert it to a parameter list
+//
+// empty, prependComma=false -> empty string
+// empty, prependComma=true -> empty string
+// a=1, b=1, prependComma=false -> a=1,b=1
+// a=1, b=1, prependComma=true -> ,a=1,b=1
+func normalizeAndToString(options map[string]string, prependComma bool) string {
+	if options == nil {
+		return ""
 	}
-	if deviceExtraOptions != "" && deviceExtraOptions[0] != ',' {
-		deviceExtraOptions = "," + deviceExtraOptions
+	keys := make([]string, 0, len(options))
+	for k := range options {
+		keys = append(keys, k)
 	}
+	sort.Strings(keys)
+	result := ""
+	firstElement := true
+	for _, k := range keys {
+		if firstElement {
+			firstElement = false
+			if prependComma {
+				result += ","
+			}
+		} else {
+			result += ","
+		}
+		result += k
+		result += "="
+		result += options[k]
+	}
+	return result
+}
 
+func qemuDiskArgs(id string, file string, index int, extraOptions map[string]string, deviceExtraOptions map[string]string) []string {
 	args := []string{}
-	args = append(args, "-drive", fmt.Sprintf("id=%s,file=%s,if=none,index=%d%s", id, file, index, extraOptions))
-	args = append(args, "-device", fmt.Sprintf("virtio-blk,drive=%s%s", id, deviceExtraOptions))
+	args = append(args, "-drive", fmt.Sprintf("id=%s,file=%s,if=none,index=%d%s", id, file, index, normalizeAndToString(extraOptions, true)))
+	args = append(args, "-device", fmt.Sprintf("virtio-blk,drive=%s%s", id, normalizeAndToString(deviceExtraOptions, true)))
 
 	return args
+}
+
+func parseQemuArgs(settings string) (map[string]string, error) {
+	splits := strings.Split(settings, ",")
+	result := make(map[string]string)
+	for _, split := range splits {
+		subsplits := strings.Split(split, "=")
+		if len(subsplits) != 2 {
+			return nil, fmt.Errorf("cannot parse qemu args: %s", settings)
+		}
+		k := subsplits[0]
+		v := subsplits[1]
+		result[k] = v
+	}
+	return result, nil
 }
 
 func main() {
@@ -606,14 +648,31 @@ func main() {
 	var kernelPath string
 	var appendKernelCmdline string
 	var skipCgroupManagement bool
-	var diskCacheSettings string
+	var diskCacheSettingsRaw string
 	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
 	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
 	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
 	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
 	flag.BoolVar(&skipCgroupManagement, "skip-cgroup-management", false, "Don't try to manage CPU (use if running alongside container-mgr)")
-	flag.StringVar(&diskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Cache settings to add to -drive args for VM disks")
+	flag.StringVar(&diskCacheSettingsRaw, "qemu-disk-cache-settings", "cache=none", "Cache settings to add to -drive args for VM disks")
 	flag.Parse()
+
+	diskCacheSettingsParsed, err := parseQemuArgs(diskCacheSettingsRaw)
+	if err != nil {
+		logger.Fatal("Cannot parse qemu-disk-cache-settings", zap.Error(err))
+	}
+
+	// creates a deep copy of diskCacheSettings every time the function gets called
+	withDiskCacheSettings := func(otherSettings map[string]string) map[string]string {
+		result := make(map[string]string)
+		for key, value := range diskCacheSettingsParsed {
+			result[key] = value
+		}
+		for key, value := range otherSettings {
+			result[key] = value
+		}
+		return result
+	}
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
 	if !ok {
@@ -745,22 +804,22 @@ func main() {
 
 	diskIdxCnt := 0
 
-	newQemuDisk := func(id string, file string, extraOptions string, deviceExtraOptions string) []string {
+	newQemuDisk := func(id string, file string, extraOptions map[string]string, deviceExtraOptions map[string]string) []string {
 		result := qemuDiskArgs(id, file, diskIdxCnt, extraOptions, deviceExtraOptions)
 		diskIdxCnt += 1
 		return result
 	}
 
 	// disk details
-	qemuCmd = append(qemuCmd, newQemuDisk("rootdisk", rootDiskPath, diskCacheSettings+",media=disk", "")...)
-	qemuCmd = append(qemuCmd, newQemuDisk("runtime", runtimeDiskPath, "media=cdrom,readonly=on,cache=none", "")...)
+	qemuCmd = append(qemuCmd, newQemuDisk("rootdisk", rootDiskPath, withDiskCacheSettings(map[string]string{"media": "disk"}), nil)...)
+	qemuCmd = append(qemuCmd, newQemuDisk("runtime", runtimeDiskPath, map[string]string{"media": "cdrom", "readonly": "on", "cache": "none"}, nil)...)
 
 	if enableSSH {
 		name := "ssh-authorized-keys"
 		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
 			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, newQemuDisk(name, sshAuthorizedKeysDiskPath, ",media=cdrom,cache=none", "")...)
+		qemuCmd = append(qemuCmd, newQemuDisk(name, sshAuthorizedKeysDiskPath, map[string]string{"media": "cdrom", "cache": "none"}, nil)...)
 	}
 
 	if swapSize != nil {
@@ -770,7 +829,7 @@ func main() {
 		if err := createSwap(diskName, dPath, swapSize); err != nil {
 			logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, newQemuDisk(diskName, dPath, diskCacheSettings+",media=disk,cache=none,discard=unmap", "")...)
+		qemuCmd = append(qemuCmd, newQemuDisk(diskName, dPath, withDiskCacheSettings(map[string]string{"media": "disk", "cache": "none", "discard": "unmap"}), nil)...)
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -781,19 +840,18 @@ func main() {
 			if err := createExt4QCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
 				logger.Fatal("Failed to create QCOW2 Ext4 image", zap.Error(err))
 			}
-			extraOptions := ""
-			extraOptions += diskCacheSettings
+			extraOptions := make(map[string]string)
 			if disk.EmptyDisk.Discard {
-				extraOptions += ",discard=unmap"
+				extraOptions["discard"] = "unmap"
 			}
-			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, extraOptions, "")...)
+			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, extraOptions, withDiskCacheSettings(extraOptions))...)
 		case disk.RawDisk != nil:
 			logger.Info("creating QCOW2 image with no filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createRawQCOW2(dPath, &disk.RawDisk.Size); err != nil {
 				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, "", fmt.Sprintf("serial=%s", disk.Name))...)
+			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, nil, map[string]string{"serial": disk.Name})...)
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -801,7 +859,7 @@ func main() {
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
 				logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, "media=cdrom,cache=none", "")...)
+			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, map[string]string{"media": "cdrom", "cache": "none"}, nil)...)
 		default:
 			// do nothing
 		}
