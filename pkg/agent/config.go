@@ -41,7 +41,8 @@ type MonitorConfig struct {
 	// MaxHealthCheckSequentialFailuresSeconds gives the duration, in seconds, after which we
 	// should restart the connection to the vm-monitor if health checks aren't succeeding.
 	MaxHealthCheckSequentialFailuresSeconds uint `json:"maxHealthCheckSequentialFailuresSeconds"`
-
+	// MaxUnsuccefulRequestCnt defines the maximum number of consecutive failed monitor requests
+	// which after a VM is considered stuck.
 	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
 
 	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait before retrying a
@@ -113,11 +114,15 @@ type SchedulerConfig struct {
 	RetryDeniedUpscaleSeconds uint `json:"retryDeniedUpscaleSeconds"`
 	// RequestPort defines the port to access the scheduler's ✨special✨ API with
 	RequestPort uint16 `json:"requestPort"`
-
+	// MaxUnsuccefulRequestCnt defines the maximum number of consecutive failed scheduler requests
+	// which after a VM is considered stuck.
 	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
 }
 
+// NeonVMConfig defines a few parameters for NeonVM requests
 type NeonVMConfig struct {
+	// MaxUnsuccefulRequestCnt defines the maximum number of consecutive failed NeonVM requests
+	// which after a VM is considered stuck.
 	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
 }
 
