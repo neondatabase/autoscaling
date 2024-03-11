@@ -851,7 +851,7 @@ func main() {
 			if err := createRawQCOW2(dPath, &disk.RawDisk.Size); err != nil {
 				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
 			}
-			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, nil, map[string]string{"serial": disk.Name})...)
+			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, map[string]string{"discard": "unmap"}, map[string]string{"serial": disk.Name})...)
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
