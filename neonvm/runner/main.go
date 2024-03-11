@@ -844,7 +844,7 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				extraOptions["discard"] = "unmap"
 			}
-			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, extraOptions, withDiskCacheSettings(extraOptions))...)
+			qemuCmd = append(qemuCmd, newQemuDisk(disk.Name, dPath, withDiskCacheSettings(extraOptions), nil)...)
 		case disk.RawDisk != nil:
 			logger.Info("creating QCOW2 image with no filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
