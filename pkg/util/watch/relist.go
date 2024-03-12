@@ -24,6 +24,9 @@ type relistInfo struct {
 
 	// relistCount is the number of instances of relisted that have been closed.
 	//
+	// It acts as a logical clock, allowing us to establish a happens-before relationship between
+	// events from *other* watch instances and relist requests.
+	//
 	// Externally, we only guarantee that this is monotonically increasing; internally, it's
 	// associated each time with a single instance of `relisted`, so that RelistIfHaventSince can
 	// hook into ongoing execution.
