@@ -3791,7 +3791,7 @@ spec:
           value: neonvm-overlay-for-vms
         - name: NAD_RUNNER_NAMESPACE
           value: neonvm-system
-        image: neondatabase/neonvm-controller:v0.26.1
+        image: neondatabase/neonvm-controller:v0.26.2
         livenessProbe:
           httpGet:
             path: /healthz
@@ -3828,31 +3828,10 @@ spec:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: cert
           readOnly: true
-      - args:
-        - --secure-listen-address=0.0.0.0:8443
-        - --upstream=http://127.0.0.1:8080/
-        - --logtostderr=true
-        - --v=0
-        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.13.0
-        name: kube-rbac-proxy
-        ports:
-        - containerPort: 8443
-          name: https
-          protocol: TCP
-        resources:
-          limits:
-            cpu: 500m
-            memory: 128Mi
-          requests:
-            cpu: 5m
-            memory: 64Mi
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
       securityContext:
         runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: neonvm-controller
       terminationGracePeriodSeconds: 10
       volumes:
@@ -3976,7 +3955,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-        image: neondatabase/neonvm-vxlan-controller:v0.26.1
+        image: neondatabase/neonvm-vxlan-controller:v0.26.2
         imagePullPolicy: IfNotPresent
         lifecycle:
           preStop:
@@ -4008,7 +3987,7 @@ spec:
         - /bin/sh
         - -c
         - cp -rf /opt/cni/bin /host/opt/cni
-        image: neondatabase/neonvm-vxlan-controller:v0.26.1
+        image: neondatabase/neonvm-vxlan-controller:v0.26.2
         imagePullPolicy: IfNotPresent
         name: install-cni
         volumeMounts:
