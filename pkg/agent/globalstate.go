@@ -475,22 +475,6 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	newStatus := with(s.podStatus)
 	now := time.Now()
 
-	isStuck := func() bool {
-		if newStatus.monitorStuckAt(global.config).Before(now) {
-			return true
-		}
-		if newStatus.UnsuccessfulMonitorRequestCnt > global.config.Monitor.MaxUnsuccessfulRequestCnt {
-			return true
-		}
-		if newStatus.UnsuccessfulSchedulerRequestCnt > global.config.Scheduler.MaxUnsuccessfulRequestCnt {
-			return true
-		}
-		if newStatus.UnsuccessfulNeonVMRequestCnt > global.config.NeonVM.MaxUnsuccessfulRequestCnt {
-			return true
-		}
-		return false
-	}
-
 	// Calculate the new state:
 	var newState runnerMetricState
 	if s.deleted {
@@ -505,7 +489,7 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 		case podStatusExitPanicked:
 			newState = runnerMetricStatePanicked
 		}
-	} else if isStuck() {
+	} else if newStatus.isStuck(global, now) {
 		newState = runnerMetricStateStuck
 	} else {
 		newState = runnerMetricStateOk
@@ -530,6 +514,23 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	}
 
 	s.podStatus = newStatus
+}
+
+func (s podStatus) isStuck(global *agentState, now time.Time) bool {
+	if s.monitorStuckAt(global.config).Before(now) {
+		return true
+	}
+	if s.UnsuccessfulMonitorRequestCnt > global.config.Monitor.MaxUnsuccessfulRequestCnt {
+		return true
+	}
+	if s.UnsuccessfulSchedulerRequestCnt > global.config.Scheduler.MaxUnsuccessfulRequestCnt {
+		return true
+	}
+	if s.UnsuccessfulNeonVMRequestCnt > global.config.NeonVM.MaxUnsuccessfulRequestCnt {
+		return true
+	}
+	return false
+
 }
 
 // monitorStuckAt returns the time at which the Runner will be marked "stuck"
