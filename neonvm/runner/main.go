@@ -702,9 +702,16 @@ func main() {
 		}
 	}
 
-	qemuCmd := buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapSize)
+	qemuCmd, err := buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapSize)
 
-	runQEMU(cfg, logger, vmSpec, qemuCmd, qemuCPUs)
+	if err != nil {
+		logger.Fatal("Failed to build QEMU command", zap.Error(err))
+	}
+
+	err = runQEMU(cfg, logger, vmSpec, qemuCmd, qemuCPUs)
+	if err != nil {
+		logger.Fatal("Failed to run QEMU", zap.Error(err))
+	}
 }
 
 func buildQEMUCmd(
@@ -715,8 +722,7 @@ func buildQEMUCmd(
 	cpus, memory []string,
 	enableSSH bool,
 	swapSize *resource.Quantity,
-) []string {
-
+) ([]string, error) {
 	// prepare qemu command line
 	qemuCmd := []string{
 		"-runas", "qemu",
@@ -744,7 +750,7 @@ func buildQEMUCmd(
 	if enableSSH {
 		name := "ssh-authorized-keys"
 		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
-			logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
+			return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
 	}
@@ -754,7 +760,7 @@ func buildQEMUCmd(
 		logger.Info("creating QCOW2 image for swap", zap.String("diskName", diskName))
 		dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, diskName)
 		if err := createSwap(diskName, dPath, swapSize); err != nil {
-			logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
+			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", diskName, dPath, cfg.diskCacheSettings))
 	}
@@ -765,7 +771,7 @@ func buildQEMUCmd(
 			logger.Info("creating QCOW2 image with empty ext4 filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
-				logger.Fatal("Failed to create QCOW2 image", zap.Error(err))
+				return nil, fmt.Errorf("Failed to create QCOW2 image: %w", err)
 			}
 			discard := ""
 			if disk.EmptyDisk.Discard {
@@ -777,7 +783,7 @@ func buildQEMUCmd(
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 			logger.Info("creating iso9660 image", zap.String("diskPath", dPath), zap.String("diskName", disk.Name), zap.String("mountPath", mnt))
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
-				logger.Fatal("Failed to create ISO9660 image", zap.Error(err))
+				return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
 		default:
@@ -802,7 +808,7 @@ func buildQEMUCmd(
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
 	if err != nil {
-		logger.Fatal("cannot set up default network", zap.Error(err))
+		return nil, fmt.Errorf("Failed to set up default network: %w", err)
 	}
 	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,script=no,downscript=no,vhost=on", defaultNetworkTapName))
 	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
@@ -811,7 +817,7 @@ func buildQEMUCmd(
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
 		macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface)
 		if err != nil {
-			logger.Fatal("cannot set up overlay network", zap.Error(err))
+			return nil, fmt.Errorf("Failed to set up overlay network: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
 		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
@@ -835,7 +841,7 @@ func buildQEMUCmd(
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
 	}
 
-	return qemuCmd
+	return qemuCmd, nil
 }
 
 func runQEMU(
@@ -844,10 +850,10 @@ func runQEMU(
 	vmSpec *vmv1.VirtualMachineSpec,
 	qemuCmd []string,
 	qemuCPUs QemuCPUs,
-) {
+) error {
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
 	if !ok {
-		logger.Fatal("environment variable K8S_POD_NAME missing")
+		return fmt.Errorf("environment variable K8S_POD_NAME missing")
 	}
 
 	var cgroupPath string
@@ -855,7 +861,7 @@ func runQEMU(
 	if !cfg.skipCgroupManagement {
 		selfCgroupPath, err := getSelfCgroupPath(logger)
 		if err != nil {
-			logger.Fatal("Failed to get self cgroup path", zap.Error(err))
+			return fmt.Errorf("Failed to get self cgroup path: %w", err)
 		}
 		// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
 		// that the cgroup '/neonvm-qemu-...' still works.
@@ -872,7 +878,7 @@ func runQEMU(
 		logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
 
 		if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
-			logger.Fatal("Failed to set cgroup limit", zap.Error(err))
+			return fmt.Errorf("Failed to set cgroup limit: %w", err)
 		}
 	}
 
@@ -907,6 +913,8 @@ func runQEMU(
 
 	cancel()
 	wg.Wait()
+
+	return nil
 }
 
 func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
