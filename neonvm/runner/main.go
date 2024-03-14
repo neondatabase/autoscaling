@@ -599,11 +599,6 @@ func main() {
 
 	cfg := newConfig()
 
-	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
-	if !ok {
-		logger.Fatal("environment variable K8S_POD_NAME missing")
-	}
-
 	vmSpecJson, err := base64.StdEncoding.DecodeString(cfg.vmSpecDump)
 	if err != nil {
 		logger.Fatal("Failed to decode VirtualMachine Spec dump", zap.Error(err))
@@ -706,6 +701,21 @@ func main() {
 			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
 		}
 	}
+
+	qemuCmd := buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapSize)
+
+	runQEMU(cfg, logger, vmSpec, qemuCmd, qemuCPUs)
+}
+
+func buildQEMUCmd(
+	cfg *Config,
+	logger *zap.Logger,
+	vmSpec *vmv1.VirtualMachineSpec,
+	vmStatus *vmv1.VirtualMachineStatus,
+	cpus, memory []string,
+	enableSSH bool,
+	swapSize *resource.Quantity,
+) []string {
 
 	// prepare qemu command line
 	qemuCmd := []string{
@@ -823,6 +833,21 @@ func main() {
 	// should runner receive migration ?
 	if os.Getenv("RECEIVE_MIGRATION") == "true" {
 		qemuCmd = append(qemuCmd, "-incoming", fmt.Sprintf("tcp:0:%d", vmv1.MigrationPort))
+	}
+
+	return qemuCmd
+}
+
+func runQEMU(
+	cfg *Config,
+	logger *zap.Logger,
+	vmSpec *vmv1.VirtualMachineSpec,
+	qemuCmd []string,
+	qemuCPUs QemuCPUs,
+) {
+	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
+	if !ok {
+		logger.Fatal("environment variable K8S_POD_NAME missing")
 	}
 
 	var cgroupPath string
