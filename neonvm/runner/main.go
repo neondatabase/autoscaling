@@ -38,6 +38,7 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -644,11 +645,6 @@ func run(logger *zap.Logger) error {
 		enableSSH = true
 	}
 
-	err = runInitScript(logger, vmSpec.InitScript)
-	if err != nil {
-		return fmt.Errorf("failed to run init script: %w", err)
-	}
-
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{}
 	var shmSize *resource.Quantity
@@ -666,31 +662,52 @@ func run(logger *zap.Logger) error {
 			shmSize = vmSpec.Guest.Settings.Swap
 		}
 	}
-	err = createISO9660runtime(
-		runtimeDiskPath,
-		vmSpec.Guest.Command,
-		vmSpec.Guest.Args,
-		sysctl,
-		vmSpec.Guest.Env,
-		vmSpec.Disks,
-		enableSSH,
-		swapSize,
-		shmSize,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create iso9660 disk: %w", err)
-	}
 
-	// resize rootDisk image of size specified and new size more than current
-	err = resizeRootDisk(logger, vmSpec)
-	if err != nil {
-		return fmt.Errorf("failed to resize rootDisk: %w", err)
-	}
+	eg := &errgroup.Group{}
+	eg.Go(func() error {
+		if err := runInitScript(logger, vmSpec.InitScript); err != nil {
+			return fmt.Errorf("failed to run init script: %w", err)
+		}
+		return nil
+	})
 
-	qemuCmd, err := buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapSize)
+	eg.Go(func() error {
+		if err := createISO9660runtime(
+			runtimeDiskPath,
+			vmSpec.Guest.Command,
+			vmSpec.Guest.Args,
+			sysctl,
+			vmSpec.Guest.Env,
+			vmSpec.Disks,
+			enableSSH,
+			swapSize,
+			shmSize,
+		); err != nil {
+			return fmt.Errorf("failed to create iso9660 disk: %w", err)
+		}
+		return nil
+	})
 
-	if err != nil {
-		return fmt.Errorf("failed to build QEMU command: %w", err)
+	eg.Go(func() error {
+		// resize rootDisk image of size specified and new size more than current
+		if err := resizeRootDisk(logger, vmSpec); err != nil {
+			return fmt.Errorf("failed to resize rootDisk: %w", err)
+		}
+		return nil
+	})
+	var qemuCmd []string
+
+	eg.Go(func() error {
+		var err error
+		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapSize)
+		if err != nil {
+			return fmt.Errorf("failed to build QEMU command: %w", err)
+		}
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 
 	err = runQEMU(cfg, logger, vmSpec, qemuCmd, qemuCPUs)
