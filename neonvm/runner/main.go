@@ -597,24 +597,30 @@ func newConfig() *Config {
 func main() {
 	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
 
+	if err := run(logger); err != nil {
+		logger.Fatal("Failed to run", zap.Error(err))
+	}
+}
+
+func run(logger *zap.Logger) error {
 	cfg := newConfig()
 
 	vmSpecJson, err := base64.StdEncoding.DecodeString(cfg.vmSpecDump)
 	if err != nil {
-		logger.Fatal("Failed to decode VirtualMachine Spec dump", zap.Error(err))
+		return fmt.Errorf("failed to decode VirtualMachine Spec dump: %w", err)
 	}
 	vmStatusJson, err := base64.StdEncoding.DecodeString(cfg.vmStatusDump)
 	if err != nil {
-		logger.Fatal("Failed to decode VirtualMachine Status dump", zap.Error(err))
+		return fmt.Errorf("failed to decode VirtualMachine Status dump: %w", err)
 	}
 
 	vmSpec := &vmv1.VirtualMachineSpec{}
 	if err := json.Unmarshal(vmSpecJson, vmSpec); err != nil {
-		logger.Fatal("Failed to unmarshal VM spec", zap.Error(err))
+		return fmt.Errorf("failed to unmarshal VM spec: %w", err)
 	}
 	var vmStatus vmv1.VirtualMachineStatus
 	if err := json.Unmarshal(vmStatusJson, &vmStatus); err != nil {
-		logger.Fatal("Failed to unmarshal VM Status", zap.Error(err))
+		return fmt.Errorf("failed to unmarshal VM Status: %w", err)
 	}
 
 	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
@@ -640,7 +646,7 @@ func main() {
 
 	err = runInitScript(logger, vmSpec.InitScript)
 	if err != nil {
-		logger.Fatal("Failed to run init script", zap.Error(err))
+		return fmt.Errorf("failed to run init script: %w", err)
 	}
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
@@ -672,25 +678,27 @@ func main() {
 		shmSize,
 	)
 	if err != nil {
-		logger.Fatal("Failed to create iso9660 disk", zap.Error(err))
+		return fmt.Errorf("failed to create iso9660 disk: %w", err)
 	}
 
 	// resize rootDisk image of size specified and new size more than current
 	err = resizeRootDisk(logger, vmSpec)
 	if err != nil {
-		logger.Fatal("Failed to resize rootDisk", zap.Error(err))
+		return fmt.Errorf("failed to resize rootDisk: %w", err)
 	}
 
 	qemuCmd, err := buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapSize)
 
 	if err != nil {
-		logger.Fatal("Failed to build QEMU command", zap.Error(err))
+		return fmt.Errorf("failed to build QEMU command: %w", err)
 	}
 
 	err = runQEMU(cfg, logger, vmSpec, qemuCmd, qemuCPUs)
 	if err != nil {
-		logger.Fatal("Failed to run QEMU", zap.Error(err))
+		return fmt.Errorf("failed to run QEMU: %w", err)
 	}
+
+	return nil
 }
 
 func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
