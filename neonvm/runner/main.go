@@ -558,33 +558,57 @@ func runInitScript(logger *zap.Logger, script string) error {
 	return nil
 }
 
+type Config struct {
+	vmSpecDump           string
+	vmStatusDump         string
+	kernelPath           string
+	appendKernelCmdline  string
+	skipCgroupManagement bool
+	diskCacheSettings    string
+}
+
+func newConfig() *Config {
+	cfg := &Config{
+		vmSpecDump:           "",
+		vmStatusDump:         "",
+		kernelPath:           defaultKernelPath,
+		appendKernelCmdline:  "",
+		skipCgroupManagement: false,
+		diskCacheSettings:    "cache=none",
+	}
+	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
+		"Base64 encoded VirtualMachine json specification")
+	flag.StringVar(&cfg.vmStatusDump, "vmstatus", cfg.vmStatusDump,
+		"Base64 encoded VirtualMachine json status")
+	flag.StringVar(&cfg.kernelPath, "kernelpath", cfg.kernelPath,
+		"Override path for kernel to use")
+	flag.StringVar(&cfg.appendKernelCmdline, "appendKernelCmdline",
+		cfg.appendKernelCmdline, "Additional kernel command line arguments")
+	flag.BoolVar(&cfg.skipCgroupManagement, "skip-cgroup-management",
+		cfg.skipCgroupManagement,
+		"Don't try to manage CPU (use if running alongside container-mgr)")
+	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
+		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
+	flag.Parse()
+
+	return cfg
+}
+
 func main() {
 	logger := zap.Must(zap.NewProduction()).Named("neonvm-runner")
 
-	var vmSpecDump string
-	var vmStatusDump string
-	var kernelPath string
-	var appendKernelCmdline string
-	var skipCgroupManagement bool
-	var diskCacheSettings string
-	flag.StringVar(&vmSpecDump, "vmspec", vmSpecDump, "Base64 encoded VirtualMachine json specification")
-	flag.StringVar(&vmStatusDump, "vmstatus", vmStatusDump, "Base64 encoded VirtualMachine json status")
-	flag.StringVar(&kernelPath, "kernelpath", defaultKernelPath, "Override path for kernel to use")
-	flag.StringVar(&appendKernelCmdline, "appendKernelCmdline", "", "Additional kernel command line arguments")
-	flag.BoolVar(&skipCgroupManagement, "skip-cgroup-management", false, "Don't try to manage CPU (use if running alongside container-mgr)")
-	flag.StringVar(&diskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Cache settings to add to -drive args for VM disks")
-	flag.Parse()
+	cfg := newConfig()
 
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
 	if !ok {
 		logger.Fatal("environment variable K8S_POD_NAME missing")
 	}
 
-	vmSpecJson, err := base64.StdEncoding.DecodeString(vmSpecDump)
+	vmSpecJson, err := base64.StdEncoding.DecodeString(cfg.vmSpecDump)
 	if err != nil {
 		logger.Fatal("Failed to decode VirtualMachine Spec dump", zap.Error(err))
 	}
-	vmStatusJson, err := base64.StdEncoding.DecodeString(vmStatusDump)
+	vmStatusJson, err := base64.StdEncoding.DecodeString(cfg.vmStatusDump)
 	if err != nil {
 		logger.Fatal("Failed to decode VirtualMachine Status dump", zap.Error(err))
 	}
@@ -704,7 +728,7 @@ func main() {
 	}
 
 	// disk details
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, cfg.diskCacheSettings))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
 
 	if enableSSH {
@@ -722,7 +746,7 @@ func main() {
 		if err := createSwap(diskName, dPath, swapSize); err != nil {
 			logger.Fatal("Failed to create swap QCOW2 image", zap.Error(err))
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", diskName, dPath, diskCacheSettings))
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", diskName, dPath, cfg.diskCacheSettings))
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -737,7 +761,7 @@ func main() {
 			if disk.EmptyDisk.Discard {
 				discard = ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, diskCacheSettings, discard))
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, cfg.diskCacheSettings, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -784,15 +808,15 @@ func main() {
 	}
 
 	// kernel details
-	qemuCmd = append(qemuCmd, "-kernel", kernelPath)
+	qemuCmd = append(qemuCmd, "-kernel", cfg.kernelPath)
 	var effectiveKernelCmdline string
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
 		effectiveKernelCmdline = fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName, baseKernelCmdline)
 	} else {
 		effectiveKernelCmdline = baseKernelCmdline
 	}
-	if appendKernelCmdline != "" {
-		effectiveKernelCmdline = fmt.Sprintf("%s %s", effectiveKernelCmdline, appendKernelCmdline)
+	if cfg.appendKernelCmdline != "" {
+		effectiveKernelCmdline = fmt.Sprintf("%s %s", effectiveKernelCmdline, cfg.appendKernelCmdline)
 	}
 	qemuCmd = append(qemuCmd, "-append", effectiveKernelCmdline)
 
@@ -803,7 +827,7 @@ func main() {
 
 	var cgroupPath string
 
-	if !skipCgroupManagement {
+	if !cfg.skipCgroupManagement {
 		selfCgroupPath, err := getSelfCgroupPath(logger)
 		if err != nil {
 			logger.Fatal("Failed to get self cgroup path", zap.Error(err))
@@ -832,7 +856,7 @@ func main() {
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-	if !skipCgroupManagement {
+	if !cfg.skipCgroupManagement {
 		wg.Add(1)
 		go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
 	}
@@ -841,7 +865,7 @@ func main() {
 
 	var bin string
 	var cmd []string
-	if !skipCgroupManagement {
+	if !cfg.skipCgroupManagement {
 		bin = "cgexec"
 		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
 	} else {
