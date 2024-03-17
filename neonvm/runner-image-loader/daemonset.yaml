@@ -1,8 +1,7 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: neonvm-runner-image-loader
-  namespace: neonvm-system
+  name: runner-image-loader
 spec:
   selector:
     matchLabels:
