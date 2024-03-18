@@ -107,7 +107,7 @@ test: fmt vet envtest ## Run tests.
 	export KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
 	find $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
 	CGO_ENABLED=0 \
-		go test ./... -coverprofile cover.out
+		go test $(TESTARGS) ./... -coverprofile cover.out
 
 ##@ Build
 
