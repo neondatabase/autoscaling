@@ -438,10 +438,10 @@ type podStatusDump struct {
 	EndState          *podStatusEndState  `json:"endState"`
 	PreviousEndStates []podStatusEndState `json:"previousEndStates"`
 
-	LastSuccessfulMonitorComm    *time.Time `json:"lastSuccessfulMonitorComm"`
-	UnsuccessfulMonitorCommCnt   uint       `json:"unsuccessfulMonitorCommCnt"`
-	UnsuccessfulNeonVMCommCnt    uint       `json:"unsuccessfulNeonVMCommCnt"`
-	UnsuccessfulSchedulerCommCnt uint       `json:"unsuccessfulSchedulerCommCnt"`
+	LastSuccessfulMonitorComm       *time.Time `json:"lastSuccessfulMonitorComm"`
+	UnsuccessfulMonitorRequestCnt   uint       `json:"unsuccessfulMonitorCommCnt"`
+	UnsuccessfulNeonVMRequestCnt    uint       `json:"unsuccessfulNeonVMCommCnt"`
+	UnsuccessfulSchedulerRequestCnt uint       `json:"unsuccessfulSchedulerCommCnt"`
 
 	VMInfo api.VmInfo `json:"vmInfo"`
 
@@ -619,9 +619,9 @@ func (s *lockedPodStatus) dump() podStatusDump {
 		State:          s.state,
 		StateUpdatedAt: s.stateUpdatedAt,
 
-		LastSuccessfulMonitorComm:    s.lastSuccessfulMonitorComm,
-		UnsuccessfulMonitorCommCnt:   s.UnsuccessfulMonitorRequestCnt,
-		UnsuccessfulNeonVMCommCnt:    s.UnsuccessfulNeonVMRequestCnt,
-		UnsuccessfulSchedulerCommCnt: s.UnsuccessfulSchedulerRequestCnt,
+		LastSuccessfulMonitorComm:       s.lastSuccessfulMonitorComm,
+		UnsuccessfulMonitorRequestCnt:   s.UnsuccessfulMonitorRequestCnt,
+		UnsuccessfulNeonVMRequestCnt:    s.UnsuccessfulNeonVMRequestCnt,
+		UnsuccessfulSchedulerRequestCnt: s.UnsuccessfulSchedulerRequestCnt,
 	}
 }
