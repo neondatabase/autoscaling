@@ -16,8 +16,11 @@ import (
 	"text/template"
 
 	"github.com/alessio/shellescape"
+	"github.com/distribution/reference"
+	cliconfig "github.com/docker/cli/cli/config"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"golang.org/x/term"
@@ -143,6 +146,22 @@ func main() {
 		}
 	}
 
+	log.Println("Load docker credentials")
+	dockerConfig, err := cliconfig.Load("")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	credentials, err := dockerConfig.GetAllCredentials()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	authConfigs := make(map[string]registry.AuthConfig)
+	for key, value := range credentials {
+		log.Printf("Found docker credentials for %s", key)
+		authConfigs[key] = registry.AuthConfig(value)
+	}
+
 	ctx := context.Background()
 
 	log.Println("Setup docker connection")
@@ -176,8 +195,21 @@ func main() {
 		// pull source image
 		// use a closure so deferred close is closer
 		err := func() error {
+			named, err := reference.ParseNormalizedNamed(*srcImage)
+			if err != nil {
+				return err
+			}
+			registry := reference.Domain(named)
+
+			imagePullOptions := types.ImagePullOptions{}
+			if authConfig, ok := authConfigs[registry]; ok {
+				imagePullOptions.RegistryAuth = authConfig.IdentityToken
+			} else {
+				log.Printf("No docker credentials found for %s", registry)
+			}
+
 			log.Printf("Pull source docker image: %s", *srcImage)
-			pull, err := cli.ImagePull(ctx, *srcImage, types.ImagePullOptions{})
+			pull, err := cli.ImagePull(ctx, *srcImage, imagePullOptions)
 			if err != nil {
 				return err
 			}
@@ -288,9 +320,8 @@ func main() {
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
 	opt := types.ImageBuildOptions{
-		Tags: []string{
-			dstIm,
-		},
+		AuthConfigs:    authConfigs,
+		Tags:           []string{dstIm},
 		BuildArgs:      buildArgs,
 		SuppressOutput: *quiet,
 		NoCache:        false,
