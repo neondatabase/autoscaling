@@ -26,7 +26,10 @@ data:
           "retryDeniedDownscaleSeconds": 5,
           "requestedUpscaleValidSeconds": 10,
           "retryFailedRequestSeconds": 3,
-          "maxUnsuccessfulRequestCnt": 3
+          "maxFailedRequestRate": {
+            "intervalSeconds": 60,
+            "threshold": 5
+          }
       },
       "metrics": {
         "port": 9100,
@@ -41,13 +44,19 @@ data:
         "retryFailedRequestSeconds": 3,
         "retryDeniedUpscaleSeconds": 2,
         "requestPort": 10299,
-        "maxUnsuccessfulRequestCnt": 3
+        "maxFailedRequestRate": {
+          "intervalSeconds": 60,
+          "threshold": 5
+        }
       },
       "dumpState": {
         "port": 10300,
         "timeoutSeconds": 5
       },
       "neonvm": {
-        "maxUnsuccessfulRequestCnt": 3
+        "maxFailedRequestRate": {
+          "intervalSeconds": 60,
+          "threshold": 5
+        }
       }
     }

@@ -21,6 +21,11 @@ type Config struct {
 	DumpState *DumpStateConfig `json:"dumpState"`
 }
 
+type RateThresholdConfig struct {
+	IntervalSeconds uint `json:"intervalSeconds"`
+	Threshold       uint `json:"threshold"`
+}
+
 type MonitorConfig struct {
 	ResponseTimeoutSeconds uint `json:"responseTimeoutSeconds"`
 	// ConnectionTimeoutSeconds gives how long we may take to connect to the
@@ -41,9 +46,9 @@ type MonitorConfig struct {
 	// MaxHealthCheckSequentialFailuresSeconds gives the duration, in seconds, after which we
 	// should restart the connection to the vm-monitor if health checks aren't succeeding.
 	MaxHealthCheckSequentialFailuresSeconds uint `json:"maxHealthCheckSequentialFailuresSeconds"`
-	// MaxUnsuccefulRequestCnt defines the maximum number of consecutive failed monitor requests
-	// which after a VM is considered stuck.
-	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
+	// MaxFailedRequestRate defines the maximum rate of failed monitor requests, above which
+	// a VM is considered stuck.
+	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
 
 	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait before retrying a
 	// request that previously failed.
@@ -114,16 +119,16 @@ type SchedulerConfig struct {
 	RetryDeniedUpscaleSeconds uint `json:"retryDeniedUpscaleSeconds"`
 	// RequestPort defines the port to access the scheduler's ✨special✨ API with
 	RequestPort uint16 `json:"requestPort"`
-	// MaxUnsuccefulRequestCnt defines the maximum number of consecutive failed scheduler requests
-	// which after a VM is considered stuck.
-	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
+	// MaxFailedRequestRate defines the maximum rate of failed scheduler requests, above which
+	// a VM is considered stuck.
+	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
 }
 
 // NeonVMConfig defines a few parameters for NeonVM requests
 type NeonVMConfig struct {
-	// MaxUnsuccefulRequestCnt defines the maximum number of consecutive failed NeonVM requests
-	// which after a VM is considered stuck.
-	MaxUnsuccessfulRequestCnt uint `json:"maxUnsuccessfulRequestCnt"`
+	// MaxFailedRequestRate defines the maximum rate of failed NeonVM requests, above which
+	// a VM is considered stuck.
+	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
 }
 
 func ReadConfig(path string) (*Config, error) {

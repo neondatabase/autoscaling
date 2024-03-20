@@ -66,10 +66,8 @@ func (iface *execPluginInterface) Request(
 		return true
 	}()
 	iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
-		if successful {
-			ps.UnsuccessfulSchedulerRequestCnt = 0
-		} else {
-			ps.UnsuccessfulSchedulerRequestCnt++
+		if !successful {
+			ps.failedSchedulerRequestCounter.Inc()
 		}
 		return ps
 	})
@@ -95,10 +93,8 @@ func (iface *execNeonVMInterface) Request(ctx context.Context, logger *zap.Logge
 
 	err := iface.runner.doNeonVMRequest(ctx, target)
 	iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
-		if err == nil {
-			ps.UnsuccessfulNeonVMRequestCnt = 0
-		} else {
-			ps.UnsuccessfulNeonVMRequestCnt++
+		if err != nil {
+			ps.failedNeonVMRequestCounter.Inc()
 		}
 		return ps
 	})
@@ -182,10 +178,8 @@ func (h *execMonitorHandle) Downscale(
 	}
 
 	h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
-		if err != nil && result.Ok {
-			ps.UnsuccessfulMonitorRequestCnt = 0
-		} else {
-			ps.UnsuccessfulMonitorRequestCnt++
+		if err != nil || !result.Ok {
+			ps.failedMonitorRequestCounter.Inc()
 		}
 		return ps
 	})
@@ -210,9 +204,7 @@ func (h *execMonitorHandle) Upscale(ctx context.Context, logger *zap.Logger, cur
 
 	h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
 		if err != nil {
-			ps.UnsuccessfulMonitorRequestCnt = 0
-		} else {
-			ps.UnsuccessfulMonitorRequestCnt++
+			ps.failedMonitorRequestCounter.Inc()
 		}
 		return ps
 	})

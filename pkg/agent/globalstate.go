@@ -153,11 +153,11 @@ func (s *agentState) handleVMEventAdded(
 			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
 			stateUpdatedAt:     now,
 
-			startTime:                       now,
-			lastSuccessfulMonitorComm:       nil,
-			UnsuccessfulMonitorRequestCnt:   0,
-			UnsuccessfulNeonVMRequestCnt:    0,
-			UnsuccessfulSchedulerRequestCnt: 0,
+			startTime:                     now,
+			lastSuccessfulMonitorComm:     nil,
+			failedMonitorRequestCounter:   util.NewRecentCounter(time.Duration(s.config.Monitor.MaxFailedRequestRate.IntervalSeconds)),
+			failedNeonVMRequestCounter:    util.NewRecentCounter(time.Duration(s.config.NeonVM.MaxFailedRequestRate.IntervalSeconds)),
+			failedSchedulerRequestCounter: util.NewRecentCounter(time.Duration(s.config.Scheduler.MaxFailedRequestRate.IntervalSeconds)),
 		},
 	}
 
@@ -411,10 +411,11 @@ type podStatus struct {
 	endState          *podStatusEndState
 	previousEndStates []podStatusEndState
 
-	lastSuccessfulMonitorComm       *time.Time
-	UnsuccessfulMonitorRequestCnt   uint
-	UnsuccessfulNeonVMRequestCnt    uint
-	UnsuccessfulSchedulerRequestCnt uint
+	lastSuccessfulMonitorComm *time.Time
+
+	failedMonitorRequestCounter   *util.RecentCounter
+	failedNeonVMRequestCounter    *util.RecentCounter
+	failedSchedulerRequestCounter *util.RecentCounter
 
 	// vmInfo stores the latest information about the VM, as given by the global VM watcher.
 	//
@@ -438,10 +439,10 @@ type podStatusDump struct {
 	EndState          *podStatusEndState  `json:"endState"`
 	PreviousEndStates []podStatusEndState `json:"previousEndStates"`
 
-	LastSuccessfulMonitorComm       *time.Time `json:"lastSuccessfulMonitorComm"`
-	UnsuccessfulMonitorRequestCnt   uint       `json:"unsuccessfulMonitorCommCnt"`
-	UnsuccessfulNeonVMRequestCnt    uint       `json:"unsuccessfulNeonVMCommCnt"`
-	UnsuccessfulSchedulerRequestCnt uint       `json:"unsuccessfulSchedulerCommCnt"`
+	LastSuccessfulMonitorComm     *time.Time `json:"lastSuccessfulMonitorComm"`
+	FailedMonitorRequestCounter   uint       `json:"failedMonitorRequestCounter"`
+	FailedNeonVMRequestCounter    uint       `json:"failedNeonVMRequestCounter"`
+	FailedSchedulerRequestCounter uint       `json:"failedSchedulerRequestCounter"`
 
 	VMInfo api.VmInfo `json:"vmInfo"`
 
@@ -520,13 +521,13 @@ func (s podStatus) isStuck(global *agentState, now time.Time) bool {
 	if s.monitorStuckAt(global.config).Before(now) {
 		return true
 	}
-	if s.UnsuccessfulMonitorRequestCnt > global.config.Monitor.MaxUnsuccessfulRequestCnt {
+	if s.failedMonitorRequestCounter.Get() > global.config.Monitor.MaxFailedRequestRate.Threshold {
 		return true
 	}
-	if s.UnsuccessfulSchedulerRequestCnt > global.config.Scheduler.MaxUnsuccessfulRequestCnt {
+	if s.failedSchedulerRequestCounter.Get() > global.config.Scheduler.MaxFailedRequestRate.Threshold {
 		return true
 	}
-	if s.UnsuccessfulNeonVMRequestCnt > global.config.NeonVM.MaxUnsuccessfulRequestCnt {
+	if s.failedNeonVMRequestCounter.Get() > global.config.NeonVM.MaxFailedRequestRate.Threshold {
 		return true
 	}
 	return false
@@ -619,9 +620,9 @@ func (s *lockedPodStatus) dump() podStatusDump {
 		State:          s.state,
 		StateUpdatedAt: s.stateUpdatedAt,
 
-		LastSuccessfulMonitorComm:       s.lastSuccessfulMonitorComm,
-		UnsuccessfulMonitorRequestCnt:   s.UnsuccessfulMonitorRequestCnt,
-		UnsuccessfulNeonVMRequestCnt:    s.UnsuccessfulNeonVMRequestCnt,
-		UnsuccessfulSchedulerRequestCnt: s.UnsuccessfulSchedulerRequestCnt,
+		LastSuccessfulMonitorComm:     s.lastSuccessfulMonitorComm,
+		FailedMonitorRequestCounter:   s.failedMonitorRequestCounter.Get(),
+		FailedNeonVMRequestCounter:    s.failedNeonVMRequestCounter.Get(),
+		FailedSchedulerRequestCounter: s.failedSchedulerRequestCounter.Get(),
 	}
 }
