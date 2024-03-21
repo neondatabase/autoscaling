@@ -23,6 +23,7 @@ func (rc *RecentCounter) cleaup(t time.Time) {
 			break
 		}
 	}
+	rc.timestamps = rc.timestamps[i:]
 }
 
 // Inc increments the counter and adds the current timestamp to the list of timestamps.

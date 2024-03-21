@@ -155,9 +155,9 @@ func (s *agentState) handleVMEventAdded(
 
 			startTime:                     now,
 			lastSuccessfulMonitorComm:     nil,
-			failedMonitorRequestCounter:   util.NewRecentCounter(time.Duration(s.config.Monitor.MaxFailedRequestRate.IntervalSeconds)),
-			failedNeonVMRequestCounter:    util.NewRecentCounter(time.Duration(s.config.NeonVM.MaxFailedRequestRate.IntervalSeconds)),
-			failedSchedulerRequestCounter: util.NewRecentCounter(time.Duration(s.config.Scheduler.MaxFailedRequestRate.IntervalSeconds)),
+			failedMonitorRequestCounter:   util.NewRecentCounter(time.Duration(s.config.Monitor.MaxFailedRequestRate.IntervalSeconds) * time.Second),
+			failedNeonVMRequestCounter:    util.NewRecentCounter(time.Duration(s.config.NeonVM.MaxFailedRequestRate.IntervalSeconds) * time.Second),
+			failedSchedulerRequestCounter: util.NewRecentCounter(time.Duration(s.config.Scheduler.MaxFailedRequestRate.IntervalSeconds) * time.Second),
 		},
 	}
 
