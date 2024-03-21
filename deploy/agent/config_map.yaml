@@ -27,8 +27,8 @@ data:
           "requestedUpscaleValidSeconds": 10,
           "retryFailedRequestSeconds": 3,
           "maxFailedRequestRate": {
-            "intervalSeconds": 60,
-            "threshold": 5
+            "intervalSeconds": 120,
+            "threshold": 2
           }
       },
       "metrics": {
@@ -45,7 +45,7 @@ data:
         "retryDeniedUpscaleSeconds": 2,
         "requestPort": 10299,
         "maxFailedRequestRate": {
-          "intervalSeconds": 60,
+          "intervalSeconds": 120,
           "threshold": 5
         }
       },
@@ -55,8 +55,8 @@ data:
       },
       "neonvm": {
         "maxFailedRequestRate": {
-          "intervalSeconds": 60,
-          "threshold": 5
+          "intervalSeconds": 120,
+          "threshold": 2
         }
       }
     }
