@@ -138,22 +138,32 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 }
 
 func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
-	cpuInfo, err := NewVmCpuInfo(vm.Spec.Guest.CPUs)
+	logger = logger.With(util.VMNameFields(vm))
+	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
+}
+
+func extractVmInfoGeneric(
+	logger *zap.Logger,
+	vmName string,
+	obj metav1.ObjectMetaAccessor,
+	resources vmapi.VirtualMachineResources,
+) (*VmInfo, error) {
+	cpuInfo, err := NewVmCpuInfo(resources.CPUs)
 	if err != nil {
 		return nil, fmt.Errorf("Error extracting CPU info: %w", err)
 	}
 
-	memInfo, err := NewVmMemInfo(vm.Spec.Guest.MemorySlots, vm.Spec.Guest.MemorySlotSize)
+	memInfo, err := NewVmMemInfo(resources.MemorySlots, resources.MemorySlotSize)
 	if err != nil {
 		return nil, fmt.Errorf("Error extracting memory info: %w", err)
 	}
 
-	scalingEnabled := HasAutoscalingEnabled(vm)
-	alwaysMigrate := HasAlwaysMigrateLabel(vm)
+	scalingEnabled := HasAutoscalingEnabled(obj)
+	alwaysMigrate := HasAlwaysMigrateLabel(obj)
 
 	info := VmInfo{
-		Name:           vm.Name,
-		Namespace:      vm.Namespace,
+		Name:           vmName,
+		Namespace:      obj.GetObjectMeta().GetNamespace(),
 		Cpu:            *cpuInfo,
 		Mem:            *memInfo,
 		ScalingConfig:  nil, // set below, maybe
@@ -161,19 +171,19 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 		ScalingEnabled: scalingEnabled,
 	}
 
-	if boundsJSON, ok := vm.Annotations[AnnotationAutoscalingBounds]; ok {
+	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {
 		var bounds ScalingBounds
 		if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 
-		if err := bounds.Validate(&vm.Spec.Guest.MemorySlotSize); err != nil {
+		if err := bounds.Validate(&resources.MemorySlotSize); err != nil {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
 	}
 
-	if configJSON, ok := vm.Annotations[AnnotationAutoscalingConfig]; ok {
+	if configJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingConfig]; ok {
 		var config ScalingConfig
 		if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingConfig, err)
@@ -208,13 +218,11 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 	if using.HasFieldLessThan(min) {
 		logger.Warn(
 			"Current usage has field less than minimum",
-			util.VMNameFields(vm),
 			zap.Object("using", using), zap.Object("min", min),
 		)
 	} else if using.HasFieldGreaterThan(max) {
 		logger.Warn(
 			"Current usage has field greater than maximum",
-			util.VMNameFields(vm),
 			zap.Object("using", using), zap.Object("max", max),
 		)
 	}
