@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 func TestRecentCounter(t *testing.T) {
