@@ -57,6 +57,23 @@ type VmCpuInfo struct {
 	Use vmapi.MilliCPU `json:"use"`
 }
 
+func NewVmCpuInfo(cpus vmapi.CPUs) (*VmCpuInfo, error) {
+	if cpus.Min == nil {
+		return nil, errors.New("expected non-nil field Min")
+	}
+	if cpus.Max == nil {
+		return nil, errors.New("expected non-nil field Max")
+	}
+	if cpus.Use == nil {
+		return nil, errors.New("expected non-nil field Use")
+	}
+	return &VmCpuInfo{
+		Min: *cpus.Min,
+		Max: *cpus.Max,
+		Use: *cpus.Use,
+	}, nil
+}
+
 type VmMemInfo struct {
 	// Min is the minimum number of memory slots available
 	Min uint16 `json:"min"`
@@ -66,6 +83,24 @@ type VmMemInfo struct {
 	Use uint16 `json:"use"`
 
 	SlotSize Bytes `json:"slotSize"`
+}
+
+func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) (*VmMemInfo, error) {
+	if memSlots.Min == nil {
+		return nil, errors.New("expected non-nil field Min")
+	}
+	if memSlots.Max == nil {
+		return nil, errors.New("expected non-nil field Max")
+	}
+	if memSlots.Use == nil {
+		return nil, errors.New("expected non-nil field Use")
+	}
+	return &VmMemInfo{
+		Min:      uint16(*memSlots.Min),
+		Max:      uint16(*memSlots.Max),
+		Use:      uint16(*memSlots.Use),
+		SlotSize: Bytes(memSlotSize.Value()),
+	}, nil
 }
 
 // Using returns the Resources that this VmInfo says the VM is using
@@ -103,54 +138,27 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 }
 
 func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
-	var err error
-
-	getNonNilInt := func(err *error, ptr *int32, name string) (val int32) {
-		if *err != nil {
-			return
-		} else if ptr == nil {
-			*err = fmt.Errorf("expected non-nil field %s", name)
-			return
-		} else {
-			return *ptr
-		}
+	cpuInfo, err := NewVmCpuInfo(vm.Spec.Guest.CPUs)
+	if err != nil {
+		return nil, fmt.Errorf("Error extracting CPU info: %w", err)
 	}
 
-	getNonNilMilliCPU := func(err *error, ptr *vmapi.MilliCPU, name string) (val vmapi.MilliCPU) {
-		if *err != nil {
-			return
-		} else if ptr == nil {
-			*err = fmt.Errorf("expected non-nil field %s", name)
-			return
-		} else {
-			return *ptr
-		}
+	memInfo, err := NewVmMemInfo(vm.Spec.Guest.MemorySlots, vm.Spec.Guest.MemorySlotSize)
+	if err != nil {
+		return nil, fmt.Errorf("Error extracting memory info: %w", err)
 	}
 
 	scalingEnabled := HasAutoscalingEnabled(vm)
 	alwaysMigrate := HasAlwaysMigrateLabel(vm)
 
 	info := VmInfo{
-		Name:      vm.Name,
-		Namespace: vm.Namespace,
-		Cpu: VmCpuInfo{
-			Min: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min"),
-			Max: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max"),
-			Use: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use"),
-		},
-		Mem: VmMemInfo{
-			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
-			Max:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Max, ".spec.guest.memorySlots.max")),
-			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
-			SlotSize: BytesFromResourceQuantity(vm.Spec.Guest.MemorySlotSize),
-		},
+		Name:           vm.Name,
+		Namespace:      vm.Namespace,
+		Cpu:            *cpuInfo,
+		Mem:            *memInfo,
 		ScalingConfig:  nil, // set below, maybe
 		AlwaysMigrate:  alwaysMigrate,
 		ScalingEnabled: scalingEnabled,
-	}
-
-	if err != nil {
-		return nil, err
 	}
 
 	if boundsJSON, ok := vm.Annotations[AnnotationAutoscalingBounds]; ok {
