@@ -21,25 +21,25 @@ func shallowCopy[T any](ptr *T) *T {
 // StateDump provides introspection into the current values of the fields of State
 //
 // It implements json.Marshaler.
-type StateDump struct {
-	internal state
+type StateDump[M ToAPIMetrics] struct {
+	internal state[M]
 }
 
-func (d StateDump) MarshalJSON() ([]byte, error) {
+func (d StateDump[M]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.internal)
 }
 
 // Dump produces a JSON-serializable copy of the State
-func (s *State) Dump() StateDump {
-	return StateDump{
-		internal: state{
-			Debug:   s.internal.Debug,
-			Config:  s.internal.Config,
-			VM:      s.internal.VM,
-			Plugin:  s.internal.Plugin.deepCopy(),
-			Monitor: s.internal.Monitor.deepCopy(),
-			NeonVM:  s.internal.NeonVM.deepCopy(),
-			Metrics: shallowCopy[api.Metrics](s.internal.Metrics),
+func (s *State[M]) Dump() StateDump[M] {
+	return StateDump[M]{
+		internal: state[M]{
+			Debug:            s.internal.Debug,
+			Config:           s.internal.Config,
+			VM:               s.internal.VM,
+			Plugin:           s.internal.Plugin.deepCopy(),
+			Monitor:          s.internal.Monitor.deepCopy(),
+			NeonVM:           s.internal.NeonVM.deepCopy(),
+			ScalingAlgorithm: s.internal.ScalingAlgorithm.DeepCopy(),
 		},
 	}
 }
@@ -50,6 +50,7 @@ func (s *pluginState) deepCopy() pluginState {
 		LastRequest:    shallowCopy[pluginRequested](s.LastRequest),
 		LastFailureAt:  shallowCopy[time.Time](s.LastFailureAt),
 		Permit:         shallowCopy[api.Resources](s.Permit),
+		Metrics:        shallowCopy[api.Metrics](s.Metrics),
 	}
 }
 
