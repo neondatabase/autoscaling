@@ -30,6 +30,52 @@ func PodStartedBefore(p, q *corev1.Pod) bool {
 	return p.Status.StartTime.Before(q.Status.StartTime)
 }
 
+// TryPodPreferredAZ returns the desired availability zone of the Pod, if it has one
+func TryPodPreferredAZ(pod *corev1.Pod) string {
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
+		return ""
+	}
+
+	affinity := pod.Spec.Affinity.NodeAffinity
+
+	azForTerm := func(term corev1.NodeSelectorTerm) string {
+		for _, expr := range term.MatchExpressions {
+			isAZ := expr.Key == "topology.kubernetes.io/zone" &&
+				expr.Operator == corev1.NodeSelectorOpIn &&
+				len(expr.Values) == 1
+			if isAZ {
+				return expr.Values[0]
+			}
+		}
+
+		return ""
+	}
+
+	// First, check required affinities for AZ:
+	if affinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		for _, term := range affinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			if az := azForTerm(term); az != "" {
+				return az
+			}
+		}
+	}
+
+	// Then, check preferred:
+	for _, term := range affinity.PreferredDuringSchedulingIgnoredDuringExecution {
+		if az := azForTerm(term.Preference); az != "" {
+			return az
+		}
+	}
+
+	if affinity := pod.Spec.Affinity; affinity != nil {
+		if affinity.NodeAffinity != nil {
+			panic("todo")
+		}
+	}
+
+	panic("todo")
+}
+
 // TryPodOwnerVirtualMachine returns the name of the VirtualMachine that owns the pod, if there is
 // one that does. Otherwise returns nil.
 func TryPodOwnerVirtualMachine(pod *corev1.Pod) *NamespacedName {
