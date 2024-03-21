@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"math/rand"
@@ -290,46 +289,11 @@ func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, actio
 		return nil, nil
 	}
 
-	accessor := func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
-		return index.Get(vmName.Namespace, vmName.Name)
-	}
-
-	vm, ok := e.vmStore.GetIndexed(accessor)
-	if !ok {
-		logger.Warn(
-			"VM is missing from local store. Relisting",
-			zap.Object("pod", util.GetNamespacedName(pod)),
-			zap.Object("virtualmachine", vmName),
-		)
-
-		// Use a reasonable timeout on the relist request, so that if the VM store is broken, we
-		// won't block forever.
-		//
-		// FIXME: make this configurable
-		timeout := 5 * time.Second
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-
-		select {
-		case <-e.vmStore.Relist():
-		case <-timer.C:
-			return nil, fmt.Errorf("Timed out waiting on VM store relist (timeout = %s)", timeout)
-		}
-
-		// retry fetching the VM, now that we know it's been synced.
-		vm, ok = e.vmStore.GetIndexed(accessor)
-		if !ok {
-			// if the VM is still not present after relisting, then either it's already been deleted
-			// or there's a deeper problem.
-			return nil, errors.New("Could not find VM for pod, even after relist")
-		}
-	}
-
-	vmInfo, err := api.ExtractVmInfo(logger, vm)
+	vmInfo, err := api.ExtractVmInfoFromPod(logger, pod)
 	if err != nil {
 		e.handle.EventRecorder().Eventf(
-			vm,              // regarding
-			pod,             // related
+			pod,             // regarding
+			nil,             // related
 			"Warning",       // eventtype
 			"ExtractVmInfo", // reason
 			action,          // action

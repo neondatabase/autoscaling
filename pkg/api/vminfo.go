@@ -10,6 +10,7 @@ import (
 	"github.com/tychoish/fun/erc"
 	"go.uber.org/zap"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -140,6 +141,20 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	logger = logger.With(util.VMNameFields(vm))
 	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
+}
+
+func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
+	logger = logger.With(util.PodNameFields(pod))
+	resourcesJSON := pod.Annotations[vmapi.VirtualMachineResourcesAnnotation]
+
+	var resources vmapi.VirtualMachineResources
+	if err := json.Unmarshal([]byte(resourcesJSON), &resources); err != nil {
+		return nil, fmt.Errorf("Error unmarshaling %q: %w",
+			vmapi.VirtualMachineResourcesAnnotation, err)
+	}
+
+	vmName := pod.Labels[vmapi.VirtualMachineNameLabel]
+	return extractVmInfoGeneric(logger, vmName, pod, resources)
 }
 
 func extractVmInfoGeneric(
