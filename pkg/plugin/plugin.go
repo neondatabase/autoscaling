@@ -114,8 +114,13 @@ func makeAutoscaleEnforcerPlugin(
 		}
 	}
 
+	// makePrometheusRegistry sets p.metrics, which we need to do before calling
+	// newEventQueueSet and readClusterState, because we set metrics eventQueueSet and for each
+	// node while we build the state.
+	promReg := p.makePrometheusRegistry()
+
 	// Start watching Pod/VM events, adding them to a shared queue to process them in order
-	queueSet := newEventQueueSet[func()](config.EventQueueWorkers)
+	queueSet := newEventQueueSet[func()](config.EventQueueWorkers, p.metrics)
 
 	pushToQueue := func(logger *zap.Logger, key string, f func()) {
 		if err := queueSet.enqueue(key, f); err != nil {
@@ -196,9 +201,6 @@ func makeAutoscaleEnforcerPlugin(
 
 	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
 
-	// makePrometheusRegistry sets p.metrics, which we need to do before calling readClusterState,
-	// because we set metrics for each node while we build the state.
-	promReg := p.makePrometheusRegistry()
 	watchMetrics.MustRegister(promReg)
 
 	// ... but before handling the events, read the current cluster state:
