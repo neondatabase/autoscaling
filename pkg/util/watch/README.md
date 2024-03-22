@@ -90,8 +90,8 @@ of the store are at least as recent as the request to relist.
 Concretely, this allows the scheduler to always fetch the VirtualMachine associated with a Pod by
 relisting if the VM is not immediately found (the store is probably just out of date!).
 
-The details of this implementation can be found in the relisting portion of the `watch.Watch`
-function, and in `(*watch.Store[T]).Relist()`.
+The details of this implementation can be found in `relist.go`, as well as the places where its
+functions are called in `watch.Watch` and `(*watch.Store[T]).Relist()`.
 
 ## Our changes: Custom indexes
 

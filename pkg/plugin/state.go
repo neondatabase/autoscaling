@@ -572,7 +572,7 @@ func (e *AutoscaleEnforcer) handleNodeDeletion(logger *zap.Logger, nodeName stri
 // otherwise, we might (a) ignore resources from pods that weren't scheduled here, or (b) fail to
 // include pods that *were* scheduled here, but had spurious Unreserves.
 // (for more, see: https://github.com/neondatabase/autoscaling/pull/435)
-func (e *AutoscaleEnforcer) handleStarted(logger *zap.Logger, pod *corev1.Pod) {
+func (e *AutoscaleEnforcer) handleStarted(logger *zap.Logger, pod *corev1.Pod, vmRelistCount watch.RelistCount) {
 	nodeName := pod.Spec.NodeName
 
 	logger = logger.With(
@@ -586,7 +586,7 @@ func (e *AutoscaleEnforcer) handleStarted(logger *zap.Logger, pod *corev1.Pod) {
 
 	logger.Info("Handling Pod start event")
 
-	_, _, _ = e.reserveResources(context.TODO(), logger, pod, "Pod started", false)
+	_, _, _ = e.reserveResources(context.TODO(), logger, pod, "Pod started", false, &vmRelistCount)
 }
 
 // reserveResources attempts to set aside resources on the node for the pod.
@@ -603,6 +603,7 @@ func (e *AutoscaleEnforcer) reserveResources(
 	pod *corev1.Pod,
 	action string,
 	allowDeny bool,
+	vmRelistCount *watch.RelistCount,
 ) (ok bool, _ *verdictSet, _ error) {
 	nodeName := pod.Spec.NodeName
 
@@ -610,7 +611,7 @@ func (e *AutoscaleEnforcer) reserveResources(
 		panic(fmt.Errorf("reserveResources called with ignored pod %v", util.GetNamespacedName(pod)))
 	}
 
-	vmInfo, err := e.getVmInfo(logger, pod, action)
+	vmInfo, err := e.getVmInfo(logger, pod, action, vmRelistCount)
 	if err != nil {
 		msg := "Error getting VM info for Pod"
 		logger.Error(msg, zap.Error(err))
