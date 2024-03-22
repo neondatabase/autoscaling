@@ -67,13 +67,8 @@ func TryPodPreferredAZ(pod *corev1.Pod) string {
 		}
 	}
 
-	if affinity := pod.Spec.Affinity; affinity != nil {
-		if affinity.NodeAffinity != nil {
-			panic("todo")
-		}
-	}
-
-	panic("todo")
+	// no AZ present
+	return ""
 }
 
 // TryPodOwnerVirtualMachine returns the name of the VirtualMachine that owns the pod, if there is
