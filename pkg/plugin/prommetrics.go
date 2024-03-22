@@ -26,6 +26,9 @@ type PromMetrics struct {
 	migrationCreateFails  prometheus.Counter
 	migrationDeleteFails  *prometheus.CounterVec
 	reserveShouldDeny     *prometheus.CounterVec
+	eventQueueDepth       prometheus.Gauge
+	eventQueueAddsTotal   prometheus.Counter
+	eventQueueLatency     prometheus.Histogram
 }
 
 func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
@@ -115,6 +118,25 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Help: "Number of times the plugin should deny a reservation",
 			},
 			[]string{"availability_zone", "node", "node_group"},
+		)),
+		eventQueueDepth: util.RegisterMetric(reg, prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_eventqueue_depth",
+				Help: "Current sum depth of all event queues",
+			},
+		)),
+		eventQueueAddsTotal: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_eventqueue_adds_total",
+				Help: "Total number of events added to event queues",
+			},
+		)),
+		eventQueueLatency: util.RegisterMetric(reg, prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_plugin_eventqueue_duration_seconds",
+				Help:    "How long in seconds an item stays in an event queue before being processed",
+				Buckets: prometheus.ExponentialBuckets(10e-9, 10, 12),
+			},
 		)),
 	}
 
