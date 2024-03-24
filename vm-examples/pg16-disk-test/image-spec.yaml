@@ -74,7 +74,9 @@ merge: |
   RUN set -e \
         && apk add --no-cache \
                 su-exec \
-                postgresql16
+                postgresql16 \
+                lsblk
+
 
   # Initialize postgres
   ENV PGDATA /var/lib/postgresql

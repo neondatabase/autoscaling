@@ -981,12 +981,26 @@ spec:
                       type: object
                     mountPath:
                       description: Path within the virtual machine at which the disk
-                        should be mounted.  Must not contain ':'.
+                        should be mounted. Must not contain ':'. If this is a raw
+                        disk, a soft symlink will be created.
                       type: string
                     name:
                       description: Disk's name. Must be a DNS_LABEL and unique within
                         the virtual machine.
                       type: string
+                    rawDisk:
+                      description: RawDisk represents a temporary qcow2 raw disk (no
+                        filesystem) that shares a vm's lifetime.
+                      properties:
+                        size:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                      required:
+                      - size
+                      type: object
                     readOnly:
                       default: false
                       description: Mounted read-only if true, read-write otherwise

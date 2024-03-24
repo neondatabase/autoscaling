@@ -330,8 +330,8 @@ type Disk struct {
 	// +optional
 	// +kubebuilder:default:=false
 	ReadOnly *bool `json:"readOnly,omitempty"`
-	// Path within the virtual machine at which the disk should be mounted.  Must
-	// not contain ':'.
+	// Path within the virtual machine at which the disk should be mounted. Must
+	// not contain ':'. If this is a raw disk, a soft symlink will be created.
 	MountPath string `json:"mountPath"`
 	// DiskSource represents the location and type of the mounted disk.
 	DiskSource `json:",inline"`
@@ -349,12 +349,19 @@ type DiskSource struct {
 	// TmpfsDisk represents a tmpfs.
 	// +optional
 	Tmpfs *TmpfsDiskSource `json:"tmpfs,omitempty"`
+	// RawDisk represents a temporary qcow2 raw disk (no filesystem) that shares a vm's lifetime.
+	// +optional
+	RawDisk *RawDiskSource `json:"rawDisk,omitempty"`
 }
 
 type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
 	// Discard enables the "discard" mount option for the filesystem
 	Discard bool `json:"discard,omitempty"`
+}
+
+type RawDiskSource struct {
+	Size resource.Quantity `json:"size"`
 }
 
 type TmpfsDiskSource struct {
