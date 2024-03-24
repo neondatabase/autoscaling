@@ -114,7 +114,7 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 }
 
 func (m *PromMetrics) IncMethodCall(method string, pod *corev1.Pod, ignored bool) {
-	m.pluginCalls.WithLabelValues(method, util.TryPodPreferredAZ(pod), strconv.FormatBool(ignored)).Inc()
+	m.pluginCalls.WithLabelValues(method, util.PodPreferredAZIfPresent(pod), strconv.FormatBool(ignored)).Inc()
 }
 
 func (m *PromMetrics) IncFailIfNotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
@@ -122,5 +122,5 @@ func (m *PromMetrics) IncFailIfNotSuccess(method string, pod *corev1.Pod, ignore
 		return
 	}
 
-	m.pluginCallFails.WithLabelValues(method, util.TryPodPreferredAZ(pod), strconv.FormatBool(ignored), status.Code().String())
+	m.pluginCallFails.WithLabelValues(method, util.PodPreferredAZIfPresent(pod), strconv.FormatBool(ignored), status.Code().String())
 }

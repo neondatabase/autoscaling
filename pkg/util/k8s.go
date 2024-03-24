@@ -30,8 +30,8 @@ func PodStartedBefore(p, q *corev1.Pod) bool {
 	return p.Status.StartTime.Before(q.Status.StartTime)
 }
 
-// TryPodPreferredAZ returns the desired availability zone of the Pod, if it has one
-func TryPodPreferredAZ(pod *corev1.Pod) string {
+// PodPreferredAZIfPresent returns the desired availability zone of the Pod, if it has one
+func PodPreferredAZIfPresent(pod *corev1.Pod) string {
 	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
 		return ""
 	}
