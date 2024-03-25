@@ -15,8 +15,9 @@ func NewRecentCounter(interval time.Duration) *RecentCounter {
 	}
 }
 
-func (rc *RecentCounter) cleanup(t time.Time) {
-	checkpoint := t.Add(-rc.interval)
+// cleanup removes all timestamps that are beyond the interval from the current time
+func (rc *RecentCounter) cleanup(now time.Time) {
+	checkpoint := now.Add(-rc.interval)
 	i := 0
 	for ; i < len(rc.timestamps); i++ {
 		if rc.timestamps[i].After(checkpoint) {
