@@ -30,6 +30,19 @@ func PodStartedBefore(p, q *corev1.Pod) bool {
 	return p.Status.StartTime.Before(q.Status.StartTime)
 }
 
+func azForTerm(term corev1.NodeSelectorTerm) string {
+	for _, expr := range term.MatchExpressions {
+		isAZ := expr.Key == "topology.kubernetes.io/zone" &&
+			expr.Operator == corev1.NodeSelectorOpIn &&
+			len(expr.Values) == 1
+		if isAZ {
+			return expr.Values[0]
+		}
+	}
+
+	return ""
+}
+
 // PodPreferredAZIfPresent returns the desired availability zone of the Pod, if it has one
 func PodPreferredAZIfPresent(pod *corev1.Pod) string {
 	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
@@ -37,19 +50,6 @@ func PodPreferredAZIfPresent(pod *corev1.Pod) string {
 	}
 
 	affinity := pod.Spec.Affinity.NodeAffinity
-
-	azForTerm := func(term corev1.NodeSelectorTerm) string {
-		for _, expr := range term.MatchExpressions {
-			isAZ := expr.Key == "topology.kubernetes.io/zone" &&
-				expr.Operator == corev1.NodeSelectorOpIn &&
-				len(expr.Values) == 1
-			if isAZ {
-				return expr.Values[0]
-			}
-		}
-
-		return ""
-	}
 
 	// First, check required affinities for AZ:
 	if affinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
