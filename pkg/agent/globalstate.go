@@ -518,20 +518,10 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 }
 
 func (s podStatus) isStuck(global *agentState, now time.Time) bool {
-	if s.monitorStuckAt(global.config).Before(now) {
-		return true
-	}
-	if s.failedMonitorRequestCounter.Get() > global.config.Monitor.MaxFailedRequestRate.Threshold {
-		return true
-	}
-	if s.failedSchedulerRequestCounter.Get() > global.config.Scheduler.MaxFailedRequestRate.Threshold {
-		return true
-	}
-	if s.failedNeonVMRequestCounter.Get() > global.config.NeonVM.MaxFailedRequestRate.Threshold {
-		return true
-	}
-	return false
-
+	return s.monitorStuckAt(global.config).Before(now) ||
+		s.failedMonitorRequestCounter.Get() > global.config.Monitor.MaxFailedRequestRate.Threshold ||
+		s.failedSchedulerRequestCounter.Get() > global.config.Scheduler.MaxFailedRequestRate.Threshold ||
+		s.failedNeonVMRequestCounter.Get() > global.config.NeonVM.MaxFailedRequestRate.Threshold
 }
 
 // monitorStuckAt returns the time at which the Runner will be marked "stuck"
