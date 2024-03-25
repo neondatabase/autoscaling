@@ -25,6 +25,9 @@ type PromMetrics struct {
 	migrationDeletions    *prometheus.CounterVec
 	migrationCreateFails  prometheus.Counter
 	migrationDeleteFails  *prometheus.CounterVec
+	eventQueueDepth       prometheus.Gauge
+	eventQueueAddsTotal   prometheus.Counter
+	eventQueueLatency     prometheus.Histogram
 }
 
 func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
@@ -107,6 +110,25 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Help: "Number of failed VirtualMachineMigration Delete requests by the plugin",
 			},
 			[]string{"phase"},
+		)),
+		eventQueueDepth: util.RegisterMetric(reg, prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_eventqueue_depth",
+				Help: "Current depth of eventqueue",
+			},
+		)),
+		eventQueueAddsTotal: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_eventqueue_adds_total",
+				Help: "Total number of events added to eventqueue",
+			},
+		)),
+		eventQueueLatency: util.RegisterMetric(reg, prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_plugin_eventqueue_duration_seconds",
+				Help:    "How long in seconds an item stays in eventqueue before being processed",
+				Buckets: prometheus.ExponentialBuckets(10e-9, 10, 12),
+			},
 		)),
 	}
 
