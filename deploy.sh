@@ -36,7 +36,7 @@ cmd () {
     echo -n "$(date -u '+%F %T')"
     echo -en " \e[33m::\e[0m"
     echo "$cmdline"
-    "$@" | sed -e 's/^/    /g' # sed is used for indenting here
+    "$@" 2>&1 | sed -e 's/^/    /g' # sed is used for indenting here
 }
 
 main () {
@@ -113,7 +113,8 @@ main () {
             log 'Skipping loader, but continuing to neonvm'
         fi
 
-        cmd cp neonvm.yaml "$cluster/neonvm.yaml"
+        log 'Baking neonvm...'
+        cmd bash -e -o pipefail -c "./build.sh $cluster neonvm > $cluster/neonvm.yaml"
         check_diff "$cluster" "$cluster/neonvm.yaml"
         if [ "$(confirm 'Deploy neonvm?')" = 'yes' ]; then
             log 'Deploying neonvm...'

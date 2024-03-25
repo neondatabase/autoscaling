@@ -1,41 +1,64 @@
 {
-  "autoscaler-agent": {
-    "@base": [
-      {
-        "path": ".billing",
-        "value": {
-          "url": "http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1",
-          "cpuMetricName": "effective_compute_seconds",
-          "activeTimeMetricName": "active_time_seconds",
-          "collectEverySeconds": 4,
-          "accumulateEverySeconds": 24,
-          "pushEverySeconds": 30,
-          "pushRequestTimeoutSeconds": 30,
-          "maxBatchSize": 200
-        }
+  "neonvm": [
+    {
+      "change_type": "naive_yq",
+      "k8s_kind": "Deployment",
+      "k8s_name": "neonvm-controller",
+      "obj_subpath": ".spec.template.spec.containers[0].args",
+      "changes": {
+        "@base": [
+          "map(select(. != \"--enable-container-mgr\"))",
+          "map(select(. | startswith(\"--qemu-disk-cache-settings=\")) |= \"--qemu-disk-cache-settings=cache=none\")"
+        ],
       }
-    ],
-    "prod-ap-southeast-1-epsilon": [],
-    "prod-ap-southeast-2-kappa": [],
-    "prod-eu-central-1-gamma": [],
-    "prod-il-central-1-iota": [],
-    "prod-us-east-1-theta": [],
-    "prod-us-east-2-delta": [],
-    "prod-us-west-2-eta": []
-  },
-  "autoscale-scheduler": {
-    "@base": [
-      { "path": ".randomizeScores", "value": false },
-      { "path": ".k8sNodeGroupLabel", "value": "eks.amazonaws.com/nodegroup" },
-      { "path": ".k8sAvailabilityZoneLabel", "value": "topology.kubernetes.io/zone" },
-      { "path": ".ignoreNamespaces", "value": ["overprovisioning"] }
-    ],
-    "prod-ap-southeast-1-epsilon": [],
-    "prod-ap-southeast-2-kappa": [],
-    "prod-eu-central-1-gamma": [],
-    "prod-il-central-1-iota": [],
-    "prod-us-east-1-theta": [],
-    "prod-us-east-2-delta": [],
-    "prod-us-west-2-eta": []
-  }
+    }
+  ],
+  "autoscale-scheduler": [
+    {
+      "change_type": "nested_json",
+      "k8s_kind": "ConfigMap",
+      "k8s_name": "scheduler-plugin-config",
+      "obj_subpath": ".data[\"autoscale-enforcer-config.json\"]",
+      "changes": {
+        "@base": [
+          { "path": ".randomizeScores", "value": false },
+          { "path": ".k8sNodeGroupLabel", "value": "eks.amazonaws.com/nodegroup" },
+          { "path": ".k8sAvailabilityZoneLabel", "value": "topology.kubernetes.io/zone" },
+          { "path": ".ignoreNamespaces", "value": ["overprovisioning"] }
+        ],
+      }
+    }
+  ],
+  "autoscaler-agent": [
+    {
+      "change_type": "nested_json",
+      "k8s_kind": "ConfigMap",
+      "k8s_name": "autoscaler-agent-config",
+      "obj_subpath": ".data[\"config.json\"]",
+      "changes": {
+        "@base": [
+          {
+            "path": ".billing",
+            "value": {
+              "url": "https://vector-usage-tracking.beta.us-east-2.internal.aws.neon.build/v1",
+              "cpuMetricName": "effective_compute_seconds",
+              "activeTimeMetricName": "active_time_seconds",
+              "collectEverySeconds": 4,
+              "accumulateEverySeconds": 24,
+              "pushEverySeconds": 30,
+              "pushRequestTimeoutSeconds": 30,
+              "maxBatchSize": 200
+            }
+          }
+        ],
+        "dev-eu-central-1-alpha": [
+          { "path": ".billing", "value": null }
+        ],
+        "dev-eu-west-1-zeta": [
+          { "path": ".billing.url", "value": "http://neon-vector.neon-control-plane.svc.cluster.local:8082/v1" }
+        ],
+        "dev-us-east-2-beta": []
+      }
+    }
+  ]
 }
