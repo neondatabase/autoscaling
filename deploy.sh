@@ -102,6 +102,17 @@ main () {
     fi
     
     if [ "$(confirm 'Dry-run deploy neonvm?')" = 'yes' ]; then
+        cmd cp neonvm-runner-image-loader.yaml "$cluster/neonvm-runner-image-loader.yaml"
+        check_diff "$cluster" "$cluster/neonvm-runner-image-loader.yaml"
+        if [ "$(confirm 'Deploy neonvm-runner image loader?')" = 'yes']; then
+            log 'Deploying neonvm-runner image loader...'
+            cmd kubectl --context="$cluster" apply -f "$cluster/neonvm-runner-image-loader.yaml"
+            cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset neonvm-runner-image-loader
+            log 'neonvm-runner image loader deploy finished'
+        else
+            log 'Skipping loader, but continuing to neonvm'
+        fi
+
         cmd cp neonvm.yaml "$cluster/neonvm.yaml"
         check_diff "$cluster" "$cluster/neonvm.yaml"
         if [ "$(confirm 'Deploy neonvm?')" = 'yes' ]; then
