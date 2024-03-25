@@ -8,8 +8,6 @@ data:
     {
       "scaling": {
         "computeUnit": { "vCPUs": 0.25, "mem": "1Gi" },
-        "requestTimeoutSeconds": 10,
-        "retryFailedRequestSeconds": 5,
         "defaultConfig": {
           "loadAverageFractionTarget": 0.9,
           "memoryUsageFractionTarget": 0.75
@@ -54,6 +52,8 @@ data:
         "timeoutSeconds": 5
       },
       "neonvm": {
+        "requestTimeoutSeconds": 10,
+        "retryFailedRequestSeconds": 5,
         "maxFailedRequestRate": {
           "intervalSeconds": 120,
           "threshold": 2

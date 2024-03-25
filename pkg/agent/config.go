@@ -75,11 +75,6 @@ type ScalingConfig struct {
 	// ComputeUnit is the desired ratio between CPU and memory that the autoscaler-agent should
 	// uphold when making changes to a VM
 	ComputeUnit api.Resources `json:"computeUnit"`
-	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
-	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
-	// failed request before making another one.
-	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
 	// DefaultConfig gives the default scaling config, to be used if there is no configuration
 	// supplied with the "autoscaling.neon.tech/config" annotation.
 	DefaultConfig api.ScalingConfig `json:"defaultConfig"`
@@ -126,6 +121,12 @@ type SchedulerConfig struct {
 
 // NeonVMConfig defines a few parameters for NeonVM requests
 type NeonVMConfig struct {
+	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
+	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
+	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
+	// failed request before making another one.
+	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
+
 	// MaxFailedRequestRate defines the maximum rate of failed NeonVM requests, above which
 	// a VM is considered stuck.
 	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
@@ -175,8 +176,8 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.VCPU == 0, zeroTmpl, ".scaling.computeUnit.vCPUs")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.Mem == 0, zeroTmpl, ".scaling.computeUnit.mem")
-	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
-	erc.Whenf(ec, c.Scaling.RetryFailedRequestSeconds == 0, zeroTmpl, ".scaling.retryFailedRequestSeconds")
+	erc.Whenf(ec, c.NeonVM.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
+	erc.Whenf(ec, c.NeonVM.RetryFailedRequestSeconds == 0, zeroTmpl, ".scaling.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds")
 	erc.Whenf(ec, c.Monitor.ConnectionTimeoutSeconds == 0, zeroTmpl, ".monitor.connectionTimeoutSeconds")
 	erc.Whenf(ec, c.Monitor.ConnectionRetryMinWaitSeconds == 0, zeroTmpl, ".monitor.connectionRetryMinWaitSeconds")
