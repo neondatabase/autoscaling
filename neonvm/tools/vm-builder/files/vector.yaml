@@ -15,6 +15,12 @@ sources:
         excludes: ["*/proc/sys/fs/binfmt_misc"]
     type: host_metrics
     scrape_interval_secs: 1 # default is 15, but we scrape every 5s in autoscaler-agent
+  sql_exporter_metrics:
+    type: prometheus_scrape
+    # sql_exporter listen addr, exporting LFC statistics.
+    # This statistics will only be available when using the neon vm image. A custom image
+    # does not have this exporter by default.
+    endpoints: ["http://localhost:9399/metrics"]
 sinks:
   prom_exporter:
     type: prometheus_exporter
