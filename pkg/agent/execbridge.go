@@ -90,13 +90,11 @@ func (iface *execNeonVMInterface) Request(ctx context.Context, logger *zap.Logge
 	iface.runner.recordResourceChange(current, target, iface.runner.global.metrics.neonvmRequestedChange)
 
 	err := iface.runner.doNeonVMRequest(ctx, target)
-	iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
-		if err != nil {
-			ps.failedNeonVMRequestCounter.Inc()
-		}
-		return ps
-	})
 	if err != nil {
+		iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
+			ps.failedNeonVMRequestCounter.Inc()
+			return ps
+		})
 		return fmt.Errorf("Error making VM patch request: %w", err)
 	}
 
@@ -173,14 +171,12 @@ func (h *execMonitorHandle) Downscale(
 
 	if err == nil && result.Ok {
 		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
-	}
-
-	h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
-		if err != nil || !result.Ok {
+	} else {
+		h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
 			ps.failedMonitorRequestCounter.Inc()
-		}
-		return ps
-	})
+			return ps
+		})
+	}
 
 	return result, err
 }
@@ -198,14 +194,12 @@ func (h *execMonitorHandle) Upscale(ctx context.Context, logger *zap.Logger, cur
 
 	if err == nil {
 		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
-	}
-
-	h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
-		if err != nil {
+	} else {
+		h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
 			ps.failedMonitorRequestCounter.Inc()
-		}
-		return ps
-	})
+			return ps
+		})
+	}
 
 	return err
 }
