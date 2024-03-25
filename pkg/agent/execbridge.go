@@ -52,18 +52,16 @@ func (iface *execPluginInterface) Request(
 	}
 
 	successful := func() bool {
-		if err != nil {
+		if err != nil { // request is failed
 			return false
 		}
-		if resp.Permit == target {
+		if resp.Permit == target { // request is fully approved by the scheduler
 			return true
 		}
-		if lastPermit != nil {
-			if resp.Permit == *lastPermit {
-				return false
-			}
+		if lastPermit != nil && *lastPermit != resp.Permit { // request is parially approved by the scheduler
+			return true
 		}
-		return true
+		return false // scheduler denied the request
 	}()
 	iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
 		if !successful {
