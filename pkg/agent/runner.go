@@ -199,7 +199,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		Core: core.Config{
 			ComputeUnit:                        r.global.config.Scaling.ComputeUnit,
 			DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
-			NeonVMRetryWait:                    time.Second * time.Duration(r.global.config.Scaling.RetryFailedRequestSeconds),
+			NeonVMRetryWait:                    time.Second * time.Duration(r.global.config.NeonVM.RetryFailedRequestSeconds),
 			PluginRequestTick:                  time.Second*time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds) - pluginRequestJitter,
 			PluginRetryWait:                    time.Second * time.Duration(r.global.config.Scheduler.RetryFailedRequestSeconds),
 			PluginDeniedRetryWait:              time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
@@ -570,7 +570,7 @@ func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) erro
 		panic(fmt.Errorf("Error marshalling JSON patch: %w", err))
 	}
 
-	timeout := time.Second * time.Duration(r.global.config.Scaling.RequestTimeoutSeconds)
+	timeout := time.Second * time.Duration(r.global.config.NeonVM.RequestTimeoutSeconds)
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -695,7 +695,7 @@ func (r *Runner) DoSchedulerRequest(
 		return nil, fmt.Errorf("Error encoding request JSON: %w", err)
 	}
 
-	timeout := time.Second * time.Duration(r.global.config.Scaling.RequestTimeoutSeconds)
+	timeout := time.Second * time.Duration(r.global.config.NeonVM.RequestTimeoutSeconds)
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

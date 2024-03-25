@@ -153,8 +153,11 @@ func (s *agentState) handleVMEventAdded(
 			state:              "", // Explicitly set state to empty so that the initial state update does no decrement
 			stateUpdatedAt:     now,
 
-			startTime:                 now,
-			lastSuccessfulMonitorComm: nil,
+			startTime:                     now,
+			lastSuccessfulMonitorComm:     nil,
+			failedMonitorRequestCounter:   util.NewRecentCounter(time.Duration(s.config.Monitor.MaxFailedRequestRate.IntervalSeconds) * time.Second),
+			failedNeonVMRequestCounter:    util.NewRecentCounter(time.Duration(s.config.NeonVM.MaxFailedRequestRate.IntervalSeconds) * time.Second),
+			failedSchedulerRequestCounter: util.NewRecentCounter(time.Duration(s.config.Scheduler.MaxFailedRequestRate.IntervalSeconds) * time.Second),
 		},
 	}
 
@@ -410,6 +413,10 @@ type podStatus struct {
 
 	lastSuccessfulMonitorComm *time.Time
 
+	failedMonitorRequestCounter   *util.RecentCounter
+	failedNeonVMRequestCounter    *util.RecentCounter
+	failedSchedulerRequestCounter *util.RecentCounter
+
 	// vmInfo stores the latest information about the VM, as given by the global VM watcher.
 	//
 	// There is also a similar field inside the Runner itself, but it's better to store this out
@@ -432,7 +439,10 @@ type podStatusDump struct {
 	EndState          *podStatusEndState  `json:"endState"`
 	PreviousEndStates []podStatusEndState `json:"previousEndStates"`
 
-	LastSuccessfulMonitorComm *time.Time `json:"lastSuccessfulMonitorComm"`
+	LastSuccessfulMonitorComm     *time.Time `json:"lastSuccessfulMonitorComm"`
+	FailedMonitorRequestCounter   uint       `json:"failedMonitorRequestCounter"`
+	FailedNeonVMRequestCounter    uint       `json:"failedNeonVMRequestCounter"`
+	FailedSchedulerRequestCounter uint       `json:"failedSchedulerRequestCounter"`
 
 	VMInfo api.VmInfo `json:"vmInfo"`
 
@@ -480,7 +490,7 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 		case podStatusExitPanicked:
 			newState = runnerMetricStatePanicked
 		}
-	} else if newStatus.monitorStuckAt(global.config).Before(now) {
+	} else if newStatus.isStuck(global, now) {
 		newState = runnerMetricStateStuck
 	} else {
 		newState = runnerMetricStateOk
@@ -505,6 +515,13 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	}
 
 	s.podStatus = newStatus
+}
+
+func (s podStatus) isStuck(global *agentState, now time.Time) bool {
+	return s.monitorStuckAt(global.config).Before(now) ||
+		s.failedMonitorRequestCounter.Get() > global.config.Monitor.MaxFailedRequestRate.Threshold ||
+		s.failedSchedulerRequestCounter.Get() > global.config.Scheduler.MaxFailedRequestRate.Threshold ||
+		s.failedNeonVMRequestCounter.Get() > global.config.NeonVM.MaxFailedRequestRate.Threshold
 }
 
 // monitorStuckAt returns the time at which the Runner will be marked "stuck"
@@ -593,6 +610,9 @@ func (s *lockedPodStatus) dump() podStatusDump {
 		State:          s.state,
 		StateUpdatedAt: s.stateUpdatedAt,
 
-		LastSuccessfulMonitorComm: s.lastSuccessfulMonitorComm,
+		LastSuccessfulMonitorComm:     s.lastSuccessfulMonitorComm,
+		FailedMonitorRequestCounter:   s.failedMonitorRequestCounter.Get(),
+		FailedNeonVMRequestCounter:    s.failedNeonVMRequestCounter.Get(),
+		FailedSchedulerRequestCounter: s.failedSchedulerRequestCounter.Get(),
 	}
 }
