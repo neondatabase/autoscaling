@@ -1,10 +1,10 @@
 # Autoscaling — dev branch
 
-This branch exists only to track what's currently deployed to these regions:
+This branch exists only to track what's currently deployed to the regions below. The order of deployment should be:
 
-* dev-us-east-2-beta
-* dev-eu-central-1-alpha
-* dev-eu-west-1-zeta
+* dev-us-east-2-beta - staging
+* dev-eu-central-1-alpha - pre-prod
+* dev-eu-west-1-zeta - console previews
 
 We don't *quite* use the release yaml files directly, because there are some config differences that
 we want to preserve.
