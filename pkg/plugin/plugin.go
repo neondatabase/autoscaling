@@ -330,9 +330,9 @@ func (e *AutoscaleEnforcer) PreFilter(
 ) (_ *framework.PreFilterResult, status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("PreFilter", ignored)
+	e.metrics.IncMethodCall("PreFilter", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("PreFilter", ignored, status)
+		e.metrics.IncFailIfNotSuccess("PreFilter", pod, ignored, status)
 	}()
 
 	return nil, nil
@@ -360,9 +360,9 @@ func (e *AutoscaleEnforcer) PostFilter(
 ) (_ *framework.PostFilterResult, status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("PostFilter", ignored)
+	e.metrics.IncMethodCall("PostFilter", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("PostFilter", ignored, status)
+		e.metrics.IncFailIfNotSuccess("PostFilter", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Filter"), util.PodNameFields(pod))
@@ -382,9 +382,9 @@ func (e *AutoscaleEnforcer) Filter(
 ) (status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("Filter", ignored)
+	e.metrics.IncMethodCall("Filter", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Filter", ignored, status)
+		e.metrics.IncFailIfNotSuccess("Filter", pod, ignored, status)
 	}()
 
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
@@ -577,9 +577,9 @@ func (e *AutoscaleEnforcer) Score(
 ) (_ int64, status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("Score", ignored)
+	e.metrics.IncMethodCall("Score", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Score", ignored, status)
+		e.metrics.IncFailIfNotSuccess("Score", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
@@ -688,9 +688,9 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 ) (status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("NormalizeScore", ignored)
+	e.metrics.IncMethodCall("NormalizeScore", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("NormalizeScore", ignored, status)
+		e.metrics.IncFailIfNotSuccess("NormalizeScore", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "NormalizeScore"), util.PodNameFields(pod))
@@ -750,9 +750,9 @@ func (e *AutoscaleEnforcer) Reserve(
 ) (status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("Reserve", ignored)
+	e.metrics.IncMethodCall("Reserve", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Reserve", ignored, status)
+		e.metrics.IncFailIfNotSuccess("Reserve", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
@@ -801,7 +801,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 	nodeName string,
 ) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
-	e.metrics.IncMethodCall("Unreserve", ignored)
+	e.metrics.IncMethodCall("Unreserve", pod, ignored)
 
 	podName := util.GetNamespacedName(pod)
 
