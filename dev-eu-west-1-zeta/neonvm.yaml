@@ -382,15 +382,16 @@ spec:
             properties:
               conditions:
                 items:
-                  description: "Condition contains details for one aspect of the current
-                    state of this API Resource. --- This struct is intended for direct
-                    use as an array at the field path .status.conditions.  For example,
-                    \n type FooStatus struct{ // Represents the observations of a
-                    foo's current state. // Known .status.conditions.type are: \"Available\",
-                    \"Progressing\", and \"Degraded\" // +patchMergeKey=type // +patchStrategy=merge
-                    // +listType=map // +listMapKey=type Conditions []metav1.Condition
-                    `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\"
-                    protobuf:\"bytes,1,rep,name=conditions\"` \n // other fields }"
+                  description: "Condition contains details for one aspect of the current\
+                    \ state of this API Resource. --- This struct is intended for\
+                    \ direct use as an array at the field path .status.conditions.\
+                    \  For example, \n type FooStatus struct{ // Represents the observations\
+                    \ of a foo's current state. // Known .status.conditions.type are:\
+                    \ \"Available\", \"Progressing\", and \"Degraded\" // +patchMergeKey=type\
+                    \ // +patchStrategy=merge // +listType=map // +listMapKey=type\
+                    \ Conditions []metav1.Condition `json:\"conditions,omitempty\"\
+                    \ patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"\
+                    ` \n // other fields }"
                   properties:
                     lastTransitionTime:
                       description: lastTransitionTime is the last time the condition
@@ -427,8 +428,8 @@ spec:
                     status:
                       description: status of the condition, one of True, False, Unknown.
                       enum:
-                      - "True"
-                      - "False"
+                      - 'True'
+                      - 'False'
                       - Unknown
                       type: string
                     type:
@@ -2042,10 +2043,10 @@ spec:
                               format: int32
                               type: integer
                             service:
-                              description: "Service is the name of the service to
-                                place in the gRPC HealthCheckRequest (see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).
-                                \n If this is not specified, the default behavior
-                                is defined by gRPC."
+                              description: "Service is the name of the service to\
+                                \ place in the gRPC HealthCheckRequest (see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\
+                                \ \n If this is not specified, the default behavior\
+                                \ is defined by gRPC."
                               type: string
                           required:
                           - port
@@ -2246,10 +2247,10 @@ spec:
                               format: int32
                               type: integer
                             service:
-                              description: "Service is the name of the service to
-                                place in the gRPC HealthCheckRequest (see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).
-                                \n If this is not specified, the default behavior
-                                is defined by gRPC."
+                              description: "Service is the name of the service to\
+                                \ place in the gRPC HealthCheckRequest (see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\
+                                \ \n If this is not specified, the default behavior\
+                                \ is defined by gRPC."
                               type: string
                           required:
                           - port
@@ -2514,12 +2515,12 @@ spec:
                                 is "Localhost".
                               type: string
                             type:
-                              description: "type indicates which kind of seccomp profile
-                                will be applied. Valid options are: \n Localhost -
-                                a profile defined in a file on the node should be
-                                used. RuntimeDefault - the container runtime default
-                                profile should be used. Unconfined - no profile should
-                                be applied."
+                              description: "type indicates which kind of seccomp profile\
+                                \ will be applied. Valid options are: \n Localhost\
+                                \ - a profile defined in a file on the node should\
+                                \ be used. RuntimeDefault - the container runtime\
+                                \ default profile should be used. Unconfined - no\
+                                \ profile should be applied."
                               type: string
                           required:
                           - type
@@ -2608,10 +2609,10 @@ spec:
                               format: int32
                               type: integer
                             service:
-                              description: "Service is the name of the service to
-                                place in the gRPC HealthCheckRequest (see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).
-                                \n If this is not specified, the default behavior
-                                is defined by gRPC."
+                              description: "Service is the name of the service to\
+                                \ place in the gRPC HealthCheckRequest (see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\
+                                \ \n If this is not specified, the default behavior\
+                                \ is defined by gRPC."
                               type: string
                           required:
                           - port
@@ -2900,7 +2901,7 @@ spec:
                             C_IDENTIFIER.
                           type: string
                         value:
-                          default: ""
+                          default: ''
                           type: string
                       required:
                       - name
@@ -3131,15 +3132,16 @@ spec:
             properties:
               conditions:
                 items:
-                  description: "Condition contains details for one aspect of the current
-                    state of this API Resource. --- This struct is intended for direct
-                    use as an array at the field path .status.conditions.  For example,
-                    \n type FooStatus struct{ // Represents the observations of a
-                    foo's current state. // Known .status.conditions.type are: \"Available\",
-                    \"Progressing\", and \"Degraded\" // +patchMergeKey=type // +patchStrategy=merge
-                    // +listType=map // +listMapKey=type Conditions []metav1.Condition
-                    `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\"
-                    protobuf:\"bytes,1,rep,name=conditions\"` \n // other fields }"
+                  description: "Condition contains details for one aspect of the current\
+                    \ state of this API Resource. --- This struct is intended for\
+                    \ direct use as an array at the field path .status.conditions.\
+                    \  For example, \n type FooStatus struct{ // Represents the observations\
+                    \ of a foo's current state. // Known .status.conditions.type are:\
+                    \ \"Available\", \"Progressing\", and \"Degraded\" // +patchMergeKey=type\
+                    \ // +patchStrategy=merge // +listType=map // +listMapKey=type\
+                    \ Conditions []metav1.Condition `json:\"conditions,omitempty\"\
+                    \ patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"\
+                    ` \n // other fields }"
                   properties:
                     lastTransitionTime:
                       description: lastTransitionTime is the last time the condition
@@ -3176,8 +3178,8 @@ spec:
                     status:
                       description: status of the condition, one of True, False, Unknown.
                       enum:
-                      - "True"
-                      - "False"
+                      - 'True'
+                      - 'False'
                       - Unknown
                       type: string
                     type:
@@ -3270,7 +3272,7 @@ metadata:
   namespace: neonvm-system
 rules:
 - apiGroups:
-  - ""
+  - ''
   resources:
   - configmaps
   verbs:
@@ -3294,7 +3296,7 @@ rules:
   - patch
   - delete
 - apiGroups:
-  - ""
+  - ''
   resources:
   - events
   verbs:
@@ -3308,20 +3310,20 @@ metadata:
   name: neonvm-manager-role
 rules:
 - apiGroups:
-  - ""
+  - ''
   resources:
   - events
   verbs:
   - create
   - patch
 - apiGroups:
-  - ""
+  - ''
   resources:
   - nodes
   verbs:
   - list
 - apiGroups:
-  - ""
+  - ''
   resources:
   - pods
   verbs:
@@ -3333,7 +3335,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ""
+  - ''
   resources:
   - pods/status
   verbs:
@@ -3341,7 +3343,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - ""
+  - ''
   resources:
   - secrets
   verbs:
@@ -3483,8 +3485,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/part-of: neonvm
-    rbac.authorization.k8s.io/aggregate-to-admin: "true"
-    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-admin: 'true'
+    rbac.authorization.k8s.io/aggregate-to-edit: 'true'
   name: neonvm-virtualmachine-editor-role
 rules:
 - apiGroups:
@@ -3516,9 +3518,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/part-of: neonvm
-    rbac.authorization.k8s.io/aggregate-to-admin: "true"
-    rbac.authorization.k8s.io/aggregate-to-edit: "true"
-    rbac.authorization.k8s.io/aggregate-to-view: "true"
+    rbac.authorization.k8s.io/aggregate-to-admin: 'true'
+    rbac.authorization.k8s.io/aggregate-to-edit: 'true'
+    rbac.authorization.k8s.io/aggregate-to-view: 'true'
   name: neonvm-virtualmachine-viewer-role
 rules:
 - apiGroups:
@@ -3546,8 +3548,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/part-of: neonvm
-    rbac.authorization.k8s.io/aggregate-to-admin: "true"
-    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-admin: 'true'
+    rbac.authorization.k8s.io/aggregate-to-edit: 'true'
   name: neonvm-virtualmachinemigration-editor-role
 rules:
 - apiGroups:
@@ -3579,9 +3581,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: clusterrole
     app.kubernetes.io/part-of: neonvm
-    rbac.authorization.k8s.io/aggregate-to-admin: "true"
-    rbac.authorization.k8s.io/aggregate-to-edit: "true"
-    rbac.authorization.k8s.io/aggregate-to-view: "true"
+    rbac.authorization.k8s.io/aggregate-to-admin: 'true'
+    rbac.authorization.k8s.io/aggregate-to-edit: 'true'
+    rbac.authorization.k8s.io/aggregate-to-view: 'true'
   name: neonvm-virtualmachinemigration-viewer-role
 rules:
 - apiGroups:
@@ -3605,7 +3607,7 @@ metadata:
   name: neonvm-vxlan-controller
 rules:
 - apiGroups:
-  - ""
+  - ''
   resources:
   - nodes
   verbs:
@@ -3862,19 +3864,9 @@ spec:
         - --domain
         - neonvm
         - --device
-        - |
-          name: kvm
-          groups:
-            - count: 1000
-              paths:
-                - path: /dev/kvm
+        - "name: kvm\ngroups:\n  - count: 1000\n    paths:\n      - path: /dev/kvm\n"
         - --device
-        - |
-          name: vhost-net
-          groups:
-            - count: 1000
-              paths:
-                - path: /dev/vhost-net
+        - "name: vhost-net\ngroups:\n  - count: 1000\n    paths:\n      - path: /dev/vhost-net\n"
         image: squat/generic-device-plugin
         name: generic-device-plugin
         ports:
