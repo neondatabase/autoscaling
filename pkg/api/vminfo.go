@@ -10,6 +10,7 @@ import (
 	"github.com/tychoish/fun/erc"
 	"go.uber.org/zap"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -57,6 +58,23 @@ type VmCpuInfo struct {
 	Use vmapi.MilliCPU `json:"use"`
 }
 
+func NewVmCpuInfo(cpus vmapi.CPUs) (*VmCpuInfo, error) {
+	if cpus.Min == nil {
+		return nil, errors.New("expected non-nil field Min")
+	}
+	if cpus.Max == nil {
+		return nil, errors.New("expected non-nil field Max")
+	}
+	if cpus.Use == nil {
+		return nil, errors.New("expected non-nil field Use")
+	}
+	return &VmCpuInfo{
+		Min: *cpus.Min,
+		Max: *cpus.Max,
+		Use: *cpus.Use,
+	}, nil
+}
+
 type VmMemInfo struct {
 	// Min is the minimum number of memory slots available
 	Min uint16 `json:"min"`
@@ -66,6 +84,24 @@ type VmMemInfo struct {
 	Use uint16 `json:"use"`
 
 	SlotSize Bytes `json:"slotSize"`
+}
+
+func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) (*VmMemInfo, error) {
+	if memSlots.Min == nil {
+		return nil, errors.New("expected non-nil field Min")
+	}
+	if memSlots.Max == nil {
+		return nil, errors.New("expected non-nil field Max")
+	}
+	if memSlots.Use == nil {
+		return nil, errors.New("expected non-nil field Use")
+	}
+	return &VmMemInfo{
+		Min:      uint16(*memSlots.Min),
+		Max:      uint16(*memSlots.Max),
+		Use:      uint16(*memSlots.Use),
+		SlotSize: Bytes(memSlotSize.Value()),
+	}, nil
 }
 
 // Using returns the Resources that this VmInfo says the VM is using
@@ -103,69 +139,66 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 }
 
 func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
-	var err error
+	logger = logger.With(util.VMNameFields(vm))
+	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
+}
 
-	getNonNilInt := func(err *error, ptr *int32, name string) (val int32) {
-		if *err != nil {
-			return
-		} else if ptr == nil {
-			*err = fmt.Errorf("expected non-nil field %s", name)
-			return
-		} else {
-			return *ptr
-		}
+func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
+	logger = logger.With(util.PodNameFields(pod))
+	resourcesJSON := pod.Annotations[vmapi.VirtualMachineResourcesAnnotation]
+
+	var resources vmapi.VirtualMachineResources
+	if err := json.Unmarshal([]byte(resourcesJSON), &resources); err != nil {
+		return nil, fmt.Errorf("Error unmarshaling %q: %w",
+			vmapi.VirtualMachineResourcesAnnotation, err)
 	}
 
-	getNonNilMilliCPU := func(err *error, ptr *vmapi.MilliCPU, name string) (val vmapi.MilliCPU) {
-		if *err != nil {
-			return
-		} else if ptr == nil {
-			*err = fmt.Errorf("expected non-nil field %s", name)
-			return
-		} else {
-			return *ptr
-		}
+	vmName := pod.Labels[vmapi.VirtualMachineNameLabel]
+	return extractVmInfoGeneric(logger, vmName, pod, resources)
+}
+
+func extractVmInfoGeneric(
+	logger *zap.Logger,
+	vmName string,
+	obj metav1.ObjectMetaAccessor,
+	resources vmapi.VirtualMachineResources,
+) (*VmInfo, error) {
+	cpuInfo, err := NewVmCpuInfo(resources.CPUs)
+	if err != nil {
+		return nil, fmt.Errorf("Error extracting CPU info: %w", err)
 	}
 
-	scalingEnabled := HasAutoscalingEnabled(vm)
-	alwaysMigrate := HasAlwaysMigrateLabel(vm)
+	memInfo, err := NewVmMemInfo(resources.MemorySlots, resources.MemorySlotSize)
+	if err != nil {
+		return nil, fmt.Errorf("Error extracting memory info: %w", err)
+	}
+
+	scalingEnabled := HasAutoscalingEnabled(obj)
+	alwaysMigrate := HasAlwaysMigrateLabel(obj)
 
 	info := VmInfo{
-		Name:      vm.Name,
-		Namespace: vm.Namespace,
-		Cpu: VmCpuInfo{
-			Min: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min"),
-			Max: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max"),
-			Use: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use"),
-		},
-		Mem: VmMemInfo{
-			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
-			Max:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Max, ".spec.guest.memorySlots.max")),
-			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
-			SlotSize: BytesFromResourceQuantity(vm.Spec.Guest.MemorySlotSize),
-		},
+		Name:           vmName,
+		Namespace:      obj.GetObjectMeta().GetNamespace(),
+		Cpu:            *cpuInfo,
+		Mem:            *memInfo,
 		ScalingConfig:  nil, // set below, maybe
 		AlwaysMigrate:  alwaysMigrate,
 		ScalingEnabled: scalingEnabled,
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
-	if boundsJSON, ok := vm.Annotations[AnnotationAutoscalingBounds]; ok {
+	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {
 		var bounds ScalingBounds
 		if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 
-		if err := bounds.Validate(&vm.Spec.Guest.MemorySlotSize); err != nil {
+		if err := bounds.Validate(&resources.MemorySlotSize); err != nil {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
 	}
 
-	if configJSON, ok := vm.Annotations[AnnotationAutoscalingConfig]; ok {
+	if configJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingConfig]; ok {
 		var config ScalingConfig
 		if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingConfig, err)
@@ -200,13 +233,11 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 	if using.HasFieldLessThan(min) {
 		logger.Warn(
 			"Current usage has field less than minimum",
-			util.VMNameFields(vm),
 			zap.Object("using", using), zap.Object("min", min),
 		)
 	} else if using.HasFieldGreaterThan(max) {
 		logger.Warn(
 			"Current usage has field greater than maximum",
-			util.VMNameFields(vm),
 			zap.Object("using", using), zap.Object("max", max),
 		)
 	}

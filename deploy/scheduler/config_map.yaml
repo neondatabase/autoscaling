@@ -33,6 +33,7 @@ data:
         "scorePeak": 0.8
       },
       "schedulerName": "autoscale-scheduler",
+      "eventQueueWorkers": 64,
       "dumpState": {
         "port": 10298,
         "timeoutSeconds": 5

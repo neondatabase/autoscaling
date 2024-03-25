@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -44,14 +45,14 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Name: "autoscaling_plugin_extension_calls_total",
 				Help: "Number of calls to scheduler plugin extension points",
 			},
-			[]string{"method", "ignored_namespace"},
+			[]string{"method", "desired_availability_zone", "ignored_namespace"},
 		)),
 		pluginCallFails: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_extension_call_fails_total",
 				Help: "Number of unsuccessful calls to scheduler plugin extension points",
 			},
-			[]string{"method", "ignored_namespace", "status"},
+			[]string{"method", "desired_availability_zone", "ignored_namespace", "status"},
 		)),
 		resourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -112,14 +113,14 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 	return reg
 }
 
-func (m *PromMetrics) IncMethodCall(method string, ignored bool) {
-	m.pluginCalls.WithLabelValues(method, strconv.FormatBool(ignored)).Inc()
+func (m *PromMetrics) IncMethodCall(method string, pod *corev1.Pod, ignored bool) {
+	m.pluginCalls.WithLabelValues(method, util.PodPreferredAZIfPresent(pod), strconv.FormatBool(ignored)).Inc()
 }
 
-func (m *PromMetrics) IncFailIfNotSuccess(method string, ignored bool, status *framework.Status) {
+func (m *PromMetrics) IncFailIfNotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
 	if !status.IsSuccess() {
 		return
 	}
 
-	m.pluginCallFails.WithLabelValues(method, strconv.FormatBool(ignored), status.Code().String())
+	m.pluginCallFails.WithLabelValues(method, util.PodPreferredAZIfPresent(pod), strconv.FormatBool(ignored), status.Code().String())
 }
