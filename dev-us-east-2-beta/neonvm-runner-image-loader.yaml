@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neonvm-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: neonvm-runner-image-loader
+  namespace: neonvm-system
+spec:
+  selector:
+    matchLabels:
+      name: neonvm-runner-image-loader
+  template:
+    metadata:
+      labels:
+        name: neonvm-runner-image-loader
+    spec:
+      containers:
+      - command:
+        - sh
+        - -c
+        - echo 'image loaded and container started' && sleep 100d
+        image: neondatabase/neonvm-runner:v0.27.0
+        name: neonvm-runner-loader
+        resources:
+          limits:
+            cpu: 10m
+            memory: 10Mi
+      terminationGracePeriodSeconds: 0
