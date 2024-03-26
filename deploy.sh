@@ -104,7 +104,7 @@ main () {
     if [ "$(confirm 'Dry-run deploy neonvm?')" = 'yes' ]; then
         cmd cp neonvm-runner-image-loader.yaml "$cluster/neonvm-runner-image-loader.yaml"
         check_diff "$cluster" "$cluster/neonvm-runner-image-loader.yaml"
-        if [ "$(confirm 'Deploy neonvm-runner image loader?')" = 'yes']; then
+        if [ "$(confirm 'Deploy neonvm-runner image loader?')" = 'yes' ]; then
             log 'Deploying neonvm-runner image loader...'
             cmd kubectl --context="$cluster" apply -f "$cluster/neonvm-runner-image-loader.yaml"
             cmd kubectl --context="$cluster" -n neonvm-system rollout status daemonset neonvm-runner-image-loader
@@ -193,7 +193,7 @@ confirm () {
         echo -en "\e[1m$(date -u '+%F %T') \e[32m::\e[39m $1 ([Y]es/[S]kip): \e[0m" >/dev/tty
         read response
         case "$response" in
-            'Y' | 'y' | 'Yes' | 'yes')
+            'Y' | 'y' | 'Yes' | 'yes' | '')
                 echo 'yes'
                 return 0
                 ;;
