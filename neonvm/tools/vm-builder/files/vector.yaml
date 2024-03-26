@@ -20,10 +20,13 @@ sources:
     # sql_exporter listen addr, exporting LFC statistics.
     # This statistics will only be available when using the neon vm image. A custom image
     # does not have this exporter by default.
-    endpoints: ["http://localhost:9399/metrics"]
+    endpoints: ["http://127.0.0.1:9399/metrics"]
+    # The data might be delayed as we use the default scrape interval. Some SQLs are not
+    # trivial to execute, and therefore we don't want them to run every second.
 sinks:
   prom_exporter:
     type: prometheus_exporter
     inputs:
       - host_metrics
+      - sql_exporter_metrics
     address: "0.0.0.0:9100"
