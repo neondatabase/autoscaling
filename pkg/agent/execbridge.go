@@ -58,7 +58,7 @@ func (iface *execPluginInterface) Request(
 		if resp.Permit == target { // request is fully approved by the scheduler
 			return true
 		}
-		if lastPermit != nil && *lastPermit != resp.Permit { // request is parially approved by the scheduler
+		if lastPermit != nil && *lastPermit != resp.Permit { // request is partially approved by the scheduler
 			return true
 		}
 		return false // scheduler denied the request

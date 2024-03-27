@@ -27,13 +27,13 @@ func (rc *RecentCounter) cleanup(now time.Time) {
 	rc.timestamps = rc.timestamps[i:]
 }
 
-// inc is seperated from its exported version to provide more flexibity around testing.
+// inc is separated from its exported version to provide more flexibity around testing.
 func (rc *RecentCounter) inc(now time.Time) {
 	rc.cleanup(now)
 	rc.timestamps = append(rc.timestamps, now)
 }
 
-// get is seperated from its exported version to provide more flexibity around testing.
+// get is separated from its exported version to provide more flexibity around testing.
 func (rc *RecentCounter) get(now time.Time) uint {
 	rc.cleanup(now)
 	return uint(len(rc.timestamps))
