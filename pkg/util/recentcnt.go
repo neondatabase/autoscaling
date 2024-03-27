@@ -15,7 +15,7 @@ func NewRecentCounter(interval time.Duration) *RecentCounter {
 	}
 }
 
-// cleanup removes all timestamps that are beyond the interval from the current time
+// cleanup removes all timestamps that are beyond the interval from the current time.
 func (rc *RecentCounter) cleanup(now time.Time) {
 	checkpoint := now.Add(-rc.interval)
 	i := 0
@@ -27,15 +27,24 @@ func (rc *RecentCounter) cleanup(now time.Time) {
 	rc.timestamps = rc.timestamps[i:]
 }
 
-// Inc increments the counter and adds the current timestamp to the list of timestamps.
-func (rc *RecentCounter) Inc() {
-	now := time.Now()
+// inc is seperated from its exported version to provide more flexibity around testing.
+func (rc *RecentCounter) inc(now time.Time) {
 	rc.cleanup(now)
 	rc.timestamps = append(rc.timestamps, now)
 }
 
+// get is seperated from its exported version to provide more flexibity around testing.
+func (rc *RecentCounter) get(now time.Time) uint {
+	rc.cleanup(now)
+	return uint(len(rc.timestamps))
+}
+
+// Inc increments the counter and adds the current timestamp to the list of timestamps.
+func (rc *RecentCounter) Inc() {
+	rc.inc(time.Now())
+}
+
 // Get returns the number of recent timestamps stored in the RecentCounter.
 func (rc *RecentCounter) Get() uint {
-	rc.cleanup(time.Now())
-	return uint(len(rc.timestamps))
+	return rc.get(time.Now())
 }
