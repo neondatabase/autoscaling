@@ -518,7 +518,8 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	s.podStatus = newStatus
 }
 
-func (s podStatus) isStuck(global *agentState, now time.Time) (ok bool, reasons []string) {
+func (s podStatus) isStuck(global *agentState, now time.Time) (bool, []string) {
+	var reasons []string
 	if s.monitorStuckAt(global.config).Before(now) {
 		reasons = append(reasons, "monitor health check failed")
 	}
@@ -555,14 +556,14 @@ func (s podStatus) monitorStuckAt(config *Config) time.Time {
 }
 
 func (s *lockedPodStatus) periodicallyRefreshState(ctx context.Context, logger *zap.Logger, global *agentState) {
-	timer := time.NewTimer(time.Second * time.Duration(global.config.RefreshStateIntervalSeconds))
-	defer timer.Stop()
+	ticker := time.NewTicker(time.Second * time.Duration(global.config.RefreshStateIntervalSeconds))
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
+		case <-ticker.C:
 		}
 
 		// use s.update to trigger re-evaluating the metrics, and simultaneously reset the timer to
