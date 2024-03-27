@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -490,7 +491,7 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 		case podStatusExitPanicked:
 			newState = runnerMetricStatePanicked
 		}
-	} else if newStatus.isStuck(global, now) {
+	} else if isStuck, _ := newStatus.isStuck(global, now); isStuck {
 		newState = runnerMetricStateStuck
 	} else {
 		newState = runnerMetricStateOk
@@ -517,11 +518,20 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 	s.podStatus = newStatus
 }
 
-func (s podStatus) isStuck(global *agentState, now time.Time) bool {
-	return s.monitorStuckAt(global.config).Before(now) ||
-		s.failedMonitorRequestCounter.Get() > global.config.Monitor.MaxFailedRequestRate.Threshold ||
-		s.failedSchedulerRequestCounter.Get() > global.config.Scheduler.MaxFailedRequestRate.Threshold ||
-		s.failedNeonVMRequestCounter.Get() > global.config.NeonVM.MaxFailedRequestRate.Threshold
+func (s podStatus) isStuck(global *agentState, now time.Time) (ok bool, reasons []string) {
+	if s.monitorStuckAt(global.config).Before(now) {
+		reasons = append(reasons, "monitor health check failed")
+	}
+	if s.failedMonitorRequestCounter.Get() > global.config.Monitor.MaxFailedRequestRate.Threshold {
+		reasons = append(reasons, "monitor requests failed")
+	}
+	if s.failedSchedulerRequestCounter.Get() > global.config.Scheduler.MaxFailedRequestRate.Threshold {
+		reasons = append(reasons, "scheduler requests failed")
+	}
+	if s.failedNeonVMRequestCounter.Get() > global.config.NeonVM.MaxFailedRequestRate.Threshold {
+		reasons = append(reasons, "neonvm requests failed")
+	}
+	return len(reasons) > 0, reasons
 }
 
 // monitorStuckAt returns the time at which the Runner will be marked "stuck"
@@ -545,15 +555,7 @@ func (s podStatus) monitorStuckAt(config *Config) time.Time {
 }
 
 func (s *lockedPodStatus) periodicallyRefreshState(ctx context.Context, logger *zap.Logger, global *agentState) {
-	maxUpdateSeconds := util.Min(
-		global.config.Monitor.UnhealthyStartupGracePeriodSeconds,
-		global.config.Monitor.UnhealthyAfterSilenceDurationSeconds,
-	)
-	// make maxTick a bit less than maxUpdateSeconds for the benefit of consistency and having
-	// relatively frequent log messages if things are stuck.
-	maxTick := time.Second * time.Duration(maxUpdateSeconds/2)
-
-	timer := time.NewTimer(0)
+	timer := time.NewTimer(time.Second * time.Duration(global.config.RefreshStateIntervalSeconds))
 	defer timer.Stop()
 
 	for {
@@ -567,17 +569,15 @@ func (s *lockedPodStatus) periodicallyRefreshState(ctx context.Context, logger *
 		// the next point in time at which the state might have changed, so that we minimize the
 		// time between the VM meeting the conditions for being "stuck" and us recognizing it.
 		s.update(global, func(stat podStatus) podStatus {
-			stuckAt := stat.monitorStuckAt(global.config)
-			now := time.Now()
-			if stuckAt.Before(now) && stat.state != runnerMetricStateErrored && stat.state != runnerMetricStatePanicked {
+			isStuck, reasons := stat.isStuck(global, time.Now())
+			if isStuck && stat.state != runnerMetricStateErrored && stat.state != runnerMetricStatePanicked {
 				if stat.endpointID != "" {
-					logger.Warn("Runner with endpoint is currently stuck", zap.String("endpointID", stat.endpointID))
+					logger.Warn("Runner with endpoint is currently stuck",
+						zap.String("endpointID", stat.endpointID), zap.String("reasons", strings.Join(reasons, ",")))
 				} else {
-					logger.Warn("Runner without endpoint is currently stuck")
+					logger.Warn("Runner without endpoint is currently stuck",
+						zap.String("reasons", strings.Join(reasons, ",")))
 				}
-				timer.Reset(maxTick)
-			} else {
-				timer.Reset(util.Min(maxTick, stuckAt.Sub(now)))
 			}
 			return stat
 		})

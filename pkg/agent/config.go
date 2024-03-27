@@ -12,6 +12,8 @@ import (
 )
 
 type Config struct {
+	RefreshStateIntervalSeconds uint `json:"refereshStateIntervalSeconds"`
+
 	Scaling   ScalingConfig    `json:"scaling"`
 	Metrics   MetricsConfig    `json:"metrics"`
 	Scheduler SchedulerConfig  `json:"scheduler"`

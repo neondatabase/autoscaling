@@ -6,6 +6,7 @@ metadata:
 data:
   config.json: |
     {
+      "refereshStateIntervalSeconds": 5,
       "scaling": {
         "computeUnit": { "vCPUs": 0.25, "mem": "1Gi" },
         "defaultConfig": {
