@@ -9,7 +9,7 @@ on:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: neon-small
     timeout-minutes: 10
     strategy:
       fail-fast: false

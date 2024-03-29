@@ -46,7 +46,7 @@ jobs:
       image: ${{ steps.get-kernel-image.outputs.image }}
       last-kernel-sha: ${{ steps.get-last-kernel-commit-sha.outputs.last-kernel-sha }}
 
-    runs-on: ubuntu-latest
+    runs-on: neon-small
 
     steps:
       - name: get last kernel commit sha
@@ -140,7 +140,7 @@ jobs:
     outputs:
       image: ${{ steps.get-tags.outputs.canonical }}@${{ steps.build-linux-kernel.outputs.digest }}
 
-    runs-on: [ self-hosted, gen3, large ]
+    runs-on: [ self-hosted, gen3, neon-large ]
     steps:
       - name: git checkout
         uses: actions/checkout@v3
