@@ -3,3 +3,6 @@ self-hosted-runner:
     - gen3
     - large
     - small
+    - neon-small
+    - neon-large
+
