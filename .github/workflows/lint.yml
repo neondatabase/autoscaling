@@ -12,7 +12,7 @@ defaults:
 jobs:
   golangci:
     name: golangci-lint
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
@@ -32,7 +32,7 @@ jobs:
 
   check-go-mod-tidy:
     name: check go mod tidy
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
@@ -53,7 +53,7 @@ jobs:
 
   manifests:
     name: check generated manifests
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
@@ -74,7 +74,7 @@ jobs:
 
   generated-go:
     name: check generated go files
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v3
@@ -92,7 +92,7 @@ jobs:
 
   codespell:
     name: check spelling with codespell
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v3
@@ -102,7 +102,7 @@ jobs:
           skip: go.sum,*.patch # '*.patch' references cluster-autoscaler/ca.patch, but somehow skipping directly doesn't work...
 
   actionlint:
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     steps:
       - uses: actions/checkout@v4
       - uses: reviewdog/action-actionlint@54e8faeff91fe07595b1ad3cfdc6aee0157bf51b # v1.40.0

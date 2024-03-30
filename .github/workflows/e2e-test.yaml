@@ -39,7 +39,7 @@ jobs:
   get-tag:
     outputs:
       tag: ${{ inputs.tag || steps.get-tag.outputs.tag }}
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     steps:
       - name: get tag
         if: ${{ inputs.tag == '' }}
@@ -79,7 +79,8 @@ jobs:
       matrix:
         cluster:
           - ${{ inputs.cluster || 'k3d' }}
-    runs-on: [ self-hosted, gen3, neon-large ]
+    runs-on: [ self-hosted, gen3, large ]
+    #runs-on: [ self-hosted, gen3, neon-large ]
     steps:
       - uses: actions/checkout@v3
         with:

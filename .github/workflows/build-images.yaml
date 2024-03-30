@@ -65,7 +65,7 @@ jobs:
       scheduler:          ${{ steps.show-tags.outputs.scheduler }}
       autoscaler-agent:   ${{ steps.show-tags.outputs.autoscaler-agent }}
       cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     steps:
       - id: show-tags
         run: |
@@ -89,7 +89,8 @@ jobs:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
     needs: [ tags, vm-kernel ]
-    runs-on: [ self-hosted, gen3, neon-large ]
+    runs-on: [ self-hosted, gen3, large ]
+    #runs-on: [ self-hosted, gen3, neon-large ]
     steps:
       - uses: actions/checkout@v3
         with:

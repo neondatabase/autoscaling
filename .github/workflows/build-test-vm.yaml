@@ -38,7 +38,7 @@ jobs:
   tags:
     outputs:
       vm-postgres-16-bullseye: ${{ steps.show-tags.outputs.vm-postgres-16-bullseye }}
-    runs-on: neon-small
+    runs-on: ubuntu-latest # neon-small
     steps:
       - id: show-tags
         run: |
@@ -48,7 +48,8 @@ jobs:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
     needs: tags
-    runs-on: [ self-hosted, gen3, neon-large ]
+    runs-on: [ self-hosted, gen3, large ]
+    #runs-on: [ self-hosted, gen3, neon-large ]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v4
