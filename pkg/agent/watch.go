@@ -320,16 +320,13 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 // makeVMRestartMetrics makes metrics related to VM restarts. Currently, it
 // only includes one metrics, which is restartCount.
 func makeVMRestartMetrics(vm *vmapi.VirtualMachine) []vmMetric {
-	if vm.Status.RestartCount == nil {
-		return nil
-	}
 	endpointID := vm.Labels[endpointLabel]
 	projectID := vm.Labels[projectLabel]
 	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, endpointID, projectID, "")
 	return []vmMetric{
 		{
 			labels: labels,
-			value:  float64(*vm.Status.RestartCount),
+			value:  float64(vm.Status.RestartCount),
 		},
 	}
 }

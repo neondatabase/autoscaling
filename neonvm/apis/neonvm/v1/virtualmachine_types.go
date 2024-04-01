@@ -42,11 +42,24 @@ const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
 // The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
 const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 
+// VirtualMachineResourcesAnnotation is the annotation added to each runner Pod, mirroring information
+// about the resource allocations of the VM running in the pod.
+//
+// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
+const VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
 // JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
 type VirtualMachineUsage struct {
 	CPU    *resource.Quantity `json:"cpu"`
 	Memory *resource.Quantity `json:"memory"`
+}
+
+// VirtualMachineResources provides information about a VM's resource allocations.
+type VirtualMachineResources struct {
+	CPUs           CPUs              `json:"cpus"`
+	MemorySlots    MemorySlots       `json:"memorySlots"`
+	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
 }
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -122,6 +135,14 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=true
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
+}
+
+func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
+	return VirtualMachineResources{
+		CPUs:           spec.Guest.CPUs,
+		MemorySlots:    spec.Guest.MemorySlots,
+		MemorySlotSize: spec.Guest.MemorySlotSize,
+	}
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
@@ -393,7 +414,7 @@ type VirtualMachineStatus struct {
 	Phase VmPhase `json:"phase,omitempty"`
 	// Number of times the VM runner pod has been recreated
 	// +optional
-	RestartCount *int32 `json:"restartCount,omitempty"`
+	RestartCount int32 `json:"restartCount"`
 	// +optional
 	PodName string `json:"podName,omitempty"`
 	// +optional
@@ -477,7 +498,7 @@ func (vm *VirtualMachine) Cleanup() {
 }
 
 func (vm *VirtualMachine) HasRestarted() bool {
-	return vm.Status.RestartCount != nil && *vm.Status.RestartCount > 0
+	return vm.Status.RestartCount > 0
 }
 
 //+kubebuilder:object:root=true

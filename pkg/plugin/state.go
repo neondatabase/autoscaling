@@ -1296,17 +1296,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 			continue
 		}
 
-		// Check if the VM exists
-		vm, ok := vmSpecs[*vmName]
-		if !ok {
-			logSkip("VM Pod's corresponding VM object is missing from our map (maybe it was removed between listing VMs and Pods?)")
-			continue
-		} else if util.PodCompleted(pod) {
-			logSkip("Pod is in its final, complete state (phase = %q), so will not use any resources", pod.Status.Phase)
-			continue
-		}
-
-		vmInfo, err := api.ExtractVmInfo(logger, vm)
+		vmInfo, err := api.ExtractVmInfoFromPod(logger, pod)
 		if err != nil {
 			return fmt.Errorf("Error extracting VM info for %v: %w", vmName, err)
 		}
@@ -1336,7 +1326,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 				Max:              vmInfo.Max().Mem,
 			},
 			vm: &vmPodState{
-				name: util.GetNamespacedName(vm),
+				name: *vmName,
 
 				mqIndex:        -1,
 				metrics:        nil,

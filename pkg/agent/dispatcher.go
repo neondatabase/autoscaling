@@ -556,7 +556,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
 		// TODO: it shouldn't be this function's responsibility to update metrics.
 		defer func() {
-			disp.runner.global.metrics.monitorRequestsInbound.WithLabelValues("UpscaleRequest", "ok")
+			disp.runner.global.metrics.monitorRequestsInbound.WithLabelValues("UpscaleRequest", "ok").Inc()
 		}()
 
 		resourceReq := api.MoreResources{

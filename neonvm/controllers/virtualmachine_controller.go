@@ -182,13 +182,8 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
 func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, virtualmachine *vmv1.VirtualMachine) {
-	// TODO(user): Add the cleanup steps that the operator
-	// needs to do before the CR can be deleted. Examples
-	// of finalizers include performing backups and deleting
-	// resources that are not owned by this CR, like a PVC.
-
 	// Note: It is not recommended to use finalizers with the purpose of delete resources which are
-	// created and managed in the reconciliation. These ones, such as the Deployment created on this reconcile,
+	// created and managed in the reconciliation. These ones, such as the Pod created on this reconcile,
 	// are defined as depended of the custom resource. See that we use the method ctrl.SetControllerReference.
 	// to set the ownerRef which means that the Deployment will be deleted by the Kubernetes API.
 	// More info: https://kubernetes.io/docs/tasks/administer-cluster/use-cascading-deletion/
@@ -349,7 +344,6 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		}
 		// VirtualMachine just created, change Phase to "Pending"
 		virtualmachine.Status.Phase = vmv1.VmPending
-		virtualmachine.Status.RestartCount = &[]int32{0}[0] // set value to pointer to 0
 	case vmv1.VmPending:
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
@@ -759,11 +753,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			if shouldRestart {
 				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
 				virtualmachine.Status.Phase = vmv1.VmPending // reset to trigger restart
-				if virtualmachine.Status.RestartCount == nil {
-					var zero int32 = 0
-					virtualmachine.Status.RestartCount = &zero
-				}
-				*virtualmachine.Status.RestartCount += 1 // increment restart count
+				virtualmachine.Status.RestartCount += 1      // increment restart count
 				r.Metrics.vmRestartCounts.Inc()
 			}
 
@@ -1035,6 +1025,15 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 	return string(usageJSON)
 }
 
+func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
+	resourcesJSON, err := json.Marshal(spec.Resources())
+	if err != nil {
+		panic(fmt.Errorf("error marshalling JSON: %w", err))
+	}
+
+	return string(resourcesJSON)
+}
+
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine,
@@ -1122,6 +1121,7 @@ func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[strin
 
 	a["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
+	a[vmv1.VirtualMachineResourcesAnnotation] = extractVirtualMachineResourcesJSON(virtualmachine.Spec)
 	return a
 }
 

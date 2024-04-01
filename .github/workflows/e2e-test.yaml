@@ -152,6 +152,8 @@ jobs:
           kubectl -n kube-system rollout status daemonset kube-multus-ds
           kubectl apply -f $(rendered whereabouts.yaml)
           kubectl -n kube-system rollout status daemonset whereabouts
+          kubectl apply -f $(rendered neonvm-runner-image-loader.yaml)
+          kubectl -n neonvm-system rollout status daemonset neonvm-runner-image-loader
           kubectl apply -f $(rendered neonvm.yaml)
           kubectl -n neonvm-system rollout status daemonset  neonvm-device-plugin
           kubectl -n neonvm-system rollout status daemonset  neonvm-vxlan-controller

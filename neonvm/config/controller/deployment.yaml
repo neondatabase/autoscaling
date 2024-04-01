@@ -41,13 +41,8 @@ spec:
                     - linux
       securityContext:
         runAsNonRoot: true
-        # TODO(user): For common cases that do not require escalating privileges
-        # it is recommended to ensure that all your Pods/Containers are restrictive.
-        # More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
-        # Please uncomment the following code if your project does NOT have to work on old Kubernetes
-        # versions < 1.19 or on vendors versions which do NOT support this field by default (i.e. Openshift < 4.11 ).
-        # seccompProfile:
-        #   type: RuntimeDefault
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: manager
         image: controller:dev
@@ -105,8 +100,6 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
-        # TODO(user): Configure the resources accordingly based on the project requirements.
-        # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
           limits:
             cpu: 8
@@ -114,29 +107,6 @@ spec:
           requests:
             cpu: 2
             memory: 1Gi
-      - name: kube-rbac-proxy
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-              - "ALL"
-        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.13.0
-        args:
-        - "--secure-listen-address=0.0.0.0:8443"
-        - "--upstream=http://127.0.0.1:8080/"
-        - "--logtostderr=true"
-        - "--v=0"
-        ports:
-        - containerPort: 8443
-          protocol: TCP
-          name: https
-        resources:
-          limits:
-            cpu: 500m
-            memory: 128Mi
-          requests:
-            cpu: 5m
-            memory: 64Mi
       serviceAccountName: controller
       terminationGracePeriodSeconds: 10
       volumes:

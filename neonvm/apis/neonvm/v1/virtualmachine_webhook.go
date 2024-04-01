@@ -69,7 +69,6 @@ func (r *VirtualMachine) Default() {
 	}
 }
 
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 //+kubebuilder:webhook:path=/validate-vm-neon-tech-v1-virtualmachine,mutating=false,failurePolicy=fail,sideEffects=None,groups=vm.neon.tech,resources=virtualmachines,verbs=create;update,versions=v1,name=vvirtualmachine.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Validator = &VirtualMachine{}
@@ -206,6 +205,6 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachine) ValidateDelete() error {
-	// TODO(user): fill in your validation logic upon object deletion.
+	// No deletion validation required currently.
 	return nil
 }

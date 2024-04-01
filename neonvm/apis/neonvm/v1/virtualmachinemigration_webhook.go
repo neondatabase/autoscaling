@@ -35,28 +35,27 @@ var _ webhook.Defaulter = &VirtualMachineMigration{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (r *VirtualMachineMigration) Default() {
-	// TODO(user): fill in your defaulting logic.
+	// TODO: implement defaults
 }
 
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 //+kubebuilder:webhook:path=/validate-vm-neon-tech-v1-virtualmachinemigration,mutating=false,failurePolicy=fail,sideEffects=None,groups=vm.neon.tech,resources=virtualmachinemigrations,verbs=create;update,versions=v1,name=vvirtualmachinemigration.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Validator = &VirtualMachineMigration{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateCreate() error {
-	// TODO(user): fill in your validation logic upon object creation.
+	// TODO: implement creation validation webhook (?)
 	return nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) error {
-	// TODO(user): fill in your validation logic upon object update.
+	// TODO: implement update validation webhook
 	return nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *VirtualMachineMigration) ValidateDelete() error {
-	// TODO(user): fill in your validation logic upon object deletion.
+	// TODO: implement deletion validation webhook (?)
 	return nil
 }
