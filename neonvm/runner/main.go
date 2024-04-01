@@ -348,6 +348,9 @@ func createISO9660runtime(
 			`swapon "$swappart"`,
 		}
 		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(lines, "\n"))), "resize-swap.sh")
+		if err != nil {
+			return err
+		}
 	}
 
 	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
