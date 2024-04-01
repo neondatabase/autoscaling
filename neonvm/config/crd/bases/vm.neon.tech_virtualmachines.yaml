@@ -2469,12 +2469,38 @@ spec:
                     description: Additional settings for the VM. Cannot be updated.
                     properties:
                       swap:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        description: Swap adds a swap disk with the provided size.
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
+                        description: Swap controls settings for adding a swap disk
+                          to the VM.
+                        properties:
+                          shrinkable:
+                            description: "Shrinkable changes the swap to sit inside
+                              a GPT partition of the mounted disk, so that it can
+                              be resized from within the guest. \n Resizing can be
+                              done with the provided program at '/neonvm/bin/resize-swap'.
+                              It requires superuser permissions to perform the resizing.
+                              Please note that this DISABLES ALL SWAP before enabling
+                              it at the new size."
+                            type: boolean
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: 'Size sets the size of the swap disk on the
+                              host. The amount available within the VM may be slightly
+                              less (typically: 4KiB less, or 3MiB+4KiB less if Shrinkable
+                              = true).'
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          skipSwapon:
+                            description: "SkipSwapon instructs the VM to *not* run
+                              swapon for the swap on startup. \n This is intended
+                              to be used in cases where you will *always* resize the
+                              swap post-startup, and don't need it available before
+                              that resizing."
+                            type: boolean
+                        required:
+                        - size
+                        type: object
                       sysctl:
                         description: Individual lines to add to a sysctl.conf file.
                           See sysctl.conf(5) for more

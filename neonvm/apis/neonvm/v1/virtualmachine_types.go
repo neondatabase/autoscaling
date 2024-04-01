@@ -196,9 +196,60 @@ type GuestSettings struct {
 	// +optional
 	Sysctl []string `json:"sysctl,omitempty"`
 
-	// Swap adds a swap disk with the provided size.
+	// Swap controls settings for adding a swap disk to the VM.
 	// +optional
-	Swap *resource.Quantity `json:"swap,omitempty"`
+	Swap *SwapInfo `json:"swap,omitempty"`
+}
+
+type SwapInfo struct {
+	// Size sets the size of the swap disk on the host. The amount available within the VM may be
+	// slightly less (typically: 4KiB less, or 3MiB+4KiB less if Shrinkable = true).
+	Size resource.Quantity `json:"size"`
+	// Shrinkable changes the swap to sit inside a GPT partition of the mounted disk, so that it can
+	// be resized from within the guest.
+	//
+	// Resizing can be done with the provided program at '/neonvm/bin/resize-swap'. It requires
+	// superuser permissions to perform the resizing. Please note that this DISABLES ALL SWAP before
+	// enabling it at the new size.
+	//
+	// +optional
+	Shrinkable *bool `json:"shrinkable,omitempty"`
+	// SkipSwapon instructs the VM to *not* run swapon for the swap on startup.
+	//
+	// This is intended to be used in cases where you will *always* resize the swap post-startup,
+	// and don't need it available before that resizing.
+	//
+	// +optional
+	SkipSwapon *bool `json:"skipSwapon,omitempty"`
+}
+
+// SwapInfo implements UnmarshalJSON to allow backwards compatibility with a previous version of
+// NeonVM that used a resource.Quantity to control swap, instead of a struct.
+//
+// This is temporary, and WILL be removed in a future version.
+func (s *SwapInfo) UnmarshalJSON(b []byte) error {
+	// Try to unmarshal both ways
+	var si struct {
+		Size       resource.Quantity `json:"size"`
+		Shrinkable *bool             `json:"shrinkable,omitempty"`
+		SkipSwapon *bool             `json:"skipSwapon,omitempty"`
+	}
+	if fstErr := json.Unmarshal(b, &si); fstErr != nil {
+		var q resource.Quantity
+		if sndErr := json.Unmarshal(b, &q); sndErr != nil {
+			// if both fail to unmarhsal, return the error as if we only tried to unmarshal into
+			// SwapInfo (and not resource.Quantity as well).
+			return fstErr
+		}
+		si.Size = q
+	}
+
+	*s = SwapInfo{
+		Size:       si.Size,
+		Shrinkable: si.Shrinkable,
+		SkipSwapon: si.SkipSwapon,
+	}
+	return nil
 }
 
 type CPUs struct {

@@ -1604,7 +1604,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 			Name: diskName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
-					SizeLimit: settings.Swap,
+					SizeLimit: &settings.Swap.Size,
 				},
 			},
 		})
