@@ -70,6 +70,11 @@ const (
 	typeDegradedVirtualMachine = "Degraded"
 )
 
+const (
+	minSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
+	maxSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
+)
+
 // VirtualMachineReconciler reconciles a VirtualMachine object
 type VirtualMachineReconciler struct {
 	client.Client
@@ -228,6 +233,24 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 		log.Info(message)
 		r.Recorder.Event(virtualmachine, "Normal", "OverlayNet", message)
 	}
+}
+
+func getRunnerVersion(pod *corev1.Pod) (api.RunnerProtoVersion, error) {
+	val, ok := pod.Labels[vmv1.RunnerPodVersionLabel]
+	if !ok {
+		return api.RunnerProtoVersion(0), nil
+	}
+
+	uintVal, err := strconv.ParseUint(val, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse label value as integer: %w", err)
+	}
+
+	return api.RunnerProtoVersion(uintVal), nil
+}
+
+func runnerVersionIsSupported(version api.RunnerProtoVersion) bool {
+	return version >= minSupportedRunnerVersion && version <= maxSupportedRunnerVersion
 }
 
 func (r *VirtualMachineReconciler) updateVMStatusCPU(
@@ -485,6 +508,17 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// update Node name where runner working
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
+			runnerVersion, err := getRunnerVersion(vmRunner)
+			if err != nil {
+				log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+			if !runnerVersionIsSupported(runnerVersion) {
+				err := fmt.Errorf("runner version %v is not supported", runnerVersion)
+				log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+
 			// get CPU details from QEMU
 			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(virtualmachine))
 			if err != nil {
@@ -613,6 +647,17 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			return nil
 		default:
 			// do nothing
+		}
+
+		runnerVersion, err := getRunnerVersion(vmRunner)
+		if err != nil {
+			log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", virtualmachine.Name)
+			return err
+		}
+		if !runnerVersionIsSupported(runnerVersion) {
+			err := fmt.Errorf("runner version %v is not supported", runnerVersion)
+			log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", virtualmachine.Name)
+			return err
 		}
 
 		cpuScaled := false
