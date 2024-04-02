@@ -18,7 +18,7 @@ sources:
   sql_exporter_metrics:
     type: prometheus_scrape
     # sql_exporter listen addr, exporting LFC statistics.
-    # This statistics will only be available when using the neon vm image. A custom image
+    # This statistics will only be available when using the neon compute image. A custom image
     # does not have this exporter by default.
     endpoints: ["http://127.0.0.1:9399/metrics"]
     # The data might be delayed as we use the default scrape interval. Some SQLs are not
