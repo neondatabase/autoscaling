@@ -123,7 +123,7 @@ func RunBillingMetricsCollector(
 			state.collect(logger, store, metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
-			state.drainEnqueue(logger, conf, client.Hostname(), queueWriter)
+			state.drainEnqueue(logger, conf, billing.GetHostname(), queueWriter)
 		case <-backgroundCtx.Done():
 			return
 		}
