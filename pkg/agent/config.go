@@ -16,7 +16,7 @@ type Config struct {
 	Metrics   MetricsConfig    `json:"metrics"`
 	Scheduler SchedulerConfig  `json:"scheduler"`
 	Monitor   MonitorConfig    `json:"monitor"`
-	Billing   *billing.Config  `json:"billing,omitempty"`
+	Billing   billing.Config   `json:"billing"`
 	DumpState *DumpStateConfig `json:"dumpState"`
 }
 
@@ -141,14 +141,14 @@ func (c *Config) validate() error {
 		zeroTmpl  = "field %q cannot be zero"
 	)
 
-	erc.Whenf(ec, c.Billing != nil && c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.PushEverySeconds == 0, zeroTmpl, ".billing.clients.http.pushEverySeconds")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.PushRequestTimeoutSeconds == 0, zeroTmpl, ".billing.clients.http.pushRequestTimeoutSeconds")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.MaxBatchSize == 0, zeroTmpl, ".billing.clients.http.maxBatchSize")
-	erc.Whenf(ec, c.Billing != nil && c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.URL == "", emptyTmpl, ".billing.clients.http.url")
+	erc.Whenf(ec, c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
+	erc.Whenf(ec, c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
+	erc.Whenf(ec, c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
+	erc.Whenf(ec, c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
+	erc.Whenf(ec, c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.PushEverySeconds == 0, zeroTmpl, ".billing.clients.http.pushEverySeconds")
+	erc.Whenf(ec, c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.PushRequestTimeoutSeconds == 0, zeroTmpl, ".billing.clients.http.pushRequestTimeoutSeconds")
+	erc.Whenf(ec, c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.MaxBatchSize == 0, zeroTmpl, ".billing.clients.http.maxBatchSize")
+	erc.Whenf(ec, c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.URL == "", emptyTmpl, ".billing.clients.http.url")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
 	erc.Whenf(ec, c.Metrics.Port == 0, zeroTmpl, ".metrics.port")

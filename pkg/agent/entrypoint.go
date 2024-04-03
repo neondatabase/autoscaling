@@ -53,16 +53,14 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	globalState, globalPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, schedTracker)
 	watchMetrics.MustRegister(globalPromReg)
 
-	if r.Config.Billing != nil {
-		logger.Info("Starting billing metrics collector")
-		storeForNode := watch.NewIndexedStore(vmWatchStore, billing.NewVMNodeIndex(r.EnvArgs.K8sNodeName))
+	logger.Info("Starting billing metrics collector")
+	storeForNode := watch.NewIndexedStore(vmWatchStore, billing.NewVMNodeIndex(r.EnvArgs.K8sNodeName))
 
-		metrics := billing.NewPromMetrics()
-		metrics.MustRegister(globalPromReg)
+	metrics := billing.NewPromMetrics()
+	metrics.MustRegister(globalPromReg)
 
-		// TODO: catch panics here, bubble those into a clean-ish shutdown.
-		go billing.RunBillingMetricsCollector(ctx, logger, r.Config.Billing, storeForNode, metrics)
-	}
+	// TODO: catch panics here, bubble those into a clean-ish shutdown.
+	go billing.RunBillingMetricsCollector(ctx, logger, &r.Config.Billing, storeForNode, metrics)
 
 	promLogger := logger.Named("prometheus")
 	if err := util.StartPrometheusMetricsServer(ctx, promLogger.Named("global"), 9100, globalPromReg); err != nil {
