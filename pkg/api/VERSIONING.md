@@ -97,7 +97,7 @@ number.
 Note: Components v0.6.0 and below did not have a versioned protocol between the controller and the runner.
 | Release | controller | runner |
 |---------|------------|--------|
-| _Current_ | 0 - 1 | 1 |
+| _Current_ | 1 | 1 |
 | v0.26.0 | 0 - 1 | 1 |
 | v0.25.0 | 0 - 1 | 1 |
 | v0.24.0 | 0 - 1 | 1 |
