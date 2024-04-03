@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -18,14 +19,26 @@ import (
 )
 
 type Config struct {
-	URL                       string `json:"url"`
-	CPUMetricName             string `json:"cpuMetricName"`
-	ActiveTimeMetricName      string `json:"activeTimeMetricName"`
-	CollectEverySeconds       uint   `json:"collectEverySeconds"`
-	AccumulateEverySeconds    uint   `json:"accumulateEverySeconds"`
-	PushEverySeconds          uint   `json:"pushEverySeconds"`
-	PushRequestTimeoutSeconds uint   `json:"pushRequestTimeoutSeconds"`
-	MaxBatchSize              uint   `json:"maxBatchSize"`
+	Clients                ClientsConfig `json:"clients"`
+	CPUMetricName          string        `json:"cpuMetricName"`
+	ActiveTimeMetricName   string        `json:"activeTimeMetricName"`
+	CollectEverySeconds    uint          `json:"collectEverySeconds"`
+	AccumulateEverySeconds uint          `json:"accumulateEverySeconds"`
+}
+
+type ClientsConfig struct {
+	HTTP *HTTPClientConfig `json:"http"`
+}
+
+type HTTPClientConfig struct {
+	BaseClientConfig
+	URL string `json:"url"`
+}
+
+type BaseClientConfig struct {
+	PushEverySeconds          uint `json:"pushEverySeconds"`
+	PushRequestTimeoutSeconds uint `json:"pushRequestTimeoutSeconds"`
+	MaxBatchSize              uint `json:"maxBatchSize"`
 }
 
 type metricsState struct {
@@ -74,7 +87,15 @@ func RunBillingMetricsCollector(
 	store VMStoreForNode,
 	metrics PromMetrics,
 ) {
-	client := billing.NewClient(conf.URL, http.DefaultClient)
+	var clients []clientInfo
+
+	if c := conf.Clients.HTTP; c != nil {
+		clients = append(clients, clientInfo{
+			client: billing.NewClient(c.URL, http.DefaultClient),
+			name:   "http",
+			config: c.BaseClientConfig,
+		})
+	}
 
 	logger := parentLogger.Named("billing")
 
@@ -92,20 +113,24 @@ func RunBillingMetricsCollector(
 		pushWindowStart: time.Now(),
 	}
 
-	queueWriter, queueReader := newEventQueue[*billing.IncrementalEvent](metrics.queueSizeCurrent)
+	var queueWriters []eventQueuePusher[*billing.IncrementalEvent]
 
-	// Start the sender
-	signalDone, thisThreadFinished := util.NewCondChannelPair()
-	defer signalDone.Send()
-	sender := eventSender{
-		client:            client,
-		config:            conf,
-		metrics:           metrics,
-		queue:             queueReader,
-		collectorFinished: thisThreadFinished,
-		lastSendDuration:  0,
+	for _, c := range clients {
+		qw, queueReader := newEventQueue[*billing.IncrementalEvent](metrics.queueSizeCurrent.WithLabelValues(c.name))
+		queueWriters = append(queueWriters, qw)
+
+		// Start the sender
+		signalDone, thisThreadFinished := util.NewCondChannelPair()
+		defer signalDone.Send() //nolint:gocritic // this defer-in-loop is intentional.
+		sender := eventSender{
+			clientInfo:        c,
+			metrics:           metrics,
+			queue:             queueReader,
+			collectorFinished: thisThreadFinished,
+			lastSendDuration:  0,
+		}
+		go sender.senderLoop(logger.Named(fmt.Sprintf("send-%s", c.name)))
 	}
-	go sender.senderLoop(logger.Named("send"))
 
 	// The rest of this function is to do with collection
 	logger = logger.Named("collect")
@@ -123,7 +148,7 @@ func RunBillingMetricsCollector(
 			state.collect(logger, store, metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
-			state.drainEnqueue(logger, conf, billing.GetHostname(), queueWriter)
+			state.drainEnqueue(logger, conf, billing.GetHostname(), queueWriters)
 		case <-backgroundCtx.Done():
 			return
 		}
@@ -256,17 +281,24 @@ func logAddedEvent(logger *zap.Logger, event *billing.IncrementalEvent) *billing
 }
 
 // drainEnqueue clears the current history, adding it as events to the queue
-func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname string, queue eventQueuePusher[*billing.IncrementalEvent]) {
+func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname string, queues []eventQueuePusher[*billing.IncrementalEvent]) {
 	now := time.Now()
 
 	countInBatch := 0
 	batchSize := 2 * len(s.historical)
 
+	// Helper function that adds an event to all queues
+	enqueue := func(event *billing.IncrementalEvent) {
+		for _, q := range queues {
+			q.enqueue(event)
+		}
+	}
+
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
 
 		countInBatch += 1
-		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+		enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
 			Type:           "", // set by billing.Enrich
 			IdempotencyKey: "", // set by billing.Enrich
@@ -278,7 +310,7 @@ func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname s
 			Value:     int(math.Round(history.total.cpu)),
 		})))
 		countInBatch += 1
-		queue.enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+		enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
 			Type:           "", // set by billing.Enrich
 			IdempotencyKey: "", // set by billing.Enrich
