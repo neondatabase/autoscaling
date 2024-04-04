@@ -345,7 +345,7 @@ func createISO9660runtime(
 			// re-make the swap on the partition
 			`mkswap "$swappart"`,
 			// ... and then re-enable the swap
-			`swapon "$swappart"`,
+			`swapon -d "$swappart"`,
 		}
 		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(lines, "\n"))), "resize-swap.sh")
 		if err != nil {
