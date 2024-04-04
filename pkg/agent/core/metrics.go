@@ -1,4 +1,4 @@
-package api
+package core
 
 // Definition of the Metrics type, plus reading it from vector.dev's prometheus format host metrics
 
@@ -6,14 +6,22 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-// Metrics gives the information pulled from vector.dev that the scheduler may use to prioritize
-// which pods it should migrate.
 type Metrics struct {
-	LoadAverage1Min  float32 `json:"loadAvg1M"`
-	LoadAverage5Min  float32 `json:"loadAvg5M"`
-	MemoryUsageBytes float32 `json:"memoryUsageBytes"`
+	LoadAverage1Min  float32
+	LoadAverage5Min  float32 // unused. To be removed when api.Metrics.LoadAverage5Min is removed.
+	MemoryUsageBytes float32
+}
+
+func (m Metrics) ToAPI() api.Metrics {
+	return api.Metrics{
+		LoadAverage1Min:  m.LoadAverage1Min,
+		LoadAverage5Min:  m.LoadAverage5Min,
+		MemoryUsageBytes: m.MemoryUsageBytes,
+	}
 }
 
 // ReadMetrics generates Metrics from vector.dev's host metrics output, or returns error on failure

@@ -251,7 +251,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		}
 	})
 	r.spawnBackgroundWorker(ctx, logger, "get metrics", func(c context.Context, l *zap.Logger) {
-		r.getMetricsLoop(c, l, func(metrics api.Metrics, withLock func()) {
+		r.getMetricsLoop(c, l, func(metrics core.Metrics, withLock func()) {
 			ecwc.Updater().UpdateMetrics(metrics, withLock)
 		})
 	})
@@ -349,7 +349,7 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, logger *zap.Logger, 
 func (r *Runner) getMetricsLoop(
 	ctx context.Context,
 	logger *zap.Logger,
-	newMetrics func(metrics api.Metrics, withLock func()),
+	newMetrics func(metrics core.Metrics, withLock func()),
 ) {
 	timeout := time.Second * time.Duration(r.global.config.Metrics.RequestTimeoutSeconds)
 	waitBetweenDuration := time.Second * time.Duration(r.global.config.Metrics.SecondsBetweenRequests)
@@ -516,7 +516,7 @@ func (r *Runner) doMetricsRequest(
 	ctx context.Context,
 	logger *zap.Logger,
 	timeout time.Duration,
-) (*api.Metrics, error) {
+) (*core.Metrics, error) {
 	url := fmt.Sprintf("http://%s:%d/metrics", r.podIP, r.global.config.Metrics.Port)
 
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -546,7 +546,7 @@ func (r *Runner) doMetricsRequest(
 		return nil, fmt.Errorf("Unsuccessful response status %d: %s", resp.StatusCode, string(body))
 	}
 
-	m, err := api.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
+	m, err := core.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("Error reading metrics from prometheus output: %w", err)
 	}
