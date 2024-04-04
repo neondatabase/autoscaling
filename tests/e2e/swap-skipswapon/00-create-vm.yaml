@@ -24,5 +24,4 @@ spec:
     settings:
       swap:
         size: 1Gi
-        shrinkable: true
         skipSwapon: true
