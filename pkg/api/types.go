@@ -190,6 +190,14 @@ type AgentRequest struct {
 	Metrics *Metrics `json:"metrics"`
 }
 
+// Metrics gives the information pulled from vector.dev that the scheduler may use to prioritize
+// which pods it should migrate.
+type Metrics struct {
+	LoadAverage1Min  float32 `json:"loadAvg1M"`
+	LoadAverage5Min  float32 `json:"loadAvg5M"`
+	MemoryUsageBytes float32 `json:"memoryUsageBytes"`
+}
+
 // ProtocolRange returns a VersionRange exactly equal to r.ProtoVersion
 func (r AgentRequest) ProtocolRange() VersionRange[PluginProtoVersion] {
 	return VersionRange[PluginProtoVersion]{

@@ -20,7 +20,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		name string
 
 		// helpers for setting fields (ish) of State:
-		metrics           api.Metrics
+		metrics           core.Metrics
 		vmUsing           api.Resources
 		schedulerApproved api.Resources
 		requestedUpscale  api.MoreResources
@@ -32,7 +32,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 	}{
 		{
 			name: "BasicScaleup",
-			metrics: api.Metrics{
+			metrics: core.Metrics{
 				LoadAverage1Min:  0.30,
 				LoadAverage5Min:  0.0, // unused
 				MemoryUsageBytes: 0.0,
@@ -47,7 +47,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		},
 		{
 			name: "MismatchedApprovedNoScaledown",
-			metrics: api.Metrics{
+			metrics: core.Metrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
 				LoadAverage5Min:  0.0,
 				MemoryUsageBytes: 0.0,
@@ -64,7 +64,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		{
 			// ref https://github.com/neondatabase/autoscaling/issues/512
 			name: "MismatchedApprovedNoScaledownButVMAtMaximum",
-			metrics: api.Metrics{
+			metrics: core.Metrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
 				LoadAverage5Min:  0.0,
 				MemoryUsageBytes: 0.0,
@@ -263,7 +263,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 
 	// Set metrics
 	clockTick().AssertEquals(duration("0.2s"))
-	lastMetrics := api.Metrics{
+	lastMetrics := core.Metrics{
 		LoadAverage1Min:  0.3,
 		LoadAverage5Min:  0.0, // unused
 		MemoryUsageBytes: 0.0,
@@ -279,7 +279,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(1)),
 			Target:     resForCU(2),
-			Metrics:    &lastMetrics,
+			Metrics:    ptr(lastMetrics.ToAPI()),
 		},
 	})
 	// start the request:
@@ -340,7 +340,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	clockTick().AssertEquals(duration("0.6s"))
 
 	// Set metrics back so that desired resources should now be zero
-	lastMetrics = api.Metrics{
+	lastMetrics = core.Metrics{
 		LoadAverage1Min:  0.0,
 		LoadAverage5Min:  0.0, // unused
 		MemoryUsageBytes: 0.0,
@@ -387,7 +387,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(2)),
 			Target:     resForCU(1),
-			Metrics:    &lastMetrics,
+			Metrics:    ptr(lastMetrics.ToAPI()),
 		},
 		// shouldn't have anything to say to the other components
 	})
@@ -418,7 +418,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 
 	state.Monitor().Active(true)
 
-	metrics := api.Metrics{
+	metrics := core.Metrics{
 		LoadAverage1Min:  0.0,
 		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
@@ -435,7 +435,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	reqEvery := DefaultInitialStateConfig.Core.PluginRequestTick
 	endTime := duration("20s")
 
-	doInitialPluginRequest(a, state, clock, clockTick, &metrics, resources)
+	doInitialPluginRequest(a, state, clock, clockTick, ptr(metrics.ToAPI()), resources)
 
 	for clock.Elapsed().Duration < endTime {
 		timeSinceScheduledRequest := (clock.Elapsed().Duration - base) % reqEvery
@@ -451,7 +451,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 				PluginRequest: &core.ActionPluginRequest{
 					LastPermit: &resources,
 					Target:     resources,
-					Metrics:    &metrics,
+					Metrics:    ptr(metrics.ToAPI()),
 				},
 			})
 			a.Do(state.Plugin().StartingRequest, clock.Now(), resources)
@@ -500,7 +500,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 
 	// Set metrics
 	clockTick()
-	metrics := api.Metrics{
+	metrics := core.Metrics{
 		LoadAverage1Min:  0.0,
 		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
@@ -606,7 +606,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(6)),
 			Target:     resForCU(3),
-			Metrics:    &metrics,
+			Metrics:    ptr(metrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
@@ -649,7 +649,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(3)),
 			Target:     resForCU(3),
-			Metrics:    &metrics,
+			Metrics:    ptr(metrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
@@ -715,7 +715,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(3)),
 			Target:     resForCU(1),
-			Metrics:    &metrics,
+			Metrics:    ptr(metrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
@@ -761,7 +761,7 @@ func TestRequestedUpscale(t *testing.T) {
 
 	// Set metrics
 	clockTick()
-	lastMetrics := api.Metrics{
+	lastMetrics := core.Metrics{
 		LoadAverage1Min:  0.0,
 		LoadAverage5Min:  0.0, // unused
 		MemoryUsageBytes: 0.0,
@@ -781,7 +781,7 @@ func TestRequestedUpscale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(1)),
 			Target:     resForCU(2),
-			Metrics:    &lastMetrics,
+			Metrics:    ptr(lastMetrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -832,7 +832,7 @@ func TestRequestedUpscale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(2)),
 			Target:     resForCU(2),
-			Metrics:    &lastMetrics,
+			Metrics:    ptr(lastMetrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -882,12 +882,12 @@ func TestDownscalePivotBack(t *testing.T) {
 		return state.NextActions(clock.Now())
 	}
 
-	initialMetrics := api.Metrics{
+	initialMetrics := core.Metrics{
 		LoadAverage1Min:  0.0,
 		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
-	newMetrics := api.Metrics{
+	newMetrics := core.Metrics{
 		LoadAverage1Min:  0.3,
 		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
@@ -975,7 +975,7 @@ func TestDownscalePivotBack(t *testing.T) {
 					PluginRequest: &core.ActionPluginRequest{
 						LastPermit: ptr(resForCU(2)),
 						Target:     resForCU(1),
-						Metrics:    &initialMetrics,
+						Metrics:    ptr(initialMetrics.ToAPI()),
 					},
 				})
 				a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
@@ -995,7 +995,7 @@ func TestDownscalePivotBack(t *testing.T) {
 					PluginRequest: &core.ActionPluginRequest{
 						LastPermit: ptr(resForCU(1)),
 						Target:     resForCU(2),
-						Metrics:    &newMetrics,
+						Metrics:    ptr(newMetrics.ToAPI()),
 					},
 				})
 				a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -1083,7 +1083,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	clockTick()
 
 	// Set metrics so the desired resources are still 2 CU
-	metrics := api.Metrics{
+	metrics := core.Metrics{
 		LoadAverage1Min:  0.3,
 		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
@@ -1135,7 +1135,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(2)),
 			Target:     resForCU(1),
-			Metrics:    &metrics,
+			Metrics:    ptr(metrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
@@ -1178,7 +1178,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	clockTick()
 
 	// Set metrics so the desired resources are still 2 CU
-	metrics := api.Metrics{
+	metrics := core.Metrics{
 		LoadAverage1Min:  0.3,
 		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
@@ -1206,7 +1206,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(2)),
 			Target:     resForCU(3),
-			Metrics:    &metrics,
+			Metrics:    ptr(metrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
@@ -1274,7 +1274,7 @@ func TestFailedRequestRetry(t *testing.T) {
 
 	// Set metrics so that we should be trying to upscale
 	clockTick()
-	metrics := api.Metrics{
+	metrics := core.Metrics{
 		LoadAverage1Min:  0.3,
 		LoadAverage5Min:  0.0, // unused
 		MemoryUsageBytes: 0.0,
@@ -1286,7 +1286,7 @@ func TestFailedRequestRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(1)),
 			Target:     resForCU(2),
-			Metrics:    &metrics,
+			Metrics:    ptr(metrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -1305,7 +1305,7 @@ func TestFailedRequestRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(1)),
 			Target:     resForCU(2),
-			Metrics:    &metrics,
+			Metrics:    ptr(metrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -1417,7 +1417,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	// usage is actually 1 CU
 	clockTick()
 	// the actual metrics we got in the actual logs
-	metrics := api.Metrics{
+	metrics := core.Metrics{
 		LoadAverage1Min:  0.0,
 		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 150589570, // 143.6 MiB
@@ -1476,7 +1476,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 			PluginRequest: &core.ActionPluginRequest{
 				LastPermit: ptr(resForCU(3)),
 				Target:     resForCU(2),
-				Metrics:    &metrics,
+				Metrics:    ptr(metrics.ToAPI()),
 			},
 			NeonVMRequest: &core.ActionNeonVMRequest{
 				Current: resForCU(2),
@@ -1506,7 +1506,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: ptr(resForCU(2)),
 			Target:     resForCU(1),
-			Metrics:    &metrics,
+			Metrics:    ptr(metrics.ToAPI()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
