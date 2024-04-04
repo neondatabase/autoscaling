@@ -1,6 +1,6 @@
 package api
 
-// Definition of the Metrics type, plus reading it from node_exporter output
+// Definition of the Metrics type, plus reading it from vector.dev's prometheus format host metrics
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Metrics gives the information pulled from node_exporter that the scheduler may use to prioritize
+// Metrics gives the information pulled from vector.dev that the scheduler may use to prioritize
 // which pods it should migrate.
 type Metrics struct {
 	LoadAverage1Min  float32 `json:"loadAvg1M"`
@@ -16,7 +16,7 @@ type Metrics struct {
 	MemoryUsageBytes float32 `json:"memoryUsageBytes"`
 }
 
-// ReadMetrics generates Metrics from node_exporter output, or returns error on failure
+// ReadMetrics generates Metrics from vector.dev's host metrics output, or returns error on failure
 //
 // This function could be more efficient, but realistically it doesn't matter. The size of the
 // output from node_exporter/vector is so small anyways.
