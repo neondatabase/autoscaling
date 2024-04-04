@@ -301,7 +301,7 @@ func createISO9660runtime(
 		return err
 	}
 
-	if swapInfo != nil && swapInfo.Shrinkable != nil && *swapInfo.Shrinkable {
+	if swapInfo != nil {
 		lines := []string{
 			`#!/neonvm/bin/sh`,
 			`set -euxo pipefail`,
@@ -418,121 +418,113 @@ func createSwap(logger *zap.Logger, diskName string, diskPath string, swapInfo v
 		return err
 	}
 
-	if swapInfo.Shrinkable == nil || !*swapInfo.Shrinkable {
-		// If we're not making the swap shrinkable, it can be relatively straightforward:
-		// just use the entire virtual disk as swap.
-		if err := execFg("mkswap", "-L", diskName, "swap.raw"); err != nil {
-			return err
-		}
-	} else {
-		// In order to allow shrinking the swap available to a VM without incurring the overhead of swap
-		// files, we create a partition *inside* the qcow2 file.
-		//
-		// A side effect of this is that there isn't a clean way for us to mkswap the partition.
-		// Ordinarily we could `mount -o loop`, but loop devices in Kubernetes appear to be
-		// difficult to handle properly (in part because there aren't very many ways to get loop
-		// devices in Linux containers, in general - at least, AFAICT).
-		//
-		// What we end up doing here, in order to make the swap partition accessible by blkid, is to
-		// mkswap a secondary file and copy it into the location of the partition.
-		if err := execFg("parted", "swap.raw", "mktable", "GPT"); err != nil {
-			return err
-		}
-		// Note: we use an offset of 2MiB here in order to match the cluster_size=2M that we give to
-		// qemu-img convert later.
-		// Does it really matter? probably not? But it takes only an additional 1MiB from the
-		// partition, so IMO it's worth the peace of mind.
-		if err := execFg("parted", "--align=optimal", "swap.raw", "mkpart", "primary", "2MiB", "100%"); err != nil {
-			return err
-		}
+	// In order to allow shrinking the swap available to a VM without incurring the overhead of swap
+	// files, we create a partition *inside* the qcow2 file.
+	//
+	// A side effect of this is that there isn't a clean way for us to mkswap the partition.
+	// Ordinarily we could `mount -o loop`, but loop devices in Kubernetes appear to be
+	// difficult to handle properly (in part because there aren't very many ways to get loop
+	// devices in Linux containers, in general - at least, AFAICT).
+	//
+	// What we end up doing here, in order to make the swap partition accessible by blkid, is to
+	// mkswap a secondary file and copy it into the location of the partition.
+	if err := execFg("parted", "swap.raw", "mktable", "GPT"); err != nil {
+		return err
+	}
+	// Note: we use an offset of 2MiB here in order to match the cluster_size=2M that we give to
+	// qemu-img convert later.
+	// Does it really matter? probably not? But it takes only an additional 1MiB from the
+	// partition, so IMO it's worth the peace of mind.
+	if err := execFg("parted", "--align=optimal", "swap.raw", "mkpart", "primary", "2MiB", "100%"); err != nil {
+		return err
+	}
 
-		// Get information about the size and location of the partition:
-		partinfo, err := execFgCapture("parted", "-m", "swap.raw", "unit", "b", "print")
-		if err != nil {
-			return err
-		}
-		logger.Info("Got swap file partition info", zap.String("partinfo", partinfo))
-		// 'parted -m swap.raw unit b print' tyipcally shows something like:
-		//
-		//     BYT;
-		//     /swap.raw:10737418240B:file:512:512:gpt::;
-		//     1:2097152B:10736369663B:10734272512B::primary:;
-		//
-		// So, we'll parse it.
-		partinfoLines := strings.Split(strings.TrimSpace(partinfo), "\n")
-		if len(partinfoLines) != 3 {
-			return fmt.Errorf("partition info for swap.raw had %d lines, but we expected 3", len(partinfoLines))
-		}
-		swapLine := strings.Split(partinfoLines[2], ":")
+	// Get information about the size and location of the partition:
+	partinfo, err := execFgCapture("parted", "-m", "swap.raw", "unit", "b", "print")
+	if err != nil {
+		return err
+	}
+	logger.Info("Got swap file partition info", zap.String("partinfo", partinfo))
+	// 'parted -m swap.raw unit b print' tyipcally shows something like:
+	//
+	//     BYT;
+	//     /swap.raw:10737418240B:file:512:512:gpt::;
+	//     1:2097152B:10736369663B:10734272512B::primary:;
+	//
+	// So, we'll parse it.
+	partinfoLines := strings.Split(strings.TrimSpace(partinfo), "\n")
+	if len(partinfoLines) != 3 {
+		return fmt.Errorf("partition info for swap.raw had %d lines, but we expected 3", len(partinfoLines))
+	}
+	swapLine := strings.Split(partinfoLines[2], ":")
 
-		expectedFields := 7
-		if len(swapLine) != expectedFields {
-			return fmt.Errorf(
-				"partition info for swap.raw had %d fields for swap partition, but we expected %d",
-				len(swapLine), expectedFields,
-			)
-		}
-		// start position *measured in bytes* is the second field (index = 1), and total size is the
-		// fourth field (index = 3).
-		partStart, err := strconv.Atoi(strings.TrimSuffix(swapLine[1], "B"))
-		if err != nil {
-			return fmt.Errorf("failed to parse start offset %q of swap partition: %w", swapLine[1], err)
-		}
-		partSize, err := strconv.Atoi(strings.TrimSuffix(swapLine[3], "B"))
-		if err != nil {
-			return fmt.Errorf("failed to parse size %q of swap partition: %w", swapLine[3], err)
-		}
+	expectedFields := 7
+	if len(swapLine) != expectedFields {
+		return fmt.Errorf(
+			"partition info for swap.raw had %d fields for swap partition, but we expected %d",
+			len(swapLine), expectedFields,
+		)
+	}
+	// start position *measured in bytes* is the second field (index = 1), and total size is the
+	// fourth field (index = 3).
+	partStart, err := strconv.Atoi(strings.TrimSuffix(swapLine[1], "B"))
+	if err != nil {
+		return fmt.Errorf("failed to parse start offset %q of swap partition: %w", swapLine[1], err)
+	}
+	partSize, err := strconv.Atoi(strings.TrimSuffix(swapLine[3], "B"))
+	if err != nil {
+		return fmt.Errorf("failed to parse size %q of swap partition: %w", swapLine[3], err)
+	}
 
-		// Create the swap. This might be quite large, so we'd like to make sure that this is a
-		// sparse file.
-		//
-		// It's also worth noting that, after running mkswap, the file is still sparse.
-		// Only a header is written, and the rest of the file remains filled with zeros, just like
-		// the contents of the partition in we created in 'swap.raw'.
-		//
-		// The header has size equal to a memory page, which is *almost always* 4096 bytes, but
-		// technically may be larger (e.g. M1 Macbooks have 16K pages).
-		// We can run 'getconf PAGE_SIZE' to find this value.
-		//
-		// Only copying the first 4KiB saves needing to write GiBs of data back into 'swap.raw',
-		// which would otherwise greatly extend NeonVM startup times.
-		if err := execFg("fallocate", "-l", fmt.Sprint(partSize), "swapfile"); err != nil {
-			return err
-		}
-		if err := execFg("mkswap", "-L", diskName, "swapfile"); err != nil {
-			return err
-		}
-		pagesizeString, err := execFgCapture("getconf", "PAGE_SIZE")
-		if err != nil {
-			return err
-		}
-		pagesizeString = strings.TrimSpace(pagesizeString)
-		pagesize, err := strconv.Atoi(pagesizeString)
-		if err != nil {
-			return fmt.Errorf("failed to parse 'getconf PAGE_SIZE' output %q as integer: %w", pagesizeString, err)
-		}
+	// Create the swap. This might be quite large, so we'd like to make sure that this is a
+	// sparse file.
+	//
+	// It's also worth noting that, after running mkswap, the file is still sparse.
+	// Only a header is written, and the rest of the file remains filled with zeros, just like
+	// the contents of the partition in we created in 'swap.raw'.
+	//
+	// The header has size equal to a memory page, which is *almost always* 4096 bytes, but
+	// technically may be larger (e.g. M1 Macbooks have 16K pages).
+	// We can run 'getconf PAGE_SIZE' to find this value.
+	//
+	// Only copying the first 4KiB saves needing to write GiBs of data back into 'swap.raw',
+	// which would otherwise greatly extend NeonVM startup times.
+	if err := execFg("fallocate", "-l", fmt.Sprint(partSize), "swapfile"); err != nil {
+		return err
+	}
+	if err := execFg("mkswap", "-L", diskName, "swapfile"); err != nil {
+		return err
+	}
+	pagesizeString, err := execFgCapture("getconf", "PAGE_SIZE")
+	if err != nil {
+		return err
+	}
+	pagesizeString = strings.TrimSpace(pagesizeString)
+	pagesize, err := strconv.Atoi(pagesizeString)
+	if err != nil {
+		return fmt.Errorf("failed to parse 'getconf PAGE_SIZE' output %q as integer: %w", pagesizeString, err)
+	}
 
-		// Copy *exactly* the first pagesize of swapfile into the start of the partition in swap.raw
-		swapfile, err := os.Open("swapfile")
-		if err != nil {
-			return fmt.Errorf("failed to open swapfile: %w", err)
-		}
-		swapRaw, err := os.OpenFile("swap.raw", os.O_RDWR, 0)
-		if err != nil {
-			return fmt.Errorf("failed to open swap.raw: %w", err)
-		}
-		if _, err := swapRaw.Seek(int64(partStart), 0); err != nil {
-			return fmt.Errorf("failed to seek to %d in swap.raw: %w", partStart, err)
-		}
+	// Copy *exactly* the first pagesize of swapfile into the start of the partition in swap.raw
+	swapfile, err := os.Open("swapfile")
+	if err != nil {
+		return fmt.Errorf("failed to open swapfile: %w", err)
+	}
+	swapRaw, err := os.OpenFile("swap.raw", os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open swap.raw: %w", err)
+	}
+	if _, err := swapRaw.Seek(int64(partStart), 0); err != nil {
+		return fmt.Errorf("failed to seek to %d in swap.raw: %w", partStart, err)
+	}
 
-		if _, err := io.CopyN(swapRaw, swapfile, int64(pagesize)); err != nil {
-			return fmt.Errorf("failed to copy %d bytes from swapfile to swap.raw: %w", pagesize, err)
-		}
+	if _, err := io.CopyN(swapRaw, swapfile, int64(pagesize)); err != nil {
+		return fmt.Errorf("failed to copy %d bytes from swapfile to swap.raw: %w", pagesize, err)
+	}
 
-		// Cleanup: remove swapfile
-		if err := execFg("rm", "-f", "swapfile"); err != nil {
-			return fmt.Errorf("failed to remove swapfile: %w", err)
-		}
+	// Cleanup: remove swapfile
+	if err := execFg("rm", "-f", "swapfile"); err != nil {
+		return fmt.Errorf("failed to remove swapfile: %w", err)
 	}
 
 	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "swap.raw", diskPath); err != nil {

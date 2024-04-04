@@ -2472,23 +2472,13 @@ spec:
                         description: Swap controls settings for adding a swap disk
                           to the VM.
                         properties:
-                          shrinkable:
-                            description: "Shrinkable changes the swap to sit inside
-                              a GPT partition of the mounted disk, so that it can
-                              be resized from within the guest. \n Resizing can be
-                              done with the provided program at '/neonvm/bin/resize-swap'.
-                              It requires superuser permissions to perform the resizing.
-                              Please note that this DISABLES ALL SWAP before enabling
-                              it at the new size."
-                            type: boolean
                           size:
                             anyOf:
                             - type: integer
                             - type: string
                             description: 'Size sets the size of the swap disk on the
                               host. The amount available within the VM may be slightly
-                              less (typically: 4KiB less, or 3MiB+4KiB less if Shrinkable
-                              = true).'
+                              less (typically: 3MiB+4KiB less).'
                             pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                             x-kubernetes-int-or-string: true
                           skipSwapon:

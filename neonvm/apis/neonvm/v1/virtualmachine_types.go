@@ -203,17 +203,8 @@ type GuestSettings struct {
 
 type SwapInfo struct {
 	// Size sets the size of the swap disk on the host. The amount available within the VM may be
-	// slightly less (typically: 4KiB less, or 3MiB+4KiB less if Shrinkable = true).
+	// slightly less (typically: 3MiB+4KiB less).
 	Size resource.Quantity `json:"size"`
-	// Shrinkable changes the swap to sit inside a GPT partition of the mounted disk, so that it can
-	// be resized from within the guest.
-	//
-	// Resizing can be done with the provided program at '/neonvm/bin/resize-swap'. It requires
-	// superuser permissions to perform the resizing. Please note that this DISABLES ALL SWAP before
-	// enabling it at the new size.
-	//
-	// +optional
-	Shrinkable *bool `json:"shrinkable,omitempty"`
 	// SkipSwapon instructs the VM to *not* run swapon for the swap on startup.
 	//
 	// This is intended to be used in cases where you will *always* resize the swap post-startup,
@@ -231,7 +222,6 @@ func (s *SwapInfo) UnmarshalJSON(b []byte) error {
 	// Try to unmarshal both ways
 	var si struct {
 		Size       resource.Quantity `json:"size"`
-		Shrinkable *bool             `json:"shrinkable,omitempty"`
 		SkipSwapon *bool             `json:"skipSwapon,omitempty"`
 	}
 	if fstErr := json.Unmarshal(b, &si); fstErr != nil {
@@ -246,7 +236,6 @@ func (s *SwapInfo) UnmarshalJSON(b []byte) error {
 
 	*s = SwapInfo{
 		Size:       si.Size,
-		Shrinkable: si.Shrinkable,
 		SkipSwapon: si.SkipSwapon,
 	}
 	return nil

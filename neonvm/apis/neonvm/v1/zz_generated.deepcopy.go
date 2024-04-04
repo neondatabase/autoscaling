@@ -450,11 +450,6 @@ func (in *RootDisk) DeepCopy() *RootDisk {
 func (in *SwapInfo) DeepCopyInto(out *SwapInfo) {
 	*out = *in
 	out.Size = in.Size.DeepCopy()
-	if in.Shrinkable != nil {
-		in, out := &in.Shrinkable, &out.Shrinkable
-		*out = new(bool)
-		**out = **in
-	}
 	if in.SkipSwapon != nil {
 		in, out := &in.SkipSwapon, &out.SkipSwapon
 		*out = new(bool)

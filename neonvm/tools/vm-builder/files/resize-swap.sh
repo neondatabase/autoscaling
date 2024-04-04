@@ -22,7 +22,7 @@ else
 fi
 
 if [ ! -f /neonvm/runtime/resize-swap.sh ]; then
-    echo 'not found: swap may not be enabled, or it is not shrinkable' >&2
+    echo 'not found: swap may not be enabled' >&2
     exit 1
 fi
 

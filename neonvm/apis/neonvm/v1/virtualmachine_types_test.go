@@ -22,17 +22,15 @@ func TestSwapInfoBackwardsCompatibility(t *testing.T) {
 			input: `"1Gi"`,
 			parsed: vmv1.SwapInfo{
 				Size:       resource.MustParse("1Gi"),
-				Shrinkable: nil,
 				SkipSwapon: nil,
 			},
 		},
 		// Simple test for current output format
 		{
-			input: `{"size": "3Gi", "shrinkable": false}`,
+			input: `{"size": "3Gi", "skipSwapon": true}`,
 			parsed: vmv1.SwapInfo{
 				Size:       resource.MustParse("3Gi"),
-				Shrinkable: &[]bool{false}[0],
-				SkipSwapon: nil,
+				SkipSwapon: &[]bool{true}[0],
 			},
 		},
 	}
