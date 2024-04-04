@@ -419,7 +419,7 @@ func createSwap(logger *zap.Logger, diskName string, diskPath string, swapInfo v
 	}
 
 	// In order to allow shrinking the swap available to a VM without incurring the overhead of swap
-	// files, we create a partition *inside* the qcow2 file.
+	// files, we create a partition *inside* the raw file (which we'll eventually convert to qcow2).
 	//
 	// A side effect of this is that there isn't a clean way for us to mkswap the partition.
 	// Ordinarily we could `mount -o loop`, but loop devices in Kubernetes appear to be
