@@ -25,6 +25,7 @@ type PromMetrics struct {
 	migrationDeletions    *prometheus.CounterVec
 	migrationCreateFails  prometheus.Counter
 	migrationDeleteFails  *prometheus.CounterVec
+	reserveShouldDeny     *prometheus.CounterVec
 }
 
 func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
@@ -108,6 +109,13 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 			},
 			[]string{"phase"},
 		)),
+		reserveShouldDeny: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_reserve_should_deny_total",
+				Help: "Number of times the plugin should deny a reservation",
+			},
+			[]string{"availability_zone", "node", "node_group"},
+		)),
 	}
 
 	return reg
@@ -123,4 +131,8 @@ func (m *PromMetrics) IncFailIfNotSuccess(method string, pod *corev1.Pod, ignore
 	}
 
 	m.pluginCallFails.WithLabelValues(method, util.PodPreferredAZIfPresent(pod), strconv.FormatBool(ignored), status.Code().String())
+}
+
+func (m *PromMetrics) IncReserveShouldDeny(pod *corev1.Pod, node *nodeState) {
+	m.reserveShouldDeny.WithLabelValues(util.PodPreferredAZIfPresent(pod), node.name, node.nodeGroup).Inc()
 }
