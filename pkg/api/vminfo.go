@@ -235,7 +235,7 @@ func extractVmInfoGeneric(
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingConfig, err)
 		}
 
-		if err := config.Validate(); err != nil {
+		if err := config.ValidateOverrides(); err != nil {
 			return nil, fmt.Errorf("Bad scaling config in annotation %q: %w", AnnotationAutoscalingConfig, err)
 		}
 		info.Config.ScalingConfig = &config
@@ -337,29 +337,77 @@ func (b ResourceBounds) validate(ec *erc.Collector, path string, memSlotSize *re
 // ScalingConfig provides bits of configuration for how the autoscaler-agent makes scaling decisions
 type ScalingConfig struct {
 	// LoadAverageFractionTarget sets the desired fraction of current CPU that the load average
-	// should be. For example, with a value of 0.7, we'd want load average to sit at 0.7 ×
-	// CPU,
+	// should be. For example, with a value of 0.7, we'd want load average to sit at 0.7 × CPU,
 	// scaling CPU to make this happen.
-	LoadAverageFractionTarget float64 `json:"loadAverageFractionTarget"`
+	//
+	// When specifying the autoscaler-agent config, this field is required. For an individual VM, if
+	// this field is left out the settings will fall back on the global default.
+	LoadAverageFractionTarget *float64 `json:"loadAverageFractionTarget,omitempty"`
 
 	// MemoryUsageFractionTarget sets the desired fraction of current memory that
 	// we would like to be using. For example, with a value of 0.7, on a 4GB VM
 	// we'd like to be using 2.8GB of memory.
-	MemoryUsageFractionTarget float64 `json:"memoryUsageFractionTarget"`
+	//
+	// When specifying the autoscaler-agent config, this field is required. For an individual VM, if
+	// this field is left out the settings will fall back on the global default.
+	MemoryUsageFractionTarget *float64 `json:"memoryUsageFractionTarget,omitempty"`
 }
 
-func (c *ScalingConfig) Validate() error {
+// WithOverrides returns a new copy of defaults, where fields set in overrides replace the ones in
+// defaults but all others remain the same.
+//
+// overrides may be nil; if so, this method just returns defaults.
+func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingConfig {
+	if overrides == nil {
+		return defaults
+	}
+
+	if overrides.LoadAverageFractionTarget != nil {
+		defaults.LoadAverageFractionTarget = &[]float64{*overrides.LoadAverageFractionTarget}[0] // slice trick to shallow copy
+	}
+	if overrides.MemoryUsageFractionTarget != nil {
+		defaults.MemoryUsageFractionTarget = &[]float64{*overrides.MemoryUsageFractionTarget}[0]
+	}
+
+	return defaults
+}
+
+// ValidateDefaults checks that the ScalingConfig is safe to use as default settings.
+//
+// This is more strict than ValidateOverride, where some fields need not be specified.
+// Refer to the comments on ScalingConfig for more - each field specifies whether it is required,
+// and when.
+func (c *ScalingConfig) ValidateDefaults() error {
+	return c.validate(true)
+}
+
+// ValidateOverrides checks that the ScalingConfig is safe to use to override preexisting settings.
+//
+// This is less strict than ValidateDefaults, because with ValidateOverrides even required fields
+// are optional.
+func (c *ScalingConfig) ValidateOverrides() error {
+	return c.validate(false)
+}
+
+func (c *ScalingConfig) validate(requireAllRequiredFields bool) error {
 	ec := &erc.Collector{}
 
-	// Check c.loadAverageFractionTarget is between 0 and 2. We don't
-	// *strictly* need the upper
+	// Check c.loadAverageFractionTarget is between 0 and 2. We don't *strictly* need the upper
 	// bound, but it's a good safety check.
-	erc.Whenf(ec, c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
-	erc.Whenf(ec, c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget")
+	if c.LoadAverageFractionTarget != nil {
+		erc.Whenf(ec, *c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
+		erc.Whenf(ec, *c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget")
+	} else if requireAllRequiredFields {
+		ec.Add(fmt.Errorf("%s is a required field", ".loadAverageFractionTarget"))
+	}
 
 	// Make sure c.MemoryUsageFractionTarget is between 0 and 1
-	erc.Whenf(ec, c.MemoryUsageFractionTarget < 0.0, "%s must be set to value >= 0", ".memoryUsageFractionTarget")
-	erc.Whenf(ec, c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget")
+	if c.MemoryUsageFractionTarget != nil {
+		erc.Whenf(ec, *c.MemoryUsageFractionTarget < 0.0, "%s must be set to value >= 0", ".memoryUsageFractionTarget")
+		erc.Whenf(ec, *c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget")
+	} else if requireAllRequiredFields {
+		ec.Add(fmt.Errorf("%s is a required field", ".memoryUsageFractionTarget"))
+	}
 
 	// heads-up! some functions elsewhere depend on the concrete return type of this function.
 	return ec.Resolve()
