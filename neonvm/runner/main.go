@@ -313,8 +313,8 @@ func createISO9660runtime(
 			// this script may be run as root, so we should avoid potentially-malicious path
 			// injection
 			`export PATH="/neonvm/bin"`,
-			`swappart="$(blkid -L swapdisk)"`,                       // e.g. '/dev/vdd1'
-			`swapdisk="$(echo "$swappart" | grep -oE '^/dev/vd.')"`, // e.g. '/dev/vdd'
+			fmt.Sprintf(`swappart="$(blkid -t PARTLABEL=%s -o device)"`, sp.partitionLabel), // e.g. '/dev/vdd1'
+			`swapdisk="$(echo "$swappart" | grep -oE '^/dev/vd.')"`,                         // e.g. '/dev/vdd'
 			// disable swap. Allow it to fail if it's already disabled.
 			`swapoff $swappart || true`,
 			// if the requested size is zero, then... just exit. There's nothing we need to do.
@@ -345,7 +345,7 @@ func createISO9660runtime(
 			// Reload the partition table
 			`partprobe "$swapdisk"`,
 			// re-make the swap on the partition
-			`mkswap -L swapdisk "$swappart"`,
+			`mkswap "$swappart"`,
 			// ... and then re-enable the swap
 			//
 			// nb: busybox swapon only supports '-d', not its long form '--discard'.
@@ -425,11 +425,14 @@ const (
 	// partition, so IMO it's worth the peace of mind.
 	swapStartLocationMiB int64 = 2
 	swapAlignMiB         int64 = 2
+
+	swapPartitionName string = "swapdisk"
 )
 
 type swapParams struct {
 	sectorSize            int64
 	partitionStartInBytes int64
+	partitionLabel        string
 }
 
 func createSwap(logger *zap.Logger, diskName string, diskPath string, swapInfo vmv1.SwapInfo, swapParamsResult chan<- swapParams) error {
@@ -439,17 +442,11 @@ func createSwap(logger *zap.Logger, diskName string, diskPath string, swapInfo v
 	// In order to allow shrinking the swap available to a VM without incurring the overhead of swap
 	// files, we create a partition *inside* the raw file (which we'll eventually convert to qcow2).
 	//
-	// A side effect of this is that there isn't a clean way for us to mkswap the partition.
-	// Ordinarily we could `mount -o loop`, but loop devices in Kubernetes appear to be
-	// difficult to handle properly (in part because there aren't very many ways to get loop
-	// devices in Linux containers, in general - at least, AFAICT).
-	//
-	// If we had GNU mkswap, we could `mkswap --offset` to start from the start of the partition in
-	// the file. But our neonvm-runner base image is alpine, so installing GNU tools is quite
-	// difficult.
-	//
-	// What we end up doing here, in order to make the swap partition accessible by blkid, is to
-	// mkswap a secondary file and copy it into the location of the partition.
+	// There isn't really a clean way to mkswap inside the partition (running in k8s prevents
+	// mounting a loop device, and we're using busybox mkswap, which doesn't have --offset).
+	// So, because of that and the fact that resizing needs to mkswap inside the VM *anyways*, we
+	// just use a consistent name for the partition and locate it by blkid -t PARTLABEL=... inside
+	// the guest.
 	//
 	// ---
 	//
@@ -492,7 +489,7 @@ func createSwap(logger *zap.Logger, diskName string, diskPath string, swapInfo v
 		"--align=optimal",
 		"swap.raw",
 		"mkpart",
-		"primary",
+		swapPartitionName, // used by blkid -t PARTLABEL=... inside the guest.
 		// note the 'B' suffix, indicating units of bytes.
 		fmt.Sprintf("%dB", swapStartLocation),
 		fmt.Sprintf("%dB", swapEndLocation),
@@ -554,42 +551,7 @@ func createSwap(logger *zap.Logger, diskName string, diskPath string, swapInfo v
 	swapParamsResult <- swapParams{
 		sectorSize:            *sfdiskOut.PartitionTable.SectorSize,
 		partitionStartInBytes: swapStartLocation,
-	}
-
-	// Create the swap. We'll always resize it from within the guest, so we just need it to provide
-	// the label for blkid. Technically we only need to copy the first page (that's where the header
-	// is), which is almost always 4KiB, but it's easier to just make a small swapfile and copy the
-	// entire thing.
-	//
-	// If the 1MiB copy is impacting startup times (it shouldn't), we can switch to only copying the
-	// 4KiB header.
-	smallSwapSize := mib // exactly 1 MiB. We've previously guaranteed the partition is >=1MiB.
-	if err := execFg("fallocate", "-l", fmt.Sprint(smallSwapSize), "swapfile"); err != nil {
-		return err
-	}
-	if err := execFg("mkswap", "-L", diskName, "swapfile"); err != nil {
-		return err
-	}
-	// Open swapfile and swap.raw, seek to the offset that the partition's at, and then copy the
-	// contents of the swapfile.
-	swapfile, err := os.Open("swapfile")
-	if err != nil {
-		return fmt.Errorf("failed to open swapfile: %w", err)
-	}
-	swapRaw, err := os.OpenFile("swap.raw", os.O_RDWR, 0)
-	if err != nil {
-		return fmt.Errorf("failed to open swap.raw: %w", err)
-	}
-	if _, err := swapRaw.Seek(swapStartLocation, 0); err != nil {
-		return fmt.Errorf("failed to seek to %d in swap.raw: %w", swapStartLocation, err)
-	}
-	if _, err := io.CopyN(swapRaw, swapfile, smallSwapSize); err != nil {
-		return fmt.Errorf("failed to copy %d bytes from swapfile to swap.raw: %w", smallSwapSize, err)
-	}
-
-	// Cleanup: remove swapfile
-	if err := execFg("rm", "-f", "swapfile"); err != nil {
-		return fmt.Errorf("failed to remove swapfile: %w", err)
+		partitionLabel:        swapPartitionName,
 	}
 
 	qcow2Opts := fmt.Sprintf("cluster_size=%s,lazy_refcounts=on", swapDiskClusterSize)
