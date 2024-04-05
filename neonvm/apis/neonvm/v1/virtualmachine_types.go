@@ -202,8 +202,9 @@ type GuestSettings struct {
 }
 
 type SwapInfo struct {
-	// Size sets the size of the swap disk on the host. The amount available within the VM may be
-	// slightly less (typically: 3MiB+4KiB less).
+	// Size sets the size of the swap in the VM. The amount of space used on the host may be
+	// slightly more (by a few MiBs). The information reported by `cat /proc/meminfo` may show
+	// slightly less, due to a single page header (typically 4KiB).
 	Size resource.Quantity `json:"size"`
 	// SkipSwapon instructs the VM to *not* run swapon for the swap on startup.
 	//

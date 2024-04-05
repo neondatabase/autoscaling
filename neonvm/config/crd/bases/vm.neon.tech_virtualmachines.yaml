@@ -2476,9 +2476,11 @@ spec:
                             anyOf:
                             - type: integer
                             - type: string
-                            description: 'Size sets the size of the swap disk on the
-                              host. The amount available within the VM may be slightly
-                              less (typically: 3MiB+4KiB less).'
+                            description: Size sets the size of the swap in the VM.
+                              The amount of space used on the host may be slightly
+                              more (by a few MiBs). The information reported by `cat
+                              /proc/meminfo` may show slightly less, due to a single
+                              page header (typically 4KiB).
                             pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                             x-kubernetes-int-or-string: true
                           skipSwapon:
