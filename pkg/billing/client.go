@@ -14,21 +14,29 @@ import (
 )
 
 type Client struct {
-	URL      string
-	httpc    *http.Client
-	hostname string
+	URL   string
+	httpc *http.Client
 }
 
-func NewClient(url string, c *http.Client) Client {
-	hostname, err := os.Hostname()
+var hostname string
+
+func init() {
+	var err error
+	hostname, err = os.Hostname()
 	if err != nil {
 		hostname = fmt.Sprintf("unknown-%d", rand.Intn(1000))
 	}
-	return Client{URL: fmt.Sprintf("%s/usage_events", url), httpc: c, hostname: hostname}
 }
 
-func (c Client) Hostname() string {
-	return c.hostname
+// GetHostname returns the hostname to be used for enriching billing events (see Enrich())
+//
+// This function MUST NOT be run before init has finished.
+func GetHostname() string {
+	return hostname
+}
+
+func NewClient(url string, c *http.Client) Client {
+	return Client{URL: fmt.Sprintf("%s/usage_events", url), httpc: c}
 }
 
 type TraceID string

@@ -641,6 +641,11 @@ func (e *AutoscaleEnforcer) reserveResources(
 	}
 
 	shouldDeny := add.VCPU > node.remainingReservableCPU() || add.Mem > node.remainingReservableMem()
+
+	if shouldDeny {
+		e.metrics.IncReserveShouldDeny(pod, node)
+	}
+
 	if shouldDeny && allowDeny {
 		cpuShortVerdict := "NOT ENOUGH"
 		if add.VCPU <= node.remainingReservableCPU() {
