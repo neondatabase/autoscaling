@@ -435,7 +435,7 @@ type swapParams struct {
 	partitionLabel        string
 }
 
-func createSwap(logger *zap.Logger, diskName string, diskPath string, swapInfo vmv1.SwapInfo, swapParamsResult chan<- swapParams) error {
+func createSwap(logger *zap.Logger, diskPath string, swapInfo vmv1.SwapInfo, swapParamsResult chan<- swapParams) error {
 	// NB: we don't `defer close(swapParamsResult)` here because it's handled by the outermost
 	// caller, so it's guaranteed to happen even if createSwap is never called (preventing deadlock)
 
@@ -985,9 +985,9 @@ func buildQEMUCmd(
 
 	if swapInfo != nil {
 		diskName := "swapdisk"
-		logger.Info("creating QCOW2 image for swap", zap.String("diskName", diskName))
 		dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, diskName)
-		if err := createSwap(logger, diskName, dPath, *swapInfo, swapParamsResult); err != nil {
+		logger.Info("creating QCOW2 image for swap", zap.String("diskPath", dPath))
+		if err := createSwap(logger, dPath, *swapInfo, swapParamsResult); err != nil {
 			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", diskName, dPath, cfg.diskCacheSettings))
