@@ -13,8 +13,8 @@ import (
 type PromMetrics struct {
 	vmsProcessedTotal *prometheus.CounterVec
 	vmsCurrent        *prometheus.GaugeVec
-	queueSizeCurrent  prometheus.Gauge
-	lastSendDuration  prometheus.Gauge
+	queueSizeCurrent  *prometheus.GaugeVec
+	lastSendDuration  *prometheus.GaugeVec
 	sendErrorsTotal   *prometheus.CounterVec
 }
 
@@ -34,24 +34,26 @@ func NewPromMetrics() PromMetrics {
 			},
 			[]string{"is_endpoint", "autoscaling_enabled", "phase"},
 		),
-		queueSizeCurrent: prometheus.NewGauge(
+		queueSizeCurrent: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_agent_billing_queue_size",
 				Help: "Size of the billing subsystem's queue of unsent events",
 			},
+			[]string{"client"},
 		),
-		lastSendDuration: prometheus.NewGauge(
+		lastSendDuration: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_agent_billing_last_send_duration_seconds",
 				Help: "Duration, in seconds, that it took to send the latest set of billing events (or current time if ongoing)",
 			},
+			[]string{"client"},
 		),
 		sendErrorsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_billing_send_errors_total",
 				Help: "Total errors from attempting to send billing events",
 			},
-			[]string{"cause"},
+			[]string{"client", "cause"},
 		),
 	}
 }

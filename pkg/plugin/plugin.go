@@ -149,8 +149,8 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 	vwc := vmWatchCallbacks{
-		submitDisabledScaling: func(logger *zap.Logger, pod util.NamespacedName) {
-			pushToQueue(logger, pod.Name, func() { p.handleVMDisabledScaling(hlogger, pod) })
+		submitConfigUpdated: func(logger *zap.Logger, pod util.NamespacedName, newCfg api.VmConfig) {
+			pushToQueue(logger, pod.Name, func() { p.handleVMConfigUpdated(hlogger, pod, newCfg) })
 		},
 		submitBoundsChanged: func(logger *zap.Logger, vm *api.VmInfo, podName string) {
 			pushToQueue(logger, vm.Name, func() { p.handleUpdatedScalingBounds(hlogger, vm, podName) })
@@ -773,7 +773,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		return status
 	}
 
-	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", true)
+	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", false)
 	if err != nil {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
 	}

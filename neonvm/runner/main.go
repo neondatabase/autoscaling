@@ -847,10 +847,20 @@ func run(logger *zap.Logger) error {
 		}
 	}
 
+	// Helper function to both log an error and return the result of wrapping it with the message.
+	//
+	// This is used below because (*errgroup.Group).Wait() returns at most 1 error, which means
+	// imprecise usage can hide errors. So, we log the errors before they would be returned, to make
+	// sure they're always visible.
+	logWrap := func(msg string, err error) error {
+		logger.Error(msg, zap.Error(err))
+		return fmt.Errorf("%s: %w", msg, err)
+	}
+
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
 		if err := runInitScript(logger, vmSpec.InitScript); err != nil {
-			return fmt.Errorf("failed to run init script: %w", err)
+			return logWrap("failed to run init script", err)
 		}
 		return nil
 	})
@@ -872,7 +882,7 @@ func run(logger *zap.Logger) error {
 			swapParamsResult,
 			shmSize,
 		); err != nil {
-			return fmt.Errorf("failed to create iso9660 disk: %w", err)
+			return logWrap("failed to create iso9660 disk", err)
 		}
 		return nil
 	})
@@ -880,7 +890,7 @@ func run(logger *zap.Logger) error {
 	eg.Go(func() error {
 		// resize rootDisk image of size specified and new size more than current
 		if err := resizeRootDisk(logger, vmSpec); err != nil {
-			return fmt.Errorf("failed to resize rootDisk: %w", err)
+			return logWrap("failed to resize rootDisk", err)
 		}
 		return nil
 	})
@@ -894,7 +904,7 @@ func run(logger *zap.Logger) error {
 		var err error
 		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapInfo, swapParamsResult)
 		if err != nil {
-			return fmt.Errorf("failed to build QEMU command: %w", err)
+			return logWrap("failed to build QEMU command", err)
 		}
 		return nil
 	})

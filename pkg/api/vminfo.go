@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	LabelEnableAutoMigration      = "autoscaling.neon.tech/auto-migration-enabled"
 	LabelTestingOnlyAlwaysMigrate = "autoscaling.neon.tech/testing-only-always-migrate"
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
@@ -26,30 +27,36 @@ const (
 	AnnotationBillingEndpointID   = "autoscaling.neon.tech/billing-endpoint-id"
 )
 
-// HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
-func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
+func hasTrueLabel(obj metav1.ObjectMetaAccessor, labelName string) bool {
 	labels := obj.GetObjectMeta().GetLabels()
-	value, ok := labels[LabelEnableAutoscaling]
+	value, ok := labels[labelName]
 	return ok && value == "true"
 }
 
+// HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
+func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
+	return hasTrueLabel(obj, LabelEnableAutoscaling)
+}
+
+// HasAutoMigrationEnabled returns true iff the object has the label that enables "automatic"
+// scheduler-triggered migration, and it's set to "true"
+func HasAutoMigrationEnabled(obj metav1.ObjectMetaAccessor) bool {
+	return hasTrueLabel(obj, LabelEnableAutoMigration)
+}
+
 func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
-	labels := obj.GetObjectMeta().GetLabels()
-	value, ok := labels[LabelTestingOnlyAlwaysMigrate]
-	return ok && value == "true"
+	return hasTrueLabel(obj, LabelTestingOnlyAlwaysMigrate)
 }
 
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
 // care about. It takes various labels and annotations into account, so certain fields might be
 // different from what's strictly in the VirtualMachine object.
 type VmInfo struct {
-	Name           string         `json:"name"`
-	Namespace      string         `json:"namespace"`
-	Cpu            VmCpuInfo      `json:"cpu"`
-	Mem            VmMemInfo      `json:"mem"`
-	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
-	AlwaysMigrate  bool           `json:"alwaysMigrate"`
-	ScalingEnabled bool           `json:"scalingEnabled"`
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
+	Cpu       VmCpuInfo `json:"cpu"`
+	Mem       VmMemInfo `json:"mem"`
+	Config    VmConfig  `json:"config"`
 }
 
 type VmCpuInfo struct {
@@ -102,6 +109,26 @@ func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) (*V
 		Use:      uint16(*memSlots.Use),
 		SlotSize: Bytes(memSlotSize.Value()),
 	}, nil
+
+}
+
+// VmConfig stores the autoscaling-specific "extra" configuration derived from labels and
+// annotations on the VM object.
+//
+// This is separate from the bounds information stored in VmInfo (even though that's also derived
+// from annotations), because VmConfig is meant to store values that either qualitatively change the
+// handling for a VM (e.g., AutoMigrationEnabled) or are expected to largely be the same for most VMs
+// (e.g., ScalingConfig).
+type VmConfig struct {
+	// AutoMigrationEnabled indicates to the scheduler plugin that it's allowed to trigger migration
+	// for this VM. This defaults to false because otherwise we might disrupt VMs that don't have
+	// adequate networking support to preserve connections across live migration.
+	AutoMigrationEnabled bool `json:"autoMigrationEnabled"`
+	// AlwaysMigrate is a test-only debugging flag that, if present in the VM's labels, will always
+	// prompt it to migrate, regardless of whether the VM actually *needs* to.
+	AlwaysMigrate  bool           `json:"alwaysMigrate"`
+	ScalingEnabled bool           `json:"scalingEnabled"`
+	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
 }
 
 // Using returns the Resources that this VmInfo says the VM is using
@@ -173,17 +200,21 @@ func extractVmInfoGeneric(
 		return nil, fmt.Errorf("Error extracting memory info: %w", err)
 	}
 
+	autoMigrationEnabled := HasAutoMigrationEnabled(obj)
 	scalingEnabled := HasAutoscalingEnabled(obj)
 	alwaysMigrate := HasAlwaysMigrateLabel(obj)
 
 	info := VmInfo{
-		Name:           vmName,
-		Namespace:      obj.GetObjectMeta().GetNamespace(),
-		Cpu:            *cpuInfo,
-		Mem:            *memInfo,
-		ScalingConfig:  nil, // set below, maybe
-		AlwaysMigrate:  alwaysMigrate,
-		ScalingEnabled: scalingEnabled,
+		Name:      vmName,
+		Namespace: obj.GetObjectMeta().GetNamespace(),
+		Cpu:       *cpuInfo,
+		Mem:       *memInfo,
+		Config: VmConfig{
+			AutoMigrationEnabled: autoMigrationEnabled,
+			AlwaysMigrate:        alwaysMigrate,
+			ScalingEnabled:       scalingEnabled,
+			ScalingConfig:        nil, // set below, maybe
+		},
 	}
 
 	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {
@@ -207,7 +238,7 @@ func extractVmInfoGeneric(
 		if err := config.Validate(); err != nil {
 			return nil, fmt.Errorf("Bad scaling config in annotation %q: %w", AnnotationAutoscalingConfig, err)
 		}
-		info.ScalingConfig = &config
+		info.Config.ScalingConfig = &config
 	}
 
 	min := info.Min()
@@ -342,8 +373,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
 		state.Write([]byte(fmt.Sprintf(
-			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, ScalingConfig:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, Config:%#v}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.Config,
 		)))
 	default:
 		if verb != 'v' {
@@ -353,8 +384,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 		}
 
 		state.Write([]byte(fmt.Sprintf(
-			"{Name:%s Namespace:%s Cpu:%v Mem:%v ScalingConfig:%+v AlwaysMigrate:%t ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"{Name:%s Namespace:%s Cpu:%v Mem:%v Config:%v}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.Config,
 		)))
 
 		if verb != 'v' {
@@ -380,5 +411,21 @@ func (mem VmMemInfo) Format(state fmt.State, verb rune) {
 		state.Write([]byte(fmt.Sprintf("api.VmMemInfo{Min:%d, Max:%d, Use:%d, SlotSize:%#v}", mem.Min, mem.Max, mem.Use, mem.SlotSize)))
 	default:
 		state.Write([]byte(fmt.Sprintf("{Min:%d Max:%d Use:%d SlotSize:%v}", mem.Min, mem.Max, mem.Use, mem.SlotSize)))
+	}
+}
+
+func (cfg VmConfig) Format(state fmt.State, verb rune) {
+	// same-ish style as for VmInfo, differing slightly from default repr.
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf(
+			"api.VmConfig{AutoMigrationEnabled:%t, AlwaysMigrate:%t, ScalingEnabled:%t, ScalingConfig:%#v}",
+			cfg.AutoMigrationEnabled, cfg.AlwaysMigrate, cfg.ScalingEnabled, cfg.ScalingConfig,
+		)))
+	default:
+		state.Write([]byte(fmt.Sprintf(
+			"{AutoMigrationEnabled:%t AlwaysMigrate:%t ScalingEnabled:%t ScalingConfig:%+v}",
+			cfg.AutoMigrationEnabled, cfg.AlwaysMigrate, cfg.ScalingEnabled, cfg.ScalingConfig,
+		)))
 	}
 }
