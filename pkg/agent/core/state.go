@@ -113,7 +113,7 @@ type state struct {
 	// NeonVM records all state relevant to the NeonVM k8s API
 	NeonVM neonvmState
 
-	Metrics *Metrics
+	Metrics *SystemMetrics
 }
 
 type pluginState struct {
@@ -934,7 +934,7 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	s.internal.VM = vm
 }
 
-func (s *State) UpdateMetrics(metrics Metrics) {
+func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
 	s.internal.Metrics = &metrics
 }
 
