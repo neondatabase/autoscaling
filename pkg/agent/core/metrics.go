@@ -13,12 +13,12 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-type Metrics struct {
+type SystemMetrics struct {
 	LoadAverage1Min  float64
 	MemoryUsageBytes float64
 }
 
-func (m Metrics) ToAPI() api.Metrics {
+func (m SystemMetrics) ToAPI() api.Metrics {
 	return api.Metrics{
 		LoadAverage1Min:  float32(m.LoadAverage1Min),
 		LoadAverage5Min:  nil,
@@ -62,8 +62,8 @@ func missingMetric(name string) error {
 	return fmt.Errorf("missing expected metric %s", name)
 }
 
-// fromPrometheus implements FromPrometheus, so Metrics can be used with ParseMetrics.
-func (m *Metrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) error {
+// fromPrometheus implements FromPrometheus, so SystemMetrics can be used with ParseMetrics.
+func (m *SystemMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) error {
 	ec := &erc.Collector{}
 
 	getFloat := func(metricName string) float64 {
@@ -81,7 +81,7 @@ func (m *Metrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) error {
 	memTotal := getFloat("host_memory_total_bytes")
 	memAvailable := getFloat("host_memory_available_bytes")
 
-	tmp := Metrics{
+	tmp := SystemMetrics{
 		LoadAverage1Min: load1,
 		// Add an extra 100 MiB to account for kernel memory usage
 		MemoryUsageBytes: memTotal - memAvailable + 100*(1<<20),

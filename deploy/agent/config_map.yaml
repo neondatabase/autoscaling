@@ -38,9 +38,11 @@ data:
           }
       },
       "metrics": {
-        "port": 9100,
-        "requestTimeoutSeconds": 2,
-        "secondsBetweenRequests": 5
+        "system": {
+          "port": 9100,
+          "requestTimeoutSeconds": 2,
+          "secondsBetweenRequests": 5
+        }
       },
       "scheduler": {
         "schedulerName": "autoscale-scheduler",
