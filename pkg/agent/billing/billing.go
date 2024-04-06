@@ -28,11 +28,20 @@ type Config struct {
 
 type ClientsConfig struct {
 	HTTP *HTTPClientConfig `json:"http"`
+	S3   *S3ClientConfig   `json:"s3"`
 }
 
 type HTTPClientConfig struct {
 	BaseClientConfig
 	URL string `json:"url"`
+}
+
+type S3ClientConfig struct {
+	BaseClientConfig
+	Bucket         string `json:"bucket"`
+	Region         string `json:"region"`
+	PrefixInBucket string `json:"prefixInBucket"`
+	Endpoint       string `json:"endpoint"`
 }
 
 type BaseClientConfig struct {
@@ -87,17 +96,34 @@ func RunBillingMetricsCollector(
 	store VMStoreForNode,
 	metrics PromMetrics,
 ) {
+	logger := parentLogger.Named("billing")
+
 	var clients []clientInfo
 
 	if c := conf.Clients.HTTP; c != nil {
 		clients = append(clients, clientInfo{
-			client: billing.NewClient(c.URL, http.DefaultClient),
+			client: billing.NewHTTPClient(c.URL, http.DefaultClient),
 			name:   "http",
 			config: c.BaseClientConfig,
 		})
 	}
-
-	logger := parentLogger.Named("billing")
+	if c := conf.Clients.S3; c != nil {
+		client, err := billing.NewS3Client(c.Bucket, c.Region, c.PrefixInBucket, c.Endpoint, time.Now)
+		if err != nil {
+			logger.Panic("Failed to create S3 client", zap.Error(err))
+		}
+		logger.Info("Created S3 client",
+			zap.String("bucket", c.Bucket),
+			zap.String("region", c.Region),
+			zap.String("prefixInBucket", c.PrefixInBucket),
+			zap.String("endpoint", c.Endpoint),
+		)
+		clients = append(clients, clientInfo{
+			client: client,
+			name:   "s3",
+			config: c.BaseClientConfig,
+		})
+	}
 
 	collectTicker := time.NewTicker(time.Second * time.Duration(conf.CollectEverySeconds))
 	defer collectTicker.Stop()

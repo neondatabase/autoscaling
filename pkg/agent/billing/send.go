@@ -112,13 +112,13 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 			return
 		}
 
-		traceID := s.client.GenerateTraceID()
+		traceID := billing.GenerateTraceID()
 
 		logger.Info(
 			"Pushing billing events",
 			zap.Int("count", count),
 			zap.String("traceID", string(traceID)),
-			zap.String("url", s.client.URL),
+			s.client.LogFields(),
 		)
 
 		reqStart := time.Now()
@@ -138,7 +138,7 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 				zap.Int("count", count),
 				zap.Duration("after", reqDuration),
 				zap.String("traceID", string(traceID)),
-				zap.String("url", s.client.URL),
+				s.client.LogFields(),
 				zap.Int("total", total),
 				zap.Duration("totalTime", time.Since(startTime)),
 				zap.Error(err),
@@ -170,7 +170,7 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 			zap.Int("count", count),
 			zap.Duration("after", reqDuration),
 			zap.String("traceID", string(traceID)),
-			zap.String("url", s.client.URL),
+			s.client.LogFields(),
 			zap.Int("total", total),
 			zap.Duration("totalTime", currentTotalTime),
 		)
