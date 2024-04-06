@@ -86,9 +86,6 @@ type ScalingConfig struct {
 type MetricsConfig struct {
 	// Port is the port that VMs are expected to provide metrics on
 	Port uint16 `json:"port"`
-	// LoadMetricPrefix is the prefix at the beginning of the load metrics that we use. For
-	// node_exporter, this is "node_", and for vector it's "host_"
-	LoadMetricPrefix string `json:"loadMetricPrefix"`
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for metrics requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	// SecondsBetweenRequests sets the number of seconds to wait between metrics requests
@@ -186,7 +183,6 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
 	erc.Whenf(ec, c.Metrics.Port == 0, zeroTmpl, ".metrics.port")
-	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
 	erc.Whenf(ec, c.Metrics.RequestTimeoutSeconds == 0, zeroTmpl, ".metrics.requestTimeoutSeconds")
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.VCPU == 0, zeroTmpl, ".scaling.computeUnit.vCPUs")

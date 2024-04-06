@@ -537,18 +537,13 @@ func (r *Runner) doMetricsRequest(
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("Error receiving response body: %w", err)
-	}
-
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Unsuccessful response status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("Unsuccessful response status %d", resp.StatusCode)
 	}
 
-	m, err := core.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
-	if err != nil {
-		return nil, fmt.Errorf("Error reading metrics from prometheus output: %w", err)
+	var m core.Metrics
+	if err := core.ParseMetrics(resp.Body, &m); err != nil {
+		return nil, fmt.Errorf("Error parsing metrics from prometheus output: %w", err)
 	}
 
 	return &m, nil
