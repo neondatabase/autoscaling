@@ -773,7 +773,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		return status
 	}
 
-	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", true)
+	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", false)
 	if err != nil {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
 	}

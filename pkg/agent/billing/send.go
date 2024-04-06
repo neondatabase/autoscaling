@@ -13,9 +13,15 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+type clientInfo struct {
+	client billing.Client
+	name   string
+	config BaseClientConfig
+}
+
 type eventSender struct {
-	client            billing.Client
-	config            *Config
+	clientInfo
+
 	metrics           PromMetrics
 	queue             eventQueuePuller[*billing.IncrementalEvent]
 	collectorFinished util.CondChannelReceiver
@@ -72,7 +78,7 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 	if s.queue.size() == 0 {
 		logger.Info("No billing events to push")
 		s.lastSendDuration = 0
-		s.metrics.lastSendDuration.Set(1e-6) // small value, to indicate that nothing happened
+		s.metrics.lastSendDuration.WithLabelValues(s.clientInfo.name).Set(1e-6) // small value, to indicate that nothing happened
 		return
 	}
 
@@ -96,7 +102,7 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 		if count == 0 {
 			totalTime := time.Since(startTime)
 			s.lastSendDuration = totalTime
-			s.metrics.lastSendDuration.Set(totalTime.Seconds())
+			s.metrics.lastSendDuration.WithLabelValues(s.clientInfo.name).Set(totalTime.Seconds())
 
 			logger.Info(
 				"All available events have been sent",
@@ -148,10 +154,10 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 			default:
 				rootErr = util.RootError(err).Error()
 			}
-			s.metrics.sendErrorsTotal.WithLabelValues(rootErr).Inc()
+			s.metrics.sendErrorsTotal.WithLabelValues(s.clientInfo.name, rootErr).Inc()
 
 			s.lastSendDuration = 0
-			s.metrics.lastSendDuration.Set(0.0) // use 0 as a flag that something went wrong; there's no valid time here.
+			s.metrics.lastSendDuration.WithLabelValues(s.clientInfo.name).Set(0.0) // use 0 as a flag that something went wrong; there's no valid time here.
 			return
 		}
 
@@ -171,7 +177,7 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 
 		if currentTotalTime > s.lastSendDuration {
 			s.lastSendDuration = currentTotalTime
-			s.metrics.lastSendDuration.Set(currentTotalTime.Seconds())
+			s.metrics.lastSendDuration.WithLabelValues(s.clientInfo.name).Set(currentTotalTime.Seconds())
 		}
 	}
 }
