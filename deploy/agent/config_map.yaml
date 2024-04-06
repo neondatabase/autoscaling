@@ -39,7 +39,6 @@ data:
       },
       "metrics": {
         "port": 9100,
-        "loadMetricPrefix": "host_",
         "requestTimeoutSeconds": 2,
         "secondsBetweenRequests": 5
       },
