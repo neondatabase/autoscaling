@@ -169,6 +169,15 @@ func (c ExecutorCoreUpdater) UpdateSystemMetrics(metrics core.SystemMetrics, wit
 	})
 }
 
+// UpdateLFCMetrics calls (*core.State).UpdateLFCMetrics() on the inner core.State and runs withLock
+// while holding the lock.
+func (c ExecutorCoreUpdater) UpdateLFCMetrics(metrics core.LFCMetrics, withLock func()) {
+	c.core.update(func(state *core.State) {
+		state.UpdateLFCMetrics(metrics)
+		withLock()
+	})
+}
+
 // UpdatedVM calls (*core.State).UpdatedVM() on the inner core.State and runs withLock while
 // holding the lock.
 func (c ExecutorCoreUpdater) UpdatedVM(vm api.VmInfo, withLock func()) {

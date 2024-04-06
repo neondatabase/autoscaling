@@ -259,8 +259,28 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			metricsMgr[*core.SystemMetrics]{
 				kind:         "system",
 				emptyMetrics: func() *core.SystemMetrics { return new(core.SystemMetrics) },
+				isActive:     func() bool { return true },
 				updateMetrics: func(metrics *core.SystemMetrics, withLock func()) {
 					ecwc.Updater().UpdateSystemMetrics(*metrics, withLock)
+				},
+			},
+		)
+	})
+	r.spawnBackgroundWorker(ctx, logger, "get LFC metrics", func(c context.Context, l *zap.Logger) {
+		getMetricsLoop(
+			r,
+			c,
+			l,
+			r.global.config.Metrics.LFC,
+			metricsMgr[*core.LFCMetrics]{
+				kind:         "LFC",
+				emptyMetrics: func() *core.LFCMetrics { return new(core.LFCMetrics) },
+				isActive: func() bool {
+					scalingConfig := r.global.config.Scaling.DefaultConfig.WithOverrides(getVmInfo().Config.ScalingConfig)
+					return *scalingConfig.EnableLFCMetrics // guaranteed non-nil as a required field.
+				},
+				updateMetrics: func(metrics *core.LFCMetrics, withLock func()) {
+					ecwc.Updater().UpdateLFCMetrics(*metrics, withLock)
 				},
 			},
 		)
@@ -365,6 +385,11 @@ type metricsMgr[M core.FromPrometheus] struct {
 	// but at the time we decided this is the least convoluted way.
 	emptyMetrics func() M
 
+	// isActive returns whether these metrics should currently be collected for the VM.
+	//
+	// For example, with LFC metrics, we return false if they are not enabled for the VM.
+	isActive func() bool
+
 	// updateMetrics is a callback to update the internal state with new values for these metrics.
 	updateMetrics func(metrics M, withLock func())
 }
@@ -383,10 +408,18 @@ func getMetricsLoop[M core.FromPrometheus](
 
 	randomStartWait := util.NewTimeRange(time.Second, 0, int(config.SecondsBetweenRequests)).Random()
 
-	logger.Info(
-		fmt.Sprintf("Sleeping for random delay before making first %s metrics request", mgr.kind),
-		zap.Duration("delay", randomStartWait),
-	)
+	lastActive := mgr.isActive()
+
+	// Don't log anything if we're not making this type of metrics request currently.
+	//
+	// The idea is that isActive() can/should be used for gradual rollout of new metrics, and we
+	// don't want to log every time we *don't* do the new thing.
+	if lastActive {
+		logger.Info(
+			fmt.Sprintf("Sleeping for random delay before making first %s metrics request", mgr.kind),
+			zap.Duration("delay", randomStartWait),
+		)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -395,16 +428,28 @@ func getMetricsLoop[M core.FromPrometheus](
 	}
 
 	for {
-		metrics := mgr.emptyMetrics()
-		err := doMetricsRequest(r, ctx, logger, metrics, config)
-		if err != nil {
-			logger.Error("Error making metrics request", zap.Error(err))
-			goto next
-		}
+		if !mgr.isActive() {
+			if lastActive {
+				logger.Info(fmt.Sprintf("VM is no longer active for %s metrics requests", mgr.kind))
+			}
+			lastActive = false
+		} else {
+			if !lastActive {
+				logger.Info(fmt.Sprintf("VM is now active for %s metrics requests", mgr.kind))
+			}
+			lastActive = true
 
-		mgr.updateMetrics(metrics, func() {
-			logger.Info("Updated metrics", zap.Any("metrics", metrics))
-		})
+			metrics := mgr.emptyMetrics()
+			err := doMetricsRequest(r, ctx, logger, metrics, config)
+			if err != nil {
+				logger.Error("Error making metrics request", zap.Error(err))
+				goto next
+			}
+
+			mgr.updateMetrics(metrics, func() {
+				logger.Info("Updated metrics", zap.Any("metrics", metrics))
+			})
+		}
 
 	next:
 		select {

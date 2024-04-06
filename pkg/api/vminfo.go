@@ -352,6 +352,14 @@ type ScalingConfig struct {
 	// When specifying the autoscaler-agent config, this field is required. For an individual VM, if
 	// this field is left out the settings will fall back on the global default.
 	MemoryUsageFractionTarget *float64 `json:"memoryUsageFractionTarget,omitempty"`
+
+	// EnableLFCMetrics, if true, enables fetching additional metrics about the Local File Cache
+	// (LFC) to provide as input to the scaling algorithm.
+	//
+	// When specifying the autoscaler-agent config, this field is required. False is a safe default.
+	// For an individual VM, if this field is left out the settings will fall back on the global
+	// default.
+	EnableLFCMetrics *bool `json:"enableLFCMetrics,omitempty"`
 }
 
 // WithOverrides returns a new copy of defaults, where fields set in overrides replace the ones in
@@ -368,6 +376,9 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 	}
 	if overrides.MemoryUsageFractionTarget != nil {
 		defaults.MemoryUsageFractionTarget = lo.ToPtr(*overrides.MemoryUsageFractionTarget)
+	}
+	if overrides.EnableLFCMetrics != nil {
+		defaults.EnableLFCMetrics = &[]bool{*overrides.EnableLFCMetrics}[0]
 	}
 
 	return defaults
@@ -408,6 +419,10 @@ func (c *ScalingConfig) validate(requireAll bool) error {
 		erc.Whenf(ec, *c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget")
 	} else if requireAll {
 		ec.Add(fmt.Errorf("%s is a required field", ".memoryUsageFractionTarget"))
+	}
+
+	if requireAll {
+		erc.Whenf(ec, c.EnableLFCMetrics == nil, "%s is a required field", ".enableLFCMetrics")
 	}
 
 	// heads-up! some functions elsewhere depend on the concrete return type of this function.

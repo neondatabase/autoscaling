@@ -26,6 +26,14 @@ func (m SystemMetrics) ToAPI() api.Metrics {
 	}
 }
 
+type LFCMetrics struct {
+	CacheHitsTotal   float64
+	CacheMissesTotal float64
+	CacheWritesTotal float64
+
+	ApproximateWorkingSetSizeTotal float64 // approximate_working_set_size
+}
+
 // FromPrometheus represents metric types that can be parsed from prometheus output.
 type FromPrometheus interface {
 	fromPrometheus(map[string]*promtypes.MetricFamily) error
@@ -85,6 +93,37 @@ func (m *SystemMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) e
 		LoadAverage1Min: load1,
 		// Add an extra 100 MiB to account for kernel memory usage
 		MemoryUsageBytes: memTotal - memAvailable + 100*(1<<20),
+	}
+
+	if err := ec.Resolve(); err != nil {
+		return err
+	}
+
+	*m = tmp
+	return nil
+}
+
+// fromPrometheus implements FromPrometheus, so LFCMetrics can be used with ParseMetrics.
+func (m *LFCMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) error {
+	ec := &erc.Collector{}
+
+	getFloat := func(metricName string) float64 {
+		if mf := mfs[metricName]; mf != nil {
+			f, err := extractFloatGauge(mf)
+			ec.Add(err) // does nothing if err == nil
+			return f
+		} else {
+			ec.Add(missingMetric(metricName))
+			return 0
+		}
+	}
+
+	tmp := LFCMetrics{
+		CacheHitsTotal:   getFloat("lfc_hits"),
+		CacheMissesTotal: getFloat("lfc_misses"),
+		CacheWritesTotal: getFloat("lfc_writes"),
+
+		ApproximateWorkingSetSizeTotal: getFloat("lfc_approximate_working_set_size"),
 	}
 
 	if err := ec.Resolve(); err != nil {

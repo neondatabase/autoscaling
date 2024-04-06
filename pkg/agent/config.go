@@ -85,6 +85,7 @@ type ScalingConfig struct {
 // MetricsConfig defines a few parameters for metrics requests to the VM
 type MetricsConfig struct {
 	System MetricsSourceConfig `json:"system"`
+	LFC    MetricsSourceConfig `json:"lfc"`
 }
 
 type MetricsSourceConfig struct {
@@ -195,6 +196,7 @@ func (c *Config) validate() error {
 		erc.Whenf(ec, cfg.SecondsBetweenRequests == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.secondsBetweenRequests", key))
 	}
 	validateMetricsConfig(c.Metrics.System, "system")
+	validateMetricsConfig(c.Metrics.LFC, "lfc")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.VCPU == 0, zeroTmpl, ".scaling.computeUnit.vCPUs")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.Mem == 0, zeroTmpl, ".scaling.computeUnit.mem")
 	erc.Whenf(ec, c.NeonVM.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")

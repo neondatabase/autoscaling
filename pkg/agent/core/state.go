@@ -938,6 +938,10 @@ func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
 	s.internal.Metrics = &metrics
 }
 
+func (s *State) UpdateLFCMetrics(metrics LFCMetrics) {
+	// stub implementation, intentionally does nothing yet.
+}
+
 // PluginHandle provides write access to the scheduler plugin pieces of an UpdateState
 type PluginHandle struct {
 	s *state
