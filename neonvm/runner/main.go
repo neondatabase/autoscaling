@@ -419,10 +419,11 @@ func calcDirUsage(dirPath string) (int64, error) {
 
 const (
 	swapDiskClusterSize string = "2M"
-	// Align the swap start location with a start of a QCOW2 cluster (2M). 
-	// Doesn't matter much, but might improve cache efficiency. 
-	swapStartLocationMiB int64 = 2
-	swapAlignMiB         int64 = 2
+	mib                 int64  = 1024 * 1024
+	// Align the swap start location with a start of a QCOW2 cluster (2M).
+	// Doesn't matter much, but might improve cache efficiency.
+	swapStartLocation int64 = 2 * mib
+	swapAlign         int64 = 2 * mib
 
 	swapPartitionName string = "swapdisk"
 )
@@ -452,10 +453,6 @@ func createSwap(logger *zap.Logger, diskPath string, swapInfo vmv1.SwapInfo, swa
 	// than let `parted` dictate it. This means things can *potentially* break if the logic changes
 	// dramatically for whatever disk we're using (e.g. starts wanting 4MiB alignment instead of
 	// 1Mib), but generally that shouldn't happen, and if it does it shouldn't be a surprise.
-
-	mib := int64(1024 * 1024) // 1 MiB
-	swapStartLocation := swapStartLocationMiB * mib
-	swapAlign := swapAlignMiB * mib
 
 	desiredSwapSize := swapInfo.Size.Value()
 	// round up desiredSwapSize to the nearest multiple of swapAlign
