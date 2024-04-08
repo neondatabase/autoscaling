@@ -22,11 +22,11 @@ const (
 	ContentTypeError string = "text/plain"
 )
 
-// The scheduler plugin currently supports v1.0 to v4.0 of the agent<->scheduler plugin protocol.
+// The scheduler plugin currently supports v3.0 to v4.0 of the agent<->scheduler plugin protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
-	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
+	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
 	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV4_0
 )
 

@@ -12,12 +12,20 @@ import (
 )
 
 type Config struct {
+	RefreshStateIntervalSeconds uint `json:"refereshStateIntervalSeconds"`
+
 	Scaling   ScalingConfig    `json:"scaling"`
 	Metrics   MetricsConfig    `json:"metrics"`
 	Scheduler SchedulerConfig  `json:"scheduler"`
 	Monitor   MonitorConfig    `json:"monitor"`
+	NeonVM    NeonVMConfig     `json:"neonvm"`
 	Billing   billing.Config   `json:"billing"`
 	DumpState *DumpStateConfig `json:"dumpState"`
+}
+
+type RateThresholdConfig struct {
+	IntervalSeconds uint `json:"intervalSeconds"`
+	Threshold       uint `json:"threshold"`
 }
 
 type MonitorConfig struct {
@@ -40,6 +48,9 @@ type MonitorConfig struct {
 	// MaxHealthCheckSequentialFailuresSeconds gives the duration, in seconds, after which we
 	// should restart the connection to the vm-monitor if health checks aren't succeeding.
 	MaxHealthCheckSequentialFailuresSeconds uint `json:"maxHealthCheckSequentialFailuresSeconds"`
+	// MaxFailedRequestRate defines the maximum rate of failed monitor requests, above which
+	// a VM is considered stuck.
+	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
 
 	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait before retrying a
 	// request that previously failed.
@@ -66,11 +77,6 @@ type ScalingConfig struct {
 	// ComputeUnit is the desired ratio between CPU and memory that the autoscaler-agent should
 	// uphold when making changes to a VM
 	ComputeUnit api.Resources `json:"computeUnit"`
-	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
-	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
-	// failed request before making another one.
-	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
 	// DefaultConfig gives the default scaling config, to be used if there is no configuration
 	// supplied with the "autoscaling.neon.tech/config" annotation.
 	DefaultConfig api.ScalingConfig `json:"defaultConfig"`
@@ -110,6 +116,22 @@ type SchedulerConfig struct {
 	RetryDeniedUpscaleSeconds uint `json:"retryDeniedUpscaleSeconds"`
 	// RequestPort defines the port to access the scheduler's ✨special✨ API with
 	RequestPort uint16 `json:"requestPort"`
+	// MaxFailedRequestRate defines the maximum rate of failed scheduler requests, above which
+	// a VM is considered stuck.
+	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
+}
+
+// NeonVMConfig defines a few parameters for NeonVM requests
+type NeonVMConfig struct {
+	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
+	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
+	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
+	// failed request before making another one.
+	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
+
+	// MaxFailedRequestRate defines the maximum rate of failed NeonVM requests, above which
+	// a VM is considered stuck.
+	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
 }
 
 func ReadConfig(path string) (*Config, error) {
@@ -156,8 +178,9 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.VCPU == 0, zeroTmpl, ".scaling.computeUnit.vCPUs")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.Mem == 0, zeroTmpl, ".scaling.computeUnit.mem")
-	erc.Whenf(ec, c.Scaling.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
-	erc.Whenf(ec, c.Scaling.RetryFailedRequestSeconds == 0, zeroTmpl, ".scaling.retryFailedRequestSeconds")
+	erc.Whenf(ec, c.NeonVM.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
+	erc.Whenf(ec, c.NeonVM.RetryFailedRequestSeconds == 0, zeroTmpl, ".scaling.retryFailedRequestSeconds")
+	erc.Whenf(ec, c.NeonVM.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".neonvm.maxFailedRequestRate.intervalSeconds")
 	erc.Whenf(ec, c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds")
 	erc.Whenf(ec, c.Monitor.ConnectionTimeoutSeconds == 0, zeroTmpl, ".monitor.connectionTimeoutSeconds")
 	erc.Whenf(ec, c.Monitor.ConnectionRetryMinWaitSeconds == 0, zeroTmpl, ".monitor.connectionRetryMinWaitSeconds")
@@ -168,6 +191,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Monitor.RetryFailedRequestSeconds == 0, zeroTmpl, ".monitor.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Monitor.RetryDeniedDownscaleSeconds == 0, zeroTmpl, ".monitor.retryDeniedDownscaleSeconds")
 	erc.Whenf(ec, c.Monitor.RequestedUpscaleValidSeconds == 0, zeroTmpl, ".monitor.requestedUpscaleValidSeconds")
+	erc.Whenf(ec, c.Monitor.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".monitor.maxFailedRequestRate.intervalSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.Validate())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
@@ -176,6 +200,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Scheduler.RetryFailedRequestSeconds == 0, zeroTmpl, ".scheduler.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Scheduler.RetryDeniedUpscaleSeconds == 0, zeroTmpl, ".scheduler.retryDeniedUpscaleSeconds")
 	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
+	erc.Whenf(ec, c.Scheduler.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".monitor.maxFailedRequestRate.intervalSeconds")
 
 	return ec.Resolve()
 }
