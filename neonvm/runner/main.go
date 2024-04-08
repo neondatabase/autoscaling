@@ -419,10 +419,8 @@ func calcDirUsage(dirPath string) (int64, error) {
 
 const (
 	swapDiskClusterSize string = "2M"
-	// Note: we use an offset of 2MiB here in order to match the cluster_size=2M that we give to
-	// qemu-img convert when creating the qcow2 image.
-	// Does it really matter? probably not? But it takes only an additional 1MiB from the
-	// partition, so IMO it's worth the peace of mind.
+	// Align the swap start location with a start of a QCOW2 cluster (2M). 
+	// Doesn't matter much, but might improve cache efficiency. 
 	swapStartLocationMiB int64 = 2
 	swapAlignMiB         int64 = 2
 
