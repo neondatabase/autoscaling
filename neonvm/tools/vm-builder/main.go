@@ -41,6 +41,8 @@ var (
 	scriptVmInit string
 	//go:embed files/udev-init.sh
 	scriptUdevInit string
+	//go:embed files/resize-swap.sh
+	scriptResizeSwap string
 	//go:embed files/vector.yaml
 	configVector string
 	//go:embed files/chrony.conf
@@ -277,6 +279,7 @@ func main() {
 		{"chrony.conf", configChrony},
 		{"sshd_config", configSshd},
 		{"udev-init.sh", scriptUdevInit},
+		{"resize-swap.sh", scriptResizeSwap},
 	}
 
 	for _, f := range files {
