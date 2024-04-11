@@ -22,12 +22,12 @@ const (
 	ContentTypeError string = "text/plain"
 )
 
-// The scheduler plugin currently supports v3.0 to v4.0 of the agent<->scheduler plugin protocol.
+// The scheduler plugin currently supports v3.0 to v5.0 of the agent<->scheduler plugin protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV4_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
@@ -165,6 +165,15 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	// check that req.ComputeUnit has no zeros
 	if err := req.ComputeUnit.ValidateNonZero(); err != nil {
 		return nil, 400, fmt.Errorf("computeUnit fields must be non-zero: %w", err)
+	}
+	// check that nil-ness of req.Metrics.{LoadAverage5Min,MemoryUsageBytes} match what's expected
+	// for the protocol version.
+	if (req.Metrics.LoadAverage5Min != nil) != (req.Metrics.MemoryUsageBytes != nil) {
+		return nil, 400, fmt.Errorf("presence of metrics.loadAvg5M must match presence of metrics.memoryUsageBytes")
+	} else if req.Metrics.LoadAverage5Min == nil && req.ProtoVersion.IncludesExtendedMetrics() {
+		return nil, 400, fmt.Errorf("nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
+	} else if req.Metrics.LoadAverage5Min != nil && !req.ProtoVersion.IncludesExtendedMetrics() {
+		return nil, 400, fmt.Errorf("non-nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
 	}
 
 	e.state.lock.Lock()

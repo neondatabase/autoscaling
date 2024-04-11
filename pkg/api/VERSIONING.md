@@ -40,7 +40,7 @@ number.
 
 | Release | autoscaler-agent | Scheduler plugin |
 |---------|------------------|------------------|
-| _Current_ | v4.0 only | v3.0-v4.0 |
+| _Current_ | v4.0 only | **v3.0-v5.0** |
 | v0.27.0 | v4.0 only | v3.0-v4.0 |
 | v0.26.0 | v4.0 only | **v3.0-v4.0** |
 | v0.25.0 | v4.0 only | v1.0-v4.0 |
