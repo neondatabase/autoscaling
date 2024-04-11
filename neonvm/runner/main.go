@@ -211,7 +211,6 @@ func createISO9660runtime(
 	disks []vmv1.Disk,
 	enableSSH bool,
 	swapInfo *vmv1.SwapInfo,
-	swapParamsResult <-chan swapParams,
 	shmsize *resource.Quantity,
 ) error {
 	writer, err := iso9660.NewWriter()
@@ -302,54 +301,25 @@ func createISO9660runtime(
 	}
 
 	if swapInfo != nil {
-		sp, ok := <-swapParamsResult
-		if !ok {
-			return fmt.Errorf("could not create resize-swap.sh: %w", errors.New("swapParamsResult unexpectedly closed"))
-		}
-
 		lines := []string{
 			`#!/neonvm/bin/sh`,
 			`set -euxo pipefail`,
 			// this script may be run as root, so we should avoid potentially-malicious path
 			// injection
 			`export PATH="/neonvm/bin"`,
-			fmt.Sprintf(`swappart="$(blkid -t PARTLABEL=%s -o device)"`, sp.partitionLabel), // e.g. '/dev/vdd1'
-			`swapdisk="$(echo "$swappart" | grep -oE '^/dev/vd.')"`,                         // e.g. '/dev/vdd'
+			`swapdisk="$(/neonvm/bin/blkid -L swapdisk)"`,
 			// disable swap. Allow it to fail if it's already disabled.
-			`swapoff $swappart || true`,
+			`swapoff "$swapdisk" || true`,
 			// if the requested size is zero, then... just exit. There's nothing we need to do.
 			`new_size="$1"`,
 			`if [ "$new_size" = '0' ]; then exit 0; fi`,
-			// Find the new end position of the partition.
-			//
-			// We use a fixed start position and pass in the sector size to make this easier.
-			// The reason we need the sector size is because 'parted resizepart' expects you to give
-			// the end position as `offset + partition size - 1 sector`.
-			// And while a sector is *almost always* 512 bytes, it isn't guaranteed to be.
-			//
-			// Lots of details on the trade-offs for approaches here in the comments of the PR that
-			// added resizeable swap: https://github.com/neondatabase/autoscaling/pull/887
-			fmt.Sprintf("sector_size=%d", sp.sectorSize),
-			fmt.Sprintf("part_start=%d", sp.partitionStartInBytes/sp.sectorSize),
-
-			// Calculate `start + new_size - sector_size`
-			`new_part_end=$(( part_start + (new_size / sector_size) - 1 ))`,
-			// Actually resize partition
-			//
-			// NB: if we don't give 'yes' on stdin with '---pretend-input-tty', it'll refuse to
-			// resize because of the chance of data loss. This is a swap partition that we've
-			// disabled beforehand, so it's ok for us to do this; no data will be lost.
-			//
-			// For more, see: https://unix.stackexchange.com/questions/190317/gnu-parted-resizepart-in-script
-			`echo yes | parted "$swapdisk" ---pretend-input-tty resizepart 1 "$new_part_end"s`,
-			// Reload the partition table
-			`partprobe "$swapdisk"`,
-			// re-make the swap on the partition
-			`mkswap "$swappart"`,
+			// re-make the swap.
+			// mkswap expects the size to be given in KiB, so divide the new size by 1K
+			`mkswap -L swapdisk "$swapdisk" $(( new_size / 1024 ))`,
 			// ... and then re-enable the swap
 			//
 			// nb: busybox swapon only supports '-d', not its long form '--discard'.
-			`swapon -d "$swappart"`,
+			`swapon -d "$swapdisk"`,
 		}
 		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(lines, "\n"))), "resize-swap.sh")
 		if err != nil {
@@ -417,140 +387,18 @@ func calcDirUsage(dirPath string) (int64, error) {
 	return size, nil
 }
 
-const (
-	swapDiskClusterSize string = "2M"
-	mib                 int64  = 1024 * 1024
-	// Align the swap start location with a start of a QCOW2 cluster (2M).
-	// Doesn't matter much, but might improve cache efficiency.
-	swapStartLocation int64 = 2 * mib
-	swapAlign         int64 = 2 * mib
+func createSwap(diskPath string, swapInfo vmv1.SwapInfo) error {
+	diskSize := swapInfo.Size
 
-	swapPartitionName string = "swapdisk"
-)
-
-type swapParams struct {
-	sectorSize            int64
-	partitionStartInBytes int64
-	partitionLabel        string
-}
-
-func createSwap(logger *zap.Logger, diskPath string, swapInfo vmv1.SwapInfo, swapParamsResult chan<- swapParams) error {
-	// NB: we don't `defer close(swapParamsResult)` here because it's handled by the outermost
-	// caller, so it's guaranteed to happen even if createSwap is never called (preventing deadlock)
-
-	// In order to allow shrinking the swap available to a VM without incurring the overhead of swap
-	// files, we create a partition *inside* the raw file (which we'll eventually convert to qcow2).
-	//
-	// There isn't really a clean way to mkswap inside the partition (running in k8s prevents
-	// mounting a loop device, and we're using busybox mkswap, which doesn't have --offset).
-	// So, because of that and the fact that resizing needs to mkswap inside the VM *anyways*, we
-	// just use a consistent name for the partition and locate it by blkid -t PARTLABEL=... inside
-	// the guest.
-	//
-	// ---
-	//
-	// In order to keep things simple, we always create the partition at a fixed location, rather
-	// than let `parted` dictate it. This means things can *potentially* break if the logic changes
-	// dramatically for whatever disk we're using (e.g. starts wanting 4MiB alignment instead of
-	// 1Mib), but generally that shouldn't happen, and if it does it shouldn't be a surprise.
-
-	desiredSwapSize := swapInfo.Size.Value()
-	// round up desiredSwapSize to the nearest multiple of swapAlign
-	partitionSize := ((desiredSwapSize-1)/swapAlign + 1) * swapAlign
-
-	// Add a little bit extra, just to be safe. We mount the swap disk with discard *anyways* so it
-	// really shouldn't matter. In practice, we tend to only need ~1 MiB, but that's technically
-	// hardware-dependent (even though just about everything wants 1 MiB-alignment)
-	extraOverhead := 16 * mib
-	totalDiskSize := swapStartLocation + partitionSize + extraOverhead
-
-	logger.Info(
-		"Creating swap disk",
-		zap.Int64("desiredSwapSize", desiredSwapSize),
-		zap.Int64("partitionSize", partitionSize),
-		zap.Int64("totalDiskSize", totalDiskSize),
-	)
-
-	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", "swap.raw", fmt.Sprintf("%d", totalDiskSize)); err != nil {
+	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", "swap.raw", fmt.Sprintf("%d", diskSize.Value())); err != nil {
+		return err
+	}
+	// Even if swapInfo.SkipSwapon, we still need to mkswap to propagate the label.
+	if err := execFg("mkswap", "-L", "swapdisk", "swap.raw"); err != nil {
 		return err
 	}
 
-	if err := execFg("parted", "swap.raw", "mktable", "GPT"); err != nil {
-		return err
-	}
-	swapEndLocation := swapStartLocation + partitionSize
-	err := execFg(
-		"parted",
-		"--align=optimal",
-		"swap.raw",
-		"mkpart",
-		swapPartitionName, // used by blkid -t PARTLABEL=... inside the guest.
-		// note the 'B' suffix, indicating units of bytes.
-		fmt.Sprintf("%dB", swapStartLocation),
-		fmt.Sprintf("%dB", swapEndLocation),
-	)
-	if err != nil {
-		return err
-	}
-
-	// Fetch the sector size, so we can pass the info to createISO9660runtime's logic for
-	// resize-swap.sh. `parted`'s output is difficult to parse, so we're using `sfdisk` instead.
-	// And, because `sfdisk` supports a `--json` output option, we can just directly deserialize
-	// from that to make our lives easier.
-	//
-	// Here, we only define the fields we actually care about. The actual JSON format looks
-	// something like:
-	//
-	//   {
-	//      "partitiontable": {
-	//         "label": "gpt",
-	//         "id": "52894F14-7333-4F50-B64C-3E7E2B3DCF7A",
-	//         "device": "swap.raw",
-	//         "unit": "sectors",
-	//         "firstlba": 34,
-	//         "lastlba": 6291422,
-	//         "sectorsize": 512,
-	//         "partitions": [
-	//            {
-	//               "node": "swap.raw1",
-	//               "start": 4096,
-	//               "size": 6285312,
-	//               "type": "0FC63DAF-8483-4772-8E79-3D69D8477DE4",
-	//               "uuid": "3E7FC783-06CC-474C-9E1E-5DD4A1E379A8",
-	//               "name": "primary"
-	//            }
-	//         ]
-	//      }
-	//   }
-	type sfdiskPartitionTable struct {
-		// nb: use a pointer so we can tell if it's not present
-		SectorSize *int64 `json:"sectorsize"`
-	}
-	type sfdiskOutput struct {
-		PartitionTable sfdiskPartitionTable `json:"partitiontable"`
-	}
-	sfdiskDump, err := execFgCapture("sfdisk", "--dump", "--json", "swap.raw")
-	if err != nil {
-		return err
-	}
-	logger.Info("Got swap file partition dump", zap.String("sfdiskOutput", string(sfdiskDump)))
-	var sfdiskOut sfdiskOutput
-	if err := json.Unmarshal(sfdiskDump, &sfdiskOut); err != nil {
-		return fmt.Errorf("failed to unmarshal sfdisk output: %w", err)
-	}
-	if sfdiskOut.PartitionTable.SectorSize == nil {
-		return errors.New("sfdisk output missing sector size")
-	}
-	// Now that we have sector size, communicate that info to createISO9660runtime, which needs it
-	// to create resize-swap.sh:
-	swapParamsResult <- swapParams{
-		sectorSize:            *sfdiskOut.PartitionTable.SectorSize,
-		partitionStartInBytes: swapStartLocation,
-		partitionLabel:        swapPartitionName,
-	}
-
-	qcow2Opts := fmt.Sprintf("cluster_size=%s,lazy_refcounts=on", swapDiskClusterSize)
-	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", qcow2Opts, "swap.raw", diskPath); err != nil {
+	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "swap.raw", diskPath); err != nil {
 		return err
 	}
 
@@ -860,10 +708,6 @@ func run(logger *zap.Logger) error {
 		return nil
 	})
 
-	// If swap is enabled, we'll need to communicate some information from createSwap (disk sector
-	// size and partition start location) to createISO9660runtime, for use in resize-swap.sh.
-	swapParamsResult := make(chan swapParams, 1)
-
 	eg.Go(func() error {
 		if err := createISO9660runtime(
 			runtimeDiskPath,
@@ -874,7 +718,6 @@ func run(logger *zap.Logger) error {
 			vmSpec.Disks,
 			enableSSH,
 			swapInfo,
-			swapParamsResult,
 			shmSize,
 		); err != nil {
 			return logWrap("failed to create iso9660 disk", err)
@@ -892,12 +735,8 @@ func run(logger *zap.Logger) error {
 	var qemuCmd []string
 
 	eg.Go(func() error {
-		// always make sure we close swapParamsResult, so that we never end up blocking
-		// createISO9660runtime on failure
-		defer close(swapParamsResult)
-
 		var err error
-		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapInfo, swapParamsResult)
+		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapInfo)
 		if err != nil {
 			return logWrap("failed to build QEMU command", err)
 		}
@@ -954,7 +793,6 @@ func buildQEMUCmd(
 	cpus, memory []string,
 	enableSSH bool,
 	swapInfo *vmv1.SwapInfo,
-	swapParamsResult chan<- swapParams,
 ) ([]string, error) {
 	// prepare qemu command line
 	qemuCmd := []string{
@@ -992,7 +830,7 @@ func buildQEMUCmd(
 		diskName := "swapdisk"
 		dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, diskName)
 		logger.Info("creating QCOW2 image for swap", zap.String("diskPath", dPath))
-		if err := createSwap(logger, dPath, *swapInfo, swapParamsResult); err != nil {
+		if err := createSwap(dPath, *swapInfo); err != nil {
 			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", diskName, dPath, cfg.diskCacheSettings))
@@ -1627,12 +1465,6 @@ func execFg(name string, arg ...string) error {
 		return err
 	}
 	return nil
-}
-
-func execFgCapture(name string, arg ...string) ([]byte, error) {
-	cmd := exec.Command(name, arg...)
-	cmd.Stderr = os.Stderr
-	return cmd.Output()
 }
 
 func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC, error) {

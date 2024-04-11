@@ -26,7 +26,6 @@ RUN set -e \
 		e2fsprogs-extra \
 		blkid \
 		flock \
-		parted \
 	&& mv /sbin/acpid         /neonvm/bin/ \
 	&& mv /sbin/udevd         /neonvm/bin/ \
 	&& mv /bin/udevadm        /neonvm/bin/ \
@@ -35,7 +34,6 @@ RUN set -e \
 	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
 	&& mv /sbin/blkid         /neonvm/bin/blkid \
 	&& mv /usr/bin/flock	  /neonvm/bin/flock \
-	&& mv /usr/sbin/parted    /neonvm/bin/parted \
 	&& mkdir -p /neonvm/lib \
 	&& cp -f /lib/ld-musl-x86_64.so.1  /neonvm/lib/ \
 	&& cp -f /lib/libblkid.so.1.1.0    /neonvm/lib/libblkid.so.1 \
@@ -49,11 +47,6 @@ RUN set -e \
 	&& cp -f /lib/libext2fs.so.2       /neonvm/lib/libext2fs.so.2 \
 	&& cp -f /lib/libcom_err.so.2      /neonvm/lib/libcom_err.so.2 \
 	&& cp -f /lib/libblkid.so.1        /neonvm/lib/libblkid.so.1 \
-	&& cp -f /usr/lib/libparted.so.2   /neonvm/lib/libparted.so.2 \
-	&& cp -f /lib/libuuid.so.1         /neonvm/lib/libuuid.so.1 \
-	&& cp -f /usr/lib/libreadline.so.8 /neonvm/lib/libreadline.so.8 \
-	&& cp -f /usr/lib/libncursesw.so.6 /neonvm/lib/libncursesw.so.6 \
-	&& cp -f /lib/libdevmapper.so.1.02 /neonvm/lib/libdevmapper.so.1.02 \
 	&& mv /usr/share/udhcpc/default.script /neonvm/bin/udhcpc.script \
 	&& sed -i 's/#!\/bin\/sh/#!\/neonvm\/bin\/sh/' /neonvm/bin/udhcpc.script \
 	&& sed -i 's/export PATH=.*/export PATH=\/neonvm\/bin/' /neonvm/bin/udhcpc.script
