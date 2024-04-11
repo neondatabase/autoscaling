@@ -415,7 +415,6 @@ func TestPeriodicPluginRequest(t *testing.T) {
 
 	metrics := core.Metrics{
 		LoadAverage1Min:  0.0,
-		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
 	resources := DefaultComputeUnit
@@ -497,7 +496,6 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	clockTick()
 	metrics := core.Metrics{
 		LoadAverage1Min:  0.0,
-		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
 	a.Do(state.UpdateMetrics, metrics)
@@ -758,7 +756,6 @@ func TestRequestedUpscale(t *testing.T) {
 	clockTick()
 	lastMetrics := core.Metrics{
 		LoadAverage1Min:  0.0,
-		LoadAverage5Min:  0.0, // unused
 		MemoryUsageBytes: 0.0,
 	}
 	a.Do(state.UpdateMetrics, lastMetrics)
@@ -879,12 +876,10 @@ func TestDownscalePivotBack(t *testing.T) {
 
 	initialMetrics := core.Metrics{
 		LoadAverage1Min:  0.0,
-		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
 	newMetrics := core.Metrics{
 		LoadAverage1Min:  0.3,
-		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
 
@@ -1080,7 +1075,6 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	// Set metrics so the desired resources are still 2 CU
 	metrics := core.Metrics{
 		LoadAverage1Min:  0.3,
-		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
 	a.Do(state.UpdateMetrics, metrics)
@@ -1175,7 +1169,6 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	// Set metrics so the desired resources are still 2 CU
 	metrics := core.Metrics{
 		LoadAverage1Min:  0.3,
-		LoadAverage5Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
 	a.Do(state.UpdateMetrics, metrics)
@@ -1271,7 +1264,6 @@ func TestFailedRequestRetry(t *testing.T) {
 	clockTick()
 	metrics := core.Metrics{
 		LoadAverage1Min:  0.3,
-		LoadAverage5Min:  0.0, // unused
 		MemoryUsageBytes: 0.0,
 	}
 	a.Do(state.UpdateMetrics, metrics)
