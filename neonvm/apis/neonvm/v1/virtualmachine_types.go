@@ -26,28 +26,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// VirtualMachineNameLabel is the label assigned to each NeonVM Pod, providing the name of the
-// VirtualMachine object for the VM running in it
-//
-// This label can be used both to find which VM is running in a Pod (by getting the value of the
-// label) or to find which Pod a VM is running in (by searching for Pods with the label equal to the
-// VM's name).
-const VirtualMachineNameLabel string = "vm.neon.tech/name"
+const (
+	// VirtualMachineNameLabel is the label assigned to each NeonVM Pod, providing the name of the
+	// VirtualMachine object for the VM running in it
+	//
+	// This label can be used both to find which VM is running in a Pod (by getting the value of the
+	// label) or to find which Pod a VM is running in (by searching for Pods with the label equal to
+	// the VM's name).
+	VirtualMachineNameLabel string = "vm.neon.tech/name"
 
-// Label that determines the version of runner pod. May be missing on older runners
-const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
+	// Label that determines the version of runner pod. May be missing on older runners
+	RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
 
-// VirtualMachineUsageAnnotation is the annotation added to each runner Pod, mirroring information
-// about the resource allocations of the VM running in the pod.
-//
-// The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
-const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
+	// VirtualMachineUsageAnnotation is the annotation added to each runner Pod, mirroring
+	// information about the resource allocations of the VM running in the pod.
+	//
+	// The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
+	VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 
-// VirtualMachineResourcesAnnotation is the annotation added to each runner Pod, mirroring information
-// about the resource allocations of the VM running in the pod.
-//
-// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
-const VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+	// VirtualMachineResourcesAnnotation is the annotation added to each runner Pod, mirroring
+	// information about the resource allocations of the VM running in the pod.
+	//
+	// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
+	VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+)
 
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
 // JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
