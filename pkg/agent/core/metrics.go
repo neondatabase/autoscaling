@@ -1,22 +1,29 @@
-package api
+package core
 
-// Definition of the Metrics type, plus reading it from node_exporter output
+// Definition of the Metrics type, plus reading it from vector.dev's prometheus format host metrics
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-// Metrics gives the information pulled from node_exporter that the scheduler may use to prioritize
-// which pods it should migrate.
 type Metrics struct {
-	LoadAverage1Min  float32 `json:"loadAvg1M"`
-	LoadAverage5Min  float32 `json:"loadAvg5M"`
-	MemoryUsageBytes float32 `json:"memoryUsageBytes"`
+	LoadAverage1Min  float32
+	MemoryUsageBytes float32
 }
 
-// ReadMetrics generates Metrics from node_exporter output, or returns error on failure
+func (m Metrics) ToAPI() api.Metrics {
+	return api.Metrics{
+		LoadAverage1Min:  m.LoadAverage1Min,
+		LoadAverage5Min:  nil,
+		MemoryUsageBytes: nil,
+	}
+}
+
+// ReadMetrics generates Metrics from vector.dev's host metrics output, or returns error on failure
 //
 // This function could be more efficient, but realistically it doesn't matter. The size of the
 // output from node_exporter/vector is so small anyways.
@@ -54,10 +61,6 @@ func ReadMetrics(nodeExporterOutput []byte, loadPrefix string) (m Metrics, err e
 	}
 
 	m.LoadAverage1Min, err = getField(loadPrefix+"load1", loadPrefix+"load15")
-	if err != nil {
-		return
-	}
-	m.LoadAverage5Min, err = getField(loadPrefix+"load5", "")
 	if err != nil {
 		return
 	}
