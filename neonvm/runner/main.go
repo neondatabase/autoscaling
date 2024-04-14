@@ -62,6 +62,8 @@ const (
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
 
+	swapName = "swapdisk"
+
 	defaultNetworkBridgeName = "br-def"
 	defaultNetworkTapName    = "tap-def"
 	defaultNetworkCIDR       = "169.254.254.252/30"
@@ -307,7 +309,7 @@ func createISO9660runtime(
 			// this script may be run as root, so we should avoid potentially-malicious path
 			// injection
 			`export PATH="/neonvm/bin"`,
-			`swapdisk="$(/neonvm/bin/blkid -L swapdisk)"`,
+			fmt.Sprintf(`swapdisk="$(/neonvm/bin/blkid -L %s)"`, swapName),
 			// disable swap. Allow it to fail if it's already disabled.
 			`swapoff "$swapdisk" || true`,
 			// if the requested size is zero, then... just exit. There's nothing we need to do.
@@ -315,7 +317,7 @@ func createISO9660runtime(
 			`if [ "$new_size" = '0' ]; then exit 0; fi`,
 			// re-make the swap.
 			// mkswap expects the size to be given in KiB, so divide the new size by 1K
-			`mkswap -L swapdisk "$swapdisk" $(( new_size / 1024 ))`,
+			fmt.Sprintf(`mkswap -L %s "$swapdisk" $(( new_size / 1024 ))`, swapName),
 			// ... and then re-enable the swap
 			//
 			// nb: busybox swapon only supports '-d', not its long form '--discard'.
@@ -389,20 +391,21 @@ func calcDirUsage(dirPath string) (int64, error) {
 
 func createSwap(diskPath string, swapInfo vmv1.SwapInfo) error {
 	diskSize := swapInfo.Size
+	tmpRawFile := "swap.raw"
 
-	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", "swap.raw", fmt.Sprintf("%d", diskSize.Value())); err != nil {
+	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", diskSize.Value())); err != nil {
 		return err
 	}
 	// Even if swapInfo.SkipSwapon, we still need to mkswap to propagate the label.
-	if err := execFg("mkswap", "-L", "swapdisk", "swap.raw"); err != nil {
+	if err := execFg("mkswap", "-L", swapName, tmpRawFile); err != nil {
 		return err
 	}
 
-	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "swap.raw", diskPath); err != nil {
+	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", tmpRawFile, diskPath); err != nil {
 		return err
 	}
 
-	if err := execFg("rm", "-f", "swap.raw"); err != nil {
+	if err := execFg("rm", "-f", tmpRawFile); err != nil {
 		return err
 	}
 
@@ -827,13 +830,12 @@ func buildQEMUCmd(
 	}
 
 	if swapInfo != nil {
-		diskName := "swapdisk"
-		dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, diskName)
+		dPath := fmt.Sprintf("%s/swapdisk.qcow2", mountedDiskPath)
 		logger.Info("creating QCOW2 image for swap", zap.String("diskPath", dPath))
 		if err := createSwap(dPath, *swapInfo); err != nil {
 			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", diskName, dPath, cfg.diskCacheSettings))
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
 	}
 
 	for _, disk := range vmSpec.Disks {
