@@ -33,13 +33,8 @@ type AutoscaleEnforcer struct {
 	state    pluginState
 	metrics  PromMetrics
 
-	// vmStore provides access the current-ish state of VMs in the cluster. If something's missing,
-	// it can be updated with Resync().
-	//
-	// Keeping this store allows us to make sure that our event handling is never out-of-sync
-	// because all the information is coming from the same source.
-	vmStore IndexedVMStore
-	// nodeStore is doing roughly the same thing as with vmStore, but for Nodes.
+	// nodeStore provides access to the current-ish state of Nodes in the cluster. If something's
+	// missing, it can be updated with Relist().
 	nodeStore IndexedNodeStore
 }
 
@@ -99,7 +94,6 @@ func makeAutoscaleEnforcerPlugin(
 			conf:                      config,
 		},
 		metrics:   PromMetrics{},      //nolint:exhaustruct // set by makePrometheusRegistry
-		vmStore:   IndexedVMStore{},   //nolint:exhaustruct // set below
 		nodeStore: IndexedNodeStore{}, //nolint:exhaustruct // set below
 	}
 
@@ -195,13 +189,11 @@ func makeAutoscaleEnforcerPlugin(
 		return nil, fmt.Errorf("Error starting VM Migration watcher: %w", err)
 	}
 
-	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
-
 	watchMetrics.MustRegister(promReg)
 
 	// ... but before handling the events, read the current cluster state:
 	logger.Info("Reading initial cluster state")
-	if err = p.readClusterState(ctx, logger); err != nil {
+	if err = p.readClusterState(ctx, logger, vmStore); err != nil {
 		return nil, fmt.Errorf("Error reading cluster state: %w", err)
 	}
 
