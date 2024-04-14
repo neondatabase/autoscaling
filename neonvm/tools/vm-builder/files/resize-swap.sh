@@ -21,12 +21,12 @@ else
     exit 1
 fi
 
-if [ ! -f /neonvm/runtime/resize-swap.sh ]; then
+if [ ! -f /neonvm/runtime/resize-swap-internal.sh ]; then
     echo 'not found: swap may not be enabled' >&2
     exit 1
 fi
 
-/neonvm/bin/sh /neonvm/runtime/resize-swap.sh "$size"
+/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh "$size"
 if [ "$once" = 'yes' ]; then
     # remove *this* script so that it cannot be called again.
     rm /neonvm/bin/resize-swap

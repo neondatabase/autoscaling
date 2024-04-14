@@ -261,7 +261,7 @@ func createISO9660runtime(
 	}
 
 	if swapInfo != nil && (swapInfo.SkipSwapon == nil || !*swapInfo.SkipSwapon) {
-		mounts = append(mounts, fmt.Sprintf("/neonvm/bin/sh /neonvm/runtime/resize-swap.sh %d", swapInfo.Size.Value()))
+		mounts = append(mounts, fmt.Sprintf("/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh %d", swapInfo.Size.Value()))
 	}
 
 	if len(disks) != 0 {
@@ -321,7 +321,7 @@ func createISO9660runtime(
 			// nb: busybox swapon only supports '-d', not its long form '--discard'.
 			`swapon -d "$swapdisk"`,
 		}
-		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(lines, "\n"))), "resize-swap.sh")
+		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(lines, "\n"))), "resize-swap-internal.sh")
 		if err != nil {
 			return err
 		}
