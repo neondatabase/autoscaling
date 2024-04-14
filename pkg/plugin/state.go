@@ -1228,7 +1228,11 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 //
 // This method expects that all pluginState fields except pluginState.conf are set to their zero
 // value, and will panic otherwise. Accordingly, this is only called during plugin initialization.
-func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Logger) error {
+func (p *AutoscaleEnforcer) readClusterState(
+	ctx context.Context,
+	logger *zap.Logger,
+	vmStore *watch.Store[vmapi.VirtualMachine],
+) error {
 	logger = logger.With(zap.String("action", "read cluster state"))
 
 	p.state.lock.Lock()
@@ -1260,7 +1264,7 @@ func (p *AutoscaleEnforcer) readClusterState(ctx context.Context, logger *zap.Lo
 	// has already been made.
 
 	logger.Info("Fetching VMs from existing store")
-	vms := p.vmStore.Items()
+	vms := vmStore.Items()
 
 	logger.Info("Listing Pods")
 	pods, err := p.handle.ClientSet().CoreV1().Pods(corev1.NamespaceAll).List(ctx, metav1.ListOptions{})
