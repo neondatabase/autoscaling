@@ -51,7 +51,7 @@ func (e *AutoscaleEnforcer) watchNodeEvents(
 		watch.Accessors[*corev1.NodeList, corev1.Node]{
 			Items: func(list *corev1.NodeList) []corev1.Node { return list.Items },
 		},
-		watch.InitModeSync,
+		watch.InitModeSync, // Doesn't matter because AddFunc is nil and node store is only used for events.
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*corev1.Node]{
 			DeleteFunc: func(node *corev1.Node, mayBeStale bool) {
@@ -63,7 +63,7 @@ func (e *AutoscaleEnforcer) watchNodeEvents(
 }
 
 type podWatchCallbacks struct {
-	submitStarted        func(*zap.Logger, *corev1.Pod)
+	submitStarted        func(_ *zap.Logger, _ *corev1.Pod, preexisting bool)
 	submitDeletion       func(*zap.Logger, util.NamespacedName)
 	submitStartMigration func(_ *zap.Logger, podName, migrationName util.NamespacedName, source bool)
 	submitEndMigration   func(_ *zap.Logger, podName, migrationName util.NamespacedName)
@@ -103,7 +103,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 		watch.Accessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
-		watch.InitModeSync, // note: doesn't matter, because AddFunc = nil.
+		watch.InitModeSync, // required so that events are queued before watchPodEvents() returns
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*corev1.Pod]{
 			AddFunc: func(pod *corev1.Pod, preexisting bool) {
@@ -123,7 +123,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 						// definitely don't miss anything).
 						logger.Warn("Received add event for new Pod already running", zap.Object("pod", name))
 					}
-					callbacks.submitStarted(logger, pod)
+					callbacks.submitStarted(logger, pod, preexisting)
 				}
 			},
 			UpdateFunc: func(oldPod *corev1.Pod, newPod *corev1.Pod) {
@@ -137,7 +137,7 @@ func (e *AutoscaleEnforcer) watchPodEvents(
 				// Check if a pod is now running.
 				if oldPod.Status.Phase == corev1.PodPending && newPod.Status.Phase == corev1.PodRunning {
 					logger.Info("Received update event for Pod now running", zap.Object("pod", name))
-					callbacks.submitStarted(logger, newPod)
+					callbacks.submitStarted(logger, newPod, false)
 				}
 
 				// Check if pod is "completed" - handle that the same as deletion.
@@ -239,7 +239,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 		watch.Accessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
 			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
 		},
-		watch.InitModeSync, // Must sync here so that initial cluster state is read correctly.
+		watch.InitModeSync, // Doesn't matter because AddFunc is nil, and vmStore is only used for events.
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmapi.VirtualMachine]{
 			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {

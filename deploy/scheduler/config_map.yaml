@@ -34,6 +34,7 @@ data:
       },
       "schedulerName": "autoscale-scheduler",
       "eventQueueWorkers": 64,
+      "startupEventHandlingTimeoutSeconds": 15,
       "dumpState": {
         "port": 10298,
         "timeoutSeconds": 5

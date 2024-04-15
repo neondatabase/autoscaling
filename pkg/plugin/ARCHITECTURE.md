@@ -58,8 +58,9 @@ The entrypoint for plugin initialization is through the `NewAutoscaleEnforcerPlu
 `plugin.go`, which in turn:
 
   1. Fetches the scheduler config (and starts watching for changes) (see: [`config.go`])
-  2. Starts watching for pod deletion events (see: [`watch.go`])
-  3. Loads an initial state from the cluster's resources (see: `readClusterState` in [`state.go`])
+  2. Starts watching for pod events, among others (see: [`watch.go`])
+  3. Loads an initial state from the cluster's resources (by waiting for all the initial Pod start
+     events to be handled)
   4. Spawns the HTTP server for handling `autoscaler-agent` requests (see: [`run.go`])
 
 The plugins we implement are:
