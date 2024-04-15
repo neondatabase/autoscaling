@@ -686,19 +686,29 @@ func (e *AutoscaleEnforcer) reserveResources(
 			MqIndex:        -1,
 			MigrationState: nil,
 		}
+		// initially build the resource states assuming that we're including buffer, and then update
+		// later to remove it if that turns out not to be right.
 		cpuState = podResourceState[vmapi.MilliCPU]{
-			Reserved:         vmInfo.Using().VCPU,
-			Buffer:           0,
+			Reserved:         vmInfo.Max().VCPU,
+			Buffer:           util.SaturatingSub(vmInfo.Max().VCPU, vmInfo.Using().VCPU),
 			CapacityPressure: 0,
 			Min:              vmInfo.Min().VCPU,
 			Max:              vmInfo.Max().VCPU,
 		}
 		memState = podResourceState[api.Bytes]{
-			Reserved:         vmInfo.Using().Mem,
-			Buffer:           0,
+			Reserved:         vmInfo.Max().Mem,
+			Buffer:           util.SaturatingSub(vmInfo.Max().Mem, vmInfo.Using().Mem),
 			CapacityPressure: 0,
 			Min:              vmInfo.Min().Mem,
 			Max:              vmInfo.Max().Mem,
+		}
+
+		migrating := util.TryPodOwnerVirtualMachineMigration(pod) != nil
+		if !vmInfo.Config.ScalingEnabled || migrating {
+			cpuState.Buffer = 0
+			cpuState.Reserved = vmInfo.Using().VCPU
+			memState.Buffer = 0
+			memState.Reserved = vmInfo.Using().Mem
 		}
 	} else {
 		cpuState = podResourceState[vmapi.MilliCPU]{
@@ -728,16 +738,33 @@ func (e *AutoscaleEnforcer) reserveResources(
 	}
 	newNodeReservedCPU := node.cpu.Reserved + ps.cpu.Reserved
 	newNodeReservedMem := node.mem.Reserved + ps.mem.Reserved
+	newNodeBufferCPU := node.cpu.Buffer + ps.cpu.Buffer
+	newNodeBufferMem := node.mem.Buffer + ps.mem.Buffer
 
-	verdict := verdictSet{
-		cpu: fmt.Sprintf(
-			"node reserved %v + %v -> %v of total %v",
-			node.cpu.Reserved, ps.cpu.Reserved, newNodeReservedCPU, node.cpu.Total,
-		),
-		mem: fmt.Sprintf(
-			"node reserved %v + %v -> %v of total %v",
-			node.mem.Reserved, ps.mem.Reserved, newNodeReservedMem, node.mem.Total,
-		),
+	var verdict verdictSet
+
+	if ps.cpu.Buffer != 0 || ps.mem.Buffer != 0 {
+		verdict = verdictSet{
+			cpu: fmt.Sprintf(
+				"node reserved %v [buffer %v] + %v [buffer %v] -> %v [buffer %v] of total %v",
+				node.cpu.Reserved, node.cpu.Buffer, ps.cpu.Reserved, ps.cpu.Buffer, newNodeReservedCPU, newNodeBufferCPU, node.cpu.Total,
+			),
+			mem: fmt.Sprintf(
+				"node reserved %v [buffer %v] + %v [buffer %v] -> %v [buffer %v] of total %v",
+				node.mem.Reserved, node.mem.Buffer, ps.mem.Reserved, ps.mem.Buffer, newNodeReservedMem, newNodeBufferMem, node.mem.Total,
+			),
+		}
+	} else {
+		verdict = verdictSet{
+			cpu: fmt.Sprintf(
+				"node reserved %v + %v -> %v of total %v",
+				node.cpu.Reserved, ps.cpu.Reserved, newNodeReservedCPU, node.cpu.Total,
+			),
+			mem: fmt.Sprintf(
+				"node reserved %v + %v -> %v of total %v",
+				node.mem.Reserved, ps.mem.Reserved, newNodeReservedMem, node.mem.Total,
+			),
+		}
 	}
 
 	if allowDeny {
@@ -750,6 +777,8 @@ func (e *AutoscaleEnforcer) reserveResources(
 
 	node.cpu.Reserved = newNodeReservedCPU
 	node.mem.Reserved = newNodeReservedMem
+	node.cpu.Buffer = newNodeBufferCPU
+	node.mem.Buffer = newNodeBufferMem
 
 	node.pods[podName] = ps
 	e.state.pods[podName] = ps
