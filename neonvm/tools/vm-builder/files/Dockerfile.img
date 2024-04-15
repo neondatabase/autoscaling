@@ -99,6 +99,8 @@ COPY sshd_config /neonvm/config/sshd_config
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 COPY udev-init.sh /neonvm/bin/udev-init.sh
 RUN chmod +rx /neonvm/bin/udev-init.sh
+COPY resize-swap.sh /neonvm/bin/resize-swap
+RUN chmod +rx /neonvm/bin/resize-swap
 
 # rootdisk modification
 FROM rootdisk AS rootdisk-mod
