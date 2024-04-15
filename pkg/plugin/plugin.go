@@ -735,7 +735,14 @@ func (e *AutoscaleEnforcer) Reserve(
 		return status
 	}
 
-	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", false)
+	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", reserveOptions{
+		// we *could* deny, but that's ultimately less reliable.
+		// For more, see https://github.com/neondatabase/autoscaling/issues/869
+		allowDeny: false,
+		// don't include buffer because we know that future changes by the autoscaler-agent must go
+		// through us.
+		includeBuffer: false,
+	})
 	if err != nil {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
 	}
