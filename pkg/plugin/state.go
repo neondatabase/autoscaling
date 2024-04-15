@@ -1011,8 +1011,10 @@ func (e *AutoscaleEnforcer) handleUpdatedScalingBounds(logger *zap.Logger, vm *a
 		return
 	}
 
-	cpuVerdict := handleUpdatedLimits(&ps.node.cpu, &ps.cpu, vm.Cpu.Min, vm.Cpu.Max)
-	memVerdict := handleUpdatedLimits(&ps.node.mem, &ps.mem, vm.Min().Mem, vm.Max().Mem)
+	cpuVerdict := makeResourceTransitioner(&ps.node.cpu, &ps.cpu).
+		handleUpdatedLimits(vm.Cpu.Min, vm.Cpu.Max)
+	memVerdict := makeResourceTransitioner(&ps.node.mem, &ps.mem).
+		handleUpdatedLimits(vm.Min().Mem, vm.Max().Mem)
 
 	ps.node.updateMetrics(e.metrics)
 

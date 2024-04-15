@@ -374,13 +374,11 @@ func (r resourceTransitioner[T]) handleStartMigration(source bool) (verdict stri
 	return verdict
 }
 
-func handleUpdatedLimits[T constraints.Unsigned](
-	node *nodeResourceState[T],
-	pod *podResourceState[T],
+func (r resourceTransitioner[T]) handleUpdatedLimits(
 	newMin T,
 	newMax T,
 ) (verdict string) {
-	if newMin == pod.Min && newMax == pod.Max {
+	if newMin == r.pod.Min && newMax == r.pod.Max {
 		return fmt.Sprintf("limits unchanged (min = %d, max = %d)", newMin, newMax)
 	}
 
@@ -409,37 +407,34 @@ func handleUpdatedLimits[T constraints.Unsigned](
 	// attempt to prevent this is worthwhile here. (realistically, the things we can't prevent would
 	// require a "perfect storm" of other failures in order to be relevant - which is good!)
 	bufferVerdict := ""
-	updateBuffer := pod.Max != newMax
+	updateBuffer := r.pod.Max != newMax
 	if updateBuffer {
-		oldPodBuffer := pod.Buffer
-		oldNodeBuffer := node.Buffer
-		oldPodReserved := pod.Reserved
-		oldNodeReserved := node.Reserved
+		oldState := r.snapshotState()
 
 		// Recalculate Reserved and Buffer from scratch because it's easier than doing the math
 		// directly.
 		//
 		// Note that we don't want to reserve *below* what we think the VM is using if the bounds
 		// decrease; it may be that the autoscaler-agent has not yet reacted to that.
-		using := pod.Reserved - pod.Buffer
-		pod.Reserved = util.Max(newMax, using)
-		pod.Buffer = pod.Reserved - using
+		using := r.pod.Reserved - r.pod.Buffer
+		r.pod.Reserved = util.Max(newMax, using)
+		r.pod.Buffer = r.pod.Reserved - using
 
-		node.Reserved = node.Reserved + pod.Reserved - oldPodReserved
-		node.Buffer = node.Buffer + pod.Buffer - oldPodBuffer
+		r.node.Reserved = r.node.Reserved + r.pod.Reserved - oldState.pod.Reserved
+		r.node.Buffer = r.node.Buffer + r.pod.Buffer - oldState.pod.Buffer
 
 		bufferVerdict = fmt.Sprintf(
 			". no contact yet: pod reserved %d -> %d (buffer %d -> %d), node reserved %d -> %d (buffer %d -> %d)",
-			oldPodReserved, pod.Reserved, oldPodBuffer, pod.Buffer,
-			oldNodeReserved, node.Reserved, oldNodeBuffer, node.Buffer,
+			oldState.pod.Reserved, r.pod.Reserved, oldState.pod.Buffer, r.pod.Buffer,
+			oldState.node.Reserved, r.node.Reserved, oldState.node.Buffer, r.node.Buffer,
 		)
 	}
 
-	oldMin := pod.Min
-	oldMax := pod.Max
+	oldMin := r.pod.Min
+	oldMax := r.pod.Max
 
-	pod.Min = newMin
-	pod.Max = newMax
+	r.pod.Min = newMin
+	r.pod.Max = newMax
 
 	return fmt.Sprintf("updated min %d -> %d, max %d -> %d%s", oldMin, newMin, oldMax, newMax, bufferVerdict)
 }
