@@ -57,6 +57,8 @@ type VmInfo struct {
 	Cpu       VmCpuInfo `json:"cpu"`
 	Mem       VmMemInfo `json:"mem"`
 	Config    VmConfig  `json:"config"`
+
+	Overcommit vmapi.OvercommitSettings `json:"overcommit"`
 }
 
 type VmCpuInfo struct {
@@ -167,7 +169,11 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 
 func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	logger = logger.With(util.VMNameFields(vm))
-	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
+	var overcommit vmapi.OvercommitSettings
+	if vm.Spec.Overcommit != nil {
+		overcommit = *vm.Spec.Overcommit
+	}
+	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources(), overcommit)
 }
 
 func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
@@ -180,8 +186,17 @@ func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) 
 			vmapi.VirtualMachineResourcesAnnotation, err)
 	}
 
+	var overcommit vmapi.OvercommitSettings
+	if factorJSON, ok := pod.GetObjectMeta().GetAnnotations()[vmapi.VirtualMachineOvercommitAnnotation]; ok {
+		// nb: we give json.Unmarshal a **vmapi.OvercommitSettings because the annotation may be "null"
+		overcommitPtr := &overcommit
+		if err := json.Unmarshal([]byte(factorJSON), &overcommitPtr); err != nil {
+			return nil, fmt.Errorf("Error unmarshaling %q: %w", vmapi.VirtualMachineOvercommitAnnotation, err)
+		}
+	}
+
 	vmName := pod.Labels[vmapi.VirtualMachineNameLabel]
-	return extractVmInfoGeneric(logger, vmName, pod, resources)
+	return extractVmInfoGeneric(logger, vmName, pod, resources, overcommit)
 }
 
 func extractVmInfoGeneric(
@@ -189,6 +204,7 @@ func extractVmInfoGeneric(
 	vmName string,
 	obj metav1.ObjectMetaAccessor,
 	resources vmapi.VirtualMachineResources,
+	overcommit vmapi.OvercommitSettings,
 ) (*VmInfo, error) {
 	cpuInfo, err := NewVmCpuInfo(resources.CPUs)
 	if err != nil {
@@ -215,6 +231,7 @@ func extractVmInfoGeneric(
 			ScalingEnabled:       scalingEnabled,
 			ScalingConfig:        nil, // set below, maybe
 		},
+		Overcommit: overcommit,
 	}
 
 	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {

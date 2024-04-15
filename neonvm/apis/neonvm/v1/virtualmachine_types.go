@@ -49,6 +49,12 @@ const (
 	//
 	// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
 	VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+
+	// VirtualMachineOvercommitAnnotation is the annotation added to runner pods of VMs with
+	// non-nil .Spec.Overcommit.
+	//
+	// The value of this annotation is always a JSON-encoded OvercommitSettings.
+	VirtualMachineOvercommitAnnotation string = "vm.neon.tech/overcommit"
 )
 
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
@@ -138,6 +144,9 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=true
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
+
+	// Overcommit sets factors by which to discount resource usage from the VM.
+	Overcommit *OvercommitSettings `json:"overcommit,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -146,6 +155,47 @@ func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
 		MemorySlots:    spec.Guest.MemorySlots,
 		MemorySlotSize: spec.Guest.MemorySlotSize,
 	}
+}
+
+// OvercommitSettings sets factors by which to discount resource usage from a VM.
+//
+// For example, if all VMs have a CPU overcommit factor of 2.0, then twice as many VMs of the same
+// amount of CPU could be scheduled onto nodes of the same size.
+//
+// Note: Overcommit factors are INHERENTLY DANGEROUS. Setting any of these values greater than 1
+// ONLY makes sense when all your VMs are much smaller than the nodes they run on, AND you have
+// verified that average resource usage is, in practice, significantly below what's allocated.
+//
+// Individual factors are required to have "reasonable" values, if present - but the definition of
+// "reasonable" is subject to change in the future.
+type OvercommitSettings struct {
+	// CPU overcommit factor.
+	//
+	// +kubebuilder:validation:Minimum=0.5
+	// +kubebuilder:validation:Maximum=2.0
+	// +kubebuilder:validation:ExclusiveMaximum=false
+	// +optional
+	CPU *float64 `json:"cpu,omitempty"`
+
+	// Memory overcommit factor.
+	//
+	// +kubebuilder:validation:Minimum=0.5
+	// +kubebuilder:validation:Maximum=2.0
+	// +kubebuilder:validation:ExclusiveMaximum=false
+	// +optional
+	Mem *float64 `json:"mem,omitempty"`
+}
+
+func (s OvercommitSettings) String() string {
+	cpu := "<nil>"
+	if s.CPU != nil {
+		cpu = fmt.Sprintf("%v", *s.CPU)
+	}
+	mem := "<nil>"
+	if s.Mem != nil {
+		mem = fmt.Sprintf("%v", *s.Mem)
+	}
+	return fmt.Sprintf("{CPU:%s Mem:%s}", cpu, mem)
 }
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never

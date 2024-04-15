@@ -1,12 +1,13 @@
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
-index d0033550f..fa3c2ec30 100644
+index d0033550f..a08d834f2 100644
 --- a/cluster-autoscaler/utils/kubernetes/listers.go
 +++ b/cluster-autoscaler/utils/kubernetes/listers.go
-@@ -17,14 +17,19 @@ limitations under the License.
+@@ -17,14 +17,20 @@ limitations under the License.
  package kubernetes
  
  import (
 +	"encoding/json"
++	"math"
  	"time"
  
  	appsv1 "k8s.io/api/apps/v1"
@@ -22,7 +23,7 @@ index d0033550f..fa3c2ec30 100644
  	client "k8s.io/client-go/kubernetes"
  	v1appslister "k8s.io/client-go/listers/apps/v1"
  	v1batchlister "k8s.io/client-go/listers/batch/v1"
-@@ -185,6 +190,7 @@ func NewUnschedulablePodInNamespaceLister(kubeClient client.Interface, namespace
+@@ -185,6 +191,7 @@ func NewUnschedulablePodInNamespaceLister(kubeClient client.Interface, namespace
  	selector := fields.ParseSelectorOrDie("spec.nodeName==" + "" + ",status.phase!=" +
  		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
  	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
@@ -30,7 +31,7 @@ index d0033550f..fa3c2ec30 100644
  	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
  	podLister := v1lister.NewPodLister(store)
  	go reflector.Run(stopchannel)
-@@ -209,6 +215,7 @@ func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struc
+@@ -209,6 +216,7 @@ func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struc
  	selector := fields.ParseSelectorOrDie("spec.nodeName!=" + "" + ",status.phase!=" +
  		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
  	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", apiv1.NamespaceAll, selector)
@@ -38,7 +39,7 @@ index d0033550f..fa3c2ec30 100644
  	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
  	podLister := v1lister.NewPodLister(store)
  	go reflector.Run(stopchannel)
-@@ -218,6 +225,105 @@ func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struc
+@@ -218,6 +226,137 @@ func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struc
  	}
  }
  
@@ -50,16 +51,48 @@ index d0033550f..fa3c2ec30 100644
 +	Memory resource.Quantity `json:"memory"`
 +}
 +
++// copied from github.com/neondatabase/autoscaling, neonvm/apis/neonvm/v1/virtualmachine_types.go.
++//
++// this is duplicated so we're not *also* managing an additional dependency.
++type VirtualMachineOvercommitSettings struct {
++	CPU *float64 `json:"cpu,omitempty"`
++	Mem *float64 `json:"mem,omitempty"`
++}
++
 +func wrapListWatchWithNeonVMUsage(lw *cache.ListWatch) *cache.ListWatch {
 +	updatePodRequestsFromNeonVMAnnotation := func(pod *apiv1.Pod) {
-+		annotation, ok := pod.Annotations["vm.neon.tech/usage"]
++		usageAnnotation, ok := pod.Annotations["vm.neon.tech/usage"]
 +		if !ok {
 +			return
 +		}
 +
 +		var usage virtualMachineUsage
-+		if err := json.Unmarshal([]byte(annotation), &usage); err != nil {
++		if err := json.Unmarshal([]byte(usageAnnotation), &usage); err != nil {
 +			return
++		}
++
++		// Handle overcommit, if present
++		overcommitAnnotation, ok := pod.Annotations["vm.neon.tech/overcommit"]
++		if ok {
++			var overcommit VirtualMachineOvercommitSettings
++			if err := json.Unmarshal([]byte(overcommitAnnotation), &overcommit); err != nil {
++				return
++			}
++
++			if cpuFactor := overcommit.CPU; cpuFactor != nil {
++				newCPU := resource.NewMilliQuantity(
++					int64(math.Round(float64(usage.CPU.MilliValue())/(*cpuFactor))),
++					usage.CPU.Format,
++				)
++				usage.CPU = *newCPU
++			}
++			if memFactor := overcommit.Mem; memFactor != nil {
++				newMem := resource.NewQuantity(
++					int64(math.Round(float64(usage.Memory.Value())/(*memFactor))),
++					usage.Memory.Format,
++				)
++				usage.Memory = *newMem
++			}
 +		}
 +
 +		pod.Spec.Containers[0].Resources.Requests = apiv1.ResourceList(map[apiv1.ResourceName]resource.Quantity{

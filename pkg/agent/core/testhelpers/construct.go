@@ -86,6 +86,7 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 			ScalingConfig:        nil,
 			ScalingEnabled:       true,
 		},
+		Overcommit: vmapi.OvercommitSettings{CPU: nil, Mem: nil},
 	}
 
 	for _, o := range opts {

@@ -284,9 +284,9 @@ func (e *AutoscaleEnforcer) handleResources(
 
 	if lastPermit != nil {
 		cpuVerdict := makeResourceTransitioner(&node.cpu, &pod.cpu).
-			handleLastPermit(lastPermit.VCPU)
+			handleLastPermit(lastPermit.VCPU, pod.vm.Overcommit.CPU)
 		memVerdict := makeResourceTransitioner(&node.mem, &pod.mem).
-			handleLastPermit(lastPermit.Mem)
+			handleLastPermit(lastPermit.Mem, pod.vm.Overcommit.Mem)
 		logger.Info(
 			"Handled last permit info from pod",
 			zap.Object("verdict", verdictSet{
@@ -303,9 +303,9 @@ func (e *AutoscaleEnforcer) handleResources(
 	memFactor := cu.Mem
 
 	cpuVerdict := makeResourceTransitioner(&node.cpu, &pod.cpu).
-		handleRequested(req.VCPU, startingMigration, cpuFactor)
+		handleRequested(req.VCPU, startingMigration, cpuFactor, pod.vm.Overcommit.CPU)
 	memVerdict := makeResourceTransitioner(&node.mem, &pod.mem).
-		handleRequested(req.Mem, startingMigration, memFactor)
+		handleRequested(req.Mem, startingMigration, memFactor, pod.vm.Overcommit.Mem)
 
 	logger.Info(
 		"Handled requested resources from pod",

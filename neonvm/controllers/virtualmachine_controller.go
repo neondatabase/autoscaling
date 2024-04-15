@@ -1079,6 +1079,15 @@ func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
 	return string(resourcesJSON)
 }
 
+func extractVirtualMachineOvercommitSettingsJSON(spec vmv1.VirtualMachineSpec) string {
+	factorJSON, err := json.Marshal(spec.Overcommit)
+	if err != nil {
+		panic(fmt.Errorf("error marshalling JSON: %w", err))
+	}
+
+	return string(factorJSON)
+}
+
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine,
@@ -1167,6 +1176,7 @@ func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[strin
 	a["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
 	a[vmv1.VirtualMachineResourcesAnnotation] = extractVirtualMachineResourcesJSON(virtualmachine.Spec)
+	a[vmv1.VirtualMachineOvercommitAnnotation] = extractVirtualMachineOvercommitSettingsJSON(virtualmachine.Spec)
 	return a
 }
 

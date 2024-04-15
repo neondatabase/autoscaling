@@ -12,6 +12,7 @@ package plugin
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/constraints"
@@ -30,7 +31,8 @@ type resourceTransitioner[T constraints.Unsigned] struct {
 }
 
 func makeResourceTransitioner[T constraints.Unsigned](
-	node *nodeResourceState[T], pod *podResourceState[T],
+	node *nodeResourceState[T],
+	pod *podResourceState[T],
 ) resourceTransitioner[T] {
 	return resourceTransitioner[T]{
 		node: node,
@@ -64,6 +66,10 @@ func (s verdictSet) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
+func (r resourceTransitioner[T]) applyOvercommit(value T, overcommit float64) T {
+	return T(math.Round(float64(value) / overcommit))
+}
+
 // handleLastPermit updates reserved values of r.pod and r.node with the most
 // recent info about the last permit received by the agent. This allows a new
 // scheduler to learn about previous scheduler's state.
@@ -73,8 +79,12 @@ func (s verdictSet) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 // any disconnect, which could lead to unintentional over-committing of resources
 // from the Buffer values if too many agents request upscaling on the first
 // request to the scheduler.
-func (r resourceTransitioner[T]) handleLastPermit(lastPermit T) (verdict string) {
+func (r resourceTransitioner[T]) handleLastPermit(lastPermit T, overcommit *float64) (verdict string) {
 	oldState := r.snapshotState()
+
+	if overcommit != nil {
+		lastPermit = r.applyOvercommit(lastPermit, *overcommit)
+	}
 
 	if lastPermit <= r.pod.Reserved {
 		r.node.Reserved -= r.pod.Reserved - lastPermit
@@ -123,13 +133,22 @@ func (r resourceTransitioner[T]) handleLastPermit(lastPermit T) (verdict string)
 // Any permitted increases are required to be a multiple of factor.
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
-func (r resourceTransitioner[T]) handleRequested(requested T, startingMigration bool, factor T) (verdict string) {
+func (r resourceTransitioner[T]) handleRequested(
+	requested T,
+	startingMigration bool,
+	factor T,
+	overcommit *float64,
+) (verdict string) {
 	oldState := r.snapshotState()
 
 	totalReservable := r.node.Total
 	// note: it's possible to temporarily have reserved > totalReservable, after loading state or
 	// config change; we have to use SaturatingSub here to account for that.
 	remainingReservable := util.SaturatingSub(totalReservable, oldState.node.Reserved)
+
+	if overcommit != nil {
+		requested = r.applyOvercommit(requested, *overcommit)
+	}
 
 	// Note: The correctness of this function depends on the autoscaler-agents and previous
 	// scheduler being well-behaved. This function will fail to prevent overcommitting when:
@@ -377,7 +396,13 @@ func (r resourceTransitioner[T]) handleStartMigration(source bool) (verdict stri
 func (r resourceTransitioner[T]) handleUpdatedLimits(
 	newMin T,
 	newMax T,
+	overcommit *float64,
 ) (verdict string) {
+	if overcommit != nil {
+		newMin = r.applyOvercommit(newMin, *overcommit)
+		newMax = r.applyOvercommit(newMax, *overcommit)
+	}
+
 	if newMin == r.pod.Min && newMax == r.pod.Max {
 		return fmt.Sprintf("limits unchanged (min = %d, max = %d)", newMin, newMax)
 	}

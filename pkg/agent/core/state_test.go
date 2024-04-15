@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
+	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	helpers "github.com/neondatabase/autoscaling/pkg/agent/core/testhelpers"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -103,6 +104,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					ScalingEnabled:       true,
 					ScalingConfig:        nil,
 				},
+				Overcommit: vmapi.OvercommitSettings{CPU: nil, Mem: nil},
 			},
 			core.Config{
 				ComputeUnit: api.Resources{VCPU: 250, Mem: 1 * slotSize},

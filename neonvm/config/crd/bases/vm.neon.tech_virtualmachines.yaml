@@ -2534,6 +2534,21 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
+              overcommit:
+                description: Overcommit sets factors by which to discount resource
+                  usage from the VM.
+                properties:
+                  cpu:
+                    description: CPU overcommit factor.
+                    maximum: 2
+                    minimum: 0.5
+                    type: number
+                  mem:
+                    description: Memory overcommit factor.
+                    maximum: 2
+                    minimum: 0.5
+                    type: number
+                type: object
               podResources:
                 description: ResourceRequirements describes the compute resource requirements.
                 properties:

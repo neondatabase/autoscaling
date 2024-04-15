@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 
 	"go.uber.org/zap/zapcore"
@@ -326,6 +327,24 @@ func (r Resources) CheckValuesAreReasonablySized() error {
 	}
 
 	return nil
+}
+
+// WithOvercommitFactor returns a new Resources after applying the overcommit settings.
+func (r Resources) WithOvercommit(settings vmapi.OvercommitSettings) Resources {
+	// NB: this same logic is also used in pkg/plugin/trans.go and cluster-autoscaler/ca.patch
+	//
+	// Be careful when updating any one of these, because mismatches may result in disagreements
+	// between components.
+	if factor := settings.CPU; factor != nil {
+		newCPU := vmapi.MilliCPU(math.Round(float64(r.VCPU) / *factor))
+		r.VCPU = newCPU
+	}
+	if factor := settings.Mem; factor != nil {
+		newMem := Bytes(math.Round(r.Mem.AsFloat64() / *factor))
+		r.Mem = newMem
+	}
+
+	return r
 }
 
 // HasFieldGreaterThan returns true if and only if there is a field F where r.F > cmp.F

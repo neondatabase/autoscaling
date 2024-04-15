@@ -451,7 +451,7 @@ func (e *AutoscaleEnforcer) Filter(
 
 	var podResources api.Resources
 	if vmInfo != nil {
-		podResources = vmInfo.Using()
+		podResources = vmInfo.Using().WithOvercommit(vmInfo.Overcommit)
 	} else {
 		podResources = extractPodResources(pod)
 	}
@@ -656,7 +656,7 @@ func (e *AutoscaleEnforcer) Score(
 
 	var resources api.Resources
 	if vmInfo != nil {
-		resources = vmInfo.Using()
+		resources = vmInfo.Using().WithOvercommit(vmInfo.Overcommit)
 	} else {
 		resources = extractPodResources(pod)
 	}
