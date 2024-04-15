@@ -23,10 +23,6 @@ import (
 
 const Name = "AutoscaleEnforcer"
 const LabelPluginCreatedMigration = "autoscaling.neon.tech/created-by-scheduler"
-const ConfigMapNamespace = "kube-system"
-const ConfigMapName = "scheduler-plugin-config"
-const ConfigMapKey = "autoscaler-enforcer-config.json"
-const InitConfigMapTimeoutSeconds = 5
 
 // AutoscaleEnforcer is the scheduler plugin to coordinate autoscaling
 type AutoscaleEnforcer struct {

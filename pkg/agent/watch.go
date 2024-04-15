@@ -178,33 +178,6 @@ func makeVMEvent(logger *zap.Logger, vm *vmapi.VirtualMachine, kind vmEventKind)
 	}, nil
 }
 
-// custom formatting for vmEvent so that it prints in the same way as VmInfo
-func (e vmEvent) Format(state fmt.State, verb rune) {
-	switch {
-	case verb == 'v' && state.Flag('#'):
-		state.Write([]byte(fmt.Sprintf(
-			// note: intentionally order podName and podIP before vmInfo because vmInfo is large.
-			"agent.vmEvent{kind:%q, podName:%q, podIP:%q, vmInfo:%#v, endpointID:%q}",
-			e.kind, e.podName, e.podIP, e.vmInfo, e.endpointID,
-		)))
-	default:
-		if verb != 'v' {
-			state.Write([]byte("%!"))
-			state.Write([]byte(string(verb)))
-			state.Write([]byte("(agent.vmEvent="))
-		}
-
-		state.Write([]byte(fmt.Sprintf(
-			"{kind:%s podName:%s podIP:%s vmInfo:%v endpointID:%s}",
-			e.kind, e.podName, e.podIP, e.vmInfo, e.endpointID,
-		)))
-
-		if verb != 'v' {
-			state.Write([]byte{')'})
-		}
-	}
-}
-
 // extractAutoscalingBounds extracts the ScalingBounds from a VM's autoscaling
 // annotation, for the purpose of exposing it in per-VM metrics.
 //

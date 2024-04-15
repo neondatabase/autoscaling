@@ -1,7 +1,6 @@
 package schedwatch
 
 import (
-	"fmt"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -36,30 +35,5 @@ func newSchedulerInfo(pod *corev1.Pod) SchedulerInfo {
 		UID:               pod.UID,
 		IP:                pod.Status.PodIP,
 		CreationTimestamp: pod.CreationTimestamp.Time,
-	}
-}
-
-func (info SchedulerInfo) Format(state fmt.State, verb rune) {
-	switch {
-	case verb == 'v' && state.Flag('#'):
-		state.Write([]byte(fmt.Sprintf(
-			"schedwatch.SchedulerInfo{PodName:%#v, IP:%q, UID:%q, CreationTimestamp: %#v}",
-			info.PodName, info.IP, string(info.UID), info.CreationTimestamp,
-		)))
-	default:
-		if verb != 'v' {
-			state.Write([]byte("%!"))
-			state.Write([]byte(string(verb)))
-			state.Write([]byte("(schedwatch.SchedulerInfo="))
-		}
-
-		state.Write([]byte(fmt.Sprintf(
-			"{PodName:%v IP:%q UID:%q CreationTimestamp:%q}",
-			info.PodName, info.IP, info.UID, info.CreationTimestamp,
-		)))
-
-		if verb != 'v' {
-			state.Write([]byte{')'})
-		}
 	}
 }
