@@ -6,14 +6,20 @@ metadata:
 data:
   config.json: |
     {
+      "refereshStateIntervalSeconds": 5,
       "scaling": {
         "computeUnit": { "vCPUs": 0.25, "mem": "1Gi" },
-        "requestTimeoutSeconds": 10,
-        "retryFailedRequestSeconds": 5,
         "defaultConfig": {
           "loadAverageFractionTarget": 0.9,
           "memoryUsageFractionTarget": 0.75
         }
+      },
+      "billing": {
+        "cpuMetricName": "effective_compute_seconds",
+        "activeTimeMetricName": "active_time_seconds",
+        "collectEverySeconds": 4,
+        "accumulateEverySeconds": 24,
+        "clients": {}
       },
       "monitor": {
           "serverPort": 10301,
@@ -25,7 +31,11 @@ data:
           "maxHealthCheckSequentialFailuresSeconds": 30,
           "retryDeniedDownscaleSeconds": 5,
           "requestedUpscaleValidSeconds": 10,
-          "retryFailedRequestSeconds": 3
+          "retryFailedRequestSeconds": 3,
+          "maxFailedRequestRate": {
+            "intervalSeconds": 120,
+            "threshold": 2
+          }
       },
       "metrics": {
         "port": 9100,
@@ -39,10 +49,22 @@ data:
         "requestAtLeastEverySeconds": 5,
         "retryFailedRequestSeconds": 3,
         "retryDeniedUpscaleSeconds": 2,
-        "requestPort": 10299
+        "requestPort": 10299,
+        "maxFailedRequestRate": {
+          "intervalSeconds": 120,
+          "threshold": 5
+        }
       },
       "dumpState": {
         "port": 10300,
         "timeoutSeconds": 5
+      },
+      "neonvm": {
+        "requestTimeoutSeconds": 10,
+        "retryFailedRequestSeconds": 5,
+        "maxFailedRequestRate": {
+          "intervalSeconds": 120,
+          "threshold": 2
+        }
       }
     }

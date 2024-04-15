@@ -112,7 +112,7 @@ type state struct {
 	// NeonVM records all state relevant to the NeonVM k8s API
 	NeonVM neonvmState
 
-	Metrics *api.Metrics
+	Metrics *Metrics
 }
 
 type pluginState struct {
@@ -400,7 +400,15 @@ func (s *state) calculatePluginAction(
 		return &ActionPluginRequest{
 			LastPermit: s.Plugin.Permit,
 			Target:     permittedRequestResources,
-			Metrics:    s.Metrics,
+			// convert maybe-nil '*Metrics' to maybe-nil '*core.Metrics'
+			Metrics: func() *api.Metrics {
+				if s.Metrics != nil {
+					m := s.Metrics.ToAPI()
+					return &m
+				} else {
+					return nil
+				}
+			}(),
 		}, nil
 	} else {
 		if wantToRequestNewResources && waitingOnRetryBackoff {
@@ -625,8 +633,8 @@ func (s *state) calculateMonitorDownscaleAction(
 }
 
 func (s *state) scalingConfig() api.ScalingConfig {
-	if s.VM.ScalingConfig != nil {
-		return *s.VM.ScalingConfig
+	if s.VM.Config.ScalingConfig != nil {
+		return *s.VM.Config.ScalingConfig
 	} else {
 		return s.Config.DefaultScalingConfig
 	}
@@ -929,7 +937,7 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	s.internal.VM = vm
 }
 
-func (s *State) UpdateMetrics(metrics api.Metrics) {
+func (s *State) UpdateMetrics(metrics Metrics) {
 	s.internal.Metrics = &metrics
 }
 

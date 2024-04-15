@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: runner-image-loader
+spec:
+  selector:
+    matchLabels:
+      name: neonvm-runner-image-loader
+  template:
+    metadata:
+      labels:
+        name: neonvm-runner-image-loader
+    spec:
+      containers:
+      - image: runner:dev
+        name: neonvm-runner-loader
+        command: ["sh", "-c", "echo 'image loaded and container started' && sleep 100d"]
+        resources:
+          limits:
+            cpu: 10m
+            memory: 10Mi
+      # Sleep never gracefully terminates. No point waiting for it to.
+      terminationGracePeriodSeconds: 0

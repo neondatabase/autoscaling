@@ -22,12 +22,12 @@ const (
 	ContentTypeError string = "text/plain"
 )
 
-// The scheduler plugin currently supports v1.0 to v4.0 of the agent<->scheduler plugin protocol.
+// The scheduler plugin currently supports v3.0 to v5.0 of the agent<->scheduler plugin protocol.
 //
 // If you update either of these values, make sure to also update VERSIONING.md.
 const (
-	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV1_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV4_0
+	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
@@ -166,6 +166,15 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	if err := req.ComputeUnit.ValidateNonZero(); err != nil {
 		return nil, 400, fmt.Errorf("computeUnit fields must be non-zero: %w", err)
 	}
+	// check that nil-ness of req.Metrics.{LoadAverage5Min,MemoryUsageBytes} match what's expected
+	// for the protocol version.
+	if (req.Metrics.LoadAverage5Min != nil) != (req.Metrics.MemoryUsageBytes != nil) {
+		return nil, 400, fmt.Errorf("presence of metrics.loadAvg5M must match presence of metrics.memoryUsageBytes")
+	} else if req.Metrics.LoadAverage5Min == nil && req.ProtoVersion.IncludesExtendedMetrics() {
+		return nil, 400, fmt.Errorf("nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
+	} else if req.Metrics.LoadAverage5Min != nil && !req.ProtoVersion.IncludesExtendedMetrics() {
+		return nil, 400, fmt.Errorf("non-nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
+	}
 
 	e.state.lock.Lock()
 	defer e.state.lock.Unlock()
@@ -181,32 +190,30 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	}
 
 	// Check that req.ComputeUnit.Mem is divisible by the VM's memory slot size
-	if req.ComputeUnit.Mem%pod.vm.memSlotSize != 0 {
+	if req.ComputeUnit.Mem%pod.vm.MemSlotSize != 0 {
 		return nil, 400, fmt.Errorf(
 			"computeUnit is not divisible by VM memory slot size: %v not divisible by %v",
 			req.ComputeUnit,
-			pod.vm.memSlotSize,
+			pod.vm.MemSlotSize,
 		)
 	}
 
 	// If the request was actually sending a quantity of *memory slots*, rather than bytes, then
 	// multiply memory resources to make it match the
 	if !req.ProtoVersion.RepresentsMemoryAsBytes() {
-		req.Resources.Mem *= pod.vm.memSlotSize
+		req.Resources.Mem *= pod.vm.MemSlotSize
 	}
 
 	node := pod.node
 	nodeName = node.name // set nodeName for deferred metrics
 
 	// Also, now that we know which VM this refers to (and which node it's on), add that to the logger for later.
-	logger = logger.With(zap.Object("virtualmachine", pod.vm.name), zap.String("node", nodeName))
+	logger = logger.With(zap.Object("virtualmachine", pod.vm.Name), zap.String("node", nodeName))
 
-	mustMigrate := pod.vm.migrationState == nil &&
+	mustMigrate := pod.vm.MigrationState == nil &&
 		// Check whether the pod *will* migrate, then update its resources, and THEN start its
 		// migration, using the possibly-changed resources.
-		e.updateMetricsAndCheckMustMigrate(logger, pod.vm, node, req.Metrics) &&
-		// Don't migrate if it's disabled
-		e.state.conf.migrationEnabled()
+		e.updateMetricsAndCheckMustMigrate(logger, pod.vm, node, req.Metrics)
 
 	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
 
@@ -315,24 +322,27 @@ func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
 	node *nodeState,
 	metrics *api.Metrics,
 ) bool {
-	// This pod should migrate if (a) we're looking for migrations and (b) it's next up in the
-	// priority queue. We will give it a chance later to veto if the metrics have changed too much
+	// This pod should migrate if (a) it's allowed to migrate, (b) node resource usage is high
+	// enough that we should migrate *something*, and (c) it's next up in the priority queue.
+	// We will give it a chance later to veto if the metrics have changed too much.
 	//
-	// A third condition, "the pod is marked to always migrate" causes it to migrate even if neither
-	// of the above conditions are met, so long as it has *previously* provided metrics.
+	// Alternatively, "the pod is marked to always migrate" causes it to migrate even if none of
+	// the above conditions are met, so long as it has *previously* provided metrics.
+	canMigrate := vm.Config.AutoMigrationEnabled && e.state.conf.migrationEnabled()
 	shouldMigrate := node.mq.isNextInQueue(vm) && node.tooMuchPressure(logger)
-	forcedMigrate := vm.testingOnlyAlwaysMigrate && vm.metrics != nil
+	forcedMigrate := vm.Config.AlwaysMigrate && vm.Metrics != nil
 
 	logger.Info("Updating pod metrics", zap.Any("metrics", metrics))
-	oldMetrics := vm.metrics
-	vm.metrics = metrics
+	oldMetrics := vm.Metrics
+	vm.Metrics = metrics
 	if vm.currentlyMigrating() {
 		return false // don't do anything else; it's already migrating.
 	}
 
 	node.mq.addOrUpdate(vm)
 
-	if !shouldMigrate && !forcedMigrate {
+	// nb: forcedMigrate takes priority over canMigrate
+	if (!canMigrate || !shouldMigrate) && !forcedMigrate {
 		return false
 	}
 

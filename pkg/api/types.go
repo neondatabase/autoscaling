@@ -78,8 +78,17 @@ const (
 	// * Memory quantities now use "number of bytes" instead of "number of memory slots"
 	// * Adds AgentRequest.ComputeUnit
 	//
-	// Currently the latest version.
+	// Last used in release version v0.27.0.
 	PluginProtoV4_0
+
+	// PluginProtoV5_0 represents v5.0 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v4.0:
+	//
+	// * Removed AgentRequest.metrics fields loadAvg5M and memoryUsageBytes
+	//
+	// Currently the latest version.
+	PluginProtoV5_0
 
 	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
 	// protocol
@@ -108,6 +117,8 @@ func (v PluginProtoVersion) String() string {
 		return "v3.0"
 	case PluginProtoV4_0:
 		return "v4.0"
+	case PluginProtoV5_0:
+		return "v5.0"
 	default:
 		diff := v - latestPluginProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)
@@ -155,6 +166,14 @@ func (v PluginProtoVersion) RepresentsMemoryAsBytes() bool {
 	return v >= PluginProtoV4_0
 }
 
+// IncludesExtendedMetrics returns whether this version of the protocol includes the AgentRequest's
+// metrics loadAvg5M and memoryUsageBytes.
+//
+// This is true for all versions below v4.0.
+func (v PluginProtoVersion) IncludesExtendedMetrics() bool {
+	return v < PluginProtoV4_0
+}
+
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
 //
 // All AgentRequests expect a PluginResponse.
@@ -188,6 +207,16 @@ type AgentRequest struct {
 	//
 	// In some protocol versions, this field may be nil.
 	Metrics *Metrics `json:"metrics"`
+}
+
+// Metrics gives the information pulled from vector.dev that the scheduler may use to prioritize
+// which pods it should migrate.
+type Metrics struct {
+	LoadAverage1Min float32 `json:"loadAvg1M"`
+	// DEPRECATED. Will be removed in an upcoming release.
+	LoadAverage5Min *float32 `json:"loadAvg5M,omitempty"`
+	// DEPRECATED. Will be removed in an upcoming release.
+	MemoryUsageBytes *float32 `json:"memoryUsageBytes,omitempty"`
 }
 
 // ProtocolRange returns a VersionRange exactly equal to r.ProtoVersion

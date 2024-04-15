@@ -44,7 +44,7 @@ import (
 //
 // Currently, each autoscaler-agent supports only one version at a time. In the future, this may
 // change.
-const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV4_0
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
 
 // Runner is per-VM Pod god object responsible for handling everything
 //
@@ -199,7 +199,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		Core: core.Config{
 			ComputeUnit:                        r.global.config.Scaling.ComputeUnit,
 			DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
-			NeonVMRetryWait:                    time.Second * time.Duration(r.global.config.Scaling.RetryFailedRequestSeconds),
+			NeonVMRetryWait:                    time.Second * time.Duration(r.global.config.NeonVM.RetryFailedRequestSeconds),
 			PluginRequestTick:                  time.Second*time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds) - pluginRequestJitter,
 			PluginRetryWait:                    time.Second * time.Duration(r.global.config.Scheduler.RetryFailedRequestSeconds),
 			PluginDeniedRetryWait:              time.Second * time.Duration(r.global.config.Scheduler.RetryDeniedUpscaleSeconds),
@@ -251,7 +251,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		}
 	})
 	r.spawnBackgroundWorker(ctx, logger, "get metrics", func(c context.Context, l *zap.Logger) {
-		r.getMetricsLoop(c, l, func(metrics api.Metrics, withLock func()) {
+		r.getMetricsLoop(c, l, func(metrics core.Metrics, withLock func()) {
 			ecwc.Updater().UpdateMetrics(metrics, withLock)
 		})
 	})
@@ -349,7 +349,7 @@ func (r *Runner) spawnBackgroundWorker(ctx context.Context, logger *zap.Logger, 
 func (r *Runner) getMetricsLoop(
 	ctx context.Context,
 	logger *zap.Logger,
-	newMetrics func(metrics api.Metrics, withLock func()),
+	newMetrics func(metrics core.Metrics, withLock func()),
 ) {
 	timeout := time.Second * time.Duration(r.global.config.Metrics.RequestTimeoutSeconds)
 	waitBetweenDuration := time.Second * time.Duration(r.global.config.Metrics.SecondsBetweenRequests)
@@ -516,7 +516,7 @@ func (r *Runner) doMetricsRequest(
 	ctx context.Context,
 	logger *zap.Logger,
 	timeout time.Duration,
-) (*api.Metrics, error) {
+) (*core.Metrics, error) {
 	url := fmt.Sprintf("http://%s:%d/metrics", r.podIP, r.global.config.Metrics.Port)
 
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -546,7 +546,7 @@ func (r *Runner) doMetricsRequest(
 		return nil, fmt.Errorf("Unsuccessful response status %d: %s", resp.StatusCode, string(body))
 	}
 
-	m, err := api.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
+	m, err := core.ReadMetrics(body, r.global.config.Metrics.LoadMetricPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("Error reading metrics from prometheus output: %w", err)
 	}
@@ -570,7 +570,7 @@ func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) erro
 		panic(fmt.Errorf("Error marshalling JSON patch: %w", err))
 	}
 
-	timeout := time.Second * time.Duration(r.global.config.Scaling.RequestTimeoutSeconds)
+	timeout := time.Second * time.Duration(r.global.config.NeonVM.RequestTimeoutSeconds)
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -695,7 +695,7 @@ func (r *Runner) DoSchedulerRequest(
 		return nil, fmt.Errorf("Error encoding request JSON: %w", err)
 	}
 
-	timeout := time.Second * time.Duration(r.global.config.Scaling.RequestTimeoutSeconds)
+	timeout := time.Second * time.Duration(r.global.config.NeonVM.RequestTimeoutSeconds)
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -24,6 +25,10 @@ type PromMetrics struct {
 	migrationDeletions    *prometheus.CounterVec
 	migrationCreateFails  prometheus.Counter
 	migrationDeleteFails  *prometheus.CounterVec
+	reserveShouldDeny     *prometheus.CounterVec
+	eventQueueDepth       prometheus.Gauge
+	eventQueueAddsTotal   prometheus.Counter
+	eventQueueLatency     prometheus.Histogram
 }
 
 func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
@@ -44,14 +49,14 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Name: "autoscaling_plugin_extension_calls_total",
 				Help: "Number of calls to scheduler plugin extension points",
 			},
-			[]string{"method", "ignored_namespace"},
+			[]string{"method", "desired_availability_zone", "ignored_namespace"},
 		)),
 		pluginCallFails: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_extension_call_fails_total",
 				Help: "Number of unsuccessful calls to scheduler plugin extension points",
 			},
-			[]string{"method", "ignored_namespace", "status"},
+			[]string{"method", "desired_availability_zone", "ignored_namespace", "status"},
 		)),
 		resourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -107,19 +112,49 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 			},
 			[]string{"phase"},
 		)),
+		reserveShouldDeny: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_reserve_should_deny_total",
+				Help: "Number of times the plugin should deny a reservation",
+			},
+			[]string{"availability_zone", "node", "node_group"},
+		)),
+		eventQueueDepth: util.RegisterMetric(reg, prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_eventqueue_depth",
+				Help: "Current sum depth of all event queues",
+			},
+		)),
+		eventQueueAddsTotal: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_eventqueue_adds_total",
+				Help: "Total number of events added to event queues",
+			},
+		)),
+		eventQueueLatency: util.RegisterMetric(reg, prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_plugin_eventqueue_duration_seconds",
+				Help:    "How long in seconds an item stays in an event queue before being processed",
+				Buckets: prometheus.ExponentialBuckets(10e-9, 10, 12),
+			},
+		)),
 	}
 
 	return reg
 }
 
-func (m *PromMetrics) IncMethodCall(method string, ignored bool) {
-	m.pluginCalls.WithLabelValues(method, strconv.FormatBool(ignored)).Inc()
+func (m *PromMetrics) IncMethodCall(method string, pod *corev1.Pod, ignored bool) {
+	m.pluginCalls.WithLabelValues(method, util.PodPreferredAZIfPresent(pod), strconv.FormatBool(ignored)).Inc()
 }
 
-func (m *PromMetrics) IncFailIfNotSuccess(method string, ignored bool, status *framework.Status) {
+func (m *PromMetrics) IncFailIfNotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
 	if !status.IsSuccess() {
 		return
 	}
 
-	m.pluginCallFails.WithLabelValues(method, strconv.FormatBool(ignored), status.Code().String())
+	m.pluginCallFails.WithLabelValues(method, util.PodPreferredAZIfPresent(pod), strconv.FormatBool(ignored), status.Code().String())
+}
+
+func (m *PromMetrics) IncReserveShouldDeny(pod *corev1.Pod, node *nodeState) {
+	m.reserveShouldDeny.WithLabelValues(util.PodPreferredAZIfPresent(pod), node.name, node.nodeGroup).Inc()
 }

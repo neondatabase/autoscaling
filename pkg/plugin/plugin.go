@@ -2,13 +2,10 @@ package plugin
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"hash/fnv"
 	"math/rand"
 	"time"
 
-	"github.com/tychoish/fun/pubsub"
 	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
@@ -117,8 +114,13 @@ func makeAutoscaleEnforcerPlugin(
 		}
 	}
 
+	// makePrometheusRegistry sets p.metrics, which we need to do before calling
+	// newEventQueueSet and readClusterState, because we set metrics eventQueueSet and for each
+	// node while we build the state.
+	promReg := p.makePrometheusRegistry()
+
 	// Start watching Pod/VM events, adding them to a shared queue to process them in order
-	queueSet := newEventQueueSet[func()](config.EventQueueWorkers)
+	queueSet := newEventQueueSet[func()](config.EventQueueWorkers, p.metrics)
 
 	pushToQueue := func(logger *zap.Logger, key string, f func()) {
 		if err := queueSet.enqueue(key, f); err != nil {
@@ -150,8 +152,8 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 	vwc := vmWatchCallbacks{
-		submitDisabledScaling: func(logger *zap.Logger, pod util.NamespacedName) {
-			pushToQueue(logger, pod.Name, func() { p.handleVMDisabledScaling(hlogger, pod) })
+		submitConfigUpdated: func(logger *zap.Logger, pod util.NamespacedName, newCfg api.VmConfig) {
+			pushToQueue(logger, pod.Name, func() { p.handleVMConfigUpdated(hlogger, pod, newCfg) })
 		},
 		submitBoundsChanged: func(logger *zap.Logger, vm *api.VmInfo, podName string) {
 			pushToQueue(logger, vm.Name, func() { p.handleUpdatedScalingBounds(hlogger, vm, podName) })
@@ -199,9 +201,6 @@ func makeAutoscaleEnforcerPlugin(
 
 	p.vmStore = watch.NewIndexedStore(vmStore, watch.NewNameIndex[vmapi.VirtualMachine]())
 
-	// makePrometheusRegistry sets p.metrics, which we need to do before calling readClusterState,
-	// because we set metrics for each node while we build the state.
-	promReg := p.makePrometheusRegistry()
 	watchMetrics.MustRegister(promReg)
 
 	// ... but before handling the events, read the current cluster state:
@@ -248,32 +247,6 @@ func makeAutoscaleEnforcerPlugin(
 	return &p, nil
 }
 
-type eventQueueSet[T any] struct {
-	queues []*pubsub.Queue[T]
-}
-
-func newEventQueueSet[T any](size int) eventQueueSet[T] {
-	queues := make([]*pubsub.Queue[T], size)
-	for i := 0; i < size; i += 1 {
-		queues[i] = pubsub.NewUnlimitedQueue[T]()
-	}
-	return eventQueueSet[T]{queues: queues}
-}
-
-func (s eventQueueSet[T]) enqueue(key string, item T) error {
-	hasher := fnv.New64()
-	// nb: Hash guarantees that Write never returns an error
-	_, _ = hasher.Write([]byte(key))
-	hash := hasher.Sum64()
-
-	idx := int(hash % uint64(len(s.queues)))
-	return s.queues[idx].Add(item)
-}
-
-func (s eventQueueSet[T]) wait(ctx context.Context, idx int) (T, error) {
-	return s.queues[idx].Wait(ctx)
-}
-
 // Name returns the name of the AutoscaleEnforcer plugin
 //
 // Required for framework.Plugin
@@ -290,46 +263,11 @@ func (e *AutoscaleEnforcer) getVmInfo(logger *zap.Logger, pod *corev1.Pod, actio
 		return nil, nil
 	}
 
-	accessor := func(index *watch.NameIndex[vmapi.VirtualMachine]) (*vmapi.VirtualMachine, bool) {
-		return index.Get(vmName.Namespace, vmName.Name)
-	}
-
-	vm, ok := e.vmStore.GetIndexed(accessor)
-	if !ok {
-		logger.Warn(
-			"VM is missing from local store. Relisting",
-			zap.Object("pod", util.GetNamespacedName(pod)),
-			zap.Object("virtualmachine", vmName),
-		)
-
-		// Use a reasonable timeout on the relist request, so that if the VM store is broken, we
-		// won't block forever.
-		//
-		// FIXME: make this configurable
-		timeout := 5 * time.Second
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-
-		select {
-		case <-e.vmStore.Relist():
-		case <-timer.C:
-			return nil, fmt.Errorf("Timed out waiting on VM store relist (timeout = %s)", timeout)
-		}
-
-		// retry fetching the VM, now that we know it's been synced.
-		vm, ok = e.vmStore.GetIndexed(accessor)
-		if !ok {
-			// if the VM is still not present after relisting, then either it's already been deleted
-			// or there's a deeper problem.
-			return nil, errors.New("Could not find VM for pod, even after relist")
-		}
-	}
-
-	vmInfo, err := api.ExtractVmInfo(logger, vm)
+	vmInfo, err := api.ExtractVmInfoFromPod(logger, pod)
 	if err != nil {
 		e.handle.EventRecorder().Eventf(
-			vm,              // regarding
-			pod,             // related
+			pod,             // regarding
+			nil,             // related
 			"Warning",       // eventtype
 			"ExtractVmInfo", // reason
 			action,          // action
@@ -366,9 +304,9 @@ func (e *AutoscaleEnforcer) PreFilter(
 ) (_ *framework.PreFilterResult, status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("PreFilter", ignored)
+	e.metrics.IncMethodCall("PreFilter", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("PreFilter", ignored, status)
+		e.metrics.IncFailIfNotSuccess("PreFilter", pod, ignored, status)
 	}()
 
 	return nil, nil
@@ -396,9 +334,9 @@ func (e *AutoscaleEnforcer) PostFilter(
 ) (_ *framework.PostFilterResult, status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("PostFilter", ignored)
+	e.metrics.IncMethodCall("PostFilter", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("PostFilter", ignored, status)
+		e.metrics.IncFailIfNotSuccess("PostFilter", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Filter"), util.PodNameFields(pod))
@@ -418,9 +356,9 @@ func (e *AutoscaleEnforcer) Filter(
 ) (status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("Filter", ignored)
+	e.metrics.IncMethodCall("Filter", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Filter", ignored, status)
+		e.metrics.IncFailIfNotSuccess("Filter", pod, ignored, status)
 	}()
 
 	nodeName := nodeInfo.Node().Name // TODO: nodes also have namespaces? are they used at all?
@@ -613,9 +551,9 @@ func (e *AutoscaleEnforcer) Score(
 ) (_ int64, status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("Score", ignored)
+	e.metrics.IncMethodCall("Score", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Score", ignored, status)
+		e.metrics.IncFailIfNotSuccess("Score", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Score"), zap.String("node", nodeName), util.PodNameFields(pod))
@@ -724,9 +662,9 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 ) (status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("NormalizeScore", ignored)
+	e.metrics.IncMethodCall("NormalizeScore", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("NormalizeScore", ignored, status)
+		e.metrics.IncFailIfNotSuccess("NormalizeScore", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "NormalizeScore"), util.PodNameFields(pod))
@@ -786,9 +724,9 @@ func (e *AutoscaleEnforcer) Reserve(
 ) (status *framework.Status) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
 
-	e.metrics.IncMethodCall("Reserve", ignored)
+	e.metrics.IncMethodCall("Reserve", pod, ignored)
 	defer func() {
-		e.metrics.IncFailIfNotSuccess("Reserve", ignored, status)
+		e.metrics.IncFailIfNotSuccess("Reserve", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(zap.String("method", "Reserve"), zap.String("node", nodeName), util.PodNameFields(pod))
@@ -809,7 +747,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		return status
 	}
 
-	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", true)
+	ok, verdict, err := e.reserveResources(ctx, logger, pod, "Reserve", false)
 	if err != nil {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
 	}
@@ -837,7 +775,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 	nodeName string,
 ) {
 	ignored := e.state.conf.ignoredNamespace(pod.Namespace)
-	e.metrics.IncMethodCall("Unreserve", ignored)
+	e.metrics.IncMethodCall("Unreserve", pod, ignored)
 
 	podName := util.GetNamespacedName(pod)
 

@@ -33,12 +33,12 @@ data:
         "scorePeak": 0.8
       },
       "schedulerName": "autoscale-scheduler",
-      "eventQueueWorkers": 16,
+      "eventQueueWorkers": 64,
       "dumpState": {
         "port": 10298,
         "timeoutSeconds": 5
       },
       "migrationDeletionRetrySeconds": 5,
-      "doMigration": false,
+      "doMigration": true,
       "randomizeScores": true
     }

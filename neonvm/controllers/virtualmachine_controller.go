@@ -70,6 +70,11 @@ const (
 	typeDegradedVirtualMachine = "Degraded"
 )
 
+const (
+	minSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
+	maxSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
+)
+
 // VirtualMachineReconciler reconciles a VirtualMachine object
 type VirtualMachineReconciler struct {
 	client.Client
@@ -230,18 +235,22 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 	}
 }
 
-func runnerSupportsCgroup(pod *corev1.Pod) bool {
+func getRunnerVersion(pod *corev1.Pod) (api.RunnerProtoVersion, error) {
 	val, ok := pod.Labels[vmv1.RunnerPodVersionLabel]
 	if !ok {
-		return false
+		return api.RunnerProtoVersion(0), nil
 	}
 
 	uintVal, err := strconv.ParseUint(val, 10, 32)
 	if err != nil {
-		return false
+		return 0, fmt.Errorf("failed to parse label value as integer: %w", err)
 	}
 
-	return api.RunnerProtoVersion(uintVal).SupportsCgroupFractionalCPU()
+	return api.RunnerProtoVersion(uintVal), nil
+}
+
+func runnerVersionIsSupported(version api.RunnerProtoVersion) bool {
+	return version >= minSupportedRunnerVersion && version <= maxSupportedRunnerVersion
 }
 
 func (r *VirtualMachineReconciler) updateVMStatusCPU(
@@ -499,6 +508,17 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// update Node name where runner working
 			virtualmachine.Status.Node = vmRunner.Spec.NodeName
 
+			runnerVersion, err := getRunnerVersion(vmRunner)
+			if err != nil {
+				log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+			if !runnerVersionIsSupported(runnerVersion) {
+				err := fmt.Errorf("runner version %v is not supported", runnerVersion)
+				log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", virtualmachine.Name)
+				return err
+			}
+
 			// get CPU details from QEMU
 			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(virtualmachine))
 			if err != nil {
@@ -508,14 +528,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			pluggedCPU := uint32(len(cpuSlotsPlugged))
 
 			// get cgroups CPU details from runner pod
-			var cgroupUsage *api.VCPUCgroup
-			supportsCgroup := runnerSupportsCgroup(vmRunner)
-			if supportsCgroup {
-				cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
-				if err != nil {
-					log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
-					return err
-				}
+			cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+			if err != nil {
+				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+				return err
 			}
 
 			// update status by CPUs used in the VM
@@ -534,19 +550,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// compare guest spec and count of plugged
 
 			specUseCPU := virtualmachine.Spec.Guest.CPUs.Use
-			scaleCgroupCPU := supportsCgroup && *specUseCPU != cgroupUsage.VCPUs
+			scaleCgroupCPU := *specUseCPU != cgroupUsage.VCPUs
 			scaleQemuCPU := specUseCPU.RoundedUp() != pluggedCPU
 			if scaleCgroupCPU || scaleQemuCPU {
-				if !supportsCgroup {
-					log.Info("VM goes into scaling mode, CPU count needs to be changed",
-						"CPUs on board", pluggedCPU,
-						"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use)
-				} else {
-					log.Info("VM goes into scaling mode, CPU count needs to be changed",
-						"CPUs on runner pod cgroup", cgroupUsage.VCPUs,
-						"CPUs on board", pluggedCPU,
-						"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use)
-				}
+				log.Info("VM goes into scaling mode, CPU count needs to be changed",
+					"CPUs on runner pod cgroup", cgroupUsage.VCPUs,
+					"CPUs on board", pluggedCPU,
+					"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use)
 				virtualmachine.Status.Phase = vmv1.VmScaling
 			}
 
@@ -639,6 +649,17 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			// do nothing
 		}
 
+		runnerVersion, err := getRunnerVersion(vmRunner)
+		if err != nil {
+			log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", virtualmachine.Name)
+			return err
+		}
+		if !runnerVersionIsSupported(runnerVersion) {
+			err := fmt.Errorf("runner version %v is not supported", runnerVersion)
+			log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", virtualmachine.Name)
+			return err
+		}
+
 		cpuScaled := false
 		ramScaled := false
 
@@ -652,14 +673,10 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		specCPU := virtualmachine.Spec.Guest.CPUs.Use
 		pluggedCPU := uint32(len(cpuSlotsPlugged))
 
-		var cgroupUsage *api.VCPUCgroup
-		supportsCgroup := runnerSupportsCgroup(vmRunner)
-		if supportsCgroup {
-			cgroupUsage, err = getRunnerCgroup(ctx, virtualmachine)
-			if err != nil {
-				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
-				return err
-			}
+		cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+		if err != nil {
+			log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+			return err
 		}
 
 		// compare guest spec to count of plugged and runner pod cgroups
@@ -681,7 +698,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
 				fmt.Sprintf("One CPU was unplugged from VM %s",
 					virtualmachine.Name))
-		} else if supportsCgroup && *specCPU != cgroupUsage.VCPUs {
+		} else if *specCPU != cgroupUsage.VCPUs {
 			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", *specCPU)
 			if err := setRunnerCgroup(ctx, virtualmachine, *specCPU); err != nil {
 				return err
@@ -1053,6 +1070,15 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 	return string(usageJSON)
 }
 
+func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
+	resourcesJSON, err := json.Marshal(spec.Resources())
+	if err != nil {
+		panic(fmt.Errorf("error marshalling JSON: %w", err))
+	}
+
+	return string(resourcesJSON)
+}
+
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VirtualMachineReconciler) podForVirtualMachine(
 	virtualmachine *vmv1.VirtualMachine,
@@ -1140,6 +1166,7 @@ func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[strin
 
 	a["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
 	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
+	a[vmv1.VirtualMachineResourcesAnnotation] = extractVirtualMachineResourcesJSON(virtualmachine.Spec)
 	return a
 }
 
@@ -1594,7 +1621,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 			Name: diskName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{
-					SizeLimit: settings.Swap,
+					SizeLimit: &settings.Swap.Size,
 				},
 			},
 		})

@@ -10,6 +10,7 @@ import (
 	"github.com/tychoish/fun/erc"
 	"go.uber.org/zap"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -18,6 +19,7 @@ import (
 )
 
 const (
+	LabelEnableAutoMigration      = "autoscaling.neon.tech/auto-migration-enabled"
 	LabelTestingOnlyAlwaysMigrate = "autoscaling.neon.tech/testing-only-always-migrate"
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
@@ -25,36 +27,59 @@ const (
 	AnnotationBillingEndpointID   = "autoscaling.neon.tech/billing-endpoint-id"
 )
 
-// HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
-func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
+func hasTrueLabel(obj metav1.ObjectMetaAccessor, labelName string) bool {
 	labels := obj.GetObjectMeta().GetLabels()
-	value, ok := labels[LabelEnableAutoscaling]
+	value, ok := labels[labelName]
 	return ok && value == "true"
 }
 
+// HasAutoscalingEnabled returns true iff the object has the label that enables autoscaling
+func HasAutoscalingEnabled(obj metav1.ObjectMetaAccessor) bool {
+	return hasTrueLabel(obj, LabelEnableAutoscaling)
+}
+
+// HasAutoMigrationEnabled returns true iff the object has the label that enables "automatic"
+// scheduler-triggered migration, and it's set to "true"
+func HasAutoMigrationEnabled(obj metav1.ObjectMetaAccessor) bool {
+	return hasTrueLabel(obj, LabelEnableAutoMigration)
+}
+
 func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
-	labels := obj.GetObjectMeta().GetLabels()
-	value, ok := labels[LabelTestingOnlyAlwaysMigrate]
-	return ok && value == "true"
+	return hasTrueLabel(obj, LabelTestingOnlyAlwaysMigrate)
 }
 
 // VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
 // care about. It takes various labels and annotations into account, so certain fields might be
 // different from what's strictly in the VirtualMachine object.
 type VmInfo struct {
-	Name           string         `json:"name"`
-	Namespace      string         `json:"namespace"`
-	Cpu            VmCpuInfo      `json:"cpu"`
-	Mem            VmMemInfo      `json:"mem"`
-	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
-	AlwaysMigrate  bool           `json:"alwaysMigrate"`
-	ScalingEnabled bool           `json:"scalingEnabled"`
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
+	Cpu       VmCpuInfo `json:"cpu"`
+	Mem       VmMemInfo `json:"mem"`
+	Config    VmConfig  `json:"config"`
 }
 
 type VmCpuInfo struct {
 	Min vmapi.MilliCPU `json:"min"`
 	Max vmapi.MilliCPU `json:"max"`
 	Use vmapi.MilliCPU `json:"use"`
+}
+
+func NewVmCpuInfo(cpus vmapi.CPUs) (*VmCpuInfo, error) {
+	if cpus.Min == nil {
+		return nil, errors.New("expected non-nil field Min")
+	}
+	if cpus.Max == nil {
+		return nil, errors.New("expected non-nil field Max")
+	}
+	if cpus.Use == nil {
+		return nil, errors.New("expected non-nil field Use")
+	}
+	return &VmCpuInfo{
+		Min: *cpus.Min,
+		Max: *cpus.Max,
+		Use: *cpus.Use,
+	}, nil
 }
 
 type VmMemInfo struct {
@@ -66,6 +91,44 @@ type VmMemInfo struct {
 	Use uint16 `json:"use"`
 
 	SlotSize Bytes `json:"slotSize"`
+}
+
+func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) (*VmMemInfo, error) {
+	if memSlots.Min == nil {
+		return nil, errors.New("expected non-nil field Min")
+	}
+	if memSlots.Max == nil {
+		return nil, errors.New("expected non-nil field Max")
+	}
+	if memSlots.Use == nil {
+		return nil, errors.New("expected non-nil field Use")
+	}
+	return &VmMemInfo{
+		Min:      uint16(*memSlots.Min),
+		Max:      uint16(*memSlots.Max),
+		Use:      uint16(*memSlots.Use),
+		SlotSize: Bytes(memSlotSize.Value()),
+	}, nil
+
+}
+
+// VmConfig stores the autoscaling-specific "extra" configuration derived from labels and
+// annotations on the VM object.
+//
+// This is separate from the bounds information stored in VmInfo (even though that's also derived
+// from annotations), because VmConfig is meant to store values that either qualitatively change the
+// handling for a VM (e.g., AutoMigrationEnabled) or are expected to largely be the same for most VMs
+// (e.g., ScalingConfig).
+type VmConfig struct {
+	// AutoMigrationEnabled indicates to the scheduler plugin that it's allowed to trigger migration
+	// for this VM. This defaults to false because otherwise we might disrupt VMs that don't have
+	// adequate networking support to preserve connections across live migration.
+	AutoMigrationEnabled bool `json:"autoMigrationEnabled"`
+	// AlwaysMigrate is a test-only debugging flag that, if present in the VM's labels, will always
+	// prompt it to migrate, regardless of whether the VM actually *needs* to.
+	AlwaysMigrate  bool           `json:"alwaysMigrate"`
+	ScalingEnabled bool           `json:"scalingEnabled"`
+	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
 }
 
 // Using returns the Resources that this VmInfo says the VM is using
@@ -103,69 +166,70 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 }
 
 func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
-	var err error
+	logger = logger.With(util.VMNameFields(vm))
+	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
+}
 
-	getNonNilInt := func(err *error, ptr *int32, name string) (val int32) {
-		if *err != nil {
-			return
-		} else if ptr == nil {
-			*err = fmt.Errorf("expected non-nil field %s", name)
-			return
-		} else {
-			return *ptr
-		}
+func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
+	logger = logger.With(util.PodNameFields(pod))
+	resourcesJSON := pod.Annotations[vmapi.VirtualMachineResourcesAnnotation]
+
+	var resources vmapi.VirtualMachineResources
+	if err := json.Unmarshal([]byte(resourcesJSON), &resources); err != nil {
+		return nil, fmt.Errorf("Error unmarshaling %q: %w",
+			vmapi.VirtualMachineResourcesAnnotation, err)
 	}
 
-	getNonNilMilliCPU := func(err *error, ptr *vmapi.MilliCPU, name string) (val vmapi.MilliCPU) {
-		if *err != nil {
-			return
-		} else if ptr == nil {
-			*err = fmt.Errorf("expected non-nil field %s", name)
-			return
-		} else {
-			return *ptr
-		}
+	vmName := pod.Labels[vmapi.VirtualMachineNameLabel]
+	return extractVmInfoGeneric(logger, vmName, pod, resources)
+}
+
+func extractVmInfoGeneric(
+	logger *zap.Logger,
+	vmName string,
+	obj metav1.ObjectMetaAccessor,
+	resources vmapi.VirtualMachineResources,
+) (*VmInfo, error) {
+	cpuInfo, err := NewVmCpuInfo(resources.CPUs)
+	if err != nil {
+		return nil, fmt.Errorf("Error extracting CPU info: %w", err)
 	}
 
-	scalingEnabled := HasAutoscalingEnabled(vm)
-	alwaysMigrate := HasAlwaysMigrateLabel(vm)
+	memInfo, err := NewVmMemInfo(resources.MemorySlots, resources.MemorySlotSize)
+	if err != nil {
+		return nil, fmt.Errorf("Error extracting memory info: %w", err)
+	}
+
+	autoMigrationEnabled := HasAutoMigrationEnabled(obj)
+	scalingEnabled := HasAutoscalingEnabled(obj)
+	alwaysMigrate := HasAlwaysMigrateLabel(obj)
 
 	info := VmInfo{
-		Name:      vm.Name,
-		Namespace: vm.Namespace,
-		Cpu: VmCpuInfo{
-			Min: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Min, ".spec.guest.cpus.min"),
-			Max: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Max, ".spec.guest.cpus.max"),
-			Use: getNonNilMilliCPU(&err, vm.Spec.Guest.CPUs.Use, ".spec.guest.cpus.use"),
+		Name:      vmName,
+		Namespace: obj.GetObjectMeta().GetNamespace(),
+		Cpu:       *cpuInfo,
+		Mem:       *memInfo,
+		Config: VmConfig{
+			AutoMigrationEnabled: autoMigrationEnabled,
+			AlwaysMigrate:        alwaysMigrate,
+			ScalingEnabled:       scalingEnabled,
+			ScalingConfig:        nil, // set below, maybe
 		},
-		Mem: VmMemInfo{
-			Min:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Min, ".spec.guest.memorySlots.min")),
-			Max:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Max, ".spec.guest.memorySlots.max")),
-			Use:      uint16(getNonNilInt(&err, vm.Spec.Guest.MemorySlots.Use, ".spec.guest.memorySlots.use")),
-			SlotSize: BytesFromResourceQuantity(vm.Spec.Guest.MemorySlotSize),
-		},
-		ScalingConfig:  nil, // set below, maybe
-		AlwaysMigrate:  alwaysMigrate,
-		ScalingEnabled: scalingEnabled,
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
-	if boundsJSON, ok := vm.Annotations[AnnotationAutoscalingBounds]; ok {
+	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {
 		var bounds ScalingBounds
 		if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 
-		if err := bounds.Validate(&vm.Spec.Guest.MemorySlotSize); err != nil {
+		if err := bounds.Validate(&resources.MemorySlotSize); err != nil {
 			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
 	}
 
-	if configJSON, ok := vm.Annotations[AnnotationAutoscalingConfig]; ok {
+	if configJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingConfig]; ok {
 		var config ScalingConfig
 		if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingConfig, err)
@@ -174,7 +238,7 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 		if err := config.Validate(); err != nil {
 			return nil, fmt.Errorf("Bad scaling config in annotation %q: %w", AnnotationAutoscalingConfig, err)
 		}
-		info.ScalingConfig = &config
+		info.Config.ScalingConfig = &config
 	}
 
 	min := info.Min()
@@ -200,13 +264,11 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 	if using.HasFieldLessThan(min) {
 		logger.Warn(
 			"Current usage has field less than minimum",
-			util.VMNameFields(vm),
 			zap.Object("using", using), zap.Object("min", min),
 		)
 	} else if using.HasFieldGreaterThan(max) {
 		logger.Warn(
 			"Current usage has field greater than maximum",
-			util.VMNameFields(vm),
 			zap.Object("using", using), zap.Object("max", max),
 		)
 	}
@@ -311,8 +373,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
 		state.Write([]byte(fmt.Sprintf(
-			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, ScalingConfig:%#v, AlwaysMigrate:%t, ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"api.VmInfo{Name:%q, Namespace:%q, Cpu:%#v, Mem:%#v, Config:%#v}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.Config,
 		)))
 	default:
 		if verb != 'v' {
@@ -322,8 +384,8 @@ func (vm VmInfo) Format(state fmt.State, verb rune) {
 		}
 
 		state.Write([]byte(fmt.Sprintf(
-			"{Name:%s Namespace:%s Cpu:%v Mem:%v ScalingConfig:%+v AlwaysMigrate:%t ScalingEnabled:%t}",
-			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.ScalingConfig, vm.AlwaysMigrate, vm.ScalingEnabled,
+			"{Name:%s Namespace:%s Cpu:%v Mem:%v Config:%v}",
+			vm.Name, vm.Namespace, vm.Cpu, vm.Mem, vm.Config,
 		)))
 
 		if verb != 'v' {
@@ -349,5 +411,21 @@ func (mem VmMemInfo) Format(state fmt.State, verb rune) {
 		state.Write([]byte(fmt.Sprintf("api.VmMemInfo{Min:%d, Max:%d, Use:%d, SlotSize:%#v}", mem.Min, mem.Max, mem.Use, mem.SlotSize)))
 	default:
 		state.Write([]byte(fmt.Sprintf("{Min:%d Max:%d Use:%d SlotSize:%v}", mem.Min, mem.Max, mem.Use, mem.SlotSize)))
+	}
+}
+
+func (cfg VmConfig) Format(state fmt.State, verb rune) {
+	// same-ish style as for VmInfo, differing slightly from default repr.
+	switch {
+	case verb == 'v' && state.Flag('#'):
+		state.Write([]byte(fmt.Sprintf(
+			"api.VmConfig{AutoMigrationEnabled:%t, AlwaysMigrate:%t, ScalingEnabled:%t, ScalingConfig:%#v}",
+			cfg.AutoMigrationEnabled, cfg.AlwaysMigrate, cfg.ScalingEnabled, cfg.ScalingConfig,
+		)))
+	default:
+		state.Write([]byte(fmt.Sprintf(
+			"{AutoMigrationEnabled:%t AlwaysMigrate:%t ScalingEnabled:%t ScalingConfig:%+v}",
+			cfg.AutoMigrationEnabled, cfg.AlwaysMigrate, cfg.ScalingEnabled, cfg.ScalingConfig,
+		)))
 	}
 }

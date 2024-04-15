@@ -42,11 +42,24 @@ const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
 // The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
 const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 
+// VirtualMachineResourcesAnnotation is the annotation added to each runner Pod, mirroring information
+// about the resource allocations of the VM running in the pod.
+//
+// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
+const VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
 // JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
 type VirtualMachineUsage struct {
 	CPU    *resource.Quantity `json:"cpu"`
 	Memory *resource.Quantity `json:"memory"`
+}
+
+// VirtualMachineResources provides information about a VM's resource allocations.
+type VirtualMachineResources struct {
+	CPUs           CPUs              `json:"cpus"`
+	MemorySlots    MemorySlots       `json:"memorySlots"`
+	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
 }
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -124,6 +137,14 @@ type VirtualMachineSpec struct {
 	EnableSSH *bool `json:"enableSSH,omitempty"`
 }
 
+func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
+	return VirtualMachineResources{
+		CPUs:           spec.Guest.CPUs,
+		MemorySlots:    spec.Guest.MemorySlots,
+		MemorySlotSize: spec.Guest.MemorySlotSize,
+	}
+}
+
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
 type RestartPolicy string
 
@@ -175,9 +196,50 @@ type GuestSettings struct {
 	// +optional
 	Sysctl []string `json:"sysctl,omitempty"`
 
-	// Swap adds a swap disk with the provided size.
+	// Swap controls settings for adding a swap disk to the VM.
 	// +optional
-	Swap *resource.Quantity `json:"swap,omitempty"`
+	Swap *SwapInfo `json:"swap,omitempty"`
+}
+
+type SwapInfo struct {
+	// Size sets the size of the swap in the VM. The amount of space used on the host may be
+	// slightly more (by a few MiBs). The information reported by `cat /proc/meminfo` may show
+	// slightly less, due to a single page header (typically 4KiB).
+	Size resource.Quantity `json:"size"`
+	// SkipSwapon instructs the VM to *not* run swapon for the swap on startup.
+	//
+	// This is intended to be used in cases where you will *always* resize the swap post-startup,
+	// and don't need it available before that resizing.
+	//
+	// +optional
+	SkipSwapon *bool `json:"skipSwapon,omitempty"`
+}
+
+// SwapInfo implements UnmarshalJSON to allow backwards compatibility with a previous version of
+// NeonVM that used a resource.Quantity to control swap, instead of a struct.
+//
+// This is temporary, and WILL be removed in a future version.
+func (s *SwapInfo) UnmarshalJSON(b []byte) error {
+	// Try to unmarshal both ways
+	var si struct {
+		Size       resource.Quantity `json:"size"`
+		SkipSwapon *bool             `json:"skipSwapon,omitempty"`
+	}
+	if fstErr := json.Unmarshal(b, &si); fstErr != nil {
+		var q resource.Quantity
+		if sndErr := json.Unmarshal(b, &q); sndErr != nil {
+			// if both fail to unmarhsal, return the error as if we only tried to unmarshal into
+			// SwapInfo (and not resource.Quantity as well).
+			return fstErr
+		}
+		si.Size = q
+	}
+
+	*s = SwapInfo{
+		Size:       si.Size,
+		SkipSwapon: si.SkipSwapon,
+	}
+	return nil
 }
 
 type CPUs struct {
