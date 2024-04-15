@@ -39,7 +39,7 @@ func (s *State) Dump() StateDump {
 			Plugin:  s.internal.Plugin.deepCopy(),
 			Monitor: s.internal.Monitor.deepCopy(),
 			NeonVM:  s.internal.NeonVM.deepCopy(),
-			Metrics: shallowCopy[api.Metrics](s.internal.Metrics),
+			Metrics: shallowCopy[Metrics](s.internal.Metrics),
 		},
 	}
 }

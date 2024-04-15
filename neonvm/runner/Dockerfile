@@ -54,6 +54,8 @@ RUN apk add --no-cache \
     e2fsprogs \
     qemu-system-x86_64 \
     qemu-img \
+    parted \
+    sfdisk \
 	cgroup-tools \
     openssh
 

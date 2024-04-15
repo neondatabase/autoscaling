@@ -162,7 +162,7 @@ type ExecutorCoreUpdater struct {
 
 // UpdateMetrics calls (*core.State).UpdateMetrics() on the inner core.State and runs withLock while
 // holding the lock.
-func (c ExecutorCoreUpdater) UpdateMetrics(metrics api.Metrics, withLock func()) {
+func (c ExecutorCoreUpdater) UpdateMetrics(metrics core.Metrics, withLock func()) {
 	c.core.update(func(state *core.State) {
 		state.UpdateMetrics(metrics)
 		withLock()
