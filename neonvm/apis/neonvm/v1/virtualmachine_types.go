@@ -203,6 +203,7 @@ type GuestSettings struct {
 	// *really* a good way to allow both strings and structs in the field without that.
 	//
 	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=any
 	// +optional
 	Swap *SwapInfo `json:"swap,omitempty"`
 }

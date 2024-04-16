@@ -2474,6 +2474,7 @@ spec:
                           having Schemaless validation, but there isn't *really* a
                           good way to allow both strings and structs in the field
                           without that."
+                        type: any
                       sysctl:
                         description: Individual lines to add to a sysctl.conf file.
                           See sysctl.conf(5) for more
