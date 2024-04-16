@@ -22,5 +22,4 @@ spec:
       image: vm-postgres:15-bullseye
       size: 1Gi
     settings:
-      swap:
-        size: 1Gi
+      swap: 1Gi
