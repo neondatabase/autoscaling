@@ -2466,10 +2466,21 @@ spec:
                     - image
                     type: object
                   settings:
-                    description: "Additional settings for the VM. Cannot be updated.
-                      \n Note: kubebuilder generally recommends against having Schemaless
-                      validation, but there isn't *really* a good way to allow both
-                      strings and structs in the field without that."
+                    description: Additional settings for the VM. Cannot be updated.
+                    properties:
+                      swap:
+                        description: "Swap controls settings for adding a swap disk
+                          to the VM. \n Note: kubebuilder generally recommends against
+                          having Schemaless validation, but there isn't *really* a
+                          good way to allow both strings and structs in the field
+                          without that."
+                      sysctl:
+                        description: Individual lines to add to a sysctl.conf file.
+                          See sysctl.conf(5) for more
+                        items:
+                          type: string
+                        type: array
+                    type: object
                 type: object
               imagePullSecrets:
                 items:

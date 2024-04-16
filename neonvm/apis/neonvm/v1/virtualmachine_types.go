@@ -188,11 +188,7 @@ type Guest struct {
 	// Additional settings for the VM.
 	// Cannot be updated.
 	//
-	// Note: kubebuilder generally recommends against having Schemaless validation, but there isn't
-	// *really* a good way to allow both strings and structs in the field without that.
-	//
 	// +optional
-	// +kubebuilder:validation:Schemaless
 	Settings *GuestSettings `json:"settings,omitempty"`
 }
 
@@ -202,6 +198,11 @@ type GuestSettings struct {
 	Sysctl []string `json:"sysctl,omitempty"`
 
 	// Swap controls settings for adding a swap disk to the VM.
+	//
+	// Note: kubebuilder generally recommends against having Schemaless validation, but there isn't
+	// *really* a good way to allow both strings and structs in the field without that.
+	//
+	// +kubebuilder:validation:Schemaless
 	// +optional
 	Swap *SwapInfo `json:"swap,omitempty"`
 }
