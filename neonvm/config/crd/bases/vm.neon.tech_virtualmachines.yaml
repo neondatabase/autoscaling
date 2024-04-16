@@ -2466,40 +2466,10 @@ spec:
                     - image
                     type: object
                   settings:
-                    description: Additional settings for the VM. Cannot be updated.
-                    properties:
-                      swap:
-                        description: Swap controls settings for adding a swap disk
-                          to the VM.
-                        properties:
-                          size:
-                            anyOf:
-                            - type: integer
-                            - type: string
-                            description: Size sets the size of the swap in the VM.
-                              The amount of space used on the host may be slightly
-                              more (by a few MiBs). The information reported by `cat
-                              /proc/meminfo` may show slightly less, due to a single
-                              page header (typically 4KiB).
-                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                            x-kubernetes-int-or-string: true
-                          skipSwapon:
-                            description: "SkipSwapon instructs the VM to *not* run
-                              swapon for the swap on startup. \n This is intended
-                              to be used in cases where you will *always* resize the
-                              swap post-startup, and don't need it available before
-                              that resizing."
-                            type: boolean
-                        required:
-                        - size
-                        type: object
-                      sysctl:
-                        description: Individual lines to add to a sysctl.conf file.
-                          See sysctl.conf(5) for more
-                        items:
-                          type: string
-                        type: array
-                    type: object
+                    description: "Additional settings for the VM. Cannot be updated.
+                      \n Note: kubebuilder generally recommends against having Schemaless
+                      validation, but there isn't *really* a good way to allow both
+                      strings and structs in the field without that."
                 type: object
               imagePullSecrets:
                 items:

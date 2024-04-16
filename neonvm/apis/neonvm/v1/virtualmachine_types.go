@@ -187,7 +187,12 @@ type Guest struct {
 
 	// Additional settings for the VM.
 	// Cannot be updated.
+	//
+	// Note: kubebuilder generally recommends against having Schemaless validation, but there isn't
+	// *really* a good way to allow both strings and structs in the field without that.
+	//
 	// +optional
+	// +kubebuilder:validation:Schemaless
 	Settings *GuestSettings `json:"settings,omitempty"`
 }
 
