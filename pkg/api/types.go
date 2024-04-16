@@ -169,9 +169,9 @@ func (v PluginProtoVersion) RepresentsMemoryAsBytes() bool {
 // IncludesExtendedMetrics returns whether this version of the protocol includes the AgentRequest's
 // metrics loadAvg5M and memoryUsageBytes.
 //
-// This is true for all versions below v4.0.
+// This is true for all versions below v5.0.
 func (v PluginProtoVersion) IncludesExtendedMetrics() bool {
-	return v < PluginProtoV4_0
+	return v < PluginProtoV5_0
 }
 
 // AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
