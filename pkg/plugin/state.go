@@ -410,7 +410,7 @@ func (s *pluginState) getOrFetchNodeState(
 		return nil, err
 	}
 
-	// update maxTotalReservableCPU and maxTotalReservableMemSlots if there's new maxima
+	// update maxTotalReservableCPU and maxTotalReservableMem if there's new maxima
 	if n.cpu.Total > s.maxTotalReservableCPU {
 		s.maxTotalReservableCPU = n.cpu.Total
 	}
