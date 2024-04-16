@@ -49,3 +49,36 @@ func TestSwapInfoBackwardsCompatibility(t *testing.T) {
 		assert.Equal(t, parsedWrapper.Swap, &c.parsed)
 	}
 }
+
+func TestSwapInfoForwardsCompatibility(t *testing.T) {
+	cases := []struct {
+		input  vmv1.SwapInfo
+		output string
+	}{
+		// Forwards compatibility test
+		{
+			input: vmv1.SwapInfo{
+				Size:       resource.MustParse("1Gi"),
+				SkipSwapon: nil,
+			},
+			output: `"1Gi"`,
+		},
+		// Simple test for current output format
+		{
+			input: vmv1.SwapInfo{
+				Size:       resource.MustParse("3Gi"),
+				SkipSwapon: &[]bool{true}[0],
+			},
+			output: `{"size":"3Gi","skipSwapon":true}`,
+		},
+	}
+
+	for i, c := range cases {
+		marshaled, err := json.Marshal(&c.input)
+		if !assert.Nil(t, err, "marshaling failed for case %d", i) {
+			continue
+		}
+
+		assert.Equal(t, string(marshaled), c.output)
+	}
+}

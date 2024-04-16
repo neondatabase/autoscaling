@@ -215,6 +215,23 @@ type SwapInfo struct {
 	SkipSwapon *bool `json:"skipSwapon,omitempty"`
 }
 
+// SwapInfo implements MarshalJSON to allow backwards compatibility with a clients using a previous
+// version of NeonVM that expect the type to be a resource.Quantity instead of a struct.
+func (s *SwapInfo) MarshalJSON() ([]byte, error) {
+	if s.SkipSwapon == nil {
+		return json.Marshal(&s.Size)
+	}
+
+	var si struct {
+		Size       resource.Quantity `json:"size"`
+		SkipSwapon *bool             `json:"skipSwapon,omitempty"`
+	}
+	si.Size = s.Size
+	si.SkipSwapon = s.SkipSwapon
+
+	return json.Marshal(&si)
+}
+
 // SwapInfo implements UnmarshalJSON to allow backwards compatibility with a previous version of
 // NeonVM that used a resource.Quantity to control swap, instead of a struct.
 //
