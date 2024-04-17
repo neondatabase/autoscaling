@@ -681,7 +681,7 @@ func run(logger *zap.Logger) error {
 	var swapInfo *vmv1.SwapInfo
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
-		swapInfo, err = vmSpec.Guest.Settings.SwapInfo()
+		swapInfo, err = vmSpec.Guest.Settings.GetSwapInfo()
 		if err != nil {
 			return fmt.Errorf("failed to get SwapInfo from VirtualMachine object: %w", err)
 		}

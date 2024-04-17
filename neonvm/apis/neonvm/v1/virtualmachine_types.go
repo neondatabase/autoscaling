@@ -199,41 +199,41 @@ type GuestSettings struct {
 
 	// Swap adds a swap disk with the provided size.
 	//
-	// If Swap is provided, SwapV2 MUST NOT be provided, and vice versa.
+	// If Swap is provided, SwapInfo MUST NOT be provided, and vice versa.
 	//
 	// +optional
 	Swap *resource.Quantity `json:"swap,omitempty"`
 
-	// SwapV2 controls settings for adding a swap disk to the VM.
+	// SwapInfo controls settings for adding a swap disk to the VM.
 	//
-	// SwapV2 is a temporary newer version of the Swap field.
+	// SwapInfo is a temporary newer version of the Swap field.
 	//
-	// Eventually, after all VMs have moved from Swap to SwapV2, we can change the type of the Swap
-	// field to SwapInfo, move VMs from SwapV2 back to Swap, and then remove SwapV2.
+	// Eventually, after all VMs have moved from Swap to SwapInfo, we can change the type of the Swap
+	// field to SwapInfo, move VMs from SwapInfo back to Swap, and then remove SwapInfo.
 	//
 	// More information here: https://neondb.slack.com/archives/C06SW383C79/p1713298689471319
 	//
 	// +optional
-	SwapV2 *SwapInfo `json:"swapV2,omitempty"`
+	SwapInfo *SwapInfo `json:"swapInfo,omitempty"`
 }
 
 func (s *GuestSettings) WithoutSwapFields() *GuestSettings {
 	return &GuestSettings{
-		Sysctl: s.Sysctl,
-		Swap:   nil,
-		SwapV2: nil,
+		Sysctl:   s.Sysctl,
+		Swap:     nil,
+		SwapInfo: nil,
 	}
 }
 
 // SwapInfo returns information about the swap requested, if there is any.
 //
-// This is an abstraction over the Swap/SwapV2 fields, providing a unified internal interface.
+// This is an abstraction over the Swap/SwapInfo fields, providing a unified internal interface.
 //
-// SwapInfo returns error if both Swap and SwapV2 are provided. Typically the Kubernetes API
+// SwapInfo returns error if both Swap and SwapInfo are provided. Typically the Kubernetes API
 // guarantees that is not the case.
-func (s *GuestSettings) SwapInfo() (*SwapInfo, error) {
-	if s.Swap != nil && s.SwapV2 != nil {
-		return nil, errors.New("cannot have both 'swap' and 'swapV2' enabled")
+func (s *GuestSettings) GetSwapInfo() (*SwapInfo, error) {
+	if s.Swap != nil && s.SwapInfo != nil {
+		return nil, errors.New("cannot have both 'swap' and 'swapInfo' enabled")
 	}
 
 	if s.Swap != nil {
@@ -241,8 +241,8 @@ func (s *GuestSettings) SwapInfo() (*SwapInfo, error) {
 			Size:       *s.Swap,
 			SkipSwapon: nil,
 		}, nil
-	} else if s.SwapV2 != nil {
-		return &[]SwapInfo{*s.SwapV2}[0], nil
+	} else if s.SwapInfo != nil {
+		return &[]SwapInfo{*s.SwapInfo}[0], nil
 	}
 
 	return nil, nil

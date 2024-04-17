@@ -139,8 +139,8 @@ func (r *VirtualMachine) ValidateCreate() error {
 
 	// validate that at most one type of swap is provided:
 	if settings := r.Spec.Guest.Settings; settings != nil {
-		if settings.Swap != nil && settings.SwapV2 != nil {
-			return errors.New("cannot have both 'swap' and 'swapV2' enabled")
+		if settings.Swap != nil && settings.SwapInfo != nil {
+			return errors.New("cannot have both 'swap' and 'swapInfo' enabled")
 		}
 	}
 
@@ -170,7 +170,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 				//nolint:gocritic // linter complains that we could say 'nil' directly. It's typed vs untyped nil.
 				return v.Spec.Guest.Settings
 			} else {
-				// Selectively allow swap fields to change between Swap and SwapV2. More below.
+				// Selectively allow swap fields to change between Swap and SwapInfo. More below.
 				return v.Spec.Guest.Settings.WithoutSwapFields()
 			}
 		}},
@@ -193,16 +193,16 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	// new one to proceed. This is to prevent any VirtualMachine objects getting stuck during
 	// rollout of swap changes.
 	if r.Spec.Guest.Settings != nil /* from above, if new GuestSettings != nil, then old is as well */ {
-		newSwapInfo, err := r.Spec.Guest.Settings.SwapInfo()
+		newSwapInfo, err := r.Spec.Guest.Settings.GetSwapInfo()
 		if err != nil {
 			return err
 		}
-		oldSwapInfo, err := before.Spec.Guest.Settings.SwapInfo()
+		oldSwapInfo, err := before.Spec.Guest.Settings.GetSwapInfo()
 		if err != nil {
 			// do nothing; we'll allow fixing broken objects.
 		} else {
 			if !reflect.DeepEqual(newSwapInfo, oldSwapInfo) {
-				return errors.New(".spec.guest.settings.{swap,swapV2} is immutable")
+				return errors.New(".spec.guest.settings.{swap,swapInfo} is immutable")
 			}
 		}
 	}

@@ -7,13 +7,13 @@ commands:
       
       # Check that we're *not* allowed to update the object if we're e.g. removing swap
       error="$(kubectl patch -n "$NAMESPACE" neonvm example --type=json --patch '[{"op": "remove", "path": "/spec/guest/settings/swap"}]' 2>&1 || true)"
-      expected='Error from server (.spec.guest.settings.{swap,swapV2} is immutable): admission webhook "vvirtualmachine.kb.io" denied the request: .spec.guest.settings.{swap,swapV2} is immutable'
+      expected='Error from server (.spec.guest.settings.{swap,swapInfo} is immutable): admission webhook "vvirtualmachine.kb.io" denied the request: .spec.guest.settings.{swap,swapInfo} is immutable'
       if [ "$error" != "$expected" ]; then
           echo "Expected error removing swap, got: $error"
       fi
 
       # Do the actual patch to migrate from swap v1 to v2
       kubectl patch -n "$NAMESPACE" neonvm example --type=json --patch '[
-        {"op": "add", "path": "/spec/guest/settings/swapV2", "value": {}},
-        {"op": "move", "from": "/spec/guest/settings/swap", "path": "/spec/guest/settings/swapV2/size"}
+        {"op": "add", "path": "/spec/guest/settings/swapInfo", "value": {}},
+        {"op": "move", "from": "/spec/guest/settings/swap", "path": "/spec/guest/settings/swapInfo/size"}
       ]'

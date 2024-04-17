@@ -1612,7 +1612,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 	}
 
 	if settings := virtualmachine.Spec.Guest.Settings; settings != nil {
-		swapInfo, err := settings.SwapInfo()
+		swapInfo, err := settings.GetSwapInfo()
 		if err != nil {
 			return nil, fmt.Errorf("error getting SwapInfo from VirtualMachine guest settings: %w", err)
 		}

@@ -23,6 +23,6 @@ spec:
       size: 1Gi
     settings:
       # use new format
-      swapV2:
+      swapInfo:
         size: 1Gi
         skipSwapon: true

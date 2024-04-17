@@ -9,5 +9,5 @@ metadata:
 spec:
   guest:
     settings:
-      swapV2:
+      swapInfo:
         size: 1Gi
