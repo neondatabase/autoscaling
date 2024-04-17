@@ -681,7 +681,10 @@ func run(logger *zap.Logger) error {
 	var swapInfo *vmv1.SwapInfo
 	if vmSpec.Guest.Settings != nil {
 		sysctl = vmSpec.Guest.Settings.Sysctl
-		swapInfo = vmSpec.Guest.Settings.Swap
+		swapInfo, err = vmSpec.Guest.Settings.GetSwapInfo()
+		if err != nil {
+			return fmt.Errorf("failed to get SwapInfo from VirtualMachine object: %w", err)
+		}
 
 		// By default, Linux sets the size of /dev/shm to 1/2 of the physical memory.  If
 		// swap is configured, we want to set /dev/shm higher, because we can autoscale

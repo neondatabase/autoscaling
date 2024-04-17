@@ -22,7 +22,6 @@ spec:
       image: vm-postgres:15-bullseye
       size: 1Gi
     settings:
-      # use new format
-      swapInfo:
-        size: 1Gi
-        skipSwapon: true
+      # use old format at the start
+      swap: 1Gi
+

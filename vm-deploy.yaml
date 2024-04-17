@@ -24,3 +24,5 @@ spec:
       - port: 5432 # postgres
       - port: 9100 # metrics
       - port: 10301 # monitor
+    settings:
+      swap: 1Gi
