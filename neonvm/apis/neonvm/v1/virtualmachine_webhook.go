@@ -191,7 +191,11 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	//
 	// If there's an error with the old object, but NOT an error with the new one, we'll allow the
 	// new one to proceed. This is to prevent any VirtualMachine objects getting stuck during
-	// rollout of swap changes.
+	// rollout of swap changes, in case there's logic bugs in handling the change.
+	//
+	// If we didn't have that exception, we could *in theory* end up with an object in a bad state,
+	// but be unable to fix it because the old state is bad - even if the new one is ok - because
+	// the webhook would return an error from the old state being invalid, which disallows the update
 	if r.Spec.Guest.Settings != nil /* from above, if new GuestSettings != nil, then old is as well */ {
 		newSwapInfo, err := r.Spec.Guest.Settings.GetSwapInfo()
 		if err != nil {
