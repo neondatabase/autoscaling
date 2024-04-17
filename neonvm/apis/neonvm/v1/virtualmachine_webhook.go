@@ -167,6 +167,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.guest.env", func(v *VirtualMachine) any { return v.Spec.Guest.Env }},
 		{".spec.guest.settings", func(v *VirtualMachine) any {
 			if v.Spec.Guest.Settings == nil {
+				//nolint:gocritic // linter complains that we could say 'nil' directly. It's typed vs untyped nil.
 				return v.Spec.Guest.Settings
 			} else {
 				// Selectively allow swap fields to change between Swap and SwapV2. More below.
