@@ -158,7 +158,8 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.guest.command", func(v *VirtualMachine) any { return v.Spec.Guest.Command }},
 		{".spec.guest.args", func(v *VirtualMachine) any { return v.Spec.Guest.Args }},
 		{".spec.guest.env", func(v *VirtualMachine) any { return v.Spec.Guest.Env }},
-		{".spec.guest.settings", func(v *VirtualMachine) any { return v.Spec.Guest.Settings }},
+		// Temporarily ignored in order to unbork. See https://neondb.slack.com/archives/C06SW383C79/p1713385842900859
+		// {".spec.guest.settings", func(v *VirtualMachine) any { return v.Spec.Guest.Settings }},
 		{".spec.disks", func(v *VirtualMachine) any { return v.Spec.Disks }},
 		{".spec.podResources", func(v *VirtualMachine) any { return v.Spec.PodResources }},
 		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},
