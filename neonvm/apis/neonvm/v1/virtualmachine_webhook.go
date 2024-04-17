@@ -137,6 +137,13 @@ func (r *VirtualMachine) ValidateCreate() error {
 		}
 	}
 
+	// validate that at most one type of swap is provided:
+	if settings := r.Spec.Guest.Settings; settings != nil {
+		if settings.Swap != nil && settings.SwapV2 != nil {
+			return errors.New("cannot have both 'swap' and 'swapV2' enabled")
+		}
+	}
+
 	return nil
 }
 
@@ -158,7 +165,14 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.guest.command", func(v *VirtualMachine) any { return v.Spec.Guest.Command }},
 		{".spec.guest.args", func(v *VirtualMachine) any { return v.Spec.Guest.Args }},
 		{".spec.guest.env", func(v *VirtualMachine) any { return v.Spec.Guest.Env }},
-		{".spec.guest.settings", func(v *VirtualMachine) any { return v.Spec.Guest.Settings }},
+		{".spec.guest.settings", func(v *VirtualMachine) any {
+			if v.Spec.Guest.Settings == nil {
+				return v.Spec.Guest.Settings
+			} else {
+				// Selectively allow swap fields to change between Swap and SwapV2. More below.
+				return v.Spec.Guest.Settings.WithoutSwapFields()
+			}
+		}},
 		{".spec.disks", func(v *VirtualMachine) any { return v.Spec.Disks }},
 		{".spec.podResources", func(v *VirtualMachine) any { return v.Spec.PodResources }},
 		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},
@@ -169,6 +183,26 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	for _, info := range immutableFields {
 		if !reflect.DeepEqual(info.getter(r), info.getter(before)) {
 			return fmt.Errorf("%s is immutable", info.fieldName)
+		}
+	}
+
+	// validate swap changes by comparing the SwapInfo for each.
+	//
+	// If there's an error with the old object, but NOT an error with the new one, we'll allow the
+	// new one to proceed. This is to prevent any VirtualMachine objects getting stuck during
+	// rollout of swap changes.
+	if r.Spec.Guest.Settings != nil /* from above, if new GuestSettings != nil, then old is as well */ {
+		newSwapInfo, err := r.Spec.Guest.Settings.SwapInfo()
+		if err != nil {
+			return err
+		}
+		oldSwapInfo, err := before.Spec.Guest.Settings.SwapInfo()
+		if err != nil {
+			// do nothing; we'll allow fixing broken objects.
+		} else {
+			if !reflect.DeepEqual(newSwapInfo, oldSwapInfo) {
+				return errors.New(".spec.guest.settings.{swap,swapV2} is immutable")
+			}
 		}
 	}
 

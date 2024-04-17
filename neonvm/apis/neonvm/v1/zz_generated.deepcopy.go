@@ -223,6 +223,11 @@ func (in *GuestSettings) DeepCopyInto(out *GuestSettings) {
 	}
 	if in.Swap != nil {
 		in, out := &in.Swap, &out.Swap
+		x := (*in).DeepCopy()
+		*out = &x
+	}
+	if in.SwapV2 != nil {
+		in, out := &in.SwapV2, &out.SwapV2
 		*out = new(SwapInfo)
 		(*in).DeepCopyInto(*out)
 	}

@@ -18,6 +18,7 @@ package v1
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -196,9 +197,55 @@ type GuestSettings struct {
 	// +optional
 	Sysctl []string `json:"sysctl,omitempty"`
 
-	// Swap controls settings for adding a swap disk to the VM.
+	// Swap adds a swap disk with the provided size.
+	//
+	// If Swap is provided, SwapV2 MUST NOT be provided, and vice versa.
+	//
 	// +optional
-	Swap *SwapInfo `json:"swap,omitempty"`
+	Swap *resource.Quantity `json:"swap,omitempty"`
+
+	// SwapV2 controls settings for adding a swap disk to the VM.
+	//
+	// SwapV2 is a temporary newer version of the Swap field.
+	//
+	// Eventually, after all VMs have moved from Swap to SwapV2, we can change the type of the Swap
+	// field to SwapInfo, move VMs from SwapV2 back to Swap, and then remove SwapV2.
+	//
+	// More information here: https://neondb.slack.com/archives/C06SW383C79/p1713298689471319
+	//
+	// +optional
+	SwapV2 *SwapInfo `json:"swapV2,omitempty"`
+}
+
+func (s *GuestSettings) WithoutSwapFields() *GuestSettings {
+	return &GuestSettings{
+		Sysctl: s.Sysctl,
+		Swap:   nil,
+		SwapV2: nil,
+	}
+}
+
+// SwapInfo returns information about the swap requested, if there is any.
+//
+// This is an abstraction over the Swap/SwapV2 fields, providing a unified internal interface.
+//
+// SwapInfo returns error if both Swap and SwapV2 are provided. Typically the Kubernetes API
+// guarantees that is not the case.
+func (s *GuestSettings) SwapInfo() (*SwapInfo, error) {
+	if s.Swap != nil && s.SwapV2 != nil {
+		return nil, errors.New("cannot have both 'swap' and 'swapV2' enabled")
+	}
+
+	if s.Swap != nil {
+		return &SwapInfo{
+			Size:       *s.Swap,
+			SkipSwapon: nil,
+		}, nil
+	} else if s.SwapV2 != nil {
+		return &[]SwapInfo{*s.SwapV2}[0], nil
+	}
+
+	return nil, nil
 }
 
 type SwapInfo struct {
@@ -213,33 +260,6 @@ type SwapInfo struct {
 	//
 	// +optional
 	SkipSwapon *bool `json:"skipSwapon,omitempty"`
-}
-
-// SwapInfo implements UnmarshalJSON to allow backwards compatibility with a previous version of
-// NeonVM that used a resource.Quantity to control swap, instead of a struct.
-//
-// This is temporary, and WILL be removed in a future version.
-func (s *SwapInfo) UnmarshalJSON(b []byte) error {
-	// Try to unmarshal both ways
-	var si struct {
-		Size       resource.Quantity `json:"size"`
-		SkipSwapon *bool             `json:"skipSwapon,omitempty"`
-	}
-	if fstErr := json.Unmarshal(b, &si); fstErr != nil {
-		var q resource.Quantity
-		if sndErr := json.Unmarshal(b, &q); sndErr != nil {
-			// if both fail to unmarhsal, return the error as if we only tried to unmarshal into
-			// SwapInfo (and not resource.Quantity as well).
-			return fstErr
-		}
-		si.Size = q
-	}
-
-	*s = SwapInfo{
-		Size:       si.Size,
-		SkipSwapon: si.SkipSwapon,
-	}
-	return nil
 }
 
 type CPUs struct {
