@@ -12,7 +12,7 @@ assignees: ''
 <!--
 Improvement are for when something isn't a bug (because there's nothing
 *unexpected* per se), but there's still room for improvement. In contrast to
-feature requests this is less customer facting but more of an internal cleanup
+feature requests this is less customer facing but more of an internal cleanup
 or improvement.
 
 This area is the most important part! Sometimes we think one solution is best,
