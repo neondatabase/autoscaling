@@ -104,7 +104,7 @@ func NewS3Client(cfg S3ClientConfig, now func() time.Time) (S3Client, error) {
 
 	client := s3.NewFromConfig(s3Config, func(o *s3.Options) {
 		o.BaseEndpoint = &cfg.Endpoint
-		o.UsePathStyle = true
+		o.UsePathStyle = true // required for minio
 	})
 
 	return S3Client{
@@ -115,7 +115,7 @@ func NewS3Client(cfg S3ClientConfig, now func() time.Time) (S3Client, error) {
 }
 
 func (c S3Client) key() string {
-	// Example: year=2021/month=01/day=26/hh:mm:ssZ_{autoscaler_agent_id}.ndjson.gz
+	// Example: year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
 	now := c.now()
 	id := shortuuid.New()
 
