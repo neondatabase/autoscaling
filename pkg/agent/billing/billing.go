@@ -38,10 +38,7 @@ type HTTPClientConfig struct {
 
 type S3ClientConfig struct {
 	BaseClientConfig
-	Bucket         string `json:"bucket"`
-	Region         string `json:"region"`
-	PrefixInBucket string `json:"prefixInBucket"`
-	Endpoint       string `json:"endpoint"`
+	billing.S3ClientConfig
 }
 
 type BaseClientConfig struct {
@@ -108,7 +105,7 @@ func RunBillingMetricsCollector(
 		})
 	}
 	if c := conf.Clients.S3; c != nil {
-		client, err := billing.NewS3Client(c.Bucket, c.Region, c.PrefixInBucket, c.Endpoint, time.Now)
+		client, err := billing.NewS3Client(c.S3ClientConfig, time.Now)
 		if err != nil {
 			logger.Panic("Failed to create S3 client", zap.Error(err))
 		}

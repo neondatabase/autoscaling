@@ -82,32 +82,35 @@ func (c HTTPClient) LogFields() zap.Field {
 	return zap.String("url", c.URL)
 }
 
-type S3Client struct {
-	bucket, prefixInBucket string
-	client                 *s3.Client
-	now                    func() time.Time
+type S3ClientConfig struct {
+	Bucket         string `json:"bucket"`
+	Region         string `json:"region"`
+	PrefixInBucket string `json:"prefixInBucket"`
+	Endpoint       string `json:"endpoint"`
 }
 
-func NewS3Client(
-	bucket, region, prefixInBucket, endpoint string,
-	now func() time.Time,
-) (S3Client, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
+type S3Client struct {
+	cfg    S3ClientConfig
+	client *s3.Client
+	now    func() time.Time
+}
+
+func NewS3Client(cfg S3ClientConfig, now func() time.Time) (S3Client, error) {
+	s3Config, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(cfg.Region))
 
 	if err != nil {
 		return S3Client{}, err
 	}
 
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.BaseEndpoint = &endpoint
+	client := s3.NewFromConfig(s3Config, func(o *s3.Options) {
+		o.BaseEndpoint = &cfg.Endpoint
 		o.UsePathStyle = true
 	})
 
 	return S3Client{
-		bucket:         bucket,
-		prefixInBucket: prefixInBucket,
-		client:         client,
-		now:            now,
+		cfg:    cfg,
+		client: client,
+		now:    now,
 	}, nil
 }
 
@@ -121,7 +124,7 @@ func (c S3Client) key() string {
 		now.Format("15:04:05Z"),
 		id,
 	)
-	return fmt.Sprintf("%s/%s", c.prefixInBucket, filename)
+	return fmt.Sprintf("%s/%s", c.cfg.PrefixInBucket, filename)
 }
 
 type s3LogFields struct {
@@ -129,8 +132,8 @@ type s3LogFields struct {
 }
 
 func (c s3LogFields) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("bucket", c.bucket)
-	enc.AddString("prefixInBucket", c.prefixInBucket)
+	enc.AddString("bucket", c.cfg.Bucket)
+	enc.AddString("prefixInBucket", c.cfg.PrefixInBucket)
 	return nil
 }
 
@@ -152,7 +155,7 @@ func (c S3Client) Send(ctx context.Context, payload []byte, traceID TraceID) err
 
 	r := bytes.NewReader(buf.Bytes())
 	_, err = c.client.PutObject(ctx, &s3.PutObjectInput{ //nolint:exhaustruct // AWS SDK
-		Bucket: &c.bucket,
+		Bucket: &c.cfg.Bucket,
 		Key:    &key,
 		Body:   r,
 	})
