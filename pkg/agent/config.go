@@ -163,14 +163,27 @@ func (c *Config) validate() error {
 		zeroTmpl  = "field %q cannot be zero"
 	)
 
+	validateBaseBillingConfig := func(cfg *billing.BaseClientConfig, key string) {
+		erc.Whenf(ec, cfg.PushEverySeconds == 0, zeroTmpl, key+".pushEverySeconds")
+		erc.Whenf(ec, cfg.PushRequestTimeoutSeconds == 0, zeroTmpl, ".pushRequestTimeoutSeconds")
+		erc.Whenf(ec, cfg.MaxBatchSize == 0, zeroTmpl, ".maxBatchSize")
+	}
+
 	erc.Whenf(ec, c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
 	erc.Whenf(ec, c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
 	erc.Whenf(ec, c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
 	erc.Whenf(ec, c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
-	erc.Whenf(ec, c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.PushEverySeconds == 0, zeroTmpl, ".billing.clients.http.pushEverySeconds")
-	erc.Whenf(ec, c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.PushRequestTimeoutSeconds == 0, zeroTmpl, ".billing.clients.http.pushRequestTimeoutSeconds")
-	erc.Whenf(ec, c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.MaxBatchSize == 0, zeroTmpl, ".billing.clients.http.maxBatchSize")
-	erc.Whenf(ec, c.Billing.Clients.HTTP != nil && c.Billing.Clients.HTTP.URL == "", emptyTmpl, ".billing.clients.http.url")
+	if c.Billing.Clients.HTTP != nil {
+		validateBaseBillingConfig(&c.Billing.Clients.HTTP.BaseClientConfig, ".billing.clients.http")
+		erc.Whenf(ec, c.Billing.Clients.HTTP.URL == "", emptyTmpl, ".billing.clients.http.url")
+	}
+	if c.Billing.Clients.S3 != nil {
+		validateBaseBillingConfig(&c.Billing.Clients.S3.BaseClientConfig, "billing.clients.s3")
+		erc.Whenf(ec, c.Billing.Clients.S3.Bucket == "", emptyTmpl, ".billing.clients.s3.bucket")
+		erc.Whenf(ec, c.Billing.Clients.S3.Region == "", emptyTmpl, ".billing.clients.s3.region")
+		erc.Whenf(ec, c.Billing.Clients.S3.PrefixInBucket == "", emptyTmpl, ".billing.clients.s3.prefixInBucket")
+		erc.Whenf(ec, c.Billing.Clients.S3.Endpoint == "", emptyTmpl, ".billing.clients.s3.endpoint")
+	}
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
 	erc.Whenf(ec, c.Metrics.Port == 0, zeroTmpl, ".metrics.port")
