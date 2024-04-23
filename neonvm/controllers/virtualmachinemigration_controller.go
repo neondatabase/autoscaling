@@ -63,7 +63,7 @@ type VirtualMachineMigrationReconciler struct {
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
-// when the command <make manifests> is executed.
+// when controller-gen (used by 'make manifests') is executed.
 // To know more about markers see: https://book.kubebuilder.io/reference/markers.html
 
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachinemigrations,verbs=get;list;watch;create;update;patch;delete
