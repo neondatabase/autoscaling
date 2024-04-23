@@ -87,7 +87,7 @@ type vmMetricsSeconds struct {
 }
 
 func RunBillingMetricsCollector(
-	backgroundCtx context.Context,
+	ctx context.Context,
 	parentLogger *zap.Logger,
 	conf *Config,
 	store VMStoreForNode,
@@ -105,7 +105,7 @@ func RunBillingMetricsCollector(
 		})
 	}
 	if c := conf.Clients.S3; c != nil {
-		client, err := billing.NewS3Client(c.S3ClientConfig, time.Now)
+		client, err := billing.NewS3Client(ctx, c.S3ClientConfig, time.Now)
 		if err != nil {
 			logger.Panic("Failed to create S3 client", zap.Error(err))
 		}
@@ -164,7 +164,7 @@ func RunBillingMetricsCollector(
 		select {
 		case <-collectTicker.C:
 			logger.Info("Collecting billing state")
-			if store.Stopped() && backgroundCtx.Err() == nil {
+			if store.Stopped() && ctx.Err() == nil {
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
@@ -172,7 +172,7 @@ func RunBillingMetricsCollector(
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, conf, billing.GetHostname(), queueWriters)
-		case <-backgroundCtx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}

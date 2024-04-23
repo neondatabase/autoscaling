@@ -95,8 +95,8 @@ type S3Client struct {
 	now    func() time.Time
 }
 
-func NewS3Client(cfg S3ClientConfig, now func() time.Time) (S3Client, error) {
-	s3Config, err := awsconfig.LoadDefaultConfig(context.TODO(), awsconfig.WithRegion(cfg.Region))
+func NewS3Client(ctx context.Context, cfg S3ClientConfig, now func() time.Time) (S3Client, error) {
+	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 
 	if err != nil {
 		return S3Client{}, err
