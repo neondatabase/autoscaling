@@ -127,18 +127,14 @@ func (c S3Client) generateKey() string {
 	return fmt.Sprintf("%s/%s", c.cfg.PrefixInBucket, filename)
 }
 
-type s3LogFields struct {
-	S3Client
-}
-
-func (c s3LogFields) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("bucket", c.cfg.Bucket)
-	enc.AddString("prefixInBucket", c.cfg.PrefixInBucket)
-	return nil
-}
-
 func (c S3Client) LogFields() zap.Field {
-	return zap.Inline(s3LogFields{c})
+	return zap.Inline(zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
+		enc.AddString("bucket", c.cfg.Bucket)
+		enc.AddString("prefixInBucket", c.cfg.PrefixInBucket)
+		enc.AddString("region", c.cfg.Region)
+		enc.AddString("endpoint", c.cfg.Endpoint)
+		return nil
+	}))
 }
 
 func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
