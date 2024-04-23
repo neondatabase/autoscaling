@@ -6,9 +6,28 @@ import os
 import sys
 import boto3
 import time
+import datetime
+
+def do_assert(condition, message="assert failed"):
+    if not condition:
+        raise Exception(message)
 
 
-def update_agent_biling_clients(billing):
+def update_agent_biling_config(billing_config: dict):
+    """
+    Updates the billing configuration for the autoscaling agent.
+
+    Args:
+        billing_config (dict): The new billing configuration to be applied.
+
+    Raises:
+        CalledProcessError: If the subprocess command returns a non-zero exit code.
+
+    This function updates the billing configuration for the autoscaling agent by retrieving the current
+    configuration from a Kubernetes ConfigMap named 'autoscaler-agent-config' in the 'kube-system' namespace.
+    The new billing configuration is then applied by executing a subprocess command using the 'kubectl' tool
+    to get the ConfigMap in JSON format and store it in the 'config' variable.
+    """
     config = subprocess.check_output(
         [
             "kubectl",
@@ -22,14 +41,16 @@ def update_agent_biling_clients(billing):
         ]
     )
     config = json.loads(config)
-    print(config)
+
+    # Extract existing config JSON
     agent_config_json = config["data"]["config.json"]
     agent_config = json.loads(agent_config_json)
-    agent_config["billing"] = billing
+    # Set the billing config and write back into the ConfigMap
+    agent_config["billing"] = billing_config
     agent_config_json = json.dumps(agent_config)
     config["data"]["config.json"] = agent_config_json
 
-    result = subprocess.check_call(
+    output = subprocess.check_output(
         [
             "kubectl",
             "patch",
@@ -43,12 +64,12 @@ def update_agent_biling_clients(billing):
             json.dumps(config),
         ]
     )
-    assert result == 0
+    print(output)
 
 
 def agent_add_s3():
     namespace = os.environ.get("NAMESPACE")
-    update_agent_biling_clients(
+    update_agent_biling_config(
         {
             "cpuMetricName": "effective_compute_seconds",
             "activeTimeMetricName": "active_time_seconds",
@@ -70,7 +91,7 @@ def agent_add_s3():
 
 
 def agent_remove_s3():
-    update_agent_biling_clients(
+    update_agent_biling_config(
         {
             "cpuMetricName": "effective_compute_seconds",
             "activeTimeMetricName": "active_time_seconds",
@@ -90,7 +111,20 @@ def s3_create_bucket(local_endpoint):
     s3.create_bucket(Bucket="metrics")
 
 
-def s3_check_file(local_endpoint):
+def s3_check_file(local_endpoint: str):
+    """
+    Waits for a file to be available in an S3 bucket and performs checks on the file, 
+    such as the format of the events and the time intervals.
+
+    Args:
+        local_endpoint (str): The endpoint URL of the local S3 service.
+
+    Raises:
+        Exception: If the file is not found in the S3 bucket.
+
+    Returns:
+        None
+    """
     s3 = boto3.client("s3", endpoint_url=local_endpoint)
     found = False
     for i in range(100):
@@ -104,25 +138,24 @@ def s3_check_file(local_endpoint):
     if not found:
         raise Exception("File not found in s3")
 
-    assert len(response["Contents"]) > 0
+    do_assert(len(response["Contents"]) > 0)
     key = response["Contents"][0]["Key"]
 
     # Example key:
     # autoscaler-agent/year=2024/month=04/day=12/07:19:27Z_DGFMM7kfyLFdJASCnJfEYT.ndjson.gz
-    assert key.startswith("autoscaler-agent")
-    assert key.endswith(".ndjson.gz")
+    do_assert(key.startswith("autoscaler-agent"))
+    do_assert(key.endswith(".ndjson.gz"))
 
     response = s3.get_object(Bucket="metrics", Key=key)
     result = subprocess.check_output(
         ["gzip", "-d", "-c"], input=response["Body"].read()
     )
     result = json.loads(result)
-    print(result)
 
-    assert "events" in result
+    do_assert("events" in result)
 
     events = result["events"]
-    assert len(events) > 0
+    do_assert(len(events) > 0, "No events found")
 
     # Example events[0]:
     #
@@ -135,7 +168,7 @@ def s3_check_file(local_endpoint):
     #   "stop_time": "2024-04-12T12:10:00.845237402Z",
     #   "value": 1
     # }
-    assert set(events[0].keys()) == set(
+    do_assert(set(events[0].keys()) == set(
         [
             "idempotency_key",
             "metric",
@@ -145,40 +178,53 @@ def s3_check_file(local_endpoint):
             "stop_time",
             "value",
         ]
-    ), events[0].keys()
+    ), "actual keys: %s" % events[0].keys())
+
+    start_time = datetime.datetime.strptime(
+        events[0]["start_time"].split(".")[0], "%Y-%m-%dT%H:%M:%S"
+    )
+    stop_time = datetime.datetime.strptime(
+        events[0]["stop_time"].split(".")[0], "%Y-%m-%dT%H:%M:%S"
+    )
+
+    # We have a 5 second interval, 10 seconds is a reasonable upper bound
+    do_assert(stop_time - start_time < datetime.timedelta(seconds=10)) 
+    
+    now = datetime.datetime.utcnow()
+    do_assert(now - stop_time < datetime.timedelta(seconds=10))
+
 
 
 class KubctlForward:
     def __init__(self):
         self.namespace = os.environ.get("NAMESPACE")
-        self.port = 12345  # arbitrary starting port
+        self.port = 56632  # arbitrary port
 
     def start(self):
-        while True:
-            self.process = subprocess.Popen(
-                [
-                    "kubectl",
-                    "port-forward",
-                    "service/minio-service",
-                    "%s:9000" % self.port,
-                    "-n",
-                    self.namespace,
-                ]
-            )
+        self.process = subprocess.Popen(
+            [
+                "kubectl",
+                "port-forward",
+                "service/minio-service",
+                "%s:9000" % self.port,
+                "-n",
+                self.namespace,
+            ]
+        )
 
-            time.sleep(1)
+        # Check if the process is still running after 1 second.  
+        # If the port is already in use, it would have exited.
+        time.sleep(1)
+        if self.process.poll() is not None:
+            raise Exception("Failed to start port-forward")
 
-            if self.process.poll() is None:
-                break
-
-            self.port += 1
 
     def stop(self):
         print("Killing forward")
         self.process.terminate()
         ret = self.process.wait()
         # -SIGTERM
-        assert ret == -15, ret
+        do_assert(ret == -15, "Wrong exit code: %s" % ret)
 
     def endpoint(self):
         return "http://localhost:%d" % self.port
@@ -186,9 +232,10 @@ class KubctlForward:
 
 def step2_init():
     forward = KubctlForward()
-    forward.start()
-
+    
     try:
+        forward.start()
+
         s3_create_bucket(forward.endpoint())
         agent_add_s3()
         agent_restart()
@@ -198,15 +245,13 @@ def step2_init():
 
 def step2_assert():
     forward = KubctlForward()
-    forward.start()
-
     try:
+        forward.start()
         s3_check_file(forward.endpoint())
     finally:
         forward.stop()
 
-
-if __name__ == "__main__":
+def main():
     forward = KubctlForward()
 
     action = sys.argv[1]
@@ -217,3 +262,6 @@ if __name__ == "__main__":
     elif action == "restore":
         agent_remove_s3()
         agent_restart()
+
+if __name__ == "__main__":
+    main()
