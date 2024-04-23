@@ -36,8 +36,8 @@ func GetHostname() string {
 }
 
 type Client interface {
-	Send(ctx context.Context, payload []byte, traceID TraceID) error
 	LogFields() zap.Field
+	send(ctx context.Context, payload []byte, traceID TraceID) error
 }
 
 type TraceID string
@@ -55,7 +55,7 @@ func NewHTTPClient(url string, c *http.Client) HTTPClient {
 	return HTTPClient{URL: fmt.Sprintf("%s/usage_events", url), httpc: c}
 }
 
-func (c HTTPClient) Send(ctx context.Context, payload []byte, traceID TraceID) error {
+func (c HTTPClient) send(ctx context.Context, payload []byte, traceID TraceID) error {
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(payload))
 	if err != nil {
 		return RequestError{Err: err}
@@ -141,7 +141,7 @@ func (c S3Client) LogFields() zap.Field {
 	return zap.Inline(s3LogFields{c})
 }
 
-func (c S3Client) Send(ctx context.Context, payload []byte, traceID TraceID) error {
+func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
 	key := c.key()
 	buf := bytes.Buffer{}
 
@@ -200,7 +200,7 @@ func Send[E Event](ctx context.Context, client Client, traceID TraceID, events [
 		return JSONError{Err: err}
 	}
 
-	return client.Send(ctx, payload, traceID)
+	return client.send(ctx, payload, traceID)
 }
 
 type JSONError struct {
