@@ -114,7 +114,7 @@ func NewS3Client(ctx context.Context, cfg S3ClientConfig, now func() time.Time) 
 	}, nil
 }
 
-func (c S3Client) key() string {
+func (c S3Client) generateKey() string {
 	// Example: year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
 	now := c.now()
 	id := shortuuid.New()
@@ -142,7 +142,7 @@ func (c S3Client) LogFields() zap.Field {
 }
 
 func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
-	key := c.key()
+	key := c.generateKey()
 	buf := bytes.Buffer{}
 
 	gzW := gzip.NewWriter(&buf)
