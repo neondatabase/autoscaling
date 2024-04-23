@@ -86,13 +86,13 @@ type vmMetricsSeconds struct {
 	activeTime time.Duration
 }
 
-func RunBillingMetricsCollector(
+func StartBillingMetricsCollector(
 	ctx context.Context,
 	parentLogger *zap.Logger,
 	conf *Config,
 	store VMStoreForNode,
 	metrics PromMetrics,
-) {
+) error {
 	logger := parentLogger.Named("billing")
 
 	var clients []clientInfo
@@ -107,7 +107,7 @@ func RunBillingMetricsCollector(
 	if c := conf.Clients.S3; c != nil {
 		client, err := billing.NewS3Client(ctx, c.S3ClientConfig, time.Now)
 		if err != nil {
-			logger.Panic("Failed to create S3 client", zap.Error(err))
+			return fmt.Errorf("Failed to create S3 client: %w", err)
 		}
 		logger.Info("Created S3 client",
 			zap.String("bucket", c.Bucket),
@@ -121,6 +121,18 @@ func RunBillingMetricsCollector(
 			config: c.BaseClientConfig,
 		})
 	}
+	go runBillingMetricsCollector(ctx, logger, conf, store, metrics, clients)
+	return nil
+}
+
+func runBillingMetricsCollector(
+	ctx context.Context,
+	logger *zap.Logger,
+	conf *Config,
+	store VMStoreForNode,
+	metrics PromMetrics,
+	clients []clientInfo,
+) {
 
 	collectTicker := time.NewTicker(time.Second * time.Duration(conf.CollectEverySeconds))
 	defer collectTicker.Stop()
