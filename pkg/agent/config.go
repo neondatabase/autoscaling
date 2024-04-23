@@ -164,9 +164,9 @@ func (c *Config) validate() error {
 	)
 
 	validateBaseBillingConfig := func(cfg *billing.BaseClientConfig, key string) {
-		erc.Whenf(ec, cfg.PushEverySeconds == 0, zeroTmpl, key+".pushEverySeconds")
-		erc.Whenf(ec, cfg.PushRequestTimeoutSeconds == 0, zeroTmpl, ".pushRequestTimeoutSeconds")
-		erc.Whenf(ec, cfg.MaxBatchSize == 0, zeroTmpl, ".maxBatchSize")
+		erc.Whenf(ec, cfg.PushEverySeconds == 0, zeroTmpl, fmt.Sprintf("%s.pushEverySeconds", key))
+		erc.Whenf(ec, cfg.PushRequestTimeoutSeconds == 0, zeroTmpl, fmt.Sprintf("%s.pushRequestTimeoutSeconds", key))
+		erc.Whenf(ec, cfg.MaxBatchSize == 0, zeroTmpl, fmt.Sprintf("%s.maxBatchSize", key))
 	}
 
 	erc.Whenf(ec, c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")

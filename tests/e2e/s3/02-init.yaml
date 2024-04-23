@@ -11,7 +11,7 @@ commands:
       
       ../.venv/bin/python3 utils.py step2_init
 
-      # The reason we put the assert here as well is that a seprate
+      # The reason we put the assert here as well is that a separate
       # TestAssert step has different semantics:
       #  1. It has a different home directory (root of the repo)
       #  2. If the assert fails, the the assert step keeps retrying
