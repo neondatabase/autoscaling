@@ -142,13 +142,19 @@ func (c S3Client) LogFields() zap.Field {
 }
 
 func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
+	// Source of truth for the storage format:
+	// https://github.com/neondatabase/cloud/issues/11199#issuecomment-1992549672
+
 	key := c.generateKey()
 	buf := bytes.Buffer{}
 
 	gzW := gzip.NewWriter(&buf)
 	_, err := gzW.Write(payload)
-	_ = gzW.Close()
+	if err != nil {
+		return RequestError{Err: err}
+	}
 
+	err = gzW.Close() // Have to close it before reading the buffer
 	if err != nil {
 		return RequestError{Err: err}
 	}
