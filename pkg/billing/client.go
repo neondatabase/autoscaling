@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/lithammer/shortuuid"
 	"go.uber.org/zap"
@@ -96,7 +96,7 @@ type S3Client struct {
 }
 
 func NewS3Client(cfg S3ClientConfig, now func() time.Time) (S3Client, error) {
-	s3Config, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(cfg.Region))
+	s3Config, err := awsconfig.LoadDefaultConfig(context.TODO(), awsconfig.WithRegion(cfg.Region))
 
 	if err != nil {
 		return S3Client{}, err
