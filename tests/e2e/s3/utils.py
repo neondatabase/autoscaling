@@ -262,6 +262,8 @@ def main():
     elif action == "restore":
         agent_remove_s3()
         agent_restart()
+    else:
+        raise Exception("Unknown action: %s" % action)
 
 if __name__ == "__main__":
     main()
