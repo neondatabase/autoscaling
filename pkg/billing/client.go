@@ -92,10 +92,9 @@ type S3ClientConfig struct {
 type S3Client struct {
 	cfg    S3ClientConfig
 	client *s3.Client
-	now    func() time.Time
 }
 
-func NewS3Client(ctx context.Context, cfg S3ClientConfig, now func() time.Time) (S3Client, error) {
+func NewS3Client(ctx context.Context, cfg S3ClientConfig) (S3Client, error) {
 	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 
 	if err != nil {
@@ -110,13 +109,12 @@ func NewS3Client(ctx context.Context, cfg S3ClientConfig, now func() time.Time) 
 	return S3Client{
 		cfg:    cfg,
 		client: client,
-		now:    now,
 	}, nil
 }
 
 func (c S3Client) generateKey() string {
 	// Example: year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
-	now := c.now()
+	now := time.Now()
 	id := shortuuid.New()
 
 	filename := fmt.Sprintf("year=%d/month=%02d/day=%02d/%s_%s.ndjson.gz",

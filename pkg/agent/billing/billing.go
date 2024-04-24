@@ -105,7 +105,7 @@ func StartBillingMetricsCollector(
 		})
 	}
 	if c := conf.Clients.S3; c != nil {
-		client, err := billing.NewS3Client(ctx, c.S3ClientConfig, time.Now)
+		client, err := billing.NewS3Client(ctx, c.S3ClientConfig)
 		if err != nil {
 			return fmt.Errorf("Failed to create S3 client: %w", err)
 		}
