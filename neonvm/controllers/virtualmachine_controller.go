@@ -167,17 +167,29 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	statusBefore := virtualmachine.Status.DeepCopy()
-	if err := r.doReconcile(ctx, &virtualmachine); err != nil {
+
+	now := time.Now()
+	err := r.doReconcile(ctx, &virtualmachine)
+	since := time.Since(now)
+
+	if err != nil {
 		r.Recorder.Eventf(&virtualmachine, corev1.EventTypeWarning, "Failed",
 			"Failed to reconcile (%s): %s", virtualmachine.Name, err)
+		log.Error(err, "Failed to reconcile VirtualMachine",
+			"virtualmachine", virtualmachine.Name, "duration", since.String())
+		r.Metrics.reconcileDurationFailure.Observe(since.Seconds())
 		return ctrl.Result{}, err
 	}
+
+	r.Metrics.reconcileDurationSuccessful.Observe(since.Seconds())
+	log.Info("Successful reconciliation", "duration", since.String())
 
 	// If the status changed, try to update the object
 	if !DeepEqual(statusBefore, virtualmachine.Status) {
 		if err := r.Status().Update(ctx, &virtualmachine); err != nil {
 			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
 				"virtualmachine", virtualmachine.Name)
+			r.Metrics.statusUpdateFailureCount.Inc()
 			return ctrl.Result{}, err
 		}
 	}

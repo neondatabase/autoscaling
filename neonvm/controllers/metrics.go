@@ -19,6 +19,9 @@ type ReconcilerMetrics struct {
 	runnerCreationToVMRunningTime  prometheus.Histogram
 	vmCreationToVMRunningTime      prometheus.Histogram
 	vmRestartCounts                prometheus.Counter
+	reconcileDurationSuccessful    prometheus.Histogram
+	reconcileDurationFailure       prometheus.Histogram
+	statusUpdateFailureCount       prometheus.Counter
 }
 
 func MakeReconcilerMetrics() ReconcilerMetrics {
@@ -60,6 +63,26 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 			prometheus.CounterOpts{
 				Name: "vm_restarts_count",
 				Help: "Total number of VM restarts across the cluster captured by VirtualMachine reconciler",
+			},
+		)),
+		reconcileDurationSuccessful: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "reconcile_duration_successful_seconds",
+				Help:    "Time duration of successful reconciles",
+				Buckets: buckets,
+			},
+		)),
+		reconcileDurationFailure: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "reconcile_duration_failure_seconds",
+				Help:    "Time duration of failed reconciles",
+				Buckets: buckets,
+			},
+		)),
+		statusUpdateFailureCount: util.RegisterMetric(metrics.Registry, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "status_update_failure_count",
+				Help: "Total number of failures to update the status of a VirtualMachine",
 			},
 		)),
 	}
