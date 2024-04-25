@@ -176,7 +176,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		r.Recorder.Eventf(&virtualmachine, corev1.EventTypeWarning, "Failed",
 			"Failed to reconcile (%s): %s", virtualmachine.Name, err)
 		log.Error(err, "Failed to reconcile VirtualMachine",
-			"virtualmachine", virtualmachine.Name, "duration", since.String())
+			"duration", since.String())
 		r.Metrics.reconcileDurationFailure.Observe(since.Seconds())
 		return ctrl.Result{}, err
 	}
