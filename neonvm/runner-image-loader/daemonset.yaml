@@ -6,6 +6,10 @@ spec:
   selector:
     matchLabels:
       name: neonvm-runner-image-loader
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 3
   template:
     metadata:
       labels:
