@@ -8,14 +8,15 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 	"go.uber.org/multierr"
+	"go.uber.org/zap"
 )
 
 func ExampleGroup() {
-	g := taskgroup.Group{}
-	g.Go(func() error {
+	g := taskgroup.NewGroup(zap.NewNop())
+	g.Go("task1", func(_ *zap.Logger) error {
 		return errors.New("error 1")
 	})
-	g.Go(func() error {
+	g.Go("task2", func(_ *zap.Logger) error {
 		return errors.New("error 2")
 	})
 	err := g.Wait()
@@ -29,12 +30,14 @@ func ExampleGroup() {
 func TestWithContext(t *testing.T) {
 	err1 := errors.New("error 1")
 	err2 := errors.New("error 2")
+	log := zap.NewNop()
 
-	g, ctx := taskgroup.WithContext(context.Background())
-	g.Go(func() error {
+	g := taskgroup.NewGroup(log)
+	ctx := g.WithContext(context.Background())
+	g.Go("task1", func(_ *zap.Logger) error {
 		return err1
 	})
-	g.Go(func() error {
+	g.Go("task2", func(_ *zap.Logger) error {
 		return err2
 	})
 	err := g.Wait()
@@ -54,5 +57,4 @@ func TestWithContext(t *testing.T) {
 	if !canceled {
 		t.Errorf("context should have been canceled!")
 	}
-
 }

@@ -4,15 +4,18 @@ package taskgroup
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"go.uber.org/multierr"
+	"go.uber.org/zap"
 )
 
 // Group manages goroutines and collect all the errors.
 // See https://pkg.go.dev/golang.org/x/sync/errgroup#Group for more information
 type Group struct {
 	cancel context.CancelFunc
+	logger *zap.Logger
 
 	wg sync.WaitGroup
 
@@ -20,12 +23,17 @@ type Group struct {
 	err      error
 }
 
+// NewGroup returns a new Group.
+func NewGroup(logger *zap.Logger) *Group {
+	return &Group{logger: logger}
+}
+
 // WithContext returns a new Group with a associated Context.
 // The context will be canceled if any goroutine returns an error.
 // See https://pkg.go.dev/golang.org/x/sync/errgroup#WithContext
-func WithContext(ctx context.Context) (*Group, context.Context) {
-	ctx, cancel := context.WithCancel(ctx)
-	return &Group{cancel: cancel}, ctx
+func (g *Group) WithContext(ctx context.Context) context.Context {
+	ctx, g.cancel = context.WithCancel(ctx)
+	return ctx
 }
 
 // Wait blocks until all goroutines have completed.
@@ -42,15 +50,18 @@ func (g *Group) Wait() error {
 // Go calls the function in a new goroutine.
 // If a non-nil errors is returned, the context is canceled and
 // the error is collected using multierr and will be returned by Wait.
-func (g *Group) Go(f func() error) {
+func (g *Group) Go(name string, f func(logger *zap.Logger) error) {
 	g.wg.Add(1)
 
 	go func() {
 		defer g.wg.Done()
-		if err := f(); err != nil {
+		logger := g.logger.Named(name)
+		if err := f(logger); err != nil {
+			err = fmt.Errorf("task %s failed: %w", name, err)
 			g.errMutex.Lock()
 			g.err = multierr.Append(g.err, err)
 			g.errMutex.Unlock()
+			logger.Error(err.Error())
 			if g.cancel != nil {
 				g.cancel()
 			}
