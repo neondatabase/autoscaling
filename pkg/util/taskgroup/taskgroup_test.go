@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 func ExampleGroup() {
