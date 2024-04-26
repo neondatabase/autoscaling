@@ -12,8 +12,14 @@ import (
 )
 
 // Group manages goroutines and collect all the errors.
-// See https://pkg.go.dev/golang.org/x/sync/errgroup#Group for more information
-type Group struct {
+// See https://pkg.go.dev/golang.org/x/sync/errgroup#group for more information
+type Group interface {
+	WithContext(ctx context.Context) context.Context
+	Wait() error
+	Go(name string, f func(logger *zap.Logger) error)
+}
+
+type group struct {
 	cancel context.CancelFunc
 	logger *zap.Logger
 
@@ -24,14 +30,14 @@ type Group struct {
 }
 
 // NewGroup returns a new Group.
-func NewGroup(logger *zap.Logger) *Group {
-	return &Group{logger: logger}
+func NewGroup(logger *zap.Logger) Group {
+	return &group{logger: logger}
 }
 
 // WithContext returns a new Group with a associated Context.
 // The context will be canceled if any goroutine returns an error.
 // See https://pkg.go.dev/golang.org/x/sync/errgroup#WithContext
-func (g *Group) WithContext(ctx context.Context) context.Context {
+func (g *group) WithContext(ctx context.Context) context.Context {
 	ctx, g.cancel = context.WithCancel(ctx)
 	return ctx
 }
@@ -39,7 +45,7 @@ func (g *Group) WithContext(ctx context.Context) context.Context {
 // Wait blocks until all goroutines have completed.
 //
 // All errors returned from the goroutines will be combined into one using multierr and returned from this method.
-func (g *Group) Wait() error {
+func (g *group) Wait() error {
 	g.wg.Wait()
 	if g.cancel != nil {
 		g.cancel()
@@ -50,7 +56,7 @@ func (g *Group) Wait() error {
 // Go calls the function in a new goroutine.
 // If a non-nil errors is returned, the context is canceled and
 // the error is collected using multierr and will be returned by Wait.
-func (g *Group) Go(name string, f func(logger *zap.Logger) error) {
+func (g *group) Go(name string, f func(logger *zap.Logger) error) {
 	g.wg.Add(1)
 
 	go func() {
