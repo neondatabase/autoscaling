@@ -86,7 +86,7 @@ func RunBillingMetricsCollector(
 	conf *Config,
 	store VMStoreForNode,
 	metrics PromMetrics,
-) {
+) error {
 	var clients []clientInfo
 
 	if c := conf.Clients.HTTP; c != nil {
@@ -142,15 +142,14 @@ func RunBillingMetricsCollector(
 		case <-collectTicker.C:
 			logger.Info("Collecting billing state")
 			if store.Stopped() && backgroundCtx.Err() == nil {
-				err := errors.New("VM store stopped but background context is still live")
-				logger.Panic("Validation check failed", zap.Error(err))
+				return errors.New("VM store stopped but background context is still live")
 			}
 			state.collect(logger, store, metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, conf, billing.GetHostname(), queueWriters)
 		case <-backgroundCtx.Done():
-			return
+			return nil
 		}
 	}
 }
