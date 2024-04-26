@@ -1,6 +1,6 @@
 // Package multierrgroup provides a mix of multierr and errgroup
 // See documentation for https://pkg.go.dev/go.uber.org/multierr and https://pkg.go.dev/golang.org/x/sync/errgroup
-package multierrgroup
+package taskgroup
 
 import (
 	"context"

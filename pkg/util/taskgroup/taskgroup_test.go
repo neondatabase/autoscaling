@@ -1,4 +1,4 @@
-package multierrgroup_test
+package taskgroup_test
 
 import (
 	"context"
@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"testing"
 
-	"go.ptx.dk/multierrgroup"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 	"go.uber.org/multierr"
 )
 
 func ExampleGroup() {
-	g := multierrgroup.Group{}
+	g := taskgroup.Group{}
 	g.Go(func() error {
 		return errors.New("error 1")
 	})
@@ -30,7 +30,7 @@ func TestWithContext(t *testing.T) {
 	err1 := errors.New("error 1")
 	err2 := errors.New("error 2")
 
-	g, ctx := multierrgroup.WithContext(context.Background())
+	g, ctx := taskgroup.WithContext(context.Background())
 	g.Go(func() error {
 		return err1
 	})
