@@ -8,6 +8,9 @@ import boto3
 import time
 import datetime
 
+import openapi_schema_validator
+import yaml
+
 def do_assert(condition, message="assert failed"):
     if not condition:
         raise Exception(message)
@@ -154,6 +157,9 @@ def s3_check_file(local_endpoint: str):
 
     do_assert("events" in result)
 
+    # Check schema
+    validate_metrics_schema(result)
+
     events = result["events"]
     do_assert(len(events) > 0, "No events found")
 
@@ -180,6 +186,7 @@ def s3_check_file(local_endpoint: str):
         ]
     ), "actual keys: %s" % events[0].keys())
 
+    # Check time intervals
     start_time = datetime.datetime.strptime(
         events[0]["start_time"].split(".")[0], "%Y-%m-%dT%H:%M:%S"
     )
@@ -194,6 +201,14 @@ def s3_check_file(local_endpoint: str):
     do_assert(now - stop_time < datetime.timedelta(seconds=10))
 
 
+def validate_metrics_schema(metrics: dict):
+    billing_schema = yaml.safe_load(
+        open("../../../pkg/billing/billing-v1.yaml", "r").read()
+    )
+    metrics_schema = billing_schema["components"]["schemas"]["EventsBatch"]
+    
+    openapi_schema_validator.validate(metrics_schema, metrics)
+    
 
 class KubctlForward:
     def __init__(self):
