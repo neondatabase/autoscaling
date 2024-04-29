@@ -528,7 +528,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			pluggedCPU := uint32(len(cpuSlotsPlugged))
 
 			// get cgroups CPU details from runner pod
-			cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+			cgroupUsage, err := getRunnerCgroup(ctx, r.Config.RunnerRequestTimeout, virtualmachine)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
 				return err
@@ -673,7 +673,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		specCPU := virtualmachine.Spec.Guest.CPUs.Use
 		pluggedCPU := uint32(len(cpuSlotsPlugged))
 
-		cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+		cgroupUsage, err := getRunnerCgroup(ctx, r.Config.RunnerRequestTimeout, virtualmachine)
 		if err != nil {
 			log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
 			return err
@@ -700,7 +700,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 					virtualmachine.Name))
 		} else if *specCPU != cgroupUsage.VCPUs {
 			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", *specCPU)
-			if err := setRunnerCgroup(ctx, virtualmachine, *specCPU); err != nil {
+			if err := setRunnerCgroup(ctx, r.Config.RunnerRequestTimeout, virtualmachine, *specCPU); err != nil {
 				return err
 			}
 			reason := "ScaleDown"
@@ -1204,8 +1204,8 @@ func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affi
 	return a
 }
 
-func setRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.MilliCPU) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+func setRunnerCgroup(ctx context.Context, timeout time.Duration, vm *vmv1.VirtualMachine, cpu vmv1.MilliCPU) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
@@ -1235,8 +1235,8 @@ func setRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.Mill
 	return nil
 }
 
-func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgroup, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+func getRunnerCgroup(ctx context.Context, timeout time.Duration, vm *vmv1.VirtualMachine) (*api.VCPUCgroup, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	url := fmt.Sprintf("http://%s:%d/cpu_current", vm.Status.PodIP, vm.Spec.RunnerPort)

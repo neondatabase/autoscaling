@@ -96,6 +96,7 @@ func main() {
 	var concurrencyLimit int
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
+	var runnerRequestTimeout time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -104,6 +105,7 @@ func main() {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
+	flag.DurationVar(&runnerRequestTimeout, "runner-request-timeout", time.Second, "Set timeout for HTTP requests to neonvm-runner")
 	opts := zap.Options{ //nolint:exhaustruct // typical options struct; not all fields needed.
 		Development:     true,
 		StacktraceLevel: zapcore.Level(zapcore.PanicLevel),
@@ -159,6 +161,7 @@ func main() {
 		UseContainerMgr:         enableContainerMgr,
 		MaxConcurrentReconciles: concurrencyLimit,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
+		RunnerRequestTimeout:    runnerRequestTimeout,
 	}
 
 	vmReconciler := &controllers.VirtualMachineReconciler{
