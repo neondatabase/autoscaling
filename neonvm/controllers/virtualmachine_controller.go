@@ -1250,13 +1250,13 @@ func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgr
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("unexpected status %s", resp.Status)
 	}
 
 	body, err := io.ReadAll(resp.Body)
-	defer resp.Body.Close()
 	if err != nil {
 		return nil, err
 	}
