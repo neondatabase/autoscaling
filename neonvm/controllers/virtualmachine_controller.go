@@ -1750,7 +1750,7 @@ func DeepEqual(v1, v2 interface{}) bool {
 // TODO: reimplement to r.Patch()
 func (r *VirtualMachineReconciler) tryUpdateVM(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
 	err := r.Update(ctx, virtualmachine)
-	// Simlar to https://github.com/rancher/rancher/blob/6d87a11ea46b7571646d7c3d7af704584c39fd62/pkg/controllers/provisioningv2/provisioninglog/provisioninglog.go#L103
+	// Similar to https://github.com/rancher/rancher/blob/6d87a11ea46b7571646d7c3d7af704584c39fd62/pkg/controllers/provisioningv2/provisioninglog/provisioninglog.go#L103
 	if err != nil && strings.Contains(err.Error(),
 		"the object has been modified; please apply your changes to the latest version and try again") {
 		r.Metrics.transientFailureCount.Inc()
