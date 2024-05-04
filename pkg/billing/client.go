@@ -94,11 +94,23 @@ type S3Client struct {
 	client *s3.Client
 }
 
+type S3Error struct {
+	Err error
+}
+
+func (e S3Error) Error() string {
+	return fmt.Sprintf("Error making S3 request: %s", e.Err.Error())
+}
+
+func (e S3Error) Unwrap() error {
+	return e.Err
+}
+
 func NewS3Client(ctx context.Context, cfg S3ClientConfig) (S3Client, error) {
 	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 
 	if err != nil {
-		return S3Client{}, err
+		return S3Client{}, S3Error{Err: err} //nolint:exhaustruct // error is returned
 	}
 
 	client := s3.NewFromConfig(s3Config, func(o *s3.Options) {
@@ -145,12 +157,12 @@ func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
 	gzW := gzip.NewWriter(&buf)
 	_, err := gzW.Write(payload)
 	if err != nil {
-		return RequestError{Err: err}
+		return S3Error{Err: err}
 	}
 
 	err = gzW.Close() // Have to close it before reading the buffer
 	if err != nil {
-		return RequestError{Err: err}
+		return S3Error{Err: err}
 	}
 
 	r := bytes.NewReader(buf.Bytes())
@@ -161,7 +173,7 @@ func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
 	})
 
 	if err != nil {
-		return RequestError{Err: err}
+		return S3Error{Err: err}
 	}
 
 	return nil
