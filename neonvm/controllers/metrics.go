@@ -22,6 +22,7 @@ type ReconcilerMetrics struct {
 	reconcileDurationSuccessful    prometheus.Histogram
 	reconcileDurationFailure       prometheus.Histogram
 	statusUpdateFailureCount       prometheus.Counter
+	transientFailureCount          prometheus.Counter
 }
 
 func MakeReconcilerMetrics() ReconcilerMetrics {
@@ -83,6 +84,12 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 			prometheus.CounterOpts{
 				Name: "status_update_failure_count",
 				Help: "Total number of failures to update the status of a VirtualMachine",
+			},
+		)),
+		transientFailureCount: util.RegisterMetric(metrics.Registry, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "transient_failure_count",
+				Help: "Total number of transient failures in the VirtualMachine reconciler",
 			},
 		)),
 	}
