@@ -11,3 +11,8 @@ bash $GOPATH/src/k8s.io/code-generator/generate-groups.sh "deepcopy,client,infor
     --go-header-file neonvm/hack/boilerplate.go.txt
 
 controller-gen object:headerFile="neonvm/hack/boilerplate.go.txt" paths="./neonvm/apis/..."
+
+controller-gen rbac:roleName=manager-role crd webhook paths="./neonvm/..." \
+	output:crd:artifacts:config=neonvm/config/crd/bases \
+	output:rbac:artifacts:config=neonvm/config/rbac \
+	output:webhook:artifacts:config=neonvm/config/webhook
