@@ -9,7 +9,7 @@ spec:
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 3
+      maxUnavailable: 100%
   template:
     metadata:
       labels:
