@@ -99,18 +99,18 @@ type S3Error struct {
 }
 
 func (e S3Error) Error() string {
-	return fmt.Sprintf("Error making S3 request: %s", e.Err.Error())
+	return fmt.Sprintf("S3 error: %s", e.Err.Error())
 }
 
 func (e S3Error) Unwrap() error {
 	return e.Err
 }
 
-func NewS3Client(ctx context.Context, cfg S3ClientConfig) (S3Client, error) {
+func NewS3Client(ctx context.Context, cfg S3ClientConfig) (*S3Client, error) {
 	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 
 	if err != nil {
-		return S3Client{}, S3Error{Err: err} //nolint:exhaustruct // error is returned
+		return nil, S3Error{Err: err}
 	}
 
 	client := s3.NewFromConfig(s3Config, func(o *s3.Options) {
@@ -118,7 +118,7 @@ func NewS3Client(ctx context.Context, cfg S3ClientConfig) (S3Client, error) {
 		o.UsePathStyle = true // required for minio
 	})
 
-	return S3Client{
+	return &S3Client{
 		cfg:    cfg,
 		client: client,
 	}, nil
