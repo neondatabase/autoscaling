@@ -169,8 +169,10 @@ func (h *execMonitorHandle) Downscale(
 
 	result, err := doMonitorDownscale(ctx, logger, h.monitor.dispatcher, target)
 
-	if err == nil && result.Ok {
-		h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
+	if err == nil {
+		if result.Ok {
+			h.runner.recordResourceChange(current, target, h.runner.global.metrics.monitorApprovedChange)
+		}
 	} else {
 		h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
 			ps.failedMonitorRequestCounter.Inc()
