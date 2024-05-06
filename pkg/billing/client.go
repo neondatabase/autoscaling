@@ -107,6 +107,10 @@ func (e S3Error) Unwrap() error {
 }
 
 func NewS3Client(ctx context.Context, cfg S3ClientConfig) (*S3Client, error) {
+	// Timeout in case we have hidden IO inside config creation
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 
 	if err != nil {
