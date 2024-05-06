@@ -30,7 +30,6 @@ import (
 	"os"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -169,21 +168,14 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	statusBefore := virtualmachine.Status.DeepCopy()
 
-	now := time.Now()
 	err := r.doReconcile(ctx, &virtualmachine)
-	since := time.Since(now)
 
 	if err != nil {
 		r.Recorder.Eventf(&virtualmachine, corev1.EventTypeWarning, "Failed",
 			"Failed to reconcile (%s): %s", virtualmachine.Name, err)
-		log.Error(err, "Failed to reconcile VirtualMachine",
-			"duration", since.String())
-		r.Metrics.reconcileDurationFailure.Observe(since.Seconds())
+
 		return ctrl.Result{}, err
 	}
-
-	r.Metrics.reconcileDurationSuccessful.Observe(since.Seconds())
-	log.Info("Successful reconciliation", "duration", since.String())
 
 	// If the status changed, try to update the object
 	if !DeepEqual(statusBefore, virtualmachine.Status) {
@@ -1749,13 +1741,7 @@ func DeepEqual(v1, v2 interface{}) bool {
 
 // TODO: reimplement to r.Patch()
 func (r *VirtualMachineReconciler) tryUpdateVM(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
-	err := r.Update(ctx, virtualmachine)
-	// Similar to https://github.com/rancher/rancher/blob/6d87a11ea46b7571646d7c3d7af704584c39fd62/pkg/controllers/provisioningv2/provisioninglog/provisioninglog.go#L103
-	if err != nil && strings.Contains(err.Error(),
-		"the object has been modified; please apply your changes to the latest version and try again") {
-		r.Metrics.transientFailureCount.Inc()
-	}
-	return err
+	return r.Update(ctx, virtualmachine)
 }
 
 // return Network Attachment Definition name with IPAM settings

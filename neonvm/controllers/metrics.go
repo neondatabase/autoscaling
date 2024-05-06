@@ -3,12 +3,16 @@ package controllers
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -142,7 +146,11 @@ func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlNam
 }
 
 func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	now := time.Now()
 	res, err := d.Reconciler.Reconcile(ctx, req)
+	duration := time.Since(now)
 
 	// This part is executed sequentially since we acquire a mutex lock. It
 	// should be quite fast since a mutex lock/unlock + 2 memory writes takes less
@@ -153,8 +161,16 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	defer d.lock.Unlock()
 	if err != nil {
 		d.failing[req.NamespacedName] = struct{}{}
+		log.Error(err, "Failed to reconcile VirtualMachine",
+			"duration", duration.String())
+		d.Metrics.reconcileDurationFailure.Observe(duration.Seconds())
+		if errors.IsConflict(err) {
+			d.Metrics.transientFailureCount.Inc()
+		}
 	} else {
 		delete(d.failing, req.NamespacedName)
+		log.Info("Successful reconciliation", "duration", duration.String())
+		d.Metrics.reconcileDurationSuccessful.Observe(duration.Seconds())
 	}
 	d.Metrics.failing.WithLabelValues(d.ControllerName).Set(float64(len(d.failing)))
 
