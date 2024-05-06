@@ -2469,8 +2469,21 @@ spec:
                     description: Additional settings for the VM. Cannot be updated.
                     properties:
                       swap:
-                        description: Swap controls settings for adding a swap disk
-                          to the VM.
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: "Swap adds a swap disk with the provided size.
+                          \n If Swap is provided, SwapInfo MUST NOT be provided, and
+                          vice versa."
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      swapInfo:
+                        description: "SwapInfo controls settings for adding a swap
+                          disk to the VM. \n SwapInfo is a temporary newer version
+                          of the Swap field. \n Eventually, after all VMs have moved
+                          from Swap to SwapInfo, we can change the type of the Swap
+                          field to SwapInfo, move VMs from SwapInfo back to Swap,
+                          and then remove SwapInfo. \n More information here: https://neondb.slack.com/archives/C06SW383C79/p1713298689471319"
                         properties:
                           size:
                             anyOf:

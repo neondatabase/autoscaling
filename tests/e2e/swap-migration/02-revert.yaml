@@ -1,0 +1,11 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+timeout: 10
+commands:
+  - script: |
+      set -eux
+      # Migrate from swap v2 to v1
+      kubectl patch -n "$NAMESPACE" neonvm example --type=json --patch '[
+        {"op": "move", "from": "/spec/guest/settings/swapInfo/size", "path": "/spec/guest/settings/swap"},
+        {"op": "remove", "path": "/spec/guest/settings/swapInfo"}
+      ]'

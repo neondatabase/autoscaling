@@ -86,7 +86,7 @@ type VirtualMachineReconciler struct {
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
-// when the command <make manifests> is executed.
+// when controller-gen (used by 'make generate') is executed.
 // To know more about markers see: https://book.kubebuilder.io/reference/markers.html
 
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
@@ -1611,20 +1611,26 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 		pod.Spec.Containers[0].Ports = append(pod.Spec.Containers[0].Ports, cPort)
 	}
 
-	if settings := virtualmachine.Spec.Guest.Settings; settings != nil && settings.Swap != nil {
-		diskName := "swapdisk"
-		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
-			Name:      diskName,
-			MountPath: fmt.Sprintf("/vm/mounts/%s", diskName),
-		})
-		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-			Name: diskName,
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{
-					SizeLimit: &settings.Swap.Size,
+	if settings := virtualmachine.Spec.Guest.Settings; settings != nil {
+		swapInfo, err := settings.GetSwapInfo()
+		if err != nil {
+			return nil, fmt.Errorf("error getting SwapInfo from VirtualMachine guest settings: %w", err)
+		}
+		if swapInfo != nil {
+			diskName := "swapdisk"
+			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+				Name:      diskName,
+				MountPath: fmt.Sprintf("/vm/mounts/%s", diskName),
+			})
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: diskName,
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						SizeLimit: &swapInfo.Size,
+					},
 				},
-			},
-		})
+			})
+		}
 	}
 
 	for _, disk := range virtualmachine.Spec.Disks {
