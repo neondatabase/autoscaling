@@ -117,6 +117,11 @@ RUN set -e \
     && /neonvm/bin/id -g sshd > /dev/null 2>&1 || /neonvm/bin/addgroup sshd \
     && /neonvm/bin/id -u sshd > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
 
+# configure limits.conf
+RUN set -e \
+	&& echo "* soft core unlimited" >> /etc/security/limits.conf \
+	&& echo "* hard core unlimited" >> /etc/security/limits.conf \
+
 FROM vm-runtime AS builder
 ARG DISK_SIZE
 COPY --from=rootdisk-mod / /rootdisk

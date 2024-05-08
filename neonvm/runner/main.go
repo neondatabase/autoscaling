@@ -676,11 +676,13 @@ func run(logger *zap.Logger) error {
 	}
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
-	sysctl := []string{}
+	sysctl := []string{
+		"kernel.core_pattern=/tmp/core.%e.%p.%h.%t",
+	}
 	var shmSize *resource.Quantity
 	var swapInfo *vmv1.SwapInfo
 	if vmSpec.Guest.Settings != nil {
-		sysctl = vmSpec.Guest.Settings.Sysctl
+		sysctl = append(sysctl, vmSpec.Guest.Settings.Sysctl...)
 		swapInfo, err = vmSpec.Guest.Settings.GetSwapInfo()
 		if err != nil {
 			return fmt.Errorf("failed to get SwapInfo from VirtualMachine object: %w", err)

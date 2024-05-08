@@ -68,7 +68,8 @@ merge: |
               ca-certificates \
               util-linux-misc \
               coreutils \
-              cgroup-tools
+              cgroup-tools \
+              linux-pam
 
   # postgresql stuff
   RUN set -e \
