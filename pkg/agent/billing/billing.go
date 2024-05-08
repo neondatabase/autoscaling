@@ -121,6 +121,8 @@ func StartBillingMetricsCollector(
 			config: c.BaseClientConfig,
 		})
 	}
+
+	// TODO: catch panics here, bubble those into a clean-ish shutdown.
 	go runBillingMetricsCollector(ctx, logger, conf, store, metrics, clients)
 	return nil
 }

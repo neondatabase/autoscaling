@@ -59,7 +59,6 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	metrics := billing.NewPromMetrics()
 	metrics.MustRegister(globalPromReg)
 
-	// TODO: catch panics here, bubble those into a clean-ish shutdown.
 	err = billing.StartBillingMetricsCollector(ctx, logger, &r.Config.Billing, storeForNode, metrics)
 	if err != nil {
 		return fmt.Errorf("error starting billing metrics collector: %w", err)
