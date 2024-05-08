@@ -88,13 +88,6 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	rm -rf $$iidfile
 	go fmt ./...
 
-.PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./neonvm/..." \
-		output:crd:artifacts:config=neonvm/config/crd/bases \
-		output:rbac:artifacts:config=neonvm/config/rbac \
-		output:webhook:artifacts:config=neonvm/config/webhook
-
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
@@ -240,11 +233,11 @@ check-local-context: ## Asserts that the current kubectl context is pointing at 
 	@if [ "$$($(KUBECTL) config current-context)" != 'k3d-$(CLUSTER_NAME)' ] && [ "$$($(KUBECTL) config current-context)" != 'kind-$(CLUSTER_NAME)' ]; then echo "kubectl context is not pointing to local k3d or kind cluster (must be k3d-$(CLUSTER_NAME) or kind-$(CLUSTER_NAME))"; exit 1; fi
 
 .PHONY: install
-install: check-local-context manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+install: check-local-context kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build neonvm/config/crd | kubectl apply -f -
 
 .PHONY: uninstall
-uninstall: check-local-context manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
+uninstall: check-local-context kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build neonvm/config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 BUILDTS := $(shell date +%s)
@@ -297,7 +290,7 @@ render-release: $(RENDERED) kustomize
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
 .PHONY: deploy
-deploy: check-local-context docker-build load-images manifests render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: check-local-context docker-build load-images render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
 	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
