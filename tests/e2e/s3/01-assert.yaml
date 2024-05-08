@@ -1,0 +1,31 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 90
+---
+# Minio is running
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-deployment
+status:
+  replicas: 1
+  readyReplicas: 1
+  updatedReplicas: 1
+  conditions:
+    - type: Available
+      status: "True"
+    - type: Progressing
+      status: "True"
+---
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+status:
+  phase: Running
+  restartCount: 0
+  conditions:
+    - type: Available
+      status: "True"
+  cpus: 250m
+  memorySize: 1Gi

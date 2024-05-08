@@ -2,6 +2,7 @@ package billing
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,13 +11,12 @@ import (
 	"os"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/lithammer/shortuuid"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
-
-type Client struct {
-	URL   string
-	httpc *http.Client
-}
 
 var hostname string
 
@@ -35,14 +35,152 @@ func GetHostname() string {
 	return hostname
 }
 
-func NewClient(url string, c *http.Client) Client {
-	return Client{URL: fmt.Sprintf("%s/usage_events", url), httpc: c}
+type Client interface {
+	LogFields() zap.Field
+	send(ctx context.Context, payload []byte, traceID TraceID) error
 }
 
 type TraceID string
 
-func (c Client) GenerateTraceID() TraceID {
+func GenerateTraceID() TraceID {
 	return TraceID(shortuuid.New())
+}
+
+type HTTPClient struct {
+	URL   string
+	httpc *http.Client
+}
+
+func NewHTTPClient(url string, c *http.Client) HTTPClient {
+	return HTTPClient{URL: fmt.Sprintf("%s/usage_events", url), httpc: c}
+}
+
+func (c HTTPClient) send(ctx context.Context, payload []byte, traceID TraceID) error {
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(payload))
+	if err != nil {
+		return RequestError{Err: err}
+	}
+	r.Header.Set("content-type", "application/json")
+	r.Header.Set("x-trace-id", string(traceID))
+
+	resp, err := c.httpc.Do(r)
+	if err != nil {
+		return RequestError{Err: err}
+	}
+	defer resp.Body.Close()
+
+	// theoretically if wanted/needed, we should use an http handler that
+	// does the retrying, to avoid writing that logic here.
+	if resp.StatusCode != http.StatusOK {
+		return UnexpectedStatusCodeError{StatusCode: resp.StatusCode}
+	}
+
+	return nil
+}
+
+func (c HTTPClient) LogFields() zap.Field {
+	return zap.String("url", c.URL)
+}
+
+type S3ClientConfig struct {
+	Bucket         string `json:"bucket"`
+	Region         string `json:"region"`
+	PrefixInBucket string `json:"prefixInBucket"`
+	Endpoint       string `json:"endpoint"`
+}
+
+type S3Client struct {
+	cfg    S3ClientConfig
+	client *s3.Client
+}
+
+type S3Error struct {
+	Err error
+}
+
+func (e S3Error) Error() string {
+	return fmt.Sprintf("S3 error: %s", e.Err.Error())
+}
+
+func (e S3Error) Unwrap() error {
+	return e.Err
+}
+
+func NewS3Client(ctx context.Context, cfg S3ClientConfig) (*S3Client, error) {
+	// Timeout in case we have hidden IO inside config creation
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
+
+	if err != nil {
+		return nil, S3Error{Err: err}
+	}
+
+	client := s3.NewFromConfig(s3Config, func(o *s3.Options) {
+		o.BaseEndpoint = &cfg.Endpoint
+		o.UsePathStyle = true // required for minio
+	})
+
+	return &S3Client{
+		cfg:    cfg,
+		client: client,
+	}, nil
+}
+
+func (c S3Client) generateKey() string {
+	// Example: year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
+	now := time.Now()
+	id := shortuuid.New()
+
+	filename := fmt.Sprintf("year=%d/month=%02d/day=%02d/%s_%s.ndjson.gz",
+		now.Year(), now.Month(), now.Day(),
+		now.Format("15:04:05Z"),
+		id,
+	)
+	return fmt.Sprintf("%s/%s", c.cfg.PrefixInBucket, filename)
+}
+
+func (c S3Client) LogFields() zap.Field {
+	return zap.Inline(zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
+		enc.AddString("bucket", c.cfg.Bucket)
+		enc.AddString("prefixInBucket", c.cfg.PrefixInBucket)
+		enc.AddString("region", c.cfg.Region)
+		enc.AddString("endpoint", c.cfg.Endpoint)
+		return nil
+	}))
+}
+
+func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
+	// Source of truth for the storage format:
+	// https://github.com/neondatabase/cloud/issues/11199#issuecomment-1992549672
+
+	key := c.generateKey()
+	buf := bytes.Buffer{}
+
+	gzW := gzip.NewWriter(&buf)
+	_, err := gzW.Write(payload)
+	if err != nil {
+		return S3Error{Err: err}
+	}
+
+	err = gzW.Close() // Have to close it before reading the buffer
+	if err != nil {
+		return S3Error{Err: err}
+	}
+
+	r := bytes.NewReader(buf.Bytes())
+	_, err = c.client.PutObject(ctx, &s3.PutObjectInput{ //nolint:exhaustruct // AWS SDK
+		Bucket: &c.cfg.Bucket,
+		Key:    &key,
+		Body:   r,
+	})
+
+	if err != nil {
+		return S3Error{Err: err}
+	}
+
+	return nil
 }
 
 // Enrich sets the event's Type and IdempotencyKey fields, so that users of this API don't need to
@@ -78,26 +216,7 @@ func Send[E Event](ctx context.Context, client Client, traceID TraceID, events [
 		return JSONError{Err: err}
 	}
 
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, client.URL, bytes.NewReader(payload))
-	if err != nil {
-		return RequestError{Err: err}
-	}
-	r.Header.Set("content-type", "application/json")
-	r.Header.Set("x-trace-id", string(traceID))
-
-	resp, err := client.httpc.Do(r)
-	if err != nil {
-		return RequestError{Err: err}
-	}
-	defer resp.Body.Close()
-
-	// theoretically if wanted/needed, we should use an http handler that
-	// does the retrying, to avoid writing that logic here.
-	if resp.StatusCode != http.StatusOK {
-		return UnexpectedStatusCodeError{StatusCode: resp.StatusCode}
-	}
-
-	return nil
+	return client.send(ctx, payload, traceID)
 }
 
 type JSONError struct {

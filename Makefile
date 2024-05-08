@@ -351,7 +351,7 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 ##@ End-to-End tests
 
 .PHONE: e2e-tools
-e2e-tools: k3d kind kubectl kuttl ## Donwnload tools for e2e tests locally if necessary.
+e2e-tools: k3d kind kubectl kuttl python-init ## Donwnload tools for e2e tests locally if necessary.
 
 .PHONE: e2e
 e2e: check-local-context e2e-tools ## Run e2e kuttl tests
@@ -461,3 +461,8 @@ $(K3D): $(LOCALBIN)
 .PHONY: cert-manager
 cert-manager: check-local-context kubectl ## install cert-manager to cluster
 	$(KUBECTL) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+
+.PHONY: python-init
+python-init:
+	python3 -m venv tests/e2e/.venv
+	tests/e2e/.venv/bin/pip install -r requirements.txt
