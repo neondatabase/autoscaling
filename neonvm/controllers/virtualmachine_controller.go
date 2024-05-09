@@ -167,6 +167,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	statusBefore := virtualmachine.Status.DeepCopy()
+
 	if err := r.doReconcile(ctx, &virtualmachine); err != nil {
 		r.Recorder.Eventf(&virtualmachine, corev1.EventTypeWarning, "Failed",
 			"Failed to reconcile (%s): %s", virtualmachine.Name, err)

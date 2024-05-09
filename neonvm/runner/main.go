@@ -677,7 +677,7 @@ func run(logger *zap.Logger) error {
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{
-		"kernel.core_pattern=/tmp/core.%e.%p.%h.%t",
+		"kernel.core_pattern=core",
 		"kernel.core_uses_pid=1",
 	}
 	var shmSize *resource.Quantity
