@@ -3,12 +3,16 @@ package controllers
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -19,7 +23,10 @@ type ReconcilerMetrics struct {
 	runnerCreationToVMRunningTime  prometheus.Histogram
 	vmCreationToVMRunningTime      prometheus.Histogram
 	vmRestartCounts                prometheus.Counter
+	reconcileDuration              prometheus.HistogramVec
 }
+
+const OutcomeLabel = "outcome"
 
 func MakeReconcilerMetrics() ReconcilerMetrics {
 	// Copied bucket values from controller runtime latency metric. We can
@@ -62,8 +69,30 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Help: "Total number of VM restarts across the cluster captured by VirtualMachine reconciler",
 			},
 		)),
+		reconcileDuration: *util.RegisterMetric(metrics.Registry, prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "reconcile_duration_seconds",
+				Help:    "Time duration of reconciles",
+				Buckets: buckets,
+			}, []string{OutcomeLabel},
+		)),
 	}
 	return m
+}
+
+type ReconcileOutcome string
+
+const (
+	SuccessOutcome  ReconcileOutcome = "success"
+	FailureOutcome  ReconcileOutcome = "failure"
+	ConflictOutcome ReconcileOutcome = "conflict"
+)
+
+func (m ReconcilerMetrics) ObserveReconcileDuration(
+	outcome ReconcileOutcome,
+	duration time.Duration,
+) {
+	m.reconcileDuration.WithLabelValues(string(outcome)).Observe(duration.Seconds())
 }
 
 type wrappedReconciler struct {
@@ -112,7 +141,11 @@ func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlNam
 }
 
 func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	now := time.Now()
 	res, err := d.Reconciler.Reconcile(ctx, req)
+	duration := time.Since(now)
 
 	// This part is executed sequentially since we acquire a mutex lock. It
 	// should be quite fast since a mutex lock/unlock + 2 memory writes takes less
@@ -121,11 +154,22 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// async approach.
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	outcome := SuccessOutcome
 	if err != nil {
 		d.failing[req.NamespacedName] = struct{}{}
+		if errors.IsConflict(err) {
+			outcome = ConflictOutcome
+		} else {
+			outcome = FailureOutcome
+		}
+
+		log.Error(err, "Failed to reconcile VirtualMachine",
+			"duration", duration.String(), "outcome", outcome)
 	} else {
 		delete(d.failing, req.NamespacedName)
+		log.Info("Successful reconciliation", "duration", duration.String())
 	}
+	d.Metrics.ObserveReconcileDuration(outcome, duration)
 	d.Metrics.failing.WithLabelValues(d.ControllerName).Set(float64(len(d.failing)))
 
 	return res, err
