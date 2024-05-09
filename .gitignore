@@ -27,3 +27,4 @@ testbin/*
 neonvm/hack/kernel/vmlinuz
 
 rendered_manifests
+.venv

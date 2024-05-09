@@ -28,11 +28,17 @@ type Config struct {
 
 type ClientsConfig struct {
 	HTTP *HTTPClientConfig `json:"http"`
+	S3   *S3ClientConfig   `json:"s3"`
 }
 
 type HTTPClientConfig struct {
 	BaseClientConfig
 	URL string `json:"url"`
+}
+
+type S3ClientConfig struct {
+	BaseClientConfig
+	billing.S3ClientConfig
 }
 
 type BaseClientConfig struct {
@@ -80,24 +86,55 @@ type vmMetricsSeconds struct {
 	activeTime time.Duration
 }
 
-func RunBillingMetricsCollector(
-	backgroundCtx context.Context,
+func StartBillingMetricsCollector(
+	ctx context.Context,
 	parentLogger *zap.Logger,
 	conf *Config,
 	store VMStoreForNode,
 	metrics PromMetrics,
-) {
+) error {
+	logger := parentLogger.Named("billing")
+
 	var clients []clientInfo
 
 	if c := conf.Clients.HTTP; c != nil {
 		clients = append(clients, clientInfo{
-			client: billing.NewClient(c.URL, http.DefaultClient),
+			client: billing.NewHTTPClient(c.URL, http.DefaultClient),
 			name:   "http",
 			config: c.BaseClientConfig,
 		})
 	}
+	if c := conf.Clients.S3; c != nil {
+		client, err := billing.NewS3Client(ctx, c.S3ClientConfig)
+		if err != nil {
+			return fmt.Errorf("Failed to create S3 client: %w", err)
+		}
+		logger.Info("Created S3 client",
+			zap.String("bucket", c.Bucket),
+			zap.String("region", c.Region),
+			zap.String("prefixInBucket", c.PrefixInBucket),
+			zap.String("endpoint", c.Endpoint),
+		)
+		clients = append(clients, clientInfo{
+			client: client,
+			name:   "s3",
+			config: c.BaseClientConfig,
+		})
+	}
 
-	logger := parentLogger.Named("billing")
+	// TODO: catch panics here, bubble those into a clean-ish shutdown.
+	go runBillingMetricsCollector(ctx, logger, conf, store, metrics, clients)
+	return nil
+}
+
+func runBillingMetricsCollector(
+	ctx context.Context,
+	logger *zap.Logger,
+	conf *Config,
+	store VMStoreForNode,
+	metrics PromMetrics,
+	clients []clientInfo,
+) {
 
 	collectTicker := time.NewTicker(time.Second * time.Duration(conf.CollectEverySeconds))
 	defer collectTicker.Stop()
@@ -141,7 +178,7 @@ func RunBillingMetricsCollector(
 		select {
 		case <-collectTicker.C:
 			logger.Info("Collecting billing state")
-			if store.Stopped() && backgroundCtx.Err() == nil {
+			if store.Stopped() && ctx.Err() == nil {
 				err := errors.New("VM store stopped but background context is still live")
 				logger.Panic("Validation check failed", zap.Error(err))
 			}
@@ -149,7 +186,7 @@ func RunBillingMetricsCollector(
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, conf, billing.GetHostname(), queueWriters)
-		case <-backgroundCtx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}

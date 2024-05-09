@@ -95,6 +95,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt install -y python3-venv
           make e2e-tools
           echo $(pwd)/bin >> $GITHUB_PATH
 

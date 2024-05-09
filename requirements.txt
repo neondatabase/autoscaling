@@ -1,0 +1,3 @@
+boto3
+openapi_schema_validator
+pyyaml
