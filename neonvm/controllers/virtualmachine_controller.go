@@ -167,13 +167,9 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	statusBefore := virtualmachine.Status.DeepCopy()
-
-	err := r.doReconcile(ctx, &virtualmachine)
-
-	if err != nil {
+	if err := r.doReconcile(ctx, &virtualmachine); err != nil {
 		r.Recorder.Eventf(&virtualmachine, corev1.EventTypeWarning, "Failed",
 			"Failed to reconcile (%s): %s", virtualmachine.Name, err)
-
 		return ctrl.Result{}, err
 	}
 
@@ -182,7 +178,6 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if err := r.Status().Update(ctx, &virtualmachine); err != nil {
 			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
 				"virtualmachine", virtualmachine.Name)
-			r.Metrics.statusUpdateFailureCount.Inc()
 			return ctrl.Result{}, err
 		}
 	}

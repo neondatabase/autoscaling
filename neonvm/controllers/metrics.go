@@ -23,11 +23,10 @@ type ReconcilerMetrics struct {
 	runnerCreationToVMRunningTime  prometheus.Histogram
 	vmCreationToVMRunningTime      prometheus.Histogram
 	vmRestartCounts                prometheus.Counter
-	reconcileDurationSuccessful    prometheus.Histogram
-	reconcileDurationFailure       prometheus.Histogram
-	statusUpdateFailureCount       prometheus.Counter
-	transientFailureCount          prometheus.Counter
+	reconcileDuration              prometheus.HistogramVec
 }
+
+const OutcomeLabel = "outcome"
 
 func MakeReconcilerMetrics() ReconcilerMetrics {
 	// Copied bucket values from controller runtime latency metric. We can
@@ -70,34 +69,30 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Help: "Total number of VM restarts across the cluster captured by VirtualMachine reconciler",
 			},
 		)),
-		reconcileDurationSuccessful: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
+		reconcileDuration: *util.RegisterMetric(metrics.Registry, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "reconcile_duration_successful_seconds",
-				Help:    "Time duration of successful reconciles",
+				Name:    "reconcile_duration_seconds",
+				Help:    "Time duration of reconciles",
 				Buckets: buckets,
-			},
-		)),
-		reconcileDurationFailure: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
-			prometheus.HistogramOpts{
-				Name:    "reconcile_duration_failure_seconds",
-				Help:    "Time duration of failed reconciles",
-				Buckets: buckets,
-			},
-		)),
-		statusUpdateFailureCount: util.RegisterMetric(metrics.Registry, prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "status_update_failure_count",
-				Help: "Total number of failures to update the status of a VirtualMachine",
-			},
-		)),
-		transientFailureCount: util.RegisterMetric(metrics.Registry, prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "transient_failure_count",
-				Help: "Total number of transient failures in the VirtualMachine reconciler",
-			},
+			}, []string{OutcomeLabel},
 		)),
 	}
 	return m
+}
+
+type ReconcileOutcome string
+
+const (
+	SuccessOutcome  ReconcileOutcome = "success"
+	FailureOutcome  ReconcileOutcome = "failure"
+	ConflictOutcome ReconcileOutcome = "conflict"
+)
+
+func (m ReconcilerMetrics) ObserveReconcileDuration(
+	outcome ReconcileOutcome,
+	duration time.Duration,
+) {
+	m.reconcileDuration.WithLabelValues(string(outcome)).Observe(duration.Seconds())
 }
 
 type wrappedReconciler struct {
@@ -159,19 +154,22 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// async approach.
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	outcome := SuccessOutcome
 	if err != nil {
 		d.failing[req.NamespacedName] = struct{}{}
-		log.Error(err, "Failed to reconcile VirtualMachine",
-			"duration", duration.String())
-		d.Metrics.reconcileDurationFailure.Observe(duration.Seconds())
 		if errors.IsConflict(err) {
-			d.Metrics.transientFailureCount.Inc()
+			outcome = ConflictOutcome
+		} else {
+			outcome = FailureOutcome
 		}
+
+		log.Error(err, "Failed to reconcile VirtualMachine",
+			"duration", duration.String(), "outcome", outcome)
 	} else {
 		delete(d.failing, req.NamespacedName)
 		log.Info("Successful reconciliation", "duration", duration.String())
-		d.Metrics.reconcileDurationSuccessful.Observe(duration.Seconds())
 	}
+	d.Metrics.ObserveReconcileDuration(outcome, duration)
 	d.Metrics.failing.WithLabelValues(d.ControllerName).Set(float64(len(d.failing)))
 
 	return res, err
