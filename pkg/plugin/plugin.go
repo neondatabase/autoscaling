@@ -654,19 +654,17 @@ func (e *AutoscaleEnforcer) Score(
 		return 0, framework.NewStatus(framework.Error, "Error fetching state for node")
 	}
 
-	var resources api.Resources
-	if vmInfo != nil {
-		resources = vmInfo.Using()
-	} else {
-		resources = extractPodResources(pod)
-	}
-
 	// Special case: return minimum score if we don't have room
-	noRoom := resources.VCPU > node.remainingReservableCPU() ||
-		resources.Mem > node.remainingReservableMem()
-	if noRoom {
+	overbudget, verdict := e.speculativeReserve(node, vmInfo, pod, false, func(_ verdictSet, overBudget bool) bool {
+		return overBudget
+	})
+	if overbudget {
 		score := framework.MinNodeScore
-		logger.Warn("No room on node, giving minimum score (typically handled by Filter method)", zap.Int64("score", score))
+		logger.Warn(
+			"No room on node, giving minimum score (typically handled by Filter method)",
+			zap.Int64("score", score),
+			zap.Object("verdict", verdict),
+		)
 		return score, nil
 	}
 

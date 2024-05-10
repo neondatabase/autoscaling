@@ -117,10 +117,42 @@ func (r resourceTransitioner[T]) handleLastPermit(lastPermit T) (verdict string)
 	return
 }
 
+// handleReserve adds the resources from the pod to the node, reporting if the node was over-budget
+//
+// Unlike handleRequested, this method should be called to add a NEW pod to the node.
+//
+// This is used in combination with Xact to speculatively *try* reserving a pod, and then revert if
+// it would result in being over-budget.
+func (r resourceTransitioner[T]) handleReserve() (overbudget bool, verdict string) {
+	oldState := r.snapshotState()
+
+	r.node.Reserved += r.pod.Reserved
+	r.node.Buffer += r.pod.Buffer
+
+	if r.pod.Buffer != 0 {
+		verdict = fmt.Sprintf(
+			"node reserved %v [buffer %v] + %v [buffer %v] -> %v [buffer %v] of total %v",
+			oldState.node.Reserved, oldState.node.Buffer, r.pod.Reserved, r.pod.Buffer, r.node.Reserved, r.node.Buffer, oldState.node.Total,
+		)
+	} else {
+		verdict = fmt.Sprintf(
+			"node reserved %v + %v -> %v of total %v",
+			oldState.node.Reserved, r.pod.Reserved, r.node.Reserved, oldState.node.Total,
+		)
+	}
+
+	overbudget = r.node.Reserved > r.node.Total
+
+	return overbudget, verdict
+}
+
 // handleRequested updates r.pod and r.node with changes to match the requested resources, within
 // what's possible given the remaining resources.
 //
 // Any permitted increases are required to be a multiple of factor.
+//
+// Unlike handleReserve, this method should be called to update the resources for a preexisting pod
+// on the node.
 //
 // A pretty-formatted summary of the outcome is returned as the verdict, for logging.
 func (r resourceTransitioner[T]) handleRequested(requested T, startingMigration bool, factor T) (verdict string) {
