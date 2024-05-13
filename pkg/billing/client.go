@@ -118,7 +118,9 @@ func NewS3Client(ctx context.Context, cfg S3ClientConfig) (*S3Client, error) {
 	}
 
 	client := s3.NewFromConfig(s3Config, func(o *s3.Options) {
-		o.BaseEndpoint = &cfg.Endpoint
+		if cfg.Endpoint != "" {
+			o.BaseEndpoint = &cfg.Endpoint
+		}
 		o.UsePathStyle = true // required for minio
 	})
 

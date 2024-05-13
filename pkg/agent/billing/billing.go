@@ -107,14 +107,9 @@ func StartBillingMetricsCollector(
 	if c := conf.Clients.S3; c != nil {
 		client, err := billing.NewS3Client(ctx, c.S3ClientConfig)
 		if err != nil {
-			return fmt.Errorf("Failed to create S3 client: %w", err)
+			return fmt.Errorf("failed to create S3 client: %w", err)
 		}
-		logger.Info("Created S3 client",
-			zap.String("bucket", c.Bucket),
-			zap.String("region", c.Region),
-			zap.String("prefixInBucket", c.PrefixInBucket),
-			zap.String("endpoint", c.Endpoint),
-		)
+		logger.Info("Created S3 client", client.LogFields())
 		clients = append(clients, clientInfo{
 			client: client,
 			name:   "s3",
