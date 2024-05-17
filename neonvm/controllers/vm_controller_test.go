@@ -20,7 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -46,7 +45,8 @@ func (c *clientMock) Get(ctx context.Context, key client.ObjectKey,
 	if !ok {
 		return apierrors.NewNotFound(vmv1.Resource("virtualmachine"), key.Name)
 	}
-	json.Unmarshal(str, obj)
+	err := json.Unmarshal(str, obj)
+	require.NoError(c.t, err)
 
 	return nil
 }
@@ -177,18 +177,19 @@ var reconcilerMetrics = MakeReconcilerMetrics()
 func newTestParams(t *testing.T) *testParams {
 	os.Setenv("VM_RUNNER_IMAGE", "vm-runner-img")
 
-	params := &testParams{
-		t: t,
-	}
-
 	logger := zap.New(zap.UseDevMode(true), zap.WriteTo(os.Stdout),
 		zap.Level(zapcore.DebugLevel))
-	params.ctx = log.IntoContext(context.Background(), logger)
+	ctx := log.IntoContext(context.Background(), logger)
 
-	params.client = newClientMock(t)
-
-	//nolint:exhaustruct // This is a mock
-	params.mockRecorder = &mockRecorder{}
+	params := &testParams{
+		t:      t,
+		ctx:    ctx,
+		client: newClientMock(t),
+		//nolint:exhaustruct // This is a mock
+		mockRecorder: &mockRecorder{},
+		r:            nil,
+		origVM:       nil,
+	}
 
 	scheme := runtime.NewScheme()
 	var vm *vmv1.VirtualMachine
@@ -211,7 +212,8 @@ func newTestParams(t *testing.T) *testParams {
 }
 
 func (p *testParams) initVM(vm *vmv1.VirtualMachine) *vmv1.VirtualMachine {
-	p.client.Create(p.ctx, vm)
+	err := p.client.Create(p.ctx, vm)
+	require.NoError(p.t, err)
 	p.origVM = vm
 
 	// Do serialize/deserialize, to normalize resource.Quantity
@@ -274,10 +276,6 @@ func TestReconcile(t *testing.T) {
 
 	// Pod is pending, so nothing changes
 	assert.Equal(t, vm, params.getVM())
-
-	// s, _ := json.MarshalIndent(vm, "", "\t")
-	// fmt.Print(string(s))
-	// t.Fail()
 }
 
 func PrettyPrint(t *testing.T, obj any) {
@@ -327,7 +325,8 @@ func TestRunningPod(t *testing.T) {
 	PrettyPrint(t, pod)
 
 	pod.Status.Phase = corev1.PodRunning
-	params.client.Update(params.ctx, &pod)
+	err = params.client.Update(params.ctx, &pod)
+	require.NoError(t, err)
 
 	// Round 2
 	res, err = params.r.Reconcile(params.ctx, req)
