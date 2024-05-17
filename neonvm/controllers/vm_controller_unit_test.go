@@ -3,7 +3,10 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,8 +25,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/neonvm/controllers/mocks"
+	"github.com/neondatabase/autoscaling/neonvm/qmp"
 )
 
 type mockRecorder struct {
@@ -76,15 +82,36 @@ func defaultVm() *vmv1.VirtualMachine {
 }
 
 type testParams struct {
-	t            *testing.T
-	ctx          context.Context
-	r            *VMReconciler
-	client       client.Client
-	origVM       *vmv1.VirtualMachine
-	mockRecorder *mockRecorder
+	t              *testing.T
+	ctx            context.Context
+	r              *VMReconciler
+	client         client.Client
+	origVM         *vmv1.VirtualMachine
+	mockRecorder   *mockRecorder
+	mockQMPFactory *mockQMPFactory
+	mockHTTPClient *mocks.HTTPClient
 }
 
 var reconcilerMetrics = MakeReconcilerMetrics()
+
+type mockQMPFactory struct {
+	mock.Mock
+}
+
+func (m *mockQMPFactory) ConnectVM(vm *vmv1.VirtualMachine) (QMPMonitor, error) {
+	call := m.Called(vm)
+	return call.Get(0).(QMPMonitor), call.Error(1)
+}
+
+func (m *mockQMPFactory) QmpSetMemorySlots(
+	ctx context.Context,
+	vm *vmv1.VirtualMachine,
+	slots int,
+	recorder record.EventRecorder,
+) (int, error) {
+	call := m.Called(ctx, vm, slots, recorder)
+	return call.Int(0), call.Error(1)
+}
 
 func newTestParams(t *testing.T) *testParams {
 	os.Setenv("VM_RUNNER_IMAGE", "vm-runner-img")
@@ -108,6 +135,9 @@ func newTestParams(t *testing.T) *testParams {
 		mockRecorder: &mockRecorder{},
 		r:            nil,
 		origVM:       nil,
+		//nolint:exhaustruct // This is a mock
+		mockQMPFactory: &mockQMPFactory{},
+		mockHTTPClient: mocks.NewHTTPClient(t),
 	}
 
 	params.r = &VMReconciler{
@@ -125,7 +155,9 @@ func newTestParams(t *testing.T) *testParams {
 			FailurePendingPeriod:    time.Minute,
 			FailingRefreshInterval:  time.Minute,
 		},
-		Metrics: reconcilerMetrics,
+		Metrics:    reconcilerMetrics,
+		QMPFactory: params.mockQMPFactory,
+		HTTPClient: params.mockHTTPClient,
 	}
 
 	return params
@@ -147,6 +179,14 @@ func (p *testParams) getVM() *vmv1.VirtualMachine {
 	require.NoError(p.t, err)
 
 	return &obj
+}
+
+//nolint:unused // This is used to catch recorder calls during test debug
+func (p *testParams) recorderCatchAll() {
+	p.mockRecorder.
+		On("Eventf", mock.Anything, mock.Anything,
+			mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).Maybe()
 }
 
 func TestReconcile(t *testing.T) {
@@ -216,7 +256,7 @@ func TestRunningPod(t *testing.T) {
 
 	// Round 1
 	params.mockRecorder.On("Event", mock.Anything, "Normal", "Created",
-		mock.Anything)
+		mock.Anything).Once()
 	res, err := params.r.Reconcile(params.ctx, req)
 	require.NoError(t, err)
 	assert.Equal(t, false, res.Requeue)
@@ -256,4 +296,45 @@ func TestRunningPod(t *testing.T) {
 	assert.Equal(t, vmv1.VmRunning, vm.Status.Phase)
 	assert.Len(t, vm.Status.Conditions, 1)
 	assert.Equal(t, vm.Status.Conditions[0].Type, typeAvailableVirtualMachine)
+
+	// Round 3
+	// Now QMP kicks in
+	// params.recorderCatchAll()
+
+	mon := mocks.NewQMPMonitor(t)
+	params.mockQMPFactory.On("ConnectVM", vm).Return(mon, nil)
+
+	params.mockRecorder.On("Event", mock.Anything, "Normal", "CpuInfo", mock.Anything).
+		Return(nil)
+	params.mockRecorder.On("Event", mock.Anything, "Normal", "MemoryInfo", mock.Anything).
+		Return(nil)
+
+	result := `{}`
+	//nolint:exhaustruct // This is a test
+	resp := &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(result)),
+	}
+	params.mockHTTPClient.On("Do", mock.Anything).Return(resp, nil)
+
+	memorySize := resource.NewQuantity(int64(1000), resource.DecimalSI)
+	mon.On("CPUs").Return([]qmp.CPUSlot{}, []qmp.CPUSlot{}, nil).Once()
+	mon.On("MemorySize").Return(memorySize, nil).Once()
+
+	mon.On("Close")
+
+	res, err = params.r.Reconcile(params.ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, false, res.Requeue)
+
+	// Status is updated
+	vm.Status.Phase = vmv1.VmScaling
+	vm.Status.CPUs = lo.ToPtr(vmv1.MilliCPU(0))
+	vm.Status.MemorySize = resource.NewScaledQuantity(1, 3)
+
+	// Need to call this to update the internal representation of the
+	// resource.Quantity
+	_ = vm.Status.MemorySize.String()
+
+	assert.Equal(t, vm.Status, params.getVM().Status)
 }
