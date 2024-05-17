@@ -18,6 +18,7 @@ package functests
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"time"
 
@@ -106,6 +107,8 @@ var _ = Describe("VirtualMachine controller", func() {
 					FailurePendingPeriod:    1 * time.Minute,
 					FailingRefreshInterval:  1 * time.Minute,
 				},
+				HTTPClient: http.DefaultClient,
+				QMPFactory: nil,
 			}
 
 			_, err = virtualmachineReconciler.Reconcile(ctx, reconcile.Request{

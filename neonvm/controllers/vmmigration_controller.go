@@ -40,6 +40,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/neonvm/controllers/buildtag"
+	"github.com/neondatabase/autoscaling/neonvm/qmp"
 )
 
 const virtualmachinemigrationFinalizer = "vm.neon.tech/finalizer"
@@ -309,14 +310,14 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 
 			// do hotplugCPU in targetRunner before migration
 			log.Info("Syncing CPUs in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
-			if err := QmpSyncCpuToTarget(vm, migration); err != nil {
+			if err := qmp.QmpSyncMemoryToTarget(vm, migration); err != nil {
 				return ctrl.Result{}, err
 			}
 			log.Info("CPUs in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 
 			// do hotplug Memory in targetRunner
 			log.Info("Syncing Memory in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
-			if err := QmpSyncMemoryToTarget(vm, migration); err != nil {
+			if err := qmp.QmpSyncMemoryToTarget(vm, migration); err != nil {
 				return ctrl.Result{}, err
 			}
 			log.Info("Memory in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
@@ -330,7 +331,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 					return ctrl.Result{}, err
 				}
 				// trigger migration
-				if err := QmpStartMigration(vm, migration); err != nil {
+				if err := qmp.QmpStartMigration(vm, migration); err != nil {
 					migration.Status.Phase = vmv1.VmmFailed
 					return ctrl.Result{}, err
 				}
@@ -412,7 +413,14 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 
 		// retrieve migration statistics
-		migrationInfo, err := QmpGetMigrationInfo(QmpAddr(vm))
+		sourceMon, err := qmp.DefaultQMPFactory.ConnectVM(vm)
+		if err != nil {
+			log.Error(err, "Failed to connect to VM")
+			return ctrl.Result{}, err
+		}
+		defer sourceMon.Close()
+
+		migrationInfo, err := sourceMon.MigrationInfo()
 		if err != nil {
 			log.Error(err, "Failed to get migration info")
 			return ctrl.Result{}, err
@@ -469,7 +477,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 
 			// try to stop hypervisor in source runner if it running still
 			if sourceRunner.Status.Phase == corev1.PodRunning {
-				if err := QmpQuit(migration.Status.SourcePodIP, vm.Spec.QMP); err != nil {
+				if err := sourceMon.Quit(); err != nil {
 					log.Error(err, "Failed stop hypervisor in source runner pod")
 				} else {
 					log.Info("Hypervisor in source runner pod stopped")
@@ -492,9 +500,16 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Failed", message)
 
+			targetMon, err := qmp.DefaultQMPFactory.ConnectIP(migration.Status.TargetPodIP, vm.Spec.QMP)
+			if err != nil {
+				log.Error(err, "Failed to connect to target VM")
+				return ctrl.Result{}, err
+			}
+			defer targetMon.Close()
+
 			// try to stop hypervisor in target runner
 			if targetRunner.Status.Phase == corev1.PodRunning {
-				if err := QmpQuit(migration.Status.TargetPodIP, vm.Spec.QMP); err != nil {
+				if err := targetMon.Quit(); err != nil {
 					log.Error(err, "Failed stop hypervisor in target runner pod")
 				} else {
 					log.Info("Hypervisor in target runner pod stopped")
@@ -516,7 +531,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		// seems migration still going on, just update status with migration progress once per second
 		time.Sleep(time.Second)
 		// re-retrieve migration statistics
-		migrationInfo, err = QmpGetMigrationInfo(QmpAddr(vm))
+		migrationInfo, err = sourceMon.MigrationInfo()
 		if err != nil {
 			log.Error(err, "Failed to re-get migration info")
 			return ctrl.Result{}, err
@@ -622,7 +637,15 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 
 		// try to cancel migration
 		log.Info("Canceling migration")
-		if err := QmpCancelMigration(QmpAddr(vm)); err != nil {
+
+		mon, err := qmp.DefaultQMPFactory.ConnectVM(vm)
+		if err != nil {
+			log.Error(err, "Failed to connect to VM")
+			return err
+		}
+		defer mon.Close()
+
+		if err := mon.MigrationCancel(); err != nil {
 			// inform about error but not return error to avoid stuckness in reconciliation cycle
 			log.Error(err, "Migration canceling failed")
 		}
