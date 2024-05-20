@@ -1,6 +1,6 @@
 module github.com/neondatabase/autoscaling
 
-go 1.21
+go 1.22
 
 // Replace directives from github.com/cilium/cilium. Keep in sync when updating Cilium!
 replace (

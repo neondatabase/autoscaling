@@ -284,7 +284,6 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, a
 			// read IPPool from ipppols.vm.neon.tech custom resource
 			pool, err := i.getNeonvmIPPool(ctxWithTimeout, ipRange.Range)
 			if err != nil {
-				//nolint:errorlint // spurious. Temporary is an interface, and doesn't work with errors.As
 				if e, ok := err.(Temporary); ok && e.Temporary() {
 					// retry attempt to read IPPool
 					time.Sleep(DatastoreRetriesDelay)
@@ -313,7 +312,6 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, a
 			// update IPPool with newReservation
 			err = pool.Update(ctxWithTimeout, newReservation)
 			if err != nil {
-				//nolint:errorlint // spurious. Temporary is an interface, and doesn't work with errors.As
 				if e, ok := err.(Temporary); ok && e.Temporary() {
 					// retry attempt to update IPPool
 					time.Sleep(DatastoreRetriesDelay)
