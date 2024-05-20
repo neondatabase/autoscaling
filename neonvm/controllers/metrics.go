@@ -40,7 +40,7 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Name: "reconcile_failing_objects",
 				Help: "Number of objects that are failing to reconcile for each specific controller",
 			},
-			[]string{"controller"},
+			[]string{"controller", OutcomeLabel},
 		)),
 		vmCreationToRunnerCreationTime: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
@@ -100,8 +100,9 @@ type wrappedReconciler struct {
 	Reconciler     reconcile.Reconciler
 	Metrics        ReconcilerMetrics
 
-	lock    sync.Mutex
-	failing map[client.ObjectKey]struct{}
+	lock        sync.Mutex
+	failing     map[client.ObjectKey]struct{}
+	conflicting map[client.ObjectKey]struct{}
 }
 
 // ReconcilerWithMetrics is a Reconciler produced by WithMetrics that can return a snapshot of the
@@ -124,6 +125,10 @@ type ReconcileSnapshot struct {
 
 	// Failing is the list of objects currently failing to reconcile
 	Failing []string `json:"failing"`
+
+	// Conflicting is the list of objects currently failing to reconcile
+	// due to a conflict
+	Conflicting []string `json:"conflicting"`
 }
 
 // WithMetrics wraps a given Reconciler with metrics capabilities.
@@ -137,6 +142,7 @@ func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlNam
 		ControllerName: cntrlName,
 		lock:           sync.Mutex{},
 		failing:        make(map[client.ObjectKey]struct{}),
+		conflicting:    make(map[client.ObjectKey]struct{}),
 	}
 }
 
@@ -156,36 +162,48 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	defer d.lock.Unlock()
 	outcome := SuccessOutcome
 	if err != nil {
-		d.failing[req.NamespacedName] = struct{}{}
 		if errors.IsConflict(err) {
 			outcome = ConflictOutcome
+			d.conflicting[req.NamespacedName] = struct{}{}
 		} else {
 			outcome = FailureOutcome
+			d.failing[req.NamespacedName] = struct{}{}
 		}
 
 		log.Error(err, "Failed to reconcile VirtualMachine",
 			"duration", duration.String(), "outcome", outcome)
 	} else {
 		delete(d.failing, req.NamespacedName)
+		delete(d.conflicting, req.NamespacedName)
 		log.Info("Successful reconciliation", "duration", duration.String())
 	}
 	d.Metrics.ObserveReconcileDuration(outcome, duration)
-	d.Metrics.failing.WithLabelValues(d.ControllerName).Set(float64(len(d.failing)))
+	d.Metrics.failing.WithLabelValues(d.ControllerName,
+		string(FailureOutcome)).Set(float64(len(d.failing)))
+	d.Metrics.failing.WithLabelValues(d.ControllerName,
+		string(ConflictOutcome)).Set(float64(len(d.conflicting)))
 
 	return res, err
+}
+
+func keysToSlice(m map[client.ObjectKey]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k.String())
+	}
+	return keys
 }
 
 func (r *wrappedReconciler) Snapshot() ReconcileSnapshot {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	failing := make([]string, 0, len(r.failing))
-	for namespacedName := range r.failing {
-		failing = append(failing, namespacedName.String())
-	}
+	failing := keysToSlice(r.failing)
+	conflicting := keysToSlice(r.conflicting)
 
 	return ReconcileSnapshot{
 		ControllerName: r.ControllerName,
 		Failing:        failing,
+		Conflicting:    conflicting,
 	}
 }
