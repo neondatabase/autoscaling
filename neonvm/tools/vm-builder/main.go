@@ -236,6 +236,8 @@ func main() {
 		tmplArgs.ShutdownHook = strings.ReplaceAll(spec.ShutdownHook, "\n", "\n\t")
 
 		for _, c := range spec.Commands {
+			// Allow core dumps for all inittab targets
+			c.Shell = fmt.Sprintf("ulimit -c unlimited; %s", c.Shell)
 			tmplArgs.InittabCommands = append(tmplArgs.InittabCommands, inittabCommand{
 				SysvInitAction:      c.SysvInitAction,
 				CommandUser:         c.User,

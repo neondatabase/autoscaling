@@ -28,11 +28,17 @@ type Config struct {
 
 type ClientsConfig struct {
 	HTTP *HTTPClientConfig `json:"http"`
+	S3   *S3ClientConfig   `json:"s3"`
 }
 
 type HTTPClientConfig struct {
 	BaseClientConfig
 	URL string `json:"url"`
+}
+
+type S3ClientConfig struct {
+	BaseClientConfig
+	billing.S3ClientConfig
 }
 
 type BaseClientConfig struct {
@@ -80,30 +86,57 @@ type vmMetricsSeconds struct {
 	activeTime time.Duration
 }
 
-func RunBillingMetricsCollector(
-	backgroundCtx context.Context,
+type MetricsCollector struct {
+	conf    *Config
+	clients []clientInfo
+}
+
+func NewMetricsCollector(
+	ctx context.Context,
 	parentLogger *zap.Logger,
 	conf *Config,
-	store VMStoreForNode,
-	metrics PromMetrics,
-) error {
-	var clients []clientInfo
+) (*MetricsCollector, error) {
+	logger := parentLogger.Named("billing")
+	mc := &MetricsCollector{
+		conf:    conf,
+		clients: make([]clientInfo, 0),
+	}
 
 	if c := conf.Clients.HTTP; c != nil {
-		clients = append(clients, clientInfo{
-			client: billing.NewClient(c.URL, http.DefaultClient),
+		mc.clients = append(mc.clients, clientInfo{
+			client: billing.NewHTTPClient(c.URL, http.DefaultClient),
 			name:   "http",
 			config: c.BaseClientConfig,
 		})
 	}
+	if c := conf.Clients.S3; c != nil {
+		client, err := billing.NewS3Client(ctx, c.S3ClientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create S3 client: %w", err)
+		}
+		logger.Info("Created S3 client", client.LogFields())
+		mc.clients = append(mc.clients, clientInfo{
+			client: client,
+			name:   "s3",
+			config: c.BaseClientConfig,
+		})
+	}
 
-	logger := parentLogger.Named("billing")
+	return mc, nil
+}
 
-	collectTicker := time.NewTicker(time.Second * time.Duration(conf.CollectEverySeconds))
+func (mc *MetricsCollector) Run(
+	ctx context.Context,
+	logger *zap.Logger,
+	store VMStoreForNode,
+	metrics PromMetrics,
+) error {
+
+	collectTicker := time.NewTicker(time.Second * time.Duration(mc.conf.CollectEverySeconds))
 	defer collectTicker.Stop()
 	// Offset by half a second, so it's a bit more deterministic.
 	time.Sleep(500 * time.Millisecond)
-	accumulateTicker := time.NewTicker(time.Second * time.Duration(conf.AccumulateEverySeconds))
+	accumulateTicker := time.NewTicker(time.Second * time.Duration(mc.conf.AccumulateEverySeconds))
 	defer accumulateTicker.Stop()
 
 	state := metricsState{
@@ -115,7 +148,7 @@ func RunBillingMetricsCollector(
 
 	var queueWriters []eventQueuePusher[*billing.IncrementalEvent]
 
-	for _, c := range clients {
+	for _, c := range mc.clients {
 		qw, queueReader := newEventQueue[*billing.IncrementalEvent](metrics.queueSizeCurrent.WithLabelValues(c.name))
 		queueWriters = append(queueWriters, qw)
 
@@ -141,14 +174,14 @@ func RunBillingMetricsCollector(
 		select {
 		case <-collectTicker.C:
 			logger.Info("Collecting billing state")
-			if store.Stopped() && backgroundCtx.Err() == nil {
+			if store.Stopped() && ctx.Err() == nil {
 				return errors.New("VM store stopped but background context is still live")
 			}
 			state.collect(logger, store, metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
-			state.drainEnqueue(logger, conf, billing.GetHostname(), queueWriters)
-		case <-backgroundCtx.Done():
+			state.drainEnqueue(logger, mc.conf, billing.GetHostname(), queueWriters)
+		case <-ctx.Done():
 			return nil
 		}
 	}
