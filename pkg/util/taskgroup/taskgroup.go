@@ -1,4 +1,6 @@
-// Package multierrgroup provides a mix of multierr and errgroup
+// Originally taken from https://github.com/ptxmac/multierrgroup
+
+// Package taskgroup provides a mix of multierr and errgroup
 // See documentation for https://pkg.go.dev/go.uber.org/multierr and https://pkg.go.dev/golang.org/x/sync/errgroup
 package taskgroup
 
@@ -15,13 +17,15 @@ import (
 // See https://pkg.go.dev/golang.org/x/sync/errgroup#group for more information
 type Group interface {
 	WithContext(ctx context.Context) context.Context
+	WithPanicHandler(f func(any))
 	Wait() error
 	Go(name string, f func(logger *zap.Logger) error)
 }
 
 type group struct {
-	cancel context.CancelFunc
-	logger *zap.Logger
+	cancel       context.CancelFunc
+	logger       *zap.Logger
+	panicHandler func(any)
 
 	wg sync.WaitGroup
 
@@ -41,12 +45,17 @@ func NewGroup(logger *zap.Logger) Group {
 	}
 }
 
-// WithContext returns a new Group with a associated Context.
+// WithContext updates the current Group with a associated Context.
 // The context will be canceled if any goroutine returns an error.
 // See https://pkg.go.dev/golang.org/x/sync/errgroup#WithContext
 func (g *group) WithContext(ctx context.Context) context.Context {
 	ctx, g.cancel = context.WithCancel(ctx)
 	return ctx
+}
+
+// WithPanicHandler sets a panic handler for the group.
+func (g *group) WithPanicHandler(f func(any)) {
+	g.panicHandler = f
 }
 
 // Wait blocks until all goroutines have completed.
@@ -60,6 +69,19 @@ func (g *group) Wait() error {
 	return g.err
 }
 
+func (g *group) call(f func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if g.panicHandler != nil {
+				g.panicHandler(r)
+			}
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	err = f()
+	return err
+}
+
 // Go calls the function in a new goroutine.
 // If a non-nil errors is returned, the context is canceled and
 // the error is collected using multierr and will be returned by Wait.
@@ -69,7 +91,10 @@ func (g *group) Go(name string, f func(logger *zap.Logger) error) {
 	go func() {
 		defer g.wg.Done()
 		logger := g.logger.Named(name)
-		if err := f(logger); err != nil {
+		cb := func() error {
+			return f(logger)
+		}
+		if err := g.call(cb); err != nil {
 			err = fmt.Errorf("task %s failed: %w", name, err)
 			g.errMutex.Lock()
 			g.err = multierr.Append(g.err, err)

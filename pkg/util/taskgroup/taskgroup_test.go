@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
+	"github.com/stretchr/testify/assert"
 )
 
 func ExampleGroup() {
@@ -58,4 +59,15 @@ func TestWithContext(t *testing.T) {
 	if !canceled {
 		t.Errorf("context should have been canceled!")
 	}
+}
+
+func TestPanic(t *testing.T) {
+	log := zap.NewNop()
+	g := taskgroup.NewGroup(log)
+	g.Go("task1", func(_ *zap.Logger) error {
+		panic("panic message")
+	})
+	err := g.Wait()
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), "task task1 failed: panic: panic message")
 }
