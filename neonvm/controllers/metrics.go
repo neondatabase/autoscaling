@@ -168,6 +168,15 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		} else {
 			outcome = FailureOutcome
 			d.failing[req.NamespacedName] = struct{}{}
+
+			// If the VM is now getting non-conflict errors, it probably
+			// means transient conflicts has been resolved.
+			//
+			// Notably, the other way around is not true:
+			// if a VM is getting conflict errors, it doesn't mean
+			// non-conflict errors are resolved, as they are more
+			// likely to be persistent.
+			delete(d.conflicting, req.NamespacedName)
 		}
 
 		log.Error(err, "Failed to reconcile VirtualMachine",
