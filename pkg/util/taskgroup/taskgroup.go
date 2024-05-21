@@ -36,9 +36,10 @@ type group struct {
 // NewGroup returns a new Group.
 func NewGroup(logger *zap.Logger) Group {
 	return &group{
-		cancel: nil, // Set separately by WithContext
-		logger: logger,
-		wg:     sync.WaitGroup{},
+		cancel:       nil, // Set separately by WithContext
+		panicHandler: nil, // Set separately by WithPanicHandler
+		logger:       logger,
+		wg:           sync.WaitGroup{},
 
 		errMutex: sync.Mutex{},
 		err:      nil,

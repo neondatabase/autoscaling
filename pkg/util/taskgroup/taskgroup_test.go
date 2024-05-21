@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
-	"github.com/stretchr/testify/assert"
 )
 
 func ExampleGroup() {
