@@ -161,7 +161,7 @@ func main() {
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
 	}
 
-	vmReconciler := &controllers.VirtualMachineReconciler{
+	vmReconciler := &controllers.VMReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),

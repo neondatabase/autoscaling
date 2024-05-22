@@ -93,7 +93,7 @@ var _ = Describe("VirtualMachine controller", func() {
 			}, time.Minute, time.Second).Should(Succeed())
 
 			By("Reconciling the custom resource created")
-			virtualmachineReconciler := &VirtualMachineReconciler{
+			virtualmachineReconciler := &VMReconciler{
 				Client:   k8sClient,
 				Scheme:   k8sClient.Scheme(),
 				Recorder: nil,
