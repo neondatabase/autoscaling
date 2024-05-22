@@ -75,8 +75,8 @@ const (
 	maxSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
 )
 
-// VirtualMachineReconciler reconciles a VirtualMachine object
-type VirtualMachineReconciler struct {
+// VMReconciler reconciles a VirtualMachine object
+type VMReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
@@ -113,7 +113,7 @@ type VirtualMachineReconciler struct {
 // - About Operator Pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
 // - About Controllers: https://kubernetes.io/docs/concepts/architecture/controller/
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
-func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	var vm vmv1.VirtualMachine
@@ -186,7 +186,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
-func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, vm *vmv1.VirtualMachine) {
+func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, vm *vmv1.VirtualMachine) {
 	// Note: It is not recommended to use finalizers with the purpose of delete resources which are
 	// created and managed in the reconciliation. These ones, such as the Pod created on this reconcile,
 	// are defined as depended of the custom resource. See that we use the method ctrl.SetControllerReference.
@@ -253,7 +253,7 @@ func runnerVersionIsSupported(version api.RunnerProtoVersion) bool {
 	return version >= minSupportedRunnerVersion && version <= maxSupportedRunnerVersion
 }
 
-func (r *VirtualMachineReconciler) updateVMStatusCPU(
+func (r *VMReconciler) updateVMStatusCPU(
 	ctx context.Context,
 	vm *vmv1.VirtualMachine,
 	vmRunner *corev1.Pod,
@@ -292,7 +292,7 @@ func (r *VirtualMachineReconciler) updateVMStatusCPU(
 	}
 }
 
-func (r *VirtualMachineReconciler) updateVMStatusMemory(
+func (r *VMReconciler) updateVMStatusMemory(
 	vm *vmv1.VirtualMachine,
 	qmpMemorySize *resource.Quantity,
 ) {
@@ -305,7 +305,7 @@ func (r *VirtualMachineReconciler) updateVMStatusMemory(
 	}
 }
 
-func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine) error {
+func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine) error {
 	log := log.FromContext(ctx)
 
 	// Let's check and just set the condition status as Unknown when no status are available
@@ -908,7 +908,7 @@ func runnerContainerStopped(pod *corev1.Pod) bool {
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
 // then emits an event and log line about what it did, whether it actually deleted the runner pod.
-func (r *VirtualMachineReconciler) deleteRunnerPodIfEnabled(
+func (r *VMReconciler) deleteRunnerPodIfEnabled(
 	ctx context.Context,
 	vm *vmv1.VirtualMachine,
 	runner *corev1.Pod,
@@ -1080,7 +1080,7 @@ func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
 }
 
 // podForVirtualMachine returns a VirtualMachine Pod object
-func (r *VirtualMachineReconciler) podForVirtualMachine(
+func (r *VMReconciler) podForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
@@ -1098,7 +1098,7 @@ func (r *VirtualMachineReconciler) podForVirtualMachine(
 	return pod, nil
 }
 
-func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
+func (r *VMReconciler) sshSecretForVirtualMachine(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 	secret, err := sshSecretSpec(vm)
 	if err != nil {
 		return nil, err
@@ -1708,7 +1708,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 // SetupWithManager sets up the controller with the Manager.
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
-func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
+func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachine"
 	reconciler := WithMetrics(withCatchPanic(r), r.Metrics, cntrlName)
 	err := ctrl.NewControllerManagedBy(mgr).
@@ -1735,7 +1735,7 @@ func DeepEqual(v1, v2 interface{}) bool {
 }
 
 // TODO: reimplement to r.Patch()
-func (r *VirtualMachineReconciler) tryUpdateVM(ctx context.Context, vm *vmv1.VirtualMachine) error {
+func (r *VMReconciler) tryUpdateVM(ctx context.Context, vm *vmv1.VirtualMachine) error {
 	return r.Update(ctx, vm)
 }
 
