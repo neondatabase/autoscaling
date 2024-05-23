@@ -166,7 +166,7 @@ func defaultVm() *vmv1.VirtualMachine {
 type testParams struct {
 	t            *testing.T
 	ctx          context.Context
-	r            *VirtualMachineReconciler
+	r            *VMReconciler
 	client       *clientMock
 	origVM       *vmv1.VirtualMachine
 	mockRecorder *mockRecorder
@@ -195,7 +195,7 @@ func newTestParams(t *testing.T) *testParams {
 	var vm *vmv1.VirtualMachine
 	scheme.AddKnownTypes(vmv1.SchemeGroupVersion, vm)
 
-	params.r = &VirtualMachineReconciler{
+	params.r = &VMReconciler{
 		Client:   params.client,
 		Recorder: params.mockRecorder,
 		Scheme:   scheme,
