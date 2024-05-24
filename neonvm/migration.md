@@ -69,7 +69,7 @@ status:
 
 ### Questions
 
-- how generate name for target VM (name prefix/sufix/other) ?
+- how generate name for target VM (name prefix/suffix/other) ?
 - how long migration resource should be available (`kubectl get neonvmmigrate`) after migration finished ?
 - how to cancel migration ? as variant - just delete it (`kubectl delete neonvmmigrate example`)
 - should migration controller delete source VM after migration ?
