@@ -28,10 +28,11 @@ import (
 	"time"
 
 	"github.com/tychoish/fun/srv"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -104,17 +105,28 @@ func main() {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
-	opts := zap.Options{ //nolint:exhaustruct // typical options struct; not all fields needed.
-		Development:     true,
-		StacktraceLevel: zapcore.Level(zapcore.PanicLevel),
-		TimeEncoder:     zapcore.ISO8601TimeEncoder,
-	}
-	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	logConfig := zap.NewProductionConfig()
+	logConfig.Sampling = nil // Disabling sampling; it's enabled by default for zap's production configs.
+	logConfig.Level.SetLevel(zap.InfoLevel)
+	logConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	baseLogger := zap.Must(logConfig.Build(
+		zap.AddStacktrace(zapcore.PanicLevel), // enable stack traces at panic or above
+	))
+	// There's no direct way to go from a zap.Logger to a logr.Logger, or even a zapcore.Core to a
+	// logr.Logger, so we need the roundabout method of letting logr do the intial setup and then
+	// replacing the zapcore.Core with our own.
+	logger := ctrlzap.New(ctrlzap.RawZapOpts(zap.WrapCore(
+		func(c zapcore.Core) zapcore.Core {
+			return baseLogger.Core() // completely replace the zapcore.Core with the one we created above.
+		},
+	)))
+
+	ctrl.SetLogger(logger)
 	// define klog settings (used in LeaderElector)
-	klog.SetLogger(zap.New(zap.UseFlagOptions(&opts)).V(2))
+	klog.SetLogger(logger)
 
 	// tune k8s client for manager
 	cfg := ctrl.GetConfigOrDie()
