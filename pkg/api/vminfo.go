@@ -392,7 +392,7 @@ func (c *ScalingConfig) ValidateOverrides() error {
 func (c *ScalingConfig) validate(requireAllRequiredFields bool) error {
 	ec := &erc.Collector{}
 
-	// Check c.loadAverageFractionTarget is between 0 and 2. We don't *strictly* need the upper
+	// Check c.LoadAverageFractionTarget is between 0 and 2. We don't *strictly* need the upper
 	// bound, but it's a good safety check.
 	if c.LoadAverageFractionTarget != nil {
 		erc.Whenf(ec, *c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
