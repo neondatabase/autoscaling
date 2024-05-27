@@ -116,7 +116,7 @@ func main() {
 		zap.AddStacktrace(zapcore.PanicLevel), // enable stack traces at panic or above
 	))
 	// There's no direct way to go from a zap.Logger to a logr.Logger, or even a zapcore.Core to a
-	// logr.Logger, so we need the roundabout method of letting logr do the intial setup and then
+	// logr.Logger, so we need the roundabout method of letting logr do the initial setup and then
 	// replacing the zapcore.Core with our own.
 	logger := ctrlzap.New(ctrlzap.RawZapOpts(zap.WrapCore(
 		func(c zapcore.Core) zapcore.Core {
