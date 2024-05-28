@@ -16,7 +16,7 @@ import (
 // Group manages goroutines and collect all the errors.
 // See https://pkg.go.dev/golang.org/x/sync/errgroup#group for more information
 type Group interface {
-	WithContext(ctx context.Context) context.Context
+	Ctx() context.Context
 	WithPanicHandler(f func(any))
 	Wait() error
 	Go(name string, f func(logger *zap.Logger) error)
@@ -24,6 +24,7 @@ type Group interface {
 
 type group struct {
 	cancel       context.CancelFunc
+	ctx          context.Context
 	logger       *zap.Logger
 	panicHandler func(any)
 
@@ -33,10 +34,20 @@ type group struct {
 	err      error
 }
 
+type GroupOption func(*group)
+
+// WithParentContext sets the parent context for the group.
+func WithParentContext(ctx context.Context) GroupOption {
+	return func(g *group) {
+		g.ctx, g.cancel = context.WithCancel(ctx)
+	}
+}
+
 // NewGroup returns a new Group.
-func NewGroup(logger *zap.Logger) Group {
-	return &group{
-		cancel:       nil, // Set separately by WithContext
+func NewGroup(logger *zap.Logger, opts ...GroupOption) Group {
+	g := &group{
+		cancel:       nil, // Set separately by Ctx
+		ctx:          nil, // Set separately by Ctx
 		panicHandler: nil, // Set separately by WithPanicHandler
 		logger:       logger,
 		wg:           sync.WaitGroup{},
@@ -44,14 +55,21 @@ func NewGroup(logger *zap.Logger) Group {
 		errMutex: sync.Mutex{},
 		err:      nil,
 	}
+
+	for _, opt := range opts {
+		opt(g)
+	}
+	if g.ctx == nil {
+		// If parent context is not set, use background context
+		WithParentContext(context.Background())(g)
+	}
+
+	return g
 }
 
-// WithContext updates the current Group with a associated Context.
-// The context will be canceled if any goroutine returns an error.
-// See https://pkg.go.dev/golang.org/x/sync/errgroup#WithContext
-func (g *group) WithContext(ctx context.Context) context.Context {
-	ctx, g.cancel = context.WithCancel(ctx)
-	return ctx
+// Ctx returns a context that will be canceled when the group is Waited.
+func (g *group) Ctx() context.Context {
+	return g.ctx
 }
 
 // WithPanicHandler sets a panic handler for the group.

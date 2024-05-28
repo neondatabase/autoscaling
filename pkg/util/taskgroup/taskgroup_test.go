@@ -35,7 +35,6 @@ func TestWithContext(t *testing.T) {
 	log := zap.NewNop()
 
 	g := taskgroup.NewGroup(log)
-	ctx := g.WithContext(context.Background())
 	g.Go("task1", func(_ *zap.Logger) error {
 		return err1
 	})
@@ -43,21 +42,27 @@ func TestWithContext(t *testing.T) {
 		return err2
 	})
 	err := g.Wait()
-	if !errors.Is(err, err1) {
-		t.Errorf("error: %s should be: %s", err, err1)
-	}
-	if !errors.Is(err, err2) {
-		t.Errorf("error: %s should be: %s", err, err2)
-	}
-	canceled := false
-	select {
-	case <-ctx.Done():
-		canceled = true
-	default:
+	assert.ErrorIs(t, err, err1)
+	assert.ErrorIs(t, err, err2)
 
+	select {
+	case <-g.Ctx().Done():
+		break
+	default:
+		t.Fatal("context should be done")
 	}
-	if !canceled {
-		t.Errorf("context should have been canceled!")
+}
+
+func TestParentContext(t *testing.T) {
+	parentCtx, cancel := context.WithCancel(context.Background())
+	g := taskgroup.NewGroup(zap.NewNop(), taskgroup.WithParentContext(parentCtx))
+	cancel()
+
+	select {
+	case <-g.Ctx().Done():
+		break
+	default:
+		t.Fatal("context should be done")
 	}
 }
 
