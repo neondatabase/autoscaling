@@ -77,13 +77,12 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 
 	mc, err := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing)
 	if err != nil {
-		return fmt.Errorf("error starting billing metrics collector: %w", err)
+		return fmt.Errorf("error creating billing metrics collector: %w", err)
 	}
 
-	tg := taskgroup.NewGroup(logger)
-	ctx = tg.WithContext(ctx)
-	tg.Go("watch-metrics", func(logger *zap.Logger) error {
-		return mc.Run(ctx, logger, storeForNode, metrics)
+	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
+	tg.Go("collect-metrics", func(logger *zap.Logger) error {
+		return mc.Run(tg.Ctx(), logger, storeForNode, metrics)
 	})
 	tg.Go("main-loop", func(logger *zap.Logger) error {
 		logger.Info("Entering main loop")
@@ -98,7 +97,7 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 				logger.Error("vmEventQueue returned error", zap.Error(err))
 				return err
 			}
-			globalState.handleEvent(ctx, logger, event)
+			globalState.handleEvent(tg.Ctx(), logger, event)
 		}
 	})
 
