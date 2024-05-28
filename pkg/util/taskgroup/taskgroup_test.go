@@ -67,7 +67,7 @@ func TestParentContext(t *testing.T) {
 }
 
 func TestPanic(t *testing.T) {
-	log := zap.NewNop()
+	log := zap.NewExample()
 	g := taskgroup.NewGroup(log)
 	g.Go("task1", func(_ *zap.Logger) error {
 		panic("panic message")
@@ -75,4 +75,5 @@ func TestPanic(t *testing.T) {
 	err := g.Wait()
 	assert.NotNil(t, err)
 	assert.Equal(t, err.Error(), "task task1 failed: panic: panic message")
+	t.Fail()
 }

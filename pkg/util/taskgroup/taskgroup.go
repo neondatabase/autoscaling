@@ -11,6 +11,8 @@ import (
 
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+
+	"github.com/neondatabase/autoscaling/pkg/util/stack"
 )
 
 // Group manages goroutines and collect all the errors.
@@ -94,6 +96,8 @@ func (g *group) call(f func() error) (err error) {
 			if g.panicHandler != nil {
 				g.panicHandler(r)
 			}
+			st := stack.GetStackTrace(nil, 1).String()
+			g.logger.Error("panic", zap.Any("panic", r), zap.String("stack", st))
 			err = fmt.Errorf("panic: %v", r)
 		}
 	}()
