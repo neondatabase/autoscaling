@@ -75,5 +75,4 @@ func TestPanic(t *testing.T) {
 	err := g.Wait()
 	assert.NotNil(t, err)
 	assert.Equal(t, err.Error(), "task task1 failed: panic: panic message")
-	t.Fail()
 }
