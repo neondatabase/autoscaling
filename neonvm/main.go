@@ -126,7 +126,7 @@ func main() {
 
 	ctrl.SetLogger(logger)
 	// define klog settings (used in LeaderElector)
-	klog.SetLogger(logger)
+	klog.SetLogger(logger.V(2))
 
 	// tune k8s client for manager
 	cfg := ctrl.GetConfigOrDie()
