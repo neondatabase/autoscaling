@@ -75,8 +75,8 @@ const (
 	maxSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
 )
 
-// VirtualMachineReconciler reconciles a VirtualMachine object
-type VirtualMachineReconciler struct {
+// VMReconciler reconciles a VirtualMachine object
+type VMReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
@@ -113,11 +113,11 @@ type VirtualMachineReconciler struct {
 // - About Operator Pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
 // - About Controllers: https://kubernetes.io/docs/concepts/architecture/controller/
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
-func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	var virtualmachine vmv1.VirtualMachine
-	if err := r.Get(ctx, req.NamespacedName, &virtualmachine); err != nil {
+	var vm vmv1.VirtualMachine
+	if err := r.Get(ctx, req.NamespacedName, &vm); err != nil {
 		// Error reading the object - requeue the request.
 		if notfound := client.IgnoreNotFound(err); notfound == nil {
 			log.Info("virtualmachine resource not found. Ignoring since object must be deleted")
@@ -128,17 +128,17 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// examine DeletionTimestamp to determine if object is under deletion
-	if virtualmachine.ObjectMeta.DeletionTimestamp.IsZero() {
+	if vm.ObjectMeta.DeletionTimestamp.IsZero() {
 		// The object is not being deleted, so if it does not have our finalizer,
 		// then lets add the finalizer and update the object. This is equivalent
 		// registering our finalizer.
-		if !controllerutil.ContainsFinalizer(&virtualmachine, virtualmachineFinalizer) {
+		if !controllerutil.ContainsFinalizer(&vm, virtualmachineFinalizer) {
 			log.Info("Adding Finalizer for VirtualMachine")
-			if ok := controllerutil.AddFinalizer(&virtualmachine, virtualmachineFinalizer); !ok {
+			if ok := controllerutil.AddFinalizer(&vm, virtualmachineFinalizer); !ok {
 				log.Info("Failed to add finalizer from VirtualMachine")
 				return ctrl.Result{Requeue: true}, nil
 			}
-			if err := r.tryUpdateVM(ctx, &virtualmachine); err != nil {
+			if err := r.tryUpdateVM(ctx, &vm); err != nil {
 				log.Error(err, "Failed to update status about adding finalizer to VirtualMachine")
 				return ctrl.Result{}, err
 			}
@@ -146,18 +146,18 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	} else {
 		// The object is being deleted
-		if controllerutil.ContainsFinalizer(&virtualmachine, virtualmachineFinalizer) {
+		if controllerutil.ContainsFinalizer(&vm, virtualmachineFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for VirtualMachine before delete it")
-			r.doFinalizerOperationsForVirtualMachine(ctx, &virtualmachine)
+			r.doFinalizerOperationsForVirtualMachine(ctx, &vm)
 
 			// remove our finalizer from the list and update it.
 			log.Info("Removing Finalizer for VirtualMachine after successfully perform the operations")
-			if ok := controllerutil.RemoveFinalizer(&virtualmachine, virtualmachineFinalizer); !ok {
+			if ok := controllerutil.RemoveFinalizer(&vm, virtualmachineFinalizer); !ok {
 				log.Info("Failed to remove finalizer from VirtualMachine")
 				return ctrl.Result{Requeue: true}, nil
 			}
-			if err := r.tryUpdateVM(ctx, &virtualmachine); err != nil {
+			if err := r.tryUpdateVM(ctx, &vm); err != nil {
 				log.Error(err, "Failed to update status about removing finalizer from VirtualMachine")
 				return ctrl.Result{}, err
 			}
@@ -166,18 +166,18 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	statusBefore := virtualmachine.Status.DeepCopy()
-	if err := r.doReconcile(ctx, &virtualmachine); err != nil {
-		r.Recorder.Eventf(&virtualmachine, corev1.EventTypeWarning, "Failed",
-			"Failed to reconcile (%s): %s", virtualmachine.Name, err)
+	statusBefore := vm.Status.DeepCopy()
+	if err := r.doReconcile(ctx, &vm); err != nil {
+		r.Recorder.Eventf(&vm, corev1.EventTypeWarning, "Failed",
+			"Failed to reconcile (%s): %s", vm.Name, err)
 		return ctrl.Result{}, err
 	}
 
 	// If the status changed, try to update the object
-	if !DeepEqual(statusBefore, virtualmachine.Status) {
-		if err := r.Status().Update(ctx, &virtualmachine); err != nil {
+	if !DeepEqual(statusBefore, vm.Status) {
+		if err := r.Status().Update(ctx, &vm); err != nil {
 			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
-				"virtualmachine", virtualmachine.Name)
+				"virtualmachine", vm.Name)
 			return ctrl.Result{}, err
 		}
 	}
@@ -186,7 +186,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
-func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, virtualmachine *vmv1.VirtualMachine) {
+func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, vm *vmv1.VirtualMachine) {
 	// Note: It is not recommended to use finalizers with the purpose of delete resources which are
 	// created and managed in the reconciliation. These ones, such as the Pod created on this reconcile,
 	// are defined as depended of the custom resource. See that we use the method ctrl.SetControllerReference.
@@ -196,13 +196,13 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 	log := log.FromContext(ctx)
 
 	// The following implementation will raise an event
-	r.Recorder.Event(virtualmachine, "Warning", "Deleting",
+	r.Recorder.Event(vm, "Warning", "Deleting",
 		fmt.Sprintf("Custom Resource %s is being deleted from the namespace %s",
-			virtualmachine.Name,
-			virtualmachine.Namespace))
+			vm.Name,
+			vm.Namespace))
 
 	// Release overlay IP address
-	if virtualmachine.Spec.ExtraNetwork != nil {
+	if vm.Spec.ExtraNetwork != nil {
 		// Create IPAM object
 		nadName, err := nadIpamName()
 		if err != nil {
@@ -223,7 +223,7 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 			return
 		}
 		defer ipam.Close()
-		ip, err := ipam.ReleaseIP(ctx, virtualmachine.Name, virtualmachine.Namespace)
+		ip, err := ipam.ReleaseIP(ctx, vm.Name, vm.Namespace)
 		if err != nil {
 			// ignore error
 			log.Error(err, "fail to release IP, error ignored")
@@ -231,7 +231,7 @@ func (r *VirtualMachineReconciler) doFinalizerOperationsForVirtualMachine(ctx co
 		}
 		message := fmt.Sprintf("Released IP %s", ip.String())
 		log.Info(message)
-		r.Recorder.Event(virtualmachine, "Normal", "OverlayNet", message)
+		r.Recorder.Event(vm, "Normal", "OverlayNet", message)
 	}
 }
 
@@ -253,9 +253,9 @@ func runnerVersionIsSupported(version api.RunnerProtoVersion) bool {
 	return version >= minSupportedRunnerVersion && version <= maxSupportedRunnerVersion
 }
 
-func (r *VirtualMachineReconciler) updateVMStatusCPU(
+func (r *VMReconciler) updateVMStatusCPU(
 	ctx context.Context,
-	virtualmachine *vmv1.VirtualMachine,
+	vm *vmv1.VirtualMachine,
 	vmRunner *corev1.Pod,
 	qmpPluggedCPUs uint32,
 	cgroupUsage *api.VCPUCgroup,
@@ -274,7 +274,7 @@ func (r *VirtualMachineReconciler) updateVMStatusCPU(
 			// iteration loops by comparing these values to spec CPU use
 			// and moving to the scaling phase.
 			log.Error(nil, "Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
-				"VirtualMachine", virtualmachine.Name,
+				"VirtualMachine", vm.Name,
 				"Runner Pod", vmRunner.Name,
 				"plugged CPUs", qmpPluggedCPUs,
 				"cgroup vCPUs", cgroupUsage.VCPUs)
@@ -283,62 +283,62 @@ func (r *VirtualMachineReconciler) updateVMStatusCPU(
 	} else {
 		currentCPUUsage = vmv1.MilliCPU(1000 * qmpPluggedCPUs)
 	}
-	if virtualmachine.Status.CPUs == nil || *virtualmachine.Status.CPUs != currentCPUUsage {
-		virtualmachine.Status.CPUs = &currentCPUUsage
-		r.Recorder.Event(virtualmachine, "Normal", "CpuInfo",
+	if vm.Status.CPUs == nil || *vm.Status.CPUs != currentCPUUsage {
+		vm.Status.CPUs = &currentCPUUsage
+		r.Recorder.Event(vm, "Normal", "CpuInfo",
 			fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
-				virtualmachine.Name,
-				virtualmachine.Status.CPUs))
+				vm.Name,
+				vm.Status.CPUs))
 	}
 }
 
-func (r *VirtualMachineReconciler) updateVMStatusMemory(
-	virtualmachine *vmv1.VirtualMachine,
+func (r *VMReconciler) updateVMStatusMemory(
+	vm *vmv1.VirtualMachine,
 	qmpMemorySize *resource.Quantity,
 ) {
-	if virtualmachine.Status.MemorySize == nil || !qmpMemorySize.Equal(*virtualmachine.Status.MemorySize) {
-		virtualmachine.Status.MemorySize = qmpMemorySize
-		r.Recorder.Event(virtualmachine, "Normal", "MemoryInfo",
+	if vm.Status.MemorySize == nil || !qmpMemorySize.Equal(*vm.Status.MemorySize) {
+		vm.Status.MemorySize = qmpMemorySize
+		r.Recorder.Event(vm, "Normal", "MemoryInfo",
 			fmt.Sprintf("VirtualMachine %s uses %v memory",
-				virtualmachine.Name,
-				virtualmachine.Status.MemorySize))
+				vm.Name,
+				vm.Status.MemorySize))
 	}
 }
 
-func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
+func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine) error {
 	log := log.FromContext(ctx)
 
 	// Let's check and just set the condition status as Unknown when no status are available
-	if virtualmachine.Status.Conditions == nil || len(virtualmachine.Status.Conditions) == 0 {
+	if vm.Status.Conditions == nil || len(vm.Status.Conditions) == 0 {
 		// set Unknown condition status for AvailableVirtualMachine
-		meta.SetStatusCondition(&virtualmachine.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
+		meta.SetStatusCondition(&vm.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 	}
 
 	// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
-	enableSSH := *virtualmachine.Spec.EnableSSH
+	enableSSH := *vm.Spec.EnableSSH
 
 	// Generate ssh secret name
-	if enableSSH && len(virtualmachine.Status.SSHSecretName) == 0 {
-		virtualmachine.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", virtualmachine.Name)
+	if enableSSH && len(vm.Status.SSHSecretName) == 0 {
+		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
 	}
 
 	// Generate runner pod name
-	if len(virtualmachine.Status.PodName) == 0 {
-		virtualmachine.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", virtualmachine.Name))
+	if len(vm.Status.PodName) == 0 {
+		vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
 		// Update the .Status on API Server to avoid creating multiple pods for a single VM
 		// See https://github.com/neondatabase/autoscaling/issues/794 for the context
-		if err := r.Status().Update(ctx, virtualmachine); err != nil {
+		if err := r.Status().Update(ctx, vm); err != nil {
 			return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
 		}
 	}
 
-	switch virtualmachine.Status.Phase {
+	switch vm.Status.Phase {
 
 	case "":
 		// Acquire overlay IP address
-		if virtualmachine.Spec.ExtraNetwork != nil &&
-			virtualmachine.Spec.ExtraNetwork.Enable &&
-			len(virtualmachine.Status.ExtraNetIP) == 0 {
+		if vm.Spec.ExtraNetwork != nil &&
+			vm.Spec.ExtraNetwork.Enable &&
+			len(vm.Status.ExtraNetIP) == 0 {
 			// Create IPAM object
 			nadName, err := nadIpamName()
 			if err != nil {
@@ -354,35 +354,35 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 				return err
 			}
 			defer ipam.Close()
-			ip, err := ipam.AcquireIP(ctx, virtualmachine.Name, virtualmachine.Namespace)
+			ip, err := ipam.AcquireIP(ctx, vm.Name, vm.Namespace)
 			if err != nil {
 				log.Error(err, "fail to acquire IP")
 				return err
 			}
 			message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
 			log.Info(message)
-			virtualmachine.Status.ExtraNetIP = ip.IP.String()
-			virtualmachine.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
-			r.Recorder.Event(virtualmachine, "Normal", "OverlayNet", message)
+			vm.Status.ExtraNetIP = ip.IP.String()
+			vm.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
+			r.Recorder.Event(vm, "Normal", "OverlayNet", message)
 		}
 		// VirtualMachine just created, change Phase to "Pending"
-		virtualmachine.Status.Phase = vmv1.VmPending
+		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
-		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			var sshSecret *corev1.Secret
 			if enableSSH {
 				// Check if the ssh secret already exists, if not create a new one
 				sshSecret = &corev1.Secret{}
 				err := r.Get(ctx, types.NamespacedName{
-					Name:      virtualmachine.Status.SSHSecretName,
-					Namespace: virtualmachine.Namespace,
+					Name:      vm.Status.SSHSecretName,
+					Namespace: vm.Namespace,
 				}, sshSecret)
 				if err != nil && apierrors.IsNotFound(err) {
 					// Define a new ssh secret
-					sshSecret, err = r.sshSecretForVirtualMachine(virtualmachine)
+					sshSecret, err = r.sshSecretForVirtualMachine(vm)
 					if err != nil {
 						log.Error(err, "Failed to define new SSH Secret for VirtualMachine")
 						return err
@@ -401,7 +401,7 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(virtualmachine, sshSecret)
+			pod, err := r.podForVirtualMachine(vm, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
@@ -414,13 +414,13 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 			}
 			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
-			msg := fmt.Sprintf("VirtualMachine %s created, Pod %s", virtualmachine.Name, pod.Name)
+			msg := fmt.Sprintf("VirtualMachine %s created, Pod %s", vm.Name, pod.Name)
 			if sshSecret != nil {
 				msg = fmt.Sprintf("%s, SSH Secret %s", msg, sshSecret.Name)
 			}
-			r.Recorder.Event(virtualmachine, "Normal", "Created", msg)
-			if !virtualmachine.HasRestarted() {
-				d := pod.CreationTimestamp.Time.Sub(virtualmachine.CreationTimestamp.Time)
+			r.Recorder.Event(vm, "Normal", "Created", msg)
+			if !vm.HasRestarted() {
+				d := pod.CreationTimestamp.Time.Sub(vm.CreationTimestamp.Time)
 				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
 			}
 		} else if err != nil {
@@ -430,63 +430,63 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// runner pod found, check phase
 		switch runnerStatus(vmRunner) {
 		case runnerRunning:
-			virtualmachine.Status.PodIP = vmRunner.Status.PodIP
-			virtualmachine.Status.Phase = vmv1.VmRunning
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.PodIP = vmRunner.Status.PodIP
+			vm.Status.Phase = vmv1.VmRunning
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", vm.Status.PodName, vm.Name)})
 			{
 				// Calculating VM startup latency metrics
 				now := time.Now()
 				d := now.Sub(vmRunner.CreationTimestamp.Time)
 				r.Metrics.runnerCreationToVMRunningTime.Observe(d.Seconds())
-				if !virtualmachine.HasRestarted() {
-					d := now.Sub(virtualmachine.CreationTimestamp.Time)
+				if !vm.HasRestarted() {
+					d := now.Sub(vm.CreationTimestamp.Time)
 					r.Metrics.vmCreationToVMRunningTime.Observe(d.Seconds())
 					log.Info("VM creation to VM running time", "duration(sec)", d.Seconds())
 				}
 			}
 		case runnerSucceeded:
-			virtualmachine.Status.Phase = vmv1.VmSucceeded
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmSucceeded
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name)})
 		case runnerFailed:
-			virtualmachine.Status.Phase = vmv1.VmFailed
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name)})
 		case runnerUnknown:
-			virtualmachine.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmPending
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionUnknown,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name)})
 		default:
 			// do nothing
 		}
 	case vmv1.VmRunning:
 		// Check if the runner pod exists
 		vmRunner := &corev1.Pod{}
-		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			// lost runner pod for running VirtualMachine ?
-			r.Recorder.Event(virtualmachine, "Warning", "NotFound",
+			r.Recorder.Event(vm, "Warning", "NotFound",
 				fmt.Sprintf("runner pod %s not found",
-					virtualmachine.Status.PodName))
-			virtualmachine.Status.Phase = vmv1.VmFailed
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+					vm.Status.PodName))
+			vm.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", vm.Status.PodName, vm.Name)})
 		} else if err != nil {
 			log.Error(err, "Failed to get runner Pod")
 			return err
@@ -494,101 +494,101 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 		// Update the metadata (including "usage" annotation) before anything else, so that it
 		// will be correctly set even if the rest of the reconcile operation fails.
-		if err := updatePodMetadataIfNecessary(ctx, r.Client, virtualmachine, vmRunner); err != nil {
-			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", virtualmachine.Name)
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, vm, vmRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", vm.Name)
 		}
 
 		// runner pod found, check/update phase now
 		switch runnerStatus(vmRunner) {
 		case runnerRunning:
 			// update status by IP of runner pod
-			virtualmachine.Status.PodIP = vmRunner.Status.PodIP
+			vm.Status.PodIP = vmRunner.Status.PodIP
 			// update phase
-			virtualmachine.Status.Phase = vmv1.VmRunning
+			vm.Status.Phase = vmv1.VmRunning
 			// update Node name where runner working
-			virtualmachine.Status.Node = vmRunner.Spec.NodeName
+			vm.Status.Node = vmRunner.Spec.NodeName
 
 			runnerVersion, err := getRunnerVersion(vmRunner)
 			if err != nil {
-				log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", virtualmachine.Name)
+				log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", vm.Name)
 				return err
 			}
 			if !runnerVersionIsSupported(runnerVersion) {
 				err := fmt.Errorf("runner version %v is not supported", runnerVersion)
-				log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", virtualmachine.Name)
+				log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", vm.Name)
 				return err
 			}
 
 			// get CPU details from QEMU
-			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(virtualmachine))
+			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
 			if err != nil {
-				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
 				return err
 			}
 			pluggedCPU := uint32(len(cpuSlotsPlugged))
 
 			// get cgroups CPU details from runner pod
-			cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+			cgroupUsage, err := getRunnerCgroup(ctx, vm)
 			if err != nil {
-				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 				return err
 			}
 
 			// update status by CPUs used in the VM
-			r.updateVMStatusCPU(ctx, virtualmachine, vmRunner, pluggedCPU, cgroupUsage)
+			r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 			// get Memory details from hypervisor and update VM status
-			memorySize, err := QmpGetMemorySize(QmpAddr(virtualmachine))
+			memorySize, err := QmpGetMemorySize(QmpAddr(vm))
 			if err != nil {
-				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
 				return err
 			}
 			// update status by memory sizes used in the VM
-			r.updateVMStatusMemory(virtualmachine, memorySize)
+			r.updateVMStatusMemory(vm, memorySize)
 
 			// check if need hotplug/unplug CPU or memory
 			// compare guest spec and count of plugged
 
-			specUseCPU := virtualmachine.Spec.Guest.CPUs.Use
+			specUseCPU := vm.Spec.Guest.CPUs.Use
 			scaleCgroupCPU := *specUseCPU != cgroupUsage.VCPUs
 			scaleQemuCPU := specUseCPU.RoundedUp() != pluggedCPU
 			if scaleCgroupCPU || scaleQemuCPU {
 				log.Info("VM goes into scaling mode, CPU count needs to be changed",
 					"CPUs on runner pod cgroup", cgroupUsage.VCPUs,
 					"CPUs on board", pluggedCPU,
-					"CPUs in spec", virtualmachine.Spec.Guest.CPUs.Use)
-				virtualmachine.Status.Phase = vmv1.VmScaling
+					"CPUs in spec", vm.Spec.Guest.CPUs.Use)
+				vm.Status.Phase = vmv1.VmScaling
 			}
 
-			memorySizeFromSpec := resource.NewQuantity(int64(*virtualmachine.Spec.Guest.MemorySlots.Use)*virtualmachine.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
+			memorySizeFromSpec := resource.NewQuantity(int64(*vm.Spec.Guest.MemorySlots.Use)*vm.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
 			if !memorySize.Equal(*memorySizeFromSpec) {
 				log.Info("VM goes into scale mode, need to resize Memory",
 					"Memory on board", memorySize,
 					"Memory in spec", memorySizeFromSpec)
-				virtualmachine.Status.Phase = vmv1.VmScaling
+				vm.Status.Phase = vmv1.VmScaling
 			}
 
 		case runnerSucceeded:
-			virtualmachine.Status.Phase = vmv1.VmSucceeded
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmSucceeded
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name)})
 		case runnerFailed:
-			virtualmachine.Status.Phase = vmv1.VmFailed
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name)})
 		case runnerUnknown:
-			virtualmachine.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmPending
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionUnknown,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name)})
 		default:
 			// do nothing
 		}
@@ -596,18 +596,18 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 	case vmv1.VmScaling:
 		// Check that runner pod is still ok
 		vmRunner := &corev1.Pod{}
-		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			// lost runner pod for running VirtualMachine ?
-			r.Recorder.Event(virtualmachine, "Warning", "NotFound",
+			r.Recorder.Event(vm, "Warning", "NotFound",
 				fmt.Sprintf("runner pod %s not found",
-					virtualmachine.Status.PodName))
-			virtualmachine.Status.Phase = vmv1.VmFailed
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+					vm.Status.PodName))
+			vm.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", vm.Status.PodName, vm.Name)})
 		} else if err != nil {
 			log.Error(err, "Failed to get runner Pod")
 			return err
@@ -615,35 +615,35 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 		// Update the metadata (including "usage" annotation) before anything else, so that it
 		// will be correctly set even if the rest of the reconcile operation fails.
-		if err := updatePodMetadataIfNecessary(ctx, r.Client, virtualmachine, vmRunner); err != nil {
-			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", virtualmachine.Name)
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, vm, vmRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", vm.Name)
 		}
 
 		// runner pod found, check that it's still up:
 		switch runnerStatus(vmRunner) {
 		case runnerSucceeded:
-			virtualmachine.Status.Phase = vmv1.VmSucceeded
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmSucceeded
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name)})
 			return nil
 		case runnerFailed:
-			virtualmachine.Status.Phase = vmv1.VmFailed
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmFailed
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name)})
 			return nil
 		case runnerUnknown:
-			virtualmachine.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&virtualmachine.Status.Conditions,
+			vm.Status.Phase = vmv1.VmPending
+			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeAvailableVirtualMachine,
 					Status:  metav1.ConditionUnknown,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", virtualmachine.Status.PodName, virtualmachine.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name)})
 			return nil
 		default:
 			// do nothing
@@ -651,12 +651,12 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 		runnerVersion, err := getRunnerVersion(vmRunner)
 		if err != nil {
-			log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", virtualmachine.Name)
+			log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", vm.Name)
 			return err
 		}
 		if !runnerVersionIsSupported(runnerVersion) {
 			err := fmt.Errorf("runner version %v is not supported", runnerVersion)
-			log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", virtualmachine.Name)
+			log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", vm.Name)
 			return err
 		}
 
@@ -665,17 +665,17 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 
 		// do hotplug/unplug CPU
 		// firstly get current state from QEMU
-		cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(virtualmachine))
+		cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
 		if err != nil {
-			log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+			log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
 			return err
 		}
-		specCPU := virtualmachine.Spec.Guest.CPUs.Use
+		specCPU := vm.Spec.Guest.CPUs.Use
 		pluggedCPU := uint32(len(cpuSlotsPlugged))
 
-		cgroupUsage, err := getRunnerCgroup(ctx, virtualmachine)
+		cgroupUsage, err := getRunnerCgroup(ctx, vm)
 		if err != nil {
-			log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", virtualmachine.Name)
+			log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 			return err
 		}
 
@@ -683,43 +683,43 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		if specCPU.RoundedUp() > pluggedCPU {
 			// going to plug one CPU
 			log.Info("Plug one more CPU into VM")
-			if err := QmpPlugCpu(QmpAddr(virtualmachine)); err != nil {
+			if err := QmpPlugCpu(QmpAddr(vm)); err != nil {
 				return err
 			}
-			r.Recorder.Event(virtualmachine, "Normal", "ScaleUp",
+			r.Recorder.Event(vm, "Normal", "ScaleUp",
 				fmt.Sprintf("One more CPU was plugged into VM %s",
-					virtualmachine.Name))
+					vm.Name))
 		} else if specCPU.RoundedUp() < pluggedCPU {
 			// going to unplug one CPU
 			log.Info("Unplug one CPU from VM")
-			if err := QmpUnplugCpu(QmpAddr(virtualmachine)); err != nil {
+			if err := QmpUnplugCpu(QmpAddr(vm)); err != nil {
 				return err
 			}
-			r.Recorder.Event(virtualmachine, "Normal", "ScaleDown",
+			r.Recorder.Event(vm, "Normal", "ScaleDown",
 				fmt.Sprintf("One CPU was unplugged from VM %s",
-					virtualmachine.Name))
+					vm.Name))
 		} else if *specCPU != cgroupUsage.VCPUs {
 			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", *specCPU)
-			if err := setRunnerCgroup(ctx, virtualmachine, *specCPU); err != nil {
+			if err := setRunnerCgroup(ctx, vm, *specCPU); err != nil {
 				return err
 			}
 			reason := "ScaleDown"
 			if *specCPU > cgroupUsage.VCPUs {
 				reason = "ScaleUp"
 			}
-			r.Recorder.Event(virtualmachine, "Normal", reason,
+			r.Recorder.Event(vm, "Normal", reason,
 				fmt.Sprintf("Runner pod cgroups was updated on VM %s",
-					virtualmachine.Name))
+					vm.Name))
 		} else {
 			// seems already plugged correctly
 			cpuScaled = true
 		}
 
 		// do hotplug/unplug Memory
-		memSlotsMin := *virtualmachine.Spec.Guest.MemorySlots.Min
-		targetSlotCount := int(*virtualmachine.Spec.Guest.MemorySlots.Use - memSlotsMin)
+		memSlotsMin := *vm.Spec.Guest.MemorySlots.Min
+		targetSlotCount := int(*vm.Spec.Guest.MemorySlots.Use - memSlotsMin)
 
-		realSlots, err := QmpSetMemorySlots(ctx, virtualmachine, targetSlotCount, r.Recorder)
+		realSlots, err := QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
 		if realSlots < 0 {
 			return err
 		}
@@ -727,14 +727,14 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		if realSlots != int(targetSlotCount) {
 			log.Info("Couldn't achieve desired memory slot count, will modify .spec.guest.memorySlots.use instead", "details", err)
 			// firstly re-fetch VM
-			if err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Name, Namespace: virtualmachine.Namespace}, virtualmachine); err != nil {
+			if err := r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, vm); err != nil {
 				log.Error(err, "Unable to re-fetch VirtualMachine")
 				return err
 			}
-			memorySlotsUseInSpec := *virtualmachine.Spec.Guest.MemorySlots.Use
+			memorySlotsUseInSpec := *vm.Spec.Guest.MemorySlots.Use
 			memoryPluggedSlots := memSlotsMin + int32(realSlots)
-			*virtualmachine.Spec.Guest.MemorySlots.Use = memoryPluggedSlots
-			if err := r.tryUpdateVM(ctx, virtualmachine); err != nil {
+			*vm.Spec.Guest.MemorySlots.Use = memoryPluggedSlots
+			if err := r.tryUpdateVM(ctx, vm); err != nil {
 				log.Error(err, "Failed to update .spec.guest.memorySlots.use",
 					"old value", memorySlotsUseInSpec,
 					"new value", memoryPluggedSlots)
@@ -747,28 +747,28 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// set VM phase to running if everything scaled
 		if cpuScaled && ramScaled {
 			// update status by CPUs used in the VM
-			r.updateVMStatusCPU(ctx, virtualmachine, vmRunner, pluggedCPU, cgroupUsage)
+			r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 			// get Memory details from hypervisor and update VM status
-			memorySize, err := QmpGetMemorySize(QmpAddr(virtualmachine))
+			memorySize, err := QmpGetMemorySize(QmpAddr(vm))
 			if err != nil {
-				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", virtualmachine.Name)
+				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
 				return err
 			}
 			// update status by memory sizes used in the VM
-			r.updateVMStatusMemory(virtualmachine, memorySize)
+			r.updateVMStatusMemory(vm, memorySize)
 
-			virtualmachine.Status.Phase = vmv1.VmRunning
+			vm.Status.Phase = vmv1.VmRunning
 		}
 
 	case vmv1.VmSucceeded, vmv1.VmFailed:
 		// Always delete runner pod. Otherwise, we could end up with one container succeeded/failed
 		// but the other one still running (meaning that the pod still ends up Running).
 		vmRunner := &corev1.Pod{}
-		err := r.Get(ctx, types.NamespacedName{Name: virtualmachine.Status.PodName, Namespace: virtualmachine.Namespace}, vmRunner)
+		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err == nil {
 			// delete current runner
-			if err := r.deleteRunnerPodIfEnabled(ctx, virtualmachine, vmRunner); err != nil {
+			if err := r.deleteRunnerPodIfEnabled(ctx, vm, vmRunner); err != nil {
 				return err
 			}
 		} else if !apierrors.IsNotFound(err) {
@@ -783,22 +783,22 @@ func (r *VirtualMachineReconciler) doReconcile(ctx context.Context, virtualmachi
 		// one* container inside the runner pod has finished; the VM itself may still be running.
 		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
 			// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
-			virtualmachine.Cleanup()
+			vm.Cleanup()
 
 			var shouldRestart bool
-			switch virtualmachine.Spec.RestartPolicy {
+			switch vm.Spec.RestartPolicy {
 			case vmv1.RestartPolicyAlways:
 				shouldRestart = true
 			case vmv1.RestartPolicyOnFailure:
-				shouldRestart = virtualmachine.Status.Phase == vmv1.VmFailed
+				shouldRestart = vm.Status.Phase == vmv1.VmFailed
 			case vmv1.RestartPolicyNever:
 				shouldRestart = false
 			}
 
 			if shouldRestart {
-				log.Info("Restarting VM runner pod", "VM.Phase", virtualmachine.Status.Phase, "RestartPolicy", virtualmachine.Spec.RestartPolicy)
-				virtualmachine.Status.Phase = vmv1.VmPending // reset to trigger restart
-				virtualmachine.Status.RestartCount += 1      // increment restart count
+				log.Info("Restarting VM runner pod", "VM.Phase", vm.Status.Phase, "RestartPolicy", vm.Spec.RestartPolicy)
+				vm.Status.Phase = vmv1.VmPending // reset to trigger restart
+				vm.Status.RestartCount += 1      // increment restart count
 				r.Metrics.vmRestartCounts.Inc()
 			}
 
@@ -908,9 +908,9 @@ func runnerContainerStopped(pod *corev1.Pod) bool {
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
 // then emits an event and log line about what it did, whether it actually deleted the runner pod.
-func (r *VirtualMachineReconciler) deleteRunnerPodIfEnabled(
+func (r *VMReconciler) deleteRunnerPodIfEnabled(
 	ctx context.Context,
-	virtualmachine *vmv1.VirtualMachine,
+	vm *vmv1.VirtualMachine,
 	runner *corev1.Pod,
 ) error {
 	log := log.FromContext(ctx)
@@ -927,7 +927,7 @@ func (r *VirtualMachineReconciler) deleteRunnerPodIfEnabled(
 		eventReason = "Deleted"
 	}
 	log.Info(msg, "Pod.Namespace", runner.Namespace, "Pod.Name", runner.Name)
-	r.Recorder.Event(virtualmachine, "Normal", eventReason, fmt.Sprintf("%s: %s", msg, runner.Name))
+	r.Recorder.Event(vm, "Normal", eventReason, fmt.Sprintf("%s: %s", msg, runner.Name))
 	return nil
 }
 
@@ -1080,39 +1080,39 @@ func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
 }
 
 // podForVirtualMachine returns a VirtualMachine Pod object
-func (r *VirtualMachineReconciler) podForVirtualMachine(
-	virtualmachine *vmv1.VirtualMachine,
+func (r *VMReconciler) podForVirtualMachine(
+	vm *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
-	pod, err := podSpec(virtualmachine, sshSecret, r.Config)
+	pod, err := podSpec(vm, sshSecret, r.Config)
 	if err != nil {
 		return nil, err
 	}
 
 	// Set the ownerRef for the Pod
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
-	if err := ctrl.SetControllerReference(virtualmachine, pod, r.Scheme); err != nil {
+	if err := ctrl.SetControllerReference(vm, pod, r.Scheme); err != nil {
 		return nil, err
 	}
 
 	return pod, nil
 }
 
-func (r *VirtualMachineReconciler) sshSecretForVirtualMachine(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
-	secret, err := sshSecretSpec(virtualmachine)
+func (r *VMReconciler) sshSecretForVirtualMachine(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
+	secret, err := sshSecretSpec(vm)
 	if err != nil {
 		return nil, err
 	}
 
 	// Set the ownerRef for the Secret
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
-	if err := ctrl.SetControllerReference(virtualmachine, secret, r.Scheme); err != nil {
+	if err := ctrl.SetControllerReference(vm, secret, r.Scheme); err != nil {
 		return nil, err
 	}
 	return secret, nil
 }
 
-func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) {
+func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 	// using ed25519 signatures it takes ~16us to finish
 	publicKey, privateKey, err := sshKeygen()
 	if err != nil {
@@ -1121,8 +1121,8 @@ func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) 
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      virtualmachine.Status.SSHSecretName,
-			Namespace: virtualmachine.Namespace,
+			Name:      vm.Status.SSHSecretName,
+			Namespace: vm.Namespace,
 		},
 		Immutable: &[]bool{true}[0],
 		Type:      corev1.SecretTypeSSHAuth,
@@ -1137,41 +1137,41 @@ func sshSecretSpec(virtualmachine *vmv1.VirtualMachine) (*corev1.Secret, error) 
 
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
-func labelsForVirtualMachine(virtualmachine *vmv1.VirtualMachine, runnerVersion *api.RunnerProtoVersion) map[string]string {
-	l := make(map[string]string, len(virtualmachine.Labels)+3)
-	for k, v := range virtualmachine.Labels {
+func labelsForVirtualMachine(vm *vmv1.VirtualMachine, runnerVersion *api.RunnerProtoVersion) map[string]string {
+	l := make(map[string]string, len(vm.Labels)+3)
+	for k, v := range vm.Labels {
 		l[k] = v
 	}
 
 	l["app.kubernetes.io/name"] = "NeonVM"
-	l[vmv1.VirtualMachineNameLabel] = virtualmachine.Name
+	l[vmv1.VirtualMachineNameLabel] = vm.Name
 	if runnerVersion != nil {
 		l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", *runnerVersion)
 	}
 	return l
 }
 
-func annotationsForVirtualMachine(virtualmachine *vmv1.VirtualMachine) map[string]string {
+func annotationsForVirtualMachine(vm *vmv1.VirtualMachine) map[string]string {
 	// use bool here so `if ignored[key] { ... }` works
 	ignored := map[string]bool{
 		"kubectl.kubernetes.io/last-applied-configuration": true,
 	}
 
-	a := make(map[string]string, len(virtualmachine.Annotations)+2)
-	for k, v := range virtualmachine.Annotations {
+	a := make(map[string]string, len(vm.Annotations)+2)
+	for k, v := range vm.Annotations {
 		if !ignored[k] {
 			a[k] = v
 		}
 	}
 
 	a["kubectl.kubernetes.io/default-container"] = "neonvm-runner"
-	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(virtualmachine.Spec)
-	a[vmv1.VirtualMachineResourcesAnnotation] = extractVirtualMachineResourcesJSON(virtualmachine.Spec)
+	a[vmv1.VirtualMachineUsageAnnotation] = extractVirtualMachineUsageJSON(vm.Spec)
+	a[vmv1.VirtualMachineResourcesAnnotation] = extractVirtualMachineResourcesJSON(vm.Spec)
 	return a
 }
 
-func affinityForVirtualMachine(virtualmachine *vmv1.VirtualMachine) *corev1.Affinity {
-	a := virtualmachine.Spec.Affinity
+func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
+	a := vm.Spec.Affinity
 	if a == nil {
 		a = &corev1.Affinity{}
 	}
@@ -1281,11 +1281,11 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
-func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *ReconcilerConfig) (*corev1.Pod, error) {
+func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *ReconcilerConfig) (*corev1.Pod, error) {
 	runnerVersion := api.RunnerProtoV1
-	labels := labelsForVirtualMachine(virtualmachine, &runnerVersion)
-	annotations := annotationsForVirtualMachine(virtualmachine)
-	affinity := affinityForVirtualMachine(virtualmachine)
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+	affinity := affinityForVirtualMachine(vm)
 
 	// Get the Operand image
 	image, err := imageForVmRunner()
@@ -1293,39 +1293,39 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 		return nil, err
 	}
 
-	vmSpecJson, err := json.Marshal(virtualmachine.Spec)
+	vmSpecJson, err := json.Marshal(vm.Spec)
 	if err != nil {
 		return nil, fmt.Errorf("marshal VM Spec: %w", err)
 	}
 
-	vmStatusJson, err := json.Marshal(virtualmachine.Status)
+	vmStatusJson, err := json.Marshal(vm.Status)
 	if err != nil {
 		return nil, fmt.Errorf("marshal VM Status: %w", err)
 	}
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        virtualmachine.Status.PodName,
-			Namespace:   virtualmachine.Namespace,
+			Name:        vm.Status.PodName,
+			Namespace:   vm.Namespace,
 			Labels:      labels,
 			Annotations: annotations,
 		},
 		Spec: corev1.PodSpec{
-			EnableServiceLinks:            virtualmachine.Spec.ServiceLinks,
+			EnableServiceLinks:            vm.Spec.ServiceLinks,
 			AutomountServiceAccountToken:  &[]bool{false}[0],
 			RestartPolicy:                 corev1.RestartPolicyNever,
-			TerminationGracePeriodSeconds: virtualmachine.Spec.TerminationGracePeriodSeconds,
-			NodeSelector:                  virtualmachine.Spec.NodeSelector,
-			ImagePullSecrets:              virtualmachine.Spec.ImagePullSecrets,
-			Tolerations:                   virtualmachine.Spec.Tolerations,
-			ServiceAccountName:            virtualmachine.Spec.ServiceAccountName,
-			SchedulerName:                 virtualmachine.Spec.SchedulerName,
+			TerminationGracePeriodSeconds: vm.Spec.TerminationGracePeriodSeconds,
+			NodeSelector:                  vm.Spec.NodeSelector,
+			ImagePullSecrets:              vm.Spec.ImagePullSecrets,
+			Tolerations:                   vm.Spec.Tolerations,
+			ServiceAccountName:            vm.Spec.ServiceAccountName,
+			SchedulerName:                 vm.Spec.SchedulerName,
 			Affinity:                      affinity,
 			InitContainers: []corev1.Container{
 				{
-					Image:           virtualmachine.Spec.Guest.RootDisk.Image,
+					Image:           vm.Spec.Guest.RootDisk.Image,
 					Name:            "init",
-					ImagePullPolicy: virtualmachine.Spec.Guest.RootDisk.ImagePullPolicy,
+					ImagePullPolicy: vm.Spec.Guest.RootDisk.ImagePullPolicy,
 					VolumeMounts: []corev1.VolumeMount{{
 						Name:      "virtualmachineimages",
 						MountPath: "/vm/images",
@@ -1361,10 +1361,10 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 						},
 					},
 					Ports: []corev1.ContainerPort{{
-						ContainerPort: virtualmachine.Spec.QMP,
+						ContainerPort: vm.Spec.QMP,
 						Name:          "qmp",
 					}, {
-						ContainerPort: virtualmachine.Spec.QMPManual,
+						ContainerPort: vm.Spec.QMPManual,
 						Name:          "qmp-manual",
 					}},
 					Command: func() []string {
@@ -1414,15 +1414,15 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 							return []corev1.VolumeMount{images, cgroups}
 						}
 					}(),
-					Resources: virtualmachine.Spec.PodResources,
+					Resources: vm.Spec.PodResources,
 				}
 				containerMgr := corev1.Container{
 					Image: image,
 					Name:  "neonvm-container-mgr",
 					Command: []string{
 						"container-mgr",
-						"-port", strconv.Itoa(int(virtualmachine.Spec.RunnerPort)),
-						"-init-milli-cpu", strconv.Itoa(int(*virtualmachine.Spec.Guest.CPUs.Use)),
+						"-port", strconv.Itoa(int(vm.Spec.RunnerPort)),
+						"-init-milli-cpu", strconv.Itoa(int(*vm.Spec.Guest.CPUs.Use)),
 					},
 					Env: []corev1.EnvVar{
 						{
@@ -1443,7 +1443,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 						ProbeHandler: corev1.ProbeHandler{
 							HTTPGet: &corev1.HTTPGetAction{
 								Path: "/healthz",
-								Port: intstr.FromInt(int(virtualmachine.Spec.RunnerPort)),
+								Port: intstr.FromInt(int(vm.Spec.RunnerPort)),
 							},
 						},
 					},
@@ -1554,20 +1554,20 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 	}
 
 	// If a custom neonvm-runner image is requested, use that instead:
-	if virtualmachine.Spec.RunnerImage != nil {
-		pod.Spec.Containers[0].Image = *virtualmachine.Spec.RunnerImage
+	if vm.Spec.RunnerImage != nil {
+		pod.Spec.Containers[0].Image = *vm.Spec.RunnerImage
 		if config.UseContainerMgr {
-			pod.Spec.Containers[1].Image = *virtualmachine.Spec.RunnerImage
+			pod.Spec.Containers[1].Image = *vm.Spec.RunnerImage
 		}
 	}
 
 	// If a custom kernel is used, add that image:
-	if virtualmachine.Spec.Guest.KernelImage != nil {
+	if vm.Spec.Guest.KernelImage != nil {
 		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "-kernelpath=/vm/images/vmlinuz")
 		pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
-			Image:           *virtualmachine.Spec.Guest.KernelImage,
+			Image:           *vm.Spec.Guest.KernelImage,
 			Name:            "init-kernel",
-			ImagePullPolicy: virtualmachine.Spec.Guest.RootDisk.ImagePullPolicy,
+			ImagePullPolicy: vm.Spec.Guest.RootDisk.ImagePullPolicy,
 			Args:            []string{"cp", "/vmlinuz", "/vm/images/vmlinuz"},
 			VolumeMounts: []corev1.VolumeMount{{
 				Name:      "virtualmachineimages",
@@ -1581,12 +1581,12 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 		})
 	}
 
-	if virtualmachine.Spec.Guest.AppendKernelCmdline != nil {
-		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, fmt.Sprintf("-appendKernelCmdline=%s", *virtualmachine.Spec.Guest.AppendKernelCmdline))
+	if vm.Spec.Guest.AppendKernelCmdline != nil {
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, fmt.Sprintf("-appendKernelCmdline=%s", *vm.Spec.Guest.AppendKernelCmdline))
 	}
 
 	// Add any InitContainers that were specified by the spec
-	pod.Spec.InitContainers = append(pod.Spec.InitContainers, virtualmachine.Spec.ExtraInitContainers...)
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, vm.Spec.ExtraInitContainers...)
 
 	// allow access to /dev/kvm and /dev/vhost-net devices by generic-device-plugin for kubelet
 	if pod.Spec.Containers[0].Resources.Limits == nil {
@@ -1594,11 +1594,11 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 	}
 	pod.Spec.Containers[0].Resources.Limits["neonvm/vhost-net"] = resource.MustParse("1")
 	// NB: EnableAcceleration guaranteed non-nil because the k8s API server sets the default for us.
-	if *virtualmachine.Spec.EnableAcceleration {
+	if *vm.Spec.EnableAcceleration {
 		pod.Spec.Containers[0].Resources.Limits["neonvm/kvm"] = resource.MustParse("1")
 	}
 
-	for _, port := range virtualmachine.Spec.Guest.Ports {
+	for _, port := range vm.Spec.Guest.Ports {
 		cPort := corev1.ContainerPort{
 			ContainerPort: int32(port.Port),
 		}
@@ -1611,7 +1611,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 		pod.Spec.Containers[0].Ports = append(pod.Spec.Containers[0].Ports, cPort)
 	}
 
-	if settings := virtualmachine.Spec.Guest.Settings; settings != nil {
+	if settings := vm.Spec.Guest.Settings; settings != nil {
 		swapInfo, err := settings.GetSwapInfo()
 		if err != nil {
 			return nil, fmt.Errorf("error getting SwapInfo from VirtualMachine guest settings: %w", err)
@@ -1633,7 +1633,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 		}
 	}
 
-	for _, disk := range virtualmachine.Spec.Disks {
+	for _, disk := range vm.Spec.Disks {
 
 		mnt := corev1.VolumeMount{
 			Name:      disk.Name,
@@ -1684,10 +1684,10 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 	}
 
 	// use multus network to add extra network interface
-	if virtualmachine.Spec.ExtraNetwork != nil && virtualmachine.Spec.ExtraNetwork.Enable {
+	if vm.Spec.ExtraNetwork != nil && vm.Spec.ExtraNetwork.Enable {
 		var nadNetwork string
-		if len(virtualmachine.Spec.ExtraNetwork.MultusNetwork) > 0 { // network specified in spec
-			nadNetwork = virtualmachine.Spec.ExtraNetwork.MultusNetwork
+		if len(vm.Spec.ExtraNetwork.MultusNetwork) > 0 { // network specified in spec
+			nadNetwork = vm.Spec.ExtraNetwork.MultusNetwork
 		} else { // get network from env variables
 			nadName, err := nadRunnerName()
 			if err != nil {
@@ -1699,7 +1699,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 			}
 			nadNetwork = fmt.Sprintf("%s/%s", nadNamespace, nadName)
 		}
-		pod.ObjectMeta.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", nadNetwork, virtualmachine.Spec.ExtraNetwork.Interface)
+		pod.ObjectMeta.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", nadNetwork, vm.Spec.ExtraNetwork.Interface)
 	}
 
 	return pod, nil
@@ -1708,7 +1708,7 @@ func podSpec(virtualmachine *vmv1.VirtualMachine, sshSecret *corev1.Secret, conf
 // SetupWithManager sets up the controller with the Manager.
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
-func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
+func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachine"
 	reconciler := WithMetrics(withCatchPanic(r), r.Metrics, cntrlName)
 	err := ctrl.NewControllerManagedBy(mgr).
@@ -1735,8 +1735,8 @@ func DeepEqual(v1, v2 interface{}) bool {
 }
 
 // TODO: reimplement to r.Patch()
-func (r *VirtualMachineReconciler) tryUpdateVM(ctx context.Context, virtualmachine *vmv1.VirtualMachine) error {
-	return r.Update(ctx, virtualmachine)
+func (r *VMReconciler) tryUpdateVM(ctx context.Context, vm *vmv1.VirtualMachine) error {
+	return r.Update(ctx, vm)
 }
 
 // return Network Attachment Definition name with IPAM settings
