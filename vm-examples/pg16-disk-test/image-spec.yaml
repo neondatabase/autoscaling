@@ -13,10 +13,18 @@ commands:
     user: vm-monitor
     sysvInitAction: respawn
     shell: 'RUST_LOG=info /bin/vm-monitor --cgroup=neon-test --addr="0.0.0.0:10301"'
+  - name: create-fifo
+    user: root
+    sysvInitAction: wait
+    shell: 'mkfifo -m 0666 /tmp/neon-logs.fifo'
+  - name: log-redirect
+    user: root
+    sysvInitAction: respawn
+    shell: 'cat /tmp/neon-logs.fifo > /dev/virtio-ports/tech.neon.log.0'
   - name: start-postgres
     user: postgres
     sysvInitAction: once
-    shell: 'PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf" -l /dev/virtio-ports/tech.neon.log.0'
+    shell: 'PGDATA=/var/lib/postgresql pg_ctl start -o "-c config_file=/etc/postgresql.conf -c hba_file=/etc/pg_hba.conf" -l /tmp/neon-logs.fifo'
 files:
   - filename: postgresql.conf
     hostPath: postgresql.conf
