@@ -234,27 +234,27 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
 
 	r.spawnBackgroundWorker(ctx, logger, "deadlock checker", ignoreLogger(mainDeadlockChecker))
-	r.spawnBackgroundWorker(ctx, logger, "podStatus updater", func(c context.Context, l *zap.Logger) {
-		r.status.periodicallyRefreshState(c, l, r.global)
+	r.spawnBackgroundWorker(ctx, logger, "podStatus updater", func(ctx2 context.Context, logger2 *zap.Logger) {
+		r.status.periodicallyRefreshState(ctx2, logger2, r.global)
 	})
-	r.spawnBackgroundWorker(ctx, logger, "VmInfo updater", func(c context.Context, l *zap.Logger) {
+	r.spawnBackgroundWorker(ctx, logger, "VmInfo updater", func(ctx2 context.Context, logger2 *zap.Logger) {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-ctx2.Done():
 				return
 			case <-vmInfoUpdated.Recv():
 				vm := getVmInfo()
 				ecwc.Updater().UpdatedVM(vm, func() {
-					l.Info("VmInfo updated", zap.Any("vmInfo", vm))
+					logger2.Info("VmInfo updated", zap.Any("vmInfo", vm))
 				})
 			}
 		}
 	})
-	r.spawnBackgroundWorker(ctx, logger, "get system metrics", func(c context.Context, l *zap.Logger) {
+	r.spawnBackgroundWorker(ctx, logger, "get system metrics", func(ctx2 context.Context, logger2 *zap.Logger) {
 		getMetricsLoop(
 			r,
-			c,
-			l,
+			ctx2,
+			logger2,
 			r.global.config.Metrics.System,
 			metricsMgr[*core.SystemMetrics]{
 				kind:         "system",
@@ -266,11 +266,11 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			},
 		)
 	})
-	r.spawnBackgroundWorker(ctx, logger, "get LFC metrics", func(c context.Context, l *zap.Logger) {
+	r.spawnBackgroundWorker(ctx, logger, "get LFC metrics", func(ctx2 context.Context, logger2 *zap.Logger) {
 		getMetricsLoop(
 			r,
-			c,
-			l,
+			ctx2,
+			logger2,
 			r.global.config.Metrics.LFC,
 			metricsMgr[*core.LFCMetrics]{
 				kind:         "LFC",
@@ -285,8 +285,8 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			},
 		)
 	})
-	r.spawnBackgroundWorker(ctx, logger.Named("vm-monitor"), "vm-monitor reconnection loop", func(c context.Context, l *zap.Logger) {
-		r.connectToMonitorLoop(c, l, monitorGeneration, monitorStateCallbacks{
+	r.spawnBackgroundWorker(ctx, logger.Named("vm-monitor"), "vm-monitor reconnection loop", func(ctx2 context.Context, logger2 *zap.Logger) {
+		r.connectToMonitorLoop(ctx2, logger2, monitorGeneration, monitorStateCallbacks{
 			reset: func(withLock func()) {
 				ecwc.Updater().ResetMonitor(withLock)
 			},
