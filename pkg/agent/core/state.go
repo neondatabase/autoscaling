@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -403,8 +404,7 @@ func (s *state) calculatePluginAction(
 			// convert maybe-nil '*Metrics' to maybe-nil '*core.Metrics'
 			Metrics: func() *api.Metrics {
 				if s.Metrics != nil {
-					m := s.Metrics.ToAPI()
-					return &m
+					return lo.ToPtr(s.Metrics.ToAPI())
 				} else {
 					return nil
 				}
