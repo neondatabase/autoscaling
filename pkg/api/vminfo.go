@@ -389,7 +389,7 @@ func (c *ScalingConfig) ValidateOverrides() error {
 	return c.validate(false)
 }
 
-func (c *ScalingConfig) validate(requireAllRequiredFields bool) error {
+func (c *ScalingConfig) validate(requireAll bool) error {
 	ec := &erc.Collector{}
 
 	// Check c.LoadAverageFractionTarget is between 0 and 2. We don't *strictly* need the upper
@@ -397,7 +397,7 @@ func (c *ScalingConfig) validate(requireAllRequiredFields bool) error {
 	if c.LoadAverageFractionTarget != nil {
 		erc.Whenf(ec, *c.LoadAverageFractionTarget < 0.0, "%s must be set to value >= 0", ".loadAverageFractionTarget")
 		erc.Whenf(ec, *c.LoadAverageFractionTarget >= 2.0, "%s must be set to value < 2 ", ".loadAverageFractionTarget")
-	} else if requireAllRequiredFields {
+	} else if requireAll {
 		ec.Add(fmt.Errorf("%s is a required field", ".loadAverageFractionTarget"))
 	}
 
@@ -405,7 +405,7 @@ func (c *ScalingConfig) validate(requireAllRequiredFields bool) error {
 	if c.MemoryUsageFractionTarget != nil {
 		erc.Whenf(ec, *c.MemoryUsageFractionTarget < 0.0, "%s must be set to value >= 0", ".memoryUsageFractionTarget")
 		erc.Whenf(ec, *c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget")
-	} else if requireAllRequiredFields {
+	} else if requireAll {
 		ec.Add(fmt.Errorf("%s is a required field", ".memoryUsageFractionTarget"))
 	}
 
