@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/samber/lo"
 	"github.com/tychoish/fun/erc"
 	"go.uber.org/zap"
 
@@ -363,10 +364,10 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 	}
 
 	if overrides.LoadAverageFractionTarget != nil {
-		defaults.LoadAverageFractionTarget = &[]float64{*overrides.LoadAverageFractionTarget}[0] // slice trick to shallow copy
+		defaults.LoadAverageFractionTarget = lo.ToPtr(*overrides.LoadAverageFractionTarget)
 	}
 	if overrides.MemoryUsageFractionTarget != nil {
-		defaults.MemoryUsageFractionTarget = &[]float64{*overrides.MemoryUsageFractionTarget}[0]
+		defaults.MemoryUsageFractionTarget = lo.ToPtr(*overrides.MemoryUsageFractionTarget)
 	}
 
 	return defaults
