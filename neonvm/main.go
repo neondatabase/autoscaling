@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -112,17 +113,18 @@ func main() {
 	logConfig.Level.SetLevel(zap.InfoLevel)
 	logConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
-	baseLogger := zap.Must(logConfig.Build(
-		zap.AddStacktrace(zapcore.PanicLevel), // enable stack traces at panic or above
-	))
+	baseLogger := zap.Must(logConfig.Build())
 	// There's no direct way to go from a zap.Logger to a logr.Logger, or even a zapcore.Core to a
 	// logr.Logger, so we need the roundabout method of letting logr do the initial setup and then
 	// replacing the zapcore.Core with our own.
-	logger := ctrlzap.New(ctrlzap.RawZapOpts(zap.WrapCore(
-		func(c zapcore.Core) zapcore.Core {
-			return baseLogger.Core() // completely replace the zapcore.Core with the one we created above.
-		},
-	)))
+	logger := ctrlzap.New(
+		ctrlzap.RawZapOpts(zap.WrapCore(
+			func(c zapcore.Core) zapcore.Core {
+				return baseLogger.Core() // completely replace the zapcore.Core with the one we created above.
+			},
+		)),
+		ctrlzap.StacktraceLevel(zapcore.PanicLevel), // Must be set here, otherwise gets overridden.
+	)
 
 	ctrl.SetLogger(logger)
 	// define klog settings (used in LeaderElector)
