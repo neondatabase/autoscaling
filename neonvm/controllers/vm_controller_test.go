@@ -98,10 +98,11 @@ var _ = Describe("VirtualMachine controller", func() {
 				Scheme:   k8sClient.Scheme(),
 				Recorder: nil,
 				Config: &ReconcilerConfig{
-					IsK3s:                   false,
-					UseContainerMgr:         true,
-					MaxConcurrentReconciles: 1,
-					QEMUDiskCacheSettings:   "cache=none",
+					IsK3s:                    false,
+					UseContainerMgr:          true,
+					MaxConcurrentReconciles:  1,
+					QEMUDiskCacheSettings:    "cache=none",
+					ReconcileFailureInterval: 10 * time.Minute,
 				},
 			}
 

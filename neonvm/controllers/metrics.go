@@ -14,6 +14,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/neondatabase/autoscaling/neonvm/controllers/alerttracker"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -101,8 +102,8 @@ type wrappedReconciler struct {
 	Metrics        ReconcilerMetrics
 
 	lock        sync.Mutex
-	failing     map[client.ObjectKey]struct{}
-	conflicting map[client.ObjectKey]struct{}
+	failing     *alerttracker.Tracker[client.ObjectKey]
+	conflicting *alerttracker.Tracker[client.ObjectKey]
 }
 
 // ReconcilerWithMetrics is a Reconciler produced by WithMetrics that can return a snapshot of the
@@ -135,14 +136,19 @@ type ReconcileSnapshot struct {
 //
 // The returned reconciler also provides a way to get a snapshot of the state of ongoing reconciles,
 // to see the data backing the metrics.
-func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) ReconcilerWithMetrics {
+func WithMetrics(
+	reconciler reconcile.Reconciler,
+	rm ReconcilerMetrics,
+	cntrlName string,
+	reconcileFailureInterval time.Duration,
+) ReconcilerWithMetrics {
 	return &wrappedReconciler{
 		Reconciler:     reconciler,
 		Metrics:        rm,
 		ControllerName: cntrlName,
 		lock:           sync.Mutex{},
-		failing:        make(map[client.ObjectKey]struct{}),
-		conflicting:    make(map[client.ObjectKey]struct{}),
+		failing:        alerttracker.NewTracker[client.ObjectKey](reconcileFailureInterval),
+		conflicting:    alerttracker.NewTracker[client.ObjectKey](reconcileFailureInterval),
 	}
 }
 
@@ -164,10 +170,10 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		if errors.IsConflict(err) {
 			outcome = ConflictOutcome
-			d.conflicting[req.NamespacedName] = struct{}{}
+			d.conflicting.RecordFailure(req.NamespacedName)
 		} else {
 			outcome = FailureOutcome
-			d.failing[req.NamespacedName] = struct{}{}
+			d.failing.RecordFailure(req.NamespacedName)
 
 			// If the VM is now getting non-conflict errors, it probably
 			// means transient conflicts has been resolved.
@@ -176,28 +182,27 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			// if a VM is getting conflict errors, it doesn't mean
 			// non-conflict errors are resolved, as they are more
 			// likely to be persistent.
-			delete(d.conflicting, req.NamespacedName)
+			d.conflicting.RecordSuccess(req.NamespacedName)
 		}
 
 		log.Error(err, "Failed to reconcile VirtualMachine",
 			"duration", duration.String(), "outcome", outcome)
 	} else {
-		delete(d.failing, req.NamespacedName)
-		delete(d.conflicting, req.NamespacedName)
+		d.failing.RecordSuccess(req.NamespacedName)
 		log.Info("Successful reconciliation", "duration", duration.String())
 	}
 	d.Metrics.ObserveReconcileDuration(outcome, duration)
 	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(FailureOutcome)).Set(float64(len(d.failing)))
+		string(FailureOutcome)).Set(float64(d.failing.FiringCount()))
 	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(ConflictOutcome)).Set(float64(len(d.conflicting)))
+		string(ConflictOutcome)).Set(float64(d.conflicting.FiringCount()))
 
 	return res, err
 }
 
-func keysToSlice(m map[client.ObjectKey]struct{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
+func toStringSlice(s []client.ObjectKey) []string {
+	keys := make([]string, 0, len(s))
+	for _, k := range s {
 		keys = append(keys, k.String())
 	}
 	return keys
@@ -207,8 +212,8 @@ func (r *wrappedReconciler) Snapshot() ReconcileSnapshot {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	failing := keysToSlice(r.failing)
-	conflicting := keysToSlice(r.conflicting)
+	failing := toStringSlice(r.failing.Firing())
+	conflicting := toStringSlice(r.conflicting.Firing())
 
 	return ReconcileSnapshot{
 		ControllerName: r.ControllerName,

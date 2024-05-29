@@ -670,7 +670,7 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 // desirable state on the cluster
 func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachinemigration"
-	reconciler := WithMetrics(withCatchPanic(r), r.Metrics, cntrlName)
+	reconciler := WithMetrics(withCatchPanic(r), r.Metrics, cntrlName, r.Config.ReconcileFailureInterval)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
 		Owns(&corev1.Pod{}).

@@ -97,6 +97,7 @@ func main() {
 	var concurrencyLimit int
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
+	var reconcileFailureInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -168,10 +169,11 @@ func main() {
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
 
 	rc := &controllers.ReconcilerConfig{
-		IsK3s:                   isK3s,
-		UseContainerMgr:         enableContainerMgr,
-		MaxConcurrentReconciles: concurrencyLimit,
-		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
+		IsK3s:                    isK3s,
+		UseContainerMgr:          enableContainerMgr,
+		MaxConcurrentReconciles:  concurrencyLimit,
+		QEMUDiskCacheSettings:    qemuDiskCacheSettings,
+		ReconcileFailureInterval: reconcileFailureInterval,
 	}
 
 	vmReconciler := &controllers.VMReconciler{
