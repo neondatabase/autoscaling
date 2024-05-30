@@ -121,6 +121,8 @@ func (m *mockRecorder) AnnotatedEventf(object runtime.Object, annotations map[st
 	m.Called(object, annotations, eventtype, reason, messageFmt, args)
 }
 
+// defaultVm returns a VM which is similar to what we can reasonably
+// expect from the control plane.
 func defaultVm() *vmv1.VirtualMachine {
 	return &vmv1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
