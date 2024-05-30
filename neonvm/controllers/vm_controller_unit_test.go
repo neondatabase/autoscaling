@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -24,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type clientMock struct {
@@ -128,21 +128,21 @@ func defaultVm() *vmv1.VirtualMachine {
 			Namespace: "default",
 		},
 		Spec: vmv1.VirtualMachineSpec{
-			EnableSSH:          util.Ptr(false),
-			EnableAcceleration: util.Ptr(true),
+			EnableSSH:          lo.ToPtr(false),
+			EnableAcceleration: lo.ToPtr(true),
 			//nolint:exhaustruct // This is a test
 			Guest: vmv1.Guest{
-				KernelImage:         util.Ptr("kernel-img"),
+				KernelImage:         lo.ToPtr("kernel-img"),
 				AppendKernelCmdline: nil,
 				CPUs: vmv1.CPUs{
-					Min: util.Ptr(vmv1.MilliCPU(1000)),
-					Max: util.Ptr(vmv1.MilliCPU(2000)),
-					Use: util.Ptr(vmv1.MilliCPU(1500)),
+					Min: lo.ToPtr(vmv1.MilliCPU(1000)),
+					Max: lo.ToPtr(vmv1.MilliCPU(2000)),
+					Use: lo.ToPtr(vmv1.MilliCPU(1500)),
 				},
 				MemorySlots: vmv1.MemorySlots{
-					Min: util.Ptr(int32(512)),
-					Max: util.Ptr(int32(2048)),
-					Use: util.Ptr(int32(1024)),
+					Min: lo.ToPtr(int32(512)),
+					Max: lo.ToPtr(int32(2048)),
+					Use: lo.ToPtr(int32(1024)),
 				},
 				MemorySlotSize: *resource.NewQuantity(1, resource.DecimalSI),
 			},
@@ -156,7 +156,7 @@ func defaultVm() *vmv1.VirtualMachine {
 			ExtraNetIP:    "",
 			ExtraNetMask:  "",
 			Node:          "",
-			CPUs:          util.Ptr(vmv1.MilliCPU(100)),
+			CPUs:          lo.ToPtr(vmv1.MilliCPU(100)),
 			MemorySize:    resource.NewQuantity(123, resource.DecimalSI),
 			SSHSecretName: "",
 		},
