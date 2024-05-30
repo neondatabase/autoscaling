@@ -54,10 +54,6 @@ spec:
         - "--leader-elect"
         - "--concurrency-limit=128"
         - "--enable-container-mgr"
-        - "--zap-devel=false"
-        - "--zap-time-encoding=iso8601"
-        - "--zap-log-level=info"
-        - "--zap-stacktrace-level=panic"
         # See #775 and its links.
         # * cache.writeback=on - don't set O_DSYNC (don't flush every write)
         # * cache.direct=on    - use O_DIRECT (don't abuse host's page cache!)
