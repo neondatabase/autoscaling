@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
@@ -218,7 +219,7 @@ func (s *podState) dump() podStateDump {
 
 	var vm *vmPodState
 	if s.vm != nil {
-		vm = &[]vmPodState{s.vm.dump()}[0]
+		vm = lo.ToPtr(s.vm.dump())
 	}
 
 	return podStateDump{
@@ -235,8 +236,7 @@ func (s *vmPodState) dump() vmPodState {
 	// Copy some of the "may be nil" pointer fields
 	var metrics *api.Metrics
 	if s.Metrics != nil {
-		m := *s.Metrics
-		metrics = &m
+		metrics = lo.ToPtr(*s.Metrics)
 	}
 	var migrationState *podMigrationState
 	if s.MigrationState != nil {

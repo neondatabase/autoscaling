@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/samber/lo"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -242,7 +244,7 @@ func (s *GuestSettings) GetSwapInfo() (*SwapInfo, error) {
 			SkipSwapon: nil,
 		}, nil
 	} else if s.SwapInfo != nil {
-		return &[]SwapInfo{*s.SwapInfo}[0], nil
+		return lo.ToPtr(*s.SwapInfo), nil
 	}
 
 	return nil, nil

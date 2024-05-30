@@ -6,7 +6,7 @@ WORKDIR /workspace
 
 ARG CA_GIT_TAG
 
-# Download the repo. It's... quite large, but thankfuly this should get cached
+# Download the repo. It's... quite large, but thankfully this should get cached
 RUN git clone --depth=1 -b $CA_GIT_TAG https://github.com/kubernetes/autoscaler
 
 # Only ADD the patch after downloading, to avoid wrecking the cache
