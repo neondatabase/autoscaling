@@ -97,7 +97,7 @@ func (g *group) call(f func() error) (err error) {
 				g.panicHandler(r)
 			}
 			st := stack.GetStackTrace(nil, 1).String()
-			g.logger.Error("panic", zap.Any("panic", r), zap.String("stack", st))
+			g.logger.Error("Task panicked", zap.Any("payload", r), zap.String("stack", st))
 			err = fmt.Errorf("panic: %v", r)
 		}
 	}()
