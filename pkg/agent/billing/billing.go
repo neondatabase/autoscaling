@@ -175,7 +175,9 @@ func (mc *MetricsCollector) Run(
 		case <-collectTicker.C:
 			logger.Info("Collecting billing state")
 			if store.Stopped() && ctx.Err() == nil {
-				return errors.New("VM store stopped but background context is still live")
+				err := errors.New("VM store stopped but background context is still live")
+				logger.Panic("Validation check failed", zap.Error(err))
+				return err
 			}
 			state.collect(logger, store, metrics)
 		case <-accumulateTicker.C:
