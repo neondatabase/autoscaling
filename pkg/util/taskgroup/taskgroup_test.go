@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
@@ -66,13 +68,32 @@ func TestParentContext(t *testing.T) {
 	}
 }
 
+func setupLogsCapture() (*zap.Logger, *observer.ObservedLogs) {
+	core, logs := observer.New(zap.InfoLevel)
+	return zap.New(core), logs
+}
+
 func TestPanic(t *testing.T) {
-	log := zap.NewExample()
-	g := taskgroup.NewGroup(log)
+	logger, logs := setupLogsCapture()
+	g := taskgroup.NewGroup(logger)
 	g.Go("task1", func(_ *zap.Logger) error {
 		panic("panic message")
 	})
 	err := g.Wait()
 	assert.NotNil(t, err)
 	assert.Equal(t, err.Error(), "task task1 failed: panic: panic message")
+
+	assert.Equal(t, 2, logs.Len())
+	msg0 := logs.All()[0]
+	assert.Equal(t, "Task panicked", msg0.Message)
+	assert.Len(t, msg0.Context, 2)
+	assert.Equal(t, "payload", msg0.Context[0].Key)
+	assert.Equal(t, "panic message", msg0.Context[0].String)
+	assert.Equal(t, "stack", msg0.Context[1].Key)
+	stackTrace := msg0.Context[1].String
+	assert.True(t, strings.HasPrefix(stackTrace, "runtime.gopanic(...)\n"))
+	msg1 := logs.All()[1]
+	assert.Equal(t, "task task1 failed: panic: panic message", msg1.Message)
+	assert.Len(t, msg1.Context, 0)
+
 }

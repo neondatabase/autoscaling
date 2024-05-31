@@ -96,6 +96,7 @@ func (g *group) call(f func() error) (err error) {
 			if g.panicHandler != nil {
 				g.panicHandler(r)
 			}
+			// Omit 1 frame - the f() call below
 			st := stack.GetStackTrace(nil, 1).String()
 			g.logger.Error("Task panicked", zap.Any("payload", r), zap.String("stack", st))
 			err = fmt.Errorf("panic: %v", r)
