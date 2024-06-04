@@ -59,7 +59,7 @@ spec:
         # * cache.direct=on    - use O_DIRECT (don't abuse host's page cache!)
         # * cache.no-flush=on  - ignores disk flush operations (not needed; our disks are ephemeral)
         - "--qemu-disk-cache-settings=cache.writeback=on,cache.direct=on,cache.no-flush=on"
-        - "--reconcile-failure-interval=1m"
+        - "--failure-pending-period=1m"
         env:
         - name: NAD_IPAM_NAME
           value: $(NAD_IPAM_NAME)

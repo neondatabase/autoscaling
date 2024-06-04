@@ -25,9 +25,9 @@ type ReconcilerConfig struct {
 	// used in setting up the VM disks via QEMU's `-drive` flag.
 	QEMUDiskCacheSettings string
 
-	// ReconcileFailureInterval is the interval after which a VM will be marked as failing if it has
-	// not reconciled successfully.
-	ReconcileFailureInterval time.Duration
+	// FailurePendingPeriod is the period between a reconciliation failure
+	// and propagation of this failure to the observability instruments.
+	FailurePendingPeriod time.Duration
 }
 
 func (c *ReconcilerConfig) criEndpointSocketPath() string {

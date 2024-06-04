@@ -97,7 +97,7 @@ func main() {
 	var concurrencyLimit int
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
-	var reconcileFailureInterval time.Duration
+	var failurePendingPeriod time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -106,6 +106,8 @@ func main() {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
+	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
+		"the period between a reconciliation failure and propagation of this failure to the observability instruments.")
 	flag.Parse()
 
 	logConfig := zap.NewProductionConfig()
@@ -169,11 +171,11 @@ func main() {
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
 
 	rc := &controllers.ReconcilerConfig{
-		IsK3s:                    isK3s,
-		UseContainerMgr:          enableContainerMgr,
-		MaxConcurrentReconciles:  concurrencyLimit,
-		QEMUDiskCacheSettings:    qemuDiskCacheSettings,
-		ReconcileFailureInterval: reconcileFailureInterval,
+		IsK3s:                   isK3s,
+		UseContainerMgr:         enableContainerMgr,
+		MaxConcurrentReconciles: concurrencyLimit,
+		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
+		FailurePendingPeriod:    failurePendingPeriod,
 	}
 
 	vmReconciler := &controllers.VMReconciler{
