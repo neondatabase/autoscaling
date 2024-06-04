@@ -78,3 +78,33 @@ func TestFailureSuccessFailure(t *testing.T) {
 	now.Add(7 * time.Minute)
 	assert.Equal(t, tracker.FiringCount(), 1)
 }
+
+func TestMultipleKeys(t *testing.T) {
+	now := newNowMock()
+	alerttracker.Now = now.Now
+	tracker := alerttracker.NewTracker[string](10 * time.Minute)
+
+	// A combination of TestFailureSuccess and TestFailureSuccessFailure
+	tracker.RecordFailure("key1")
+	tracker.RecordFailure("key2")
+
+	now.Add(5 * time.Minute)
+	tracker.RecordSuccess("key1")
+	tracker.RecordSuccess("key2")
+
+	now.Add(1 * time.Minute)
+	tracker.RecordFailure("key1")
+
+	now.Add(5 * time.Minute)
+	assert.Equal(t, tracker.FiringCount(), 0)
+
+	now.Add(7 * time.Minute)
+	assert.Equal(t, tracker.FiringCount(), 1)
+	assert.Equal(t, tracker.Firing(), []string{"key1"})
+
+	tracker.RecordFailure("key2")
+	now.Add(15 * time.Minute)
+	assert.Equal(t, tracker.FiringCount(), 2)
+	assert.Contains(t, tracker.Firing(), "key1")
+	assert.Contains(t, tracker.Firing(), "key2")
+}

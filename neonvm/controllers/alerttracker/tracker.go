@@ -28,6 +28,7 @@ func NewTracker[T comparable](interval time.Duration) *Tracker[T] {
 	}
 }
 
+// forward processes all the fireAt events that are now in the past.
 func (t *Tracker[T]) forward(now time.Time) {
 	i := 0
 	for ; i < len(t.fireAt); i++ {
