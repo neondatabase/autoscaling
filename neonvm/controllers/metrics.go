@@ -138,14 +138,14 @@ func WithMetrics(
 	reconciler reconcile.Reconciler,
 	rm ReconcilerMetrics,
 	cntrlName string,
-	reconcileFailureInterval time.Duration,
+	failurePendingPeriod time.Duration,
 ) ReconcilerWithMetrics {
 	return &wrappedReconciler{
 		Reconciler:     reconciler,
 		Metrics:        rm,
 		ControllerName: cntrlName,
-		failing:        alerttracker.NewTracker[client.ObjectKey](reconcileFailureInterval),
-		conflicting:    alerttracker.NewTracker[client.ObjectKey](reconcileFailureInterval),
+		failing:        alerttracker.NewTracker[client.ObjectKey](failurePendingPeriod),
+		conflicting:    alerttracker.NewTracker[client.ObjectKey](failurePendingPeriod),
 	}
 }
 
