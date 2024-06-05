@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -101,7 +100,6 @@ type wrappedReconciler struct {
 	Reconciler     reconcile.Reconciler
 	Metrics        ReconcilerMetrics
 
-	lock        sync.Mutex
 	failing     *alerttracker.Tracker[client.ObjectKey]
 	conflicting *alerttracker.Tracker[client.ObjectKey]
 }
@@ -146,7 +144,6 @@ func WithMetrics(
 		Reconciler:     reconciler,
 		Metrics:        rm,
 		ControllerName: cntrlName,
-		lock:           sync.Mutex{},
 		failing:        alerttracker.NewTracker[client.ObjectKey](reconcileFailureInterval),
 		conflicting:    alerttracker.NewTracker[client.ObjectKey](reconcileFailureInterval),
 	}
@@ -159,13 +156,6 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	res, err := d.Reconciler.Reconcile(ctx, req)
 	duration := time.Since(now)
 
-	// This part is executed sequentially since we acquire a mutex lock. It
-	// should be quite fast since a mutex lock/unlock + 2 memory writes takes less
-	// than 100ns. I (@shayanh) preferred to go with the simplest implementation
-	// as of now. For a more performant solution, if needed, we can switch to an
-	// async approach.
-	d.lock.Lock()
-	defer d.lock.Unlock()
 	outcome := SuccessOutcome
 	if err != nil {
 		if errors.IsConflict(err) {
@@ -209,9 +199,6 @@ func toStringSlice(s []client.ObjectKey) []string {
 }
 
 func (r *wrappedReconciler) Snapshot() ReconcileSnapshot {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-
 	failing := toStringSlice(r.failing.Firing())
 	conflicting := toStringSlice(r.conflicting.Firing())
 

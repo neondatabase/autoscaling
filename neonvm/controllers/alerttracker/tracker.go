@@ -1,6 +1,9 @@
 package alerttracker
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 var Now = time.Now
 
@@ -12,6 +15,8 @@ type Tracker[T comparable] struct {
 	pendingSince map[T]time.Time
 	firing       map[T]struct{}
 	fireAt       []fireAt[T]
+
+	lock sync.Mutex
 }
 
 type fireAt[T comparable] struct {
@@ -25,6 +30,7 @@ func NewTracker[T comparable](interval time.Duration) *Tracker[T] {
 		pendingSince: make(map[T]time.Time),
 		firing:       make(map[T]struct{}),
 		fireAt:       []fireAt[T]{},
+		lock:         sync.Mutex{},
 	}
 }
 
@@ -53,12 +59,18 @@ func (t *Tracker[T]) forward(now time.Time) {
 }
 
 func (t *Tracker[T]) RecordSuccess(key T) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
 	delete(t.firing, key)
 	delete(t.pendingSince, key)
 	t.forward(Now())
 }
 
 func (t *Tracker[T]) RecordFailure(key T) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
 	now := Now()
 
 	if _, ok := t.pendingSince[key]; !ok {
@@ -74,11 +86,17 @@ func (t *Tracker[T]) RecordFailure(key T) {
 }
 
 func (t *Tracker[T]) FiringCount() int {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
 	t.forward(Now())
 	return len(t.firing)
 }
 
 func (t *Tracker[T]) Firing() []T {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
 	t.forward(Now())
 	keys := make([]T, 0, len(t.firing))
 	for k := range t.firing {
