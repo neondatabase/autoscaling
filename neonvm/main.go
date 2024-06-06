@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -245,7 +246,7 @@ func checkIfRunningInK3sCluster(cfg *rest.Config) (bool, error) {
 	}
 
 	for _, node := range nodes.Items {
-		if node.Status.NodeInfo.OSImage == "K3s dev" {
+		if strings.HasPrefix(node.Status.NodeInfo.OSImage, "K3s") {
 			return true, nil
 		}
 	}
