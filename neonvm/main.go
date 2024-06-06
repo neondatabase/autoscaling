@@ -98,6 +98,7 @@ func main() {
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
 	var failurePendingPeriod time.Duration
+	var failingRefreshInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -107,7 +108,9 @@ func main() {
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
 	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
-		"the period between a reconciliation failure and propagation of this failure to the observability instruments.")
+		"the period for the propagation of reconciliation failures to the observability instruments")
+	flag.DurationVar(&failingRefreshInterval, "failing-refresh-interval", 1*time.Minute,
+		"the interval between consecutive updates of metrics and logs, related to failing reconciliations")
 	flag.Parse()
 
 	logConfig := zap.NewProductionConfig()
@@ -176,6 +179,7 @@ func main() {
 		MaxConcurrentReconciles: concurrencyLimit,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
 		FailurePendingPeriod:    failurePendingPeriod,
+		FailingRefreshInterval:  failingRefreshInterval,
 	}
 
 	vmReconciler := &controllers.VMReconciler{
@@ -225,6 +229,11 @@ func main() {
 	dbgSrv := debugServerFunc(vmReconcilerMetrics, migrationReconcilerMetrics)
 	if err := mgr.Add(dbgSrv); err != nil {
 		setupLog.Error(err, "unable to set up debug server")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(vmReconcilerMetrics.FailingRefresher()); err != nil {
+		setupLog.Error(err, "unable to set up failing refresher")
 		os.Exit(1)
 	}
 

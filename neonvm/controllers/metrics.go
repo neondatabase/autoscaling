@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -96,9 +97,10 @@ func (m ReconcilerMetrics) ObserveReconcileDuration(
 }
 
 type wrappedReconciler struct {
-	ControllerName string
-	Reconciler     reconcile.Reconciler
-	Metrics        ReconcilerMetrics
+	ControllerName         string
+	Reconciler             reconcile.Reconciler
+	Metrics                ReconcilerMetrics
+	refreshFailingInterval time.Duration
 
 	failing     *failurelag.Tracker[client.ObjectKey]
 	conflicting *failurelag.Tracker[client.ObjectKey]
@@ -110,6 +112,7 @@ type ReconcilerWithMetrics interface {
 	reconcile.Reconciler
 
 	Snapshot() ReconcileSnapshot
+	FailingRefresher() FailingRefresher
 }
 
 // ReconcileSnapshot provides a glimpse into the current state of ongoing reconciles
@@ -139,14 +142,60 @@ func WithMetrics(
 	rm ReconcilerMetrics,
 	cntrlName string,
 	failurePendingPeriod time.Duration,
+	refreshFailingInterval time.Duration,
 ) ReconcilerWithMetrics {
 	return &wrappedReconciler{
-		Reconciler:     reconciler,
-		Metrics:        rm,
-		ControllerName: cntrlName,
-		failing:        failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
-		conflicting:    failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
+		Reconciler:             reconciler,
+		Metrics:                rm,
+		ControllerName:         cntrlName,
+		failing:                failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
+		conflicting:            failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
+		refreshFailingInterval: refreshFailingInterval,
 	}
+}
+
+func (d *wrappedReconciler) refreshFailing(
+	log logr.Logger,
+	outcome ReconcileOutcome,
+	tracker *failurelag.Tracker[client.ObjectKey],
+) {
+	degraded := tracker.Degraded()
+	d.Metrics.failing.WithLabelValues(d.ControllerName, string(outcome)).
+		Set(float64(len(degraded)))
+
+	log.Info("Currently failing objects",
+		"outcome", outcome,
+		"count", len(degraded),
+		"objects", degraded,
+	)
+}
+
+func (d *wrappedReconciler) runRefreshFailing(ctx context.Context) {
+	log := log.FromContext(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(d.refreshFailingInterval):
+			d.refreshFailing(log, FailureOutcome, d.failing)
+			d.refreshFailing(log, ConflictOutcome, d.conflicting)
+		}
+	}
+}
+
+func (d *wrappedReconciler) FailingRefresher() FailingRefresher {
+	return FailingRefresher{r: d}
+}
+
+// FailingRefresher is a wrapper, which implements manager.Runnable
+type FailingRefresher struct {
+	r *wrappedReconciler
+}
+
+func (f FailingRefresher) Start(ctx context.Context) error {
+	go f.r.runRefreshFailing(ctx)
+	return nil
 }
 
 func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

@@ -1711,7 +1711,13 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 // desirable state on the cluster
 func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachine"
-	reconciler := WithMetrics(withCatchPanic(r), r.Metrics, cntrlName, r.Config.FailurePendingPeriod)
+	reconciler := WithMetrics(
+		withCatchPanic(r),
+		r.Metrics,
+		cntrlName,
+		r.Config.FailurePendingPeriod,
+		r.Config.FailingRefreshInterval,
+	)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).
