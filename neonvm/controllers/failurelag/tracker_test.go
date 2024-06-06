@@ -28,8 +28,8 @@ func newNowMock() *nowMock {
 
 func TestTracker(t *testing.T) {
 	now := newNowMock()
-	failurelag.Now = now.Now
 	tracker := failurelag.NewTracker[string](10 * time.Minute)
+	tracker.Now = now.Now
 
 	// Alert fires after 15 minutes
 	tracker.RecordFailure("key1")
@@ -44,8 +44,8 @@ func TestTracker(t *testing.T) {
 
 func TestFailureSuccess(t *testing.T) {
 	now := newNowMock()
-	failurelag.Now = now.Now
 	tracker := failurelag.NewTracker[string](10 * time.Minute)
+	tracker.Now = now.Now
 
 	// Alert doesn't fire if there was a success in the interval
 	tracker.RecordFailure("key1")
@@ -59,8 +59,8 @@ func TestFailureSuccess(t *testing.T) {
 
 func TestFailureSuccessFailure(t *testing.T) {
 	now := newNowMock()
-	failurelag.Now = now.Now
 	tracker := failurelag.NewTracker[string](10 * time.Minute)
+	tracker.Now = now.Now
 
 	// Alert doesn't fire if there was success + failure in the interval
 	tracker.RecordFailure("key1")
@@ -81,8 +81,8 @@ func TestFailureSuccessFailure(t *testing.T) {
 
 func TestMultipleKeys(t *testing.T) {
 	now := newNowMock()
-	failurelag.Now = now.Now
 	tracker := failurelag.NewTracker[string](10 * time.Minute)
+	tracker.Now = now.Now
 
 	// A combination of TestFailureSuccess and TestFailureSuccessFailure
 	tracker.RecordFailure("key1")

@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-var Now = time.Now
-
 // Tracker accumulates failure events for a given key and determines if
 // the key is degraded. The key becomes degraded if it receives only failures
 // over a configurable pending period. Once the success event is received, the key
@@ -19,6 +17,7 @@ type Tracker[T comparable] struct {
 	degradeAt    []degradeAt[T]
 
 	lock sync.Mutex
+	Now  func() time.Time
 }
 
 type degradeAt[T comparable] struct {
@@ -33,6 +32,7 @@ func NewTracker[T comparable](period time.Duration) *Tracker[T] {
 		degraded:     make(map[T]struct{}),
 		degradeAt:    []degradeAt[T]{},
 		lock:         sync.Mutex{},
+		Now:          time.Now,
 	}
 }
 
@@ -66,14 +66,14 @@ func (t *Tracker[T]) RecordSuccess(key T) {
 
 	delete(t.degraded, key)
 	delete(t.pendingSince, key)
-	t.forward(Now())
+	t.forward(t.Now())
 }
 
 func (t *Tracker[T]) RecordFailure(key T) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	now := Now()
+	now := t.Now()
 
 	if _, ok := t.pendingSince[key]; !ok {
 		t.pendingSince[key] = now
@@ -91,7 +91,7 @@ func (t *Tracker[T]) DegradedCount() int {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	t.forward(Now())
+	t.forward(t.Now())
 	return len(t.degraded)
 }
 
@@ -99,7 +99,7 @@ func (t *Tracker[T]) Degraded() []T {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	t.forward(Now())
+	t.forward(t.Now())
 	keys := make([]T, 0, len(t.degraded))
 	for k := range t.degraded {
 		keys = append(keys, k)
