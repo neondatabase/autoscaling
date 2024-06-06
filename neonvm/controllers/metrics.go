@@ -13,7 +13,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 
-	"github.com/neondatabase/autoscaling/neonvm/controllers/alerttracker"
+	"github.com/neondatabase/autoscaling/neonvm/controllers/failurelag"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -100,8 +100,8 @@ type wrappedReconciler struct {
 	Reconciler     reconcile.Reconciler
 	Metrics        ReconcilerMetrics
 
-	failing     *alerttracker.Tracker[client.ObjectKey]
-	conflicting *alerttracker.Tracker[client.ObjectKey]
+	failing     *failurelag.Tracker[client.ObjectKey]
+	conflicting *failurelag.Tracker[client.ObjectKey]
 }
 
 // ReconcilerWithMetrics is a Reconciler produced by WithMetrics that can return a snapshot of the
@@ -144,8 +144,8 @@ func WithMetrics(
 		Reconciler:     reconciler,
 		Metrics:        rm,
 		ControllerName: cntrlName,
-		failing:        alerttracker.NewTracker[client.ObjectKey](failurePendingPeriod),
-		conflicting:    alerttracker.NewTracker[client.ObjectKey](failurePendingPeriod),
+		failing:        failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
+		conflicting:    failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
 	}
 }
 
@@ -183,9 +183,9 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	d.Metrics.ObserveReconcileDuration(outcome, duration)
 	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(FailureOutcome)).Set(float64(d.failing.FiringCount()))
+		string(FailureOutcome)).Set(float64(d.failing.DegradedCount()))
 	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(ConflictOutcome)).Set(float64(d.conflicting.FiringCount()))
+		string(ConflictOutcome)).Set(float64(d.conflicting.DegradedCount()))
 
 	return res, err
 }
@@ -199,8 +199,8 @@ func toStringSlice(s []client.ObjectKey) []string {
 }
 
 func (r *wrappedReconciler) Snapshot() ReconcileSnapshot {
-	failing := toStringSlice(r.failing.Firing())
-	conflicting := toStringSlice(r.conflicting.Firing())
+	failing := toStringSlice(r.failing.Degraded())
+	conflicting := toStringSlice(r.conflicting.Degraded())
 
 	return ReconcileSnapshot{
 		ControllerName: r.ControllerName,

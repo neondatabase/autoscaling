@@ -1,4 +1,4 @@
-package alerttracker_test
+package failurelag_test
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/neondatabase/autoscaling/neonvm/controllers/alerttracker"
+	"github.com/neondatabase/autoscaling/neonvm/controllers/failurelag"
 )
 
 type nowMock struct {
@@ -28,24 +28,24 @@ func newNowMock() *nowMock {
 
 func TestTracker(t *testing.T) {
 	now := newNowMock()
-	alerttracker.Now = now.Now
-	tracker := alerttracker.NewTracker[string](10 * time.Minute)
+	failurelag.Now = now.Now
+	tracker := failurelag.NewTracker[string](10 * time.Minute)
 
 	// Alert fires after 15 minutes
 	tracker.RecordFailure("key1")
-	assert.Equal(t, tracker.FiringCount(), 0)
+	assert.Equal(t, tracker.DegradedCount(), 0)
 	now.Add(15 * time.Minute)
-	assert.Equal(t, tracker.FiringCount(), 1)
+	assert.Equal(t, tracker.DegradedCount(), 1)
 
 	// Alert no longer fires
 	tracker.RecordSuccess("key1")
-	assert.Equal(t, tracker.FiringCount(), 0)
+	assert.Equal(t, tracker.DegradedCount(), 0)
 }
 
 func TestFailureSuccess(t *testing.T) {
 	now := newNowMock()
-	alerttracker.Now = now.Now
-	tracker := alerttracker.NewTracker[string](10 * time.Minute)
+	failurelag.Now = now.Now
+	tracker := failurelag.NewTracker[string](10 * time.Minute)
 
 	// Alert doesn't fire if there was a success in the interval
 	tracker.RecordFailure("key1")
@@ -54,13 +54,13 @@ func TestFailureSuccess(t *testing.T) {
 	tracker.RecordSuccess("key1")
 
 	now.Add(10 * time.Minute)
-	assert.Equal(t, tracker.FiringCount(), 0)
+	assert.Equal(t, tracker.DegradedCount(), 0)
 }
 
 func TestFailureSuccessFailure(t *testing.T) {
 	now := newNowMock()
-	alerttracker.Now = now.Now
-	tracker := alerttracker.NewTracker[string](10 * time.Minute)
+	failurelag.Now = now.Now
+	tracker := failurelag.NewTracker[string](10 * time.Minute)
 
 	// Alert doesn't fire if there was success + failure in the interval
 	tracker.RecordFailure("key1")
@@ -72,17 +72,17 @@ func TestFailureSuccessFailure(t *testing.T) {
 	tracker.RecordFailure("key1")
 
 	now.Add(5 * time.Minute)
-	assert.Equal(t, tracker.FiringCount(), 0)
+	assert.Equal(t, tracker.DegradedCount(), 0)
 
 	// But after 7 more minutes it does
 	now.Add(7 * time.Minute)
-	assert.Equal(t, tracker.FiringCount(), 1)
+	assert.Equal(t, tracker.DegradedCount(), 1)
 }
 
 func TestMultipleKeys(t *testing.T) {
 	now := newNowMock()
-	alerttracker.Now = now.Now
-	tracker := alerttracker.NewTracker[string](10 * time.Minute)
+	failurelag.Now = now.Now
+	tracker := failurelag.NewTracker[string](10 * time.Minute)
 
 	// A combination of TestFailureSuccess and TestFailureSuccessFailure
 	tracker.RecordFailure("key1")
@@ -96,15 +96,15 @@ func TestMultipleKeys(t *testing.T) {
 	tracker.RecordFailure("key1")
 
 	now.Add(5 * time.Minute)
-	assert.Equal(t, tracker.FiringCount(), 0)
+	assert.Equal(t, tracker.DegradedCount(), 0)
 
 	now.Add(7 * time.Minute)
-	assert.Equal(t, tracker.FiringCount(), 1)
-	assert.Equal(t, tracker.Firing(), []string{"key1"})
+	assert.Equal(t, tracker.DegradedCount(), 1)
+	assert.Equal(t, tracker.Degraded(), []string{"key1"})
 
 	tracker.RecordFailure("key2")
 	now.Add(15 * time.Minute)
-	assert.Equal(t, tracker.FiringCount(), 2)
-	assert.Contains(t, tracker.Firing(), "key1")
-	assert.Contains(t, tracker.Firing(), "key2")
+	assert.Equal(t, tracker.DegradedCount(), 2)
+	assert.Contains(t, tracker.Degraded(), "key1")
+	assert.Contains(t, tracker.Degraded(), "key2")
 }

@@ -1,4 +1,4 @@
-package alerttracker
+package failurelag
 
 import (
 	"sync"
@@ -7,29 +7,31 @@ import (
 
 var Now = time.Now
 
-// Tracker is a struct that keeps track of failure/success events for a given key.
-// Failure state over a given interval will trigger a firing alert.
+// Tracker accumulates failure events for a given key and determines if
+// the key is degraded. The key becomes degraded if it receives only failures
+// over a configurable pending period. Once the success event is received, the key
+// is no longer considered degraded, and the pending period is reset.
 type Tracker[T comparable] struct {
-	interval time.Duration
+	period time.Duration
 
 	pendingSince map[T]time.Time
-	firing       map[T]struct{}
-	fireAt       []fireAt[T]
+	degraded     map[T]struct{}
+	degradeAt    []degradeAt[T]
 
 	lock sync.Mutex
 }
 
-type fireAt[T comparable] struct {
+type degradeAt[T comparable] struct {
 	ts  time.Time
 	key T
 }
 
-func NewTracker[T comparable](interval time.Duration) *Tracker[T] {
+func NewTracker[T comparable](period time.Duration) *Tracker[T] {
 	return &Tracker[T]{
-		interval:     interval,
+		period:       period,
 		pendingSince: make(map[T]time.Time),
-		firing:       make(map[T]struct{}),
-		fireAt:       []fireAt[T]{},
+		degraded:     make(map[T]struct{}),
+		degradeAt:    []degradeAt[T]{},
 		lock:         sync.Mutex{},
 	}
 }
@@ -37,8 +39,8 @@ func NewTracker[T comparable](interval time.Duration) *Tracker[T] {
 // forward processes all the fireAt events that are now in the past.
 func (t *Tracker[T]) forward(now time.Time) {
 	i := 0
-	for ; i < len(t.fireAt); i++ {
-		event := t.fireAt[i]
+	for ; i < len(t.degradeAt); i++ {
+		event := t.degradeAt[i]
 		if event.ts.After(now) {
 			break
 		}
@@ -48,21 +50,21 @@ func (t *Tracker[T]) forward(now time.Time) {
 			continue
 		}
 
-		if event.ts.Sub(pendingSince) < t.interval {
+		if event.ts.Sub(pendingSince) < t.period {
 			// There was a success, and another failure in between
 			// We will have another fireAt event for this key in the future
 			continue
 		}
-		t.firing[event.key] = struct{}{}
+		t.degraded[event.key] = struct{}{}
 	}
-	t.fireAt = t.fireAt[i:]
+	t.degradeAt = t.degradeAt[i:]
 }
 
 func (t *Tracker[T]) RecordSuccess(key T) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	delete(t.firing, key)
+	delete(t.degraded, key)
 	delete(t.pendingSince, key)
 	t.forward(Now())
 }
@@ -77,29 +79,29 @@ func (t *Tracker[T]) RecordFailure(key T) {
 		t.pendingSince[key] = now
 	}
 
-	t.fireAt = append(t.fireAt, fireAt[T]{
-		ts:  now.Add(t.interval),
+	t.degradeAt = append(t.degradeAt, degradeAt[T]{
+		ts:  now.Add(t.period),
 		key: key,
 	})
 
 	t.forward(now)
 }
 
-func (t *Tracker[T]) FiringCount() int {
+func (t *Tracker[T]) DegradedCount() int {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
 	t.forward(Now())
-	return len(t.firing)
+	return len(t.degraded)
 }
 
-func (t *Tracker[T]) Firing() []T {
+func (t *Tracker[T]) Degraded() []T {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
 	t.forward(Now())
-	keys := make([]T, 0, len(t.firing))
-	for k := range t.firing {
+	keys := make([]T, 0, len(t.degraded))
+	for k := range t.degraded {
 		keys = append(keys, k)
 	}
 	return keys
