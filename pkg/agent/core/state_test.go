@@ -108,8 +108,8 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			core.Config{
 				ComputeUnit: api.Resources{VCPU: 250, Mem: 1 * slotSize},
 				DefaultScalingConfig: api.ScalingConfig{
-					LoadAverageFractionTarget: 0.5,
-					MemoryUsageFractionTarget: 0.5,
+					LoadAverageFractionTarget: lo.ToPtr(0.5),
+					MemoryUsageFractionTarget: lo.ToPtr(0.5),
 				},
 				// these don't really matter, because we're not using (*State).NextActions()
 				NeonVMRetryWait:                    time.Second,
@@ -178,8 +178,8 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 	Core: core.Config{
 		ComputeUnit: DefaultComputeUnit,
 		DefaultScalingConfig: api.ScalingConfig{
-			LoadAverageFractionTarget: 0.5,
-			MemoryUsageFractionTarget: 0.5,
+			LoadAverageFractionTarget: lo.ToPtr(0.5),
+			MemoryUsageFractionTarget: lo.ToPtr(0.5),
 		},
 		NeonVMRetryWait:                    5 * time.Second,
 		PluginRequestTick:                  5 * time.Second,
