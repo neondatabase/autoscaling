@@ -102,6 +102,8 @@ var _ = Describe("VirtualMachine controller", func() {
 					UseContainerMgr:         true,
 					MaxConcurrentReconciles: 1,
 					QEMUDiskCacheSettings:   "cache=none",
+					FailurePendingPeriod:    1 * time.Minute,
+					FailingRefreshInterval:  1 * time.Minute,
 				},
 			}
 

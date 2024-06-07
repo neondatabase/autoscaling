@@ -1,5 +1,7 @@
 package controllers
 
+import "time"
+
 // ReconcilerConfig stores shared configuration for VirtualMachineReconciler and
 // VirtualMachineMigrationReconciler.
 type ReconcilerConfig struct {
@@ -22,6 +24,14 @@ type ReconcilerConfig struct {
 	// This field is passed to neonvm-runner as the `-qemu-disk-cache-settings` arg, and is directly
 	// used in setting up the VM disks via QEMU's `-drive` flag.
 	QEMUDiskCacheSettings string
+
+	// FailurePendingPeriod is the period for the propagation of
+	// reconciliation failures to the observability instruments
+	FailurePendingPeriod time.Duration
+
+	// FailingRefreshInterval is the interval between consecutive
+	// updates of metrics and logs, related to failing reconciliations
+	FailingRefreshInterval time.Duration
 }
 
 func (c *ReconcilerConfig) criEndpointSocketPath() string {
