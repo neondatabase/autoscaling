@@ -9,7 +9,6 @@ RUN set -e \
     && echo "force this as a requirement for build-deps" > /build/arg-check-succeeded
 
 FROM ubuntu:23.10 as build-deps
-ARG KERNEL_VERSION
 WORKDIR /build
 
 RUN apt-get update && apt-get -y install \
@@ -30,6 +29,12 @@ RUN apt-get update && apt-get -y install \
 # We need to copy something in, otherwise 'docker buildx build' will just completely drop the
 # check-arg stage.
 COPY --from=check-arg /build/arg-check-succeeded arg-check-succeeded
+
+# the ARG must be down here (specifically: not before 'apt-get install'), else docker seems to
+# assume that KERNEL_VERSION could influence the 'apt-get install' and refuses to cache it.
+# (maybe they're just exposed as environment variables to RUN?)
+# This all as of Docker 26.1.4 - 2024-06-07.
+ARG KERNEL_VERSION
 
 RUN set -e \
     && rm arg-check-succeeded \
