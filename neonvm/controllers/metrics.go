@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -163,11 +164,17 @@ func (d *wrappedReconciler) refreshFailing(
 	d.Metrics.failing.WithLabelValues(d.ControllerName, string(outcome)).
 		Set(float64(len(degraded)))
 
-	log.Info("Currently failing objects",
-		"outcome", outcome,
-		"count", len(degraded),
-		"objects", degraded,
-	)
+	// Log each object on a separate line (even though we could just put them all on the same line)
+	// so that:
+	// 1. we avoid super long log lines (which can make log storage / querying unhappy), and
+	// 2. so that we can process it with Grafana Loki, which can't handle arrays
+	for _, obj := range degraded {
+		log.Info(
+			fmt.Sprintf("Currently failing to reconcile %v object", d.ControllerName),
+			"outcome", outcome,
+			"object", obj,
+		)
+	}
 }
 
 func (d *wrappedReconciler) runRefreshFailing(ctx context.Context) {
