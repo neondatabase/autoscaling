@@ -19,7 +19,6 @@ import (
 // See https://pkg.go.dev/golang.org/x/sync/errgroup#group for more information
 type Group interface {
 	Ctx() context.Context
-	WithPanicHandler(f func(any))
 	Wait() error
 	Go(name string, f func(logger *zap.Logger) error)
 }
@@ -42,6 +41,13 @@ type GroupOption func(*group)
 func WithParentContext(ctx context.Context) GroupOption {
 	return func(g *group) {
 		g.ctx, g.cancel = context.WithCancel(ctx)
+	}
+}
+
+// WithPanicHandler sets a panic handler for the group.
+func WithPanicHandler(f func(any)) GroupOption {
+	return func(g *group) {
+		g.panicHandler = f
 	}
 }
 
@@ -72,11 +78,6 @@ func NewGroup(logger *zap.Logger, opts ...GroupOption) Group {
 // Ctx returns a context that will be canceled when the group is Waited.
 func (g *group) Ctx() context.Context {
 	return g.ctx
-}
-
-// WithPanicHandler sets a panic handler for the group.
-func (g *group) WithPanicHandler(f func(any)) {
-	g.panicHandler = f
 }
 
 // Wait blocks until all goroutines have completed.

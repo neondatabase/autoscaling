@@ -74,16 +74,25 @@ func setupLogsCapture() (*zap.Logger, *observer.ObservedLogs) {
 }
 
 func TestPanic(t *testing.T) {
+	var panicCnt int
+	handler := func(_ any) {
+		panicCnt++
+	}
+
 	logger, logs := setupLogsCapture()
-	g := taskgroup.NewGroup(logger)
+	g := taskgroup.NewGroup(logger, taskgroup.WithPanicHandler(handler))
 	g.Go("task1", func(_ *zap.Logger) error {
 		panic("panic message")
 	})
 	err := g.Wait()
 	assert.NotNil(t, err)
-	assert.Equal(t, err.Error(), "task task1 failed: panic: panic message")
+	assert.Equal(t, "task task1 failed: panic: panic message", err.Error())
+	assert.Equal(t, 1, panicCnt)
 
+	// We have two log lines: one specific for the panic, with additional
+	// context, and one for any task failure.
 	assert.Equal(t, 2, logs.Len())
+
 	msg0 := logs.All()[0]
 	assert.Equal(t, "Task panicked", msg0.Message)
 	assert.Len(t, msg0.Context, 2)
@@ -92,8 +101,9 @@ func TestPanic(t *testing.T) {
 	assert.Equal(t, "stack", msg0.Context[1].Key)
 	stackTrace := msg0.Context[1].String
 	assert.True(t, strings.HasPrefix(stackTrace, "runtime.gopanic(...)\n"))
+
 	msg1 := logs.All()[1]
+	// msg := task {name} failed: {error}; error := panic: {panicMessage}
 	assert.Equal(t, "task task1 failed: panic: panic message", msg1.Message)
 	assert.Len(t, msg1.Context, 0)
-
 }
