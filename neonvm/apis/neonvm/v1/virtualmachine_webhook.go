@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	"slices"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -74,19 +75,19 @@ func (r *VirtualMachine) Default() {
 var _ webhook.Validator = &VirtualMachine{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *VirtualMachine) ValidateCreate() error {
+func (r *VirtualMachine) ValidateCreate() (admission.Warnings, error) {
 	// validate .spec.guest.cpus.use and .spec.guest.cpus.max
 	if r.Spec.Guest.CPUs.Use != nil {
 		if r.Spec.Guest.CPUs.Max == nil {
-			return errors.New(".spec.guest.cpus.max must be defined if .spec.guest.cpus.use specified")
+			return nil, errors.New(".spec.guest.cpus.max must be defined if .spec.guest.cpus.use specified")
 		}
 		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
-			return fmt.Errorf(".spec.guest.cpus.use (%v) should be greater than or equal to the .spec.guest.cpus.min (%v)",
+			return nil, fmt.Errorf(".spec.guest.cpus.use (%v) should be greater than or equal to the .spec.guest.cpus.min (%v)",
 				r.Spec.Guest.CPUs.Use,
 				r.Spec.Guest.CPUs.Min)
 		}
 		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
-			return fmt.Errorf(".spec.guest.cpus.use (%v) should be less than or equal to the .spec.guest.cpus.max (%v)",
+			return nil, fmt.Errorf(".spec.guest.cpus.use (%v) should be less than or equal to the .spec.guest.cpus.max (%v)",
 				r.Spec.Guest.CPUs.Use,
 				r.Spec.Guest.CPUs.Max)
 		}
@@ -95,15 +96,15 @@ func (r *VirtualMachine) ValidateCreate() error {
 	// validate .spec.guest.memorySlots.use and .spec.guest.memorySlots.max
 	if r.Spec.Guest.MemorySlots.Use != nil {
 		if r.Spec.Guest.MemorySlots.Max == nil {
-			return errors.New(".spec.guest.memorySlots.max must be defined if .spec.guest.memorySlots.use specified")
+			return nil, errors.New(".spec.guest.memorySlots.max must be defined if .spec.guest.memorySlots.use specified")
 		}
 		if *r.Spec.Guest.MemorySlots.Use < *r.Spec.Guest.MemorySlots.Min {
-			return fmt.Errorf(".spec.guest.memorySlots.use (%d) should be greater than or equal to the .spec.guest.memorySlots.min (%d)",
+			return nil, fmt.Errorf(".spec.guest.memorySlots.use (%d) should be greater than or equal to the .spec.guest.memorySlots.min (%d)",
 				*r.Spec.Guest.MemorySlots.Use,
 				*r.Spec.Guest.MemorySlots.Min)
 		}
 		if *r.Spec.Guest.MemorySlots.Use > *r.Spec.Guest.MemorySlots.Max {
-			return fmt.Errorf(".spec.guest.memorySlots.use (%d) should be less than or equal to the .spec.guest.memorySlots.max (%d)",
+			return nil, fmt.Errorf(".spec.guest.memorySlots.use (%d) should be less than or equal to the .spec.guest.memorySlots.max (%d)",
 				*r.Spec.Guest.MemorySlots.Use,
 				*r.Spec.Guest.MemorySlots.Max)
 		}
@@ -123,32 +124,32 @@ func (r *VirtualMachine) ValidateCreate() error {
 	}
 	for _, disk := range r.Spec.Disks {
 		if slices.Contains(reservedDiskNames, disk.Name) {
-			return fmt.Errorf("'%s' is reserved for .spec.disks[].name", disk.Name)
+			return nil, fmt.Errorf("'%s' is reserved for .spec.disks[].name", disk.Name)
 		}
 		if len(disk.Name) > 32 {
-			return fmt.Errorf("disk name '%s' too long, should be less than or equal to 32", disk.Name)
+			return nil, fmt.Errorf("disk name '%s' too long, should be less than or equal to 32", disk.Name)
 		}
 	}
 
 	// validate .spec.guest.ports[].name
 	for _, port := range r.Spec.Guest.Ports {
 		if len(port.Name) != 0 && port.Name == "qmp" {
-			return errors.New("'qmp' is reserved name for .spec.guest.ports[].name")
+			return nil, errors.New("'qmp' is reserved name for .spec.guest.ports[].name")
 		}
 	}
 
 	// validate that at most one type of swap is provided:
 	if settings := r.Spec.Guest.Settings; settings != nil {
 		if settings.Swap != nil && settings.SwapInfo != nil {
-			return errors.New("cannot have both 'swap' and 'swapInfo' enabled")
+			return nil, errors.New("cannot have both 'swap' and 'swapInfo' enabled")
 		}
 	}
 
-	return nil
+	return nil, nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
+func (r *VirtualMachine) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	// process immutable fields
 	before, _ := old.(*VirtualMachine)
 
@@ -183,7 +184,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 
 	for _, info := range immutableFields {
 		if !reflect.DeepEqual(info.getter(r), info.getter(before)) {
-			return fmt.Errorf("%s is immutable", info.fieldName)
+			return nil, fmt.Errorf("%s is immutable", info.fieldName)
 		}
 	}
 
@@ -199,14 +200,14 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	if r.Spec.Guest.Settings != nil /* from above, if new GuestSettings != nil, then old is as well */ {
 		newSwapInfo, err := r.Spec.Guest.Settings.GetSwapInfo()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		oldSwapInfo, err := before.Spec.Guest.Settings.GetSwapInfo()
 		if err != nil {
 			// do nothing; we'll allow fixing broken objects.
 		} else {
 			if !reflect.DeepEqual(newSwapInfo, oldSwapInfo) {
-				return errors.New(".spec.guest.settings.{swap,swapInfo} is immutable")
+				return nil, errors.New(".spec.guest.settings.{swap,swapInfo} is immutable")
 			}
 		}
 	}
@@ -214,12 +215,12 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	// validate .spec.guest.cpu.use
 	if r.Spec.Guest.CPUs.Use != nil {
 		if *r.Spec.Guest.CPUs.Use < *r.Spec.Guest.CPUs.Min {
-			return fmt.Errorf(".cpus.use (%v) should be greater than or equal to the .cpus.min (%v)",
+			return nil, fmt.Errorf(".cpus.use (%v) should be greater than or equal to the .cpus.min (%v)",
 				r.Spec.Guest.CPUs.Use,
 				r.Spec.Guest.CPUs.Min)
 		}
 		if *r.Spec.Guest.CPUs.Use > *r.Spec.Guest.CPUs.Max {
-			return fmt.Errorf(".cpus.use (%v) should be less than or equal to the .cpus.max (%v)",
+			return nil, fmt.Errorf(".cpus.use (%v) should be less than or equal to the .cpus.max (%v)",
 				r.Spec.Guest.CPUs.Use,
 				r.Spec.Guest.CPUs.Max)
 		}
@@ -228,22 +229,22 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	// validate .spec.guest.memorySlots.use
 	if r.Spec.Guest.MemorySlots.Use != nil {
 		if *r.Spec.Guest.MemorySlots.Use < *r.Spec.Guest.MemorySlots.Min {
-			return fmt.Errorf(".memorySlots.use (%d) should be greater than or equal to the .memorySlots.min (%d)",
+			return nil, fmt.Errorf(".memorySlots.use (%d) should be greater than or equal to the .memorySlots.min (%d)",
 				*r.Spec.Guest.MemorySlots.Use,
 				*r.Spec.Guest.MemorySlots.Min)
 		}
 		if *r.Spec.Guest.MemorySlots.Use > *r.Spec.Guest.MemorySlots.Max {
-			return fmt.Errorf(".memorySlots.use (%d) should be less than or equal to the .memorySlots.max (%d)",
+			return nil, fmt.Errorf(".memorySlots.use (%d) should be less than or equal to the .memorySlots.max (%d)",
 				*r.Spec.Guest.MemorySlots.Use,
 				*r.Spec.Guest.MemorySlots.Max)
 		}
 	}
 
-	return nil
+	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *VirtualMachine) ValidateDelete() error {
+func (r *VirtualMachine) ValidateDelete() (admission.Warnings, error) {
 	// No deletion validation required currently.
-	return nil
+	return nil, nil
 }
