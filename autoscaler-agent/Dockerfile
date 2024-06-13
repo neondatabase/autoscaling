@@ -13,7 +13,7 @@ COPY pkg/agent            pkg/agent
 COPY pkg/api              pkg/api
 COPY pkg/billing          pkg/billing
 COPY pkg/util             pkg/util
-COPY cmd/autoscaler-agent cmd/autoscaler-agent
+COPY autoscaler-agent/cmd autoscaler-agent/cmd
 
 ARG GIT_INFO
 
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	-mod readonly \
     # -ldflags "-X ..." allows us to overwrite the value of a variable in a package \
     -ldflags "-X 'github.com/neondatabase/autoscaling/pkg/util.BuildGitInfo=$GIT_INFO'" \
-    cmd/autoscaler-agent/main.go
+    autoscaler-agent/cmd/*.go
 
 FROM alpine
 COPY --from=builder /workspace/main /usr/bin/autoscaler-agent

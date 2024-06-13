@@ -15,7 +15,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 
-	"github.com/neondatabase/autoscaling/neonvm/controllers/failurelag"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/failurelag"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 

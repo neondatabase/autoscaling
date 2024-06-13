@@ -12,14 +12,14 @@ COPY go.sum go.sum
 RUN go mod download
 
 # Copy the go source
-COPY neonvm/tools/vxlan/controller/ neonvm/tools/vxlan/controller/
+COPY neonvm-vxlan-controller/cmd neonvm-vxlan-controller/cmd
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
 # was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /vxlan-controller neonvm/tools/vxlan/controller/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /vxlan-controller neonvm-vxlan-controller/cmd/*.go
 
 FROM alpine:3.16
 

@@ -48,7 +48,7 @@ import (
 	"k8s.io/klog/v2"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/autoscaling/neonvm/controllers"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 

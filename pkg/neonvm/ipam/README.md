@@ -3,17 +3,17 @@
 ### Creat Network Attachment Definition
 
 ```console
-kubectl apply -f ipam-demo-nad.yaml
+kubectl apply -f demo/ipam-nad.yaml
 ```
 
 ### Run example
 
 ```console
-go run ipam-demo.go
+go run demo/ipam.go
 ```
 
 ### Delete Network Attachment Definition
 
 ```console
-kubectl delete -f ipam-demo-nad.yaml
+kubectl delete -f ipam-nad.yaml
 ```

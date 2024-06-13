@@ -39,7 +39,7 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/autoscaling/neonvm/controllers/buildtag"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/buildtag"
 )
 
 const virtualmachinemigrationFinalizer = "vm.neon.tech/finalizer"

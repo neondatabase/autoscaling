@@ -53,9 +53,9 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/autoscaling/neonvm/controllers/buildtag"
-	"github.com/neondatabase/autoscaling/neonvm/pkg/ipam"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/buildtag"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
 )
 

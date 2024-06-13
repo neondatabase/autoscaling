@@ -14,7 +14,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"github.com/neondatabase/autoscaling/neonvm/pkg/ipam"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 )
 
 var (

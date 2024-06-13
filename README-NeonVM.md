@@ -18,6 +18,8 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/do
 kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/multus.yaml
 kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/whereabouts.yaml
 kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm.yaml
+kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm-vxlan-controller.yaml
+kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm-controller.yaml
 ```
 
 ### Run virtual machine
@@ -109,16 +111,7 @@ make k3d-setup
 make kernel
 ```
 
-(Alternatively, pull & extract it from Dockerhub)
-
-To adjust the kernel config:
-
-```
-cd hack/kernel
-docker build --build-arg KERNEL_VERSION=6.1.92 --platform linux/x86_64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder .
-docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
-# inside that bash shell, do the menuconfig, then copy-out the config to /host
-```
+For more on the kernel, see [neonvm-kernel/](./neonvm-kernel/).
 
 #### 3. Build and deploy controller and VXLAN overlay network to local cluster
 
@@ -287,21 +280,4 @@ which provides a reconcile function responsible for synchronizing resources unti
 - [x] Live migration CRDs
 - [x] Simplify VM disk image creation from any docker image
 - [ ] ARM64 support
-
-
-## License
-
-Copyright 2022.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 

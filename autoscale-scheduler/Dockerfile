@@ -12,7 +12,7 @@ COPY neonvm/client           neonvm/client
 COPY pkg/api                 pkg/api
 COPY pkg/plugin              pkg/plugin
 COPY pkg/util                pkg/util
-COPY cmd/autoscale-scheduler cmd/autoscale-scheduler
+COPY autoscale-scheduler/cmd autoscale-scheduler/cmd
 
 ARG GIT_INFO
 
@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	-mod readonly \
     # -ldflags "-X ..." allows us to overwrite the value of a variable in a package \
     -ldflags "-X 'github.com/neondatabase/autoscaling/pkg/util.BuildGitInfo=$GIT_INFO'" \
-    cmd/autoscale-scheduler/main.go
+    autoscale-scheduler/cmd/*.go
 
 FROM alpine
 COPY --from=builder /workspace/main /usr/bin/kube-scheduler

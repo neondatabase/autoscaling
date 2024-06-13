@@ -119,7 +119,7 @@ build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" neonvm/tools/vm-builder/main.go
+	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" vm-builder/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
@@ -145,15 +145,15 @@ docker-push: docker-build ## Push docker images to docker registry
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
-	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) --build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
+	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) --build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) -t $(IMG_CONTROLLER) -f neonvm-controller/Dockerfile .
 
 .PHONY: docker-build-runner
 docker-build-runner: ## Build docker image for NeonVM runner
-	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
+	docker build -t $(IMG_RUNNER) -f neonvm-runner/Dockerfile .
 
 .PHONY: docker-build-vxlan-controller
 docker-build-vxlan-controller: ## Build docker image for NeonVM vxlan controller
-	docker build -t $(IMG_VXLAN_CONTROLLER) -f neonvm/tools/vxlan/Dockerfile .
+	docker build -t $(IMG_VXLAN_CONTROLLER) -f neonvm-vxlan-controller/Dockerfile .
 
 .PHONY: docker-build-autoscaler-agent
 docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
@@ -161,7 +161,7 @@ docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
 		--tag $(IMG_AUTOSCALER_AGENT) \
 		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
-		--file build/autoscaler-agent/Dockerfile \
+		--file autoscaler-agent/Dockerfile \
 		.
 
 .PHONY: docker-build-scheduler
@@ -170,7 +170,7 @@ docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
 		--tag $(IMG_SCHEDULER) \
 		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
-		--file build/autoscale-scheduler/Dockerfile \
+		--file autoscale-scheduler/Dockerfile \
 		.
 
 .PHONY: docker-build-examples
@@ -211,8 +211,8 @@ endif
 
 .PHONY: kernel
 kernel: ## Build linux kernel.
-	rm -f neonvm/hack/kernel/vmlinuz; \
-	linux_config=$$(ls neonvm/hack/kernel/linux-config-*) \
+	rm -f neonvm-kernel/vmlinuz; \
+	linux_config=$$(ls neonvm-kernel/linux-config-*) \
 	kernel_version=$${linux_config##*-} \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
@@ -222,10 +222,10 @@ kernel: ## Build linux kernel.
 		--pull \
 		--load \
 		--iidfile $$iidfile \
-		--file neonvm/hack/kernel/Dockerfile.kernel-builder \
-		neonvm/hack/kernel; \
+		--file neonvm-kernel/Dockerfile.kernel-builder \
+		neonvm-kernel; \
 	id=$$(docker create $$(cat $$iidfile)); \
-	docker cp $$id:/vmlinuz neonvm/hack/kernel/vmlinuz; \
+	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \
 	docker rm -f $$id
 
 .PHONY: check-local-context
@@ -247,47 +247,51 @@ $(RENDERED):
 .PHONY: render-manifests
 render-manifests: $(RENDERED) kustomize
 	# Prepare:
-	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm-controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm-vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm-runner/image-loader && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
 	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
-	$(KUSTOMIZE) build neonvm/runner-image-loader > $(RENDERED)/neonvm-runner-image-loader.yaml
-	$(KUSTOMIZE) build deploy/scheduler > $(RENDERED)/autoscale-scheduler.yaml
-	$(KUSTOMIZE) build deploy/agent > $(RENDERED)/autoscaler-agent.yaml
+	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
+	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
+	$(KUSTOMIZE) build neonvm-runner/image-loader > $(RENDERED)/neonvm-runner-image-loader.yaml
+	$(KUSTOMIZE) build autoscale-scheduler > $(RENDERED)/autoscale-scheduler.yaml
+	$(KUSTOMIZE) build autoscaler-agent > $(RENDERED)/autoscaler-agent.yaml
 	# Cleanup:
-	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
-	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=runner:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
-	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
-	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd neonvm-controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd neonvm-vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd neonvm-runner/image-loader && $(KUSTOMIZE) edit set image runner=runner:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 
 render-release: $(RENDERED) kustomize
 	# Prepare:
-	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)
-	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER)
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER)
-	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER)
-	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
+	cd neonvm-controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)
+	cd neonvm-vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER)
+	cd neonvm-runner/image-loader && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER)
+	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER)
+	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
 	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
-	$(KUSTOMIZE) build neonvm/runner-image-loader > $(RENDERED)/neonvm-runner-image-loader.yaml
-	$(KUSTOMIZE) build deploy/scheduler > $(RENDERED)/autoscale-scheduler.yaml
-	$(KUSTOMIZE) build deploy/agent > $(RENDERED)/autoscaler-agent.yaml
+	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
+	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
+	$(KUSTOMIZE) build neonvm-runner/image-loader > $(RENDERED)/neonvm-runner-image-loader.yaml
+	$(KUSTOMIZE) build autoscale-scheduler > $(RENDERED)/autoscale-scheduler.yaml
+	$(KUSTOMIZE) build autoscaler-agent > $(RENDERED)/autoscaler-agent.yaml
 	# Cleanup:
-	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=controller:dev
-	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=runner:dev
-	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev
-	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
+	cd neonvm-controller && $(KUSTOMIZE) edit set image controller=controller:dev
+	cd neonvm-vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev
+	cd neonvm-runner/image-loader && $(KUSTOMIZE) edit set image runner=runner:dev
+	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev
+	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
 .PHONY: deploy
 deploy: check-local-context docker-build load-images render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
@@ -298,9 +302,11 @@ deploy: check-local-context docker-build load-images render-manifests kubectl ##
 	$(KUBECTL) apply -f $(RENDERED)/neonvm-runner-image-loader.yaml
 	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-runner-image-loader
 	$(KUBECTL) apply -f $(RENDERED)/neonvm.yaml
-	$(KUBECTL) -n neonvm-system rollout status daemonset  neonvm-device-plugin
-	$(KUBECTL) -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
+	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-device-plugin
+	$(KUBECTL) apply -f $(RENDERED)/neonvm-controller.yaml
 	$(KUBECTL) -n neonvm-system rollout status deployment neonvm-controller
+	$(KUBECTL) apply -f $(RENDERED)/neonvm-vxlan-controller.yaml
+	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-vxlan-controller
 	# NB: typical upgrade path requires updated scheduler before autoscaler-agents.
 	$(KUBECTL) apply -f $(RENDERED)/autoscale-scheduler.yaml
 	$(KUBECTL) -n kube-system rollout status deployment autoscale-scheduler

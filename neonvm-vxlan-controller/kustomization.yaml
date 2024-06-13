@@ -8,9 +8,9 @@ namePrefix: neonvm-
 
 resources:
 - daemonset.yaml
-- ../config/namespace
+- rbac.yaml
 
 images:
-- name: runner
-  newName: runner
+- name: vxlan-controller
+  newName: vxlan-controller
   newTag: dev

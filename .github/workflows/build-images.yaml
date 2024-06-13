@@ -151,7 +151,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: neonvm/runner/Dockerfile
+          file: neonvm-runner/Dockerfile
           tags: ${{ needs.tags.outputs.runner }}
 
       - name: Generate neonvm-controller build tags
@@ -171,7 +171,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: neonvm/Dockerfile
+          file: neonvm-controller/Dockerfile
           tags: ${{ needs.tags.outputs.controller }}
           build-args: |
             VM_RUNNER_IMAGE=${{ needs.tags.outputs.runner }}
@@ -183,7 +183,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: neonvm/tools/vxlan/Dockerfile
+          file: neonvm-vxlan-controller/Dockerfile
           tags: ${{ needs.tags.outputs.vxlan-controller }}
 
       - name: Build and push autoscale-scheduler image
@@ -192,7 +192,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: build/autoscale-scheduler/Dockerfile
+          file: autoscale-scheduler/Dockerfile
           tags: ${{ needs.tags.outputs.scheduler }}
           build-args: |
             GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
@@ -203,7 +203,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: build/autoscaler-agent/Dockerfile
+          file: autoscaler-agent/Dockerfile
           tags: ${{ needs.tags.outputs.autoscaler-agent }}
           build-args: |
             GIT_INFO=${{ steps.get-git-info.outputs.info }}
