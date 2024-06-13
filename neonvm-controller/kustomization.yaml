@@ -1,0 +1,66 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Add neonvm-system namespace to all resources
+namespace: neonvm-system
+# Prepend 'neonvm-' to all resource names.
+namePrefix: neonvm-
+
+# double-include overlay networks so we can reference them correctly
+resources:
+- deployment.yaml
+- service_account.yaml
+- role.yaml
+- role_binding.yaml
+- leader_election_role.yaml
+- leader_election_role_binding.yaml
+- ../neonvm/config/network
+- ../neonvm-runner/image-loader/bases
+
+images:
+- name: controller
+  newName: controller
+  newTag: dev
+
+# overlay networking variables
+vars:
+- fieldref:
+    fieldPath: spec.template.spec.containers.[name=neonvm-runner-loader].image
+  name: VM_RUNNER_IMAGE
+  objref:
+    group: apps
+    kind: DaemonSet
+    name: runner-image-loader
+    version: v1
+- fieldref:
+    fieldPath: metadata.name
+  name: NAD_IPAM_NAME
+  objref:
+    group: k8s.cni.cncf.io
+    kind: NetworkAttachmentDefinition
+    name: overlay-ipam
+    version: v1
+- fieldref:
+    fieldPath: metadata.namespace
+  name: NAD_IPAM_NAMESPACE
+  objref:
+    group: k8s.cni.cncf.io
+    kind: NetworkAttachmentDefinition
+    name: overlay-ipam
+    version: v1
+- fieldref:
+    fieldPath: metadata.name
+  name: NAD_RUNNER_NAME
+  objref:
+    group: k8s.cni.cncf.io
+    kind: NetworkAttachmentDefinition
+    name: overlay-for-vms
+    version: v1
+- fieldref:
+    fieldPath: metadata.namespace
+  name: NAD_RUNNER_NAMESPACE
+  objref:
+    group: k8s.cni.cncf.io
+    kind: NetworkAttachmentDefinition
+    name: overlay-for-vms
+    version: v1

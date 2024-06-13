@@ -174,9 +174,11 @@ jobs:
           kubectl apply -f $(rendered neonvm-runner-image-loader.yaml)
           kubectl -n neonvm-system rollout status daemonset neonvm-runner-image-loader
           kubectl apply -f $(rendered neonvm.yaml)
-          kubectl -n neonvm-system rollout status daemonset  neonvm-device-plugin
-          kubectl -n neonvm-system rollout status daemonset  neonvm-vxlan-controller
+          kubectl -n neonvm-system rollout status daemonset neonvm-device-plugin
+          kubectl apply -f $(rendered neonvm-controller.yaml)
           kubectl -n neonvm-system rollout status deployment neonvm-controller
+          kubectl apply -f $(rendered neonvm-vxlan-controller.yaml)
+          kubectl -n neonvm-system rollout status daemonset neonvm-vxlan-controller
           kubectl apply -f $(rendered autoscale-scheduler.yaml)
           kubectl -n kube-system rollout status deployment autoscale-scheduler
           kubectl apply -f $(rendered autoscaler-agent.yaml)
