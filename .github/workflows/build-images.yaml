@@ -142,7 +142,7 @@ jobs:
         run: |
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
+          docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz
           docker rm -f ${ID}
 
       - name: Build and push neonvm-runner image
