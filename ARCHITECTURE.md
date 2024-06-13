@@ -108,6 +108,7 @@ These are:
 Each component directory contains:
 
 * `cmd/` — the entrypoint of the component, containing `main.go`
+* `Dockerfile` — for building the component, if applicable
 * `kustomize.yaml` — if the component is separately deployed, instructions for how Kustomize should
     generate the YAML
 * `*.yaml` — if the component is separately deployed, there will be other YAML files as the
