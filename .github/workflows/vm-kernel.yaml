@@ -166,7 +166,7 @@ jobs:
         id: get-kernel-version
         run: |
           linux_config=$(ls neonvm-kernel/linux-config-*)  # returns something like "neonvm/hack/kernel/linux-config-6.1.63"
-          kernel_version=${linux_config##*-}                    # returns something like "6.1.63"
+          kernel_version=${linux_config##*-}               # returns something like "6.1.63"
 
           echo VM_KERNEL_VERSION=$kernel_version >> $GITHUB_OUTPUT
 
