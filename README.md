@@ -2,23 +2,6 @@
 
 Vertical autoscaling for a fleet of postgres instances running in a Kubernetes cluster.
 
-## Quick access
-
-Images are available as:
-
-| Component name | Image name |
-|----------------|------------|
-| scheduler (and plugin) | `neondatabase/autoscale-scheduler` |
-| autoscaler-agent | `neondatabase/autoscaler-agent` |
-
-The deployment files and a vm-builder binary are attached to each release.
-
-For information on inter-version compatibility, see
-[`pkg/api/VERSIONING.md`](./pkg/api/VERSIONING.md).
-
-For now, the currently deployed configuration on staging is manually replicated
-in the [`staging` branch](https://github.com/neondatabase/autoscaling/tree/staging).
-
 ## Releasing
 
 For Neon folks, documentation for doing releases can be found [here](https://www.notion.so/neondatabase/Releasing-Autoscaling-8d7cb8b9467e42b9b12c8bbd0ae07c81).
@@ -38,7 +21,7 @@ settled on the following:
 * Use [VM live migration](https://www.qemu.org/docs/master/devel/migration.html) to move running
   postgres instances between physical nodes
 * QEMU is used as our hypervisor
-* [NeonVM](https://github.com/neondatabase/autoscaling/tree/main/neonvm) orchestrates NeonVM VMs as custom resources in
+* [NeonVM](./README-NeonVM.md) orchestrates NeonVM VMs as custom resources in
   K8s, and is responsible for scaling allocated resources (CPU and memory _slots_)
 * A modified K8s scheduler ensures that we don't overcommit resources and triggers migrations when
   demand is above a pre-configured threshold

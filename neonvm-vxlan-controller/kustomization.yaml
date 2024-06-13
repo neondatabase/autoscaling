@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Add neonvm-system namespace to all resources
+namespace: neonvm-system
+# Prepend 'neonvm-' to all resource names.
+namePrefix: neonvm-
+
+resources:
+- daemonset.yaml
+- rbac.yaml
+
+images:
+- name: vxlan-controller
+  newName: vxlan-controller
+  newTag: dev

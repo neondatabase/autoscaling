@@ -24,6 +24,7 @@ testbin/*
 *~
 
 *.qcow2
+# todo: remove old kernel location
 neonvm/hack/kernel/vmlinuz
 
 rendered_manifests
