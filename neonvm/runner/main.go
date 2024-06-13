@@ -1484,7 +1484,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	}
 
 	// create an configure linux bridge
-	logger.Info("setup bridge interface", zap.String("name", defaultNetworkBridgeName))
+	logger.Debug("setup bridge interface", zap.String("name", defaultNetworkBridgeName))
 	bridge := &netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkBridgeName,
@@ -1516,7 +1516,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 
 	// create an configure TAP interface
 	if !checkDevTun() {
-		logger.Info("create /dev/net/tun")
+		logger.Debug("create /dev/net/tun")
 		if err := execFg("mkdir", "-p", "/dev/net"); err != nil {
 			return nil, err
 		}
