@@ -113,7 +113,7 @@ type state struct {
 	// NeonVM records all state relevant to the NeonVM k8s API
 	NeonVM neonvmState
 
-	Metrics *Metrics
+	Metrics *SystemMetrics
 }
 
 type pluginState struct {
@@ -633,11 +633,8 @@ func (s *state) calculateMonitorDownscaleAction(
 }
 
 func (s *state) scalingConfig() api.ScalingConfig {
-	if s.VM.Config.ScalingConfig != nil {
-		return *s.VM.Config.ScalingConfig
-	} else {
-		return s.Config.DefaultScalingConfig
-	}
+	// nb: WithOverrides allows its arg to be nil, in which case it does nothing.
+	return s.Config.DefaultScalingConfig.WithOverrides(s.VM.Config.ScalingConfig)
 }
 
 // public version, for testing.
@@ -676,7 +673,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
 		// average),
 		// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
-		goalCPUs := float64(s.Metrics.LoadAverage1Min) / s.scalingConfig().LoadAverageFractionTarget
+		goalCPUs := s.Metrics.LoadAverage1Min / *s.scalingConfig().LoadAverageFractionTarget
 		cpuGoalCU := uint32(math.Round(goalCPUs / s.Config.ComputeUnit.VCPU.AsFloat64()))
 
 		// For Mem:
@@ -685,7 +682,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		// that to CUs
 		//
 		// NOTE: use uint64 for calculations on bytes as uint32 can overflow
-		memGoalBytes := api.Bytes(math.Round(float64(s.Metrics.MemoryUsageBytes) / s.scalingConfig().MemoryUsageFractionTarget))
+		memGoalBytes := api.Bytes(math.Round(s.Metrics.MemoryUsageBytes / *s.scalingConfig().MemoryUsageFractionTarget))
 		memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
 
 		goalCU = util.Max(cpuGoalCU, memGoalCU)
@@ -937,8 +934,12 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	s.internal.VM = vm
 }
 
-func (s *State) UpdateMetrics(metrics Metrics) {
+func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
 	s.internal.Metrics = &metrics
+}
+
+func (s *State) UpdateLFCMetrics(metrics LFCMetrics) {
+	// stub implementation, intentionally does nothing yet.
 }
 
 // PluginHandle provides write access to the scheduler plugin pieces of an UpdateState

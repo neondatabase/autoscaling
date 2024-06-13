@@ -84,11 +84,15 @@ type ScalingConfig struct {
 
 // MetricsConfig defines a few parameters for metrics requests to the VM
 type MetricsConfig struct {
-	// Port is the port that VMs are expected to provide metrics on
+	System MetricsSourceConfig `json:"system"`
+	LFC    MetricsSourceConfig `json:"lfc"`
+}
+
+type MetricsSourceConfig struct {
+	// Port is the port that VMs are expected to provide the metrics on
+	//
+	// For system metrics, vm-builder installs vector (from vector.dev) to expose them on port 9100.
 	Port uint16 `json:"port"`
-	// LoadMetricPrefix is the prefix at the beginning of the load metrics that we use. For
-	// node_exporter, this is "node_", and for vector it's "host_"
-	LoadMetricPrefix string `json:"loadMetricPrefix"`
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for metrics requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	// SecondsBetweenRequests sets the number of seconds to wait between metrics requests
@@ -185,10 +189,14 @@ func (c *Config) validate() error {
 	}
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
-	erc.Whenf(ec, c.Metrics.Port == 0, zeroTmpl, ".metrics.port")
-	erc.Whenf(ec, c.Metrics.LoadMetricPrefix == "", emptyTmpl, ".metrics.loadMetricPrefix")
-	erc.Whenf(ec, c.Metrics.RequestTimeoutSeconds == 0, zeroTmpl, ".metrics.requestTimeoutSeconds")
-	erc.Whenf(ec, c.Metrics.SecondsBetweenRequests == 0, zeroTmpl, ".metrics.secondsBetweenRequests")
+
+	validateMetricsConfig := func(cfg MetricsSourceConfig, key string) {
+		erc.Whenf(ec, cfg.Port == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.port", key))
+		erc.Whenf(ec, cfg.RequestTimeoutSeconds == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.requestTimeoutSeconds", key))
+		erc.Whenf(ec, cfg.SecondsBetweenRequests == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.secondsBetweenRequests", key))
+	}
+	validateMetricsConfig(c.Metrics.System, "system")
+	validateMetricsConfig(c.Metrics.LFC, "lfc")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.VCPU == 0, zeroTmpl, ".scaling.computeUnit.vCPUs")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.Mem == 0, zeroTmpl, ".scaling.computeUnit.mem")
 	erc.Whenf(ec, c.NeonVM.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
@@ -206,7 +214,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Monitor.RequestedUpscaleValidSeconds == 0, zeroTmpl, ".monitor.requestedUpscaleValidSeconds")
 	erc.Whenf(ec, c.Monitor.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".monitor.maxFailedRequestRate.intervalSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
-	ec.Add(c.Scaling.DefaultConfig.Validate())
+	ec.Add(c.Scaling.DefaultConfig.ValidateDefaults())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
 	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
 	erc.Whenf(ec, c.Scheduler.RequestAtLeastEverySeconds == 0, zeroTmpl, ".scheduler.requestAtLeastEverySeconds")

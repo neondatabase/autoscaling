@@ -21,7 +21,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		name string
 
 		// helpers for setting fields (ish) of State:
-		metrics           core.Metrics
+		metrics           core.SystemMetrics
 		vmUsing           api.Resources
 		schedulerApproved api.Resources
 		requestedUpscale  api.MoreResources
@@ -33,7 +33,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 	}{
 		{
 			name: "BasicScaleup",
-			metrics: core.Metrics{
+			metrics: core.SystemMetrics{
 				LoadAverage1Min:  0.30,
 				MemoryUsageBytes: 0.0,
 			},
@@ -47,7 +47,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		},
 		{
 			name: "MismatchedApprovedNoScaledown",
-			metrics: core.Metrics{
+			metrics: core.SystemMetrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
 				MemoryUsageBytes: 0.0,
 			},
@@ -63,7 +63,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		{
 			// ref https://github.com/neondatabase/autoscaling/issues/512
 			name: "MismatchedApprovedNoScaledownButVMAtMaximum",
-			metrics: core.Metrics{
+			metrics: core.SystemMetrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
 				MemoryUsageBytes: 0.0,
 			},
@@ -108,8 +108,9 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			core.Config{
 				ComputeUnit: api.Resources{VCPU: 250, Mem: 1 * slotSize},
 				DefaultScalingConfig: api.ScalingConfig{
-					LoadAverageFractionTarget: 0.5,
-					MemoryUsageFractionTarget: 0.5,
+					LoadAverageFractionTarget: lo.ToPtr(0.5),
+					MemoryUsageFractionTarget: lo.ToPtr(0.5),
+					EnableLFCMetrics:          nil,
 				},
 				// these don't really matter, because we're not using (*State).NextActions()
 				NeonVMRetryWait:                    time.Second,
@@ -130,7 +131,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 
 		t.Run(c.name, func(t *testing.T) {
 			// set the metrics
-			state.UpdateMetrics(c.metrics)
+			state.UpdateSystemMetrics(c.metrics)
 
 			now := time.Now()
 
@@ -178,8 +179,9 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 	Core: core.Config{
 		ComputeUnit: DefaultComputeUnit,
 		DefaultScalingConfig: api.ScalingConfig{
-			LoadAverageFractionTarget: 0.5,
-			MemoryUsageFractionTarget: 0.5,
+			LoadAverageFractionTarget: lo.ToPtr(0.5),
+			MemoryUsageFractionTarget: lo.ToPtr(0.5),
+			EnableLFCMetrics:          nil,
 		},
 		NeonVMRetryWait:                    5 * time.Second,
 		PluginRequestTick:                  5 * time.Second,
@@ -257,11 +259,11 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 
 	// Set metrics
 	clockTick().AssertEquals(duration("0.2s"))
-	lastMetrics := core.Metrics{
+	lastMetrics := core.SystemMetrics{
 		LoadAverage1Min:  0.3,
 		MemoryUsageBytes: 0.0,
 	}
-	a.Do(state.UpdateMetrics, lastMetrics)
+	a.Do(state.UpdateSystemMetrics, lastMetrics)
 	// double-check that we agree about the desired resources
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(2))
@@ -333,11 +335,11 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	clockTick().AssertEquals(duration("0.6s"))
 
 	// Set metrics back so that desired resources should now be zero
-	lastMetrics = core.Metrics{
+	lastMetrics = core.SystemMetrics{
 		LoadAverage1Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
-	a.Do(state.UpdateMetrics, lastMetrics)
+	a.Do(state.UpdateSystemMetrics, lastMetrics)
 	// double-check that we agree about the new desired resources
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(1))
@@ -410,13 +412,13 @@ func TestPeriodicPluginRequest(t *testing.T) {
 
 	state.Monitor().Active(true)
 
-	metrics := core.Metrics{
+	metrics := core.SystemMetrics{
 		LoadAverage1Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
 	resources := DefaultComputeUnit
 
-	a.Do(state.UpdateMetrics, metrics)
+	a.Do(state.UpdateSystemMetrics, metrics)
 
 	base := duration("0s")
 	clock.Elapsed().AssertEquals(base)
@@ -491,11 +493,11 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 
 	// Set metrics
 	clockTick()
-	metrics := core.Metrics{
+	metrics := core.SystemMetrics{
 		LoadAverage1Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
-	a.Do(state.UpdateMetrics, metrics)
+	a.Do(state.UpdateSystemMetrics, metrics)
 	// double-check that we agree about the desired resources
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(1))
@@ -751,11 +753,11 @@ func TestRequestedUpscale(t *testing.T) {
 
 	// Set metrics
 	clockTick()
-	lastMetrics := core.Metrics{
+	lastMetrics := core.SystemMetrics{
 		LoadAverage1Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
-	a.Do(state.UpdateMetrics, lastMetrics)
+	a.Do(state.UpdateSystemMetrics, lastMetrics)
 
 	// Check we're not supposed to do anything
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -871,11 +873,11 @@ func TestDownscalePivotBack(t *testing.T) {
 		return state.NextActions(clock.Now())
 	}
 
-	initialMetrics := core.Metrics{
+	initialMetrics := core.SystemMetrics{
 		LoadAverage1Min:  0.0,
 		MemoryUsageBytes: 0.0,
 	}
-	newMetrics := core.Metrics{
+	newMetrics := core.SystemMetrics{
 		LoadAverage1Min:  0.3,
 		MemoryUsageBytes: 0.0,
 	}
@@ -1016,7 +1018,7 @@ func TestDownscalePivotBack(t *testing.T) {
 		clockTick().AssertEquals(duration("0.2s"))
 		pluginWait := duration("4.8s")
 
-		a.Do(state.UpdateMetrics, initialMetrics)
+		a.Do(state.UpdateSystemMetrics, initialMetrics)
 		// double-check that we agree about the desired resources
 		a.Call(getDesiredResources, state, clock.Now()).
 			Equals(resForCU(1))
@@ -1027,7 +1029,7 @@ func TestDownscalePivotBack(t *testing.T) {
 				// at the midpoint, start backtracking by setting the metrics
 				midRequest = func() {
 					t.Log(" > > updating metrics mid-request")
-					a.Do(state.UpdateMetrics, newMetrics)
+					a.Do(state.UpdateSystemMetrics, newMetrics)
 					a.Call(getDesiredResources, state, clock.Now()).
 						Equals(resForCU(2))
 				}
@@ -1070,11 +1072,11 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	clockTick()
 
 	// Set metrics so the desired resources are still 2 CU
-	metrics := core.Metrics{
+	metrics := core.SystemMetrics{
 		LoadAverage1Min:  0.3,
 		MemoryUsageBytes: 0.0,
 	}
-	a.Do(state.UpdateMetrics, metrics)
+	a.Do(state.UpdateSystemMetrics, metrics)
 	// Check that we agree about desired resources
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(2))
@@ -1164,11 +1166,11 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	clockTick()
 
 	// Set metrics so the desired resources are still 2 CU
-	metrics := core.Metrics{
+	metrics := core.SystemMetrics{
 		LoadAverage1Min:  0.3,
 		MemoryUsageBytes: 0.0,
 	}
-	a.Do(state.UpdateMetrics, metrics)
+	a.Do(state.UpdateSystemMetrics, metrics)
 	// Check that we agree about desired resources
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(2))
@@ -1259,11 +1261,11 @@ func TestFailedRequestRetry(t *testing.T) {
 
 	// Set metrics so that we should be trying to upscale
 	clockTick()
-	metrics := core.Metrics{
+	metrics := core.SystemMetrics{
 		LoadAverage1Min:  0.3,
 		MemoryUsageBytes: 0.0,
 	}
-	a.Do(state.UpdateMetrics, metrics)
+	a.Do(state.UpdateSystemMetrics, metrics)
 
 	// We should be asking the scheduler for upscaling
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -1401,11 +1403,11 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	// usage is actually 1 CU
 	clockTick()
 	// the actual metrics we got in the actual logs
-	metrics := core.Metrics{
+	metrics := core.SystemMetrics{
 		LoadAverage1Min:  0.0,
 		MemoryUsageBytes: 150589570, // 143.6 MiB
 	}
-	a.Do(state.UpdateMetrics, metrics)
+	a.Do(state.UpdateSystemMetrics, metrics)
 
 	// nothing to do yet, until the existing vm-monitor request finishes
 	a.Call(nextActions).Equals(core.ActionSet{

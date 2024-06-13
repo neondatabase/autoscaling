@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -97,6 +98,8 @@ func main() {
 	var concurrencyLimit int
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
+	var failurePendingPeriod time.Duration
+	var failingRefreshInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -105,6 +108,10 @@ func main() {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
+	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
+		"the period for the propagation of reconciliation failures to the observability instruments")
+	flag.DurationVar(&failingRefreshInterval, "failing-refresh-interval", 1*time.Minute,
+		"the interval between consecutive updates of metrics and logs, related to failing reconciliations")
 	flag.Parse()
 
 	logConfig := zap.NewProductionConfig()
@@ -172,6 +179,8 @@ func main() {
 		UseContainerMgr:         enableContainerMgr,
 		MaxConcurrentReconciles: concurrencyLimit,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
+		FailurePendingPeriod:    failurePendingPeriod,
+		FailingRefreshInterval:  failingRefreshInterval,
 	}
 
 	vmReconciler := &controllers.VMReconciler{
@@ -224,6 +233,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := mgr.Add(vmReconcilerMetrics.FailingRefresher()); err != nil {
+		setupLog.Error(err, "unable to set up failing refresher")
+		os.Exit(1)
+	}
+
 	if err := run(mgr); err != nil {
 		setupLog.Error(err, "run manager error")
 		os.Exit(1)
@@ -245,7 +259,7 @@ func checkIfRunningInK3sCluster(cfg *rest.Config) (bool, error) {
 	}
 
 	for _, node := range nodes.Items {
-		if node.Status.NodeInfo.OSImage == "K3s dev" {
+		if strings.HasPrefix(node.Status.NodeInfo.OSImage, "K3s") {
 			return true, nil
 		}
 	}
