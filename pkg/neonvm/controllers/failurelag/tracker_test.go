@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/neondatabase/autoscaling/neonvm/controllers/failurelag"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/failurelag"
 )
 
 type nowMock struct {
