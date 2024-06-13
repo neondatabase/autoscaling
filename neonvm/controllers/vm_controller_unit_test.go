@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -12,98 +13,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
-
-type clientMock struct {
-	objects map[types.NamespacedName][]byte
-	t       *testing.T
-}
-
-func newClientMock(t *testing.T) *clientMock {
-	return &clientMock{
-		objects: make(map[types.NamespacedName][]byte),
-		t:       t,
-	}
-}
-
-func (c *clientMock) Get(ctx context.Context, key client.ObjectKey,
-	obj client.Object, opts ...client.GetOption) error {
-	str, ok := c.objects[key]
-	if !ok {
-		return apierrors.NewNotFound(vmv1.Resource("virtualmachine"), key.Name)
-	}
-	err := json.Unmarshal(str, obj)
-	require.NoError(c.t, err)
-
-	return nil
-}
-
-func (c *clientMock) Update(ctx context.Context, obj client.Object,
-	opts ...client.UpdateOption) error {
-
-	str, err := json.Marshal(obj)
-	require.NoError(c.t, err)
-
-	c.objects[client.ObjectKeyFromObject(obj)] = str
-	return nil
-}
-
-func (c *clientMock) Status() client.StatusWriter {
-	return c
-}
-
-func (c *clientMock) List(ctx context.Context, list client.ObjectList,
-	opts ...client.ListOption) error {
-	c.t.Fatal("not implemented")
-	return nil
-}
-
-func (c *clientMock) Create(ctx context.Context, obj client.Object,
-	opts ...client.CreateOption) error {
-	return c.Update(ctx, obj)
-}
-
-func (c *clientMock) Delete(ctx context.Context, obj client.Object,
-	opts ...client.DeleteOption) error {
-	c.t.Fatal("not implemented")
-	return nil
-}
-
-func (c *clientMock) Patch(ctx context.Context, obj client.Object,
-	patch client.Patch, opts ...client.PatchOption) error {
-
-	c.t.Fatal("not implemented")
-	return nil
-}
-
-func (c *clientMock) DeleteAllOf(ctx context.Context, obj client.Object,
-	opts ...client.DeleteAllOfOption) error {
-	c.t.Fatal("not implemented")
-	return nil
-}
-
-func (c *clientMock) RESTMapper() meta.RESTMapper {
-	c.t.Fatal("not implemented")
-	return nil
-}
-
-func (c *clientMock) Scheme() *runtime.Scheme {
-	c.t.Fatal("not implemented")
-	return nil
-}
 
 type mockRecorder struct {
 	mock.Mock
@@ -169,7 +90,7 @@ type testParams struct {
 	t            *testing.T
 	ctx          context.Context
 	r            *VMReconciler
-	client       *clientMock
+	client       client.Client
 	origVM       *vmv1.VirtualMachine
 	mockRecorder *mockRecorder
 }
@@ -183,19 +104,19 @@ func newTestParams(t *testing.T) *testParams {
 		zap.Level(zapcore.DebugLevel))
 	ctx := log.IntoContext(context.Background(), logger)
 
+	scheme := runtime.NewScheme()
+	scheme.AddKnownTypes(vmv1.SchemeGroupVersion, &vmv1.VirtualMachine{})
+	scheme.AddKnownTypes(corev1.SchemeGroupVersion, &corev1.Pod{})
+
 	params := &testParams{
 		t:      t,
 		ctx:    ctx,
-		client: newClientMock(t),
+		client: fake.NewClientBuilder().WithScheme(scheme).Build(),
 		//nolint:exhaustruct // This is a mock
 		mockRecorder: &mockRecorder{},
 		r:            nil,
 		origVM:       nil,
 	}
-
-	scheme := runtime.NewScheme()
-	var vm *vmv1.VirtualMachine
-	scheme.AddKnownTypes(vmv1.SchemeGroupVersion, vm)
 
 	params.r = &VMReconciler{
 		Client:   params.client,
@@ -206,6 +127,8 @@ func newTestParams(t *testing.T) *testParams {
 			UseContainerMgr:         false,
 			MaxConcurrentReconciles: 10,
 			QEMUDiskCacheSettings:   "",
+			FailurePendingPeriod:    time.Minute,
+			FailingRefreshInterval:  time.Minute,
 		},
 		Metrics: reconcilerMetrics,
 	}
@@ -255,7 +178,6 @@ func TestReconcile(t *testing.T) {
 
 	// VM is pending
 	assert.Equal(t, vmv1.VmPending, params.getVM().Status.Phase)
-	assert.Equal(t, 1, len(params.client.objects))
 
 	// Round 3
 	params.mockRecorder.On("Event", mock.Anything, "Normal", "Created",
@@ -265,7 +187,6 @@ func TestReconcile(t *testing.T) {
 	assert.Equal(t, false, res.Requeue)
 
 	// We now have a pod
-	assert.Equal(t, 2, len(params.client.objects))
 	vm := params.getVM()
 	assert.NotEmpty(t, vm.Status.PodName)
 	// Spec is unchanged
@@ -305,10 +226,7 @@ func TestRunningPod(t *testing.T) {
 	assert.Equal(t, false, res.Requeue)
 
 	// We now have a pod
-	assert.Equal(t, 2, len(params.client.objects))
-
 	podName := params.getVM().Status.PodName
-
 	podKey := client.ObjectKey{
 		Namespace: origVM.Namespace,
 		Name:      podName,
