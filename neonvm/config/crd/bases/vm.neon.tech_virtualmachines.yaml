@@ -1068,6 +1068,22 @@ spec:
                       required:
                       - size
                       type: object
+                    virtiofs:
+                      description: Virtiofs represents a virtiofs-backed device created
+                        in an empty directory alongside the VM, that shares the VM's
+                        lifetime.
+                      properties:
+                        sizeLimit:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          description: SizeLimit sets the maximum size of the volume
+                            mount containing the virtiofs directory
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                      required:
+                      - sizeLimit
+                      type: object
                   required:
                   - mountPath
                   - name

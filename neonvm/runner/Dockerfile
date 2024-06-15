@@ -27,7 +27,7 @@ COPY pkg/util pkg/util
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /runner neonvm/runner/main.go
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /container-mgr neonvm/runner/container-mgr/*.go
 
-FROM alpine:3.16 as crictl
+FROM alpine:3.18 as crictl
 
 RUN apk add --no-cache \
     curl
@@ -38,6 +38,23 @@ ENV VERSION="v1.25.0"
 RUN curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz" -o crictl.tar.gz \
 	&& tar zxvf crictl.tar.gz -C /
 
+# Also build virtiofsd
+FROM rust:1.78-alpine as virtiofsd
+WORKDIR /workspace
+
+RUN apk add musl-dev git libcap-ng-static libseccomp-static
+
+# == 83057321d7920ab04c324981318ad62ee1a6d986
+# Latest release (2024-06-06) as of 2024-06-15. First release including live migration.
+ENV BRANCH v1.11.0
+
+RUN git clone --depth 1 --branch $BRANCH https://gitlab.com/virtio-fs/virtiofsd
+RUN env LIBCAPNG_LINK_TYPE=static LIBCAPNG_LIB_PATH=/usr/lib/ \
+        LIBSECCOMP_LINK_TYPE=static LIBSECCOMP_LIB_PATH=/usr/lib \
+        cargo install --path virtiofsd \
+    && mv /usr/local/cargo/bin/virtiofsd /virtiofsd
+
+# Put it together
 FROM alpine:3.16
 
 RUN apk add --no-cache \
@@ -57,9 +74,10 @@ RUN apk add --no-cache \
 	cgroup-tools \
     openssh
 
-COPY --from=builder /runner /usr/bin/runner
-COPY --from=builder /container-mgr /usr/bin/container-mgr
-COPY --from=crictl /crictl /usr/bin/crictl
+COPY --from=builder   /runner        /usr/bin/runner
+COPY --from=builder   /container-mgr /usr/bin/container-mgr
+COPY --from=crictl    /crictl        /usr/bin/crictl
+COPY --from=virtiofsd /virtiofsd     /usr/bin/virtiofsd
 COPY neonvm/hack/kernel/vmlinuz /vm/kernel/vmlinuz
 COPY neonvm/runner/ssh_config /etc/ssh/ssh_config
 

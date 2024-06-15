@@ -300,7 +300,8 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 
 		// now inspect target pod status and update migration
-		switch runnerStatus(targetRunner) {
+		status, reason := runnerStatus(targetRunner)
+		switch status {
 		case runnerRunning:
 			// update migration status
 			migration.Status.SourcePodName = vm.Status.PodName
@@ -359,7 +360,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
 		case runnerFailed:
-			message := fmt.Sprintf("Target Pod (%s) failed", targetRunner.Name)
+			message := fmt.Sprintf("Target Pod (%s) failed because: %s", targetRunner.Name, reason)
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Failed", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
