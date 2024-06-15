@@ -23,8 +23,8 @@ func (r *catchPanicReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	defer func() {
 		if v := recover(); v != nil {
-			err = fmt.Errorf("Reconcile panicked: %v", v)
-			log.Error(err, "stack", string(debug.Stack()))
+			err = fmt.Errorf("payload: %v", v)
+			log.Error(err, "Reconcile panicked", "stack", string(debug.Stack()))
 		}
 	}()
 
