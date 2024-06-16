@@ -398,7 +398,7 @@ $(LOCALBIN):
 
 ## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-KUSTOMIZE_VERSION ?= v4.5.7
+KUSTOMIZE_VERSION ?= v4.5.7 # same as used in kubectl v1.26.x ; see https://github.com/kubernetes-sigs/kustomize/tree/48d79c745a142b440eae1e13445bb8343cd0ca23?tab=readme-ov-file#kubectl-integration
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
