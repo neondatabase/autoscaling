@@ -988,6 +988,7 @@ func runQEMU(
 	if err != nil {
 		msg := "QEMU exited with error" // TODO: technically this might not be accurate. This can also happen if it fails to start.
 		logger.Error(msg, zap.Error(err))
+		err = fmt.Errorf("%s: %w", msg, err)
 	} else {
 		logger.Info("QEMU exited without error")
 	}
