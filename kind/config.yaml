@@ -2,12 +2,12 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
-  image: kindest/node:v1.25.11
+  image: kindest/node:v1.26.15
 - role: worker
-  image: kindest/node:v1.25.11
+  image: kindest/node:v1.26.15
   labels:
     node: neon1
 - role: worker
-  image: kindest/node:v1.25.11
+  image: kindest/node:v1.26.15
   labels:
     node: neon2

@@ -416,7 +416,7 @@ KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.26.15
 
 KIND ?= $(LOCALBIN)/kind
-KIND_VERSION ?= v0.20.0
+KIND_VERSION ?= v0.23.0 # https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0
 
 K3D ?= $(LOCALBIN)/k3d
 K3D_VERSION ?= v5.5.1
