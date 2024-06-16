@@ -984,8 +984,10 @@ func runQEMU(
 	}
 
 	logger.Info(fmt.Sprintf("calling %s", bin), zap.Strings("args", cmd))
-	if err := execFg(bin, cmd...); err != nil {
-		logger.Error("QEMU exited with error", zap.Error(err))
+	err := execFg(bin, cmd...)
+	if err != nil {
+		msg := "QEMU exited with error" // TODO: technically this might not be accurate. This can also happen if it fails to start.
+		logger.Error(msg, zap.Error(err))
 	} else {
 		logger.Info("QEMU exited without error")
 	}
@@ -993,7 +995,7 @@ func runQEMU(
 	cancel()
 	wg.Wait()
 
-	return nil
+	return err
 }
 
 func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
