@@ -419,7 +419,7 @@ KIND ?= $(LOCALBIN)/kind
 KIND_VERSION ?= v0.23.0 # https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0
 
 K3D ?= $(LOCALBIN)/k3d
-K3D_VERSION ?= v5.5.1
+K3D_VERSION ?= v5.5.1 # k8s deps in go.mod @ v1.27.1 (nb: binary, separate from images)
 
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
