@@ -30,6 +30,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -429,7 +430,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return err
 		}
 		// runner pod found, check phase
-		switch runnerStatus(vmRunner) {
+		status, reason := runnerStatus(vmRunner)
+		switch status {
 		case runnerRunning:
 			vm.Status.PodIP = vmRunner.Status.PodIP
 			vm.Status.Phase = vmv1.VmRunning
@@ -458,6 +460,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name)})
 		case runnerFailed:
 			vm.Status.Phase = vmv1.VmFailed
+			r.Recorder.Event(vm, "Warning", "Failed", fmt.Sprintf("Runner pod %s failed because: %s", vm.Status.PodName, reason))
 			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
@@ -500,7 +503,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		}
 
 		// runner pod found, check/update phase now
-		switch runnerStatus(vmRunner) {
+		status, reason := runnerStatus(vmRunner)
+		switch status {
 		case runnerRunning:
 			// update status by IP of runner pod
 			vm.Status.PodIP = vmRunner.Status.PodIP
@@ -578,6 +582,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name)})
 		case runnerFailed:
 			vm.Status.Phase = vmv1.VmFailed
+			r.Recorder.Event(vm, "Warning", "Failed", fmt.Sprintf("Runner pod %s failed because: %s", vm.Status.PodName, reason))
 			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
@@ -621,7 +626,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		}
 
 		// runner pod found, check that it's still up:
-		switch runnerStatus(vmRunner) {
+		status, reason := runnerStatus(vmRunner)
+		switch status {
 		case runnerSucceeded:
 			vm.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&vm.Status.Conditions,
@@ -632,6 +638,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return nil
 		case runnerFailed:
 			vm.Status.Phase = vmv1.VmFailed
+			r.Recorder.Event(vm, "Warning", "Failed", fmt.Sprintf("Runner pod %s failed because: %s", vm.Status.PodName, reason))
 			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{Type: typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
@@ -838,20 +845,20 @@ const (
 //     container other than neonvm-runner has exited
 //   - runnerSucceeded, if pod.Status.Phase is Succeeded, or if neonvm-runner has exited
 //     successfully
-func runnerStatus(pod *corev1.Pod) runnerStatusKind {
+func runnerStatus(pod *corev1.Pod) (_ runnerStatusKind, reason string) {
 	switch pod.Status.Phase {
 	case "", corev1.PodPending:
-		return runnerPending
+		return runnerPending, "Pod Pending"
 	case corev1.PodSucceeded:
-		return runnerSucceeded
+		return runnerSucceeded, "Pod Succeeded"
 	case corev1.PodFailed:
-		return runnerFailed
+		return runnerFailed, "Pod Failed"
 	case corev1.PodUnknown:
-		return runnerUnknown
+		return runnerUnknown, "Pod Unknown"
 
 	// See comment above for context on this logic
 	case corev1.PodRunning:
-		nonRunnerContainerSucceeded := false
+		nonRunnerContainersSucceeded := []string{}
 		runnerContainerSucceeded := false
 
 		for _, stat := range pod.Status.ContainerStatuses {
@@ -861,7 +868,11 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 
 				if failed {
 					// return that the "runner" has failed if any container has.
-					return runnerFailed
+					return runnerFailed, fmt.Sprintf(
+						"Container %s ExitCode = %d",
+						stat.Name,
+						stat.State.Terminated.ExitCode,
+					)
 				} else /* succeeded */ {
 					if isRunner {
 						// neonvm-runner succeeded. We'll return runnerSucceeded if no other
@@ -871,18 +882,24 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 						// Other container has succeeded. We'll return runnerSucceeded if
 						// neonvm-runner has succeeded, but runnerFailed if this exited while
 						// neonvm-runner is still going.
-						nonRunnerContainerSucceeded = true
+						nonRunnerContainersSucceeded = append(nonRunnerContainersSucceeded, stat.Name)
 					}
 				}
 			}
 		}
 
 		if runnerContainerSucceeded {
-			return runnerSucceeded
-		} else if nonRunnerContainerSucceeded {
-			return runnerFailed
+			return runnerSucceeded, "Pod Running, neonvm-runner succeeded"
+		} else if len(nonRunnerContainersSucceeded) > 0 {
+			var msgStart string
+			if len(nonRunnerContainersSucceeded) == 1 {
+				msgStart = fmt.Sprintf("Container %s", nonRunnerContainersSucceeded[0])
+			} else {
+				msgStart = fmt.Sprintf("Containers %s", strings.Join(nonRunnerContainersSucceeded, ","))
+			}
+			return runnerFailed, fmt.Sprintf("%s succeeded, but not neonvm-runner", msgStart)
 		} else {
-			return runnerRunning
+			return runnerRunning, "Pod and all containers Running"
 		}
 
 	default:
@@ -1676,6 +1693,17 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{
 						SizeLimit: &disk.EmptyDisk.Size,
+					},
+				},
+			})
+		case disk.Virtiofs != nil:
+			mnt.MountPath = fmt.Sprintf("/vm/mounts/%s", disk.Name) // TODO: cloud#14473
+			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: disk.Name,
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						SizeLimit: &disk.Virtiofs.SizeLimit,
 					},
 				},
 			})

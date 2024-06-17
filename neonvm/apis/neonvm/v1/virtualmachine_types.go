@@ -424,6 +424,10 @@ type Disk struct {
 type DiskSource struct {
 	// EmptyDisk represents a temporary empty qcow2 disk that shares a vm's lifetime.
 	EmptyDisk *EmptyDiskSource `json:"emptyDisk,omitempty"`
+	// Virtiofs represents a virtiofs-backed device created in an empty directory alongside the VM,
+	// that shares the VM's lifetime.
+	// +optional
+	Virtiofs *VirtiofsSource `json:"virtiofs,omitempty"`
 	// configMap represents a configMap that should populate this disk
 	// +optional
 	ConfigMap *corev1.ConfigMapVolumeSource `json:"configMap,omitempty"`
@@ -439,6 +443,11 @@ type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
 	// Discard enables the "discard" mount option for the filesystem
 	Discard bool `json:"discard,omitempty"`
+}
+
+type VirtiofsSource struct {
+	// SizeLimit sets the maximum size of the volume mount containing the virtiofs directory
+	SizeLimit resource.Quantity `json:"sizeLimit"`
 }
 
 type TmpfsDiskSource struct {

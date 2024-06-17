@@ -15,7 +15,7 @@ spec:
   selector:
     matchLabels:
       control-plane: controller
-  replicas: 3
+  replicas: 1 # temporary, to make debugging easier
   template:
     metadata:
       annotations:

@@ -281,6 +281,8 @@ func createISO9660runtime(
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
 				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
+			case disk.Virtiofs != nil:
+				// mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -t virtiofs %s %s`, disk.Name, disk.MountPath))
 			case disk.ConfigMap != nil || disk.Secret != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
 			case disk.Tmpfs != nil:
@@ -669,6 +671,18 @@ func run(logger *zap.Logger) error {
 		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
 		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
+	// memory := []string{
+	// 	"-m",
+	// 	fmt.Sprintf(
+	// 		"size=%db,slots=%d,maxmem=%db",
+	// 		initialMemorySize,
+	// 		*vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min,
+	// 		vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max),
+	// 	),
+	// 	"-object",
+	// 	fmt.Sprintf("memory-backend-file,id=base-memory,size=%db,mem-path=/dev/shm,share=on", initialMemorySize),
+	// 	"-numa", "node,memdev=base-memory", // TODO: do we actually need this? got it from https://virtio-fs.gitlab.io/howto-qemu.html
+	// }
 
 	enableSSH := false
 	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
@@ -835,6 +849,32 @@ func buildQEMUCmd(
 				discard = ",discard=unmap"
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, cfg.diskCacheSettings, discard))
+		case disk.Virtiofs != nil:
+			dirPath := fmt.Sprintf("/vm/mounts/%s", disk.Name)
+			sockName := fmt.Sprintf("virtiofsd-sock-%s", disk.Name)
+			sockPath := fmt.Sprintf("/vm/virtiofs-%s.sock", disk.Name)
+
+			virtiofsdCmd := []string{
+				"/usr/bin/virtiofsd",
+				"--log-level=debug",
+				"--sandbox=none", // We're already running in a container. TODO: adjust this if possible?
+				fmt.Sprintf("--socket-path=%s", sockPath),
+				fmt.Sprintf("--shared-dir=%s", dirPath),
+			}
+			logger.Info("Starting virtiofsd", zap.Strings("args", virtiofsdCmd))
+			// TODO: this shouldn't be execBg, it should actually be some thread somewhere.
+			// Unfortunately there doesn't *seem* to be an easy way to actually make sure that
+			// virtiofsd has started waiting on the socket before starting QEMU.
+			// Maybe I missed something? should be easy enough to patch either way if it's an issue.
+			if err := execBg(virtiofsdCmd[0], virtiofsdCmd[1:]...); err != nil {
+				return nil, fmt.Errorf("Failed to start virtiofsd: %w", err)
+			}
+
+			qemuCmd = append(
+				qemuCmd,
+				"-chardev", fmt.Sprintf("socket,id=%s,path=%s", sockName, sockPath),
+				"-device", fmt.Sprintf("vhost-user-fs-pci,queue-size=1024,chardev=%s,tag=%s", sockName, disk.Name),
+			)
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -861,6 +901,7 @@ func buildQEMUCmd(
 
 	// memory details
 	qemuCmd = append(qemuCmd, "-m", strings.Join(memory, ","))
+	// qemuCmd = append(qemuCmd, memory...) // TODO: Fix temporary stuff here.
 
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
@@ -962,8 +1003,10 @@ func runQEMU(
 	}
 
 	logger.Info(fmt.Sprintf("calling %s", bin), zap.Strings("args", cmd))
-	if err := execFg(bin, cmd...); err != nil {
-		logger.Error("QEMU exited with error", zap.Error(err))
+	err := execFg(bin, cmd...)
+	if err != nil {
+		msg := "QEMU exited with error" // TODO: technically this might not be accurate. This can also happen if it fails to start.
+		logger.Error(msg, zap.Error(err))
 	} else {
 		logger.Info("QEMU exited without error")
 	}
@@ -971,7 +1014,7 @@ func runQEMU(
 	cancel()
 	wg.Wait()
 
-	return nil
+	return err
 }
 
 func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
