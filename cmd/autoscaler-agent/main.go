@@ -21,8 +21,8 @@ import (
 
 func main() {
 	logConfig := zap.NewProductionConfig()
-	logConfig.Sampling = nil                 // Disable sampling, which the production config enables by default.
-	logConfig.Level.SetLevel(zap.DebugLevel) // Allow debug logs
+	logConfig.Sampling = nil                // Disable sampling, which the production config enables by default.
+	logConfig.Level.SetLevel(zap.InfoLevel) // Only "info" level and above (i.e. not debug logs)
 	logger := zap.Must(logConfig.Build()).Named("autoscaler-agent")
 	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
 
