@@ -81,7 +81,7 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	}
 
 	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
-	tg.Go("billing-metrics", func(logger *zap.Logger) error {
+	tg.Go("billing", func(logger *zap.Logger) error {
 		return mc.Run(tg.Ctx(), logger, storeForNode, metrics)
 	})
 	tg.Go("main-loop", func(logger *zap.Logger) error {
