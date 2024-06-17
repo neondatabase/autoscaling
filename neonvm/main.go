@@ -24,14 +24,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/tychoish/fun/srv"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -96,6 +98,8 @@ func main() {
 	var concurrencyLimit int
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
+	var failurePendingPeriod time.Duration
+	var failingRefreshInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -104,17 +108,33 @@ func main() {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
-	opts := zap.Options{ //nolint:exhaustruct // typical options struct; not all fields needed.
-		Development:     true,
-		StacktraceLevel: zapcore.Level(zapcore.PanicLevel),
-		TimeEncoder:     zapcore.ISO8601TimeEncoder,
-	}
-	opts.BindFlags(flag.CommandLine)
+	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
+		"the period for the propagation of reconciliation failures to the observability instruments")
+	flag.DurationVar(&failingRefreshInterval, "failing-refresh-interval", 1*time.Minute,
+		"the interval between consecutive updates of metrics and logs, related to failing reconciliations")
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	logConfig := zap.NewProductionConfig()
+	logConfig.Sampling = nil // Disabling sampling; it's enabled by default for zap's production configs.
+	logConfig.Level.SetLevel(zap.InfoLevel)
+	logConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	baseLogger := zap.Must(logConfig.Build())
+	// There's no direct way to go from a zap.Logger to a logr.Logger, or even a zapcore.Core to a
+	// logr.Logger, so we need the roundabout method of letting logr do the initial setup and then
+	// replacing the zapcore.Core with our own.
+	logger := ctrlzap.New(
+		ctrlzap.RawZapOpts(zap.WrapCore(
+			func(c zapcore.Core) zapcore.Core {
+				return baseLogger.Core() // completely replace the zapcore.Core with the one we created above.
+			},
+		)),
+		ctrlzap.StacktraceLevel(zapcore.PanicLevel), // Must be set here, otherwise gets overridden.
+	)
+
+	ctrl.SetLogger(logger)
 	// define klog settings (used in LeaderElector)
-	klog.SetLogger(zap.New(zap.UseFlagOptions(&opts)).V(2))
+	klog.SetLogger(logger.V(2))
 
 	// tune k8s client for manager
 	cfg := ctrl.GetConfigOrDie()
@@ -159,6 +179,8 @@ func main() {
 		UseContainerMgr:         enableContainerMgr,
 		MaxConcurrentReconciles: concurrencyLimit,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
+		FailurePendingPeriod:    failurePendingPeriod,
+		FailingRefreshInterval:  failingRefreshInterval,
 	}
 
 	vmReconciler := &controllers.VMReconciler{
@@ -211,6 +233,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := mgr.Add(vmReconcilerMetrics.FailingRefresher()); err != nil {
+		setupLog.Error(err, "unable to set up failing refresher")
+		os.Exit(1)
+	}
+
 	if err := run(mgr); err != nil {
 		setupLog.Error(err, "run manager error")
 		os.Exit(1)
@@ -232,7 +259,7 @@ func checkIfRunningInK3sCluster(cfg *rest.Config) (bool, error) {
 	}
 
 	for _, node := range nodes.Items {
-		if node.Status.NodeInfo.OSImage == "K3s dev" {
+		if strings.HasPrefix(node.Status.NodeInfo.OSImage, "K3s") {
 			return true, nil
 		}
 	}

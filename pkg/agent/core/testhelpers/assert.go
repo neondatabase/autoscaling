@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -26,7 +27,7 @@ func NewAssert(t *testing.T) Assert {
 	return Assert{
 		t:                     t,
 		storedWarnings:        &[]string{},
-		waitingOnPreparedCall: &[]bool{false}[0], // take address of false
+		waitingOnPreparedCall: lo.ToPtr(false),
 		tinfo: transactionInfo{
 			expectedWarnings: []string{},
 		},

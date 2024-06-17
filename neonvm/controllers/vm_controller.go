@@ -33,6 +33,7 @@ import (
 	"time"
 
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/samber/lo"
 	"golang.org/x/crypto/ssh"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -1124,7 +1125,7 @@ func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 			Name:      vm.Status.SSHSecretName,
 			Namespace: vm.Namespace,
 		},
-		Immutable: &[]bool{true}[0],
+		Immutable: lo.ToPtr(true),
 		Type:      corev1.SecretTypeSSHAuth,
 		Data: map[string][]byte{
 			"ssh-publickey":  publicKey,
@@ -1312,7 +1313,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 		},
 		Spec: corev1.PodSpec{
 			EnableServiceLinks:            vm.Spec.ServiceLinks,
-			AutomountServiceAccountToken:  &[]bool{false}[0],
+			AutomountServiceAccountToken:  lo.ToPtr(false),
 			RestartPolicy:                 corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: vm.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  vm.Spec.NodeSelector,
@@ -1338,7 +1339,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 							"sysctl -w net.ipv4.ip_forward=1",
 					},
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: &[]bool{true}[0],
+						Privileged: lo.ToPtr(true),
 					},
 				},
 			},
@@ -1351,7 +1352,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 					// Ensure restrictive context for the container
 					// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: &[]bool{false}[0],
+						Privileged: lo.ToPtr(false),
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
 								"NET_ADMIN",
@@ -1403,7 +1404,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 							// mounted inside the container won't be propagated to the host or other
 							// containers.
 							// Note that this mode corresponds to "private" in Linux terminology.
-							MountPropagation: &[]corev1.MountPropagationMode{corev1.MountPropagationNone}[0],
+							MountPropagation: lo.ToPtr(corev1.MountPropagationNone),
 						}
 
 						if config.UseContainerMgr {
@@ -1485,7 +1486,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 					VolumeSource: corev1.VolumeSource{
 						HostPath: &corev1.HostPathVolumeSource{
 							Path: "/sys/fs/cgroup",
-							Type: &[]corev1.HostPathType{corev1.HostPathDirectory}[0],
+							Type: lo.ToPtr(corev1.HostPathDirectory),
 						},
 					},
 				}
@@ -1494,7 +1495,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 					VolumeSource: corev1.VolumeSource{
 						HostPath: &corev1.HostPathVolumeSource{
 							Path: config.criEndpointSocketPath(),
-							Type: &[]corev1.HostPathType{corev1.HostPathSocket}[0],
+							Type: lo.ToPtr(corev1.HostPathSocket),
 						},
 					},
 				}
@@ -1529,7 +1530,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 							{
 								Key:  "ssh-privatekey",
 								Path: "id_ed25519",
-								Mode: &[]int32{0600}[0],
+								Mode: lo.ToPtr[int32](0600),
 							},
 						},
 					},
@@ -1544,7 +1545,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 							{
 								Key:  "ssh-publickey",
 								Path: "authorized_keys",
-								Mode: &[]int32{0644}[0],
+								Mode: lo.ToPtr[int32](0644),
 							},
 						},
 					},
@@ -1575,8 +1576,8 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 			}},
 			SecurityContext: &corev1.SecurityContext{
 				// uid=36(qemu) gid=34(kvm) groups=34(kvm)
-				RunAsUser:  &[]int64{36}[0],
-				RunAsGroup: &[]int64{34}[0],
+				RunAsUser:  lo.ToPtr[int64](36),
+				RunAsGroup: lo.ToPtr[int64](34),
 			},
 		})
 	}
@@ -1710,7 +1711,13 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 // desirable state on the cluster
 func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachine"
-	reconciler := WithMetrics(withCatchPanic(r), r.Metrics, cntrlName)
+	reconciler := WithMetrics(
+		withCatchPanic(r),
+		r.Metrics,
+		cntrlName,
+		r.Config.FailurePendingPeriod,
+		r.Config.FailingRefreshInterval,
+	)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&corev1.Pod{}).

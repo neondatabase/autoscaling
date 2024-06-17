@@ -2,9 +2,10 @@ package controllers
 
 import (
 	"context"
-	"sync"
+	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -14,6 +15,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/neondatabase/autoscaling/neonvm/controllers/failurelag"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -96,13 +98,13 @@ func (m ReconcilerMetrics) ObserveReconcileDuration(
 }
 
 type wrappedReconciler struct {
-	ControllerName string
-	Reconciler     reconcile.Reconciler
-	Metrics        ReconcilerMetrics
+	ControllerName         string
+	Reconciler             reconcile.Reconciler
+	Metrics                ReconcilerMetrics
+	refreshFailingInterval time.Duration
 
-	lock        sync.Mutex
-	failing     map[client.ObjectKey]struct{}
-	conflicting map[client.ObjectKey]struct{}
+	failing     *failurelag.Tracker[client.ObjectKey]
+	conflicting *failurelag.Tracker[client.ObjectKey]
 }
 
 // ReconcilerWithMetrics is a Reconciler produced by WithMetrics that can return a snapshot of the
@@ -111,6 +113,7 @@ type ReconcilerWithMetrics interface {
 	reconcile.Reconciler
 
 	Snapshot() ReconcileSnapshot
+	FailingRefresher() FailingRefresher
 }
 
 // ReconcileSnapshot provides a glimpse into the current state of ongoing reconciles
@@ -135,15 +138,71 @@ type ReconcileSnapshot struct {
 //
 // The returned reconciler also provides a way to get a snapshot of the state of ongoing reconciles,
 // to see the data backing the metrics.
-func WithMetrics(reconciler reconcile.Reconciler, rm ReconcilerMetrics, cntrlName string) ReconcilerWithMetrics {
+func WithMetrics(
+	reconciler reconcile.Reconciler,
+	rm ReconcilerMetrics,
+	cntrlName string,
+	failurePendingPeriod time.Duration,
+	refreshFailingInterval time.Duration,
+) ReconcilerWithMetrics {
 	return &wrappedReconciler{
-		Reconciler:     reconciler,
-		Metrics:        rm,
-		ControllerName: cntrlName,
-		lock:           sync.Mutex{},
-		failing:        make(map[client.ObjectKey]struct{}),
-		conflicting:    make(map[client.ObjectKey]struct{}),
+		Reconciler:             reconciler,
+		Metrics:                rm,
+		ControllerName:         cntrlName,
+		failing:                failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
+		conflicting:            failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
+		refreshFailingInterval: refreshFailingInterval,
 	}
+}
+
+func (d *wrappedReconciler) refreshFailing(
+	log logr.Logger,
+	outcome ReconcileOutcome,
+	tracker *failurelag.Tracker[client.ObjectKey],
+) {
+	degraded := tracker.Degraded()
+	d.Metrics.failing.WithLabelValues(d.ControllerName, string(outcome)).
+		Set(float64(len(degraded)))
+
+	// Log each object on a separate line (even though we could just put them all on the same line)
+	// so that:
+	// 1. we avoid super long log lines (which can make log storage / querying unhappy), and
+	// 2. so that we can process it with Grafana Loki, which can't handle arrays
+	for _, obj := range degraded {
+		log.Info(
+			fmt.Sprintf("Currently failing to reconcile %v object", d.ControllerName),
+			"outcome", outcome,
+			"object", obj,
+		)
+	}
+}
+
+func (d *wrappedReconciler) runRefreshFailing(ctx context.Context) {
+	log := log.FromContext(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(d.refreshFailingInterval):
+			d.refreshFailing(log, FailureOutcome, d.failing)
+			d.refreshFailing(log, ConflictOutcome, d.conflicting)
+		}
+	}
+}
+
+func (d *wrappedReconciler) FailingRefresher() FailingRefresher {
+	return FailingRefresher{r: d}
+}
+
+// FailingRefresher is a wrapper, which implements manager.Runnable
+type FailingRefresher struct {
+	r *wrappedReconciler
+}
+
+func (f FailingRefresher) Start(ctx context.Context) error {
+	go f.r.runRefreshFailing(ctx)
+	return nil
 }
 
 func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -153,21 +212,14 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	res, err := d.Reconciler.Reconcile(ctx, req)
 	duration := time.Since(now)
 
-	// This part is executed sequentially since we acquire a mutex lock. It
-	// should be quite fast since a mutex lock/unlock + 2 memory writes takes less
-	// than 100ns. I (@shayanh) preferred to go with the simplest implementation
-	// as of now. For a more performant solution, if needed, we can switch to an
-	// async approach.
-	d.lock.Lock()
-	defer d.lock.Unlock()
 	outcome := SuccessOutcome
 	if err != nil {
 		if errors.IsConflict(err) {
 			outcome = ConflictOutcome
-			d.conflicting[req.NamespacedName] = struct{}{}
+			d.conflicting.RecordFailure(req.NamespacedName)
 		} else {
 			outcome = FailureOutcome
-			d.failing[req.NamespacedName] = struct{}{}
+			d.failing.RecordFailure(req.NamespacedName)
 
 			// If the VM is now getting non-conflict errors, it probably
 			// means transient conflicts has been resolved.
@@ -176,39 +228,36 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			// if a VM is getting conflict errors, it doesn't mean
 			// non-conflict errors are resolved, as they are more
 			// likely to be persistent.
-			delete(d.conflicting, req.NamespacedName)
+			d.conflicting.RecordSuccess(req.NamespacedName)
 		}
 
 		log.Error(err, "Failed to reconcile VirtualMachine",
 			"duration", duration.String(), "outcome", outcome)
 	} else {
-		delete(d.failing, req.NamespacedName)
-		delete(d.conflicting, req.NamespacedName)
+		d.failing.RecordSuccess(req.NamespacedName)
+		d.conflicting.RecordSuccess(req.NamespacedName)
 		log.Info("Successful reconciliation", "duration", duration.String())
 	}
 	d.Metrics.ObserveReconcileDuration(outcome, duration)
 	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(FailureOutcome)).Set(float64(len(d.failing)))
+		string(FailureOutcome)).Set(float64(d.failing.DegradedCount()))
 	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(ConflictOutcome)).Set(float64(len(d.conflicting)))
+		string(ConflictOutcome)).Set(float64(d.conflicting.DegradedCount()))
 
 	return res, err
 }
 
-func keysToSlice(m map[client.ObjectKey]struct{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
+func toStringSlice(s []client.ObjectKey) []string {
+	keys := make([]string, 0, len(s))
+	for _, k := range s {
 		keys = append(keys, k.String())
 	}
 	return keys
 }
 
 func (r *wrappedReconciler) Snapshot() ReconcileSnapshot {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-
-	failing := keysToSlice(r.failing)
-	conflicting := keysToSlice(r.conflicting)
+	failing := toStringSlice(r.failing.Degraded())
+	conflicting := toStringSlice(r.conflicting.Degraded())
 
 	return ReconcileSnapshot{
 		ControllerName: r.ControllerName,
