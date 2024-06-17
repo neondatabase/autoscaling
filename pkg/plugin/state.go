@@ -21,6 +21,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
+	"github.com/neondatabase/autoscaling/pkg/util/xact"
 )
 
 // pluginState stores the private state for the plugin, used both within and outside of the
@@ -644,45 +645,50 @@ func (e *AutoscaleEnforcer) reserveResources(
 		return false, nil, fmt.Errorf("%s: %w", msg, err)
 	}
 
-	var add api.Resources
-	if vmInfo != nil {
-		add = vmInfo.Using()
-	} else {
-		add = extractPodResources(pod)
-	}
-
-	shouldDeny := add.VCPU > node.remainingReservableCPU() || add.Mem > node.remainingReservableMem()
-
-	if shouldDeny {
-		e.metrics.IncReserveShouldDeny(pod, node)
-	}
-
-	if shouldDeny && opts.allowDeny {
-		cpuShortVerdict := "NOT ENOUGH"
-		if add.VCPU <= node.remainingReservableCPU() {
-			cpuShortVerdict = "OK"
-		}
-		memShortVerdict := "NOT ENOUGH"
-		if add.Mem <= node.remainingReservableMem() {
-			memShortVerdict = "OK"
+	accept := func(verdict verdictSet, overBudget bool) bool {
+		shouldDeny := overBudget
+		if shouldDeny {
+			e.metrics.IncReserveShouldDeny(pod, node)
 		}
 
-		verdict := verdictSet{
-			cpu: fmt.Sprintf(
-				"need %v, %v of %v used, so %v available (%s)",
-				add.VCPU, node.cpu.Reserved, node.cpu.Total, node.remainingReservableCPU(), cpuShortVerdict,
-			),
-			mem: fmt.Sprintf(
-				"need %v, %v of %v used, so %v available (%s)",
-				add.Mem, node.mem.Reserved, node.mem.Total, node.remainingReservableMem(), memShortVerdict,
-			),
+		if shouldDeny && opts.allowDeny {
+			logger.Error(
+				"Can't reserve resources for Pod (not enough available)",
+				zap.Object("verdict", verdict),
+			)
+			return false
 		}
 
-		logger.Error("Can't reserve resources for Pod (not enough available)", zap.Object("verdict", verdict))
-		return false, &verdict, nil
+		if opts.allowDeny {
+			logger.Info("Allowing reserve resources for Pod", zap.Object("verdict", verdict))
+		} else if shouldDeny /* want to deny, but can't */ {
+			logger.Warn("Reserved resources for Pod above totals", zap.Object("verdict", verdict))
+		} else /* don't want to deny, but also couldn't if we wanted to */ {
+			logger.Info("Reserved resources for Pod", zap.Object("verdict", verdict))
+		}
+		return true
 	}
 
-	// Construct the final state
+	ok, verdict := e.speculativeReserve(node, vmInfo, pod, opts.includeBuffer, accept)
+	return ok, &verdict, nil
+}
+
+// speculativeReserve reserves the pod, and then calls accept() to see whether the pod should
+// actually be added.
+//
+// If accept() returns false, no changes to the state will be made.
+func (e *AutoscaleEnforcer) speculativeReserve(
+	node *nodeState,
+	vmInfo *api.VmInfo,
+	pod *corev1.Pod,
+	includeBuffer bool,
+	accept func(verdict verdictSet, overBudget bool) bool,
+) (ok bool, _ verdictSet) {
+
+	// Construct the speculative state of the pod
+	//
+	// We'll pass this into (resourceTransitioner).handleReserve(), but only commit the changes if
+	// the caller allows us to.
 
 	var cpuState podResourceState[vmapi.MilliCPU]
 	var memState podResourceState[api.Bytes]
@@ -721,31 +727,31 @@ func (e *AutoscaleEnforcer) reserveResources(
 		// If scaling is disabled, we don't have to worry about this, and if there's an ongoing
 		// migration, scaling is forbidden.
 		migrating := util.TryPodOwnerVirtualMachineMigration(pod) != nil
-		if !vmInfo.Config.ScalingEnabled || migrating || !opts.includeBuffer {
+		if !vmInfo.Config.ScalingEnabled || migrating || !includeBuffer {
 			cpuState.Buffer = 0
 			cpuState.Reserved = vmInfo.Using().VCPU
 			memState.Buffer = 0
 			memState.Reserved = vmInfo.Using().Mem
 		}
 	} else {
+		res := extractPodResources(pod)
+
 		cpuState = podResourceState[vmapi.MilliCPU]{
-			Reserved:         add.VCPU,
+			Reserved:         res.VCPU,
 			Buffer:           0,
 			CapacityPressure: 0,
-			Min:              add.VCPU,
-			Max:              add.VCPU,
+			Min:              res.VCPU,
+			Max:              res.VCPU,
 		}
 		memState = podResourceState[api.Bytes]{
-			Reserved:         add.Mem,
+			Reserved:         res.Mem,
 			Buffer:           0,
 			CapacityPressure: 0,
-			Min:              add.Mem,
-			Max:              add.Mem,
+			Min:              res.Mem,
+			Max:              res.Mem,
 		}
 	}
-
 	podName := util.GetNamespacedName(pod)
-
 	ps := &podState{
 		name: podName,
 		node: node,
@@ -753,56 +759,50 @@ func (e *AutoscaleEnforcer) reserveResources(
 		mem:  memState,
 		vm:   vmState,
 	}
-	newNodeReservedCPU := node.cpu.Reserved + ps.cpu.Reserved
-	newNodeReservedMem := node.mem.Reserved + ps.mem.Reserved
-	newNodeBufferCPU := node.cpu.Buffer + ps.cpu.Buffer
-	newNodeBufferMem := node.mem.Buffer + ps.mem.Buffer
 
-	var verdict verdictSet
+	// Speculatively try reserving the pod.
+	nodeXactCPU := xact.New(&node.cpu)
+	nodeXactMem := xact.New(&node.mem)
 
-	if ps.cpu.Buffer != 0 || ps.mem.Buffer != 0 {
-		verdict = verdictSet{
-			cpu: fmt.Sprintf(
-				"node reserved %v [buffer %v] + %v [buffer %v] -> %v [buffer %v] of total %v",
-				node.cpu.Reserved, node.cpu.Buffer, ps.cpu.Reserved, ps.cpu.Buffer, newNodeReservedCPU, newNodeBufferCPU, node.cpu.Total,
-			),
-			mem: fmt.Sprintf(
-				"node reserved %v [buffer %v] + %v [buffer %v] -> %v [buffer %v] of total %v",
-				node.mem.Reserved, node.mem.Buffer, ps.mem.Reserved, ps.mem.Buffer, newNodeReservedMem, newNodeBufferMem, node.mem.Total,
-			),
-		}
-	} else {
-		verdict = verdictSet{
-			cpu: fmt.Sprintf(
-				"node reserved %v + %v -> %v of total %v",
-				node.cpu.Reserved, ps.cpu.Reserved, newNodeReservedCPU, node.cpu.Total,
-			),
-			mem: fmt.Sprintf(
-				"node reserved %v + %v -> %v of total %v",
-				node.mem.Reserved, ps.mem.Reserved, newNodeReservedMem, node.mem.Total,
-			),
-		}
+	cpuOverBudget, cpuVerdict := makeResourceTransitioner(nodeXactCPU.Value(), &ps.cpu).handleReserve()
+	memOverBudget, memVerdict := makeResourceTransitioner(nodeXactMem.Value(), &ps.mem).handleReserve()
+
+	overBudget := cpuOverBudget || memOverBudget
+
+	verdict := verdictSet{
+		cpu: cpuVerdict,
+		mem: memVerdict,
 	}
 
-	if opts.allowDeny {
-		logger.Info("Allowing reserve resources for Pod", zap.Object("verdict", verdict))
-	} else if shouldDeny /* but couldn't */ {
-		logger.Warn("Reserved resources for Pod above totals", zap.Object("verdict", verdict))
-	} else {
-		logger.Info("Reserved resources for Pod", zap.Object("verdict", verdict))
+	const verdictNotEnough = "NOT ENOUGH"
+	const verdictOk = "OK"
+
+	if overBudget {
+		cpuShortVerdict := verdictNotEnough
+		if !cpuOverBudget {
+			cpuShortVerdict = verdictOk
+		}
+		verdict.cpu = fmt.Sprintf("%s: %s", cpuShortVerdict, verdict.cpu)
+		memShortVerdict := verdictNotEnough
+		if !memOverBudget {
+			memShortVerdict = verdictOk
+		}
+		verdict.mem = fmt.Sprintf("%s: %s", memShortVerdict, verdict.mem)
 	}
 
-	node.cpu.Reserved = newNodeReservedCPU
-	node.mem.Reserved = newNodeReservedMem
-	node.cpu.Buffer = newNodeBufferCPU
-	node.mem.Buffer = newNodeBufferMem
+	if !accept(verdict, overBudget) {
+		return false, verdict
+	}
+
+	nodeXactCPU.Commit()
+	nodeXactMem.Commit()
 
 	node.pods[podName] = ps
 	e.state.pods[podName] = ps
 
 	node.updateMetrics(e.metrics)
 
-	return true, &verdict, nil
+	return true, verdict
 }
 
 // This method is /basically/ the same as e.Unreserve, but the API is different and it has different
