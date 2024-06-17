@@ -34,7 +34,7 @@ RUN apk add --no-cache \
 WORKDIR /workspace
 # FIXME: There's non-overlapping version support for <1.27 and >=1.27.
 # We should carefully consider how we go about future-proofing this (or not).
-ENV VERSION="v1.25.0"
+ENV VERSION="v1.26.1"
 RUN curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz" -o crictl.tar.gz \
 	&& tar zxvf crictl.tar.gz -C /
 
