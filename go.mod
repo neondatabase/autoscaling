@@ -53,6 +53,7 @@ require (
 	github.com/docker/docker v24.0.9+incompatible
 	github.com/docker/libnetwork v0.8.0-dev.2.0.20210525090646-64b7a4574d14
 	github.com/go-logr/logr v1.2.3
+	github.com/go-logr/zapr v1.2.3
 	github.com/jpillora/backoff v1.0.0
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
 	github.com/k8snetworkplumbingwg/whereabouts v0.6.1
@@ -127,7 +128,6 @@ require (
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-logr/zapr v1.2.3 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/go-openapi/jsonreference v0.20.0 // indirect
 	github.com/go-openapi/swag v0.21.1 // indirect
