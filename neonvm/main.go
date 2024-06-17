@@ -45,10 +45,12 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/neonvm/controllers"
+	"github.com/neondatabase/autoscaling/neonvm/qmp"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -89,6 +91,30 @@ func run(mgr manager.Manager) error {
 	}
 
 	return nil
+}
+
+// We have to have this funcionless shim, because golang doesn't
+// properly support subtyping:
+//   - qmp.Factory.ConnectVM() returns qmp.Monitor (both concrete types)
+//   - controllers.QMPFactory.ConnectVM() returns controllers.QMPMonitor
+//     (both interface types)
+//
+// And it is impossible to cast qmp.Monitor to controllers.QMPMonitor.
+type QMPFactory struct {
+	inner *qmp.Factory
+}
+
+func (f *QMPFactory) ConnectVM(vm *vmv1.VirtualMachine) (controllers.QMPMonitor, error) {
+	return f.inner.ConnectVM(vm)
+}
+
+func (f *QMPFactory) QmpSetMemorySlots(
+	ctx context.Context,
+	vm *vmv1.VirtualMachine,
+	slots int,
+	recorder record.EventRecorder,
+) (int, error) {
+	return f.inner.QmpSetMemorySlots(ctx, vm, slots, recorder)
 }
 
 func main() {
@@ -184,11 +210,13 @@ func main() {
 	}
 
 	vmReconciler := &controllers.VMReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
-		Config:   rc,
-		Metrics:  reconcilerMetrics,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("virtualmachine-controller"),
+		Config:     rc,
+		Metrics:    reconcilerMetrics,
+		QMPFactory: &QMPFactory{qmp.DefaultQMPFactory},
+		HTTPClient: http.DefaultClient,
 	}
 	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
 	if err != nil {
