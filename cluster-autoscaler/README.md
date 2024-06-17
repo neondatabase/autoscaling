@@ -42,7 +42,7 @@ $ # create a temporary directory for kubernetes/autoscaler
 $ tmpdir=$(mktemp -d | tee /dev/tty)
 /tmp/tmp./tmp/tmp.MCMXmnprG0
 $ # clone the source repo
-$ git clone --quiet --branch $(cat cluster-autoscaler/ca.tag) https://github.com/kubernetes/autsocaler $tmpdir
+$ git clone --quiet --branch $(cat cluster-autoscaler/ca.tag) https://github.com/kubernetes/autoscaler $tmpdir
 Cloning into '/tmp/tmp.MCMXmnprG0'...
 remote: Enumerating objects: 23946, done.
 remote: Counting objects: 100% (23946/23946), done.
