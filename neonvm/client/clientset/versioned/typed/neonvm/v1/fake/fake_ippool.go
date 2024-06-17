@@ -20,10 +20,9 @@ package fake
 import (
 	"context"
 
-	neonvmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
-	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	testing "k8s.io/client-go/testing"
@@ -35,25 +34,25 @@ type FakeIPPools struct {
 	ns   string
 }
 
-var ippoolsResource = schema.GroupVersionResource{Group: "neonvm", Version: "v1", Resource: "ippools"}
+var ippoolsResource = v1.SchemeGroupVersion.WithResource("ippools")
 
-var ippoolsKind = schema.GroupVersionKind{Group: "neonvm", Version: "v1", Kind: "IPPool"}
+var ippoolsKind = v1.SchemeGroupVersion.WithKind("IPPool")
 
 // Get takes name of the iPPool, and returns the corresponding iPPool object, and an error if there is any.
-func (c *FakeIPPools) Get(ctx context.Context, name string, options v1.GetOptions) (result *neonvmv1.IPPool, err error) {
+func (c *FakeIPPools) Get(ctx context.Context, name string, options metav1.GetOptions) (result *v1.IPPool, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(ippoolsResource, c.ns, name), &neonvmv1.IPPool{})
+		Invokes(testing.NewGetAction(ippoolsResource, c.ns, name), &v1.IPPool{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*neonvmv1.IPPool), err
+	return obj.(*v1.IPPool), err
 }
 
 // List takes label and field selectors, and returns the list of IPPools that match those selectors.
-func (c *FakeIPPools) List(ctx context.Context, opts v1.ListOptions) (result *neonvmv1.IPPoolList, err error) {
+func (c *FakeIPPools) List(ctx context.Context, opts metav1.ListOptions) (result *v1.IPPoolList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(ippoolsResource, ippoolsKind, c.ns, opts), &neonvmv1.IPPoolList{})
+		Invokes(testing.NewListAction(ippoolsResource, ippoolsKind, c.ns, opts), &v1.IPPoolList{})
 
 	if obj == nil {
 		return nil, err
@@ -63,8 +62,8 @@ func (c *FakeIPPools) List(ctx context.Context, opts v1.ListOptions) (result *ne
 	if label == nil {
 		label = labels.Everything()
 	}
-	list := &neonvmv1.IPPoolList{ListMeta: obj.(*neonvmv1.IPPoolList).ListMeta}
-	for _, item := range obj.(*neonvmv1.IPPoolList).Items {
+	list := &v1.IPPoolList{ListMeta: obj.(*v1.IPPoolList).ListMeta}
+	for _, item := range obj.(*v1.IPPoolList).Items {
 		if label.Matches(labels.Set(item.Labels)) {
 			list.Items = append(list.Items, item)
 		}
@@ -73,57 +72,57 @@ func (c *FakeIPPools) List(ctx context.Context, opts v1.ListOptions) (result *ne
 }
 
 // Watch returns a watch.Interface that watches the requested iPPools.
-func (c *FakeIPPools) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
+func (c *FakeIPPools) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
 		InvokesWatch(testing.NewWatchAction(ippoolsResource, c.ns, opts))
 
 }
 
 // Create takes the representation of a iPPool and creates it.  Returns the server's representation of the iPPool, and an error, if there is any.
-func (c *FakeIPPools) Create(ctx context.Context, iPPool *neonvmv1.IPPool, opts v1.CreateOptions) (result *neonvmv1.IPPool, err error) {
+func (c *FakeIPPools) Create(ctx context.Context, iPPool *v1.IPPool, opts metav1.CreateOptions) (result *v1.IPPool, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(ippoolsResource, c.ns, iPPool), &neonvmv1.IPPool{})
+		Invokes(testing.NewCreateAction(ippoolsResource, c.ns, iPPool), &v1.IPPool{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*neonvmv1.IPPool), err
+	return obj.(*v1.IPPool), err
 }
 
 // Update takes the representation of a iPPool and updates it. Returns the server's representation of the iPPool, and an error, if there is any.
-func (c *FakeIPPools) Update(ctx context.Context, iPPool *neonvmv1.IPPool, opts v1.UpdateOptions) (result *neonvmv1.IPPool, err error) {
+func (c *FakeIPPools) Update(ctx context.Context, iPPool *v1.IPPool, opts metav1.UpdateOptions) (result *v1.IPPool, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(ippoolsResource, c.ns, iPPool), &neonvmv1.IPPool{})
+		Invokes(testing.NewUpdateAction(ippoolsResource, c.ns, iPPool), &v1.IPPool{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*neonvmv1.IPPool), err
+	return obj.(*v1.IPPool), err
 }
 
 // Delete takes name of the iPPool and deletes it. Returns an error if one occurs.
-func (c *FakeIPPools) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
+func (c *FakeIPPools) Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteActionWithOptions(ippoolsResource, c.ns, name, opts), &neonvmv1.IPPool{})
+		Invokes(testing.NewDeleteActionWithOptions(ippoolsResource, c.ns, name, opts), &v1.IPPool{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
-func (c *FakeIPPools) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
+func (c *FakeIPPools) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
 	action := testing.NewDeleteCollectionAction(ippoolsResource, c.ns, listOpts)
 
-	_, err := c.Fake.Invokes(action, &neonvmv1.IPPoolList{})
+	_, err := c.Fake.Invokes(action, &v1.IPPoolList{})
 	return err
 }
 
 // Patch applies the patch and returns the patched iPPool.
-func (c *FakeIPPools) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *neonvmv1.IPPool, err error) {
+func (c *FakeIPPools) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.IPPool, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(ippoolsResource, c.ns, name, pt, data, subresources...), &neonvmv1.IPPool{})
+		Invokes(testing.NewPatchSubresourceAction(ippoolsResource, c.ns, name, pt, data, subresources...), &v1.IPPool{})
 
 	if obj == nil {
 		return nil, err
 	}
-	return obj.(*neonvmv1.IPPool), err
+	return obj.(*v1.IPPool), err
 }
