@@ -13,6 +13,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
@@ -59,11 +60,6 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	metrics := billing.NewPromMetrics()
 	metrics.MustRegister(globalPromReg)
 
-	err = billing.StartBillingMetricsCollector(ctx, logger, &r.Config.Billing, storeForNode, metrics)
-	if err != nil {
-		return fmt.Errorf("error starting billing metrics collector: %w", err)
-	}
-
 	promLogger := logger.Named("prometheus")
 	if err := util.StartPrometheusMetricsServer(ctx, promLogger.Named("global"), 9100, globalPromReg); err != nil {
 		return fmt.Errorf("Error starting prometheus metrics server: %w", err)
@@ -79,18 +75,31 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 		}
 	}
 
-	logger.Info("Entering main loop")
-	for {
-		event, err := vmEventQueue.Wait(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				// treat context canceled as a "normal" exit (because it is)
-				return nil
-			}
-
-			logger.Error("vmEventQueue returned error", zap.Error(err))
-			return err
-		}
-		globalState.handleEvent(ctx, logger, event)
+	mc, err := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing)
+	if err != nil {
+		return fmt.Errorf("error creating billing metrics collector: %w", err)
 	}
+
+	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
+	tg.Go("billing", func(logger *zap.Logger) error {
+		return mc.Run(tg.Ctx(), logger, storeForNode, metrics)
+	})
+	tg.Go("main-loop", func(logger *zap.Logger) error {
+		logger.Info("Entering main loop")
+		for {
+			event, err := vmEventQueue.Wait(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					// treat context canceled as a "normal" exit (because it is)
+					return nil
+				}
+
+				logger.Error("vmEventQueue returned error", zap.Error(err))
+				return err
+			}
+			globalState.handleEvent(tg.Ctx(), logger, event)
+		}
+	})
+
+	return tg.Wait()
 }
