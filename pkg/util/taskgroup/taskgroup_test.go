@@ -100,6 +100,8 @@ func TestPanic(t *testing.T) {
 	assert.Equal(t, "panic message", msg0.Context[0].String)
 	assert.Equal(t, "stack", msg0.Context[1].Key)
 	stackTrace := msg0.Context[1].String
+	// test that the stack trace begins with gopanic(...) so we always start
+	// the backtrace at the same place
 	assert.True(t, strings.HasPrefix(stackTrace, "runtime.gopanic(...)\n"))
 
 	msg1 := logs.All()[1]
