@@ -63,26 +63,15 @@ func defaultVm() *vmv1.VirtualMachine {
 					Use: lo.ToPtr(vmv1.MilliCPU(1500)),
 				},
 				MemorySlots: vmv1.MemorySlots{
-					Min: lo.ToPtr(int32(512)),
-					Max: lo.ToPtr(int32(2048)),
-					Use: lo.ToPtr(int32(1024)),
+					Min: lo.ToPtr(int32(1)),
+					Max: lo.ToPtr(int32(32)),
+					Use: lo.ToPtr(int32(2)),
 				},
-				MemorySlotSize: *resource.NewQuantity(1, resource.DecimalSI),
+				MemorySlotSize: resource.MustParse("1Gi"),
 			},
 		},
-		Status: vmv1.VirtualMachineStatus{
-			Phase:         "",
-			Conditions:    []metav1.Condition{},
-			RestartCount:  0,
-			PodName:       "",
-			PodIP:         "",
-			ExtraNetIP:    "",
-			ExtraNetMask:  "",
-			Node:          "",
-			CPUs:          lo.ToPtr(vmv1.MilliCPU(100)),
-			MemorySize:    resource.NewQuantity(123, resource.DecimalSI),
-			SSHSecretName: "",
-		},
+		//nolint:exhaustruct // Intentionally left empty
+		Status: vmv1.VirtualMachineStatus{},
 	}
 }
 
@@ -136,6 +125,7 @@ func newTestParams(t *testing.T) *testParams {
 	return params
 }
 
+// initVM initializes the VM in the fake client and returns the VM
 func (p *testParams) initVM(vm *vmv1.VirtualMachine) *vmv1.VirtualMachine {
 	err := p.client.Create(p.ctx, vm)
 	require.NoError(p.t, err)
@@ -197,11 +187,11 @@ func TestReconcile(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, false, res.Requeue)
 
-	// Pod is pending, so nothing changes
+	// Nothing is updating the pod status, so nothing changes in VM as well
 	assert.Equal(t, vm, params.getVM())
 }
 
-func PrettyPrint(t *testing.T, obj any) {
+func prettyPrint(t *testing.T, obj any) {
 	s, _ := json.MarshalIndent(obj, "", "\t")
 	t.Logf("%s\n", s)
 }
@@ -242,7 +232,7 @@ func TestRunningPod(t *testing.T) {
 	assert.Equal(t, "init", pod.Spec.InitContainers[0].Name)
 	assert.Equal(t, "init-kernel", pod.Spec.InitContainers[1].Name)
 
-	PrettyPrint(t, pod)
+	prettyPrint(t, pod)
 
 	pod.Status.Phase = corev1.PodRunning
 	err = params.client.Update(params.ctx, &pod)
