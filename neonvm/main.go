@@ -28,12 +28,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/zapr"
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -118,19 +118,7 @@ func main() {
 	logConfig.Sampling = nil // Disabling sampling; it's enabled by default for zap's production configs.
 	logConfig.Level.SetLevel(zap.InfoLevel)
 	logConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	baseLogger := zap.Must(logConfig.Build())
-	// There's no direct way to go from a zap.Logger to a logr.Logger, or even a zapcore.Core to a
-	// logr.Logger, so we need the roundabout method of letting logr do the initial setup and then
-	// replacing the zapcore.Core with our own.
-	logger := ctrlzap.New(
-		ctrlzap.RawZapOpts(zap.WrapCore(
-			func(c zapcore.Core) zapcore.Core {
-				return baseLogger.Core() // completely replace the zapcore.Core with the one we created above.
-			},
-		)),
-		ctrlzap.StacktraceLevel(zapcore.PanicLevel), // Must be set here, otherwise gets overridden.
-	)
+	logger := zapr.NewLogger(zap.Must(logConfig.Build(zap.AddStacktrace(zapcore.PanicLevel))))
 
 	ctrl.SetLogger(logger)
 	// define klog settings (used in LeaderElector)

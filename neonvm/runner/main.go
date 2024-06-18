@@ -38,12 +38,12 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 const (
@@ -699,26 +699,13 @@ func run(logger *zap.Logger) error {
 		}
 	}
 
-	// Helper function to both log an error and return the result of wrapping it with the message.
-	//
-	// This is used below because (*errgroup.Group).Wait() returns at most 1 error, which means
-	// imprecise usage can hide errors. So, we log the errors before they would be returned, to make
-	// sure they're always visible.
-	logWrap := func(msg string, err error) error {
-		logger.Error(msg, zap.Error(err))
-		return fmt.Errorf("%s: %w", msg, err)
-	}
-
-	eg := &errgroup.Group{}
-	eg.Go(func() error {
-		if err := runInitScript(logger, vmSpec.InitScript); err != nil {
-			return logWrap("failed to run init script", err)
-		}
-		return nil
+	tg := taskgroup.NewGroup(logger)
+	tg.Go("init-script", func(logger *zap.Logger) error {
+		return runInitScript(logger, vmSpec.InitScript)
 	})
 
-	eg.Go(func() error {
-		if err := createISO9660runtime(
+	tg.Go("iso9660-runtime", func(logger *zap.Logger) error {
+		return createISO9660runtime(
 			runtimeDiskPath,
 			vmSpec.Guest.Command,
 			vmSpec.Guest.Args,
@@ -728,31 +715,22 @@ func run(logger *zap.Logger) error {
 			enableSSH,
 			swapInfo,
 			shmSize,
-		); err != nil {
-			return logWrap("failed to create iso9660 disk", err)
-		}
-		return nil
+		)
 	})
 
-	eg.Go(func() error {
+	tg.Go("rootDisk", func(logger *zap.Logger) error {
 		// resize rootDisk image of size specified and new size more than current
-		if err := resizeRootDisk(logger, vmSpec); err != nil {
-			return logWrap("failed to resize rootDisk", err)
-		}
-		return nil
+		return resizeRootDisk(logger, vmSpec)
 	})
 	var qemuCmd []string
 
-	eg.Go(func() error {
+	tg.Go("qemu-cmd", func(logger *zap.Logger) error {
 		var err error
 		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapInfo)
-		if err != nil {
-			return logWrap("failed to build QEMU command", err)
-		}
-		return nil
+		return err
 	})
 
-	if err := eg.Wait(); err != nil {
+	if err := tg.Wait(); err != nil {
 		return err
 	}
 
@@ -984,8 +962,11 @@ func runQEMU(
 	}
 
 	logger.Info(fmt.Sprintf("calling %s", bin), zap.Strings("args", cmd))
-	if err := execFg(bin, cmd...); err != nil {
-		logger.Error("QEMU exited with error", zap.Error(err))
+	err := execFg(bin, cmd...)
+	if err != nil {
+		msg := "QEMU exited with error" // TODO: technically this might not be accurate. This can also happen if it fails to start.
+		logger.Error(msg, zap.Error(err))
+		err = fmt.Errorf("%s: %w", msg, err)
 	} else {
 		logger.Info("QEMU exited without error")
 	}
@@ -993,7 +974,7 @@ func runQEMU(
 	cancel()
 	wg.Wait()
 
-	return nil
+	return err
 }
 
 func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
