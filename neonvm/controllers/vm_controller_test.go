@@ -83,7 +83,7 @@ var _ = Describe("VirtualMachine controller", func() {
 						QMP:           1,
 						RestartPolicy: "Never",
 						RunnerPort:    1,
-						Guest: vmv1.Guest{
+						Guest: vmv1.Guest{ //nolint:exhaustruct // other stuff will get defaulted
 							CPUs:        vmv1.CPUs{Min: 1, Use: 1, Max: 1},
 							MemorySlots: vmv1.MemorySlots{Min: 1, Use: 1, Max: 1},
 						},
