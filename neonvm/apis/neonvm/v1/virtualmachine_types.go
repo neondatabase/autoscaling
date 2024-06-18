@@ -265,13 +265,9 @@ type SwapInfo struct {
 }
 
 type CPUs struct {
-	// +optional
-	// +kubebuilder:default:=1
-	Min *MilliCPU `json:"min"`
-	// +optional
-	Max *MilliCPU `json:"max,omitempty"`
-	// +optional
-	Use *MilliCPU `json:"use,omitempty"`
+	Min MilliCPU `json:"min"`
+	Max MilliCPU `json:"max"`
+	Use MilliCPU `json:"use"`
 }
 
 // MilliCPU is a special type to represent vCPUs * 1000
@@ -346,19 +342,15 @@ type MemorySlots struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
-	// +optional
-	// +kubebuilder:default:=1
-	Min *int32 `json:"min"`
+	Min int32 `json:"min"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
-	// +optional
-	Max *int32 `json:"max,omitempty"`
+	Max int32 `json:"max"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=128
 	// +kubebuilder:validation:ExclusiveMaximum=false
-	// +optional
-	Use *int32 `json:"use,omitempty"`
+	Use int32 `json:"use"`
 }
 
 type RootDisk struct {
