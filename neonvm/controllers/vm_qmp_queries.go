@@ -333,6 +333,65 @@ type QMPRunner interface {
 	Run([]byte) ([]byte, error)
 }
 
+// QmpSetVirtioMem updates virtio-mem to the new target size, returning the previous target.
+//
+// If the new target size is equal to the previous one, this function does nothing but query the
+// target.
+func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previous int64, _ error) {
+	// Note: The virtio-mem device only exists when max mem != min mem.
+	// So if min == max, we should just short-cut, skip the queries, and say it's all good.
+	// Refer to the instantiation in neonvm-runner for more.
+	if *vm.Spec.Guest.MemorySlots.Min == *vm.Spec.Guest.MemorySlots.Max {
+		// if target size is non-zero even though min == max, something went very wrong
+		if targetVirtioMemSize != 0 {
+			panic(fmt.Errorf(
+				"VM min mem slots == max mem slots, but target virtio-mem size %d != 0",
+				targetVirtioMemSize,
+			))
+		}
+		// Otherwise, we're all good, just pretend like we talked to the VM.
+		return 0, nil
+	}
+
+	mon, err := QmpConnect(QmpAddr(vm))
+	if err != nil {
+		return 0, err
+	}
+	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
+
+	// First, fetch current desired virtio-mem size. If it's the same as targetVirtioMemSize, then
+	// we can report that it was already the same.
+	cmd := []byte(`{"execute": "qom-get", "arguments": {"path": "vm0", "property": "requested-size"}}`)
+	raw, err := mon.Run(cmd)
+	if err != nil {
+		return 0, err
+	}
+	result := struct {
+		Return int64 `json:"return"`
+	}{Return: 0}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return 0, fmt.Errorf("error unmarshaling json: %w", err)
+	}
+
+	previous = result.Return
+
+	if previous == targetVirtioMemSize {
+		return previous, nil
+	}
+
+	// The current requested size is not equal to the new desired size. Let's change that.
+	cmd = []byte(fmt.Sprintf(
+		`{"execute": "qom-set", "arguments": {"path": "vm0", "property": "requested-size", "value": %d}}`,
+		targetVirtioMemSize,
+	))
+	_, err = mon.Run(cmd)
+	if err != nil {
+		return 0, err
+	}
+
+	return previous, nil
+}
+
 // QmpAddMemoryBackend adds a single memory slot to the VM with the given size.
 //
 // The memory slot does nothing until a corresponding "device" is added to the VM for the same memory slot.

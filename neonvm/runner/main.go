@@ -596,9 +596,10 @@ type Config struct {
 	appendKernelCmdline  string
 	skipCgroupManagement bool
 	diskCacheSettings    string
+	memoryProvider       vmv1.MemoryProvider
 }
 
-func newConfig() *Config {
+func newConfig(logger *zap.Logger) *Config {
 	cfg := &Config{
 		vmSpecDump:           "",
 		vmStatusDump:         "",
@@ -606,6 +607,7 @@ func newConfig() *Config {
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
+		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -620,7 +622,12 @@ func newConfig() *Config {
 		"Don't try to manage CPU (use if running alongside container-mgr)")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
+	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
 	flag.Parse()
+
+	if cfg.memoryProvider == "" {
+		logger.Fatal("missing required flag '-memory-provider'")
+	}
 
 	return cfg
 }
@@ -634,7 +641,7 @@ func main() {
 }
 
 func run(logger *zap.Logger) error {
-	cfg := newConfig()
+	cfg := newConfig(logger)
 
 	vmSpecJson, err := base64.StdEncoding.DecodeString(cfg.vmSpecDump)
 	if err != nil {
@@ -658,17 +665,17 @@ func run(logger *zap.Logger) error {
 
 	cpus := []string{}
 	cpus = append(cpus, fmt.Sprintf("cpus=%d", qemuCPUs.min))
-	if qemuCPUs.max != nil {
-		cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *qemuCPUs.max, *qemuCPUs.max))
-	}
+	cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *qemuCPUs.max, *qemuCPUs.max))
+
+	logger.Info(fmt.Sprintf("Using memory provider %s", cfg.memoryProvider))
 
 	initialMemorySize := vmSpec.Guest.MemorySlotSize.Value() * int64(*vmSpec.Guest.MemorySlots.Min)
 	memory := []string{}
 	memory = append(memory, fmt.Sprintf("size=%db", initialMemorySize))
-	if vmSpec.Guest.MemorySlots.Max != nil {
+	if cfg.memoryProvider == vmv1.MemoryProviderDIMMSlots {
 		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
-		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
+	memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 
 	enableSSH := false
 	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
@@ -861,6 +868,20 @@ func buildQEMUCmd(
 
 	// memory details
 	qemuCmd = append(qemuCmd, "-m", strings.Join(memory, ","))
+	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem {
+		// we don't actually have any slots because it's virtio-mem, but we're still using the API
+		// designed around DIMM slots, so we need to use them to calculate how much memory we expect
+		// to be able to plug in.
+		numSlots := *vmSpec.Guest.MemorySlots.Max - *vmSpec.Guest.MemorySlots.Min
+		virtioMemSize := int64(numSlots) * vmSpec.Guest.MemorySlotSize.Value()
+		// We can add virtio-mem if it actually needs to be a non-zero size.
+		// Otherwise, QEMU fails with:
+		//   property 'size' of memory-backend-ram doesn't take value '0'
+		if virtioMemSize != 0 {
+			qemuCmd = append(qemuCmd, "-object", fmt.Sprintf("memory-backend-ram,id=vmem0,size=%db", virtioMemSize))
+			qemuCmd = append(qemuCmd, "-device", "virtio-mem-pci,id=vm0,memdev=vmem0,block-size=8M,requested-size=0")
+		}
+	}
 
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)

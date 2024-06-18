@@ -2412,6 +2412,11 @@ spec:
                     type: array
                   kernelImage:
                     type: string
+                  memoryProvider:
+                    enum:
+                    - DIMMSlots
+                    - VirtioMem
+                    type: string
                   memorySlotSize:
                     anyOf:
                     - type: integer
@@ -2763,6 +2768,11 @@ spec:
               extraNetIP:
                 type: string
               extraNetMask:
+                type: string
+              memoryProvider:
+                enum:
+                - DIMMSlots
+                - VirtioMem
                 type: string
               memorySize:
                 anyOf:

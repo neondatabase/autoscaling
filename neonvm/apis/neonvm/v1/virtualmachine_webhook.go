@@ -92,6 +92,13 @@ func (r *VirtualMachine) ValidateCreate() error {
 		}
 	}
 
+	// validate .spec.guest.memorySlotSize w.r.t. .spec.guest.memoryProvider
+	if r.Spec.Guest.MemoryProvider != nil {
+		if err := r.Spec.Guest.ValidateForMemoryProvider(*r.Spec.Guest.MemoryProvider); err != nil {
+			return fmt.Errorf(".spec.guest: %w", err)
+		}
+	}
+
 	// validate .spec.guest.memorySlots.use and .spec.guest.memorySlots.max
 	if r.Spec.Guest.MemorySlots.Use != nil {
 		if r.Spec.Guest.MemorySlots.Max == nil {
@@ -160,6 +167,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.guest.cpus.max", func(v *VirtualMachine) any { return v.Spec.Guest.CPUs.Max }},
 		{".spec.guest.memorySlots.min", func(v *VirtualMachine) any { return v.Spec.Guest.MemorySlots.Min }},
 		{".spec.guest.memorySlots.max", func(v *VirtualMachine) any { return v.Spec.Guest.MemorySlots.Max }},
+		// nb: we don't check memoryProvider here, we have some specific logic for that.
 		{".spec.guest.ports", func(v *VirtualMachine) any { return v.Spec.Guest.Ports }},
 		{".spec.guest.rootDisk", func(v *VirtualMachine) any { return v.Spec.Guest.RootDisk }},
 		{".spec.guest.command", func(v *VirtualMachine) any { return v.Spec.Guest.Command }},
@@ -186,6 +194,19 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 			return fmt.Errorf("%s is immutable", info.fieldName)
 		}
 	}
+
+	// Only allow changing .spec.guest.memoryProvider if it was previously nil, and the new version
+	// is equal to .status.memoryProvider.
+	if !reflect.DeepEqual(before.Spec.Guest.MemoryProvider, r.Spec.Guest.MemoryProvider) {
+		if before.Spec.Guest.MemoryProvider != nil {
+			return errors.New(".spec.guest.memoryProvider cannot be changed once it is non-nil")
+		}
+		if !reflect.DeepEqual(r.Spec.Guest.MemoryProvider, r.Status.MemoryProvider) {
+			return errors.New(".spec.guest.memoryProvider cannot be set to any value other than .status.memoryProvider")
+		}
+	}
+
+	// {".spec.guest.memoryProvider", func(v *VirtualMachine) any { return v.Spec.Guest.MemoryProvider }},
 
 	// validate swap changes by comparing the SwapInfo for each.
 	//

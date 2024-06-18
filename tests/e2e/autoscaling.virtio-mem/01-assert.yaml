@@ -12,6 +12,12 @@ status:
   conditions:
     - type: Available
       status: "True"
-  cpus: 250m
-  memorySize: 1Gi
-  memoryProvider: DIMMSlots
+  cpus: 1
+  memorySize: 4Gi
+---
+apiVersion: v1
+kind: pod
+metadata:
+  name: workload
+status:
+  phase: Running

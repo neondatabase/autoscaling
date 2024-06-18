@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/samber/lo"
 
@@ -172,6 +173,8 @@ type Guest struct {
 	// +optional
 	MemorySlots MemorySlots `json:"memorySlots"`
 	// +optional
+	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
+	// +optional
 	RootDisk RootDisk `json:"rootDisk"`
 	// Docker image Entrypoint array replacement.
 	// +optional
@@ -192,6 +195,24 @@ type Guest struct {
 	// Cannot be updated.
 	// +optional
 	Settings *GuestSettings `json:"settings,omitempty"`
+}
+
+const virtioMemBlockSizeBytes = 8 * 1024 * 1024 // 8 MiB
+
+// ValidateForMemoryProvider returns an error iff the guest memory settings are invalid for the
+// MemoryProvider.
+//
+// This is used in two places. First, to validate VirtualMachine object creation. Second, to handle
+// the defaulting behavior for VirtualMachines that would be switching from DIMMSlots to VirtioMem
+// on restart. We place more restrictions on VirtioMem because we use 8MiB block sizes, so changing
+// to a new default can only happen if the memory slot size is a multiple of 8MiB.
+func (g Guest) ValidateForMemoryProvider(p MemoryProvider) error {
+	if p == MemoryProviderVirtioMem {
+		if g.MemorySlotSize.Value()%virtioMemBlockSizeBytes != 0 {
+			return fmt.Errorf("memorySlotSize invalid for memoryProvider VirtioMem: must be a multiple of 8Mi")
+		}
+	}
+	return nil
 }
 
 type GuestSettings struct {
@@ -361,6 +382,29 @@ type MemorySlots struct {
 	Use *int32 `json:"use,omitempty"`
 }
 
+// +kubebuilder:validation:Enum=DIMMSlots;VirtioMem
+type MemoryProvider string
+
+const (
+	MemoryProviderDIMMSlots MemoryProvider = "DIMMSlots"
+	MemoryProviderVirtioMem MemoryProvider = "VirtioMem"
+)
+
+// FlagFunc is a parsing function to be used with flag.Func
+func (p *MemoryProvider) FlagFunc(value string) error {
+	possibleValues := []string{
+		string(MemoryProviderDIMMSlots),
+		string(MemoryProviderVirtioMem),
+	}
+
+	if !slices.Contains(possibleValues, value) {
+		return fmt.Errorf("Unknown MemoryProvider %q, must be one of %v", value, possibleValues)
+	}
+
+	*p = MemoryProvider(value)
+	return nil
+}
+
 type RootDisk struct {
 	Image string `json:"image"`
 	// +optional
@@ -493,6 +537,8 @@ type VirtualMachineStatus struct {
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 	// +optional
+	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
+	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
 }
 
@@ -558,6 +604,7 @@ func (vm *VirtualMachine) Cleanup() {
 	vm.Status.Node = ""
 	vm.Status.CPUs = nil
 	vm.Status.MemorySize = nil
+	vm.Status.MemoryProvider = nil
 }
 
 func (vm *VirtualMachine) HasRestarted() bool {
