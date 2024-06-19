@@ -757,7 +757,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 		// set VM phase to running if everything scaled
 		if cpuScaled && ramScaled {
-
 			vm.Status.Phase = vmv1.VmRunning
 		}
 
