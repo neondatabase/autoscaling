@@ -149,7 +149,7 @@ func main() {
 	}
 
 	log.Println("Load docker credentials")
-	dockerConfig, err := cliconfig.Load("")
+	dockerConfig, err := cliconfig.Load("" /* auto-detect right directory */)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -207,6 +207,16 @@ func main() {
 			if authConfig, ok := authConfigs[registry]; ok {
 				imagePullOptions.RegistryAuth = authConfig.IdentityToken
 			} else {
+				// Special case handling of docker.io weirdness.
+				// ref https://github.com/moby/moby/blob/e7347f8a8c2fd3d2abd34b638d6fc8c18b0278d1/registry/config.go#L26-L49
+				// (and other handling around index.docker.io in that file...)
+				//
+				// See also e.g. https://github.com/containrrr/watchtower/issues/1176
+				legacyConfig, hasLegacyDockerConfig := authConfigs["https://index.docker.io/v1/"]
+				if hasLegacyDockerConfig && (registry == "docker.io" || registry == "registry-1.docker.io") {
+					imagePullOptions.RegistryAuth = legacyConfig.IdentityToken
+				}
+
 				log.Printf("No docker credentials found for %s", registry)
 			}
 
