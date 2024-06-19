@@ -715,6 +715,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			// seems already plugged correctly
 			cpuScaled = true
 		}
+		// update status by CPUs used in the VM
+		r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 		// do hotplug/unplug Memory
 		memSlotsMin := *vm.Spec.Guest.MemorySlots.Min
@@ -744,20 +746,17 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		} else {
 			ramScaled = true
 		}
+		// get Memory details from hypervisor and update VM status
+		memorySize, err := QmpGetMemorySize(QmpAddr(vm))
+		if err != nil {
+			log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
+			return err
+		}
+		// update status by memory sizes used in the VM
+		r.updateVMStatusMemory(vm, memorySize)
 
 		// set VM phase to running if everything scaled
 		if cpuScaled && ramScaled {
-			// update status by CPUs used in the VM
-			r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
-
-			// get Memory details from hypervisor and update VM status
-			memorySize, err := QmpGetMemorySize(QmpAddr(vm))
-			if err != nil {
-				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
-				return err
-			}
-			// update status by memory sizes used in the VM
-			r.updateVMStatusMemory(vm, memorySize)
 
 			vm.Status.Phase = vmv1.VmRunning
 		}
