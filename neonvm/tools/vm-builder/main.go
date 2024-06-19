@@ -215,9 +215,9 @@ func main() {
 				legacyConfig, hasLegacyDockerConfig := authConfigs["https://index.docker.io/v1/"]
 				if hasLegacyDockerConfig && (registry == "docker.io" || registry == "registry-1.docker.io") {
 					imagePullOptions.RegistryAuth = legacyConfig.IdentityToken
+				} else {
+					log.Printf("No docker credentials found for %s", registry)
 				}
-
-				log.Printf("No docker credentials found for %s", registry)
 			}
 
 			log.Printf("Pull source docker image: %s", *srcImage)
