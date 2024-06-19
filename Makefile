@@ -145,30 +145,28 @@ docker-push: docker-build ## Push docker images to docker registry
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image for NeonVM controller
-	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) --build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
+	DOCKER_BUILDKIT=1 docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) --build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
 
 .PHONY: docker-build-runner
 docker-build-runner: ## Build docker image for NeonVM runner
-	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
+	DOCKER_BUILDKIT=1 docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
 
 .PHONY: docker-build-vxlan-controller
 docker-build-vxlan-controller: ## Build docker image for NeonVM vxlan controller
-	docker build -t $(IMG_VXLAN_CONTROLLER) -f neonvm/tools/vxlan/Dockerfile .
+	DOCKER_BUILDKIT=1 docker build -t $(IMG_VXLAN_CONTROLLER) -f neonvm/tools/vxlan/Dockerfile .
 
 .PHONY: docker-build-autoscaler-agent
 docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
-	docker buildx build \
+	DOCKER_BUILDKIT=1 docker build \
 		--tag $(IMG_AUTOSCALER_AGENT) \
-		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscaler-agent/Dockerfile \
 		.
 
 .PHONY: docker-build-scheduler
 docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
-	docker buildx build \
+	DOCKER_BUILDKIT=1 docker build \
 		--tag $(IMG_SCHEDULER) \
-		--load \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscale-scheduler/Dockerfile \
 		.
@@ -216,11 +214,10 @@ kernel: ## Build linux kernel.
 	kernel_version=$${linux_config##*-} \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
-	docker buildx build \
+	docker build \
 	    --build-arg KERNEL_VERSION=$$kernel_version \
 		--platform linux/amd64 \
 		--pull \
-		--load \
 		--iidfile $$iidfile \
 		--file neonvm/hack/kernel/Dockerfile.kernel-builder \
 		neonvm/hack/kernel; \
