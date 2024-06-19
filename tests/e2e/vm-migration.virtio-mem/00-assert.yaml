@@ -12,6 +12,11 @@ status:
   conditions:
     - type: Available
       status: "True"
-  cpus: 250m
-  memorySize: 1Gi
-  memoryProvider: DIMMSlots
+  memoryProvider: VirtioMem
+---
+apiVersion: v1
+kind: pod
+metadata:
+  name: workload
+status:
+  phase: Running
