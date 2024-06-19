@@ -1,6 +1,10 @@
 package controllers
 
-import "time"
+import (
+	"time"
+
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+)
 
 // ReconcilerConfig stores shared configuration for VirtualMachineReconciler and
 // VirtualMachineMigrationReconciler.
@@ -24,6 +28,10 @@ type ReconcilerConfig struct {
 	// This field is passed to neonvm-runner as the `-qemu-disk-cache-settings` arg, and is directly
 	// used in setting up the VM disks via QEMU's `-drive` flag.
 	QEMUDiskCacheSettings string
+
+	// DefaultMemoryProvider is the memory provider (dimm slots or virtio-mem) that will be used for
+	// new VMs (or, when old ones restart) if nothing is explicitly set.
+	DefaultMemoryProvider vmv1.MemoryProvider
 
 	// FailurePendingPeriod is the period for the propagation of
 	// reconciliation failures to the observability instruments

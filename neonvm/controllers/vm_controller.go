@@ -323,6 +323,13 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
 	}
 
+	// Set memory provider for old VMs that don't have it in the Status.
+	if vm.Status.PodName != "" && vm.Status.MemoryProvider == nil {
+		oldMemProvider := vmv1.MemoryProviderDIMMSlots
+		log.Error(nil, "Setting default MemoryProvider for VM", "MemoryProvider", oldMemProvider)
+		vm.Status.MemoryProvider = lo.ToPtr(oldMemProvider)
+	}
+
 	switch vm.Status.Phase {
 
 	case "":
@@ -359,15 +366,22 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
-		// Generate runner pod name
+		// Generate runner pod name and set desired memory provider.
+		// Together with Status.MemoryProvider set for PodName != "" above,
+		// It is now guaranteed to have Status.MemoryProvider != nil
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
+			if vm.Status.MemoryProvider == nil {
+				vm.Status.MemoryProvider = lo.ToPtr(pickMemoryProvider(r.Config, vm))
+			}
 			// Update the .Status on API Server to avoid creating multiple pods for a single VM
 			// See https://github.com/neondatabase/autoscaling/issues/794 for the context
 			if err := r.Status().Update(ctx, vm); err != nil {
 				return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
 			}
 		}
+
+		memoryProvider := *vm.Status.MemoryProvider
 
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
@@ -402,7 +416,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			}
 
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(vm, sshSecret)
+			pod, err := r.podForVirtualMachine(vm, memoryProvider, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
@@ -719,9 +733,19 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 		// do hotplug/unplug Memory
-		ramScaled, err = r.doDIMMSlotsScaling(ctx, vm)
-		if err != nil {
-			return err
+		switch *vm.Status.MemoryProvider {
+		case vmv1.MemoryProviderVirtioMem:
+			ramScaled, err = r.doVirtioMemScaling(vm)
+			if err != nil {
+				return err
+			}
+		case vmv1.MemoryProviderDIMMSlots:
+			ramScaled, err = r.doDIMMSlotsScaling(ctx, vm)
+			if err != nil {
+				return err
+			}
+		default:
+			panic(fmt.Errorf("unexpected vm.status.memoryProvider %q", *vm.Status.MemoryProvider))
 		}
 
 		// set VM phase to running if everything scaled
@@ -777,6 +801,59 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	}
 
 	return nil
+}
+
+func pickMemoryProvider(config *ReconcilerConfig, vm *vmv1.VirtualMachine) vmv1.MemoryProvider {
+	if p := vm.Spec.Guest.MemoryProvider; p != nil {
+		return *p
+	}
+	if p := vm.Status.MemoryProvider; p != nil {
+		return *p
+	}
+
+	// Not all configurations are valid for virtio-mem. Only switch to the default as long as it
+	// won't be invalid:
+	if err := vm.Spec.Guest.ValidateForMemoryProvider(config.DefaultMemoryProvider); err != nil {
+		return vmv1.MemoryProviderDIMMSlots
+	}
+
+	return config.DefaultMemoryProvider
+}
+
+func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _ error) {
+	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - vm.Spec.Guest.MemorySlots.Min)
+
+	targetVirtioMemSize := int64(targetSlotCount) * vm.Spec.Guest.MemorySlotSize.Value()
+	previousTarget, err := QmpSetVirtioMem(vm, targetVirtioMemSize)
+	if err != nil {
+		return false, err
+	}
+
+	goalTotalSize := resource.NewQuantity(
+		int64(vm.Spec.Guest.MemorySlots.Use)*vm.Spec.Guest.MemorySlotSize.Value(),
+		resource.BinarySI,
+	)
+
+	if previousTarget != targetVirtioMemSize {
+		// We changed the requested size. Make an event for it.
+		reason := "ScaleUp"
+		if targetVirtioMemSize < previousTarget {
+			reason = "ScaleDown"
+		}
+		r.Recorder.Eventf(vm, "Normal", reason, "Set virtio-mem size for %v total memory", goalTotalSize)
+	}
+
+	// Maybe we're already using the amount we want?
+	// Update the status to reflect the current size - and if it matches goalTotalSize, ram
+	// scaling is done.
+	currentTotalSize, err := QmpGetMemorySize(QmpAddr(vm))
+	if err != nil {
+		return false, err
+	}
+
+	done = currentTotalSize.Value() == goalTotalSize.Value()
+	r.updateVMStatusMemory(vm, currentTotalSize)
+	return done, nil
 }
 
 func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualMachine) (done bool, _ error) {
@@ -1091,9 +1168,10 @@ func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VMReconciler) podForVirtualMachine(
 	vm *vmv1.VirtualMachine,
+	memoryProvider vmv1.MemoryProvider,
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
-	pod, err := podSpec(vm, sshSecret, r.Config)
+	pod, err := podSpec(vm, memoryProvider, sshSecret, r.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -1290,7 +1368,12 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
-func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *ReconcilerConfig) (*corev1.Pod, error) {
+func podSpec(
+	vm *vmv1.VirtualMachine,
+	memoryProvider vmv1.MemoryProvider,
+	sshSecret *corev1.Secret,
+	config *ReconcilerConfig,
+) (*corev1.Pod, error) {
 	runnerVersion := api.RunnerProtoV1
 	labels := labelsForVirtualMachine(vm, &runnerVersion)
 	annotations := annotationsForVirtualMachine(vm)
@@ -1386,6 +1469,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 						cmd = append(
 							cmd,
 							"-qemu-disk-cache-settings", config.QEMUDiskCacheSettings,
+							"-memory-provider", string(memoryProvider),
 							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 						)

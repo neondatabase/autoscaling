@@ -116,6 +116,7 @@ func newTestParams(t *testing.T) *testParams {
 			UseContainerMgr:         false,
 			MaxConcurrentReconciles: 10,
 			QEMUDiskCacheSettings:   "",
+			DefaultMemoryProvider:   vmv1.MemoryProviderDIMMSlots,
 			FailurePendingPeriod:    time.Minute,
 			FailingRefreshInterval:  time.Minute,
 		},
