@@ -378,7 +378,7 @@ kind-destroy: kind ## Destroy local kind cluster
 # K3D_FIX_MOUNTS=1 used to allow foreign CNI (cilium, multus and so on), https://github.com/k3d-io/k3d/pull/1268
 .PHONY: k3d-setup
 k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
-	K3D_FIX_MOUNTS=1 $(K3D) cluster create $(CLUSTER_NAME) --config k3d/config.yaml
+	K3D_FIX_MOUNTS=1 $(K3D) cluster create $(CLUSTER_NAME) --config k3d/config.yaml $(if $(USE_REGISTRIES_FILE),--registry-config=k3d/registries.yaml)
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/cilium.yaml
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status daemonset  cilium
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status deployment cilium-operator
