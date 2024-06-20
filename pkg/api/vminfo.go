@@ -53,11 +53,12 @@ func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
 // care about. It takes various labels and annotations into account, so certain fields might be
 // different from what's strictly in the VirtualMachine object.
 type VmInfo struct {
-	Name      string    `json:"name"`
-	Namespace string    `json:"namespace"`
-	Cpu       VmCpuInfo `json:"cpu"`
-	Mem       VmMemInfo `json:"mem"`
-	Config    VmConfig  `json:"config"`
+	Name               string             `json:"name"`
+	Namespace          string             `json:"namespace"`
+	Cpu                VmCpuInfo          `json:"cpu"`
+	Mem                VmMemInfo          `json:"mem"`
+	Config             VmConfig           `json:"config"`
+	CurrentLogicalTime *vmapi.LogicalTime `json:"currentLogicalTime,omitempty"`
 }
 
 type VmCpuInfo struct {
@@ -150,7 +151,7 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 
 func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	logger = logger.With(util.VMNameFields(vm))
-	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
+	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources(), vm.Status.CurrentLogicalTime)
 }
 
 func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
@@ -164,7 +165,7 @@ func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) 
 	}
 
 	vmName := pod.Labels[vmapi.VirtualMachineNameLabel]
-	return extractVmInfoGeneric(logger, vmName, pod, resources)
+	return extractVmInfoGeneric(logger, vmName, pod, resources, nil)
 }
 
 func extractVmInfoGeneric(
@@ -172,6 +173,7 @@ func extractVmInfoGeneric(
 	vmName string,
 	obj metav1.ObjectMetaAccessor,
 	resources vmapi.VirtualMachineResources,
+	currentClock *vmapi.LogicalTime,
 ) (*VmInfo, error) {
 	cpuInfo := NewVmCpuInfo(resources.CPUs)
 	memInfo := NewVmMemInfo(resources.MemorySlots, resources.MemorySlotSize)
@@ -191,6 +193,7 @@ func extractVmInfoGeneric(
 			ScalingEnabled:       scalingEnabled,
 			ScalingConfig:        nil, // set below, maybe
 		},
+		CurrentLogicalTime: currentClock,
 	}
 
 	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {

@@ -31,7 +31,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/logiclock"
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -194,6 +196,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
 
 	coreExecLogger := execLogger.Named("core")
+	clock := logiclock.NewClock(func(duration time.Duration) {
+		r.global.metrics.scalingLatency.Observe(duration.Seconds())
+	})
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
 		Core: core.Config{
@@ -211,7 +216,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 				Warn: coreExecLogger.Warn,
 			},
 		},
-	})
+	}, clock)
 
 	r.executorStateDump = executorCore.StateDump
 
@@ -625,7 +630,11 @@ func doMetricsRequest(
 	return nil
 }
 
-func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) error {
+func (r *Runner) doNeonVMRequest(
+	ctx context.Context,
+	target api.Resources,
+	desiredLogicalTime *vmv1.LogicalTime,
+) error {
 	patches := []patch.Operation{{
 		Op:    patch.OpReplace,
 		Path:  "/spec/guest/cpus/use",
@@ -634,7 +643,13 @@ func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) erro
 		Op:    patch.OpReplace,
 		Path:  "/spec/guest/memorySlots/use",
 		Value: uint32(target.Mem / r.memSlotSize),
+	}, {
+		Op:    patch.OpReplace,
+		Path:  "/spec/guest/desiredLogicalTime",
+		Value: desiredLogicalTime,
 	}}
+
+	fmt.Printf("Desired Logical Time: %v\n", desiredLogicalTime)
 
 	patchPayload, err := json.Marshal(patches)
 	if err != nil {

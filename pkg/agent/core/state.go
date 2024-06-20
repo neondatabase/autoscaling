@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -114,6 +115,8 @@ type state struct {
 	NeonVM neonvmState
 
 	Metrics *SystemMetrics
+
+	ClockSource LogicClock `json:"-"`
 }
 
 type pluginState struct {
@@ -127,6 +130,8 @@ type pluginState struct {
 	// Permit, if not nil, stores the Permit in the most recent PluginResponse. This field will be
 	// nil if we have not been able to contact *any* scheduler.
 	Permit *api.Resources
+
+	CurrentLogicalTime *vmv1.LogicalTime
 }
 
 type pluginRequested struct {
@@ -155,6 +160,8 @@ type monitorState struct {
 	// UpscaleFailureAt, if not nil, stores the time at which an upscale request most recently
 	// failed
 	UpscaleFailureAt *time.Time
+
+	CurrentLogicalTime *vmv1.LogicalTime
 }
 
 func (ms *monitorState) active() bool {
@@ -196,17 +203,23 @@ func (ns *neonvmState) ongoingRequest() bool {
 	return ns.OngoingRequested != nil
 }
 
-func NewState(vm api.VmInfo, config Config) *State {
-	return &State{
+type LogicClock interface {
+	Next(ts time.Time) *vmv1.LogicalTime
+	Observe(logicalTime *vmv1.LogicalTime) error
+}
+
+func NewState(vm api.VmInfo, config Config, clockSource LogicClock) *State {
+	state := &State{
 		internal: state{
 			Config: config,
 			Debug:  false,
 			VM:     vm,
 			Plugin: pluginState{
-				OngoingRequest: false,
-				LastRequest:    nil,
-				LastFailureAt:  nil,
-				Permit:         nil,
+				OngoingRequest:     false,
+				LastRequest:        nil,
+				LastFailureAt:      nil,
+				Permit:             nil,
+				CurrentLogicalTime: nil,
 			},
 			Monitor: monitorState{
 				OngoingRequest:     nil,
@@ -215,15 +228,19 @@ func NewState(vm api.VmInfo, config Config) *State {
 				Approved:           nil,
 				DownscaleFailureAt: nil,
 				UpscaleFailureAt:   nil,
+				CurrentLogicalTime: nil,
 			},
 			NeonVM: neonvmState{
 				LastSuccess:      nil,
 				OngoingRequested: nil,
 				RequestFailedAt:  nil,
 			},
-			Metrics: nil,
+			Metrics:     nil,
+			ClockSource: clockSource,
 		},
 	}
+
+	return state
 }
 
 func (s *state) info(msg string, fields ...zap.Field) {
@@ -256,11 +273,12 @@ func (s *state) nextActions(now time.Time) ActionSet {
 		// our handling later on is easier if we can assume it's non-nil
 		calcDesiredResourcesWait = func(ActionSet) *time.Duration { return nil }
 	}
+	desiredLogicalTime := s.ClockSource.Next(now)
 
 	// ----
 	// Requests to the scheduler plugin:
 	var pluginRequiredWait *time.Duration
-	actions.PluginRequest, pluginRequiredWait = s.calculatePluginAction(now, desiredResources)
+	actions.PluginRequest, pluginRequiredWait = s.calculatePluginAction(now, desiredResources, desiredLogicalTime)
 
 	// ----
 	// Requests to NeonVM:
@@ -274,7 +292,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 		pluginRequestedPhase = "planned"
 	}
 	var neonvmRequiredWait *time.Duration
-	actions.NeonVMRequest, neonvmRequiredWait = s.calculateNeonVMAction(now, desiredResources, pluginRequested, pluginRequestedPhase)
+	actions.NeonVMRequest, neonvmRequiredWait = s.calculateNeonVMAction(now, desiredResources, pluginRequested, pluginRequestedPhase, desiredLogicalTime)
 
 	// ----
 	// Requests to vm-monitor (upscaling)
@@ -283,13 +301,19 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	// forego notifying the vm-monitor of increased resources because we were busy asking if it
 	// could downscale.
 	var monitorUpscaleRequiredWait *time.Duration
-	actions.MonitorUpscale, monitorUpscaleRequiredWait = s.calculateMonitorUpscaleAction(now, desiredResources)
+	actions.MonitorUpscale, monitorUpscaleRequiredWait = s.calculateMonitorUpscaleAction(now, desiredResources, desiredLogicalTime)
 
 	// ----
 	// Requests to vm-monitor (downscaling)
 	plannedUpscale := actions.MonitorUpscale != nil
 	var monitorDownscaleRequiredWait *time.Duration
-	actions.MonitorDownscale, monitorDownscaleRequiredWait = s.calculateMonitorDownscaleAction(now, desiredResources, plannedUpscale)
+	actions.MonitorDownscale, monitorDownscaleRequiredWait =
+		s.calculateMonitorDownscaleAction(
+			now,
+			desiredResources,
+			plannedUpscale,
+			desiredLogicalTime,
+		)
 
 	// --- and that's all the request types! ---
 
@@ -322,6 +346,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 func (s *state) calculatePluginAction(
 	now time.Time,
 	desiredResources api.Resources,
+	desiredLogicalTime *vmv1.LogicalTime,
 ) (*ActionPluginRequest, *time.Duration) {
 	logFailureReason := func(reason string) {
 		s.warnf("Wanted to make a request to the scheduler plugin, but %s", reason)
@@ -409,6 +434,7 @@ func (s *state) calculatePluginAction(
 					return nil
 				}
 			}(),
+			DesiredLogicalTime: desiredLogicalTime,
 		}, nil
 	} else {
 		if wantToRequestNewResources && waitingOnRetryBackoff {
@@ -429,7 +455,23 @@ func (s *state) calculateNeonVMAction(
 	desiredResources api.Resources,
 	pluginRequested *api.Resources,
 	pluginRequestedPhase string,
+	logicalTime *vmv1.LogicalTime,
 ) (*ActionNeonVMRequest, *time.Duration) {
+
+	desiredTimeCandidates := []*vmv1.LogicalTime{logicalTime}
+
+	if desiredResources.HasFieldLessThan(s.VM.Using()) {
+		// We are downscaling, so we needed a permit from monitor
+		desiredTimeCandidates = append(desiredTimeCandidates, s.Monitor.CurrentLogicalTime)
+	}
+
+	if desiredResources.HasFieldGreaterThan(s.VM.Using()) {
+		// We are upscaling, so we needed a permit from the plugin
+		desiredTimeCandidates = append(desiredTimeCandidates, s.Plugin.CurrentLogicalTime)
+	}
+
+	desiredTime := vmv1.EarliestLogicalTime(desiredTimeCandidates...)
+
 	// clamp desiredResources to what we're allowed to make a request for
 	desiredResources = s.clampResources(
 		s.VM.Using(),                       // current: what we're using already
@@ -457,8 +499,9 @@ func (s *state) calculateNeonVMAction(
 		}
 
 		return &ActionNeonVMRequest{
-			Current: s.VM.Using(),
-			Target:  desiredResources,
+			Current:            s.VM.Using(),
+			Target:             desiredResources,
+			DesiredLogicalTime: desiredTime,
 		}, nil
 	} else {
 		var reqs []string
@@ -480,6 +523,7 @@ func (s *state) calculateNeonVMAction(
 func (s *state) calculateMonitorUpscaleAction(
 	now time.Time,
 	desiredResources api.Resources,
+	desiredLogicalTime *vmv1.LogicalTime,
 ) (*ActionMonitorUpscale, *time.Duration) {
 	// can't do anything if we don't have an active connection to the vm-monitor
 	if !s.Monitor.active() {
@@ -541,8 +585,9 @@ func (s *state) calculateMonitorUpscaleAction(
 
 	// Otherwise, we can make the request:
 	return &ActionMonitorUpscale{
-		Current: *s.Monitor.Approved,
-		Target:  requestResources,
+		Current:            *s.Monitor.Approved,
+		Target:             requestResources,
+		DesiredLogicalTime: desiredLogicalTime,
 	}, nil
 }
 
@@ -550,6 +595,7 @@ func (s *state) calculateMonitorDownscaleAction(
 	now time.Time,
 	desiredResources api.Resources,
 	plannedUpscaleRequest bool,
+	desiredLogicalTime *vmv1.LogicalTime,
 ) (*ActionMonitorDownscale, *time.Duration) {
 	// can't do anything if we don't have an active connection to the vm-monitor
 	if !s.Monitor.active() {
@@ -627,8 +673,9 @@ func (s *state) calculateMonitorDownscaleAction(
 
 	// Nothing else to check, we're good to make the request
 	return &ActionMonitorDownscale{
-		Current: *s.Monitor.Approved,
-		Target:  requestResources,
+		Current:            *s.Monitor.Approved,
+		Target:             requestResources,
+		DesiredLogicalTime: desiredLogicalTime,
 	}, nil
 }
 
@@ -792,6 +839,8 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		}
 	}
 
+	s.updateCurrentClock(s.VM.CurrentLogicalTime)
+
 	s.info("Calculated desired resources", zap.Object("current", s.VM.Using()), zap.Object("target", result))
 
 	return result, calculateWaitTime
@@ -911,6 +960,13 @@ func (s *state) pluginApprovedUpperBound() api.Resources {
 	}
 }
 
+func (s *state) updateCurrentClock(logicalTime *vmv1.LogicalTime) {
+	err := s.ClockSource.Observe(logicalTime)
+	if err != nil {
+		s.warnf("Failed to observe clock source: %v", err)
+	}
+}
+
 //////////////////////////////////////////
 // PUBLIC FUNCTIONS TO UPDATE THE STATE //
 //////////////////////////////////////////
@@ -964,8 +1020,12 @@ func (h PluginHandle) RequestFailed(now time.Time) {
 	h.s.Plugin.LastFailureAt = &now
 }
 
-func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) (_err error) {
+func (h PluginHandle) RequestSuccessful(
+	now time.Time,
+	resp api.PluginResponse,
+) (_err error) {
 	h.s.Plugin.OngoingRequest = false
+
 	defer func() {
 		if _err != nil {
 			h.s.Plugin.LastFailureAt = &now
@@ -998,6 +1058,10 @@ func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) 
 	return nil
 }
 
+func (h PluginHandle) UpdateLogicalTime(currentTime *vmv1.LogicalTime) {
+	h.s.Plugin.CurrentLogicalTime = currentTime
+}
+
 // MonitorHandle provides write access to the vm-monitor pieces of an UpdateState
 type MonitorHandle struct {
 	s *state
@@ -1015,6 +1079,7 @@ func (h MonitorHandle) Reset() {
 		Approved:           nil,
 		DownscaleFailureAt: nil,
 		UpscaleFailureAt:   nil,
+		CurrentLogicalTime: nil,
 	}
 }
 
@@ -1066,6 +1131,10 @@ func (h MonitorHandle) DownscaleRequestAllowed(now time.Time) {
 	h.s.Monitor.OngoingRequest = nil
 }
 
+func (h MonitorHandle) UpdateLogicalTime(currentTime *vmv1.LogicalTime) {
+	h.s.Monitor.CurrentLogicalTime = currentTime
+}
+
 // Downscale request was successful but the monitor denied our request.
 func (h MonitorHandle) DownscaleRequestDenied(now time.Time) {
 	h.s.Monitor.DeniedDownscale = &deniedDownscale{
@@ -1087,6 +1156,10 @@ type NeonVMHandle struct {
 
 func (s *State) NeonVM() NeonVMHandle {
 	return NeonVMHandle{&s.internal}
+}
+
+func (s *State) UpdateCurrentClock(logicalTime *vmv1.LogicalTime) {
+	s.internal.updateCurrentClock(logicalTime)
 }
 
 func (h NeonVMHandle) StartingRequest(now time.Time, resources api.Resources) {

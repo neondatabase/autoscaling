@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -191,6 +192,10 @@ type Guest struct {
 	// +optional
 	Ports []Port `json:"ports,omitempty"`
 
+	// Logical clock value corresponding to the desired resources of the VM.
+	// +optional
+	DesiredLogicalTime *LogicalTime `json:"desiredLogicalTime,omitempty"`
+
 	// Additional settings for the VM.
 	// Cannot be updated.
 	// +optional
@@ -213,6 +218,39 @@ func (g Guest) ValidateForMemoryProvider(p MemoryProvider) error {
 		}
 	}
 	return nil
+}
+
+// LogicalTime allows to track progress of changes to a VM.
+type LogicalTime struct {
+	Value     int64       `json:"value"`
+	UpdatedAt metav1.Time `json:"updatedAt"`
+}
+
+func (t *LogicalTime) Rewind(now time.Time) *LogicalTime {
+	if t == nil {
+		return nil
+	}
+	return &LogicalTime{
+		Value:     t.Value,
+		UpdatedAt: metav1.NewTime(now),
+	}
+}
+
+func (t *LogicalTime) RewindNow() *LogicalTime {
+	return t.Rewind(time.Now())
+}
+
+func EarliestLogicalTime(ts ...*LogicalTime) *LogicalTime {
+	var earliest *LogicalTime
+	for _, t := range ts {
+		if t == nil {
+			return nil
+		}
+		if earliest == nil || t.UpdatedAt.Before(&earliest.UpdatedAt) {
+			earliest = t
+		}
+	}
+	return earliest
 }
 
 type GuestSettings struct {
@@ -534,6 +572,8 @@ type VirtualMachineStatus struct {
 	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
+	// +optional
+	CurrentLogicalTime *LogicalTime `json:"currentLogicalTime,omitempty"`
 }
 
 type VmPhase string

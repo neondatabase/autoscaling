@@ -309,7 +309,12 @@ func (e *AutoscaleEnforcer) handleResources(
 		}),
 	)
 
-	return api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}, 200, nil
+	result := api.Resources{
+		VCPU: pod.cpu.Reserved,
+		Mem:  pod.mem.Reserved,
+	}
+
+	return result, 200, nil
 }
 
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(

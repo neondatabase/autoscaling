@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -86,10 +87,15 @@ func makeNeonVMInterface(r *Runner) *execNeonVMInterface {
 }
 
 // Request implements executor.NeonVMInterface
-func (iface *execNeonVMInterface) Request(ctx context.Context, logger *zap.Logger, current, target api.Resources) error {
+func (iface *execNeonVMInterface) Request(
+	ctx context.Context,
+	logger *zap.Logger,
+	current, target api.Resources,
+	desiredLogicalTime *vmv1.LogicalTime,
+) error {
 	iface.runner.recordResourceChange(current, target, iface.runner.global.metrics.neonvmRequestedChange)
 
-	err := iface.runner.doNeonVMRequest(ctx, target)
+	err := iface.runner.doNeonVMRequest(ctx, target, desiredLogicalTime)
 	if err != nil {
 		iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
 			ps.failedNeonVMRequestCounter.Inc()
