@@ -26,6 +26,10 @@ on:
         description: 'ONLY USE FOR E2E TESTS: Set neonvm-controller to never delete VM runner pods'
         type: boolean
         required: false
+      upload-to-ecr:
+        description: 'Should images be uploaded to neon ECR'
+        type: boolean
+        required: false
     outputs:
       controller:
         description: 'neonvm-controller image'
@@ -219,7 +223,44 @@ jobs:
           build-args: |
             CA_GIT_TAG=${{ steps.get-ca-tag.outputs.tag }}
 
+      - name: Login to dev ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: 369495373322.dkr.ecr.eu-central-1.amazonaws.com
+          username: ${{ secrets.DEV_GHA_RUNNER_LIMITED_AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.DEV_GHA_RUNNER_LIMITED_AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to prod ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: 093970136003.dkr.ecr.eu-central-1.amazonaws.com
+          username: ${{ secrets.PROD_GHA_RUNNER_LIMITED_AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.PROD_GHA_RUNNER_LIMITED_AWS_SECRET_ACCESS_KEY }}
+
+      - name: Copy all images to prod ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        run: |
+          for image in \
+            neonvm-controller \
+            neonvm-vxlan-controller \
+            neonvm-runner \
+            vm-kernel \
+            autoscale-scheduler \
+            autoscaler-agent \
+            cluster-autoscaler-neonvm \
+            ; do
+            echo Copy ${image}:${{ inputs.tag }} to dev ECR
+            docker buildx imagetools create -t 369495373322.dkr.ecr.eu-central-1.amazonaws.com/${image}:${{ inputs.tag }} \
+                                               neondatabase/${image}:${{ inputs.tag }}
+            echo Copy ${image}:${{ inputs.tag }} to prod ECR
+            docker buildx imagetools create -t 093970136003.dkr.ecr.eu-central-1.amazonaws.com/${image}:${{ inputs.tag }} \
+                                               neondatabase/${image}:${{ inputs.tag }}
+          done
+
       - name: Remove custom docker config directory
         if: always()
         run: |
           rm -rf .docker-custom
+
