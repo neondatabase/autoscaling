@@ -1,35 +1,6 @@
 name: build-images
 
 on:
-  workflow_dispatch:
-    inputs:
-      # 'skip' is kind of silly. it exists because we can't actually *skip* this job from e2e-test,
-      # otherwise the follow-up job that needs it wouldn't be able to run. So instead we pretend the
-      # job completed successfully, but actually do nothing...
-      skip:
-        description: 'Changes this action to perform a no-op'
-        type: boolean
-        required: false
-      tag:
-        description: 'Tag to use for the Docker images'
-        type: string
-        required: true
-      kernel-image:
-        description: 'Kernel image for the VMs embedded in neonvm-runner. If not specified, a kernel will be built from source'
-        type: string
-        required: false
-      build-cluster-autoscaler:
-        description: 'Build the custom cluster-autoscaler image'
-        type: boolean
-        required: false
-      controller-preserve-runner-pods:
-        description: 'ONLY USE FOR E2E TESTS: Set neonvm-controller to never delete VM runner pods'
-        type: boolean
-        required: false
-      upload-to-ecr:
-        description: 'Should images be uploaded to neon ECR'
-        type: boolean
-        required: false
   workflow_call:
     inputs:
       # 'skip' is kind of silly. it exists because we can't actually *skip* this job from e2e-test,
@@ -268,7 +239,7 @@ jobs:
           username: ${{ secrets.PROD_GHA_RUNNER_LIMITED_AWS_ACCESS_KEY_ID }}
           password: ${{ secrets.PROD_GHA_RUNNER_LIMITED_AWS_SECRET_ACCESS_KEY }}
 
-      - name: Copy all images to prod ECR
+      - name: Copy all images to ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
         run: |
           for image in \
@@ -292,4 +263,3 @@ jobs:
         if: always()
         run: |
           rm -rf .docker-custom
-
