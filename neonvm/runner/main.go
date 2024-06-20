@@ -50,7 +50,6 @@ const (
 	QEMU_BIN          = "qemu-system-x86_64"
 	QEMU_IMG_BIN      = "qemu-img"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
-	baseKernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath                = "/vm/images/runtime.iso"
@@ -897,17 +896,11 @@ func buildQEMUCmd(
 	}
 
 	// kernel details
-	qemuCmd = append(qemuCmd, "-kernel", cfg.kernelPath)
-	var effectiveKernelCmdline string
-	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
-		effectiveKernelCmdline = fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName, baseKernelCmdline)
-	} else {
-		effectiveKernelCmdline = baseKernelCmdline
-	}
-	if cfg.appendKernelCmdline != "" {
-		effectiveKernelCmdline = fmt.Sprintf("%s %s", effectiveKernelCmdline, cfg.appendKernelCmdline)
-	}
-	qemuCmd = append(qemuCmd, "-append", effectiveKernelCmdline)
+	qemuCmd = append(
+		qemuCmd,
+		"-kernel", cfg.kernelPath,
+		"-append", makeKernelCmdline(cfg, vmSpec, vmStatus),
+	)
 
 	// should runner receive migration ?
 	if os.Getenv("RECEIVE_MIGRATION") == "true" {
@@ -915,6 +908,25 @@ func buildQEMUCmd(
 	}
 
 	return qemuCmd, nil
+}
+
+const (
+	baseKernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
+)
+
+func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus) string {
+	cmdlineParts := []string{baseKernelCmdline}
+
+	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
+		netDetails := fmt.Sprintf("ip=%s:::%s:%s:eth1:off", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName)
+		cmdlineParts = append(cmdlineParts, netDetails)
+	}
+
+	if cfg.appendKernelCmdline != "" {
+		cmdlineParts = append(cmdlineParts, cfg.appendKernelCmdline)
+	}
+
+	return strings.Join(cmdlineParts, " ")
 }
 
 func runQEMU(
