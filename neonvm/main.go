@@ -99,6 +99,7 @@ func main() {
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
 	var defaultMemoryProvider vmv1.MemoryProvider
+	var memhpAutoMovableRatio string
 	var failurePendingPeriod time.Duration
 	var failingRefreshInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -110,6 +111,7 @@ func main() {
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
 	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
+	flag.StringVar(&memhpAutoMovableRatio, "memhp-auto-movable-ratio", "301", "For virtio-mem, set VM kernel's memory_hotplug.auto_movable_ratio")
 	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
 		"the period for the propagation of reconciliation failures to the observability instruments")
 	flag.DurationVar(&failingRefreshInterval, "failing-refresh-interval", 1*time.Minute,
@@ -175,6 +177,7 @@ func main() {
 		MaxConcurrentReconciles: concurrencyLimit,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
 		DefaultMemoryProvider:   defaultMemoryProvider,
+		MemhpAutoMovableRatio:   memhpAutoMovableRatio,
 		FailurePendingPeriod:    failurePendingPeriod,
 		FailingRefreshInterval:  failingRefreshInterval,
 	}

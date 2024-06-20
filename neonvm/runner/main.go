@@ -596,6 +596,7 @@ type Config struct {
 	skipCgroupManagement bool
 	diskCacheSettings    string
 	memoryProvider       vmv1.MemoryProvider
+	autoMovableRatio     string
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -607,6 +608,7 @@ func newConfig(logger *zap.Logger) *Config {
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
 		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
+		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -622,10 +624,16 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
+	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
+		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
+
 	flag.Parse()
 
 	if cfg.memoryProvider == "" {
 		logger.Fatal("missing required flag '-memory-provider'")
+	}
+	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem && cfg.autoMovableRatio == "" {
+		logger.Fatal("missing required flag '-memhp-auto-movable-ratio'")
 	}
 
 	return cfg
@@ -911,11 +919,22 @@ func buildQEMUCmd(
 }
 
 const (
-	baseKernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
+	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init console=ttyS1 loglevel=7 root=/dev/vda rw"
+	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable"
+	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
 func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus) string {
 	cmdlineParts := []string{baseKernelCmdline}
+
+	switch cfg.memoryProvider {
+	case vmv1.MemoryProviderDIMMSlots:
+		cmdlineParts = append(cmdlineParts, kernelCmdlineDIMMSlots)
+	case vmv1.MemoryProviderVirtioMem:
+		cmdlineParts = append(cmdlineParts, fmt.Sprintf(kernelCmdlineVirtioMemTmpl, cfg.autoMovableRatio))
+	default:
+		panic(fmt.Errorf("unknown memory provider %s", cfg.memoryProvider))
+	}
 
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
 		netDetails := fmt.Sprintf("ip=%s:::%s:%s:eth1:off", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName)
