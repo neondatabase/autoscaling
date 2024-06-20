@@ -1461,8 +1461,6 @@ func podSpec(
 					}},
 					Command: func() []string {
 						cmd := []string{"runner"}
-						// intentionally add this first, so it's easier to see among the very long
-						// args that follow.
 						if config.UseContainerMgr {
 							cmd = append(cmd, "-skip-cgroup-management")
 						}
@@ -1470,6 +1468,14 @@ func podSpec(
 							cmd,
 							"-qemu-disk-cache-settings", config.QEMUDiskCacheSettings,
 							"-memory-provider", string(memoryProvider),
+						)
+						if memoryProvider == vmv1.MemoryProviderVirtioMem {
+							cmd = append(cmd, "-memhp-auto-movable-ratio", config.MemhpAutoMovableRatio)
+						}
+						// put these last, so that the earlier args are easier to see (because these
+						// can get quite large)
+						cmd = append(
+							cmd,
 							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 						)

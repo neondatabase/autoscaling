@@ -60,6 +60,7 @@ spec:
         # * cache.no-flush=on  - ignores disk flush operations (not needed; our disks are ephemeral)
         - "--qemu-disk-cache-settings=cache.writeback=on,cache.direct=on,cache.no-flush=on"
         - "--default-memory-provider=DIMMSlots"
+        - "--memhp-auto-movable-ratio=801" # for virtio-mem, set memory_hotplug.auto_movable_ratio=801
         - "--failure-pending-period=1m"
         - "--failing-refresh-interval=15s"
         env:

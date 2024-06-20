@@ -112,6 +112,7 @@ var _ = Describe("VirtualMachine controller", func() {
 					MaxConcurrentReconciles: 1,
 					QEMUDiskCacheSettings:   "cache=none",
 					DefaultMemoryProvider:   vmv1.MemoryProviderDIMMSlots,
+					MemhpAutoMovableRatio:   "301",
 					FailurePendingPeriod:    1 * time.Minute,
 					FailingRefreshInterval:  1 * time.Minute,
 				},
