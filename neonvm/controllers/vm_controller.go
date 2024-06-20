@@ -323,16 +323,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
 	}
 
-	// Generate runner pod name
-	if len(vm.Status.PodName) == 0 {
-		vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
-		// Update the .Status on API Server to avoid creating multiple pods for a single VM
-		// See https://github.com/neondatabase/autoscaling/issues/794 for the context
-		if err := r.Status().Update(ctx, vm); err != nil {
-			return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
-		}
-	}
-
 	switch vm.Status.Phase {
 
 	case "":
@@ -369,6 +359,16 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
+		// Generate runner pod name
+		if len(vm.Status.PodName) == 0 {
+			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
+			// Update the .Status on API Server to avoid creating multiple pods for a single VM
+			// See https://github.com/neondatabase/autoscaling/issues/794 for the context
+			if err := r.Status().Update(ctx, vm); err != nil {
+				return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
+			}
+		}
+
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
