@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
@@ -625,7 +626,11 @@ func doMetricsRequest(
 	return nil
 }
 
-func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) error {
+func (r *Runner) doNeonVMRequest(
+	ctx context.Context,
+	target api.Resources,
+	desiredLogicalTime vmv1.LogicalTime,
+) error {
 	patches := []patch.Operation{{
 		Op:    patch.OpReplace,
 		Path:  "/spec/guest/cpus/use",
@@ -634,6 +639,10 @@ func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) erro
 		Op:    patch.OpReplace,
 		Path:  "/spec/guest/memorySlots/use",
 		Value: uint32(target.Mem / r.memSlotSize),
+	}, {
+		Op:    patch.OpReplace,
+		Path:  "/spec/guest/desiredClock",
+		Value: desiredLogicalTime,
 	}}
 
 	patchPayload, err := json.Marshal(patches)
