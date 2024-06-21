@@ -323,16 +323,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
 	}
 
-	// Generate runner pod name
-	if len(vm.Status.PodName) == 0 {
-		vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
-		// Update the .Status on API Server to avoid creating multiple pods for a single VM
-		// See https://github.com/neondatabase/autoscaling/issues/794 for the context
-		if err := r.Status().Update(ctx, vm); err != nil {
-			return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
-		}
-	}
-
 	switch vm.Status.Phase {
 
 	case "":
@@ -369,6 +359,16 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
+		// Generate runner pod name
+		if len(vm.Status.PodName) == 0 {
+			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
+			// Update the .Status on API Server to avoid creating multiple pods for a single VM
+			// See https://github.com/neondatabase/autoscaling/issues/794 for the context
+			if err := r.Status().Update(ctx, vm); err != nil {
+				return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
+			}
+		}
+
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
@@ -551,7 +551,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			// compare guest spec and count of plugged
 
 			specUseCPU := vm.Spec.Guest.CPUs.Use
-			scaleCgroupCPU := *specUseCPU != cgroupUsage.VCPUs
+			scaleCgroupCPU := specUseCPU != cgroupUsage.VCPUs
 			scaleQemuCPU := specUseCPU.RoundedUp() != pluggedCPU
 			if scaleCgroupCPU || scaleQemuCPU {
 				log.Info("VM goes into scaling mode, CPU count needs to be changed",
@@ -561,7 +561,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				vm.Status.Phase = vmv1.VmScaling
 			}
 
-			memorySizeFromSpec := resource.NewQuantity(int64(*vm.Spec.Guest.MemorySlots.Use)*vm.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
+			memorySizeFromSpec := resource.NewQuantity(int64(vm.Spec.Guest.MemorySlots.Use)*vm.Spec.Guest.MemorySlotSize.Value(), resource.BinarySI)
 			if !memorySize.Equal(*memorySizeFromSpec) {
 				log.Info("VM goes into scale mode, need to resize Memory",
 					"Memory on board", memorySize,
@@ -699,13 +699,13 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			r.Recorder.Event(vm, "Normal", "ScaleDown",
 				fmt.Sprintf("One CPU was unplugged from VM %s",
 					vm.Name))
-		} else if *specCPU != cgroupUsage.VCPUs {
-			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", *specCPU)
-			if err := setRunnerCgroup(ctx, vm, *specCPU); err != nil {
+		} else if specCPU != cgroupUsage.VCPUs {
+			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", specCPU)
+			if err := setRunnerCgroup(ctx, vm, specCPU); err != nil {
 				return err
 			}
 			reason := "ScaleDown"
-			if *specCPU > cgroupUsage.VCPUs {
+			if specCPU > cgroupUsage.VCPUs {
 				reason = "ScaleUp"
 			}
 			r.Recorder.Event(vm, "Normal", reason,
@@ -717,8 +717,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		}
 
 		// do hotplug/unplug Memory
-		memSlotsMin := *vm.Spec.Guest.MemorySlots.Min
-		targetSlotCount := int(*vm.Spec.Guest.MemorySlots.Use - memSlotsMin)
+		memSlotsMin := vm.Spec.Guest.MemorySlots.Min
+		targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - memSlotsMin)
 
 		realSlots, err := QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
 		if realSlots < 0 {
@@ -732,9 +732,9 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				log.Error(err, "Unable to re-fetch VirtualMachine")
 				return err
 			}
-			memorySlotsUseInSpec := *vm.Spec.Guest.MemorySlots.Use
+			memorySlotsUseInSpec := vm.Spec.Guest.MemorySlots.Use
 			memoryPluggedSlots := memSlotsMin + int32(realSlots)
-			*vm.Spec.Guest.MemorySlots.Use = memoryPluggedSlots
+			vm.Spec.Guest.MemorySlots.Use = memoryPluggedSlots
 			if err := r.tryUpdateVM(ctx, vm); err != nil {
 				log.Error(err, "Failed to update .spec.guest.memorySlots.use",
 					"old value", memorySlotsUseInSpec,
@@ -1054,9 +1054,9 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 }
 
 func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
-	cpu := *spec.Guest.CPUs.Use
+	cpu := spec.Guest.CPUs.Use
 
-	memorySlots := *spec.Guest.MemorySlots.Use
+	memorySlots := spec.Guest.MemorySlots.Use
 
 	usage := vmv1.VirtualMachineUsage{
 		CPU:    cpu.ToResourceQuantity(),
@@ -1423,7 +1423,7 @@ func podSpec(vm *vmv1.VirtualMachine, sshSecret *corev1.Secret, config *Reconcil
 					Command: []string{
 						"container-mgr",
 						"-port", strconv.Itoa(int(vm.Spec.RunnerPort)),
-						"-init-milli-cpu", strconv.Itoa(int(*vm.Spec.Guest.CPUs.Use)),
+						"-init-milli-cpu", strconv.Itoa(int(vm.Spec.Guest.CPUs.Use)),
 					},
 					Env: []corev1.EnvVar{
 						{

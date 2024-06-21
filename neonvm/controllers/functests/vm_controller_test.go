@@ -80,7 +80,15 @@ var _ = Describe("VirtualMachine controller", func() {
 						Name:      VirtualMachineName,
 						Namespace: namespace.Name,
 					},
-					Spec: vmv1.VirtualMachineSpec{QMP: 1, RestartPolicy: "Never", RunnerPort: 1},
+					Spec: vmv1.VirtualMachineSpec{
+						QMP:           1,
+						RestartPolicy: "Never",
+						RunnerPort:    1,
+						Guest: vmv1.Guest{ //nolint:exhaustruct // other stuff will get defaulted
+							CPUs:        vmv1.CPUs{Min: 1, Use: 1, Max: 1},
+							MemorySlots: vmv1.MemorySlots{Min: 1, Use: 1, Max: 1},
+						},
+					},
 				}
 
 				err = k8sClient.Create(ctx, virtualmachine)
