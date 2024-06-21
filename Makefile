@@ -99,6 +99,7 @@ vet: ## Run go vet against code.
 	CGO_ENABLED=0 go vet ./...
 
 
+TESTARGS ?= ./...
 .PHONY: test
 test: fmt vet envtest ## Run tests.
 	# chmodding KUBEBUILDER_ASSETS dir to make it deletable by owner,
@@ -107,7 +108,8 @@ test: fmt vet envtest ## Run tests.
 	export KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
 	find $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
 	CGO_ENABLED=0 \
-		go test ./... -coverprofile cover.out
+		go test $(TESTARGS) -coverprofile cover.out
+	go tool cover -html=cover.out -o cover.html
 
 ##@ Build
 
