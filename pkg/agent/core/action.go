@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap/zapcore"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -21,24 +22,28 @@ type ActionWait struct {
 }
 
 type ActionPluginRequest struct {
-	LastPermit *api.Resources `json:"current"`
-	Target     api.Resources  `json:"target"`
-	Metrics    *api.Metrics   `json:"metrics"`
+	LastPermit         *api.Resources    `json:"current"`
+	Target             api.Resources     `json:"target"`
+	Metrics            *api.Metrics      `json:"metrics"`
+	DesiredLogicalTime *vmv1.LogicalTime `json:"desiredLogicalTime"`
 }
 
 type ActionNeonVMRequest struct {
-	Current api.Resources `json:"current"`
-	Target  api.Resources `json:"target"`
+	Current            api.Resources     `json:"current"`
+	Target             api.Resources     `json:"target"`
+	DesiredLogicalTime *vmv1.LogicalTime `json:"desiredLogicalTime"`
 }
 
 type ActionMonitorDownscale struct {
-	Current api.Resources `json:"current"`
-	Target  api.Resources `json:"target"`
+	Current            api.Resources     `json:"current"`
+	Target             api.Resources     `json:"target"`
+	DesiredLogicalTime *vmv1.LogicalTime `json:"desiredLogicalTime"`
 }
 
 type ActionMonitorUpscale struct {
-	Current api.Resources `json:"current"`
-	Target  api.Resources `json:"target"`
+	Current            api.Resources     `json:"current"`
+	Target             api.Resources     `json:"target"`
+	DesiredLogicalTime *vmv1.LogicalTime `json:"desiredLogicalTime"`
 }
 
 func addObjectPtr[T zapcore.ObjectMarshaler](enc zapcore.ObjectEncoder, key string, value *T) error {

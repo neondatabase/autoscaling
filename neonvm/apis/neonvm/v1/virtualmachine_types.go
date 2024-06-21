@@ -188,10 +188,46 @@ type Guest struct {
 	// +optional
 	Ports []Port `json:"ports,omitempty"`
 
+	// Logical clock value corresponding to the desired resources of the VM.
+	// +optional
+	DesiredClock *LogicalTime `json:"desiredClock,omitempty"`
+
 	// Additional settings for the VM.
 	// Cannot be updated.
 	// +optional
 	Settings *GuestSettings `json:"settings,omitempty"`
+}
+
+// LogicalTime allows to track progress of changes to a VM.
+type LogicalTime struct {
+	Value     int64       `json:"value"`
+	UpdatedAt metav1.Time `json:"updatedAt"`
+}
+
+func LatestClock(a, b *LogicalTime) *LogicalTime {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	if a.UpdatedAt.After(b.UpdatedAt.Time) {
+		return a
+	}
+	return b
+}
+
+func EarliestLogicalTime(ts ...*LogicalTime) *LogicalTime {
+	var earliest *LogicalTime
+	for _, t := range ts {
+		if t == nil {
+			return nil
+		}
+		if earliest == nil || t.UpdatedAt.Before(&earliest.UpdatedAt) {
+			earliest = t
+		}
+	}
+	return earliest
 }
 
 type GuestSettings struct {
@@ -486,6 +522,8 @@ type VirtualMachineStatus struct {
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
+	// +optional
+	CurrentClock *LogicalTime `json:"currentClock,omitempty"`
 }
 
 type VmPhase string

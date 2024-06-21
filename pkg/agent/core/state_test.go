@@ -140,7 +140,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			err := state.Plugin().RequestSuccessful(now, api.PluginResponse{
 				Permit:  c.schedulerApproved,
 				Migrate: nil,
-			})
+			}, nil)
 			if err != nil {
 				t.Errorf("state.Plugin().RequestSuccessful() failed: %s", err)
 				return
