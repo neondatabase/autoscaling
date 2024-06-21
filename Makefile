@@ -410,16 +410,16 @@ ENVTEST_K8S_VERSION = 1.27.1
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 # k8s deps @ 1.27.1 https://github.com/kubernetes-sigs/controller-tools
-CONTROLLER_TOOLS_VERSION ?= v0.12.0
+CONTROLLER_TOOLS_VERSION ?= v0.12.1
 
-CODE_GENERATOR_VERSION ?= v0.27.13
+CODE_GENERATOR_VERSION ?= v0.27.15
 
 KUTTL ?= $(LOCALBIN)/kuttl
 # k8s deps @ 1.28.3
 KUTTL_VERSION ?= v0.16.0
 
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.27.13
+KUBECTL_VERSION ?= v1.27.15
 
 KIND ?= $(LOCALBIN)/kind
 # https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0, supports k8s up to 1.30
