@@ -654,22 +654,6 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("failed to unmarshal VM Status: %w", err)
 	}
 
-	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
-
-	cpus := []string{}
-	cpus = append(cpus, fmt.Sprintf("cpus=%d", qemuCPUs.min))
-	if qemuCPUs.max != nil {
-		cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *qemuCPUs.max, *qemuCPUs.max))
-	}
-
-	initialMemorySize := vmSpec.Guest.MemorySlotSize.Value() * int64(*vmSpec.Guest.MemorySlots.Min)
-	memory := []string{}
-	memory = append(memory, fmt.Sprintf("size=%db", initialMemorySize))
-	if vmSpec.Guest.MemorySlots.Max != nil {
-		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
-		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
-	}
-
 	enableSSH := false
 	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
 		enableSSH = true
@@ -694,6 +678,7 @@ func run(logger *zap.Logger) error {
 		// the memory up.
 		//
 		// See https://github.com/neondatabase/autoscaling/issues/800
+		initialMemorySize := vmSpec.Guest.MemorySlotSize.Value() * int64(vmSpec.Guest.MemorySlots.Min)
 		if swapInfo != nil && swapInfo.Size.Value() > initialMemorySize/2 {
 			shmSize = &swapInfo.Size
 		}
@@ -726,7 +711,7 @@ func run(logger *zap.Logger) error {
 
 	tg.Go("qemu-cmd", func(logger *zap.Logger) error {
 		var err error
-		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapInfo)
+		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, enableSSH, swapInfo)
 		return err
 	})
 
@@ -734,7 +719,7 @@ func run(logger *zap.Logger) error {
 		return err
 	}
 
-	err = runQEMU(cfg, logger, vmSpec, qemuCmd, qemuCPUs)
+	err = runQEMU(cfg, logger, vmSpec, qemuCmd)
 	if err != nil {
 		return fmt.Errorf("failed to run QEMU: %w", err)
 	}
@@ -777,7 +762,6 @@ func buildQEMUCmd(
 	logger *zap.Logger,
 	vmSpec *vmv1.VirtualMachineSpec,
 	vmStatus *vmv1.VirtualMachineStatus,
-	cpus, memory []string,
 	enableSSH bool,
 	swapInfo *vmv1.SwapInfo,
 ) ([]string, error) {
@@ -857,10 +841,20 @@ func buildQEMUCmd(
 		logger.Warn("not using KVM acceleration")
 	}
 	qemuCmd = append(qemuCmd, "-cpu", "max")
-	qemuCmd = append(qemuCmd, "-smp", strings.Join(cpus, ","))
+	qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
+		"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
+		vmSpec.Guest.CPUs.Min.RoundedUp(),
+		vmSpec.Guest.CPUs.Max.RoundedUp(),
+		vmSpec.Guest.CPUs.Max.RoundedUp(),
+	))
 
 	// memory details
-	qemuCmd = append(qemuCmd, "-m", strings.Join(memory, ","))
+	qemuCmd = append(qemuCmd, "-m", fmt.Sprintf(
+		"size=%db,slots=%d,maxmem=%db",
+		vmSpec.Guest.MemorySlotSize.Value()*int64(vmSpec.Guest.MemorySlots.Min),
+		vmSpec.Guest.MemorySlots.Max-vmSpec.Guest.MemorySlots.Min,
+		vmSpec.Guest.MemorySlotSize.Value()*int64(vmSpec.Guest.MemorySlots.Max),
+	))
 
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
@@ -906,7 +900,6 @@ func runQEMU(
 	logger *zap.Logger,
 	vmSpec *vmv1.VirtualMachineSpec,
 	qemuCmd []string,
-	qemuCPUs QemuCPUs,
 ) error {
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
 	if !ok {
@@ -934,7 +927,8 @@ func runQEMU(
 
 		logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
 
-		if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
+		useCPU := vmSpec.Guest.CPUs.Use
+		if err := setCgroupLimit(logger, useCPU, cgroupPath); err != nil {
 			return fmt.Errorf("Failed to set cgroup limit: %w", err)
 		}
 	}
@@ -1353,31 +1347,6 @@ func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 	cpu := vmv1.MilliCPU(uint32(quota * 1000 / cgroupPeriod))
 	cpu /= cpuLimitOvercommitFactor
 	return &cpu, nil
-}
-
-type QemuCPUs struct {
-	max *int
-	min int
-	use vmv1.MilliCPU
-}
-
-func processCPUs(cpus vmv1.CPUs) QemuCPUs {
-	min := int(cpus.Min.RoundedUp())
-	use := *cpus.Min
-	if cpus.Use != nil {
-		use = *cpus.Use
-	}
-
-	var max *int
-	if cpus.Max != nil {
-		val := int(cpus.Max.RoundedUp())
-		max = &val
-	}
-	return QemuCPUs{
-		max: max,
-		min: min,
-		use: use,
-	}
 }
 
 func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
