@@ -719,41 +719,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 		// do hotplug/unplug Memory
-		memSlotsMin := vm.Spec.Guest.MemorySlots.Min
-		targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - memSlotsMin)
-
-		realSlots, err := QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
-		if realSlots < 0 {
-			return err
-		}
-
-		if realSlots != int(targetSlotCount) {
-			log.Info("Couldn't achieve desired memory slot count, will modify .spec.guest.memorySlots.use instead", "details", err)
-			// firstly re-fetch VM
-			if err := r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, vm); err != nil {
-				log.Error(err, "Unable to re-fetch VirtualMachine")
-				return err
-			}
-			memorySlotsUseInSpec := vm.Spec.Guest.MemorySlots.Use
-			memoryPluggedSlots := memSlotsMin + int32(realSlots)
-			vm.Spec.Guest.MemorySlots.Use = memoryPluggedSlots
-			if err := r.tryUpdateVM(ctx, vm); err != nil {
-				log.Error(err, "Failed to update .spec.guest.memorySlots.use",
-					"old value", memorySlotsUseInSpec,
-					"new value", memoryPluggedSlots)
-				return err
-			}
-		} else {
-			ramScaled = true
-		}
-		// get Memory details from hypervisor and update VM status
-		memorySize, err := QmpGetMemorySize(QmpAddr(vm))
+		ramScaled, err = r.doDIMMSlotsScaling(ctx, vm)
 		if err != nil {
-			log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
 			return err
 		}
-		// update status by memory sizes used in the VM
-		r.updateVMStatusMemory(vm, memorySize)
 
 		// set VM phase to running if everything scaled
 		if cpuScaled && ramScaled {
@@ -808,6 +777,47 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	}
 
 	return nil
+}
+
+func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualMachine) (done bool, _ error) {
+	log := log.FromContext(ctx)
+
+	memSlotsMin := vm.Spec.Guest.MemorySlots.Min
+	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - memSlotsMin)
+
+	realSlots, err := QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
+	if realSlots < 0 {
+		return false, err
+	}
+
+	if realSlots != int(targetSlotCount) {
+		log.Info("Couldn't achieve desired memory slot count, will modify .spec.guest.memorySlots.use instead", "details", err)
+		// firstly re-fetch VM
+		if err := r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, vm); err != nil {
+			log.Error(err, "Unable to re-fetch VirtualMachine")
+			return false, err
+		}
+		memorySlotsUseInSpec := vm.Spec.Guest.MemorySlots.Use
+		memoryPluggedSlots := memSlotsMin + int32(realSlots)
+		vm.Spec.Guest.MemorySlots.Use = memoryPluggedSlots
+		if err := r.tryUpdateVM(ctx, vm); err != nil {
+			log.Error(err, "Failed to update .spec.guest.memorySlots.use",
+				"old value", memorySlotsUseInSpec,
+				"new value", memoryPluggedSlots)
+			return false, err
+		}
+	} else {
+		done = true
+	}
+	// get Memory details from hypervisor and update VM status
+	memorySize, err := QmpGetMemorySize(QmpAddr(vm))
+	if err != nil {
+		log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
+		return false, err
+	}
+	// update status by memory sizes used in the VM
+	r.updateVMStatusMemory(vm, memorySize)
+	return done, nil
 }
 
 type runnerStatusKind string
