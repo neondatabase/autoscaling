@@ -99,7 +99,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	err = (&VirtualMachine{}).SetupWebhookWithManager(mgr)
+	err = ctrl.NewWebhookManagedBy(mgr).For(&VirtualMachine{}).Complete()
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:webhook

@@ -194,7 +194,11 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
 		os.Exit(1)
 	}
-	if err = (&vmv1.VirtualMachine{}).SetupWebhookWithManager(mgr); err != nil {
+	vmWebhook := &controllers.VMWebhook{
+		Recorder: mgr.GetEventRecorderFor("virtualmachine-webhook"),
+		Config:   rc,
+	}
+	if err := vmWebhook.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
 		os.Exit(1)
 	}
@@ -211,8 +215,12 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
 		os.Exit(1)
 	}
-	if err = (&vmv1.VirtualMachineMigration{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachineMigration")
+	migrationWebhook := &controllers.VMMigrationWebhook{
+		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-webhook"),
+		Config:   rc,
+	}
+	if err := migrationWebhook.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder
