@@ -65,7 +65,7 @@ func (r *VirtualMachine) ValidateCreate() (admission.Warnings, error) {
 	// validate .spec.guest.memorySlotSize w.r.t. .spec.guest.memoryProvider
 	if r.Spec.Guest.MemoryProvider != nil {
 		if err := r.Spec.Guest.ValidateForMemoryProvider(*r.Spec.Guest.MemoryProvider); err != nil {
-			return fmt.Errorf(".spec.guest: %w", err)
+			return nil, fmt.Errorf(".spec.guest: %w", err)
 		}
 	}
 
