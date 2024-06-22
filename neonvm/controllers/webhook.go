@@ -10,11 +10,39 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
+
+func validateUpdate(
+	cfg *ReconcilerConfig,
+	recorder record.EventRecorder,
+	oldObj runtime.Object,
+	newObj interface {
+		webhook.Validator
+		metav1.Object
+	},
+) error {
+	namespacedName := types.NamespacedName{
+		Namespace: newObj.GetNamespace(),
+		Name:      newObj.GetName(),
+	}
+	if _, ok := cfg.SkipUpdateValidationFor[namespacedName]; ok {
+		recorder.Event(
+			newObj,
+			"Warning",
+			"SkippedValidation",
+			"Skipping webhook validation because of controller's '--skip-update-validation-for' flag",
+		)
+		return nil
+	}
+
+	return newObj.ValidateUpdate(oldObj)
+}
 
 type VMWebhook struct {
 	Recorder record.EventRecorder
@@ -49,7 +77,7 @@ func (w *VMWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) erro
 // ValidateUpdate implements webhook.CustomValidator
 func (w *VMWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) error {
 	newVM := newObj.(*vmv1.VirtualMachine)
-	return newVM.ValidateUpdate(oldObj)
+	return validateUpdate(w.Config, w.Recorder, oldObj, newVM)
 }
 
 // ValidateDelete implements webhook.CustomValidator
@@ -91,7 +119,7 @@ func (w *VMMigrationWebhook) ValidateCreate(ctx context.Context, obj runtime.Obj
 // ValidateUpdate implements webhook.CustomValidator
 func (w *VMMigrationWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) error {
 	newVMM := newObj.(*vmv1.VirtualMachineMigration)
-	return newVMM.ValidateUpdate(oldObj)
+	return validateUpdate(w.Config, w.Recorder, oldObj, newVMM)
 }
 
 // ValidateDelete implements webhook.CustomValidator
