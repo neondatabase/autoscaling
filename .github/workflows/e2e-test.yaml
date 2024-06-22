@@ -154,7 +154,7 @@ jobs:
         run: |
           {
             echo "configs:"
-            echo "  docker.io:"
+            echo "  registry-1.docker.io:"
             echo "    auth:"
             echo "      username: $DOCKERHUB_USERNAME"
             echo "      password: $DOCKERHUB_PASSWORD"
