@@ -17,24 +17,19 @@ limitations under the License.
 package v1
 
 import (
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-func (r *VirtualMachineMigration) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
-		Complete()
-}
-
 //+kubebuilder:webhook:path=/mutate-vm-neon-tech-v1-virtualmachinemigration,mutating=true,failurePolicy=fail,sideEffects=None,groups=vm.neon.tech,resources=virtualmachinemigrations,verbs=create;update,versions=v1,name=mvirtualmachinemigration.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Defaulter = &VirtualMachineMigration{}
 
-// Default implements webhook.Defaulter so a webhook will be registered for the type
+// Default implements webhook.Defaulter
+//
+// The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) Default() {
 	// TODO: implement defaults
 }
@@ -43,19 +38,25 @@ func (r *VirtualMachineMigration) Default() {
 
 var _ webhook.Validator = &VirtualMachineMigration{}
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
+// ValidateCreate implements webhook.Validator
+//
+// The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateCreate() (admission.Warnings, error) {
 	// TODO: implement creation validation webhook (?)
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
+// ValidateUpdate implements webhook.Validator
+//
+// The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	// TODO: implement update validation webhook
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
+// ValidateDelete implements webhook.Validator
+//
+// The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateDelete() (admission.Warnings, error) {
 	// TODO: implement deletion validation webhook (?)
 	return nil, nil
