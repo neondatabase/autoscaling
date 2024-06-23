@@ -160,11 +160,20 @@ type ExecutorCoreUpdater struct {
 	core *ExecutorCore
 }
 
-// UpdateMetrics calls (*core.State).UpdateMetrics() on the inner core.State and runs withLock while
-// holding the lock.
-func (c ExecutorCoreUpdater) UpdateMetrics(metrics core.Metrics, withLock func()) {
+// UpdateSystemMetrics calls (*core.State).UpdateSystemMetrics() on the inner core.State and runs
+// withLock while holding the lock.
+func (c ExecutorCoreUpdater) UpdateSystemMetrics(metrics core.SystemMetrics, withLock func()) {
 	c.core.update(func(state *core.State) {
-		state.UpdateMetrics(metrics)
+		state.UpdateSystemMetrics(metrics)
+		withLock()
+	})
+}
+
+// UpdateLFCMetrics calls (*core.State).UpdateLFCMetrics() on the inner core.State and runs withLock
+// while holding the lock.
+func (c ExecutorCoreUpdater) UpdateLFCMetrics(metrics core.LFCMetrics, withLock func()) {
+	c.core.update(func(state *core.State) {
+		state.UpdateLFCMetrics(metrics)
 		withLock()
 	})
 }

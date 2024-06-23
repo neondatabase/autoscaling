@@ -38,19 +38,18 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 const (
 	QEMU_BIN          = "qemu-system-x86_64"
 	QEMU_IMG_BIN      = "qemu-img"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
-	baseKernelCmdline = "panic=-1 init=/neonvm/bin/init memhp_default_state=online_movable console=ttyS1 loglevel=7 root=/dev/vda rw"
 
 	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath                = "/vm/images/runtime.iso"
@@ -596,9 +595,11 @@ type Config struct {
 	appendKernelCmdline  string
 	skipCgroupManagement bool
 	diskCacheSettings    string
+	memoryProvider       vmv1.MemoryProvider
+	autoMovableRatio     string
 }
 
-func newConfig() *Config {
+func newConfig(logger *zap.Logger) *Config {
 	cfg := &Config{
 		vmSpecDump:           "",
 		vmStatusDump:         "",
@@ -606,6 +607,8 @@ func newConfig() *Config {
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
+		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
+		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -620,7 +623,18 @@ func newConfig() *Config {
 		"Don't try to manage CPU (use if running alongside container-mgr)")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
+	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
+	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
+		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
+
 	flag.Parse()
+
+	if cfg.memoryProvider == "" {
+		logger.Fatal("missing required flag '-memory-provider'")
+	}
+	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem && cfg.autoMovableRatio == "" {
+		logger.Fatal("missing required flag '-memhp-auto-movable-ratio'")
+	}
 
 	return cfg
 }
@@ -634,7 +648,7 @@ func main() {
 }
 
 func run(logger *zap.Logger) error {
-	cfg := newConfig()
+	cfg := newConfig(logger)
 
 	vmSpecJson, err := base64.StdEncoding.DecodeString(cfg.vmSpecDump)
 	if err != nil {
@@ -652,22 +666,6 @@ func run(logger *zap.Logger) error {
 	var vmStatus vmv1.VirtualMachineStatus
 	if err := json.Unmarshal(vmStatusJson, &vmStatus); err != nil {
 		return fmt.Errorf("failed to unmarshal VM Status: %w", err)
-	}
-
-	qemuCPUs := processCPUs(vmSpec.Guest.CPUs)
-
-	cpus := []string{}
-	cpus = append(cpus, fmt.Sprintf("cpus=%d", qemuCPUs.min))
-	if qemuCPUs.max != nil {
-		cpus = append(cpus, fmt.Sprintf("maxcpus=%d,sockets=1,cores=%d,threads=1", *qemuCPUs.max, *qemuCPUs.max))
-	}
-
-	initialMemorySize := vmSpec.Guest.MemorySlotSize.Value() * int64(*vmSpec.Guest.MemorySlots.Min)
-	memory := []string{}
-	memory = append(memory, fmt.Sprintf("size=%db", initialMemorySize))
-	if vmSpec.Guest.MemorySlots.Max != nil {
-		memory = append(memory, fmt.Sprintf("slots=%d", *vmSpec.Guest.MemorySlots.Max-*vmSpec.Guest.MemorySlots.Min))
-		memory = append(memory, fmt.Sprintf("maxmem=%db", vmSpec.Guest.MemorySlotSize.Value()*int64(*vmSpec.Guest.MemorySlots.Max)))
 	}
 
 	enableSSH := false
@@ -694,31 +692,19 @@ func run(logger *zap.Logger) error {
 		// the memory up.
 		//
 		// See https://github.com/neondatabase/autoscaling/issues/800
+		initialMemorySize := vmSpec.Guest.MemorySlotSize.Value() * int64(vmSpec.Guest.MemorySlots.Min)
 		if swapInfo != nil && swapInfo.Size.Value() > initialMemorySize/2 {
 			shmSize = &swapInfo.Size
 		}
 	}
 
-	// Helper function to both log an error and return the result of wrapping it with the message.
-	//
-	// This is used below because (*errgroup.Group).Wait() returns at most 1 error, which means
-	// imprecise usage can hide errors. So, we log the errors before they would be returned, to make
-	// sure they're always visible.
-	logWrap := func(msg string, err error) error {
-		logger.Error(msg, zap.Error(err))
-		return fmt.Errorf("%s: %w", msg, err)
-	}
-
-	eg := &errgroup.Group{}
-	eg.Go(func() error {
-		if err := runInitScript(logger, vmSpec.InitScript); err != nil {
-			return logWrap("failed to run init script", err)
-		}
-		return nil
+	tg := taskgroup.NewGroup(logger)
+	tg.Go("init-script", func(logger *zap.Logger) error {
+		return runInitScript(logger, vmSpec.InitScript)
 	})
 
-	eg.Go(func() error {
-		if err := createISO9660runtime(
+	tg.Go("iso9660-runtime", func(logger *zap.Logger) error {
+		return createISO9660runtime(
 			runtimeDiskPath,
 			vmSpec.Guest.Command,
 			vmSpec.Guest.Args,
@@ -728,35 +714,26 @@ func run(logger *zap.Logger) error {
 			enableSSH,
 			swapInfo,
 			shmSize,
-		); err != nil {
-			return logWrap("failed to create iso9660 disk", err)
-		}
-		return nil
+		)
 	})
 
-	eg.Go(func() error {
+	tg.Go("rootDisk", func(logger *zap.Logger) error {
 		// resize rootDisk image of size specified and new size more than current
-		if err := resizeRootDisk(logger, vmSpec); err != nil {
-			return logWrap("failed to resize rootDisk", err)
-		}
-		return nil
+		return resizeRootDisk(logger, vmSpec)
 	})
 	var qemuCmd []string
 
-	eg.Go(func() error {
+	tg.Go("qemu-cmd", func(logger *zap.Logger) error {
 		var err error
-		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, cpus, memory, enableSSH, swapInfo)
-		if err != nil {
-			return logWrap("failed to build QEMU command", err)
-		}
-		return nil
+		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, enableSSH, swapInfo)
+		return err
 	})
 
-	if err := eg.Wait(); err != nil {
+	if err := tg.Wait(); err != nil {
 		return err
 	}
 
-	err = runQEMU(cfg, logger, vmSpec, qemuCmd, qemuCPUs)
+	err = runQEMU(cfg, logger, vmSpec, qemuCmd)
 	if err != nil {
 		return fmt.Errorf("failed to run QEMU: %w", err)
 	}
@@ -799,7 +776,6 @@ func buildQEMUCmd(
 	logger *zap.Logger,
 	vmSpec *vmv1.VirtualMachineSpec,
 	vmStatus *vmv1.VirtualMachineStatus,
-	cpus, memory []string,
 	enableSSH bool,
 	swapInfo *vmv1.SwapInfo,
 ) ([]string, error) {
@@ -879,10 +855,35 @@ func buildQEMUCmd(
 		logger.Warn("not using KVM acceleration")
 	}
 	qemuCmd = append(qemuCmd, "-cpu", "max")
-	qemuCmd = append(qemuCmd, "-smp", strings.Join(cpus, ","))
+	qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
+		"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
+		vmSpec.Guest.CPUs.Min.RoundedUp(),
+		vmSpec.Guest.CPUs.Max.RoundedUp(),
+		vmSpec.Guest.CPUs.Max.RoundedUp(),
+	))
 
 	// memory details
-	qemuCmd = append(qemuCmd, "-m", strings.Join(memory, ","))
+	logger.Info(fmt.Sprintf("Using memory provider %s", cfg.memoryProvider))
+	qemuCmd = append(qemuCmd, "-m", fmt.Sprintf(
+		"size=%db,slots=%d,maxmem=%db",
+		vmSpec.Guest.MemorySlotSize.Value()*int64(vmSpec.Guest.MemorySlots.Min),
+		vmSpec.Guest.MemorySlots.Max-vmSpec.Guest.MemorySlots.Min,
+		vmSpec.Guest.MemorySlotSize.Value()*int64(vmSpec.Guest.MemorySlots.Max),
+	))
+	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem {
+		// we don't actually have any slots because it's virtio-mem, but we're still using the API
+		// designed around DIMM slots, so we need to use them to calculate how much memory we expect
+		// to be able to plug in.
+		numSlots := vmSpec.Guest.MemorySlots.Max - vmSpec.Guest.MemorySlots.Min
+		virtioMemSize := int64(numSlots) * vmSpec.Guest.MemorySlotSize.Value()
+		// We can add virtio-mem if it actually needs to be a non-zero size.
+		// Otherwise, QEMU fails with:
+		//   property 'size' of memory-backend-ram doesn't take value '0'
+		if virtioMemSize != 0 {
+			qemuCmd = append(qemuCmd, "-object", fmt.Sprintf("memory-backend-ram,id=vmem0,size=%db", virtioMemSize))
+			qemuCmd = append(qemuCmd, "-device", "virtio-mem-pci,id=vm0,memdev=vmem0,block-size=8M,requested-size=0")
+		}
+	}
 
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
@@ -903,17 +904,11 @@ func buildQEMUCmd(
 	}
 
 	// kernel details
-	qemuCmd = append(qemuCmd, "-kernel", cfg.kernelPath)
-	var effectiveKernelCmdline string
-	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
-		effectiveKernelCmdline = fmt.Sprintf("ip=%s:::%s:%s:eth1:off %s", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName, baseKernelCmdline)
-	} else {
-		effectiveKernelCmdline = baseKernelCmdline
-	}
-	if cfg.appendKernelCmdline != "" {
-		effectiveKernelCmdline = fmt.Sprintf("%s %s", effectiveKernelCmdline, cfg.appendKernelCmdline)
-	}
-	qemuCmd = append(qemuCmd, "-append", effectiveKernelCmdline)
+	qemuCmd = append(
+		qemuCmd,
+		"-kernel", cfg.kernelPath,
+		"-append", makeKernelCmdline(cfg, vmSpec, vmStatus),
+	)
 
 	// should runner receive migration ?
 	if os.Getenv("RECEIVE_MIGRATION") == "true" {
@@ -923,12 +918,41 @@ func buildQEMUCmd(
 	return qemuCmd, nil
 }
 
+const (
+	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init console=ttyS1 loglevel=7 root=/dev/vda rw"
+	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable"
+	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
+)
+
+func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus) string {
+	cmdlineParts := []string{baseKernelCmdline}
+
+	switch cfg.memoryProvider {
+	case vmv1.MemoryProviderDIMMSlots:
+		cmdlineParts = append(cmdlineParts, kernelCmdlineDIMMSlots)
+	case vmv1.MemoryProviderVirtioMem:
+		cmdlineParts = append(cmdlineParts, fmt.Sprintf(kernelCmdlineVirtioMemTmpl, cfg.autoMovableRatio))
+	default:
+		panic(fmt.Errorf("unknown memory provider %s", cfg.memoryProvider))
+	}
+
+	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
+		netDetails := fmt.Sprintf("ip=%s:::%s:%s:eth1:off", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName)
+		cmdlineParts = append(cmdlineParts, netDetails)
+	}
+
+	if cfg.appendKernelCmdline != "" {
+		cmdlineParts = append(cmdlineParts, cfg.appendKernelCmdline)
+	}
+
+	return strings.Join(cmdlineParts, " ")
+}
+
 func runQEMU(
 	cfg *Config,
 	logger *zap.Logger,
 	vmSpec *vmv1.VirtualMachineSpec,
 	qemuCmd []string,
-	qemuCPUs QemuCPUs,
 ) error {
 	selfPodName, ok := os.LookupEnv("K8S_POD_NAME")
 	if !ok {
@@ -956,7 +980,8 @@ func runQEMU(
 
 		logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
 
-		if err := setCgroupLimit(logger, qemuCPUs.use, cgroupPath); err != nil {
+		useCPU := vmSpec.Guest.CPUs.Use
+		if err := setCgroupLimit(logger, useCPU, cgroupPath); err != nil {
 			return fmt.Errorf("Failed to set cgroup limit: %w", err)
 		}
 	}
@@ -984,8 +1009,11 @@ func runQEMU(
 	}
 
 	logger.Info(fmt.Sprintf("calling %s", bin), zap.Strings("args", cmd))
-	if err := execFg(bin, cmd...); err != nil {
-		logger.Error("QEMU exited with error", zap.Error(err))
+	err := execFg(bin, cmd...)
+	if err != nil {
+		msg := "QEMU exited with error" // TODO: technically this might not be accurate. This can also happen if it fails to start.
+		logger.Error(msg, zap.Error(err))
+		err = fmt.Errorf("%s: %w", msg, err)
 	} else {
 		logger.Info("QEMU exited without error")
 	}
@@ -993,7 +1021,7 @@ func runQEMU(
 	cancel()
 	wg.Wait()
 
-	return nil
+	return err
 }
 
 func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
@@ -1372,31 +1400,6 @@ func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 	cpu := vmv1.MilliCPU(uint32(quota * 1000 / cgroupPeriod))
 	cpu /= cpuLimitOvercommitFactor
 	return &cpu, nil
-}
-
-type QemuCPUs struct {
-	max *int
-	min int
-	use vmv1.MilliCPU
-}
-
-func processCPUs(cpus vmv1.CPUs) QemuCPUs {
-	min := int(cpus.Min.RoundedUp())
-	use := *cpus.Min
-	if cpus.Use != nil {
-		use = *cpus.Use
-	}
-
-	var max *int
-	if cpus.Max != nil {
-		val := int(cpus.Max.RoundedUp())
-		max = &val
-	}
-	return QemuCPUs{
-		max: max,
-		min: min,
-		use: use,
-	}
 }
 
 func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {

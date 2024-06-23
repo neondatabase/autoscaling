@@ -66,21 +66,12 @@ type VmCpuInfo struct {
 	Use vmapi.MilliCPU `json:"use"`
 }
 
-func NewVmCpuInfo(cpus vmapi.CPUs) (*VmCpuInfo, error) {
-	if cpus.Min == nil {
-		return nil, errors.New("expected non-nil field Min")
+func NewVmCpuInfo(cpus vmapi.CPUs) VmCpuInfo {
+	return VmCpuInfo{
+		Min: cpus.Min,
+		Max: cpus.Max,
+		Use: cpus.Use,
 	}
-	if cpus.Max == nil {
-		return nil, errors.New("expected non-nil field Max")
-	}
-	if cpus.Use == nil {
-		return nil, errors.New("expected non-nil field Use")
-	}
-	return &VmCpuInfo{
-		Min: *cpus.Min,
-		Max: *cpus.Max,
-		Use: *cpus.Use,
-	}, nil
 }
 
 type VmMemInfo struct {
@@ -94,22 +85,13 @@ type VmMemInfo struct {
 	SlotSize Bytes `json:"slotSize"`
 }
 
-func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) (*VmMemInfo, error) {
-	if memSlots.Min == nil {
-		return nil, errors.New("expected non-nil field Min")
-	}
-	if memSlots.Max == nil {
-		return nil, errors.New("expected non-nil field Max")
-	}
-	if memSlots.Use == nil {
-		return nil, errors.New("expected non-nil field Use")
-	}
-	return &VmMemInfo{
-		Min:      uint16(*memSlots.Min),
-		Max:      uint16(*memSlots.Max),
-		Use:      uint16(*memSlots.Use),
+func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) VmMemInfo {
+	return VmMemInfo{
+		Min:      uint16(memSlots.Min),
+		Max:      uint16(memSlots.Max),
+		Use:      uint16(memSlots.Use),
 		SlotSize: Bytes(memSlotSize.Value()),
-	}, nil
+	}
 
 }
 
@@ -191,15 +173,8 @@ func extractVmInfoGeneric(
 	obj metav1.ObjectMetaAccessor,
 	resources vmapi.VirtualMachineResources,
 ) (*VmInfo, error) {
-	cpuInfo, err := NewVmCpuInfo(resources.CPUs)
-	if err != nil {
-		return nil, fmt.Errorf("Error extracting CPU info: %w", err)
-	}
-
-	memInfo, err := NewVmMemInfo(resources.MemorySlots, resources.MemorySlotSize)
-	if err != nil {
-		return nil, fmt.Errorf("Error extracting memory info: %w", err)
-	}
+	cpuInfo := NewVmCpuInfo(resources.CPUs)
+	memInfo := NewVmMemInfo(resources.MemorySlots, resources.MemorySlotSize)
 
 	autoMigrationEnabled := HasAutoMigrationEnabled(obj)
 	scalingEnabled := HasAutoscalingEnabled(obj)
@@ -208,8 +183,8 @@ func extractVmInfoGeneric(
 	info := VmInfo{
 		Name:      vmName,
 		Namespace: obj.GetObjectMeta().GetNamespace(),
-		Cpu:       *cpuInfo,
-		Mem:       *memInfo,
+		Cpu:       cpuInfo,
+		Mem:       memInfo,
 		Config: VmConfig{
 			AutoMigrationEnabled: autoMigrationEnabled,
 			AlwaysMigrate:        alwaysMigrate,
@@ -352,6 +327,14 @@ type ScalingConfig struct {
 	// When specifying the autoscaler-agent config, this field is required. For an individual VM, if
 	// this field is left out the settings will fall back on the global default.
 	MemoryUsageFractionTarget *float64 `json:"memoryUsageFractionTarget,omitempty"`
+
+	// EnableLFCMetrics, if true, enables fetching additional metrics about the Local File Cache
+	// (LFC) to provide as input to the scaling algorithm.
+	//
+	// When specifying the autoscaler-agent config, this field is required. False is a safe default.
+	// For an individual VM, if this field is left out the settings will fall back on the global
+	// default.
+	EnableLFCMetrics *bool `json:"enableLFCMetrics,omitempty"`
 }
 
 // WithOverrides returns a new copy of defaults, where fields set in overrides replace the ones in
@@ -368,6 +351,9 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 	}
 	if overrides.MemoryUsageFractionTarget != nil {
 		defaults.MemoryUsageFractionTarget = lo.ToPtr(*overrides.MemoryUsageFractionTarget)
+	}
+	if overrides.EnableLFCMetrics != nil {
+		defaults.EnableLFCMetrics = &[]bool{*overrides.EnableLFCMetrics}[0]
 	}
 
 	return defaults
@@ -408,6 +394,10 @@ func (c *ScalingConfig) validate(requireAll bool) error {
 		erc.Whenf(ec, *c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget")
 	} else if requireAll {
 		ec.Add(fmt.Errorf("%s is a required field", ".memoryUsageFractionTarget"))
+	}
+
+	if requireAll {
+		erc.Whenf(ec, c.EnableLFCMetrics == nil, "%s is a required field", ".enableLFCMetrics")
 	}
 
 	// heads-up! some functions elsewhere depend on the concrete return type of this function.

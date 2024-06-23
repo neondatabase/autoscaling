@@ -28,12 +28,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/zapr"
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -98,6 +98,10 @@ func main() {
 	var concurrencyLimit int
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
+	var defaultMemoryProvider vmv1.MemoryProvider
+	var memhpAutoMovableRatio string
+	var failurePendingPeriod time.Duration
+	var failingRefreshInterval time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -106,25 +110,24 @@ func main() {
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
+	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
+	flag.StringVar(&memhpAutoMovableRatio, "memhp-auto-movable-ratio", "301", "For virtio-mem, set VM kernel's memory_hotplug.auto_movable_ratio")
+	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
+		"the period for the propagation of reconciliation failures to the observability instruments")
+	flag.DurationVar(&failingRefreshInterval, "failing-refresh-interval", 1*time.Minute,
+		"the interval between consecutive updates of metrics and logs, related to failing reconciliations")
 	flag.Parse()
+
+	if defaultMemoryProvider == "" {
+		fmt.Fprintln(os.Stderr, "missing required flag '-default-memory-provider'")
+		os.Exit(1)
+	}
 
 	logConfig := zap.NewProductionConfig()
 	logConfig.Sampling = nil // Disabling sampling; it's enabled by default for zap's production configs.
 	logConfig.Level.SetLevel(zap.InfoLevel)
 	logConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	baseLogger := zap.Must(logConfig.Build())
-	// There's no direct way to go from a zap.Logger to a logr.Logger, or even a zapcore.Core to a
-	// logr.Logger, so we need the roundabout method of letting logr do the initial setup and then
-	// replacing the zapcore.Core with our own.
-	logger := ctrlzap.New(
-		ctrlzap.RawZapOpts(zap.WrapCore(
-			func(c zapcore.Core) zapcore.Core {
-				return baseLogger.Core() // completely replace the zapcore.Core with the one we created above.
-			},
-		)),
-		ctrlzap.StacktraceLevel(zapcore.PanicLevel), // Must be set here, otherwise gets overridden.
-	)
+	logger := zapr.NewLogger(zap.Must(logConfig.Build(zap.AddStacktrace(zapcore.PanicLevel))))
 
 	ctrl.SetLogger(logger)
 	// define klog settings (used in LeaderElector)
@@ -173,6 +176,10 @@ func main() {
 		UseContainerMgr:         enableContainerMgr,
 		MaxConcurrentReconciles: concurrencyLimit,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
+		DefaultMemoryProvider:   defaultMemoryProvider,
+		MemhpAutoMovableRatio:   memhpAutoMovableRatio,
+		FailurePendingPeriod:    failurePendingPeriod,
+		FailingRefreshInterval:  failingRefreshInterval,
 	}
 
 	vmReconciler := &controllers.VMReconciler{
@@ -222,6 +229,11 @@ func main() {
 	dbgSrv := debugServerFunc(vmReconcilerMetrics, migrationReconcilerMetrics)
 	if err := mgr.Add(dbgSrv); err != nil {
 		setupLog.Error(err, "unable to set up debug server")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(vmReconcilerMetrics.FailingRefresher()); err != nil {
+		setupLog.Error(err, "unable to set up failing refresher")
 		os.Exit(1)
 	}
 

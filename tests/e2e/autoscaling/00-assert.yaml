@@ -14,3 +14,4 @@ status:
       status: "True"
   cpus: 250m
   memorySize: 1Gi
+  memoryProvider: DIMMSlots

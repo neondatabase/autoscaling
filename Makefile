@@ -99,6 +99,7 @@ vet: ## Run go vet against code.
 	CGO_ENABLED=0 go vet ./...
 
 
+TESTARGS ?= ./...
 .PHONY: test
 test: fmt vet envtest ## Run tests.
 	# chmodding KUBEBUILDER_ASSETS dir to make it deletable by owner,
@@ -107,7 +108,8 @@ test: fmt vet envtest ## Run tests.
 	export KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
 	find $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
 	CGO_ENABLED=0 \
-		go test ./... -coverprofile cover.out
+		go test $(TESTARGS) -coverprofile cover.out
+	go tool cover -html=cover.out -o cover.html
 
 ##@ Build
 
@@ -398,28 +400,28 @@ $(LOCALBIN):
 
 ## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-KUSTOMIZE_VERSION ?= v4.5.7
+KUSTOMIZE_VERSION ?= v4.5.7# same as used in kubectl v1.26.x ; see https://github.com/kubernetes-sigs/kustomize/tree/48d79c745a142b440eae1e13445bb8343cd0ca23?tab=readme-ov-file#kubectl-integration
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.25.0
+ENVTEST_K8S_VERSION = 1.26.1
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-CONTROLLER_TOOLS_VERSION ?= v0.10.0
-CODE_GENERATOR_VERSION ?= v0.25.16
+CONTROLLER_TOOLS_VERSION ?= v0.11.4# k8s deps @ 1.26.1
+CODE_GENERATOR_VERSION ?= v0.26.15
 
 KUTTL ?= $(LOCALBIN)/kuttl
-KUTTL_VERSION ?= v0.15.0
+KUTTL_VERSION ?= v0.15.0# k8s deps @ 1.26.0
 
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.25.16
+KUBECTL_VERSION ?= v1.26.15
 
 KIND ?= $(LOCALBIN)/kind
-KIND_VERSION ?= v0.20.0
+KIND_VERSION ?= v0.23.0# https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0
 
 K3D ?= $(LOCALBIN)/k3d
-K3D_VERSION ?= v5.5.1
+K3D_VERSION ?= v5.5.1# k8s deps in go.mod @ v1.27.1 (nb: binary, separate from images)
 
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
