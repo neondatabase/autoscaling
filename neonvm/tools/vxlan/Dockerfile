@@ -1,9 +1,18 @@
-# Build the Go binary
-FROM golang:1.21 as builder
-ARG TARGETOS
-ARG TARGETARCH
-
+FROM golang:1.21-alpine as chef
+RUN go install github.com/sharnoff/go-chef@ee64ced765864b0b55c9afc33435529681673553
 WORKDIR /workspace
+
+FROM chef as planner
+COPY . .
+RUN go-chef --prepare recipe.json
+
+# Build the Go binary
+FROM chef as builder
+
+# Build dependencies
+COPY --from=planner /workspace/recipe.json recipe.json
+RUN CGO_ENABLED=0 go-chef --cook recipe.json
+
 # Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
@@ -19,7 +28,7 @@ COPY neonvm/tools/vxlan/controller/ neonvm/tools/vxlan/controller/
 # was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /vxlan-controller neonvm/tools/vxlan/controller/main.go
+RUN CGO_ENABLED=0 go build -o /vxlan-controller neonvm/tools/vxlan/controller/main.go
 
 FROM alpine:3.16
 
