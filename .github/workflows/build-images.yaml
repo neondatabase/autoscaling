@@ -26,6 +26,10 @@ on:
         description: 'ONLY USE FOR E2E TESTS: Set neonvm-controller to never delete VM runner pods'
         type: boolean
         required: false
+      upload-to-ecr:
+        description: 'Should images be uploaded to neon ECR'
+        type: boolean
+        required: false
     outputs:
       controller:
         description: 'neonvm-controller image'
@@ -51,6 +55,8 @@ env:
   IMG_SCHEDULER:          "neondatabase/autoscale-scheduler"
   IMG_AUTOSCALER_AGENT:   "neondatabase/autoscaler-agent"
   IMG_CLUSTER_AUTOSCALER: "neondatabase/cluster-autoscaler-neonvm"
+  ECR_DEV:                "369495373322.dkr.ecr.eu-central-1.amazonaws.com"
+  ECR_PROD:               "093970136003.dkr.ecr.eu-central-1.amazonaws.com"
 
 defaults:
   run:
@@ -126,10 +132,28 @@ jobs:
           mkdir -p .docker-custom
           echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
       - uses: docker/setup-buildx-action@v2
-      - uses: docker/login-action@v2
+
+      - name: Login to Dockerhub
+        uses: docker/login-action@v2
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: Login to dev ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_DEV }}
+          username: ${{ secrets.DEV_GHA_RUNNER_LIMITED_AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.DEV_GHA_RUNNER_LIMITED_AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to prod ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_PROD }}
+          username: ${{ secrets.PROD_GHA_RUNNER_LIMITED_AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.PROD_GHA_RUNNER_LIMITED_AWS_SECRET_ACCESS_KEY }}
 
       - name: Check dependencies
         run: |
@@ -218,6 +242,26 @@ jobs:
           tags: ${{ needs.tags.outputs.cluster-autoscaler }}
           build-args: |
             CA_GIT_TAG=${{ steps.get-ca-tag.outputs.tag }}
+
+      - name: Copy all images to ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        run: |
+          for image in \
+            neonvm-controller \
+            neonvm-vxlan-controller \
+            neonvm-runner \
+            vm-kernel \
+            autoscale-scheduler \
+            autoscaler-agent \
+            cluster-autoscaler-neonvm \
+            ; do
+            echo Copy ${image}:${{ inputs.tag }} to dev ECR
+            docker buildx imagetools create -t ${{ env.ECR_DEV }}/${image}:${{ inputs.tag }} \
+                                               neondatabase/${image}:${{ inputs.tag }}
+            echo Copy ${image}:${{ inputs.tag }} to prod ECR
+            docker buildx imagetools create -t ${{ env.ECR_PROD }}/${image}:${{ inputs.tag }} \
+                                               neondatabase/${image}:${{ inputs.tag }}
+          done
 
       - name: Remove custom docker config directory
         if: always()

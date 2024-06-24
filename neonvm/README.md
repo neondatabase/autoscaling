@@ -32,6 +32,8 @@ spec:
   guest:
     rootDisk:
       image: neondatabase/vm-debian:11
+    cpus: { min: 1, use: 1, max: 1 }
+    memorySlots: { min: 1, use: 1, max: 1 }
 EOF
 ```
 

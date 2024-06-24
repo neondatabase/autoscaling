@@ -655,8 +655,8 @@ func (e *AutoscaleEnforcer) Score(
 	}
 
 	// Special case: return minimum score if we don't have room
-	overbudget, verdict := e.speculativeReserve(node, vmInfo, pod, false, func(_ verdictSet, overBudget bool) bool {
-		return overBudget
+	overbudget, verdict := e.speculativeReserve(node, vmInfo, pod, false, func(_ verdictSet, _ bool) bool {
+		return false // never actually accept the pod; we're just doing this to ask if it's over-budget.
 	})
 	if overbudget {
 		score := framework.MinNodeScore

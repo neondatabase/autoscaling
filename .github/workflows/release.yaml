@@ -39,6 +39,7 @@ jobs:
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
       build-cluster-autoscaler: true
+      upload-to-ecr: true
     secrets: inherit
 
   build-test-vm:

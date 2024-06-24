@@ -215,16 +215,14 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
 	// metrics from spec
-	specPairs := []pair[vmResourceValueType, *vmapi.MilliCPU]{
+	specPairs := []pair[vmResourceValueType, vmapi.MilliCPU]{
 		{vmResourceValueSpecMin, vm.Spec.Guest.CPUs.Min},
 		{vmResourceValueSpecMax, vm.Spec.Guest.CPUs.Max},
 		{vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use},
 	}
 	for _, p := range specPairs {
-		if p.second != nil {
-			m := makeVMMetric(vm, p.first, p.second.AsFloat64())
-			metrics = append(metrics, m)
-		}
+		m := makeVMMetric(vm, p.first, p.second.AsFloat64())
+		metrics = append(metrics, m)
 	}
 
 	// metrics from status
@@ -257,16 +255,14 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	}
 
 	// metrics from spec
-	specPairs := []pair[vmResourceValueType, *int32]{
+	specPairs := []pair[vmResourceValueType, int32]{
 		{vmResourceValueSpecMin, vm.Spec.Guest.MemorySlots.Min},
 		{vmResourceValueSpecMax, vm.Spec.Guest.MemorySlots.Max},
 		{vmResourceValueSpecUse, vm.Spec.Guest.MemorySlots.Use},
 	}
 	for _, p := range specPairs {
-		if p.second != nil {
-			m := makeVMMetric(vm, p.first, float64(memorySlotsToBytes(*p.second)))
-			metrics = append(metrics, m)
-		}
+		m := makeVMMetric(vm, p.first, float64(memorySlotsToBytes(p.second)))
+		metrics = append(metrics, m)
 	}
 
 	// metrics from status

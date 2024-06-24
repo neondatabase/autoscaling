@@ -314,12 +314,23 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			}
 			log.Info("CPUs in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 
-			// do hotplug Memory in targetRunner
-			log.Info("Syncing Memory in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
-			if err := QmpSyncMemoryToTarget(vm, migration); err != nil {
-				return ctrl.Result{}, err
+			// do hotplug Memory in targetRunner -- only needed for dimm slots; virtio-mem Just Works™
+			switch *vm.Status.MemoryProvider {
+			case vmv1.MemoryProviderVirtioMem:
+				// ref "Migration works out of the box" - https://lwn.net/Articles/755423/
+				log.Info(
+					"No need to sync memory in Target runner because MemoryProvider is VirtioMem",
+					"TargetPod.Name", migration.Status.TargetPodName,
+				)
+			case vmv1.MemoryProviderDIMMSlots:
+				log.Info("Syncing Memory in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
+				if err := QmpSyncMemoryToTarget(vm, migration); err != nil {
+					return ctrl.Result{}, err
+				}
+				log.Info("Memory in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
+			default:
+				panic(fmt.Errorf("unexpected vm.status.memoryProvider %q", *vm.Status.MemoryProvider))
 			}
-			log.Info("Memory in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 
 			// Migrate only running VMs to target with plugged devices
 			if vm.Status.Phase == vmv1.VmPreMigrating {
@@ -692,8 +703,18 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	migration *vmv1.VirtualMachineMigration,
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
+	if vm.Status.MemoryProvider == nil {
+		return nil, errors.New("cannot create target pod because vm.status.memoryProvider is not set")
+	}
+	// TODO: this is technically racy because target pod creation happens before we set the
+	// migration source pod, so in between reading this and starting the migration, it's
+	// *technically* possible that we create a target pod with a different memory provider than a
+	// newer source pod.
+	// Given that this requires (a) restart *during* initial live migration, and (b) that restart to
+	// change the memory provider, this is low enough risk that it's ok to leave to a follow-up.
+	memoryProvider := *vm.Status.MemoryProvider
 
-	pod, err := podSpec(vm, sshSecret, r.Config)
+	pod, err := podSpec(vm, memoryProvider, sshSecret, r.Config)
 	if err != nil {
 		return nil, err
 	}

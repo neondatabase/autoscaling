@@ -3,6 +3,13 @@ kind: TestAssert
 timeout: 90
 ---
 apiVersion: vm.neon.tech/v1
+kind: VirtualMachineMigration
+metadata:
+  name: example
+status:
+  phase: Succeeded
+---
+apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
   name: example
@@ -12,6 +19,10 @@ status:
   conditions:
     - type: Available
       status: "True"
-  cpus: 250m
-  memorySize: 1Gi
-  memoryProvider: DIMMSlots
+---
+apiVersion: v1
+kind: pod
+metadata:
+  name: workload
+status:
+  phase: Running
