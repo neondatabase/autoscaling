@@ -16,6 +16,10 @@ spec:
         name: neonvm-runner-image-loader
     spec:
       containers:
+        # NOTE: this image is referenced by kustomize in order to set the value of the
+        # neonvm-controller's VM_RUNNER_IMAGE env var. We do it that way so that we can use
+        # 'kustomize edit image' to set the runner image, even if it does require some
+        # spooky action at a distance.
       - image: runner:dev
         name: neonvm-runner-loader
         command: ["sh", "-c", "echo 'image loaded and container started' && sleep 100d"]

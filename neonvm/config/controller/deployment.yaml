@@ -65,7 +65,7 @@ spec:
         - "--failing-refresh-interval=15s"
         env:
         - name: VM_RUNNER_IMAGE
-          value: $(VM_RUNNER_IMAGE) # will be replaced by kustomize
+          value: $(VM_RUNNER_IMAGE) # will be replaced by kustomize based on neonvm-runner-image-loader image
         - name: NAD_IPAM_NAME
           value: $(NAD_IPAM_NAME)
         - name: NAD_IPAM_NAMESPACE
