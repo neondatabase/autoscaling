@@ -251,7 +251,7 @@ render-manifests: $(RENDERED) kustomize
 	# Prepare:
 	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm/runner-image-loader/bases && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
@@ -265,7 +265,7 @@ render-manifests: $(RENDERED) kustomize
 	# Cleanup:
 	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=runner:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd neonvm/runner-image-loader/bases && $(KUSTOMIZE) edit set image runner=runner:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 
@@ -273,7 +273,7 @@ render-release: $(RENDERED) kustomize
 	# Prepare:
 	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)
 	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER)
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER)
+	cd neonvm/runner-image-loader/bases && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER)
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER)
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
@@ -287,7 +287,7 @@ render-release: $(RENDERED) kustomize
 	# Cleanup:
 	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=controller:dev
 	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=runner:dev
+	cd neonvm/runner-image-loader/bases && $(KUSTOMIZE) edit set image runner=runner:dev
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
