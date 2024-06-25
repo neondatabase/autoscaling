@@ -31,6 +31,9 @@ type ClientsConfig struct {
 	S3   *S3ClientConfig   `json:"s3"`
 }
 
+type AzureBlobStorageConfig struct {
+}
+
 type HTTPClientConfig struct {
 	BaseClientConfig
 	URL string `json:"url"`
