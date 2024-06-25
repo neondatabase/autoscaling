@@ -98,7 +98,6 @@ func (c AzureClient) send(ctx context.Context, payload []byte, traceID TraceID) 
 var _ Client = &AzureClient{}
 
 func NewAzureBlockStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient, error) {
-	// TODO: 13890 which creds to take?
 	var client *azblob.Client
 	clientOptions := &azblob.ClientOptions{
 		ClientOptions: azcore.ClientOptions{
@@ -107,7 +106,9 @@ func NewAzureBlockStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient
 	}
 	switch cfg.AuthType {
 	case AzureAuthTypeTests:
-		shKey, err := azblob.NewSharedKeyCredential("devstoreaccount1", "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==")
+		shKey, err := azblob.NewSharedKeyCredential(
+			"devstoreaccount1",
+			"Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==")
 		if err != nil {
 			return nil, err
 		}
