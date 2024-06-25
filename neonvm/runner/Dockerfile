@@ -1,13 +1,13 @@
-FROM golang:1.21-alpine as chef
+FROM golang:1.21-alpine AS chef
 RUN go install github.com/sharnoff/go-chef@ee64ced765864b0b55c9afc33435529681673553
 WORKDIR /workspace
 
-FROM chef as planner
+FROM chef AS planner
 COPY . .
 RUN CGO_ENABLED=0 go-chef --prepare recipe.json
 
 # Build the Go binary
-FROM chef as builder
+FROM chef AS builder
 
 # Build dependencies
 COPY --from=planner /workspace/recipe.json recipe.json
@@ -33,7 +33,7 @@ COPY pkg/util pkg/util
 RUN CGO_ENABLED=0 go build -o /runner neonvm/runner/main.go
 RUN CGO_ENABLED=0 go build -o /container-mgr neonvm/runner/container-mgr/*.go
 
-FROM alpine:3.16 as crictl
+FROM alpine:3.16 AS crictl
 
 RUN apk add --no-cache \
     curl
