@@ -22,23 +22,18 @@ import (
 	"reflect"
 	"slices"
 
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-func (r *VirtualMachine) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
-		Complete()
-}
-
 //+kubebuilder:webhook:path=/mutate-vm-neon-tech-v1-virtualmachine,mutating=true,failurePolicy=fail,sideEffects=None,groups=vm.neon.tech,resources=virtualmachines,verbs=create;update,versions=v1,name=mvirtualmachine.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Defaulter = &VirtualMachine{}
 
-// Default implements webhook.Defaulter so a webhook will be registered for the type
+// Default implements webhook.Defaulter
+//
+// The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachine) Default() {
 	// Nothing to do.
 }
@@ -47,7 +42,9 @@ func (r *VirtualMachine) Default() {
 
 var _ webhook.Validator = &VirtualMachine{}
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
+// ValidateCreate implements webhook.Validator
+//
+// The controller wraps this logic so it can inject extra control.
 func (r *VirtualMachine) ValidateCreate() error {
 	// validate .spec.guest.cpus.use and .spec.guest.cpus.max
 	if r.Spec.Guest.CPUs.Use < r.Spec.Guest.CPUs.Min {
@@ -118,7 +115,9 @@ func (r *VirtualMachine) ValidateCreate() error {
 	return nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
+// ValidateUpdate implements webhook.Validator
+//
+// The controller wraps this logic so it can inject extra control.
 func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 	// process immutable fields
 	before, _ := old.(*VirtualMachine)

@@ -3,6 +3,8 @@ package controllers
 import (
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
+
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
@@ -22,6 +24,10 @@ type ReconcilerConfig struct {
 	UseContainerMgr bool
 
 	MaxConcurrentReconciles int
+
+	// SkipUpdateValidationFor is the set of object names that we should ignore when doing webhook
+	// update validation.
+	SkipUpdateValidationFor map[types.NamespacedName]struct{}
 
 	// QEMUDiskCacheSettings sets the values of the 'cache.*' settings used for QEMU disks.
 	//
