@@ -13,6 +13,7 @@ namePrefix: neonvm-
 #  someName: someValue
 
 bases:
+- namespace
 - crd
 - rbac
 - controller
@@ -23,7 +24,7 @@ bases:
 - vxlan-controller
 - network
 - device-plugin
-- ../runner-image-loader
+- ../runner-image-loader/bases
 
 patchesStrategicMerge:
 - webhookcainjection_patch.yaml
