@@ -55,7 +55,7 @@ type AzureError struct {
 }
 
 func (e AzureError) Error() string {
-	return fmt.Sprintf("S3 error: %s", e.Err.Error())
+	return fmt.Sprintf("Azure Blob error: %s", e.Err.Error())
 }
 
 func (e AzureError) Unwrap() error {
