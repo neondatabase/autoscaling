@@ -272,9 +272,9 @@ func (b Bytes) MarshalJSON() ([]byte, error) {
 func (b Bytes) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
-		state.Write([]byte(fmt.Sprintf("%v", uint64(b))))
+		state.Write([]byte(fmt.Sprintf("%v", uint64(b)))) //nolint:errcheck // we don't expect errors here
 	default:
-		state.Write([]byte(b.ToResourceQuantity().String()))
+		state.Write([]byte(b.ToResourceQuantity().String())) //nolint:errcheck // we don't expect errors here
 	}
 }
 

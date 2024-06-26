@@ -3,6 +3,8 @@ package billing
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -10,7 +12,6 @@ import (
 	"github.com/lithammer/shortuuid"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"time"
 )
 
 type AzureAuthType string
@@ -95,16 +96,17 @@ func (c AzureClient) generateKey() string {
 }
 
 func (c AzureClient) send(ctx context.Context, payload []byte, _ TraceID) error {
-	_, err := c.c.UploadBuffer(ctx, c.cfg.Container, c.generateKey(), payload, &azblob.UploadBufferOptions{
-		Progress: c.cfg.trackProgress,
-	})
+	_, err := c.c.UploadBuffer(ctx, c.cfg.Container, c.generateKey(), payload,
+		&azblob.UploadBufferOptions{ //nolint:exhaustruct // It's part of Azure SDK
+			Progress: c.cfg.trackProgress,
+		})
 	return handleAzureError(err)
 }
 
-var _ Client = &AzureClient{}
-
 func NewAzureBlobStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient, error) {
 	var client *azblob.Client
+
+	//nolint:exhaustruct // It's part of Azure SDK
 	clientOptions := &azblob.ClientOptions{
 		ClientOptions: azcore.ClientOptions{
 			Telemetry: policy.TelemetryOptions{ApplicationID: "neon-autoscaler"},
@@ -125,9 +127,7 @@ func NewAzureBlobStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient,
 			return nil, &AzureError{err}
 		}
 	case AzureAuthTypeDefault:
-		credential, err := azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
-			ClientOptions: azcore.ClientOptions{},
-		})
+		credential, err := azidentity.NewDefaultAzureCredential(nil)
 		if err != nil {
 			return nil, err
 		}
