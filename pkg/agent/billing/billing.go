@@ -27,11 +27,14 @@ type Config struct {
 }
 
 type ClientsConfig struct {
-	HTTP *HTTPClientConfig `json:"http"`
-	S3   *S3ClientConfig   `json:"s3"`
+	AzureBlob *AzureBlobStorageConfig `json:"azureBlob"`
+	HTTP      *HTTPClientConfig       `json:"http"`
+	S3        *S3ClientConfig         `json:"s3"`
 }
 
 type AzureBlobStorageConfig struct {
+	BaseClientConfig
+	billing.AzureBlockStorageClientConfig
 }
 
 type HTTPClientConfig struct {
@@ -105,6 +108,17 @@ func NewMetricsCollector(
 		clients: make([]clientInfo, 0),
 	}
 
+	if c := conf.Clients.AzureBlob; c != nil {
+		client, err := billing.NewAzureBlobStorageClient(c.AzureBlockStorageClientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("error creating AzureBlobStorageClient: %w", err)
+		}
+		mc.clients = append(mc.clients, clientInfo{
+			client: client,
+			name:   "azureblob",
+			config: c.BaseClientConfig,
+		})
+	}
 	if c := conf.Clients.HTTP; c != nil {
 		mc.clients = append(mc.clients, clientInfo{
 			client: billing.NewHTTPClient(c.URL, http.DefaultClient),

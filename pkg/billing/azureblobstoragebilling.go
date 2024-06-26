@@ -33,17 +33,23 @@ type AzureAuthSharedKey struct {
 type AzureBlockStorageClientConfig struct {
 	AuthType  AzureAuthType       `json:"authType"`
 	SharedKey *AzureAuthSharedKey `json:"sharedKey"`
-	// trackProgress is useful in tests, it's invoked when SDK sends blobs to Azure.
-	// Otherwise keep empty.
-	trackProgress func(bytesTransferred int64)
 	// In Azure a Container is close to a bucket in AWS S3
-	Container         string `json:"container"`
+	Container string `json:"container"`
+	// Files will be created with name starting with PrefixInContainer
 	PrefixInContainer string `json:"prefixInContainer"`
 	// Example Endpoint: "https://MYSTORAGEACCOUNT.blob.core.windows.net/"
 	Endpoint string `json:"endpoint"`
+
+	//
+	// Unexported attributes follow this comment.
+	//
+
 	// Use generateKey for tests.
 	// Otherwise, keep empty.
 	generateKey func() string
+	// trackProgress is useful in tests, it's invoked when SDK sends blobs to Azure.
+	// Otherwise keep empty.
+	trackProgress func(bytesTransferred int64)
 }
 
 type AzureError struct {
@@ -88,7 +94,7 @@ func (c AzureClient) generateKey() string {
 	return fmt.Sprintf("%s/%s", c.cfg.PrefixInContainer, filename)
 }
 
-func (c AzureClient) send(ctx context.Context, payload []byte, traceID TraceID) error {
+func (c AzureClient) send(ctx context.Context, payload []byte, _ TraceID) error {
 	_, err := c.c.UploadBuffer(ctx, c.cfg.Container, c.generateKey(), payload, &azblob.UploadBufferOptions{
 		Progress: c.cfg.trackProgress,
 	})
@@ -97,7 +103,7 @@ func (c AzureClient) send(ctx context.Context, payload []byte, traceID TraceID) 
 
 var _ Client = &AzureClient{}
 
-func NewAzureBlockStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient, error) {
+func NewAzureBlobStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient, error) {
 	var client *azblob.Client
 	clientOptions := &azblob.ClientOptions{
 		ClientOptions: azcore.ClientOptions{

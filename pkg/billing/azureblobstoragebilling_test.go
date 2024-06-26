@@ -79,7 +79,7 @@ func TestAzureClient_send(t *testing.T) {
 				i.cfg.generateKey = func() string {
 					return "test-blob-name"
 				}
-				c, err := NewAzureBlockStorageClient(i.cfg)
+				c, err := NewAzureBlobStorageClient(i.cfg)
 				require.NoError(t, err)
 				i.c = c
 			},
@@ -101,7 +101,7 @@ func TestAzureClient_send(t *testing.T) {
 				i.cfg.generateKey = func() string {
 					return "test-blob-name"
 				}
-				c, err := NewAzureBlockStorageClient(i.cfg)
+				c, err := NewAzureBlobStorageClient(i.cfg)
 				require.NoError(t, err)
 				i.c = c
 				_, err = c.c.CreateContainer(i.ctx, i.cfg.Container, &azblob.CreateContainerOptions{})
