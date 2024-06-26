@@ -46,9 +46,6 @@ type AzureBlobStorageClientConfig struct {
 	// Use generateKey for tests.
 	// Otherwise, keep empty.
 	generateKey func() string
-	// trackProgress is useful in tests, it's invoked when SDK sends blobs to Azure.
-	// Otherwise keep empty.
-	trackProgress func(bytesTransferred int64)
 }
 
 type AzureError struct {
@@ -90,9 +87,8 @@ func (c AzureClient) send(ctx context.Context, payload []byte, _ TraceID) error 
 		return err
 	}
 	_, err = c.c.UploadBuffer(ctx, c.cfg.Container, c.generateKey(), payload,
-		&azblob.UploadBufferOptions{ //nolint:exhaustruct // It's part of Azure SDK
-			Progress: c.cfg.trackProgress,
-		})
+		&azblob.UploadBufferOptions{}, //nolint:exhaustruct // It's part of Azure SDK
+	)
 	return handleAzureError(err)
 }
 
