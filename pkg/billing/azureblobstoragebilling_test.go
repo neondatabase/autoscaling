@@ -1,6 +1,8 @@
 package billing
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -111,9 +113,12 @@ func TestAzureClient_send(t *testing.T) {
 				require.NoError(t, o.err)
 				b := make([]byte, 1000)
 				const expectedText = "hello, billing data is here"
-				_, err := o.c.c.DownloadBuffer(o.ctx, "test-container", "test-blob-name", b, &azblob.DownloadBufferOptions{})
+				read, err := o.c.c.DownloadBuffer(o.ctx, "test-container", "test-blob-name", b, &azblob.DownloadBufferOptions{})
+				b = b[0:read]
 				require.NoError(t, err)
-				require.Equal(t, b[0:len(expectedText)], []byte(expectedText))
+				b, err = bytesFromStorage(b)
+				require.NoError(t, err)
+				require.Equal(t, b, []byte(expectedText))
 			},
 		},
 	}
@@ -142,4 +147,30 @@ func TestAzureClient_send(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestBytesForBilling(t *testing.T) {
+	const expectedText = "hello, billing data is here"
+	billing, err := bytesForBilling([]byte(expectedText))
+	require.NoError(t, err)
+	storage, err := bytesFromStorage(billing)
+	require.NoError(t, err)
+	require.Equal(t, expectedText, string(storage))
+}
+
+func bytesFromStorage(i []byte) ([]byte, error) {
+	gzR, err := gzip.NewReader(bytes.NewBuffer(i))
+	if err != nil {
+		return nil, err
+	}
+	var resB bytes.Buffer
+	_, err = resB.ReadFrom(gzR)
+	if err != nil {
+		return nil, err
+	}
+	err = gzR.Close() // Have to close it before reading the buffer
+	if err != nil {
+		return nil, err
+	}
+	return resB.Bytes(), nil
 }

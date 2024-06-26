@@ -153,25 +153,33 @@ func (c S3Client) LogFields() zap.Field {
 	}))
 }
 
+func bytesForBilling(i []byte) ([]byte, error) {
+	buf := bytes.Buffer{}
+
+	gzW := gzip.NewWriter(&buf)
+	_, err := gzW.Write(i)
+	if err != nil {
+		return nil, err
+	}
+
+	err = gzW.Close() // Have to close it before reading the buffer
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
 	// Source of truth for the storage format:
 	// https://github.com/neondatabase/cloud/issues/11199#issuecomment-1992549672
 
 	key := c.generateKey()
-	buf := bytes.Buffer{}
-
-	gzW := gzip.NewWriter(&buf)
-	_, err := gzW.Write(payload)
+	payload, err := bytesForBilling(payload)
 	if err != nil {
 		return S3Error{Err: err}
 	}
 
-	err = gzW.Close() // Have to close it before reading the buffer
-	if err != nil {
-		return S3Error{Err: err}
-	}
-
-	r := bytes.NewReader(buf.Bytes())
+	r := bytes.NewReader(payload)
 	_, err = c.client.PutObject(ctx, &s3.PutObjectInput{ //nolint:exhaustruct // AWS SDK
 		Bucket: &c.cfg.Bucket,
 		Key:    &key,

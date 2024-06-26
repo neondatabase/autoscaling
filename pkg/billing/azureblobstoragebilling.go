@@ -96,7 +96,11 @@ func (c AzureClient) generateKey() string {
 }
 
 func (c AzureClient) send(ctx context.Context, payload []byte, _ TraceID) error {
-	_, err := c.c.UploadBuffer(ctx, c.cfg.Container, c.generateKey(), payload,
+	payload, err := bytesForBilling(payload)
+	if err != nil {
+		return err
+	}
+	_, err = c.c.UploadBuffer(ctx, c.cfg.Container, c.generateKey(), payload,
 		&azblob.UploadBufferOptions{ //nolint:exhaustruct // It's part of Azure SDK
 			Progress: c.cfg.trackProgress,
 		})
