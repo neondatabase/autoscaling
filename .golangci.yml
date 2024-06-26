@@ -4,8 +4,6 @@ run:
   issues-exit-code: 1
 
 issues:
-  exclude-files:
-    - '.*_test.go$'
   exclude:
     # ChanMutex contains only a channel, which *is* safe to copy
     - 'copylocks: .* copies lock value.*: github\.com/neondatabase/autoscaling/pkg/util\.ChanMutex'

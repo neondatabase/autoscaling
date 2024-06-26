@@ -5,15 +5,16 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"net"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/orlangure/gnomock"
 	"github.com/orlangure/gnomock/preset/azurite"
 	"github.com/stretchr/testify/require"
-	"net"
-	"os"
-	"testing"
-	"time"
 )
 
 type container struct {
@@ -89,7 +90,7 @@ func TestAzureClient_send(t *testing.T) {
 				require.Error(t, o.err)
 				var azErr AzureError
 				require.ErrorAs(t, o.err, &azErr)
-				rErr := &azcore.ResponseError{}
+				rErr := &azcore.ResponseError{} //nolint:exhaustruct // OK for tests
 				require.ErrorAs(t, o.err, &rErr)
 				require.Equal(t, 404, rErr.StatusCode)
 			},
@@ -106,14 +107,18 @@ func TestAzureClient_send(t *testing.T) {
 				c, err := NewAzureBlobStorageClient(i.cfg)
 				require.NoError(t, err)
 				i.c = c
-				_, err = c.c.CreateContainer(i.ctx, i.cfg.Container, &azblob.CreateContainerOptions{})
+				_, err = c.c.CreateContainer(i.ctx, i.cfg.Container,
+					&azblob.CreateContainerOptions{}, //nolint:exhaustruct // OK for tests
+				)
 				require.NoError(t, err)
 			},
 			then: func(t *testing.T, o output) {
 				require.NoError(t, o.err)
 				b := make([]byte, 1000)
 				const expectedText = "hello, billing data is here"
-				read, err := o.c.c.DownloadBuffer(o.ctx, "test-container", "test-blob-name", b, &azblob.DownloadBufferOptions{})
+				read, err := o.c.c.DownloadBuffer(o.ctx, "test-container", "test-blob-name", b,
+					&azblob.DownloadBufferOptions{}, //nolint:exhaustruct // OK for tests
+				)
 				b = b[0:read]
 				require.NoError(t, err)
 				b, err = bytesFromStorage(b)
@@ -129,9 +134,9 @@ func TestAzureClient_send(t *testing.T) {
 			azureBlobStorage, err := startAzuriteContainer("3.30.0")
 			require.NoError(t, err)
 
-			i := &input{
+			i := &input{ //nolint:exhaustruct // OK for tests
 				ctx: ctx,
-				cfg: AzureBlobStorageClientConfig{
+				cfg: AzureBlobStorageClientConfig{ //nolint:exhaustruct // OK for tests
 					Endpoint: fmt.Sprintf("http://%s:%d/devstoreaccount1", azureBlobStorage.Host, azureBlobStorage.c.Ports["blob"].Port),
 					AuthType: AzureAuthTypeTests,
 				},
