@@ -21,7 +21,7 @@ const (
 	// It uses well-known storage account and key.
 	// See https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite
 	AzureAuthTypeTests AzureAuthType = "tests"
-	// AzureAuthTypeDefault is for pods running in AKS.
+	// AzureAuthTypeDefault is for pods running in Azure Kubernetes.
 	// Make sure you have provisioned Role and you have Managed Identity.
 	AzureAuthTypeDefault AzureAuthType = "default"
 )
