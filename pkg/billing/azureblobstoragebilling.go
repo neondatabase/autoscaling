@@ -3,13 +3,10 @@ package billing
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-	"github.com/lithammer/shortuuid"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -83,16 +80,7 @@ func (c AzureClient) generateKey() string {
 	if c.cfg.generateKey != nil {
 		return c.cfg.generateKey()
 	}
-	// Example: prefixInContainer/year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
-	now := time.Now()
-	id := shortuuid.New()
-
-	filename := fmt.Sprintf("year=%d/month=%02d/day=%02d/%s_%s.ndjson.gz",
-		now.Year(), now.Month(), now.Day(),
-		now.Format("15:04:05Z"),
-		id,
-	)
-	return fmt.Sprintf("%s/%s", c.cfg.PrefixInContainer, filename)
+	return keyTemplate(c.cfg.PrefixInContainer)
 }
 
 func (c AzureClient) send(ctx context.Context, payload []byte, _ TraceID) error {
