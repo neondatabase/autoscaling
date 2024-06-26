@@ -31,7 +31,7 @@ type AzureAuthSharedKey struct {
 	AccountKey  string `json:"accountKey"`
 }
 
-type AzureBlockStorageClientConfig struct {
+type AzureBlobStorageClientConfig struct {
 	AuthType  AzureAuthType       `json:"authType"`
 	SharedKey *AzureAuthSharedKey `json:"sharedKey"`
 	// In Azure a Container is close to a bucket in AWS S3
@@ -66,7 +66,7 @@ func (e AzureError) Unwrap() error {
 }
 
 type AzureClient struct {
-	cfg AzureBlockStorageClientConfig
+	cfg AzureBlobStorageClientConfig
 	c   *azblob.Client
 }
 
@@ -103,7 +103,7 @@ func (c AzureClient) send(ctx context.Context, payload []byte, _ TraceID) error 
 	return handleAzureError(err)
 }
 
-func NewAzureBlobStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient, error) {
+func NewAzureBlobStorageClient(cfg AzureBlobStorageClientConfig) (*AzureClient, error) {
 	var client *azblob.Client
 
 	//nolint:exhaustruct // It's part of Azure SDK
@@ -114,6 +114,8 @@ func NewAzureBlobStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient,
 	}
 	switch cfg.AuthType {
 	case AzureAuthTypeTests:
+		// Using well known credentials,
+		// see https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite
 		shKey, err := azblob.NewSharedKeyCredential(
 			"devstoreaccount1",
 			"Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==")
@@ -121,7 +123,6 @@ func NewAzureBlobStorageClient(cfg AzureBlockStorageClientConfig) (*AzureClient,
 			return nil, err
 		}
 
-		// https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite?tabs=docker-hub%2Cblob-storage#well-known-storage-account-and-key
 		client, err = azblob.NewClientWithSharedKeyCredential(cfg.Endpoint, shKey, clientOptions)
 		if err != nil {
 			return nil, &AzureError{err}

@@ -55,7 +55,7 @@ func TestAzureClient_send(t *testing.T) {
 	t.Parallel()
 	type input struct {
 		ctx     context.Context
-		cfg     AzureBlockStorageClientConfig
+		cfg     AzureBlobStorageClientConfig
 		payload []byte
 		traceID TraceID
 		c       *AzureClient
@@ -126,7 +126,7 @@ func TestAzureClient_send(t *testing.T) {
 
 			i := &input{
 				ctx: ctx,
-				cfg: AzureBlockStorageClientConfig{
+				cfg: AzureBlobStorageClientConfig{
 					Endpoint: fmt.Sprintf("http://%s:%d/devstoreaccount1", azureBlobStorage.Host, azureBlobStorage.c.Ports["blob"].Port),
 					AuthType: AzureAuthTypeTests,
 				},

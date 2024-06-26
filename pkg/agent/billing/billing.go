@@ -34,7 +34,7 @@ type ClientsConfig struct {
 
 type AzureBlobStorageConfig struct {
 	BaseClientConfig
-	billing.AzureBlockStorageClientConfig
+	billing.AzureBlobStorageClientConfig
 }
 
 type HTTPClientConfig struct {
@@ -109,7 +109,7 @@ func NewMetricsCollector(
 	}
 
 	if c := conf.Clients.AzureBlob; c != nil {
-		client, err := billing.NewAzureBlobStorageClient(c.AzureBlockStorageClientConfig)
+		client, err := billing.NewAzureBlobStorageClient(c.AzureBlobStorageClientConfig)
 		if err != nil {
 			return nil, fmt.Errorf("error creating AzureBlobStorageClient: %w", err)
 		}
