@@ -96,7 +96,7 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	# `go vet` requires gcc
 	# ref https://github.com/golang/go/issues/56755
-	GOOS=linux CGO_ENABLED=0 go vet ./...
+	CGO_ENABLED=0 go vet ./...
 
 
 TESTARGS ?= ./...
@@ -115,13 +115,13 @@ test: fmt vet envtest ## Run tests.
 
 .PHONY: build
 build: fmt vet bin/vm-builder ## Build all neonvm binaries.
-	GOOS=linux go build -o bin/controller       neonvm/main.go
-	GOOS=linux go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
-	GOOS=linux go build -o bin/runner           neonvm/runner/*.go
+	go build -o bin/controller       neonvm/main.go
+	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
+	go build -o bin/runner           neonvm/runner/*.go
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" neonvm/tools/vm-builder/main.go
+	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" neonvm/tools/vm-builder/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
@@ -129,7 +129,7 @@ run: fmt vet ## Run a controller from your host.
 
 .PHONY: lint
 lint: ## Run golangci-lint against code.
-	GOOS=linux golangci-lint run
+	golangci-lint run
 
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
