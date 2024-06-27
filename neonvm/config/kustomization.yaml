@@ -24,12 +24,21 @@ bases:
 - vxlan-controller
 - network
 - device-plugin
+- ../runner-image-loader/bases
 
 patchesStrategicMerge:
 - webhookcainjection_patch.yaml
 
 # the following config is for teaching kustomize how to do var substitution
 vars:
+- name: VM_RUNNER_IMAGE # full name of the neonvm-runner image
+  objref:
+    kind: DaemonSet
+    name: runner-image-loader
+    group: apps
+    version: v1
+  fieldref:
+    fieldpath: spec.template.spec.containers.[name=neonvm-runner-loader].image
 - name: CERTIFICATE_NAMESPACE # namespace of the certificate CR
   objref:
     kind: Certificate

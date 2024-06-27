@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package functests
 
 import (
 	"context"
@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/neonvm/controllers"
 )
 
 var _ = Describe("VirtualMachine controller", func() {
@@ -101,15 +102,17 @@ var _ = Describe("VirtualMachine controller", func() {
 			}, time.Minute, time.Second).Should(Succeed())
 
 			By("Reconciling the custom resource created")
-			virtualmachineReconciler := &VMReconciler{
+			virtualmachineReconciler := &controllers.VMReconciler{
 				Client:   k8sClient,
 				Scheme:   k8sClient.Scheme(),
 				Recorder: nil,
-				Config: &ReconcilerConfig{
+				Config: &controllers.ReconcilerConfig{
 					IsK3s:                   false,
 					UseContainerMgr:         true,
 					MaxConcurrentReconciles: 1,
 					QEMUDiskCacheSettings:   "cache=none",
+					DefaultMemoryProvider:   vmv1.MemoryProviderDIMMSlots,
+					MemhpAutoMovableRatio:   "301",
 					FailurePendingPeriod:    1 * time.Minute,
 					FailingRefreshInterval:  1 * time.Minute,
 				},

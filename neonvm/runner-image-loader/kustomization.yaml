@@ -7,9 +7,8 @@ namespace: neonvm-system
 namePrefix: neonvm-
 
 resources:
-- daemonset.yaml
+- bases
 - ../config/namespace
-
 images:
 - name: runner
   newName: runner

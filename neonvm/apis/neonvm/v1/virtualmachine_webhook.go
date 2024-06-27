@@ -61,6 +61,13 @@ func (r *VirtualMachine) ValidateCreate() error {
 			r.Spec.Guest.CPUs.Max)
 	}
 
+	// validate .spec.guest.memorySlotSize w.r.t. .spec.guest.memoryProvider
+	if r.Spec.Guest.MemoryProvider != nil {
+		if err := r.Spec.Guest.ValidateForMemoryProvider(*r.Spec.Guest.MemoryProvider); err != nil {
+			return fmt.Errorf(".spec.guest: %w", err)
+		}
+	}
+
 	// validate .spec.guest.memorySlots.use and .spec.guest.memorySlots.max
 	if r.Spec.Guest.MemorySlots.Use < r.Spec.Guest.MemorySlots.Min {
 		return fmt.Errorf(".spec.guest.memorySlots.use (%d) should be greater than or equal to the .spec.guest.memorySlots.min (%d)",
@@ -124,6 +131,10 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) error {
 		{".spec.guest.cpus.max", func(v *VirtualMachine) any { return v.Spec.Guest.CPUs.Max }},
 		{".spec.guest.memorySlots.min", func(v *VirtualMachine) any { return v.Spec.Guest.MemorySlots.Min }},
 		{".spec.guest.memorySlots.max", func(v *VirtualMachine) any { return v.Spec.Guest.MemorySlots.Max }},
+		// nb: we don't check memoryProvider here, so that it's allowed to be mutable as a way of
+		// getting flexibility to solidify the memory provider or change it across restarts.
+		// ref https://github.com/neondatabase/autoscaling/pull/970#discussion_r1644225986
+		{".spec.guest.memoryProvider", func(v *VirtualMachine) any { return v.Spec.Guest.MemoryProvider }},
 		{".spec.guest.ports", func(v *VirtualMachine) any { return v.Spec.Guest.Ports }},
 		{".spec.guest.rootDisk", func(v *VirtualMachine) any { return v.Spec.Guest.RootDisk }},
 		{".spec.guest.command", func(v *VirtualMachine) any { return v.Spec.Guest.Command }},
