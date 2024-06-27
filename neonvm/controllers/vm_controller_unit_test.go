@@ -98,9 +98,12 @@ func newTestParams(t *testing.T) *testParams {
 	scheme.AddKnownTypes(corev1.SchemeGroupVersion, &corev1.Pod{})
 
 	params := &testParams{
-		t:      t,
-		ctx:    ctx,
-		client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		t:   t,
+		ctx: ctx,
+		client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&vmv1.VirtualMachine{}).
+			Build(),
 		//nolint:exhaustruct // This is a mock
 		mockRecorder: &mockRecorder{},
 		r:            nil,
