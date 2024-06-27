@@ -15,10 +15,10 @@ import (
 type AzureAuthType string
 
 const (
-	// AzureAuthTypeTests is used in tests
+	// azureAuthTypeTests is used in tests
 	// It uses well-known storage account and key.
 	// See https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite
-	AzureAuthTypeTests AzureAuthType = "tests"
+	azureAuthTypeTests AzureAuthType = "tests"
 	// AzureAuthTypeDefault is for pods running in Azure Kubernetes.
 	// Make sure you have provisioned Role and you have Managed Identity.
 	AzureAuthTypeDefault AzureAuthType = "default"
@@ -102,7 +102,7 @@ func NewAzureBlobStorageClient(cfg AzureBlobStorageClientConfig) (*AzureClient, 
 		},
 	}
 	switch cfg.AuthType {
-	case AzureAuthTypeTests:
+	case azureAuthTypeTests:
 		// Using well known credentials,
 		// see https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite
 		shKey, err := azblob.NewSharedKeyCredential(

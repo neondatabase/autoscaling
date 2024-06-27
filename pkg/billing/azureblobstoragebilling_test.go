@@ -138,7 +138,7 @@ func TestAzureClient_send(t *testing.T) {
 				ctx: ctx,
 				cfg: AzureBlobStorageClientConfig{ //nolint:exhaustruct // OK for tests
 					Endpoint: fmt.Sprintf("http://%s:%d/devstoreaccount1", azureBlobStorage.Host, azureBlobStorage.c.Ports["blob"].Port),
-					AuthType: AzureAuthTypeTests,
+					AuthType: azureAuthTypeTests,
 				},
 			}
 			tt.when(t, i)
