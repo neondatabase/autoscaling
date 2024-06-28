@@ -40,7 +40,7 @@ mount -t devpts -o noexec,nosuid       devpts    /dev/pts
 mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
 
 # neonvm runtime params mounted as iso9660 disk
-mount -o ro,mode=0644 /dev/vdb /neonvm/runtime
+mount -t iso9660 -o ro,mode=0644 /dev/vdb /neonvm/runtime
 
 # mount virtual machine .spec.disks
 test -f /neonvm/runtime/mounts.sh && /neonvm/bin/sh /neonvm/runtime/mounts.sh
