@@ -96,7 +96,7 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	# `go vet` requires gcc
 	# ref https://github.com/golang/go/issues/56755
-	CGO_ENABLED=0 go vet ./...
+	GOOS=linux CGO_ENABLED=0 go vet ./...
 
 
 TESTARGS ?= ./...
@@ -115,13 +115,13 @@ test: fmt vet envtest ## Run tests.
 
 .PHONY: build
 build: fmt vet bin/vm-builder ## Build all neonvm binaries.
-	go build -o bin/controller       neonvm/main.go
-	go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
-	go build -o bin/runner           neonvm/runner/*.go
+	GOOS=linux go build -o bin/controller       neonvm/main.go
+	GOOS=linux go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
+	GOOS=linux go build -o bin/runner           neonvm/runner/*.go
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" neonvm/tools/vm-builder/main.go
+	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" neonvm/tools/vm-builder/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
@@ -129,7 +129,7 @@ run: fmt vet ## Run a controller from your host.
 
 .PHONY: lint
 lint: ## Run golangci-lint against code.
-	golangci-lint run
+	GOOS=linux golangci-lint run
 
 # If you wish built the controller image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
@@ -251,7 +251,7 @@ render-manifests: $(RENDERED) kustomize
 	# Prepare:
 	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
+	cd neonvm/runner-image-loader/bases && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
@@ -265,7 +265,7 @@ render-manifests: $(RENDERED) kustomize
 	# Cleanup:
 	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=runner:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
+	cd neonvm/runner-image-loader/bases && $(KUSTOMIZE) edit set image runner=runner:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev && $(KUSTOMIZE) edit remove annotation buildtime --ignore-non-existence
 
@@ -273,7 +273,7 @@ render-release: $(RENDERED) kustomize
 	# Prepare:
 	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=$(IMG_CONTROLLER)
 	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=$(IMG_VXLAN_CONTROLLER)
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER)
+	cd neonvm/runner-image-loader/bases && $(KUSTOMIZE) edit set image runner=$(IMG_RUNNER)
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER)
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
@@ -287,7 +287,7 @@ render-release: $(RENDERED) kustomize
 	# Cleanup:
 	cd neonvm/config/controller && $(KUSTOMIZE) edit set image controller=controller:dev
 	cd neonvm/config/vxlan-controller && $(KUSTOMIZE) edit set image vxlan-controller=vxlan-controller:dev
-	cd neonvm/runner-image-loader && $(KUSTOMIZE) edit set image runner=runner:dev
+	cd neonvm/runner-image-loader/bases && $(KUSTOMIZE) edit set image runner=runner:dev
 	cd deploy/scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
