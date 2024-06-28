@@ -1,3 +1,7 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+unitTest: false
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -8,37 +12,31 @@ spec:
     port: 5432
     protocol: TCP
     targetPort: postgres
-  - name: pooler
-    port: 6432
-    protocol: TCP
-    targetPort: postgres
-  - name: host-metrics
-    port: 9100
-    protocol: TCP
-    targetPort: host-metrics
-  - name: metrics
-    port: 9187
-    protocol: TCP
-    targetPort: metrics
+  type: NodePort
   selector:
     vm.neon.tech/name: example
-
 ---
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
   name: example
+  labels:
+    autoscaling.neon.tech/enabled: "true"
+  annotations:
+    autoscaling.neon.tech/bounds: '{ "min": { "cpu": "250m", "mem": "1Gi" }, "max": {"cpu": 1, "mem": "4Gi" } }'
 spec:
+  schedulerName: autoscale-scheduler
   guest:
     cpus:
-      min: 1
-      max: 4
-      use: 2
+      min: 0.25
+      max: 1.25 # set value greater than bounds so our tests check we don't exceed the bounds.
+      use: 0.5
     memorySlotSize: 1Gi
     memorySlots:
       min: 1
-      max: 2
-      use: 2
+      max: 5
+      use: 1
+    memoryProvider: VirtioMem
     rootDisk:
       image: vm-postgres:15-bullseye
       size: 8Gi
@@ -52,12 +50,10 @@ spec:
     ports:
       - name: postgres
         port: 5432
-      - name: pooler
-        port: 5432
       - name: host-metrics
         port: 9100
-      - name: metrics
-        port: 9187
+      - name: monitor
+        port: 10301
   extraNetwork:
       enable: true
   disks:
@@ -72,13 +68,6 @@ spec:
         items:
           - key: postgresql.conf
             path: postgresql.conf
-    - name: vector-config
-      mountPath: /etc/vector
-      configMap:
-        name: example-config
-        items:
-          - key: vector.yaml
-            path: vector.yaml
     - name: cache
       mountPath: /neonvm/cache
       tmpfs:
@@ -95,7 +84,7 @@ data:
     shared_preload_libraries = 'pg_stat_statements'
 
     max_connections = 64
-    shared_buffers = 512MB
+    shared_buffers = 256MB
     effective_cache_size = 1536MB
     maintenance_work_mem = 128MB
     checkpoint_completion_target = 0.9
@@ -110,18 +99,3 @@ data:
     max_parallel_workers_per_gather = 2
     max_parallel_workers = 4
     max_parallel_maintenance_workers = 2
-
-  vector.yaml: |
-    sources:
-      postgresql_metrics:
-        type: postgresql_metrics
-        endpoints:
-          - "postgres://postgres@localhost:5432"
-        exclude_databases:
-          - "^template.*"
-    sinks:
-      postgres_exporter:
-        type: prometheus_exporter
-        inputs:
-          - postgresql_metrics
-        address: "0.0.0.0:9187"

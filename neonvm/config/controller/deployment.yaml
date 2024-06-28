@@ -59,9 +59,13 @@ spec:
         # * cache.direct=on    - use O_DIRECT (don't abuse host's page cache!)
         # * cache.no-flush=on  - ignores disk flush operations (not needed; our disks are ephemeral)
         - "--qemu-disk-cache-settings=cache.writeback=on,cache.direct=on,cache.no-flush=on"
+        - "--default-memory-provider=DIMMSlots"
+        - "--memhp-auto-movable-ratio=801" # for virtio-mem, set memory_hotplug.auto_movable_ratio=801
         - "--failure-pending-period=1m"
         - "--failing-refresh-interval=15s"
         env:
+        - name: VM_RUNNER_IMAGE
+          value: $(VM_RUNNER_IMAGE) # will be replaced by kustomize based on neonvm-runner-image-loader image
         - name: NAD_IPAM_NAME
           value: $(NAD_IPAM_NAME)
         - name: NAD_IPAM_NAMESPACE

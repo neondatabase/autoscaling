@@ -2379,7 +2379,6 @@ spec:
                         type: integer
                         x-kubernetes-int-or-string: true
                       min:
-                        default: 1
                         description: MilliCPU is a special type to represent vCPUs
                           * 1000 e.g. 2 vCPU is 2000, 0.25 is 250
                         format: int32
@@ -2393,6 +2392,10 @@ spec:
                         pattern: ^[0-9]+((\.[0-9]*)?|m)
                         type: integer
                         x-kubernetes-int-or-string: true
+                    required:
+                    - max
+                    - min
+                    - use
                     type: object
                   env:
                     description: List of environment variables to set in the vmstart
@@ -2412,6 +2415,11 @@ spec:
                     type: array
                   kernelImage:
                     type: string
+                  memoryProvider:
+                    enum:
+                    - DIMMSlots
+                    - VirtioMem
+                    type: string
                   memorySlotSize:
                     anyOf:
                     - type: integer
@@ -2427,7 +2435,6 @@ spec:
                         minimum: 1
                         type: integer
                       min:
-                        default: 1
                         format: int32
                         maximum: 128
                         minimum: 1
@@ -2437,6 +2444,10 @@ spec:
                         maximum: 128
                         minimum: 1
                         type: integer
+                    required:
+                    - max
+                    - min
+                    - use
                     type: object
                   ports:
                     description: List of ports to expose from the container. Cannot
@@ -2763,6 +2774,11 @@ spec:
               extraNetIP:
                 type: string
               extraNetMask:
+                type: string
+              memoryProvider:
+                enum:
+                - DIMMSlots
+                - VirtioMem
                 type: string
               memorySize:
                 anyOf:
