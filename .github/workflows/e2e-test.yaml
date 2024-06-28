@@ -142,7 +142,28 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
+      # https://docs.k3s.io/installation/private-registry#registries-configuration-file
+      # https://github.com/neondatabase/autoscaling/issues/975
+      - name: set k3d registries.yaml
+        # TODO: Implement an equivalent for kind?
+        # Relevant docs seem to be here: https://kind.sigs.k8s.io/docs/user/private-registries
+        if: ${{ matrix.cluster == 'k3d' }}
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          DOCKERHUB_PASSWORD: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+        run: |
+          {
+            echo "configs:"
+            echo "  registry-1.docker.io:"
+            echo "    auth:"
+            echo "      username: $DOCKERHUB_USERNAME"
+            echo "      password: $DOCKERHUB_PASSWORD"
+          } >> $(pwd)/k3d/registries.yaml
+
+
       - run: make ${{ matrix.cluster }}-setup
+        env:
+          USE_REGISTRIES_FILE: true
 
       - name: deploy components
         timeout-minutes: 3
