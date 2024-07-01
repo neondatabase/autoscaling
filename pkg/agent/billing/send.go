@@ -153,6 +153,8 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 				rootErr = fmt.Sprintf("HTTP code %d", e.StatusCode)
 			case billing.S3Error:
 				rootErr = "S3 error"
+			case billing.AzureError:
+				rootErr = "Azure Blob error"
 			default:
 				rootErr = util.RootError(err).Error()
 			}
