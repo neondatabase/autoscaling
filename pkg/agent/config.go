@@ -179,7 +179,6 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
 	if c.Billing.Clients.AzureBlob != nil {
 		validateBaseBillingConfig(&c.Billing.Clients.AzureBlob.BaseClientConfig, ".billing.clients.azure")
-		erc.Whenf(ec, c.Billing.Clients.AzureBlob.AuthType == "", emptyTmpl, ".billing.clients.azure.authType")
 		erc.Whenf(ec, c.Billing.Clients.AzureBlob.Endpoint == "", emptyTmpl, ".billing.clients.azure.endpoint")
 		erc.Whenf(ec, c.Billing.Clients.AzureBlob.Container == "", emptyTmpl, ".billing.clients.azure.container")
 	}
