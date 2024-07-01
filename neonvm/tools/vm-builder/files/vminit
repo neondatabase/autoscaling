@@ -2,6 +2,9 @@
 
 export PATH=/neonvm/bin
 
+# The runner sets the hostname with a kernel arg. Update /etc/hostname to match.
+
+
 # set links to libs
 mkdir -p /lib
 for l in $(find /neonvm/lib -type f); do
