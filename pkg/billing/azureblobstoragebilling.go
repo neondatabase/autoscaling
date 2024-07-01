@@ -3,25 +3,13 @@ package billing
 import (
 	"context"
 	"fmt"
-
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-)
-
-type AzureAuthType string
-
-const (
-	// azureAuthTypeTests is used in tests
-	// It uses well-known storage account and key.
-	// See https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite
-	azureAuthTypeTests AzureAuthType = "tests"
-	// AzureAuthTypeDefault is for pods running in Azure Kubernetes.
-	// Make sure you have provisioned Role and you have Managed Identity.
-	AzureAuthTypeDefault AzureAuthType = "default"
 )
 
 type AzureAuthSharedKey struct {
@@ -30,8 +18,6 @@ type AzureAuthSharedKey struct {
 }
 
 type AzureBlobStorageClientConfig struct {
-	AuthType  AzureAuthType       `json:"authType"`
-	SharedKey *AzureAuthSharedKey `json:"sharedKey"`
 	// In Azure a Container is close to a bucket in AWS S3
 	Container string `json:"container"`
 	// Files will be created with name starting with PrefixInContainer
@@ -46,6 +32,9 @@ type AzureBlobStorageClientConfig struct {
 	// Use generateKey for tests.
 	// Otherwise, keep empty.
 	generateKey func() string
+	// Use getClient for tests.
+	// Otherwise keep empty.
+	getClient func() (*azblob.Client, error)
 }
 
 type AzureError struct {
@@ -75,14 +64,11 @@ func (c AzureClient) LogFields() zap.Field {
 }
 
 func (c AzureClient) generateKey() string {
-	if c.cfg.generateKey != nil {
-		return c.cfg.generateKey()
-	}
-	return keyTemplate(c.cfg.PrefixInContainer)
+	return c.cfg.generateKey()
 }
 
 func (c AzureClient) send(ctx context.Context, payload []byte, _ TraceID) error {
-	payload, err := bytesForBilling(payload)
+	payload, err := compress(payload)
 	if err != nil {
 		return err
 	}
@@ -92,41 +78,46 @@ func (c AzureClient) send(ctx context.Context, payload []byte, _ TraceID) error 
 	return handleAzureError(err)
 }
 
-func NewAzureBlobStorageClient(cfg AzureBlobStorageClientConfig) (*AzureClient, error) {
-	var client *azblob.Client
-
-	//nolint:exhaustruct // It's part of Azure SDK
-	clientOptions := &azblob.ClientOptions{
-		ClientOptions: azcore.ClientOptions{
-			Telemetry: policy.TelemetryOptions{ApplicationID: "neon-autoscaler"},
-		},
+func defaultGenerateKey(cfg AzureBlobStorageClientConfig) func() string {
+	return func() string {
+		return keyTemplate(cfg.PrefixInContainer)
 	}
-	switch cfg.AuthType {
-	case azureAuthTypeTests:
-		// Using well known credentials,
-		// see https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite
-		shKey, err := azblob.NewSharedKeyCredential(
-			"devstoreaccount1",
-			"Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==")
-		if err != nil {
-			return nil, err
+}
+
+func defaultGetClient(cfg AzureBlobStorageClientConfig) func() (*azblob.Client, error) {
+	return func() (*azblob.Client, error) {
+		//nolint:exhaustruct // It's part of Azure SDK
+		clientOptions := &azblob.ClientOptions{
+			ClientOptions: azcore.ClientOptions{
+				Telemetry: policy.TelemetryOptions{ApplicationID: "neon-autoscaler"},
+			},
 		}
 
-		client, err = azblob.NewClientWithSharedKeyCredential(cfg.Endpoint, shKey, clientOptions)
-		if err != nil {
-			return nil, &AzureError{err}
-		}
-	case AzureAuthTypeDefault:
 		credential, err := azidentity.NewDefaultAzureCredential(nil)
 		if err != nil {
 			return nil, err
 		}
-		client, err = azblob.NewClient(cfg.Endpoint, credential, clientOptions)
+		client, err := azblob.NewClient(cfg.Endpoint, credential, clientOptions)
 		if err != nil {
 			return nil, &AzureError{err}
 		}
-	default:
-		return nil, fmt.Errorf("unsupported auth type: %q", cfg.AuthType)
+		return client, nil
+	}
+}
+
+func NewAzureBlobStorageClient(cfg AzureBlobStorageClientConfig) (*AzureClient, error) {
+	var client *azblob.Client
+
+	if cfg.generateKey == nil {
+		cfg.generateKey = defaultGenerateKey(cfg)
+	}
+
+	if cfg.getClient == nil {
+		cfg.getClient = defaultGetClient(cfg)
+	}
+	client, err := cfg.getClient()
+	if err != nil {
+		return nil, err
 	}
 
 	return &AzureClient{

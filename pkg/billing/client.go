@@ -157,11 +157,11 @@ func (c S3Client) LogFields() zap.Field {
 	}))
 }
 
-func bytesForBilling(i []byte) ([]byte, error) {
+func compress(payload []byte) ([]byte, error) {
 	buf := bytes.Buffer{}
 
 	gzW := gzip.NewWriter(&buf)
-	_, err := gzW.Write(i)
+	_, err := gzW.Write(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
 	// https://github.com/neondatabase/cloud/issues/11199#issuecomment-1992549672
 
 	key := c.generateKey()
-	payload, err := bytesForBilling(payload)
+	payload, err := compress(payload)
 	if err != nil {
 		return S3Error{Err: err}
 	}

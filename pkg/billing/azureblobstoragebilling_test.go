@@ -61,7 +61,7 @@ func TestAzureClient_send(t *testing.T) {
 		cfg     AzureBlobStorageClientConfig
 		payload []byte
 		traceID TraceID
-		c       *AzureClient
+		client  *AzureClient
 	}
 	type output struct {
 		ctx context.Context
@@ -75,17 +75,7 @@ func TestAzureClient_send(t *testing.T) {
 	}{
 		{
 			name: "no container exists",
-			when: func(t *testing.T, i *input) {
-				i.payload = []byte("hello, billing data is here")
-				i.cfg.PrefixInContainer = "test-prefix"
-				i.cfg.Container = "test-container"
-				i.cfg.generateKey = func() string {
-					return "test-blob-name"
-				}
-				c, err := NewAzureBlobStorageClient(i.cfg)
-				require.NoError(t, err)
-				i.c = c
-			},
+			when: func(t *testing.T, i *input) {},
 			then: func(t *testing.T, o output) {
 				require.Error(t, o.err)
 				var azErr AzureError
@@ -98,16 +88,7 @@ func TestAzureClient_send(t *testing.T) {
 		{
 			name: "can write then read it",
 			when: func(t *testing.T, i *input) {
-				i.payload = []byte("hello, billing data is here")
-				i.cfg.PrefixInContainer = "test-prefix"
-				i.cfg.Container = "test-container"
-				i.cfg.generateKey = func() string {
-					return "test-blob-name"
-				}
-				c, err := NewAzureBlobStorageClient(i.cfg)
-				require.NoError(t, err)
-				i.c = c
-				_, err = c.c.CreateContainer(i.ctx, i.cfg.Container,
+				_, err := i.client.c.CreateContainer(i.ctx, i.cfg.Container,
 					&azblob.CreateContainerOptions{}, //nolint:exhaustruct // OK for tests
 				)
 				require.NoError(t, err)
@@ -134,20 +115,47 @@ func TestAzureClient_send(t *testing.T) {
 			azureBlobStorage, err := startAzuriteContainer("3.30.0")
 			require.NoError(t, err)
 
+			endpoint := fmt.Sprintf("http://%s:%d/devstoreaccount1", azureBlobStorage.Host, azureBlobStorage.c.Ports["blob"].Port)
+
+			// feel free to override in tests.
 			i := &input{ //nolint:exhaustruct // OK for tests
-				ctx: ctx,
+				payload: []byte("hello, billing data is here"),
+				ctx:     ctx,
 				cfg: AzureBlobStorageClientConfig{ //nolint:exhaustruct // OK for tests
-					Endpoint: fmt.Sprintf("http://%s:%d/devstoreaccount1", azureBlobStorage.Host, azureBlobStorage.c.Ports["blob"].Port),
-					AuthType: azureAuthTypeTests,
+					Endpoint: endpoint,
+					getClient: func() (*azblob.Client, error) {
+						// Using well known credentials,
+						// see https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite
+						shKey, err := azblob.NewSharedKeyCredential(
+							"devstoreaccount1",
+							"Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==")
+						if err != nil {
+							panic(err)
+						}
+
+						client, err := azblob.NewClientWithSharedKeyCredential(endpoint, shKey, nil)
+						if err != nil {
+							panic(err)
+						}
+						return client, nil
+					},
+					PrefixInContainer: "test-prefix",
+					Container:         "test-container",
+					generateKey: func() string {
+						return "test-blob-name"
+					},
 				},
 			}
+			c, err := NewAzureBlobStorageClient(i.cfg)
+			require.NoError(t, err)
+			i.client = c
 			tt.when(t, i)
 
-			err = i.c.send(ctx, i.payload, i.traceID)
+			err = i.client.send(ctx, i.payload, i.traceID)
 
 			tt.then(t, output{
 				err: err,
-				c:   i.c,
+				c:   i.client,
 				ctx: ctx,
 			})
 		})
@@ -156,7 +164,7 @@ func TestAzureClient_send(t *testing.T) {
 
 func TestBytesForBilling(t *testing.T) {
 	const expectedText = "hello, billing data is here"
-	billing, err := bytesForBilling([]byte(expectedText))
+	billing, err := compress([]byte(expectedText))
 	require.NoError(t, err)
 	storage, err := bytesFromStorage(billing)
 	require.NoError(t, err)
