@@ -1,3 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: example-config
+data:
+  file1.txt: "just a string"
+  file2.txt: |
+    multi-string 1
+    multi-string 2
+    multi-string 3
+    multi-string 4
+
 ---
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
@@ -13,6 +25,7 @@ metadata:
 spec:
   schedulerName: autoscale-scheduler
   enableSSH: true
+  enableAcceleration: false
   guest:
     cpus: { min: 0.25, use: 0.25, max: 1.25 }
     memorySlotSize: 1Gi
@@ -26,3 +39,13 @@ spec:
       - port: 10301 # monitor
     settings:
       swap: 1Gi
+  disks:
+    - name: disk1
+      mountPath: /mnt/empty-disk
+      emptyDisk:
+        size: 2Gi
+    - name: disk2
+      mountPath: /mnt/config-disk
+      configMap:
+        name: example-config
+      
