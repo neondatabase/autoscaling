@@ -121,7 +121,7 @@ func TestAzureClient_send(t *testing.T) {
 			i := &input{ //nolint:exhaustruct // OK for tests
 				payload: []byte("hello, billing data is here"),
 				ctx:     ctx,
-				cfg: AzureBlobStorageClientConfig{ //nolint:exhaustruct // OK for tests
+				cfg: AzureBlobStorageClientConfig{
 					Endpoint: endpoint,
 					getClient: func() (*azblob.Client, error) {
 						// Using well known credentials,
