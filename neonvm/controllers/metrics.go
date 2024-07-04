@@ -238,7 +238,7 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		d.conflicting.RecordSuccess(req.NamespacedName)
 		// Debug level: At 8k successful reconcilations every second, this can be a
 		// significant resource when enabled. So, we log at Debug level, because
-		// it's not enabled by default. 
+		// it's not enabled by default.
 		log.V(4).Info("Successful reconciliation", "duration", duration.String())
 	}
 	d.Metrics.ObserveReconcileDuration(outcome, duration)
