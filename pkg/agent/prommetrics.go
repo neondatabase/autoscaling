@@ -27,7 +27,7 @@ type GlobalMetrics struct {
 	runnerRestarts     prometheus.Counter
 	runnerNextActions  prometheus.Counter
 
-	scalingLatency prometheus.Histogram
+	scalingLatency prometheus.HistogramVec
 }
 
 type resourceChangePair struct {
@@ -220,11 +220,11 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 			},
 		)),
 
-		scalingLatency: util.RegisterMetric(reg, prometheus.NewHistogram(
+		scalingLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name: "autoscaling_agent_scaling_latency_seconds",
 				Help: "End-to-end scaling latency",
-			},
+			}, []string{"kind"},
 		)),
 	}
 

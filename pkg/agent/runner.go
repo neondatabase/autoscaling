@@ -196,8 +196,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
 
 	coreExecLogger := execLogger.Named("core")
-	clock := logiclock.NewClock(func(duration time.Duration) {
-		r.global.metrics.scalingLatency.Observe(duration.Seconds())
+	clock := logiclock.NewClock(func(duration time.Duration, kind logiclock.Kind) {
+		labels := []string{string(kind)}
+		r.global.metrics.scalingLatency.WithLabelValues(labels...).Observe(duration.Seconds())
 	})
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,

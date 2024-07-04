@@ -23,6 +23,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/logiclock"
 	"math"
 	"strings"
 	"time"
@@ -204,7 +205,7 @@ func (ns *neonvmState) ongoingRequest() bool {
 }
 
 type LogicClock interface {
-	Next(ts time.Time) *vmv1.LogicalTime
+	Next(ts time.Time, kind logiclock.Kind) *vmv1.LogicalTime
 	Observe(logicalTime *vmv1.LogicalTime) error
 }
 
@@ -273,7 +274,14 @@ func (s *state) nextActions(now time.Time) ActionSet {
 		// our handling later on is easier if we can assume it's non-nil
 		calcDesiredResourcesWait = func(ActionSet) *time.Duration { return nil }
 	}
-	desiredLogicalTime := s.ClockSource.Next(now)
+	var kind logiclock.Kind
+	if desiredResources.HasFieldLessThan(s.VM.Using()) {
+		kind = logiclock.KindDownscale
+	} else {
+		kind = logiclock.KindUpscale
+	}
+
+	desiredLogicalTime := s.ClockSource.Next(now, kind)
 
 	fmt.Printf("new desired time: %v\n", desiredLogicalTime)
 
