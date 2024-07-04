@@ -177,6 +177,11 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
 	erc.Whenf(ec, c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
 	erc.Whenf(ec, c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
+	if c.Billing.Clients.AzureBlob != nil {
+		validateBaseBillingConfig(&c.Billing.Clients.AzureBlob.BaseClientConfig, ".billing.clients.azure")
+		erc.Whenf(ec, c.Billing.Clients.AzureBlob.Endpoint == "", emptyTmpl, ".billing.clients.azure.endpoint")
+		erc.Whenf(ec, c.Billing.Clients.AzureBlob.Container == "", emptyTmpl, ".billing.clients.azure.container")
+	}
 	if c.Billing.Clients.HTTP != nil {
 		validateBaseBillingConfig(&c.Billing.Clients.HTTP.BaseClientConfig, ".billing.clients.http")
 		erc.Whenf(ec, c.Billing.Clients.HTTP.URL == "", emptyTmpl, ".billing.clients.http.url")

@@ -130,17 +130,21 @@ func NewS3Client(ctx context.Context, cfg S3ClientConfig) (*S3Client, error) {
 	}, nil
 }
 
-func (c S3Client) generateKey() string {
-	// Example: year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
+// Example: prefixInContainer/year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
+func keyTemplate(prefix string) string {
 	now := time.Now()
 	id := shortuuid.New()
 
-	filename := fmt.Sprintf("year=%d/month=%02d/day=%02d/%s_%s.ndjson.gz",
+	return fmt.Sprintf("%s/year=%d/month=%02d/day=%02d/%s_%s.ndjson.gz",
+		prefix,
 		now.Year(), now.Month(), now.Day(),
 		now.Format("15:04:05Z"),
 		id,
 	)
-	return fmt.Sprintf("%s/%s", c.cfg.PrefixInBucket, filename)
+}
+
+func (c S3Client) generateKey() string {
+	return keyTemplate(c.cfg.PrefixInBucket)
 }
 
 func (c S3Client) LogFields() zap.Field {
@@ -153,25 +157,33 @@ func (c S3Client) LogFields() zap.Field {
 	}))
 }
 
-func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
-	// Source of truth for the storage format:
-	// https://github.com/neondatabase/cloud/issues/11199#issuecomment-1992549672
-
-	key := c.generateKey()
+func compress(payload []byte) ([]byte, error) {
 	buf := bytes.Buffer{}
 
 	gzW := gzip.NewWriter(&buf)
 	_, err := gzW.Write(payload)
 	if err != nil {
-		return S3Error{Err: err}
+		return nil, err
 	}
 
 	err = gzW.Close() // Have to close it before reading the buffer
 	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
+	// Source of truth for the storage format:
+	// https://github.com/neondatabase/cloud/issues/11199#issuecomment-1992549672
+
+	key := c.generateKey()
+	payload, err := compress(payload)
+	if err != nil {
 		return S3Error{Err: err}
 	}
 
-	r := bytes.NewReader(buf.Bytes())
+	r := bytes.NewReader(payload)
 	_, err = c.client.PutObject(ctx, &s3.PutObjectInput{ //nolint:exhaustruct // AWS SDK
 		Bucket: &c.cfg.Bucket,
 		Key:    &key,
