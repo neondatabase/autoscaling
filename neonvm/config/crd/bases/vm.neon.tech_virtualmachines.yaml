@@ -2397,6 +2397,20 @@ spec:
                     - min
                     - use
                     type: object
+                  desiredLogicalTime:
+                    description: Logical clock value corresponding to the desired
+                      resources of the VM.
+                    properties:
+                      updatedAt:
+                        format: date-time
+                        type: string
+                      value:
+                        format: int64
+                        type: integer
+                    required:
+                    - updatedAt
+                    - value
+                    type: object
                   env:
                     description: List of environment variables to set in the vmstart
                       process.
@@ -2771,6 +2785,20 @@ spec:
                 pattern: ^[0-9]+((\.[0-9]*)?|m)
                 type: integer
                 x-kubernetes-int-or-string: true
+              currentLogicalTime:
+                description: LogicalTime allows to track progress of changes to a
+                  VM.
+                properties:
+                  updatedAt:
+                    format: date-time
+                    type: string
+                  value:
+                    format: int64
+                    type: integer
+                required:
+                - updatedAt
+                - value
+                type: object
               extraNetIP:
                 type: string
               extraNetMask:

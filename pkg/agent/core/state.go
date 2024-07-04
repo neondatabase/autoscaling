@@ -275,6 +275,8 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	}
 	desiredLogicalTime := s.ClockSource.Next(now)
 
+	fmt.Printf("new desired time: %v\n", desiredLogicalTime)
+
 	// ----
 	// Requests to the scheduler plugin:
 	var pluginRequiredWait *time.Duration
@@ -471,6 +473,8 @@ func (s *state) calculateNeonVMAction(
 	}
 
 	desiredTime := vmv1.EarliestLogicalTime(desiredTimeCandidates...)
+
+	fmt.Printf("Neonvm desired time: %v\n", desiredTime)
 
 	// clamp desiredResources to what we're allowed to make a request for
 	desiredResources = s.clampResources(
