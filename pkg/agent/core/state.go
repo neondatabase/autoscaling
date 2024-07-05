@@ -23,7 +23,6 @@ package core
 import (
 	"errors"
 	"fmt"
-	"github.com/neondatabase/autoscaling/pkg/agent/core/logiclock"
 	"math"
 	"strings"
 	"time"
@@ -32,6 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/logiclock"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )

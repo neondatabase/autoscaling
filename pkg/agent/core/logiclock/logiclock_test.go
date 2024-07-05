@@ -18,7 +18,7 @@ type testClockMetric struct {
 	t          *testing.T
 	now        v1.Time
 	result     *time.Duration
-	resultKind logiclock.Kind
+	resultKind *logiclock.Kind
 }
 
 func (tcm *testClockMetric) advance(d time.Duration) {
@@ -37,15 +37,16 @@ func (tcm *testClockMetric) nextNow() *vmv1.LogicalTime {
 
 func newTestClockMetric(t *testing.T) *testClockMetric {
 	tcm := &testClockMetric{
-		Clock:  nil,
-		t:      t,
-		now:    v1.NewTime(time.Now()),
-		result: nil,
+		Clock:      nil,
+		t:          t,
+		now:        v1.NewTime(time.Now()),
+		result:     nil,
+		resultKind: nil,
 	}
 
 	cb := func(d time.Duration, kind logiclock.Kind) {
 		tcm.result = &d
-		tcm.resultKind = kind
+		tcm.resultKind = &kind
 	}
 	tcm.Clock = logiclock.NewClock(cb)
 
