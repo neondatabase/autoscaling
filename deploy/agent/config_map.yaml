@@ -12,7 +12,10 @@ data:
         "defaultConfig": {
           "loadAverageFractionTarget": 0.9,
           "memoryUsageFractionTarget": 0.75,
-          "enableLFCMetrics": false
+          "enableLFCMetrics": false,
+          "lfcSizePerCU": 0.75,
+          "lfcWindowSizeMinutes": 5,
+          "lfcMinWaitBeforeDownscaleMinutes": 5
         }
       },
       "billing": {
@@ -45,7 +48,7 @@ data:
           "secondsBetweenRequests": 5
         },
         "lfc": {
-          "port": 9399,
+          "port": 9499,
           "requestTimeoutSeconds": 5,
           "secondsBetweenRequests": 15
         }

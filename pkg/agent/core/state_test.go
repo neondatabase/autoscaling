@@ -21,7 +21,9 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		name string
 
 		// helpers for setting fields (ish) of State:
-		metrics           core.SystemMetrics
+		systemMetrics     *core.SystemMetrics
+		lfcMetrics        *core.LFCMetrics
+		enableLFCMetrics  bool
 		vmUsing           api.Resources
 		schedulerApproved api.Resources
 		requestedUpscale  api.MoreResources
@@ -33,10 +35,12 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 	}{
 		{
 			name: "BasicScaleup",
-			metrics: core.SystemMetrics{
+			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:  0.30,
 				MemoryUsageBytes: 0.0,
 			},
+			lfcMetrics:        nil,
+			enableLFCMetrics:  false,
 			vmUsing:           api.Resources{VCPU: 250, Mem: 1 * slotSize},
 			schedulerApproved: api.Resources{VCPU: 250, Mem: 1 * slotSize},
 			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
@@ -47,10 +51,12 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		},
 		{
 			name: "MismatchedApprovedNoScaledown",
-			metrics: core.SystemMetrics{
+			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
 				MemoryUsageBytes: 0.0,
 			},
+			lfcMetrics:        nil,
+			enableLFCMetrics:  false,
 			vmUsing:           api.Resources{VCPU: 250, Mem: 2 * slotSize},
 			schedulerApproved: api.Resources{VCPU: 250, Mem: 2 * slotSize},
 			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
@@ -63,10 +69,12 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 		{
 			// ref https://github.com/neondatabase/autoscaling/issues/512
 			name: "MismatchedApprovedNoScaledownButVMAtMaximum",
-			metrics: core.SystemMetrics{
+			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:  0.0, // ordinarily would like to scale down
 				MemoryUsageBytes: 0.0,
 			},
+			lfcMetrics:        nil,
+			enableLFCMetrics:  false,
 			vmUsing:           api.Resources{VCPU: 1000, Mem: 5 * slotSize}, // note: mem greater than maximum. It can happen when scaling bounds change
 			schedulerApproved: api.Resources{VCPU: 1000, Mem: 5 * slotSize}, // unused
 			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
@@ -77,13 +85,114 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				"Can't decrease desired resources to within VM maximum because of vm-monitor previously denied downscale request",
 			},
 		},
+		{
+			name: "BasicLFCScaleup",
+			systemMetrics: &core.SystemMetrics{
+				LoadAverage1Min:  0.0,
+				MemoryUsageBytes: 0.0,
+			},
+			lfcMetrics: &core.LFCMetrics{
+				CacheHitsTotal:   0.0, // unused
+				CacheMissesTotal: 0.0, // unused
+				CacheWritesTotal: 0.0, // unused
+
+				ApproximateworkingSetSizeBuckets: []float64{
+					// each value is number of 8KiB pages; compute units should be sized to hold
+					// working set as <= 75% of RAM.
+					// 3 CU works out to working set size between 197k and 295k pages (2-3 CU).
+					// Window size is 5m and min wait before scaledown is also 5m.
+					// Also note projectLen is 0.5.
+					0, 15000, 30000, 40000, 50000,
+					150000, 175000, 180000, 185000, 190000, // 180 < 197, but projection from 50 -> 150 = 200, > 197
+					250000, 300000, 350000, 375000, 400000, // <- slope too steep compared to before; cutoff is line above.
+					415000, 425000, 430000, 435000, 435000,
+				},
+			},
+			enableLFCMetrics:  true,
+			vmUsing:           api.Resources{VCPU: 250, Mem: 1 * slotSize},
+			schedulerApproved: api.Resources{VCPU: 250, Mem: 1 * slotSize},
+			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
+			deniedDownscale:   nil,
+
+			expected: api.Resources{VCPU: 750, Mem: 3 * slotSize},
+			warnings: nil,
+		},
+		{
+			// Same system metrics as BasicScaleup, but we're waiting on lfc metrics. HOWEVER we can
+			// still scale up if load average dictates it.
+			name: "CanScaleUpWithoutExpectedLFCMetrics",
+			systemMetrics: &core.SystemMetrics{
+				LoadAverage1Min:  0.30,
+				MemoryUsageBytes: 0.0,
+			},
+			lfcMetrics:        nil,
+			enableLFCMetrics:  true,
+			vmUsing:           api.Resources{VCPU: 250, Mem: 1 * slotSize},
+			schedulerApproved: api.Resources{VCPU: 250, Mem: 1 * slotSize},
+			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
+			deniedDownscale:   nil,
+
+			expected: api.Resources{VCPU: 500, Mem: 2 * slotSize},
+			warnings: []string{
+				"Making scaling decision without all required metrics available",
+			},
+		},
+		{
+			// We're waiting on metrics to be able to make an informed decision, BUT if we're out of
+			// bounds we can still action that.
+			name: "CanScaleToBoundsWithoutExpectedMetrics",
+			systemMetrics: &core.SystemMetrics{
+				LoadAverage1Min:  0.30,
+				MemoryUsageBytes: 0.0,
+			},
+			lfcMetrics:        nil,
+			enableLFCMetrics:  true,
+			vmUsing:           api.Resources{VCPU: 750, Mem: 5 * slotSize}, // max is 4; 5 > 4.
+			schedulerApproved: api.Resources{VCPU: 750, Mem: 5 * slotSize}, // unused
+			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
+			deniedDownscale:   nil,
+
+			expected: api.Resources{VCPU: 750, Mem: 4 * slotSize},
+			warnings: []string{
+				"Making scaling decision without all required metrics available",
+			},
+		},
+		{
+			// Similar to CanScaleUpWithoutExpectedLFCMetrics, but for system metrics instead.
+			// We use the same LFC metrics as from BasicLFCScaleup, so we're still allowed to scale
+			// up.
+			name:          "CanScaleUpWithoutExpectedSystemMetrics",
+			systemMetrics: nil,
+			lfcMetrics: &core.LFCMetrics{
+				CacheHitsTotal:   0.0, // unused
+				CacheMissesTotal: 0.0, // unused
+				CacheWritesTotal: 0.0, // unused
+
+				ApproximateworkingSetSizeBuckets: []float64{
+					0, 15000, 30000, 40000, 50000,
+					150000, 175000, 180000, 185000, 190000,
+					250000, 300000, 350000, 375000, 400000,
+					415000, 425000, 430000, 435000, 435000,
+				},
+			},
+			enableLFCMetrics:  true,
+			vmUsing:           api.Resources{VCPU: 250, Mem: 1 * slotSize},
+			schedulerApproved: api.Resources{VCPU: 250, Mem: 1 * slotSize},
+			requestedUpscale:  api.MoreResources{Cpu: false, Memory: false},
+			deniedDownscale:   nil,
+
+			expected: api.Resources{VCPU: 750, Mem: 3 * slotSize},
+			warnings: []string{
+				"Making scaling decision without all required metrics available",
+			},
+		},
 	}
 
 	for _, c := range cases {
 		warnings := []string{}
 
-		state := core.NewState(
-			api.VmInfo{
+		makeVM := func() api.VmInfo {
+			return api.VmInfo{
 				Name:      "test",
 				Namespace: "test",
 				Cpu: api.VmCpuInfo{
@@ -104,13 +213,18 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					ScalingEnabled:       true,
 					ScalingConfig:        nil,
 				},
-			},
-			core.Config{
+			}
+		}
+		makeStateConfig := func(enableLFCMetrics bool) core.Config {
+			return core.Config{
 				ComputeUnit: api.Resources{VCPU: 250, Mem: 1 * slotSize},
 				DefaultScalingConfig: api.ScalingConfig{
-					LoadAverageFractionTarget: lo.ToPtr(0.5),
-					MemoryUsageFractionTarget: lo.ToPtr(0.5),
-					EnableLFCMetrics:          nil,
+					LoadAverageFractionTarget:        lo.ToPtr(0.5),
+					MemoryUsageFractionTarget:        lo.ToPtr(0.5),
+					EnableLFCMetrics:                 lo.ToPtr(enableLFCMetrics),
+					LFCSizePerCU:                     lo.ToPtr(0.75),
+					LFCWindowSizeMinutes:             lo.ToPtr(5),
+					LFCMinWaitBeforeDownscaleMinutes: lo.ToPtr(5),
 				},
 				// these don't really matter, because we're not using (*State).NextActions()
 				NeonVMRetryWait:                    time.Second,
@@ -126,12 +240,19 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 						warnings = append(warnings, msg)
 					},
 				},
-			},
-		)
+			}
+		}
 
 		t.Run(c.name, func(t *testing.T) {
+			state := core.NewState(makeVM(), makeStateConfig(c.enableLFCMetrics))
+
 			// set the metrics
-			state.UpdateSystemMetrics(c.metrics)
+			if c.systemMetrics != nil {
+				state.UpdateSystemMetrics(*c.systemMetrics)
+			}
+			if c.lfcMetrics != nil {
+				state.UpdateLFCMetrics(*c.lfcMetrics)
+			}
 
 			now := time.Now()
 
@@ -179,9 +300,12 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 	Core: core.Config{
 		ComputeUnit: DefaultComputeUnit,
 		DefaultScalingConfig: api.ScalingConfig{
-			LoadAverageFractionTarget: lo.ToPtr(0.5),
-			MemoryUsageFractionTarget: lo.ToPtr(0.5),
-			EnableLFCMetrics:          nil,
+			LoadAverageFractionTarget:        lo.ToPtr(0.5),
+			MemoryUsageFractionTarget:        lo.ToPtr(0.5),
+			EnableLFCMetrics:                 lo.ToPtr(false),
+			LFCSizePerCU:                     lo.ToPtr(0.75),
+			LFCWindowSizeMinutes:             lo.ToPtr(5),
+			LFCMinWaitBeforeDownscaleMinutes: lo.ToPtr(15),
 		},
 		NeonVMRetryWait:                    5 * time.Second,
 		PluginRequestTick:                  5 * time.Second,
@@ -210,7 +334,12 @@ func doInitialPluginRequest(
 	metrics *api.Metrics,
 	resources api.Resources,
 ) {
-	a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{
+	nextActionsAssert := a
+	if metrics == nil {
+		nextActionsAssert = nextActionsAssert.WithWarnings("Making scaling decision without all required metrics available")
+	}
+
+	nextActionsAssert.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit: nil,
 			Target:     resources,
@@ -1369,7 +1498,10 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 
 	// Send initial scheduler request - without the monitor active, so we're stuck at 4 CU for now
 	a.
-		WithWarnings("Wanted to send vm-monitor downscale request, but there's no active connection").
+		WithWarnings(
+			"Making scaling decision without all required metrics available",
+			"Wanted to send vm-monitor downscale request, but there's no active connection",
+		).
 		Call(state.NextActions, clock.Now()).
 		Equals(core.ActionSet{
 			PluginRequest: &core.ActionPluginRequest{
@@ -1390,13 +1522,16 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	// Monitor's now active, so we should be asking it for downscaling.
 	// We don't yet have metrics though, so we only want to downscale as much as is required.
 	state.Monitor().Active(true)
-	a.Call(nextActions).Equals(core.ActionSet{
-		Wait: &core.ActionWait{Duration: duration("4.8s")},
-		MonitorDownscale: &core.ActionMonitorDownscale{
-			Current: resForCU(3),
-			Target:  resForCU(2),
-		},
-	})
+	a.
+		WithWarnings("Making scaling decision without all required metrics available").
+		Call(nextActions).
+		Equals(core.ActionSet{
+			Wait: &core.ActionWait{Duration: duration("4.8s")},
+			MonitorDownscale: &core.ActionMonitorDownscale{
+				Current: resForCU(3),
+				Target:  resForCU(2),
+			},
+		})
 	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(2))
 
 	// In the middle of the vm-monitor request, update the metrics so that now the desired resource

@@ -3,8 +3,12 @@ package core
 // Definition of the Metrics type, plus reading it from vector.dev's prometheus format host metrics
 
 import (
+	"cmp"
 	"fmt"
 	"io"
+	"slices"
+	"strconv"
+	"time"
 
 	promtypes "github.com/prometheus/client_model/go"
 	promfmt "github.com/prometheus/common/expfmt"
@@ -31,7 +35,9 @@ type LFCMetrics struct {
 	CacheMissesTotal float64
 	CacheWritesTotal float64
 
-	ApproximateWorkingSetSizeTotal float64 // approximate_working_set_size
+	// lfc_approximate_working_set_size_windows, currently requires that values are exactly every
+	// minute
+	ApproximateworkingSetSizeBuckets []float64
 }
 
 // FromPrometheus represents metric types that can be parsed from prometheus output.
@@ -118,12 +124,15 @@ func (m *LFCMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) erro
 		}
 	}
 
+	wssBuckets, err := extractWorkingSetSizeWindows(mfs)
+	ec.Add(err)
+
 	tmp := LFCMetrics{
 		CacheHitsTotal:   getFloat("lfc_hits"),
 		CacheMissesTotal: getFloat("lfc_misses"),
 		CacheWritesTotal: getFloat("lfc_writes"),
 
-		ApproximateWorkingSetSizeTotal: getFloat("lfc_approximate_working_set_size"),
+		ApproximateworkingSetSizeBuckets: wssBuckets,
 	}
 
 	if err := ec.Resolve(); err != nil {
@@ -132,4 +141,73 @@ func (m *LFCMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) erro
 
 	*m = tmp
 	return nil
+}
+
+func extractWorkingSetSizeWindows(mfs map[string]*promtypes.MetricFamily) ([]float64, error) {
+	metricName := "lfc_approximate_working_set_size_windows"
+	mf := mfs[metricName]
+	if mf == nil {
+		return nil, missingMetric(metricName)
+	}
+
+	if mf.GetType() != promtypes.MetricType_GAUGE {
+		return nil, fmt.Errorf("wrong metric type: expected %s, but got %s", promtypes.MetricType_GAUGE, mf.GetType())
+	} else if len(mf.Metric) < 1 {
+		return nil, fmt.Errorf("expected >= metric, found %d", len(mf.Metric))
+	}
+
+	type pair struct {
+		duration time.Duration
+		value    float64
+	}
+
+	var pairs []pair
+	for _, m := range mf.Metric {
+		// Find the duration label
+		durationLabel := "duration_seconds"
+		durationIndex := slices.IndexFunc(m.Label, func(l *promtypes.LabelPair) bool {
+			return l.GetName() == durationLabel
+		})
+		if durationIndex == -1 {
+			return nil, fmt.Errorf("metric missing label %q", durationLabel)
+		}
+
+		durationSeconds, err := strconv.Atoi(m.Label[durationIndex].GetValue())
+		if err != nil {
+			return nil, fmt.Errorf("couldn't parse metric's %q label as int: %w", durationLabel, err)
+		}
+
+		pairs = append(pairs, pair{
+			duration: time.Second * time.Duration(durationSeconds),
+			value:    m.GetGauge().GetValue(),
+		})
+	}
+
+	slices.SortFunc(pairs, func(x, y pair) int {
+		return cmp.Compare(x.duration, y.duration)
+	})
+
+	// Check that the values make are as expected: they should all be 1 minute apart, starting
+	// at 1 minute.
+	// NOTE: this assumption is relied on elsewhere for scaling on ApproximateworkingSetSizeBuckets.
+	// Please search for usages before changing this behavior.
+	if pairs[0].duration != time.Minute {
+		return nil, fmt.Errorf("expected smallest duration to be %v, got %v", time.Minute, pairs[0].duration)
+	}
+	for i := range pairs {
+		expected := time.Minute * time.Duration(i+1)
+		if pairs[i].duration != expected {
+			return nil, fmt.Errorf(
+				"expected duration values to be exactly 1m apart, got unexpected value %v instead of %v",
+				pairs[i].duration,
+				expected,
+			)
+		}
+	}
+
+	var values []float64
+	for _, p := range pairs {
+		values = append(values, p.value)
+	}
+	return values, nil
 }
