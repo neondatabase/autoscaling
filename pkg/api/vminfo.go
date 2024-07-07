@@ -353,7 +353,7 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 		defaults.MemoryUsageFractionTarget = lo.ToPtr(*overrides.MemoryUsageFractionTarget)
 	}
 	if overrides.EnableLFCMetrics != nil {
-		defaults.EnableLFCMetrics = &[]bool{*overrides.EnableLFCMetrics}[0]
+		defaults.EnableLFCMetrics = lo.ToPtr(*overrides.EnableLFCMetrics)
 	}
 
 	return defaults
