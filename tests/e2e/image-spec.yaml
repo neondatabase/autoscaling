@@ -51,24 +51,40 @@ files:
 
 build: |
   # Build vm-monitor
-  FROM rust:1.79-alpine as monitor-builder
+  # We use cargo-chef to help with caching here, so that minor changes to neondatabase/neon don't
+  # require rebuilding heavy dependencies at least.
+  FROM lukemathwalker/cargo-chef:latest-rust-1.79.0-alpine AS chef
+  RUN apk add musl-dev git openssl-dev
   WORKDIR /workspace
 
-  RUN apk add musl-dev git openssl-dev
-
+  FROM chef AS neon-src
   # Which branch to pull from
   ENV BRANCH main
-
   # Ensures we reclone upon new commits
   # https://stackoverflow.com/questions/35134713
   ADD "https://api.github.com/repos/neondatabase/neon/commits/$BRANCH" latest_commit
+  # Clone, but remove rust-toolchain.toml so that we don't redo work if the versions are out of sync
+  RUN git clone --depth 1 --branch $BRANCH https://github.com/neondatabase/neon.git \
+    && rm -f rust-toolchain.toml
+  WORKDIR /workspace/neon
 
-  RUN git clone --depth 1 --branch $BRANCH https://github.com/neondatabase/neon.git
-  RUN cargo build --release --manifest-path neon/libs/vm_monitor/Cargo.toml
-  # Move binary so we can cargo clean
-  RUN mkdir -p /workspace/bin && cp /workspace/neon/target/release/vm-monitor /workspace/bin
-  # Cargo clean dramatically reduces the size of the image
-  RUN cargo clean --release --manifest-path neon/libs/vm_monitor/Cargo.toml
+  FROM neon-src AS monitor-planner
+  RUN cargo chef prepare --bin vm-monitor --recipe-path ../recipe.json
+
+  FROM chef AS monitor-builder
+  COPY --from=monitor-planner /workspace/recipe.json /workspace/recipe.json
+  WORKDIR /workspace/neon
+  # THIS WILL BE CACHED: Build deps.
+  RUN cargo chef cook --release -p vm_monitor --recipe-path ../recipe.json && \
+    mv target ../target
+  # ... and *now* copy over the current source.
+  COPY --from=neon-src /workspace/neon .
+  # Build vm-monitor and 'cargo clean' so we don't explode the size of cached layers.
+  RUN mv ../target target \
+    && cargo build --release -p vm_monitor \
+    && mkdir -p /workspace/bin \
+    && cp /workspace/neon/target/release/vm-monitor /workspace/bin \
+    && cargo clean
 
   # Build cgroup-tools
   #
