@@ -460,19 +460,17 @@ func (s *state) calculateNeonVMAction(
 	logicalTime *vmv1.LogicalTime,
 ) (*ActionNeonVMRequest, *time.Duration) {
 
-	desiredTimeCandidates := []*vmv1.LogicalTime{logicalTime}
+	desiredTime := logicalTime
 
 	if desiredResources.HasFieldLessThan(s.VM.Using()) {
 		// We are downscaling, so we needed a permit from monitor
-		desiredTimeCandidates = append(desiredTimeCandidates, s.Monitor.CurrentLogicalTime)
+		desiredTime = desiredTime.Earliest(s.Monitor.CurrentLogicalTime)
 	}
 
 	if desiredResources.HasFieldGreaterThan(s.VM.Using()) {
 		// We are upscaling, so we needed a permit from the plugin
-		desiredTimeCandidates = append(desiredTimeCandidates, s.Plugin.CurrentLogicalTime)
+		desiredTime = desiredTime.Earliest(s.Plugin.CurrentLogicalTime)
 	}
-
-	desiredTime := vmv1.EarliestLogicalTime(desiredTimeCandidates...)
 
 	fmt.Printf("Neonvm desired time: %v\n", desiredTime)
 

@@ -240,17 +240,17 @@ func (t *LogicalTime) RewindNow() *LogicalTime {
 	return t.Rewind(time.Now())
 }
 
-func EarliestLogicalTime(ts ...*LogicalTime) *LogicalTime {
-	var earliest *LogicalTime
-	for _, t := range ts {
-		if t == nil {
-			return nil
-		}
-		if earliest == nil || t.UpdatedAt.Before(&earliest.UpdatedAt) {
-			earliest = t
-		}
+func (t *LogicalTime) Earliest(other *LogicalTime) *LogicalTime {
+	if t == nil {
+		return other
 	}
-	return earliest
+	if other == nil {
+		return t
+	}
+	if t.UpdatedAt.Before(&other.UpdatedAt) {
+		return t
+	}
+	return other
 }
 
 type GuestSettings struct {
