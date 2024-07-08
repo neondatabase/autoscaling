@@ -284,7 +284,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(2))
 
-	lt := logicalTime(clock, 1)
+	lt := logicalTime(clock, 2)
 
 	// Now that the initial scheduler request is done, and we have metrics that indicate
 	// scale-up would be a good idea, we should be contacting the scheduler to get approval.
@@ -329,7 +329,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 	state.UpdateCurrentClock(lt)
 
-	lt = logicalTime(clock, 5)
+	lt = logicalTime(clock, 6)
 
 	// NeonVM change is done, now we should finish by notifying the vm-monitor
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -370,7 +370,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(1))
 
-	lt = logicalTime(clock, 8)
+	lt = logicalTime(clock, 10)
 
 	// First step in downscaling is getting approval from the vm-monitor:
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -407,7 +407,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	})
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
-	lt = logicalTime(clock, 12)
+	lt = logicalTime(clock, 14)
 
 	// Request to NeonVM completed, it's time to inform the scheduler plugin:
 	a.Call(nextActions).Equals(core.ActionSet{

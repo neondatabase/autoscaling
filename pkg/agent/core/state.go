@@ -472,8 +472,6 @@ func (s *state) calculateNeonVMAction(
 		desiredTime = desiredTime.Earliest(s.Plugin.CurrentLogicalTime)
 	}
 
-	fmt.Printf("Neonvm desired time: %v\n", desiredTime)
-
 	// clamp desiredResources to what we're allowed to make a request for
 	desiredResources = s.clampResources(
 		s.VM.Using(),                       // current: what we're using already
@@ -866,8 +864,6 @@ func (s *state) updateDesiredClock(
 	}
 
 	s.DesiredLogicalTime = s.ClockSource.Next(now, flags)
-
-	fmt.Printf("new desired time: %v\n", s.DesiredLogicalTime)
 }
 
 func (s *state) updateCurrentClock(logicalTime *vmv1.LogicalTime) {
