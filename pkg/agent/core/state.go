@@ -842,7 +842,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			return nil
 		}
 	}
-	s.updateDesiredClock(now, result, s.VM.Using())
+	s.updateDesiredClock(now, result, s.VM.Using(), requestedUpscalingAffectedResult)
 	s.updateCurrentClock(s.VM.CurrentLogicalTime)
 
 	s.info("Calculated desired resources", zap.Object("current", s.VM.Using()), zap.Object("target", result))
@@ -854,6 +854,7 @@ func (s *state) updateDesiredClock(
 	now time.Time,
 	desired api.Resources,
 	current api.Resources,
+	immediate bool,
 ) {
 	var flags logiclock.Flag
 	if desired.HasFieldGreaterThan(current) {
@@ -861,6 +862,9 @@ func (s *state) updateDesiredClock(
 	}
 	if desired.HasFieldLessThan(current) {
 		flags.Set(logiclock.Downscale)
+	}
+	if immediate {
+		flags.Set(logiclock.Immediate)
 	}
 
 	s.DesiredLogicalTime = s.ClockSource.Next(now, flags)
