@@ -327,7 +327,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Wait: &core.ActionWait{Duration: duration("4.8s")},
 	})
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	state.UpdateCurrentClock(lt)
+	state.UpdateCurrentLogicalTime(lt)
 
 	lt = logicalTime(clock, 6)
 

@@ -838,15 +838,15 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			return nil
 		}
 	}
-	s.updateDesiredClock(now, result, s.VM.Using(), requestedUpscalingAffectedResult)
-	s.updateCurrentClock(s.VM.CurrentLogicalTime)
+	s.updateDesiredLogicalTime(now, result, s.VM.Using(), requestedUpscalingAffectedResult)
+	s.updateCurrentLogicalTime(s.VM.CurrentLogicalTime)
 
 	s.info("Calculated desired resources", zap.Object("current", s.VM.Using()), zap.Object("target", result))
 
 	return result, calculateWaitTime
 }
 
-func (s *state) updateDesiredClock(
+func (s *state) updateDesiredLogicalTime(
 	now time.Time,
 	desired api.Resources,
 	current api.Resources,
@@ -866,7 +866,7 @@ func (s *state) updateDesiredClock(
 	s.DesiredLogicalTime = s.ClockSource.Next(now, flags)
 }
 
-func (s *state) updateCurrentClock(logicalTime *vmv1.LogicalTime) {
+func (s *state) updateCurrentLogicalTime(logicalTime *vmv1.LogicalTime) {
 	err := s.ClockSource.Observe(logicalTime)
 	if err != nil {
 		s.warnf("Failed to observe clock source: %v", err)
@@ -1178,8 +1178,8 @@ func (s *State) NeonVM() NeonVMHandle {
 	return NeonVMHandle{&s.internal}
 }
 
-func (s *State) UpdateCurrentClock(logicalTime *vmv1.LogicalTime) {
-	s.internal.updateCurrentClock(logicalTime)
+func (s *State) UpdateCurrentLogicalTime(logicalTime *vmv1.LogicalTime) {
+	s.internal.updateCurrentLogicalTime(logicalTime)
 }
 
 func (h NeonVMHandle) StartingRequest(now time.Time, resources api.Resources) {
