@@ -463,7 +463,7 @@ func (s *state) calculateNeonVMAction(
 	desiredTime := logicalTime
 
 	if desiredResources.HasFieldLessThan(s.VM.Using()) {
-		// We are downscaling, so we needed a permit from monitor
+		// We are downscaling, so we needed a permit from the¡ monitor
 		desiredTime = desiredTime.Earliest(s.Monitor.CurrentLogicalTime)
 	}
 

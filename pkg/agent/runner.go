@@ -659,8 +659,6 @@ func (r *Runner) doNeonVMRequest(
 		Value: desiredLogicalTime,
 	}}
 
-	fmt.Printf("Desired Logical Time: %v\n", desiredLogicalTime)
-
 	patchPayload, err := json.Marshal(patches)
 	if err != nil {
 		panic(fmt.Errorf("Error marshalling JSON patch: %w", err))
