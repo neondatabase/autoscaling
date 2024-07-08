@@ -224,7 +224,7 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 			prometheus.HistogramOpts{
 				Name: "autoscaling_agent_scaling_latency_seconds",
 				Help: "End-to-end scaling latency",
-			}, []string{"kind"},
+			}, []string{"upscale", "downscale", "immediate"},
 		)),
 	}
 

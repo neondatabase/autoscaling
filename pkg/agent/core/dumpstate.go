@@ -34,14 +34,15 @@ func (d StateDump) MarshalJSON() ([]byte, error) {
 func (s *State) Dump() StateDump {
 	return StateDump{
 		internal: state{
-			Debug:       s.internal.Debug,
-			Config:      s.internal.Config,
-			VM:          s.internal.VM,
-			Plugin:      s.internal.Plugin.deepCopy(),
-			Monitor:     s.internal.Monitor.deepCopy(),
-			NeonVM:      s.internal.NeonVM.deepCopy(),
-			Metrics:     shallowCopy[SystemMetrics](s.internal.Metrics),
-			ClockSource: s.internal.ClockSource,
+			Debug:              s.internal.Debug,
+			Config:             s.internal.Config,
+			VM:                 s.internal.VM,
+			Plugin:             s.internal.Plugin.deepCopy(),
+			Monitor:            s.internal.Monitor.deepCopy(),
+			NeonVM:             s.internal.NeonVM.deepCopy(),
+			Metrics:            shallowCopy[SystemMetrics](s.internal.Metrics),
+			ClockSource:        s.internal.ClockSource,
+			DesiredLogicalTime: s.internal.DesiredLogicalTime,
 		},
 	}
 }

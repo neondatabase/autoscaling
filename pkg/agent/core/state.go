@@ -117,7 +117,8 @@ type state struct {
 
 	Metrics *SystemMetrics
 
-	ClockSource LogicClock `json:"-"`
+	ClockSource        LogicClock `json:"-"`
+	DesiredLogicalTime *vmv1.LogicalTime
 }
 
 type pluginState struct {
@@ -205,7 +206,7 @@ func (ns *neonvmState) ongoingRequest() bool {
 }
 
 type LogicClock interface {
-	Next(ts time.Time, kind logiclock.Kind) *vmv1.LogicalTime
+	Next(ts time.Time, kind logiclock.Flag) *vmv1.LogicalTime
 	Observe(logicalTime *vmv1.LogicalTime) error
 }
 
@@ -236,8 +237,9 @@ func NewState(vm api.VmInfo, config Config, clockSource LogicClock) *State {
 				OngoingRequested: nil,
 				RequestFailedAt:  nil,
 			},
-			Metrics:     nil,
-			ClockSource: clockSource,
+			Metrics:            nil,
+			ClockSource:        clockSource,
+			DesiredLogicalTime: nil,
 		},
 	}
 
@@ -274,21 +276,11 @@ func (s *state) nextActions(now time.Time) ActionSet {
 		// our handling later on is easier if we can assume it's non-nil
 		calcDesiredResourcesWait = func(ActionSet) *time.Duration { return nil }
 	}
-	var kind logiclock.Kind
-	if desiredResources.HasFieldLessThan(s.VM.Using()) {
-		kind = logiclock.KindDownscale
-	} else {
-		kind = logiclock.KindUpscale
-	}
-
-	desiredLogicalTime := s.ClockSource.Next(now, kind)
-
-	fmt.Printf("new desired time: %v\n", desiredLogicalTime)
 
 	// ----
 	// Requests to the scheduler plugin:
 	var pluginRequiredWait *time.Duration
-	actions.PluginRequest, pluginRequiredWait = s.calculatePluginAction(now, desiredResources, desiredLogicalTime)
+	actions.PluginRequest, pluginRequiredWait = s.calculatePluginAction(now, desiredResources, s.DesiredLogicalTime)
 
 	// ----
 	// Requests to NeonVM:
@@ -302,7 +294,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 		pluginRequestedPhase = "planned"
 	}
 	var neonvmRequiredWait *time.Duration
-	actions.NeonVMRequest, neonvmRequiredWait = s.calculateNeonVMAction(now, desiredResources, pluginRequested, pluginRequestedPhase, desiredLogicalTime)
+	actions.NeonVMRequest, neonvmRequiredWait = s.calculateNeonVMAction(now, desiredResources, pluginRequested, pluginRequestedPhase, s.DesiredLogicalTime)
 
 	// ----
 	// Requests to vm-monitor (upscaling)
@@ -311,7 +303,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	// forego notifying the vm-monitor of increased resources because we were busy asking if it
 	// could downscale.
 	var monitorUpscaleRequiredWait *time.Duration
-	actions.MonitorUpscale, monitorUpscaleRequiredWait = s.calculateMonitorUpscaleAction(now, desiredResources, desiredLogicalTime)
+	actions.MonitorUpscale, monitorUpscaleRequiredWait = s.calculateMonitorUpscaleAction(now, desiredResources, s.DesiredLogicalTime)
 
 	// ----
 	// Requests to vm-monitor (downscaling)
@@ -322,7 +314,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 			now,
 			desiredResources,
 			plannedUpscale,
-			desiredLogicalTime,
+			s.DesiredLogicalTime,
 		)
 
 	// --- and that's all the request types! ---
@@ -850,12 +842,37 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			return nil
 		}
 	}
-
+	s.updateDesiredClock(now, result, s.VM.Using())
 	s.updateCurrentClock(s.VM.CurrentLogicalTime)
 
 	s.info("Calculated desired resources", zap.Object("current", s.VM.Using()), zap.Object("target", result))
 
 	return result, calculateWaitTime
+}
+
+func (s *state) updateDesiredClock(
+	now time.Time,
+	desired api.Resources,
+	current api.Resources,
+) {
+	var flags logiclock.Flag
+	if desired.HasFieldGreaterThan(current) {
+		flags.Set(logiclock.Upscale)
+	}
+	if desired.HasFieldLessThan(current) {
+		flags.Set(logiclock.Downscale)
+	}
+
+	s.DesiredLogicalTime = s.ClockSource.Next(now, flags)
+
+	fmt.Printf("new desired time: %v\n", s.DesiredLogicalTime)
+}
+
+func (s *state) updateCurrentClock(logicalTime *vmv1.LogicalTime) {
+	err := s.ClockSource.Observe(logicalTime)
+	if err != nil {
+		s.warnf("Failed to observe clock source: %v", err)
+	}
 }
 
 func (s *state) timeUntilRequestedUpscalingExpired(now time.Time) time.Duration {
@@ -969,13 +986,6 @@ func (s *state) pluginApprovedUpperBound() api.Resources {
 		return *s.Plugin.Permit
 	} else {
 		return s.VM.Using()
-	}
-}
-
-func (s *state) updateCurrentClock(logicalTime *vmv1.LogicalTime) {
-	err := s.ClockSource.Observe(logicalTime)
-	if err != nil {
-		s.warnf("Failed to observe clock source: %v", err)
 	}
 }
 

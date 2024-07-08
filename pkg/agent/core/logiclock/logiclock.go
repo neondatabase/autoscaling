@@ -9,25 +9,38 @@ import (
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
-type Kind string
+type Flag uint64
 
 const (
-	KindUpscale   Kind = "upscale"
-	KindDownscale Kind = "downscale"
+	Upscale Flag = 1 << iota
+	Downscale
+	Immediate
 )
+
+func (f *Flag) Set(flag Flag) {
+	*f |= flag
+}
+
+func (f *Flag) Clear(flag Flag) {
+	*f &= ^flag
+}
+
+func (f Flag) Has(flag Flag) bool {
+	return f&flag != 0
+}
 
 type measurement struct {
 	createdAt time.Time
-	kind      Kind
+	flags     Flag
 }
 
 type Clock struct {
-	cb           func(time.Duration, Kind)
+	cb           func(time.Duration, Flag)
 	measurements []measurement
 	offset       int64
 }
 
-func NewClock(cb func(time.Duration, Kind)) *Clock {
+func NewClock(cb func(time.Duration, Flag)) *Clock {
 	return &Clock{
 		cb:           cb,
 		measurements: nil,
@@ -39,14 +52,14 @@ func (c *Clock) NextValue() int64 {
 	return c.offset + int64(len(c.measurements))
 }
 
-func (c *Clock) Next(now time.Time, kind Kind) *vmv1.LogicalTime {
+func (c *Clock) Next(now time.Time, flags Flag) *vmv1.LogicalTime {
 	ret := vmv1.LogicalTime{
 		Value:     c.NextValue(),
 		UpdatedAt: v1.NewTime(now),
 	}
 	c.measurements = append(c.measurements, measurement{
 		createdAt: ret.UpdatedAt.Time,
-		kind:      kind,
+		flags:     flags,
 	})
 	return &ret
 }
@@ -67,7 +80,7 @@ func (c *Clock) Observe(logicalTime *vmv1.LogicalTime) error {
 	diff := logicalTime.UpdatedAt.Time.Sub(c.measurements[idx].createdAt)
 
 	if c.cb != nil {
-		c.cb(diff, c.measurements[idx].kind)
+		c.cb(diff, c.measurements[idx].flags)
 	}
 
 	c.offset = logicalTime.Value + 1
@@ -78,5 +91,5 @@ func (c *Clock) Observe(logicalTime *vmv1.LogicalTime) error {
 
 type NilClock struct{}
 
-func (c *NilClock) Next(now time.Time, _ Kind) *vmv1.LogicalTime { return nil }
-func (c *NilClock) Observe(_ *vmv1.LogicalTime) error            { return nil }
+func (c *NilClock) Next(_ time.Time, _ Flag) *vmv1.LogicalTime { return nil }
+func (c *NilClock) Observe(_ *vmv1.LogicalTime) error          { return nil }
