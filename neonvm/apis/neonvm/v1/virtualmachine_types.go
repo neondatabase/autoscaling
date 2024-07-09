@@ -140,6 +140,10 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=true
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
+
+	// Logical timestamp corresponding to the desired resources of the VM.
+	// +optional
+	DesiredLogicalTime *LogicalTime `json:"desiredLogicalTime,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -191,10 +195,6 @@ type Guest struct {
 	// Cannot be updated.
 	// +optional
 	Ports []Port `json:"ports,omitempty"`
-
-	// Logical clock value corresponding to the desired resources of the VM.
-	// +optional
-	DesiredLogicalTime *LogicalTime `json:"desiredLogicalTime,omitempty"`
 
 	// Additional settings for the VM.
 	// Cannot be updated.

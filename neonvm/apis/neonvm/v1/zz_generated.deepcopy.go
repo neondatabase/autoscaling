@@ -186,11 +186,6 @@ func (in *Guest) DeepCopyInto(out *Guest) {
 		*out = make([]Port, len(*in))
 		copy(*out, *in)
 	}
-	if in.DesiredLogicalTime != nil {
-		in, out := &in.DesiredLogicalTime, &out.DesiredLogicalTime
-		*out = new(LogicalTime)
-		(*in).DeepCopyInto(*out)
-	}
 	if in.Settings != nil {
 		in, out := &in.Settings, &out.Settings
 		*out = new(GuestSettings)
@@ -743,6 +738,11 @@ func (in *VirtualMachineSpec) DeepCopyInto(out *VirtualMachineSpec) {
 		in, out := &in.EnableSSH, &out.EnableSSH
 		*out = new(bool)
 		**out = **in
+	}
+	if in.DesiredLogicalTime != nil {
+		in, out := &in.DesiredLogicalTime, &out.DesiredLogicalTime
+		*out = new(LogicalTime)
+		(*in).DeepCopyInto(*out)
 	}
 }
 

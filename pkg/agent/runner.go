@@ -655,7 +655,7 @@ func (r *Runner) doNeonVMRequest(
 		Value: uint32(target.Mem / r.memSlotSize),
 	}, {
 		Op:    patch.OpReplace,
-		Path:  "/spec/guest/desiredLogicalTime",
+		Path:  "/spec/desiredLogicalTime",
 		Value: desiredLogicalTime,
 	}}
 

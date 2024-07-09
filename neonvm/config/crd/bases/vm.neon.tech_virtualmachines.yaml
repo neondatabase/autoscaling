@@ -892,6 +892,20 @@ spec:
                         type: array
                     type: object
                 type: object
+              desiredLogicalTime:
+                description: Logical timestamp corresponding to the desired resources
+                  of the VM.
+                properties:
+                  updatedAt:
+                    format: date-time
+                    type: string
+                  value:
+                    format: int64
+                    type: integer
+                required:
+                - updatedAt
+                - value
+                type: object
               disks:
                 description: List of disk that can be mounted by virtual machine.
                 items:
@@ -2396,20 +2410,6 @@ spec:
                     - max
                     - min
                     - use
-                    type: object
-                  desiredLogicalTime:
-                    description: Logical clock value corresponding to the desired
-                      resources of the VM.
-                    properties:
-                      updatedAt:
-                        format: date-time
-                        type: string
-                      value:
-                        format: int64
-                        type: integer
-                    required:
-                    - updatedAt
-                    - value
                     type: object
                   env:
                     description: List of environment variables to set in the vmstart
