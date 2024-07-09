@@ -3,6 +3,7 @@ module github.com/neondatabase/autoscaling
 go 1.21
 
 replace (
+	github.com/optiopay/kafka => github.com/optiopay/kafka v0.0.0
 	k8s.io/api => k8s.io/api v0.26.15
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.26.15
 	k8s.io/apimachinery => k8s.io/apimachinery v0.26.15
