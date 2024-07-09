@@ -839,9 +839,11 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		}
 	}
 	s.updateDesiredLogicalTime(now, result, s.VM.Using(), requestedUpscalingAffectedResult)
-	s.updateCurrentLogicalTime(s.VM.CurrentLogicalTime)
 
-	s.info("Calculated desired resources", zap.Object("current", s.VM.Using()), zap.Object("target", result))
+	s.info("Calculated desired resources",
+		zap.Object("current", s.VM.Using()),
+		zap.Object("target", result),
+		zap.Object("desiredLogicalTime", s.DesiredLogicalTime))
 
 	return result, calculateWaitTime
 }
@@ -1008,6 +1010,7 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	// - https://github.com/neondatabase/autoscaling/issues/462
 	vm.SetUsing(s.internal.VM.Using())
 	s.internal.VM = vm
+	s.internal.updateCurrentLogicalTime(vm.CurrentLogicalTime)
 }
 
 func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {

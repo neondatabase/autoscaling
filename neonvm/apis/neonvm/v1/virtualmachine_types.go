@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap/zapcore"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -224,6 +225,13 @@ func (g Guest) ValidateForMemoryProvider(p MemoryProvider) error {
 type LogicalTime struct {
 	Value     int64       `json:"value"`
 	UpdatedAt metav1.Time `json:"updatedAt"`
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that LogicalTime can be used with zap.Object
+func (r *LogicalTime) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddInt64("value", r.Value)
+	enc.AddTime("updatedAt", r.UpdatedAt.Time)
+	return nil
 }
 
 func (t *LogicalTime) Rewind(now time.Time) *LogicalTime {
