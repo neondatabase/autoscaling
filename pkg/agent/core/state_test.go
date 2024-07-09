@@ -477,9 +477,10 @@ func TestPeriodicPluginRequest(t *testing.T) {
 		} else {
 			a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{
 				PluginRequest: &core.ActionPluginRequest{
-					LastPermit: &resources,
-					Target:     resources,
-					Metrics:    lo.ToPtr(metrics.ToAPI()),
+					LastPermit:         &resources,
+					Target:             resources,
+					Metrics:            lo.ToPtr(metrics.ToAPI()),
+					DesiredLogicalTime: nil,
 				},
 			})
 			a.Do(state.Plugin().StartingRequest, clock.Now(), resources)
@@ -561,8 +562,9 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("6.8s")},
 		MonitorDownscale: &core.ActionMonitorDownscale{
-			Current: resForCU(6),
-			Target:  resForCU(5),
+			Current:            resForCU(6),
+			Target:             resForCU(5),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(5))
@@ -583,16 +585,18 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		var expectedNeonVMRequest *core.ActionNeonVMRequest
 		if cu < 5 {
 			expectedNeonVMRequest = &core.ActionNeonVMRequest{
-				Current: resForCU(6),
-				Target:  resForCU(cu + 1),
+				Current:            resForCU(6),
+				Target:             resForCU(cu + 1),
+				DesiredLogicalTime: nil,
 			}
 		}
 
 		a.Call(nextActions).Equals(core.ActionSet{
 			Wait: &core.ActionWait{Duration: currentPluginWait},
 			MonitorDownscale: &core.ActionMonitorDownscale{
-				Current: resForCU(cu + 1),
-				Target:  resForCU(cu),
+				Current:            resForCU(cu + 1),
+				Target:             resForCU(cu),
+				DesiredLogicalTime: nil,
 			},
 			NeonVMRequest: expectedNeonVMRequest,
 		})
@@ -632,9 +636,10 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("3.9s")},
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(6)),
-			Target:     resForCU(3),
-			Metrics:    lo.ToPtr(metrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(6)),
+			Target:             resForCU(3),
+			Metrics:            lo.ToPtr(metrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
@@ -658,8 +663,9 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("3.1s")},
 		MonitorDownscale: &core.ActionMonitorDownscale{
-			Current: resForCU(3),
-			Target:  resForCU(2),
+			Current:            resForCU(3),
+			Target:             resForCU(2),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(2))
@@ -675,9 +681,10 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("1s")}, // still want to retry vm-monitor downscaling
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(3)),
-			Target:     resForCU(3),
-			Metrics:    lo.ToPtr(metrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(3)),
+			Target:             resForCU(3),
+			Metrics:            lo.ToPtr(metrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
@@ -701,16 +708,18 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		var expectedNeonVMRequest *core.ActionNeonVMRequest
 		if cu < 2 {
 			expectedNeonVMRequest = &core.ActionNeonVMRequest{
-				Current: resForCU(3),
-				Target:  resForCU(cu + 1),
+				Current:            resForCU(3),
+				Target:             resForCU(cu + 1),
+				DesiredLogicalTime: nil,
 			}
 		}
 
 		a.Call(nextActions).Equals(core.ActionSet{
 			Wait: &core.ActionWait{Duration: currentPluginWait},
 			MonitorDownscale: &core.ActionMonitorDownscale{
-				Current: resForCU(cu + 1),
-				Target:  resForCU(cu),
+				Current:            resForCU(cu + 1),
+				Target:             resForCU(cu),
+				DesiredLogicalTime: nil,
 			},
 			NeonVMRequest: expectedNeonVMRequest,
 		})
@@ -728,8 +737,9 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("5.8s")},
 		NeonVMRequest: &core.ActionNeonVMRequest{
-			Current: resForCU(3),
-			Target:  resForCU(1),
+			Current:            resForCU(3),
+			Target:             resForCU(1),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.NeonVM().StartingRequest, time.Now(), resForCU(1))
@@ -741,9 +751,10 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	// Successfully downscaled, so now we should inform the plugin. Not waiting on any retries.
 	a.Call(nextActions).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(3)),
-			Target:     resForCU(1),
-			Metrics:    lo.ToPtr(metrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(3)),
+			Target:             resForCU(1),
+			Metrics:            lo.ToPtr(metrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
@@ -806,9 +817,10 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("6s")}, // if nothing else happens, requested upscale expires.
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(1)),
-			Target:     resForCU(2),
-			Metrics:    lo.ToPtr(lastMetrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(1)),
+			Target:             resForCU(2),
+			Metrics:            lo.ToPtr(lastMetrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -825,8 +837,9 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.9s")}, // plugin tick wait is earlier than requested upscale expiration
 		NeonVMRequest: &core.ActionNeonVMRequest{
-			Current: resForCU(1),
-			Target:  resForCU(2),
+			Current:            resForCU(1),
+			Target:             resForCU(2),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(2))
@@ -837,8 +850,9 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.8s")}, // still waiting on plugin tick
 		MonitorUpscale: &core.ActionMonitorUpscale{
-			Current: resForCU(1),
-			Target:  resForCU(2),
+			Current:            resForCU(1),
+			Target:             resForCU(2),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(2))
@@ -857,9 +871,10 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("1s")},
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(2)),
-			Target:     resForCU(2),
-			Metrics:    lo.ToPtr(lastMetrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(2)),
+			Target:             resForCU(2),
+			Metrics:            lo.ToPtr(lastMetrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -880,8 +895,9 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4s")}, // now, waiting on plugin request tick
 		MonitorDownscale: &core.ActionMonitorDownscale{
-			Current: resForCU(2),
-			Target:  resForCU(1),
+			Current:            resForCU(2),
+			Target:             resForCU(1),
+			DesiredLogicalTime: nil,
 		},
 	})
 }
@@ -931,6 +947,8 @@ func TestDownscalePivotBack(t *testing.T) {
 					MonitorDownscale: &core.ActionMonitorDownscale{
 						Current: resForCU(2),
 						Target:  resForCU(1),
+
+						DesiredLogicalTime: nil,
 					},
 				})
 				a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(1))
@@ -946,8 +964,9 @@ func TestDownscalePivotBack(t *testing.T) {
 				a.Call(nextActions).Equals(core.ActionSet{
 					Wait: &core.ActionWait{Duration: *pluginWait},
 					MonitorUpscale: &core.ActionMonitorUpscale{
-						Current: resForCU(1),
-						Target:  resForCU(2),
+						Current:            resForCU(1),
+						Target:             resForCU(2),
+						DesiredLogicalTime: nil,
 					},
 				})
 				a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(2))
@@ -964,8 +983,9 @@ func TestDownscalePivotBack(t *testing.T) {
 				a.Call(nextActions).Equals(core.ActionSet{
 					Wait: &core.ActionWait{Duration: *pluginWait},
 					NeonVMRequest: &core.ActionNeonVMRequest{
-						Current: resForCU(2),
-						Target:  resForCU(1),
+						Current:            resForCU(2),
+						Target:             resForCU(1),
+						DesiredLogicalTime: nil,
 					},
 				})
 				a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(1))
@@ -981,8 +1001,9 @@ func TestDownscalePivotBack(t *testing.T) {
 				a.Call(nextActions).Equals(core.ActionSet{
 					Wait: &core.ActionWait{Duration: *pluginWait},
 					NeonVMRequest: &core.ActionNeonVMRequest{
-						Current: resForCU(1),
-						Target:  resForCU(2),
+						Current:            resForCU(1),
+						Target:             resForCU(2),
+						DesiredLogicalTime: nil,
 					},
 				})
 				a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(2))
@@ -998,9 +1019,10 @@ func TestDownscalePivotBack(t *testing.T) {
 				t.Log(" > start plugin downscale")
 				a.Call(nextActions).Equals(core.ActionSet{
 					PluginRequest: &core.ActionPluginRequest{
-						LastPermit: lo.ToPtr(resForCU(2)),
-						Target:     resForCU(1),
-						Metrics:    lo.ToPtr(initialMetrics.ToAPI()),
+						LastPermit:         lo.ToPtr(resForCU(2)),
+						Target:             resForCU(1),
+						Metrics:            lo.ToPtr(initialMetrics.ToAPI()),
+						DesiredLogicalTime: nil,
 					},
 				})
 				a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
@@ -1018,9 +1040,10 @@ func TestDownscalePivotBack(t *testing.T) {
 				t.Log(" > start plugin upscale")
 				a.Call(nextActions).Equals(core.ActionSet{
 					PluginRequest: &core.ActionPluginRequest{
-						LastPermit: lo.ToPtr(resForCU(1)),
-						Target:     resForCU(2),
-						Metrics:    lo.ToPtr(newMetrics.ToAPI()),
+						LastPermit:         lo.ToPtr(resForCU(1)),
+						Target:             resForCU(2),
+						Metrics:            lo.ToPtr(newMetrics.ToAPI()),
+						DesiredLogicalTime: nil,
 					},
 				})
 				a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -1138,6 +1161,8 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		MonitorDownscale: &core.ActionMonitorDownscale{
 			Current: resForCU(2),
 			Target:  resForCU(1),
+
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(1))
@@ -1149,6 +1174,8 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		NeonVMRequest: &core.ActionNeonVMRequest{
 			Current: resForCU(2),
 			Target:  resForCU(1),
+
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(1))
@@ -1157,9 +1184,10 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	// Do plugin request for that downscaling:
 	a.Call(nextActions).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(2)),
-			Target:     resForCU(1),
-			Metrics:    lo.ToPtr(metrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(2)),
+			Target:             resForCU(1),
+			Metrics:            lo.ToPtr(metrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
@@ -1227,9 +1255,10 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	// We should be making a plugin request to get upscaling:
 	a.Call(nextActions).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(2)),
-			Target:     resForCU(3),
-			Metrics:    lo.ToPtr(metrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(2)),
+			Target:             resForCU(3),
+			Metrics:            lo.ToPtr(metrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
@@ -1242,8 +1271,9 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.9s")},
 		NeonVMRequest: &core.ActionNeonVMRequest{
-			Current: resForCU(2),
-			Target:  resForCU(3),
+			Current:            resForCU(2),
+			Target:             resForCU(3),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(3))
@@ -1253,8 +1283,9 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.8s")},
 		MonitorUpscale: &core.ActionMonitorUpscale{
-			Current: resForCU(2),
-			Target:  resForCU(3),
+			Current:            resForCU(2),
+			Target:             resForCU(3),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(3))
@@ -1306,9 +1337,10 @@ func TestFailedRequestRetry(t *testing.T) {
 	// We should be asking the scheduler for upscaling
 	a.Call(nextActions).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(1)),
-			Target:     resForCU(2),
-			Metrics:    lo.ToPtr(metrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(1)),
+			Target:             resForCU(2),
+			Metrics:            lo.ToPtr(metrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -1325,9 +1357,10 @@ func TestFailedRequestRetry(t *testing.T) {
 	// ... and then retry:
 	a.Call(nextActions).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(1)),
-			Target:     resForCU(2),
-			Metrics:    lo.ToPtr(metrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(1)),
+			Target:             resForCU(2),
+			Metrics:            lo.ToPtr(metrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -1342,8 +1375,9 @@ func TestFailedRequestRetry(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.9s")}, // plugin request tick
 		NeonVMRequest: &core.ActionNeonVMRequest{
-			Current: resForCU(1),
-			Target:  resForCU(2),
+			Current:            resForCU(1),
+			Target:             resForCU(2),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(2))
@@ -1360,8 +1394,9 @@ func TestFailedRequestRetry(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("1.8s")}, // plugin request tick
 		NeonVMRequest: &core.ActionNeonVMRequest{
-			Current: resForCU(1),
-			Target:  resForCU(2),
+			Current:            resForCU(1),
+			Target:             resForCU(2),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(2))
@@ -1372,8 +1407,9 @@ func TestFailedRequestRetry(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("1.7s")}, // plugin request tick
 		MonitorUpscale: &core.ActionMonitorUpscale{
-			Current: resForCU(1),
-			Target:  resForCU(2),
+			Current:            resForCU(1),
+			Target:             resForCU(2),
+			DesiredLogicalTime: nil,
 		},
 	})
 }
@@ -1409,9 +1445,10 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 		Call(state.NextActions, clock.Now()).
 		Equals(core.ActionSet{
 			PluginRequest: &core.ActionPluginRequest{
-				LastPermit: nil,
-				Target:     resForCU(3),
-				Metrics:    nil,
+				LastPermit:         nil,
+				Target:             resForCU(3),
+				Metrics:            nil,
+				DesiredLogicalTime: nil,
 			},
 		})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
@@ -1429,8 +1466,9 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.8s")},
 		MonitorDownscale: &core.ActionMonitorDownscale{
-			Current: resForCU(3),
-			Target:  resForCU(2),
+			Current:            resForCU(3),
+			Target:             resForCU(2),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(2))
@@ -1459,12 +1497,14 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.6s")}, // plugin request tick wait
 		NeonVMRequest: &core.ActionNeonVMRequest{
-			Current: resForCU(3),
-			Target:  resForCU(2),
+			Current:            resForCU(3),
+			Target:             resForCU(2),
+			DesiredLogicalTime: nil,
 		},
 		MonitorDownscale: &core.ActionMonitorDownscale{
-			Current: resForCU(2),
-			Target:  resForCU(1),
+			Current:            resForCU(2),
+			Target:             resForCU(1),
+			DesiredLogicalTime: nil,
 		},
 	})
 	// Start both requests. The vm-monitor request will finish first, but after that we'll just be
@@ -1495,13 +1535,15 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 			// incorrectly for 1 CU, rather than 2 CU. So, the rest of this test case is mostly just
 			// rounding out the rest of the scale-down routine.
 			PluginRequest: &core.ActionPluginRequest{
-				LastPermit: lo.ToPtr(resForCU(3)),
-				Target:     resForCU(2),
-				Metrics:    lo.ToPtr(metrics.ToAPI()),
+				LastPermit:         lo.ToPtr(resForCU(3)),
+				Target:             resForCU(2),
+				Metrics:            lo.ToPtr(metrics.ToAPI()),
+				DesiredLogicalTime: nil,
 			},
 			NeonVMRequest: &core.ActionNeonVMRequest{
-				Current: resForCU(2),
-				Target:  resForCU(1),
+				Current:            resForCU(2),
+				Target:             resForCU(1),
+				DesiredLogicalTime: nil,
 			},
 		})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -1525,9 +1567,10 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 	a.Call(nextActions).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
-			LastPermit: lo.ToPtr(resForCU(2)),
-			Target:     resForCU(1),
-			Metrics:    lo.ToPtr(metrics.ToAPI()),
+			LastPermit:         lo.ToPtr(resForCU(2)),
+			Target:             resForCU(1),
+			Metrics:            lo.ToPtr(metrics.ToAPI()),
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
