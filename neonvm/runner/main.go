@@ -1487,7 +1487,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	}
 
 	// create an configure linux bridge
-	logger.Info("setup bridge interface", zap.String("name", defaultNetworkBridgeName))
+	logger.Debug("setup bridge interface", zap.String("name", defaultNetworkBridgeName))
 	bridge := &netlink.Bridge{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkBridgeName,
@@ -1519,7 +1519,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 
 	// create an configure TAP interface
 	if !checkDevTun() {
-		logger.Info("create /dev/net/tun")
+		logger.Debug("create /dev/net/tun")
 		if err := execFg("mkdir", "-p", "/dev/net"); err != nil {
 			return nil, err
 		}
@@ -1531,7 +1531,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 		}
 	}
 
-	logger.Info("setup tap interface", zap.String("name", defaultNetworkTapName))
+	logger.Debug("setup tap interface", zap.String("name", defaultNetworkTapName))
 	tap := &netlink.Tuntap{
 		LinkAttrs: netlink.LinkAttrs{
 			Name: defaultNetworkTapName,
@@ -1553,7 +1553,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	}
 
 	// setup masquerading outgoing (from VM) traffic
-	logger.Info("setup masquerading for outgoing traffic")
+	logger.Debug("setup masquerading for outgoing traffic")
 	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
 		logger.Error("could not setup masquerading for outgoing traffic", zap.Error(err))
 		return nil, err
@@ -1561,18 +1561,18 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 
 	// pass incoming traffic to .Guest.Spec.Ports into VM
 	var iptablesArgs []string
-	for _, port := range ports {
-		logger.Info(fmt.Sprintf("setup DNAT rule for incoming traffic to port %d", port.Port))
+	for i, port := range ports {
+		logger.Debug(fmt.Sprintf("setup DNAT rule for incoming traffic to port %d", port.Port))
 		iptablesArgs = []string{
 			"-t", "nat", "-A", "PREROUTING",
 			"-i", "eth0", "-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
 			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
-			logger.Error("could not set up DNAT rule for incoming traffic", zap.Error(err))
+			logger.Error(fmt.Sprintf("could not set up DNAT rule #%d for incoming traffic to port %d", i, port.Port), zap.Error(err))
 			return nil, err
 		}
-		logger.Info(fmt.Sprintf("setup DNAT rule for traffic originating from localhost to port %d", port.Port))
+		logger.Debug(fmt.Sprintf("setup DNAT rule for traffic originating from localhost to port %d", port.Port))
 		iptablesArgs = []string{
 			"-t", "nat", "-A", "OUTPUT",
 			"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "LOCAL",
@@ -1580,10 +1580,10 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
-			logger.Error("could not set up DNAT rule for traffic from localhost", zap.Error(err))
+			logger.Error(fmt.Sprintf("could not set up DNAT rule #%d for traffic from localhost port %d", i, port.Port), zap.Error(err))
 			return nil, err
 		}
-		logger.Info(fmt.Sprintf("setup ACCEPT rule for traffic originating from localhost to port %d", port.Port))
+		logger.Debug(fmt.Sprintf("setup ACCEPT rule for traffic originating from localhost to port %d", port.Port))
 		iptablesArgs = []string{
 			"-A", "OUTPUT",
 			"-s", "127.0.0.1", "-d", ipVm.String(),
@@ -1591,11 +1591,11 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			"-j", "ACCEPT",
 		}
 		if err := execFg("iptables", iptablesArgs...); err != nil {
-			logger.Error("could not set up ACCEPT rule for traffic from localhost", zap.Error(err))
+			logger.Error(fmt.Sprintf("could not set up ACCEPT rule #%d for traffic from localhost to port %d", i, port.Port), zap.Error(err))
 			return nil, err
 		}
 	}
-	logger.Info("setup MASQUERADE rule for traffic originating from localhost")
+	logger.Debug("setup MASQUERADE rule for traffic originating from localhost")
 	iptablesArgs = []string{
 		"-t", "nat", "-A", "POSTROUTING",
 		"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "UNICAST",
@@ -1616,7 +1616,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	dnsSearch := strings.Join(getSearchDomains(resolvConf.Content), ",")
 
 	// prepare dnsmask command line (instead of config file)
-	logger.Info("run dnsmasq for interface", zap.String("name", defaultNetworkBridgeName))
+	logger.Debug("run dnsmasq for interface", zap.String("name", defaultNetworkBridgeName))
 	dnsMaskCmd := []string{
 		// No DNS, DHCP only
 		"--port=0",
