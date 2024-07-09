@@ -353,8 +353,10 @@ func (m MilliCPU) MarshalJSON() ([]byte, error) {
 func (m MilliCPU) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
+		//nolint:errcheck // can't do anything about the write error
 		state.Write([]byte(fmt.Sprintf("%v", uint32(m))))
 	default:
+		//nolint:errcheck // can't do anything about the write error
 		state.Write([]byte(fmt.Sprintf("%v", m.AsFloat64())))
 	}
 }
