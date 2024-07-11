@@ -196,18 +196,10 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
 
 	coreExecLogger := execLogger.Named("core")
-	clock := logiclock.NewClock(func(duration time.Duration, flag logiclock.Flag) {
-		labels := []string{"false", "false", "false"}
-		if flag.Has(logiclock.Upscale) {
-			labels[0] = "true"
-		}
-		if flag.Has(logiclock.Downscale) {
-			labels[1] = "true"
-		}
-		if flag.Has(logiclock.Immediate) {
-			labels[2] = "true"
-		}
-		r.global.metrics.scalingLatency.WithLabelValues(labels...).Observe(duration.Seconds())
+	clock := logiclock.NewClock(func(duration time.Duration, flags logiclock.Flag) {
+		r.global.metrics.scalingLatency.
+			WithLabelValues(logiclock.FlagsToLabels(flags)...).
+			Observe(duration.Seconds())
 	})
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,

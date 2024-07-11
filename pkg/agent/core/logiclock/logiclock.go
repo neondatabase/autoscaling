@@ -30,6 +30,23 @@ func (f Flag) Has(flag Flag) bool {
 	return f&flag != 0
 }
 
+// AllFlags and AllFlagNames must have the same order, so the metrics work correctly.
+var AllFlags = []Flag{Upscale, Downscale, Immediate}
+var AllFlagNames = []string{"upscale", "downscale", "immediate"}
+
+// FlagsToLabels converts a set of flags to a list of strings which prometheus can take.
+func FlagsToLabels(flags Flag) []string {
+	var ret []string
+	for _, flag := range AllFlags {
+		value := "false"
+		if flags.Has(flag) {
+			value = "true"
+		}
+		ret = append(ret, value)
+	}
+	return ret
+}
+
 // Clock can generate and observe logical time.
 // Each logical timestamp is associated with a physical timestamp and a set of flags upon creation.
 // Once Clock observes a previously generated timestamp after some time, it will call the callback with

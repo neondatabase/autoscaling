@@ -865,6 +865,11 @@ func (s *state) updateDesiredLogicalTime(
 		flags.Set(logiclock.Immediate)
 	}
 
+	if flags == 0 {
+		// Nothing changed, so no need to update the logical time
+		return
+	}
+
 	s.DesiredLogicalTime = s.ClockSource.Next(now, flags)
 }
 
