@@ -19,6 +19,8 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
+var NilLogicalTime = helpers.SafeVal[vmv1.LogicalTime](nil)
+
 func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 	slotSize := api.Bytes(1 << 30 /* 1 Gi */)
 
@@ -146,7 +148,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 
 			// set lastApproved by simulating a scheduler request/response
 			state.Plugin().StartingRequest(now, c.schedulerApproved)
-			err := state.Plugin().RequestSuccessful(now, api.PluginResponse{
+			err := state.Plugin().RequestSuccessful(now, nil, api.PluginResponse{
 				Permit:  c.schedulerApproved,
 				Migrate: nil,
 			})
@@ -229,7 +231,7 @@ func doInitialPluginRequest(a helpers.Assert, state *core.State, clock *helpers.
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resources)
 	clock.Inc(requestTime)
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resources,
 		Migrate: nil,
 	})
@@ -308,12 +310,11 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	clockTick().AssertEquals(duration("0.3s"))
 	// should have nothing more to do; waiting on plugin request to come back
 	a.Call(nextActions).Equals(core.ActionSet{})
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), lt, api.PluginResponse{
 		Permit:  resForCU(2),
 		Migrate: nil,
 	})
 	lt = lt.Rewind(clock.Now())
-	state.Plugin().UpdateLogicalTime(lt)
 
 	// Scheduler approval is done, now we should be making the request to NeonVM
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -459,11 +460,10 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	clockTick().AssertEquals(duration("1s"))
 	// should have nothing more to do; waiting on plugin request to come back
 	a.Call(nextActions).Equals(core.ActionSet{})
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), lt, api.PluginResponse{
 		Permit:  resForCU(1),
 		Migrate: nil,
 	})
-	state.Plugin().UpdateLogicalTime(lt.Rewind(clock.Now()))
 
 	// Finally, check there's no leftover actions:
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -523,7 +523,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 			a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{})
 			clock.Inc(reqDuration)
 			a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{})
-			a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+			a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 				Permit:  resources,
 				Migrate: nil,
 			})
@@ -683,7 +683,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		Wait: &core.ActionWait{Duration: duration("3.9s")},
 	})
 	clockTick()
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(3),
 		Migrate: nil,
 	})
@@ -728,7 +728,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		Wait: &core.ActionWait{Duration: duration("1s")}, // still waiting on retrying vm-monitor downscaling
 	})
 	clockTick()
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(3),
 		Migrate: nil,
 	})
@@ -798,7 +798,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		// not waiting on anything!
 	})
 	clockTick()
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(1),
 		Migrate: nil,
 	})
@@ -864,7 +864,7 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("5.9s")}, // same waiting for requested upscale expiring
 	})
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(2),
 		Migrate: nil,
 	})
@@ -918,7 +918,7 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("0.9s")}, // waiting for requested upscale expiring
 	})
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(2),
 		Migrate: nil,
 	})
@@ -1067,7 +1067,7 @@ func TestDownscalePivotBack(t *testing.T) {
 				halfClockTick()
 				*pluginWait = duration("4.9s") // reset because we just made a request
 				t.Log(" > finish plugin downscale")
-				a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+				a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 					Permit:  resForCU(1),
 					Migrate: nil,
 				})
@@ -1086,7 +1086,7 @@ func TestDownscalePivotBack(t *testing.T) {
 				clockTick()
 				*pluginWait = duration("4.9s") // reset because we just made a request
 				t.Log(" > finish plugin upscale")
-				a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+				a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 					Permit:  resForCU(2),
 					Migrate: nil,
 				})
@@ -1228,7 +1228,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
 	clockTick()
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(1),
 		Migrate: nil,
 	})
@@ -1299,7 +1299,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
 	clockTick()
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(3),
 		Migrate: nil,
 	})
@@ -1401,7 +1401,7 @@ func TestFailedRequestRetry(t *testing.T) {
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
 	clockTick()
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(2),
 		Migrate: nil,
 	})
@@ -1489,7 +1489,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 		})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
 	clockTick()
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(3),
 		Migrate: nil,
 	})
@@ -1587,7 +1587,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 
 	clockTick()
 
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(2),
 		Migrate: nil,
 	})
@@ -1613,7 +1613,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 
 	clockTick()
 
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), NilLogicalTime, api.PluginResponse{
 		Permit:  resForCU(1),
 		Migrate: nil,
 	})

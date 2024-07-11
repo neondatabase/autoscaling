@@ -60,6 +60,19 @@ func (a Assert) NoError(f any, args ...any) {
 	a.Call(f, args...).Equals(nil)
 }
 
+// SafeVal creates a safe value that can be used in Assert.Call() call.
+//
+// We have to use this function because calling the Assert.Call() method with a
+// nil parameter can cause a panic like:
+// panic: reflect: Call using zero Value argument...
+func SafeVal[T any](i any) (v reflect.Value) {
+	v = reflect.ValueOf(i)
+	if i == nil {
+		v = reflect.Zero(reflect.TypeOf((*T)(nil)))
+	}
+	return
+}
+
 // Call sets up a prepared function call, which will not be executed until one of its methods is
 // actually called, which will perform all the relevant checks.
 //
@@ -79,6 +92,11 @@ func (a Assert) Call(f any, args ...any) PreparedFunctionCall {
 
 	var argValues []reflect.Value
 	for _, a := range args {
+		if _, ok := a.(reflect.Value); ok {
+			// This is a SafeVal value, so we can just use it directly
+			argValues = append(argValues, a.(reflect.Value))
+			continue
+		}
 		argValues = append(argValues, reflect.ValueOf(a))
 	}
 

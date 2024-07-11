@@ -1062,6 +1062,7 @@ func (h PluginHandle) RequestFailed(now time.Time) {
 
 func (h PluginHandle) RequestSuccessful(
 	now time.Time,
+	desiredTime *vmv1.LogicalTime,
 	resp api.PluginResponse,
 ) (_err error) {
 	h.s.Plugin.OngoingRequest = false
@@ -1095,11 +1096,8 @@ func (h PluginHandle) RequestSuccessful(
 	// the process of moving the source of truth for ComputeUnit from the scheduler plugin to the
 	// autoscaler-agent.
 	h.s.Plugin.Permit = &resp.Permit
+	h.s.Plugin.CurrentLogicalTime = desiredTime.Rewind(now)
 	return nil
-}
-
-func (h PluginHandle) UpdateLogicalTime(currentTime *vmv1.LogicalTime) {
-	h.s.Plugin.CurrentLogicalTime = currentTime
 }
 
 // MonitorHandle provides write access to the vm-monitor pieces of an UpdateState
