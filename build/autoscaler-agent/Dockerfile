@@ -1,11 +1,19 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.21-alpine AS chef
+RUN go install github.com/sharnoff/go-chef@ee64ced765864b0b55c9afc33435529681673553
 WORKDIR /workspace
 
-RUN apk add gcc musl-dev # gcc (and therefore musl-dev) is required for cgo extensions
+FROM chef AS planner
+COPY . .
+RUN go-chef --prepare recipe.json
+
+FROM chef AS builder
+
+# Build dependencies
+COPY --from=planner /workspace/recipe.json recipe.json
+RUN CGO_ENABLED=0 go-chef --cook recipe.json
 
 COPY go.mod go.mod
 COPY go.sum go.sum
-RUN go mod download
 
 COPY neonvm/apis          neonvm/apis
 COPY neonvm/client        neonvm/client
@@ -17,10 +25,7 @@ COPY cmd/autoscaler-agent cmd/autoscaler-agent
 
 ARG GIT_INFO
 
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    go build -a \
-	# future compat: don't modify go.mod if we have a vendor directory \
-	-mod readonly \
+RUN CGO_ENABLED=0 go build \
     # -ldflags "-X ..." allows us to overwrite the value of a variable in a package \
     -ldflags "-X 'github.com/neondatabase/autoscaling/pkg/util.BuildGitInfo=$GIT_INFO'" \
     cmd/autoscaler-agent/main.go
