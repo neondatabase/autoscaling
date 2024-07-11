@@ -312,7 +312,8 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Permit:  resForCU(2),
 		Migrate: nil,
 	})
-	state.Plugin().UpdateLogicalTime(lt.Rewind(clock.Now()))
+	lt = lt.Rewind(clock.Now())
+	state.Plugin().UpdateLogicalTime(lt)
 
 	// Scheduler approval is done, now we should be making the request to NeonVM
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -337,12 +338,15 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	// Until NeonVM is successful, we won't see any observations.
 	assert.Empty(t, latencyObservations)
 
+	// Now NeonVM request is done.
+	lt = lt.Rewind(clock.Now())
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
 		DefaultInitialStateConfig.VM,
-		helpers.WithLogicalTime(lt.Rewind(clock.Now())),
+		helpers.WithLogicalTime(lt),
 	))
 
+	// And we see the latency
 	assert.Len(t, latencyObservations, 1)
 	// We started at 0.2s and finished at 0.4s
 	assert.Equal(t, duration("0.2s"), latencyObservations[0].latency)
@@ -400,12 +404,13 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	})
 	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(1))
 	clockTick().AssertEquals(duration("0.7s"))
+	lt = lt.Rewind(clock.Now())
 	// should have nothing more to do; waiting on vm-monitor request to come back
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.5s")},
 	})
 	a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
-	state.Monitor().UpdateLogicalTime(lt.Rewind(clock.Now()))
+	state.Monitor().UpdateLogicalTime(lt)
 
 	// After getting approval from the vm-monitor, we make the request to NeonVM to carry it out
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -426,11 +431,12 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 
 	// Update the VM to set current=1, but first wait 0.1s
 	clockTick().AssertEquals(duration("0.9s"))
+	lt = lt.Rewind(clock.Now())
 	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
 		DefaultInitialStateConfig.VM,
 		helpers.WithCurrentCU(1),
 		helpers.WithMinMaxCU(1, 1),
-		helpers.WithLogicalTime(lt.Rewind(clock.Now())),
+		helpers.WithLogicalTime(lt),
 	))
 
 	// One more latency observation

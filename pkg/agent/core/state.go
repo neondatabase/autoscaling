@@ -442,7 +442,7 @@ func (s *state) calculatePluginAction(
 					return nil
 				}
 			}(),
-			DesiredLogicalTime: desiredLogicalTime,
+			DesiredLogicalTime: desiredLogicalTime.Rewind(now),
 		}, nil
 	} else {
 		if wantToRequestNewResources && waitingOnRetryBackoff {
@@ -463,13 +463,10 @@ func (s *state) calculateNeonVMAction(
 	desiredResources api.Resources,
 	pluginRequested *api.Resources,
 	pluginRequestedPhase string,
-	logicalTime *vmv1.LogicalTime,
+	desiredTime *vmv1.LogicalTime,
 ) (*ActionNeonVMRequest, *time.Duration) {
-
-	desiredTime := logicalTime
-
 	if desiredResources.HasFieldLessThan(s.VM.Using()) {
-		// We are downscaling, so we needed a permit from the¡ monitor
+		// We are downscaling, so we needed a permit from the monitor
 		desiredTime = desiredTime.Earliest(s.Monitor.CurrentLogicalTime)
 	}
 
@@ -507,7 +504,7 @@ func (s *state) calculateNeonVMAction(
 		return &ActionNeonVMRequest{
 			Current:            s.VM.Using(),
 			Target:             desiredResources,
-			DesiredLogicalTime: desiredTime,
+			DesiredLogicalTime: desiredTime.Rewind(now),
 		}, nil
 	} else {
 		var reqs []string
@@ -593,7 +590,7 @@ func (s *state) calculateMonitorUpscaleAction(
 	return &ActionMonitorUpscale{
 		Current:            *s.Monitor.Approved,
 		Target:             requestResources,
-		DesiredLogicalTime: desiredLogicalTime,
+		DesiredLogicalTime: desiredLogicalTime.Rewind(now),
 	}, nil
 }
 
@@ -681,7 +678,7 @@ func (s *state) calculateMonitorDownscaleAction(
 	return &ActionMonitorDownscale{
 		Current:            *s.Monitor.Approved,
 		Target:             requestResources,
-		DesiredLogicalTime: desiredLogicalTime,
+		DesiredLogicalTime: desiredLogicalTime.Rewind(now),
 	}, nil
 }
 

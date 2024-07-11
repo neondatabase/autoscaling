@@ -255,7 +255,7 @@ func (t *LogicalTime) Earliest(other *LogicalTime) *LogicalTime {
 	if other == nil {
 		return t
 	}
-	if t.UpdatedAt.Before(&other.UpdatedAt) {
+	if t.Value < other.Value {
 		return t
 	}
 	return other
