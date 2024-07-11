@@ -19,6 +19,7 @@ package v1
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -43,19 +44,19 @@ func (r *VirtualMachineMigration) Default() {
 var _ webhook.Validator = &VirtualMachineMigration{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *VirtualMachineMigration) ValidateCreate() error {
+func (r *VirtualMachineMigration) ValidateCreate() (admission.Warnings, error) {
 	// TODO: implement creation validation webhook (?)
-	return nil
+	return nil, nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) error {
+func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	// TODO: implement update validation webhook
-	return nil
+	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *VirtualMachineMigration) ValidateDelete() error {
+func (r *VirtualMachineMigration) ValidateDelete() (admission.Warnings, error) {
 	// TODO: implement deletion validation webhook (?)
-	return nil
+	return nil, nil
 }
