@@ -2,11 +2,11 @@ package core_test
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
