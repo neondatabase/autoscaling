@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 
@@ -217,17 +218,13 @@ func logicalTime(clock *helpers.FakeClock, value int64) *vmv1.LogicalTime {
 	}
 }
 
-func doInitialPluginRequest(a helpers.Assert, state *core.State, clock *helpers.FakeClock, requestTime time.Duration, metrics *api.Metrics, resources api.Resources, enableLogicalClock bool) {
-	var lt *vmv1.LogicalTime
-	if enableLogicalClock {
-		lt = logicalTime(clock, 0)
-	}
+func doInitialPluginRequest(a helpers.Assert, state *core.State, clock *helpers.FakeClock, requestTime time.Duration, metrics *api.Metrics, resources api.Resources, _ bool) {
 	a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:         nil,
 			Target:             resources,
 			Metrics:            metrics,
-			DesiredLogicalTime: lt,
+			DesiredLogicalTime: nil,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resources)
@@ -256,7 +253,17 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	}
 	resForCU := DefaultComputeUnit.Mul
 
-	logicClock := logiclock.NewClock(nil)
+	var latencyObservations []struct {
+		latency time.Duration
+		flags   logiclock.Flag
+	}
+
+	logicClock := logiclock.NewClock(func(latency time.Duration, flags logiclock.Flag) {
+		latencyObservations = append(latencyObservations, struct {
+			latency time.Duration
+			flags   logiclock.Flag
+		}{latency, flags})
+	})
 
 	state := helpers.CreateInitialState(
 		DefaultInitialStateConfig,
@@ -284,10 +291,10 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(2))
 
-	lt := logicalTime(clock, 2)
-
 	// Now that the initial scheduler request is done, and we have metrics that indicate
-	// scale-up would be a good idea, we should be contacting the scheduler to get approval.
+	// scale-up would be a good idea. Logical time nil -> 0.
+	lt := logicalTime(clock, 0)
+	// We should be contacting the scheduler to get approval.
 	a.Call(nextActions).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:         lo.ToPtr(resForCU(1)),
@@ -305,7 +312,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Permit:  resForCU(2),
 		Migrate: nil,
 	})
-	state.Plugin().UpdateLogicalTime(lt)
+	state.Plugin().UpdateLogicalTime(lt.Rewind(clock.Now()))
 
 	// Scheduler approval is done, now we should be making the request to NeonVM
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -326,10 +333,17 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.8s")},
 	})
-	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	state.UpdateCurrentLogicalTime(lt)
 
-	lt = logicalTime(clock, 6)
+	// Until NeonVM is successful, we won't see any observations.
+	assert.Empty(t, latencyObservations)
+
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+	state.UpdateLogicalTime(lt.Rewind(clock.Now()))
+
+	assert.Len(t, latencyObservations, 1)
+	// We started at 0.2s and finished at 0.4s
+	assert.Equal(t, duration("0.2s"), latencyObservations[0].latency)
+	assert.Equal(t, logiclock.Upscale, latencyObservations[0].flags)
 
 	// NeonVM change is done, now we should finish by notifying the vm-monitor
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -348,7 +362,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Wait: &core.ActionWait{Duration: duration("4.7s")},
 	})
 	a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
-	state.Monitor().UpdateLogicalTime(lt)
+	state.Monitor().UpdateLogicalTime(lt.Rewind(clock.Now()))
 
 	// And now, double-check that there's no sneaky follow-up actions before we change the
 	// metrics
@@ -370,7 +384,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a.Call(getDesiredResources, state, clock.Now()).
 		Equals(resForCU(1))
 
-	lt = logicalTime(clock, 10)
+	lt = logicalTime(clock, 1)
 
 	// First step in downscaling is getting approval from the vm-monitor:
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -388,7 +402,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Wait: &core.ActionWait{Duration: duration("4.5s")},
 	})
 	a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now())
-	state.Monitor().UpdateLogicalTime(lt)
+	state.Monitor().UpdateLogicalTime(lt.Rewind(clock.Now()))
 
 	// After getting approval from the vm-monitor, we make the request to NeonVM to carry it out
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -406,8 +420,13 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Wait: &core.ActionWait{Duration: duration("4.4s")},
 	})
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+	state.UpdateLogicalTime(lt.Rewind(clock.Now()))
 
-	lt = logicalTime(clock, 14)
+	// One more latency observation
+	assert.Len(t, latencyObservations, 2)
+	// We started at 0.6s and finished at 0.8s
+	assert.Equal(t, duration("0.2s"), latencyObservations[1].latency)
+	assert.Equal(t, logiclock.Downscale, latencyObservations[1].flags)
 
 	// Request to NeonVM completed, it's time to inform the scheduler plugin:
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -427,7 +446,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Permit:  resForCU(1),
 		Migrate: nil,
 	})
-	state.Plugin().UpdateLogicalTime(lt)
+	state.Plugin().UpdateLogicalTime(lt.Rewind(clock.Now()))
 
 	// Finally, check there's no leftover actions:
 	a.Call(nextActions).Equals(core.ActionSet{

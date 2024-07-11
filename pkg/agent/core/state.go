@@ -117,8 +117,13 @@ type state struct {
 
 	Metrics *SystemMetrics
 
-	ClockSource        LogicClock `json:"-"`
+	ClockSource LogicClock `json:"-"`
+
+	// DesiredLogicalTime is the logical time autoscaler-agent currently works to achieve.
 	DesiredLogicalTime *vmv1.LogicalTime
+
+	// LastDesiredResources is the last target agent wanted to scale to.
+	LastDesiredResources *api.Resources
 }
 
 type pluginState struct {
@@ -237,9 +242,10 @@ func NewState(vm api.VmInfo, config Config, clockSource LogicClock) *State {
 				OngoingRequested: nil,
 				RequestFailedAt:  nil,
 			},
-			Metrics:            nil,
-			ClockSource:        clockSource,
-			DesiredLogicalTime: nil,
+			Metrics:              nil,
+			ClockSource:          clockSource,
+			DesiredLogicalTime:   nil,
+			LastDesiredResources: nil,
 		},
 	}
 
@@ -840,6 +846,8 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	}
 	s.updateDesiredLogicalTime(now, result, s.VM.Using(), requestedUpscalingAffectedResult)
 
+	s.LastDesiredResources = &result
+
 	s.info("Calculated desired resources",
 		zap.Object("current", s.VM.Using()),
 		zap.Object("target", result),
@@ -865,15 +873,22 @@ func (s *state) updateDesiredLogicalTime(
 		flags.Set(logiclock.Immediate)
 	}
 
-	if flags == 0 {
-		// Nothing changed, so no need to update the logical time
-		return
+	if s.LastDesiredResources == nil {
+		if desired == current {
+			// First iteration, but no scaling required
+			return
+		}
+	} else {
+		if *s.LastDesiredResources == desired {
+			// Nothing changed, so no need to update the logical time
+			return
+		}
 	}
 
 	s.DesiredLogicalTime = s.ClockSource.Next(now, flags)
 }
 
-func (s *state) updateCurrentLogicalTime(logicalTime *vmv1.LogicalTime) {
+func (s *state) updateLogicalTime(logicalTime *vmv1.LogicalTime) {
 	err := s.ClockSource.Observe(logicalTime)
 	if err != nil {
 		s.warnf("Failed to observe clock source: %v", err)
@@ -1015,7 +1030,7 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	// - https://github.com/neondatabase/autoscaling/issues/462
 	vm.SetUsing(s.internal.VM.Using())
 	s.internal.VM = vm
-	s.internal.updateCurrentLogicalTime(vm.CurrentLogicalTime)
+	s.internal.updateLogicalTime(vm.CurrentLogicalTime)
 }
 
 func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
@@ -1186,8 +1201,8 @@ func (s *State) NeonVM() NeonVMHandle {
 	return NeonVMHandle{&s.internal}
 }
 
-func (s *State) UpdateCurrentLogicalTime(logicalTime *vmv1.LogicalTime) {
-	s.internal.updateCurrentLogicalTime(logicalTime)
+func (s *State) UpdateLogicalTime(logicalTime *vmv1.LogicalTime) {
+	s.internal.updateLogicalTime(logicalTime)
 }
 
 func (h NeonVMHandle) StartingRequest(now time.Time, resources api.Resources) {
