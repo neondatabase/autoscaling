@@ -220,7 +220,7 @@ func logicalTime(clock *helpers.FakeClock, value int64) *vmv1.LogicalTime {
 	}
 }
 
-func doInitialPluginRequest(a helpers.Assert, state *core.State, clock *helpers.FakeClock, requestTime time.Duration, metrics *api.Metrics, resources api.Resources, _ bool) {
+func doInitialPluginRequest(a helpers.Assert, state *core.State, clock *helpers.FakeClock, requestTime time.Duration, metrics *api.Metrics, resources api.Resources) {
 	a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:         nil,
@@ -280,7 +280,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1), true)
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
 
 	// Set metrics
 	clockTick().AssertEquals(duration("0.2s"))
@@ -499,7 +499,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	reqEvery := DefaultInitialStateConfig.Core.PluginRequestTick
 	endTime := duration("20s")
 
-	doInitialPluginRequest(a, state, clock, clockTick, lo.ToPtr(metrics.ToAPI()), resources, false)
+	doInitialPluginRequest(a, state, clock, clockTick, lo.ToPtr(metrics.ToAPI()), resources)
 
 	for clock.Elapsed().Duration < endTime {
 		timeSinceScheduledRequest := (clock.Elapsed().Duration - base) % reqEvery
@@ -561,7 +561,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 
 	state.Monitor().Active(true)
 
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(6), false)
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(6))
 
 	// Set metrics
 	clockTick()
@@ -832,7 +832,7 @@ func TestRequestedUpscale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1), false)
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
 
 	// Set metrics
 	clockTick()
@@ -1108,7 +1108,7 @@ func TestDownscalePivotBack(t *testing.T) {
 
 		state.Monitor().Active(true)
 
-		doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2), false)
+		doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
 
 		clockTick().AssertEquals(duration("0.2s"))
 		pluginWait := duration("4.8s")
@@ -1162,7 +1162,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2), false)
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
 
 	clockTick()
 
@@ -1261,7 +1261,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2), false)
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
 
 	clockTick()
 
@@ -1360,7 +1360,7 @@ func TestFailedRequestRetry(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1), false)
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
 
 	// Set metrics so that we should be trying to upscale
 	clockTick()
