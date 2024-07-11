@@ -151,7 +151,13 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 
 func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
 	logger = logger.With(util.VMNameFields(vm))
-	return extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources(), vm.Status.CurrentLogicalTime)
+	info, err := extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
+	if err != nil {
+		return nil, fmt.Errorf("error extracting VM info: %w", err)
+	}
+
+	info.CurrentLogicalTime = vm.Status.CurrentLogicalTime
+	return info, nil
 }
 
 func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
@@ -165,7 +171,7 @@ func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) 
 	}
 
 	vmName := pod.Labels[vmapi.VirtualMachineNameLabel]
-	return extractVmInfoGeneric(logger, vmName, pod, resources, nil)
+	return extractVmInfoGeneric(logger, vmName, pod, resources)
 }
 
 func extractVmInfoGeneric(
@@ -173,7 +179,6 @@ func extractVmInfoGeneric(
 	vmName string,
 	obj metav1.ObjectMetaAccessor,
 	resources vmapi.VirtualMachineResources,
-	currentClock *vmapi.LogicalTime,
 ) (*VmInfo, error) {
 	cpuInfo := NewVmCpuInfo(resources.CPUs)
 	memInfo := NewVmMemInfo(resources.MemorySlots, resources.MemorySlotSize)
@@ -193,7 +198,7 @@ func extractVmInfoGeneric(
 			ScalingEnabled:       scalingEnabled,
 			ScalingConfig:        nil, // set below, maybe
 		},
-		CurrentLogicalTime: currentClock,
+		CurrentLogicalTime: nil, // set later, maybe
 	}
 
 	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {
