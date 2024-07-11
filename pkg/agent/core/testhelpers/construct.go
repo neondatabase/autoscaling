@@ -179,6 +179,12 @@ func WithCurrentCU(cu uint16) VmInfoOpt {
 	})
 }
 
+func WithLogicalTime(t *vmapi.LogicalTime) VmInfoOpt {
+	return vmInfoModifier(func(c InitialVmInfoConfig, vm *api.VmInfo) {
+		vm.CurrentLogicalTime = t
+	})
+}
+
 func WithClock(c core.LogicClock) ClockSourceOpt {
 	return clockInjector(func() core.LogicClock {
 		return c

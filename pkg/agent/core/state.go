@@ -1201,10 +1201,6 @@ func (s *State) NeonVM() NeonVMHandle {
 	return NeonVMHandle{&s.internal}
 }
 
-func (s *State) UpdateLogicalTime(logicalTime *vmv1.LogicalTime) {
-	s.internal.updateLogicalTime(logicalTime)
-}
-
 func (h NeonVMHandle) StartingRequest(now time.Time, resources api.Resources) {
 	// FIXME: add time to ongoing request info (or maybe only in RequestFailed?)
 	h.s.NeonVM.OngoingRequested = &resources

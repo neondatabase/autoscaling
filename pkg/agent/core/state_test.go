@@ -338,7 +338,10 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	assert.Empty(t, latencyObservations)
 
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	state.UpdateLogicalTime(lt.Rewind(clock.Now()))
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithLogicalTime(lt.Rewind(clock.Now())),
+	))
 
 	assert.Len(t, latencyObservations, 1)
 	// We started at 0.2s and finished at 0.4s
@@ -420,12 +423,20 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Wait: &core.ActionWait{Duration: duration("4.4s")},
 	})
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	state.UpdateLogicalTime(lt.Rewind(clock.Now()))
+
+	// Update the VM to set current=1, but first wait 0.1s
+	clockTick().AssertEquals(duration("0.9s"))
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithCurrentCU(1),
+		helpers.WithMinMaxCU(1, 1),
+		helpers.WithLogicalTime(lt.Rewind(clock.Now())),
+	))
 
 	// One more latency observation
 	assert.Len(t, latencyObservations, 2)
-	// We started at 0.6s and finished at 0.8s
-	assert.Equal(t, duration("0.2s"), latencyObservations[1].latency)
+	// We started at 0.6s and finished at 0.9s
+	assert.Equal(t, duration("0.3s"), latencyObservations[1].latency)
 	assert.Equal(t, logiclock.Downscale, latencyObservations[1].flags)
 
 	// Request to NeonVM completed, it's time to inform the scheduler plugin:
@@ -439,7 +450,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		// shouldn't have anything to say to the other components
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(1))
-	clockTick().AssertEquals(duration("0.9s"))
+	clockTick().AssertEquals(duration("1s"))
 	// should have nothing more to do; waiting on plugin request to come back
 	a.Call(nextActions).Equals(core.ActionSet{})
 	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), api.PluginResponse{
