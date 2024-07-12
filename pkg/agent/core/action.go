@@ -22,28 +22,28 @@ type ActionWait struct {
 }
 
 type ActionPluginRequest struct {
-	LastPermit         *api.Resources    `json:"current"`
-	Target             api.Resources     `json:"target"`
-	Metrics            *api.Metrics      `json:"metrics"`
-	DesiredLogicalTime *vmv1.LogicalTime `json:"desiredLogicalTime"`
+	LastPermit     *api.Resources        `json:"current"`
+	Target         api.Resources         `json:"target"`
+	Metrics        *api.Metrics          `json:"metrics"`
+	TargetRevision vmv1.RevisionWithTime `json:"targetRevision"`
 }
 
 type ActionNeonVMRequest struct {
-	Current            api.Resources     `json:"current"`
-	Target             api.Resources     `json:"target"`
-	DesiredLogicalTime *vmv1.LogicalTime `json:"desiredLogicalTime"`
+	Current        api.Resources         `json:"current"`
+	Target         api.Resources         `json:"target"`
+	TargetRevision vmv1.RevisionWithTime `json:"targetRevision"`
 }
 
 type ActionMonitorDownscale struct {
-	Current            api.Resources     `json:"current"`
-	Target             api.Resources     `json:"target"`
-	DesiredLogicalTime *vmv1.LogicalTime `json:"desiredLogicalTime"`
+	Current        api.Resources         `json:"current"`
+	Target         api.Resources         `json:"target"`
+	TargetRevision vmv1.RevisionWithTime `json:"targetRevision"`
 }
 
 type ActionMonitorUpscale struct {
-	Current            api.Resources     `json:"current"`
-	Target             api.Resources     `json:"target"`
-	DesiredLogicalTime *vmv1.LogicalTime `json:"desiredLogicalTime"`
+	Current        api.Resources         `json:"current"`
+	Target         api.Resources         `json:"target"`
+	TargetRevision vmv1.RevisionWithTime `json:"targetRevision"`
 }
 
 func addObjectPtr[T zapcore.ObjectMarshaler](enc zapcore.ObjectEncoder, key string, value *T) error {

@@ -33,7 +33,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
-	"github.com/neondatabase/autoscaling/pkg/agent/core/logiclock"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -196,9 +196,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
 
 	coreExecLogger := execLogger.Named("core")
-	clock := logiclock.NewClock(func(duration time.Duration, flags logiclock.Flag) {
+	revisionSource := revsource.NewRevisionSource(func(duration time.Duration, flags vmv1.Flag) {
 		r.global.metrics.scalingLatency.
-			WithLabelValues(logiclock.FlagsToLabels(flags)...).
+			WithLabelValues(revsource.FlagsToLabels(flags)...).
 			Observe(duration.Seconds())
 	})
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
@@ -217,8 +217,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 				Info: coreExecLogger.Info,
 				Warn: coreExecLogger.Warn,
 			},
+			RevisionSource: revisionSource,
 		},
-	}, clock)
+	})
 
 	r.executorStateDump = executorCore.StateDump
 
@@ -635,7 +636,7 @@ func doMetricsRequest(
 func (r *Runner) doNeonVMRequest(
 	ctx context.Context,
 	target api.Resources,
-	desiredLogicalTime *vmv1.LogicalTime,
+	currentRevision vmv1.RevisionWithTime,
 ) error {
 	patches := []patch.Operation{{
 		Op:    patch.OpReplace,
@@ -648,7 +649,7 @@ func (r *Runner) doNeonVMRequest(
 	}, {
 		Op:    patch.OpReplace,
 		Path:  "/spec/desiredLogicalTime",
-		Value: desiredLogicalTime,
+		Value: currentRevision,
 	}}
 
 	patchPayload, err := json.Marshal(patches)

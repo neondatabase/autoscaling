@@ -801,7 +801,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	}
 
 	if vm.Status.Phase == vmv1.VmRunning {
-		vm.Status.CurrentLogicalTime = vm.Spec.DesiredLogicalTime.RewindNow()
+		if vm.Spec.TargetRevision != nil {
+			rev := vm.Spec.TargetRevision.WithTime(time.Now())
+			vm.Status.CurrentRevision = &rev
+		}
 	}
 
 	return nil

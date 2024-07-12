@@ -17,7 +17,7 @@ type NeonVMInterface interface {
 		_ context.Context,
 		_ *zap.Logger,
 		current, target api.Resources,
-		desiredLogicalTime *vmv1.LogicalTime,
+		currentRevision vmv1.RevisionWithTime,
 	) error
 }
 
@@ -52,8 +52,10 @@ func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *
 			continue // state has changed, retry.
 		}
 
-		err := c.clients.NeonVM.Request(ctx, ifaceLogger, action.Current, action.Target, action.DesiredLogicalTime)
 		endTime := time.Now()
+		currentRevision := action.TargetRevision.WithTime(endTime)
+		err := c.clients.NeonVM.Request(ctx, ifaceLogger, action.Current, action.Target, currentRevision)
+
 		logFields := []zap.Field{zap.Object("action", action), zap.Duration("duration", endTime.Sub(startTime))}
 
 		c.update(func(state *core.State) {

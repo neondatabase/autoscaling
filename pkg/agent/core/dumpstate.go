@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"time"
 
-	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -41,8 +40,7 @@ func (s *State) Dump() StateDump {
 			Monitor:              s.internal.Monitor.deepCopy(),
 			NeonVM:               s.internal.NeonVM.deepCopy(),
 			Metrics:              shallowCopy[SystemMetrics](s.internal.Metrics),
-			ClockSource:          s.internal.ClockSource,
-			DesiredLogicalTime:   s.internal.DesiredLogicalTime,
+			TargetRevision:       s.internal.TargetRevision,
 			LastDesiredResources: s.internal.LastDesiredResources,
 		},
 	}
@@ -50,11 +48,11 @@ func (s *State) Dump() StateDump {
 
 func (s *pluginState) deepCopy() pluginState {
 	return pluginState{
-		OngoingRequest:     s.OngoingRequest,
-		LastRequest:        shallowCopy[pluginRequested](s.LastRequest),
-		LastFailureAt:      shallowCopy[time.Time](s.LastFailureAt),
-		Permit:             shallowCopy[api.Resources](s.Permit),
-		CurrentLogicalTime: shallowCopy[vmv1.LogicalTime](s.CurrentLogicalTime),
+		OngoingRequest:  s.OngoingRequest,
+		LastRequest:     shallowCopy[pluginRequested](s.LastRequest),
+		LastFailureAt:   shallowCopy[time.Time](s.LastFailureAt),
+		Permit:          shallowCopy[api.Resources](s.Permit),
+		CurrentRevision: s.CurrentRevision,
 	}
 }
 
@@ -66,7 +64,7 @@ func (s *monitorState) deepCopy() monitorState {
 		Approved:           shallowCopy[api.Resources](s.Approved),
 		DownscaleFailureAt: shallowCopy[time.Time](s.DownscaleFailureAt),
 		UpscaleFailureAt:   shallowCopy[time.Time](s.UpscaleFailureAt),
-		CurrentLogicalTime: shallowCopy[vmv1.LogicalTime](s.CurrentLogicalTime),
+		CurrentRevision:    s.CurrentRevision,
 	}
 }
 

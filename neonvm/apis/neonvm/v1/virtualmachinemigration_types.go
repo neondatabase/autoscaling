@@ -73,7 +73,7 @@ type VirtualMachineMigrationStatus struct {
 	// Represents the observations of a VirtualMachineMigration's current state.
 	// VirtualMachineMigration.status.conditions.type are: "Available", "Progressing", and "Degraded"
 	// VirtualMachineMigration.status.conditions.status are one of True, False, Unknown.
-	// VirtualMachineMigration.status.conditions.reason the value should be a CamelCase string and producers of specific
+	// VirtualMachineMigration.status.conditions.reason the Value should be a CamelCase string and producers of specific
 	// condition types may define expected values and meanings for this field, and whether the values
 	// are considered a guaranteed API.
 	// VirtualMachineMigration.status.conditions.Message is a human readable message indicating details about the transition.

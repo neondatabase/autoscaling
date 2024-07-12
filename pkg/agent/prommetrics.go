@@ -4,7 +4,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	"github.com/neondatabase/autoscaling/pkg/agent/core/logiclock"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -225,7 +225,7 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 			prometheus.HistogramOpts{
 				Name: "autoscaling_agent_scaling_latency_seconds",
 				Help: "End-to-end scaling latency",
-			}, logiclock.AllFlagNames,
+			}, revsource.AllFlagNames,
 		)),
 	}
 

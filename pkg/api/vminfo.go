@@ -53,12 +53,12 @@ func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
 // care about. It takes various labels and annotations into account, so certain fields might be
 // different from what's strictly in the VirtualMachine object.
 type VmInfo struct {
-	Name               string             `json:"name"`
-	Namespace          string             `json:"namespace"`
-	Cpu                VmCpuInfo          `json:"cpu"`
-	Mem                VmMemInfo          `json:"mem"`
-	Config             VmConfig           `json:"config"`
-	CurrentLogicalTime *vmapi.LogicalTime `json:"currentLogicalTime,omitempty"`
+	Name            string                  `json:"name"`
+	Namespace       string                  `json:"namespace"`
+	Cpu             VmCpuInfo               `json:"cpu"`
+	Mem             VmMemInfo               `json:"mem"`
+	Config          VmConfig                `json:"config"`
+	CurrentRevision *vmapi.RevisionWithTime `json:"currentRevision,omitempty"`
 }
 
 type VmCpuInfo struct {
@@ -156,7 +156,7 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 		return nil, fmt.Errorf("error extracting VM info: %w", err)
 	}
 
-	info.CurrentLogicalTime = vm.Status.CurrentLogicalTime
+	info.CurrentRevision = vm.Status.CurrentRevision
 	return info, nil
 }
 
@@ -198,7 +198,7 @@ func extractVmInfoGeneric(
 			ScalingEnabled:       scalingEnabled,
 			ScalingConfig:        nil, // set below, maybe
 		},
-		CurrentLogicalTime: nil, // set later, maybe
+		CurrentRevision: nil, // set later, maybe
 	}
 
 	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {

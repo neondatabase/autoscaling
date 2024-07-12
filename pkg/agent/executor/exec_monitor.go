@@ -99,15 +99,14 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 			if !result.Ok {
 				logger.Warn("vm-monitor denied downscale", logFields...)
 				if unchanged {
-					state.Monitor().DownscaleRequestDenied(endTime)
+					state.Monitor().DownscaleRequestDenied(endTime, action.TargetRevision)
 				} else {
 					warnSkipBecauseChanged()
 				}
 			} else {
 				logger.Info("vm-monitor approved downscale", logFields...)
 				if unchanged {
-					state.Monitor().DownscaleRequestAllowed(endTime)
-					state.Monitor().UpdateLogicalTime(action.DesiredLogicalTime.Rewind(endTime))
+					state.Monitor().DownscaleRequestAllowed(endTime, action.TargetRevision)
 				} else {
 					warnSkipBecauseChanged()
 				}
@@ -188,7 +187,6 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 			logger.Info("vm-monitor upscale request successful", logFields...)
 			if unchanged {
 				state.Monitor().UpscaleRequestSuccessful(endTime)
-				state.Monitor().UpdateLogicalTime(action.DesiredLogicalTime.Rewind(endTime))
 			} else {
 				warnSkipBecauseChanged()
 			}

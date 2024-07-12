@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
-	"github.com/neondatabase/autoscaling/pkg/agent/core/logiclock"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -58,12 +57,11 @@ func NewExecutorCore(
 	stateLogger *zap.Logger,
 	vm api.VmInfo,
 	config Config,
-	clockSource *logiclock.Clock,
 ) *ExecutorCore {
 	return &ExecutorCore{
 		mu:            sync.Mutex{},
 		stateLogger:   stateLogger,
-		core:          core.NewState(vm, config.Core, clockSource),
+		core:          core.NewState(vm, config.Core),
 		actions:       nil, // (*ExecutorCore).getActions() checks if this is nil
 		lastActionsID: -1,
 		onNextActions: config.OnNextActions,

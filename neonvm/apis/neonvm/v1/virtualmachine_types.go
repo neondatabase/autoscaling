@@ -142,9 +142,14 @@ type VirtualMachineSpec struct {
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
 
-	// Logical timestamp corresponding to the desired resources of the VM.
+	// TargetRevision is the identifier set by external party to track when changes to the spec
+	// propagate to the VM.
+	//
+	// If a certain value is written into Spec.TargetRevision together with the changes, and
+	// the same value is observed in Status.CurrentRevision, it means that the changes have
+	// propagated to the VM.
 	// +optional
-	DesiredLogicalTime *LogicalTime `json:"desiredLogicalTime,omitempty"`
+	TargetRevision *RevisionWithTime `json:"desiredLogicalTime,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -221,44 +226,70 @@ func (g Guest) ValidateForMemoryProvider(p MemoryProvider) error {
 	return nil
 }
 
-// LogicalTime allows to track progress of changes to a VM.
-type LogicalTime struct {
-	Value     int64       `json:"value"`
+type Flag uint64
+
+func (f *Flag) Set(flag Flag) {
+	*f |= flag
+}
+
+func (f *Flag) Clear(flag Flag) {
+	*f &= ^flag
+}
+
+func (f Flag) Has(flag Flag) bool {
+	return f&flag != 0
+}
+
+// Revision allows to assign an identifier to a configuration of a VM.
+// Later it can be used to track the application of the configuration.
+type Revision struct {
+	Value int64 `json:"value"`
+	Flags Flag  `json:"flags"`
+}
+
+var ZeroRevision = Revision{Value: 0, Flags: 0}
+
+func (r Revision) Min(other Revision) Revision {
+	if r.Value < other.Value {
+		return r
+	}
+	return other
+}
+
+func (r Revision) WithTime(t time.Time) RevisionWithTime {
+	return RevisionWithTime{
+		Revision:  r,
+		UpdatedAt: metav1.NewTime(t),
+	}
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that LogicalTime can be used with zap.Object
+func (r *Revision) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddInt64("value", r.Value)
+	enc.AddUint64("flags", uint64(r.Flags))
+	return nil
+}
+
+// RevisionWithTime contains a Revision and the time it was last updated.
+type RevisionWithTime struct {
+	Revision  `json:"revision"`
 	UpdatedAt metav1.Time `json:"updatedAt"`
 }
 
 // MarshalLogObject implements zapcore.ObjectMarshaler, so that LogicalTime can be used with zap.Object
-func (r *LogicalTime) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddInt64("value", r.Value)
+func (r *RevisionWithTime) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddInt64("rev", r.Revision.Value)
 	enc.AddTime("updatedAt", r.UpdatedAt.Time)
 	return nil
 }
 
-func (t *LogicalTime) Rewind(now time.Time) *LogicalTime {
-	if t == nil {
-		return nil
-	}
-	return &LogicalTime{
-		Value:     t.Value,
-		UpdatedAt: metav1.NewTime(now),
-	}
+func (r *RevisionWithTime) Update(now time.Time, rev Revision) {
+	r.Revision = rev
+	r.UpdatedAt = metav1.NewTime(now)
 }
 
-func (t *LogicalTime) RewindNow() *LogicalTime {
-	return t.Rewind(time.Now())
-}
-
-func (t *LogicalTime) Earliest(other *LogicalTime) *LogicalTime {
-	if t == nil {
-		return other
-	}
-	if other == nil {
-		return t
-	}
-	if t.Value < other.Value {
-		return t
-	}
-	return other
+func (t *RevisionWithTime) UpdateNow(rev Revision) {
+	t.Update(time.Now(), rev)
 }
 
 type GuestSettings struct {
@@ -548,7 +579,7 @@ type VirtualMachineStatus struct {
 	// Represents the observations of a VirtualMachine's current state.
 	// VirtualMachine.status.conditions.type are: "Available", "Progressing", and "Degraded"
 	// VirtualMachine.status.conditions.status are one of True, False, Unknown.
-	// VirtualMachine.status.conditions.reason the value should be a CamelCase string and producers of specific
+	// VirtualMachine.status.conditions.reason the Value should be a CamelCase string and producers of specific
 	// condition types may define expected values and meanings for this field, and whether the values
 	// are considered a guaranteed API.
 	// VirtualMachine.status.conditions.Message is a human readable message indicating details about the transition.
@@ -581,7 +612,7 @@ type VirtualMachineStatus struct {
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
 	// +optional
-	CurrentLogicalTime *LogicalTime `json:"currentLogicalTime,omitempty"`
+	CurrentRevision *RevisionWithTime `json:"currentRevision,omitempty"`
 }
 
 type VmPhase string

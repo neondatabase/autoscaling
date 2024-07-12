@@ -8,7 +8,6 @@ import (
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
-	"github.com/neondatabase/autoscaling/pkg/agent/core/logiclock"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -37,23 +36,12 @@ type VmInfoOpt interface {
 	modifyVmInfoWithConfig(InitialVmInfoConfig, *api.VmInfo)
 }
 
-type ClockSourceOpt interface {
-	InitialStateOpt
-
-	clock() core.LogicClock
-}
-
 func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *core.State {
 	vmOpts := []VmInfoOpt{}
-	var clock core.LogicClock
 
-	clock = &logiclock.NilClock{}
 	for _, o := range opts {
 		if vo, ok := o.(VmInfoOpt); ok {
 			vmOpts = append(vmOpts, vo)
-		}
-		if co, ok := o.(ClockSourceOpt); ok {
-			clock = co.clock()
 		}
 	}
 
@@ -63,7 +51,7 @@ func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *cor
 		o.modifyStateConfig(&config.Core)
 	}
 
-	return core.NewState(vm, config.Core, clock)
+	return core.NewState(vm, config.Core)
 }
 
 func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
@@ -99,7 +87,7 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 			ScalingConfig:        nil,
 			ScalingEnabled:       true,
 		},
-		CurrentLogicalTime: nil,
+		CurrentRevision: nil,
 	}
 
 	for _, o := range opts {
@@ -112,7 +100,6 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 type coreConfigModifier func(*core.Config)
 type vmInfoConfigModifier func(*InitialVmInfoConfig)
 type vmInfoModifier func(InitialVmInfoConfig, *api.VmInfo)
-type clockInjector func() core.LogicClock
 
 var (
 	_ VmInfoOpt = vmInfoConfigModifier(nil)
@@ -131,11 +118,6 @@ func (m vmInfoConfigModifier) modifyVmInfoConfig(c *InitialVmInfoConfig) {
 func (m vmInfoConfigModifier) modifyVmInfoWithConfig(InitialVmInfoConfig, *api.VmInfo) {}
 func (m vmInfoModifier) modifyVmInfoWithConfig(c InitialVmInfoConfig, vm *api.VmInfo) {
 	(func(InitialVmInfoConfig, *api.VmInfo))(m)(c, vm)
-}
-
-func (m clockInjector) modifyStateConfig(*core.Config) {}
-func (m clockInjector) clock() core.LogicClock {
-	return m()
 }
 
 func WithConfigSetting(f func(*core.Config)) InitialStateOpt {
@@ -176,17 +158,5 @@ func WithMinMaxCU(minCU, maxCU uint16) VmInfoOpt {
 func WithCurrentCU(cu uint16) VmInfoOpt {
 	return vmInfoModifier(func(c InitialVmInfoConfig, vm *api.VmInfo) {
 		vm.SetUsing(c.ComputeUnit.Mul(cu))
-	})
-}
-
-func WithLogicalTime(t *vmapi.LogicalTime) VmInfoOpt {
-	return vmInfoModifier(func(c InitialVmInfoConfig, vm *api.VmInfo) {
-		vm.CurrentLogicalTime = t
-	})
-}
-
-func WithClock(c core.LogicClock) ClockSourceOpt {
-	return clockInjector(func() core.LogicClock {
-		return c
 	})
 }

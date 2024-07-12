@@ -893,18 +893,33 @@ spec:
                     type: object
                 type: object
               desiredLogicalTime:
-                description: Logical timestamp corresponding to the desired resources
-                  of the VM.
+                description: "TargetRevision is the identifier set by external party
+                  to track when changes to the spec propagate to the VM. \n If a certain
+                  value is written into Spec.TargetRevision together with the changes,
+                  and the same value is observed in Status.CurrentRevision, it means
+                  that the changes have propagated to the VM."
                 properties:
+                  revision:
+                    description: Revision allows to assign an identifier to a configuration
+                      of a VM. Later it can be used to track the application of the
+                      configuration.
+                    properties:
+                      flags:
+                        format: int64
+                        type: integer
+                      value:
+                        format: int64
+                        type: integer
+                    required:
+                    - flags
+                    - value
+                    type: object
                   updatedAt:
                     format: date-time
                     type: string
-                  value:
-                    format: int64
-                    type: integer
                 required:
+                - revision
                 - updatedAt
-                - value
                 type: object
               disks:
                 description: List of disk that can be mounted by virtual machine.
@@ -2430,12 +2445,12 @@ spec:
                       process.
                     items:
                       properties:
+                        Value:
+                          default: ""
+                          type: string
                         name:
                           description: Name of the environment variable. Must be a
                             C_IDENTIFIER.
-                          type: string
-                        value:
-                          default: ""
                           type: string
                       required:
                       - name
@@ -2800,19 +2815,31 @@ spec:
                 pattern: ^[0-9]+((\.[0-9]*)?|m)
                 type: integer
                 x-kubernetes-int-or-string: true
-              currentLogicalTime:
-                description: LogicalTime allows to track progress of changes to a
-                  VM.
+              currentRevision:
+                description: RevisionWithTime contains a Revision and the time it
+                  was last updated.
                 properties:
+                  revision:
+                    description: Revision allows to assign an identifier to a configuration
+                      of a VM. Later it can be used to track the application of the
+                      configuration.
+                    properties:
+                      flags:
+                        format: int64
+                        type: integer
+                      value:
+                        format: int64
+                        type: integer
+                    required:
+                    - flags
+                    - value
+                    type: object
                   updatedAt:
                     format: date-time
                     type: string
-                  value:
-                    format: int64
-                    type: integer
                 required:
+                - revision
                 - updatedAt
-                - value
                 type: object
               extraNetIP:
                 type: string

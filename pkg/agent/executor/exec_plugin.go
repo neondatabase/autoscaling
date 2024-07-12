@@ -61,7 +61,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 			} else {
 				logFields = append(logFields, zap.Any("response", resp))
 				logger.Info("Plugin request successful", logFields...)
-				if err := state.Plugin().RequestSuccessful(endTime, action.DesiredLogicalTime, *resp); err != nil {
+				if err := state.Plugin().RequestSuccessful(endTime, action.TargetRevision, *resp); err != nil {
 					logger.Error("Plugin response validation failed", append(logFields, zap.Error(err))...)
 				}
 			}
