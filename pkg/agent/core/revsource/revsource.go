@@ -55,10 +55,10 @@ func (c *RevisionSource) nextValue() int64 {
 	return c.offset + int64(len(c.measurements))
 }
 
-func (c *RevisionSource) Next(now time.Time) vmv1.Revision {
+func (c *RevisionSource) Next(now time.Time, flags vmv1.Flag) vmv1.Revision {
 	ret := vmv1.Revision{
 		Value: c.nextValue(),
-		Flags: 0,
+		Flags: flags,
 	}
 	c.measurements = append(c.measurements, now)
 	return ret
@@ -90,7 +90,7 @@ func (c *RevisionSource) Observe(moment time.Time, rev vmv1.Revision) error {
 
 type NilRevisionSource struct{}
 
-func (c *NilRevisionSource) Next(_ time.Time) vmv1.Revision {
+func (c *NilRevisionSource) Next(_ time.Time, _ vmv1.Flag) vmv1.Revision {
 	return vmv1.Revision{
 		Value: 0,
 		Flags: 0,

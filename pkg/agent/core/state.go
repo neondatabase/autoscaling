@@ -214,7 +214,7 @@ func (ns *neonvmState) ongoingRequest() bool {
 }
 
 type RevisionSource interface {
-	Next(ts time.Time) vmv1.Revision
+	Next(ts time.Time, flags vmv1.Flag) vmv1.Revision
 	Observe(moment time.Time, rev vmv1.Revision) error
 }
 
@@ -869,17 +869,20 @@ func (s *state) updateTargetRevision(
 		}
 	}
 
-	s.TargetRevision = s.Config.RevisionSource.Next(now)
+	var flags vmv1.Flag
 
 	if desired.HasFieldGreaterThan(current) {
-		s.TargetRevision.Flags.Set(revsource.Upscale)
+		flags.Set(revsource.Upscale)
 	}
 	if desired.HasFieldLessThan(current) {
-		s.TargetRevision.Flags.Set(revsource.Downscale)
+		flags.Set(revsource.Downscale)
 	}
 	if immediate {
-		s.TargetRevision.Flags.Set(revsource.Immediate)
+		flags.Set(revsource.Immediate)
 	}
+
+	s.TargetRevision = s.Config.RevisionSource.Next(now, flags)
+
 }
 
 func (s *state) updateCurrentRevision(rev vmv1.RevisionWithTime) {

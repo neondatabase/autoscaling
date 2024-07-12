@@ -2445,12 +2445,12 @@ spec:
                       process.
                     items:
                       properties:
-                        Value:
-                          default: ""
-                          type: string
                         name:
                           description: Name of the environment variable. Must be a
                             C_IDENTIFIER.
+                          type: string
+                        value:
+                          default: ""
                           type: string
                       required:
                       - name
