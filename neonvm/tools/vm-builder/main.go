@@ -29,6 +29,8 @@ import (
 var (
 	//go:embed files/Dockerfile.img
 	dockerfileVmBuilder string
+	//go:embed files/helper.move-bins.sh
+	scriptMoveBinsHelper string
 	//go:embed files/vmstart
 	scriptVmStart string
 	//go:embed files/inittab
@@ -272,6 +274,7 @@ func main() {
 		tmpl     string
 	}{
 		{"Dockerfile", dockerfileVmBuilder},
+		{"helper.move-bins.sh", scriptMoveBinsHelper},
 		{"vmstart", scriptVmStart},
 		{"vmshutdown", scriptVmShutdown},
 		{"inittab", scriptInitTab},
