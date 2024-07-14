@@ -235,7 +235,7 @@ func duration(s string) time.Duration {
 	return d
 }
 
-func zeroRev(flag vmv1.Flag, t time.Time) vmv1.RevisionWithTime {
+func zeroRev(_ vmv1.Flag, t time.Time) vmv1.RevisionWithTime {
 	return vmv1.Revision{
 		Value: 0,
 		Flags: 0,
