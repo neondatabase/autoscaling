@@ -85,6 +85,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 
 	for _, c := range cases {
 		warnings := []string{}
+
 		state := core.NewState(
 			api.VmInfo{
 				Name:      "test",
@@ -208,19 +209,26 @@ func getDesiredResources(state *core.State, now time.Time) api.Resources {
 	return res
 }
 
-func doInitialPluginRequest(a helpers.Assert, state *core.State, clock *helpers.FakeClock, requestTime time.Duration, metrics *api.Metrics, resources api.Resources) {
-	rev := vmv1.ZeroRevision
+func doInitialPluginRequest(
+	a helpers.Assert,
+	state *core.State,
+	clock *helpers.FakeClock,
+	requestTime time.Duration,
+	metrics *api.Metrics,
+	resources api.Resources,
+) {
+	rev := vmv1.ZeroRevision.WithTime(clock.Now())
 	a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     nil,
 			Target:         resources,
 			Metrics:        metrics,
-			TargetRevision: rev.WithTime(clock.Now()),
+			TargetRevision: rev,
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resources)
 	clock.Inc(requestTime)
-	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), rev.WithTime(clock.Now()), api.PluginResponse{
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), rev, api.PluginResponse{
 		Permit:  resources,
 		Migrate: nil,
 	})
@@ -235,11 +243,8 @@ func duration(s string) time.Duration {
 	return d
 }
 
-func zeroRev(_ vmv1.Flag, t time.Time) vmv1.RevisionWithTime {
-	return vmv1.Revision{
-		Value: 0,
-		Flags: 0,
-	}.WithTime(t)
+func zeroRev(t time.Time) vmv1.RevisionWithTime {
+	return vmv1.ZeroRevision.WithTime(t)
 }
 
 // Thorough checks of a relatively simple flow - scaling from 1 CU to 2 CU and back down.
@@ -599,12 +604,12 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		MonitorDownscale: &core.ActionMonitorDownscale{
 			Current:        resForCU(6),
 			Target:         resForCU(5),
-			TargetRevision: zeroRev(revsource.Downscale, clock.Now()),
+			TargetRevision: zeroRev(clock.Now()),
 		},
 	})
 	a.Do(state.Monitor().StartingDownscaleRequest, clock.Now(), resForCU(5))
 	clockTick()
-	a.Do(state.Monitor().DownscaleRequestDenied, clock.Now(), zeroRev(revsource.Downscale, clock.Now()))
+	a.Do(state.Monitor().DownscaleRequestDenied, clock.Now(), zeroRev(clock.Now()))
 
 	// At the end, we should be waiting to retry downscaling:
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -622,7 +627,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 			expectedNeonVMRequest = &core.ActionNeonVMRequest{
 				Current:        resForCU(6),
 				Target:         resForCU(cu + 1),
-				TargetRevision: zeroRev(revsource.Downscale, clock.Now()),
+				TargetRevision: zeroRev(clock.Now()),
 			}
 		}
 
@@ -631,7 +636,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 			MonitorDownscale: &core.ActionMonitorDownscale{
 				Current:        resForCU(cu + 1),
 				Target:         resForCU(cu),
-				TargetRevision: zeroRev(revsource.Downscale, clock.Now()),
+				TargetRevision: zeroRev(clock.Now()),
 			},
 			NeonVMRequest: expectedNeonVMRequest,
 		})
@@ -643,9 +648,9 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		clockTick()
 		currentPluginWait -= clockTickDuration
 		if cu >= 3 /* allow down to 3 */ {
-			a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now(), zeroRev(revsource.Downscale, clock.Now()))
+			a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now(), zeroRev(clock.Now()))
 		} else {
-			a.Do(state.Monitor().DownscaleRequestDenied, clock.Now(), zeroRev(revsource.Downscale, clock.Now()))
+			a.Do(state.Monitor().DownscaleRequestDenied, clock.Now(), zeroRev(clock.Now()))
 		}
 	}
 	// At this point, waiting 3.7s for next attempt to downscale below 3 CU (last request was
@@ -656,7 +661,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		NeonVMRequest: &core.ActionNeonVMRequest{
 			Current:        resForCU(6),
 			Target:         resForCU(3),
-			TargetRevision: zeroRev(revsource.Downscale, clock.Now()),
+			TargetRevision: zeroRev(clock.Now()),
 		},
 	})
 	// Make the request:
@@ -674,7 +679,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 			LastPermit:     lo.ToPtr(resForCU(6)),
 			Target:         resForCU(3),
 			Metrics:        lo.ToPtr(metrics.ToAPI()),
-			TargetRevision: zeroRev(revsource.Downscale, clock.Now()),
+			TargetRevision: zeroRev(clock.Now()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(3))
@@ -855,7 +860,7 @@ func TestRequestedUpscale(t *testing.T) {
 			LastPermit:     lo.ToPtr(resForCU(1)),
 			Target:         resForCU(2),
 			Metrics:        lo.ToPtr(lastMetrics.ToAPI()),
-			TargetRevision: zeroRev(revsource.Upscale|revsource.Immediate, clock.Now()),
+			TargetRevision: zeroRev(clock.Now()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -887,7 +892,7 @@ func TestRequestedUpscale(t *testing.T) {
 		MonitorUpscale: &core.ActionMonitorUpscale{
 			Current:        resForCU(1),
 			Target:         resForCU(2),
-			TargetRevision: zeroRev(revsource.Upscale|revsource.Immediate, clock.Now()),
+			TargetRevision: zeroRev(clock.Now()),
 		},
 	})
 	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(2))
