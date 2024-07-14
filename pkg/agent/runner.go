@@ -636,7 +636,7 @@ func doMetricsRequest(
 func (r *Runner) doNeonVMRequest(
 	ctx context.Context,
 	target api.Resources,
-	currentRevision vmv1.RevisionWithTime,
+	targetRevision vmv1.RevisionWithTime,
 ) error {
 	patches := []patch.Operation{{
 		Op:    patch.OpReplace,
@@ -648,8 +648,8 @@ func (r *Runner) doNeonVMRequest(
 		Value: uint32(target.Mem / r.memSlotSize),
 	}, {
 		Op:    patch.OpReplace,
-		Path:  "/spec/desiredLogicalTime",
-		Value: currentRevision,
+		Path:  "/spec/targetRevision",
+		Value: targetRevision,
 	}}
 
 	patchPayload, err := json.Marshal(patches)

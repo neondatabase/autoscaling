@@ -146,10 +146,10 @@ type VirtualMachineSpec struct {
 	// propagate to the VM.
 	//
 	// If a certain value is written into Spec.TargetRevision together with the changes, and
-	// the same value is observed in Status.CurrentRevision, it means that the changes have
+	// the same value is observed in Status.CurrentRevision, it means that the changes were
 	// propagated to the VM.
 	// +optional
-	TargetRevision *RevisionWithTime `json:"desiredLogicalTime,omitempty"`
+	TargetRevision *RevisionWithTime `json:"targetRevision,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -226,6 +226,9 @@ func (g Guest) ValidateForMemoryProvider(p MemoryProvider) error {
 	return nil
 }
 
+// Flag is a bitmask of flags. The meaning is up to the user.
+//
+// Used in Revision below.
 type Flag uint64
 
 func (f *Flag) Set(flag Flag) {
@@ -236,17 +239,18 @@ func (f *Flag) Clear(flag Flag) {
 	*f &= ^flag
 }
 
-func (f Flag) Has(flag Flag) bool {
-	return f&flag != 0
+func (f *Flag) Has(flag Flag) bool {
+	return *f&flag != 0
 }
 
-// Revision allows to assign an identifier to a configuration of a VM.
+// Revision is an identifier, which can be assigned to a specific configuration of a VM.
 // Later it can be used to track the application of the configuration.
 type Revision struct {
 	Value int64 `json:"value"`
 	Flags Flag  `json:"flags"`
 }
 
+// ZeroRevision is the default value when revisions updates are disabled.
 var ZeroRevision = Revision{Value: 0, Flags: 0}
 
 func (r Revision) Min(other Revision) Revision {
@@ -263,7 +267,7 @@ func (r Revision) WithTime(t time.Time) RevisionWithTime {
 	}
 }
 
-// MarshalLogObject implements zapcore.ObjectMarshaler, so that LogicalTime can be used with zap.Object
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that Revision can be used with zap.Object
 func (r *Revision) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddInt64("value", r.Value)
 	enc.AddUint64("flags", uint64(r.Flags))
@@ -276,20 +280,10 @@ type RevisionWithTime struct {
 	UpdatedAt metav1.Time `json:"updatedAt"`
 }
 
-// MarshalLogObject implements zapcore.ObjectMarshaler, so that LogicalTime can be used with zap.Object
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that RevisionWithTime can be used with zap.Object
 func (r *RevisionWithTime) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddInt64("rev", r.Revision.Value)
 	enc.AddTime("updatedAt", r.UpdatedAt.Time)
-	return nil
-}
-
-func (r *RevisionWithTime) Update(now time.Time, rev Revision) {
-	r.Revision = rev
-	r.UpdatedAt = metav1.NewTime(now)
-}
-
-func (t *RevisionWithTime) UpdateNow(rev Revision) {
-	t.Update(time.Now(), rev)
+	return r.Revision.MarshalLogObject(enc)
 }
 
 type GuestSettings struct {
@@ -579,7 +573,7 @@ type VirtualMachineStatus struct {
 	// Represents the observations of a VirtualMachine's current state.
 	// VirtualMachine.status.conditions.type are: "Available", "Progressing", and "Degraded"
 	// VirtualMachine.status.conditions.status are one of True, False, Unknown.
-	// VirtualMachine.status.conditions.reason the Value should be a CamelCase string and producers of specific
+	// VirtualMachine.status.conditions.reason the value should be a CamelCase string and producers of specific
 	// condition types may define expected values and meanings for this field, and whether the values
 	// are considered a guaranteed API.
 	// VirtualMachine.status.conditions.Message is a human readable message indicating details about the transition.
@@ -611,6 +605,9 @@ type VirtualMachineStatus struct {
 	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
+
+	// CurrentRevision is updated with Spec.TargetRevision's value once
+	// the changes are propagated to the VM.
 	// +optional
 	CurrentRevision *RevisionWithTime `json:"currentRevision,omitempty"`
 }

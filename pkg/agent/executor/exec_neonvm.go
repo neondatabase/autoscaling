@@ -17,7 +17,7 @@ type NeonVMInterface interface {
 		_ context.Context,
 		_ *zap.Logger,
 		current, target api.Resources,
-		currentRevision vmv1.RevisionWithTime,
+		targetRevision vmv1.RevisionWithTime,
 	) error
 }
 
@@ -53,8 +53,8 @@ func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *
 		}
 
 		endTime := time.Now()
-		currentRevision := action.TargetRevision.WithTime(endTime)
-		err := c.clients.NeonVM.Request(ctx, ifaceLogger, action.Current, action.Target, currentRevision)
+		targetRevision := action.TargetRevision.WithTime(endTime)
+		err := c.clients.NeonVM.Request(ctx, ifaceLogger, action.Current, action.Target, targetRevision)
 
 		logFields := []zap.Field{zap.Object("action", action), zap.Duration("duration", endTime.Sub(startTime))}
 

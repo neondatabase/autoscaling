@@ -68,7 +68,7 @@ func TestRevSource(t *testing.T) {
 func TestRevSourceSkip(t *testing.T) {
 	trs := newTestRevisionSource(t)
 
-	// Generate new clock
+	// Generate new revision
 	rev1 := trs.Next(trs.now.Time, 0)
 	assert.Equal(t, int64(1), rev1.Value)
 
@@ -93,7 +93,7 @@ func TestRevSourceSkip(t *testing.T) {
 func TestStale(t *testing.T) {
 	trs := newTestRevisionSource(t)
 
-	// Generate new clock
+	// Generate new revision
 	cl := trs.Next(trs.now.Time, 0)
 	assert.Equal(t, int64(1), cl.Value)
 

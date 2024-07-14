@@ -30,15 +30,15 @@ func FlagsToLabels(flags vmv1.Flag) []string {
 	return ret
 }
 
-// RevisionSource can generate and observe logical time.
-// Each logical timestamp is associated with a physical timestamp and a set of flags upon creation.
-// Once RevisionSource observes a previously generated timestamp after some time, it will call the callback with
-// the time difference and the flags associated with the timestamp.
+// RevisionSource can generate and observe revisions.
+// Each Revision is a value and a set of flags (for meta-information).
+// Once RevisionSource observes a previously generated Revision after some time,
+// the time it took since that Revision was generated.
 type RevisionSource struct {
 	cb func(time.Duration, vmv1.Flag)
 
-	// The in-flight timestamps are stored in-order.
-	// After the timestamp is observed, it is removed from the measurements, and the offset is increased.
+	// The in-flight revisions are stored in-order.
+	// After the revision is observed, it is removed from the measurements, and the offset is increased.
 	measurements []time.Time
 	offset       int64
 }

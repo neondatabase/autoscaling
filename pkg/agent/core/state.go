@@ -75,7 +75,7 @@ type Config struct {
 	// about conditions that are impeding its ability to execute.
 	Log LogConfig `json:"-"`
 
-	// RevisionSource is the source of logical timestamps for the autoscaler-agent.
+	// RevisionSource is the source of revisions to track the progress during scaling.
 	RevisionSource RevisionSource `json:"-"`
 }
 
@@ -864,7 +864,7 @@ func (s *state) updateTargetRevision(
 		}
 	} else {
 		if *s.LastDesiredResources == desired {
-			// Nothing changed, so no need to update the logical time
+			// Nothing changed, so no need to update the target revision
 			return
 		}
 	}
