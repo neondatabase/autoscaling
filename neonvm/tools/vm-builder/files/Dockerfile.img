@@ -7,7 +7,7 @@ FROM {{.RootDiskImage}} AS rootdisk
 USER root
 {{.SpecMerge}}
 
-FROM alpine:3.19 AS vm-runtime
+FROM alpine:3.20 AS vm-runtime
 # add busybox
 ENV BUSYBOX_VERSION 1.35.0
 RUN set -e \
@@ -107,6 +107,6 @@ RUN set -e \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
-FROM alpine:3.19
+FROM alpine:3.20
 RUN apk add --no-cache --no-progress --quiet qemu-img
 COPY --from=builder /disk.qcow2 /
