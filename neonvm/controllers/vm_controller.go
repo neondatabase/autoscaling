@@ -171,19 +171,40 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	if err := r.doReconcile(ctx, &vm); err != nil {
 		r.Recorder.Eventf(&vm, corev1.EventTypeWarning, "Failed",
 			"Failed to reconcile (%s): %s", vm.Name, err)
+		if !DeepEqual(statusBefore, vm.Status) {
+			if err := r.patchStatus(ctx, req.NamespacedName, vm.Status); err != nil {
+				log.Error(err, "Unable to update status for VirtualMachine", "virtualmachine", vm.Name)
+			}
+		}
 		return ctrl.Result{}, err
 	}
 
-	// If the status changed, try to update the object
+	// If the status changed, try to patch the object
 	if !DeepEqual(statusBefore, vm.Status) {
-		if err := r.Status().Update(ctx, &vm); err != nil {
-			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
-				"virtualmachine", vm.Name)
+		if err := r.patchStatus(ctx, req.NamespacedName, vm.Status); err != nil {
+			log.Error(err, "Unable to update status for VirtualMachine", "virtualmachine", vm.Name)
 			return ctrl.Result{}, err
 		}
 	}
 
 	return ctrl.Result{RequeueAfter: time.Second}, nil
+}
+
+// patchStatus create a patch for VirtualMachine and send a Patch request with a new status
+func (r *VMReconciler) patchStatus(ctx context.Context, name types.NamespacedName, newStatus vmv1.VirtualMachineStatus) error {
+	log := log.FromContext(ctx)
+
+	var vm vmv1.VirtualMachine
+	if err := r.Get(ctx, name, &vm); err != nil {
+		log.Error(err, "Unable to fetch VirtualMachine")
+		return err
+	}
+
+	patch := client.MergeFrom(vm.DeepCopy())
+	vm.Status = newStatus
+
+	return r.Status().Patch(ctx, &vm, patch)
+
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
