@@ -73,5 +73,7 @@ func (s *neonvmState) deepCopy() neonvmState {
 		LastSuccess:      shallowCopy[api.Resources](s.LastSuccess),
 		OngoingRequested: shallowCopy[api.Resources](s.OngoingRequested),
 		RequestFailedAt:  shallowCopy[time.Time](s.RequestFailedAt),
+		TargetRevision:   s.TargetRevision,
+		CurrentRevision:  s.CurrentRevision,
 	}
 }

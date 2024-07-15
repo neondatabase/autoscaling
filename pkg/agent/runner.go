@@ -196,11 +196,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
 
 	coreExecLogger := execLogger.Named("core")
-	revisionSource := revsource.NewRevisionSource(func(duration time.Duration, flags vmv1.Flag) {
-		r.global.metrics.scalingLatency.
-			WithLabelValues(revsource.FlagsToLabels(flags)...).
-			Observe(duration.Seconds())
-	})
+	revisionSource := revsource.NewRevisionSource(
+		revsource.WrapHistogramVec(&r.global.metrics.scalingLatency),
+	)
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
 		Core: core.Config{
@@ -218,6 +216,11 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 				Warn: coreExecLogger.Warn,
 			},
 			RevisionSource: revisionSource,
+			PromMetricsCallbacks: core.PromMetricsCallbacks{
+				PluginLatency:  revsource.WrapHistogramVec(&r.global.metrics.pluginLatency),
+				MonitorLatency: revsource.WrapHistogramVec(&r.global.metrics.monitorLatency),
+				NeonVMLatency:  revsource.WrapHistogramVec(&r.global.metrics.neonvmLatency),
+			},
 		},
 	})
 

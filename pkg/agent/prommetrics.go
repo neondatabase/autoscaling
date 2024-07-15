@@ -29,6 +29,21 @@ type GlobalMetrics struct {
 	runnerNextActions  prometheus.Counter
 
 	scalingLatency prometheus.HistogramVec
+	pluginLatency  prometheus.HistogramVec
+	monitorLatency prometheus.HistogramVec
+	neonvmLatency  prometheus.HistogramVec
+}
+
+func (m *GlobalMetrics) PluginLatency() *prometheus.HistogramVec {
+	return &m.pluginLatency
+}
+
+func (m *GlobalMetrics) MonitorLatency() *prometheus.HistogramVec {
+	return &m.monitorLatency
+}
+
+func (m *GlobalMetrics) NeonVMLatency() *prometheus.HistogramVec {
+	return &m.neonvmLatency
 }
 
 type resourceChangePair struct {
@@ -230,6 +245,27 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 			prometheus.HistogramOpts{
 				Name:    "autoscaling_agent_scaling_latency_seconds",
 				Help:    "End-to-end scaling latency",
+				Buckets: buckets,
+			}, revsource.AllFlagNames,
+		)),
+		pluginLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_agent_plugin_latency_seconds",
+				Help:    "Plugin request latency",
+				Buckets: buckets,
+			}, revsource.AllFlagNames,
+		)),
+		monitorLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_agent_monitor_latency_seconds",
+				Help:    "Monitor request latency",
+				Buckets: buckets,
+			}, revsource.AllFlagNames,
+		)),
+		neonvmLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_agent_neonvm_latency_seconds",
+				Help:    "NeonVM request latency",
 				Buckets: buckets,
 			}, revsource.AllFlagNames,
 		)),

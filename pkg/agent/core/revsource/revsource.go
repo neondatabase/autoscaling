@@ -4,6 +4,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
@@ -35,7 +37,7 @@ func FlagsToLabels(flags vmv1.Flag) []string {
 // Once RevisionSource observes a previously generated Revision after some time,
 // the time it took since that Revision was generated.
 type RevisionSource struct {
-	cb func(time.Duration, vmv1.Flag)
+	cb MetricCB
 
 	// The in-flight revisions are stored in-order.
 	// After the revision is observed, it is removed from the measurements, and the offset is increased.
@@ -43,7 +45,7 @@ type RevisionSource struct {
 	offset       int64
 }
 
-func NewRevisionSource(cb func(time.Duration, vmv1.Flag)) *RevisionSource {
+func NewRevisionSource(cb MetricCB) *RevisionSource {
 	return &RevisionSource{
 		cb:           cb,
 		measurements: nil,
@@ -97,3 +99,33 @@ func (c *NilRevisionSource) Next(_ time.Time, _ vmv1.Flag) vmv1.Revision {
 	}
 }
 func (c *NilRevisionSource) Observe(_ time.Time, _ vmv1.Revision) error { return nil }
+
+type MetricCB func(dur time.Duration, flags vmv1.Flag)
+
+func WrapHistogramVec(hist *prometheus.HistogramVec) MetricCB {
+	return func(dur time.Duration, flags vmv1.Flag) {
+		labels := FlagsToLabels(flags)
+		hist.WithLabelValues(labels...).Observe(dur.Seconds())
+	}
+}
+
+// Propagate sets the target revision to be current, optionally measuring the time it took
+// for propagation.
+func Propagate(
+	now time.Time,
+	target vmv1.RevisionWithTime,
+	currentSlot *vmv1.Revision,
+	metricCB MetricCB,
+) {
+	if metricCB != nil {
+		diff := now.Sub(target.UpdatedAt.Time)
+		metricCB(diff, target.Flags)
+	}
+	if currentSlot == nil {
+		return
+	}
+	if currentSlot.Value > target.Value {
+		return
+	}
+	*currentSlot = target.Revision
+}

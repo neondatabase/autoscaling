@@ -132,6 +132,11 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					},
 				},
 				RevisionSource: revsource.NewRevisionSource(nil),
+				PromMetricsCallbacks: core.PromMetricsCallbacks{
+					PluginLatency:  nil,
+					MonitorLatency: nil,
+					NeonVMLatency:  nil,
+				},
 			},
 		)
 
@@ -201,6 +206,11 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 			Warn: nil,
 		},
 		RevisionSource: &revsource.NilRevisionSource{},
+		PromMetricsCallbacks: core.PromMetricsCallbacks{
+			PluginLatency:  nil,
+			MonitorLatency: nil,
+			NeonVMLatency:  nil,
+		},
 	},
 }
 
@@ -247,6 +257,33 @@ func zeroRev(t time.Time) vmv1.RevisionWithTime {
 	return vmv1.ZeroRevision.WithTime(t)
 }
 
+type latencyObserver struct {
+	t            *testing.T
+	observations []struct {
+		latency time.Duration
+		flags   vmv1.Flag
+	}
+}
+
+func (a *latencyObserver) observe(latency time.Duration, flags vmv1.Flag) {
+	a.observations = append(a.observations, struct {
+		latency time.Duration
+		flags   vmv1.Flag
+	}{latency, flags})
+}
+
+func (a *latencyObserver) assert(latency time.Duration, flags vmv1.Flag) {
+	require.NotEmpty(a.t, a.observations)
+	assert.Equal(a.t, a.observations[0].latency, latency)
+	assert.Equal(a.t, a.observations[0].flags, flags)
+	a.observations = a.observations[1:]
+}
+
+// assertEmpty should be called in defer
+func (a *latencyObserver) assertEmpty() {
+	assert.Empty(a.t, a.observations)
+}
+
 // Thorough checks of a relatively simple flow - scaling from 1 CU to 2 CU and back down.
 func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	a := helpers.NewAssert(t)
@@ -256,20 +293,13 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	}
 	resForCU := DefaultComputeUnit.Mul
 
-	var latencyObservations []struct {
-		latency time.Duration
-		flags   vmv1.Flag
-	}
+	latencyObserver := &latencyObserver{t: t, observations: nil}
+	defer latencyObserver.assertEmpty()
 
 	expectedRevision := vmv1.ZeroRevision
 	cfg := DefaultInitialStateConfig
 
-	cfg.Core.RevisionSource = revsource.NewRevisionSource(func(latency time.Duration, flags vmv1.Flag) {
-		latencyObservations = append(latencyObservations, struct {
-			latency time.Duration
-			flags   vmv1.Flag
-		}{latency, flags})
-	})
+	cfg.Core.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
 
 	state := helpers.CreateInitialState(
 		cfg,
@@ -341,7 +371,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	})
 
 	// Until NeonVM is successful, we won't see any observations.
-	assert.Empty(t, latencyObservations)
+	latencyObserver.assertEmpty()
 
 	// Now NeonVM request is done.
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
@@ -352,11 +382,8 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	vmInfo.CurrentRevision = &rev
 	a.Do(state.UpdatedVM, vmInfo)
 
-	// And we see the latency
-	require.Len(t, latencyObservations, 1)
-	// We started at 0.2s and finished at 0.4s
-	assert.Equal(t, duration("0.2s"), latencyObservations[0].latency)
-	assert.Equal(t, revsource.Upscale, latencyObservations[0].flags)
+	// And we see the latency. We started at 0.2s and finished at 0.4s
+	latencyObserver.assert(duration("0.2s"), revsource.Upscale)
 
 	// NeonVM change is done, now we should finish by notifying the vm-monitor
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -444,11 +471,8 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	vmInfo.CurrentRevision = &rev
 	a.Do(state.UpdatedVM, vmInfo)
 
-	// One more latency observation
-	require.Len(t, latencyObservations, 2)
 	// We started at 0.6s and finished at 0.9s
-	assert.Equal(t, duration("0.3s"), latencyObservations[1].latency)
-	assert.Equal(t, revsource.Downscale, latencyObservations[1].flags)
+	latencyObserver.assert(duration("0.3s"), revsource.Downscale)
 
 	// Request to NeonVM completed, it's time to inform the scheduler plugin:
 	a.Call(nextActions).Equals(core.ActionSet{

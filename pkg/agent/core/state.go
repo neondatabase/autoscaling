@@ -36,6 +36,12 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
+type PromMetricsCallbacks struct {
+	PluginLatency  revsource.MetricCB
+	MonitorLatency revsource.MetricCB
+	NeonVMLatency  revsource.MetricCB
+}
+
 // Config represents some of the static configuration underlying the decision-making of State
 type Config struct {
 	// ComputeUnit is the desired ratio between CPU and memory, copied from the global
@@ -77,6 +83,9 @@ type Config struct {
 
 	// RevisionSource is the source of revisions to track the progress during scaling.
 	RevisionSource RevisionSource `json:"-"`
+
+	// PromMetricsCallbacks are the callbacks to update the Prometheus metrics.
+	PromMetricsCallbacks PromMetricsCallbacks `json:"-"`
 }
 
 type LogConfig struct {
@@ -207,6 +216,9 @@ type neonvmState struct {
 	// OngoingRequested, if not nil, gives the resources requested
 	OngoingRequested *api.Resources
 	RequestFailedAt  *time.Time
+
+	TargetRevision  vmv1.RevisionWithTime
+	CurrentRevision vmv1.Revision
 }
 
 func (ns *neonvmState) ongoingRequest() bool {
@@ -244,6 +256,8 @@ func NewState(vm api.VmInfo, config Config) *State {
 				LastSuccess:      nil,
 				OngoingRequested: nil,
 				RequestFailedAt:  nil,
+				TargetRevision:   vmv1.ZeroRevision.WithTime(time.Time{}),
+				CurrentRevision:  vmv1.ZeroRevision,
 			},
 			Metrics:              nil,
 			LastDesiredResources: nil,
@@ -501,10 +515,11 @@ func (s *state) calculateNeonVMAction(
 			}
 		}
 
+		s.NeonVM.TargetRevision = targetRevision.WithTime(now)
 		return &ActionNeonVMRequest{
 			Current:        s.VM.Using(),
 			Target:         desiredResources,
-			TargetRevision: targetRevision.WithTime(now),
+			TargetRevision: s.NeonVM.TargetRevision,
 		}, nil
 	} else {
 		var reqs []string
@@ -885,8 +900,13 @@ func (s *state) updateTargetRevision(
 
 }
 
-func (s *state) updateCurrentRevision(rev vmv1.RevisionWithTime) {
-	err := s.Config.RevisionSource.Observe(rev.UpdatedAt.Time, rev.Revision)
+func (s *state) updateNeonVMCurrentRevision(currentRevision vmv1.RevisionWithTime) {
+	revsource.Propagate(currentRevision.UpdatedAt.Time,
+		s.NeonVM.TargetRevision,
+		&s.NeonVM.CurrentRevision,
+		s.Config.PromMetricsCallbacks.NeonVMLatency,
+	)
+	err := s.Config.RevisionSource.Observe(currentRevision.UpdatedAt.Time, currentRevision.Revision)
 	if err != nil {
 		s.warnf("Failed to observe clock source: %v", err)
 	}
@@ -1028,7 +1048,7 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	vm.SetUsing(s.internal.VM.Using())
 	s.internal.VM = vm
 	if vm.CurrentRevision != nil {
-		s.internal.updateCurrentRevision(*vm.CurrentRevision)
+		s.internal.updateNeonVMCurrentRevision(*vm.CurrentRevision)
 	}
 }
 
@@ -1064,7 +1084,7 @@ func (h PluginHandle) RequestFailed(now time.Time) {
 
 func (h PluginHandle) RequestSuccessful(
 	now time.Time,
-	rev vmv1.RevisionWithTime,
+	targetRevision vmv1.RevisionWithTime,
 	resp api.PluginResponse,
 ) (_err error) {
 	h.s.Plugin.OngoingRequest = false
@@ -1098,7 +1118,11 @@ func (h PluginHandle) RequestSuccessful(
 	// the process of moving the source of truth for ComputeUnit from the scheduler plugin to the
 	// autoscaler-agent.
 	h.s.Plugin.Permit = &resp.Permit
-	h.s.Plugin.CurrentRevision = rev.Revision
+	revsource.Propagate(now,
+		targetRevision,
+		&h.s.Plugin.CurrentRevision,
+		h.s.Config.PromMetricsCallbacks.PluginLatency,
+	)
 	return nil
 }
 
@@ -1169,18 +1193,26 @@ func (h MonitorHandle) StartingDownscaleRequest(now time.Time, resources api.Res
 func (h MonitorHandle) DownscaleRequestAllowed(now time.Time, rev vmv1.RevisionWithTime) {
 	h.s.Monitor.Approved = &h.s.Monitor.OngoingRequest.Requested
 	h.s.Monitor.OngoingRequest = nil
-	h.s.Monitor.CurrentRevision = rev.Revision
+	revsource.Propagate(now,
+		rev,
+		&h.s.Monitor.CurrentRevision,
+		h.s.Config.PromMetricsCallbacks.MonitorLatency,
+	)
 }
 
 // Downscale request was successful but the monitor denied our request.
-func (h MonitorHandle) DownscaleRequestDenied(now time.Time, rev vmv1.RevisionWithTime) {
+func (h MonitorHandle) DownscaleRequestDenied(now time.Time, targetRevision vmv1.RevisionWithTime) {
 	h.s.Monitor.DeniedDownscale = &deniedDownscale{
 		At:        now,
 		Current:   *h.s.Monitor.Approved,
 		Requested: h.s.Monitor.OngoingRequest.Requested,
 	}
 	h.s.Monitor.OngoingRequest = nil
-	h.s.Monitor.CurrentRevision = rev.Revision
+	revsource.Propagate(now,
+		targetRevision,
+		&h.s.Monitor.CurrentRevision,
+		h.s.Config.PromMetricsCallbacks.MonitorLatency,
+	)
 }
 
 func (h MonitorHandle) DownscaleRequestFailed(now time.Time) {
