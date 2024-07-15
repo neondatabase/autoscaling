@@ -274,8 +274,8 @@ func (a *latencyObserver) observe(latency time.Duration, flags vmv1.Flag) {
 
 func (a *latencyObserver) assert(latency time.Duration, flags vmv1.Flag) {
 	require.NotEmpty(a.t, a.observations)
-	assert.Equal(a.t, a.observations[0].latency, latency)
-	assert.Equal(a.t, a.observations[0].flags, flags)
+	assert.Equal(a.t, latency, a.observations[0].latency)
+	assert.Equal(a.t, flags, a.observations[0].flags)
 	a.observations = a.observations[1:]
 }
 
@@ -504,8 +504,14 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	a := helpers.NewAssert(t)
 	clock := helpers.NewFakeClock(t)
 
+	cfg := DefaultInitialStateConfig
+	latencyObserver := &latencyObserver{t: t, observations: nil}
+	defer latencyObserver.assertEmpty()
+	cfg.Core.PromMetricsCallbacks.PluginLatency = latencyObserver.observe
+
+	cfg.Core.RevisionSource = revsource.NewRevisionSource(nil)
 	state := helpers.CreateInitialState(
-		DefaultInitialStateConfig,
+		cfg,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 	)
 
@@ -528,6 +534,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	endTime := duration("20s")
 
 	doInitialPluginRequest(a, state, clock, clockTick, lo.ToPtr(metrics.ToAPI()), resources)
+	latencyObserver.assert(duration("100ms"), 0)
 
 	for clock.Elapsed().Duration < endTime {
 		timeSinceScheduledRequest := (clock.Elapsed().Duration - base) % reqEvery
@@ -539,23 +546,25 @@ func TestPeriodicPluginRequest(t *testing.T) {
 			})
 			clock.Inc(clockTick)
 		} else {
+			target := vmv1.ZeroRevision.WithTime(clock.Now())
 			a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{
 				PluginRequest: &core.ActionPluginRequest{
 					LastPermit:     &resources,
 					Target:         resources,
 					Metrics:        lo.ToPtr(metrics.ToAPI()),
-					TargetRevision: vmv1.ZeroRevision.WithTime(clock.Now()),
+					TargetRevision: target,
 				},
 			})
 			a.Do(state.Plugin().StartingRequest, clock.Now(), resources)
 			a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{})
 			clock.Inc(reqDuration)
 			a.Call(state.NextActions, clock.Now()).Equals(core.ActionSet{})
-			a.NoError(state.Plugin().RequestSuccessful, clock.Now(), vmv1.ZeroRevision.WithTime(clock.Now()), api.PluginResponse{
+			a.NoError(state.Plugin().RequestSuccessful, clock.Now(), target, api.PluginResponse{
 				Permit:  resources,
 				Migrate: nil,
 			})
 			clock.Inc(clockTick - reqDuration)
+			latencyObserver.assert(reqDuration, 0)
 		}
 	}
 }
