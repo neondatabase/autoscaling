@@ -1379,7 +1379,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(3))
 	clockTick()
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	// Do vm-monitor upscale requestßß
+	// Do vm-monitor upscale request
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.8s")},
 		MonitorUpscale: &core.ActionMonitorUpscale{
