@@ -293,14 +293,12 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	}
 	resForCU := DefaultComputeUnit.Mul
 
+	cfg := DefaultInitialStateConfig
 	latencyObserver := &latencyObserver{t: t, observations: nil}
 	defer latencyObserver.assertEmpty()
-
-	expectedRevision := vmv1.ZeroRevision
-	cfg := DefaultInitialStateConfig
-
 	cfg.Core.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
 
+	expectedRevision := vmv1.ZeroRevision
 	state := helpers.CreateInitialState(
 		cfg,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
@@ -327,7 +325,9 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Equals(resForCU(2))
 
 	// Now that the initial scheduler request is done, and we have metrics that indicate
-	// scale-up would be a good idea. Revision advances.
+	// scale-up would be a good idea, we should be contacting the scheduler to get approval.
+
+	// Revision advances.
 	expectedRevision.Value = 1
 	expectedRevision.Flags = revsource.Upscale
 
@@ -460,18 +460,21 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	})
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
-	// Update the VM to set current=1, but first wait 0.1s
+	// Request to NeonVM is successful, but let's wait one more tick for
+	// NeonVM to pick up the changes and apply those.
 	clockTick().AssertEquals(duration("0.9s"))
 	vmInfo = helpers.CreateVmInfo(
 		DefaultInitialStateConfig.VM,
 		helpers.WithCurrentCU(1),
 		helpers.WithMinMaxCU(1, 1),
 	)
+
+	// This means that the NeonVM has applied the changes.
 	rev = expectedRevision.WithTime(clock.Now())
 	vmInfo.CurrentRevision = &rev
 	a.Do(state.UpdatedVM, vmInfo)
 
-	// We started at 0.6s and finished at 0.9s
+	// We started at 0.6s and finished at 0.9s.
 	latencyObserver.assert(duration("0.3s"), revsource.Downscale)
 
 	// Request to NeonVM completed, it's time to inform the scheduler plugin:
@@ -507,6 +510,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	cfg := DefaultInitialStateConfig
 	latencyObserver := &latencyObserver{t: t, observations: nil}
 	defer latencyObserver.assertEmpty()
+	// This time, we will test plugin latency
 	cfg.Core.PromMetricsCallbacks.PluginLatency = latencyObserver.observe
 
 	cfg.Core.RevisionSource = revsource.NewRevisionSource(nil)
@@ -855,8 +859,14 @@ func TestRequestedUpscale(t *testing.T) {
 	}
 	resForCU := DefaultComputeUnit.Mul
 
+	cfg := DefaultInitialStateConfig
+	latencyObserver := &latencyObserver{t: t, observations: nil}
+	defer latencyObserver.assertEmpty()
+	cfg.Core.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
+
+	expectedRevision := vmv1.ZeroRevision
 	state := helpers.CreateInitialState(
-		DefaultInitialStateConfig,
+		cfg,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithConfigSetting(func(c *core.Config) {
 			c.MonitorRequestedUpscaleValidPeriod = duration("6s") // Override this for consistency
@@ -886,6 +896,10 @@ func TestRequestedUpscale(t *testing.T) {
 
 	// Have the vm-monitor request upscaling:
 	a.Do(state.Monitor().UpscaleRequested, clock.Now(), api.MoreResources{Cpu: false, Memory: true})
+	// Revision advances
+	expectedRevision.Value = 1
+	expectedRevision.Flags = revsource.Immediate | revsource.Upscale
+
 	// First need to check with the scheduler plugin to get approval for upscaling:
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("6s")}, // if nothing else happens, requested upscale expires.
@@ -893,7 +907,7 @@ func TestRequestedUpscale(t *testing.T) {
 			LastPermit:     lo.ToPtr(resForCU(1)),
 			Target:         resForCU(2),
 			Metrics:        lo.ToPtr(lastMetrics.ToAPI()),
-			TargetRevision: zeroRev(clock.Now()),
+			TargetRevision: expectedRevision.WithTime(clock.Now()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -919,13 +933,23 @@ func TestRequestedUpscale(t *testing.T) {
 	clockTick()
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
+	// Update the VM to set current=1
+	vmInfo := helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithCurrentCU(2),
+	)
+	rev := expectedRevision.WithTime(clock.Now())
+	vmInfo.CurrentRevision = &rev
+	a.Do(state.UpdatedVM, vmInfo)
+	latencyObserver.assert(duration("0.2s"), revsource.Upscale|revsource.Immediate)
+
 	// Finally, tell the vm-monitor that it got upscaled:
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.8s")}, // still waiting on plugin tick
 		MonitorUpscale: &core.ActionMonitorUpscale{
 			Current:        resForCU(1),
 			Target:         resForCU(2),
-			TargetRevision: zeroRev(clock.Now()),
+			TargetRevision: expectedRevision.WithTime(clock.Now()),
 		},
 	})
 	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(2))
@@ -947,7 +971,7 @@ func TestRequestedUpscale(t *testing.T) {
 			LastPermit:     lo.ToPtr(resForCU(2)),
 			Target:         resForCU(2),
 			Metrics:        lo.ToPtr(lastMetrics.ToAPI()),
-			TargetRevision: vmv1.ZeroRevision.WithTime(clock.Now()),
+			TargetRevision: expectedRevision.WithTime(clock.Now()),
 		},
 	})
 	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(2))
@@ -965,12 +989,15 @@ func TestRequestedUpscale(t *testing.T) {
 		Wait: &core.ActionWait{Duration: duration("0.9s")},
 	})
 	clock.Inc(duration("0.9s"))
+	// Upscale expired, revision advances
+	expectedRevision.Value = 2
+	expectedRevision.Flags = revsource.Downscale
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4s")}, // now, waiting on plugin request tick
 		MonitorDownscale: &core.ActionMonitorDownscale{
 			Current:        resForCU(2),
 			Target:         resForCU(1),
-			TargetRevision: vmv1.ZeroRevision.WithTime(clock.Now()),
+			TargetRevision: expectedRevision.WithTime(clock.Now()),
 		},
 	})
 }
@@ -1352,7 +1379,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(3))
 	clockTick()
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	// Do vm-monitor upscale request
+	// Do vm-monitor upscale requestßß
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.8s")},
 		MonitorUpscale: &core.ActionMonitorUpscale{
