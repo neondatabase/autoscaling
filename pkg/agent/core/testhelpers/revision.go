@@ -21,3 +21,13 @@ func NewExpectedRevision(now func() time.Time) *ExpectedRevision {
 func (e *ExpectedRevision) WithTime() vmv1.RevisionWithTime {
 	return e.Revision.WithTime(e.Now())
 }
+
+type NilRevisionSource struct{}
+
+func (c *NilRevisionSource) Next(_ time.Time, _ vmv1.Flag) vmv1.Revision {
+	return vmv1.Revision{
+		Value: 0,
+		Flags: 0,
+	}
+}
+func (c *NilRevisionSource) Observe(_ time.Time, _ vmv1.Revision) error { return nil }

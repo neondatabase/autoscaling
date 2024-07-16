@@ -36,10 +36,15 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type PromMetricsCallbacks struct {
-	PluginLatency  revsource.MetricCB
-	MonitorLatency revsource.MetricCB
-	NeonVMLatency  revsource.MetricCB
+type ObservabilityCallbacks struct {
+	PluginLatency  revsource.ObserveCallback
+	MonitorLatency revsource.ObserveCallback
+	NeonVMLatency  revsource.ObserveCallback
+}
+
+type RevisionSource interface {
+	Next(ts time.Time, flags vmv1.Flag) vmv1.Revision
+	Observe(moment time.Time, rev vmv1.Revision) error
 }
 
 // Config represents some of the static configuration underlying the decision-making of State
@@ -85,7 +90,7 @@ type Config struct {
 	RevisionSource RevisionSource `json:"-"`
 
 	// PromMetricsCallbacks are the callbacks to update the Prometheus metrics.
-	PromMetricsCallbacks PromMetricsCallbacks `json:"-"`
+	PromMetricsCallbacks ObservabilityCallbacks `json:"-"`
 }
 
 type LogConfig struct {
@@ -223,11 +228,6 @@ type neonvmState struct {
 
 func (ns *neonvmState) ongoingRequest() bool {
 	return ns.OngoingRequested != nil
-}
-
-type RevisionSource interface {
-	Next(ts time.Time, flags vmv1.Flag) vmv1.Revision
-	Observe(moment time.Time, rev vmv1.Revision) error
 }
 
 func NewState(vm api.VmInfo, config Config) *State {

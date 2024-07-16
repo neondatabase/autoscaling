@@ -37,7 +37,7 @@ func FlagsToLabels(flags vmv1.Flag) []string {
 // Once RevisionSource observes a previously generated Revision after some time,
 // the time it took since that Revision was generated.
 type RevisionSource struct {
-	cb MetricCB
+	cb ObserveCallback
 
 	// The in-flight revisions are stored in-order.
 	// After the revision is observed, it is removed from the measurements, and the offset is increased.
@@ -45,7 +45,7 @@ type RevisionSource struct {
 	offset       int64
 }
 
-func NewRevisionSource(cb MetricCB) *RevisionSource {
+func NewRevisionSource(cb ObserveCallback) *RevisionSource {
 	return &RevisionSource{
 		cb:           cb,
 		measurements: nil,
@@ -90,19 +90,9 @@ func (c *RevisionSource) Observe(moment time.Time, rev vmv1.Revision) error {
 	return nil
 }
 
-type NilRevisionSource struct{}
+type ObserveCallback func(dur time.Duration, flags vmv1.Flag)
 
-func (c *NilRevisionSource) Next(_ time.Time, _ vmv1.Flag) vmv1.Revision {
-	return vmv1.Revision{
-		Value: 0,
-		Flags: 0,
-	}
-}
-func (c *NilRevisionSource) Observe(_ time.Time, _ vmv1.Revision) error { return nil }
-
-type MetricCB func(dur time.Duration, flags vmv1.Flag)
-
-func WrapHistogramVec(hist *prometheus.HistogramVec) MetricCB {
+func WrapHistogramVec(hist *prometheus.HistogramVec) ObserveCallback {
 	return func(dur time.Duration, flags vmv1.Flag) {
 		labels := FlagsToLabels(flags)
 		hist.WithLabelValues(labels...).Observe(dur.Seconds())
@@ -115,7 +105,7 @@ func Propagate(
 	now time.Time,
 	target vmv1.RevisionWithTime,
 	currentSlot *vmv1.Revision,
-	metricCB MetricCB,
+	metricCB ObserveCallback,
 ) {
 	if metricCB != nil {
 		diff := now.Sub(target.UpdatedAt.Time)

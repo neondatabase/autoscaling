@@ -132,7 +132,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					},
 				},
 				RevisionSource: revsource.NewRevisionSource(nil),
-				PromMetricsCallbacks: core.PromMetricsCallbacks{
+				PromMetricsCallbacks: core.ObservabilityCallbacks{
 					PluginLatency:  nil,
 					MonitorLatency: nil,
 					NeonVMLatency:  nil,
@@ -205,8 +205,8 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 			Info: nil,
 			Warn: nil,
 		},
-		RevisionSource: &revsource.NilRevisionSource{},
-		PromMetricsCallbacks: core.PromMetricsCallbacks{
+		RevisionSource: &helpers.NilRevisionSource{},
+		PromMetricsCallbacks: core.ObservabilityCallbacks{
 			PluginLatency:  nil,
 			MonitorLatency: nil,
 			NeonVMLatency:  nil,
@@ -459,11 +459,6 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	// Request to NeonVM is successful, but let's wait one more tick for
 	// NeonVM to pick up the changes and apply those.
 	clockTick().AssertEquals(duration("0.9s"))
-	vmInfo = helpers.CreateVmInfo(
-		DefaultInitialStateConfig.VM,
-		helpers.WithCurrentCU(1),
-		helpers.WithMinMaxCU(1, 1),
-	)
 
 	// This means that the NeonVM has applied the changes.
 	rev = expectedRevision.WithTime()

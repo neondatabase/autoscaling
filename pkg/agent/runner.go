@@ -216,7 +216,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 				Warn: coreExecLogger.Warn,
 			},
 			RevisionSource: revisionSource,
-			PromMetricsCallbacks: core.PromMetricsCallbacks{
+			PromMetricsCallbacks: core.ObservabilityCallbacks{
 				PluginLatency:  revsource.WrapHistogramVec(&r.global.metrics.pluginLatency),
 				MonitorLatency: revsource.WrapHistogramVec(&r.global.metrics.monitorLatency),
 				NeonVMLatency:  revsource.WrapHistogramVec(&r.global.metrics.neonvmLatency),
