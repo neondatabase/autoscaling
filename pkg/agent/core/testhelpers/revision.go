@@ -1,8 +1,9 @@
 package testhelpers
 
 import (
-	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"time"
+
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
 type ExpectedRevision struct {

@@ -253,10 +253,6 @@ func duration(s string) time.Duration {
 	return d
 }
 
-func zeroRev(t time.Time) vmv1.RevisionWithTime {
-	return vmv1.ZeroRevision.WithTime(t)
-}
-
 type latencyObserver struct {
 	t            *testing.T
 	observations []struct {
@@ -294,15 +290,15 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	expectedRevision := helpers.NewExpectedRevision(clock.Now)
 	resForCU := DefaultComputeUnit.Mul
 
-	cfg := DefaultInitialStateConfig
 	latencyObserver := &latencyObserver{t: t, observations: nil}
 	defer latencyObserver.assertEmpty()
-	cfg.Core.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
-
 	state := helpers.CreateInitialState(
-		cfg,
+		DefaultInitialStateConfig,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithTestingLogfWarnings(t),
+		helpers.WithConfigSetting(func(c *core.Config) {
+			c.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
+		}),
 	)
 	nextActions := func() core.ActionSet {
 		return state.NextActions(clock.Now())
@@ -508,16 +504,17 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	clock := helpers.NewFakeClock(t)
 	expectedRevision := helpers.NewExpectedRevision(clock.Now)
 
-	cfg := DefaultInitialStateConfig
 	latencyObserver := &latencyObserver{t: t, observations: nil}
 	defer latencyObserver.assertEmpty()
-	// This time, we will test plugin latency
-	cfg.Core.PromMetricsCallbacks.PluginLatency = latencyObserver.observe
 
-	cfg.Core.RevisionSource = revsource.NewRevisionSource(nil)
 	state := helpers.CreateInitialState(
-		cfg,
+		DefaultInitialStateConfig,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
+		helpers.WithConfigSetting(func(c *core.Config) {
+			c.PromMetricsCallbacks.PluginLatency = latencyObserver.observe
+			// This time, we will test plugin latency
+			c.RevisionSource = revsource.NewRevisionSource(nil)
+		}),
 	)
 
 	state.Monitor().Active(true)
@@ -862,15 +859,13 @@ func TestRequestedUpscale(t *testing.T) {
 	expectedRevision := helpers.NewExpectedRevision(clock.Now)
 	resForCU := DefaultComputeUnit.Mul
 
-	cfg := DefaultInitialStateConfig
 	latencyObserver := &latencyObserver{t: t, observations: nil}
 	defer latencyObserver.assertEmpty()
-	cfg.Core.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
-
 	state := helpers.CreateInitialState(
-		cfg,
+		DefaultInitialStateConfig,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithConfigSetting(func(c *core.Config) {
+			c.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
 			c.MonitorRequestedUpscaleValidPeriod = duration("6s") // Override this for consistency
 		}),
 	)
