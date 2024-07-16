@@ -79,11 +79,6 @@ func (a Assert) Call(f any, args ...any) PreparedFunctionCall {
 
 	var argValues []reflect.Value
 	for _, a := range args {
-		if _, ok := a.(reflect.Value); ok {
-			// This is a SafeVal value, so we can just use it directly
-			argValues = append(argValues, a.(reflect.Value))
-			continue
-		}
 		argValues = append(argValues, reflect.ValueOf(a))
 	}
 

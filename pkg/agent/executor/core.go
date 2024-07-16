@@ -53,11 +53,7 @@ type ClientSet struct {
 	Monitor MonitorInterface
 }
 
-func NewExecutorCore(
-	stateLogger *zap.Logger,
-	vm api.VmInfo,
-	config Config,
-) *ExecutorCore {
+func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config Config) *ExecutorCore {
 	return &ExecutorCore{
 		mu:            sync.Mutex{},
 		stateLogger:   stateLogger,

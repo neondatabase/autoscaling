@@ -38,7 +38,6 @@ type VmInfoOpt interface {
 
 func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *core.State {
 	vmOpts := []VmInfoOpt{}
-
 	for _, o := range opts {
 		if vo, ok := o.(VmInfoOpt); ok {
 			vmOpts = append(vmOpts, vo)

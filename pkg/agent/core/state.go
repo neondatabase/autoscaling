@@ -331,12 +331,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	// Requests to vm-monitor (downscaling)
 	plannedUpscale := actions.MonitorUpscale != nil
 	var monitorDownscaleRequiredWait *time.Duration
-	actions.MonitorDownscale, monitorDownscaleRequiredWait =
-		s.calculateMonitorDownscaleAction(
-			now,
-			desiredResources,
-			plannedUpscale,
-		)
+	actions.MonitorDownscale, monitorDownscaleRequiredWait = s.calculateMonitorDownscaleAction(now, desiredResources, plannedUpscale)
 
 	// --- and that's all the request types! ---
 
