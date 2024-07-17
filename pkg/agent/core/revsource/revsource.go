@@ -32,6 +32,11 @@ func FlagsToLabels(flags vmv1.Flag) []string {
 	return ret
 }
 
+// MaxRevisions is the maximum number of revisions that can be stored in the RevisionSource.
+// This is to prevent memory leaks.
+// Upon reaching it, the oldest revisions are discarded.
+const MaxRevisions = 100
+
 // RevisionSource can generate and observe revisions.
 // Each Revision is a value and a set of flags (for meta-information).
 // Once RevisionSource observes a previously generated Revision after some time,
@@ -63,6 +68,12 @@ func (c *RevisionSource) Next(now time.Time, flags vmv1.Flag) vmv1.Revision {
 		Flags: flags,
 	}
 	c.measurements = append(c.measurements, now)
+
+	if len(c.measurements) > MaxRevisions {
+		c.measurements = c.measurements[1:]
+		c.offset++
+	}
+
 	return ret
 }
 
