@@ -371,12 +371,10 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 
 	// Now NeonVM request is done.
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
-	vmInfo := helpers.CreateVmInfo(
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
 		DefaultInitialStateConfig.VM,
-	)
-	rev := expectedRevision.WithTime()
-	vmInfo.CurrentRevision = &rev
-	a.Do(state.UpdatedVM, vmInfo)
+		helpers.WithCurrentRevision(expectedRevision.WithTime()),
+	))
 
 	// And we see the latency. We started at 0.2s and finished at 0.4s
 	latencyObserver.assert(duration("0.2s"), revsource.Upscale)
@@ -461,9 +459,10 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	clockTick().AssertEquals(duration("0.9s"))
 
 	// This means that the NeonVM has applied the changes.
-	rev = expectedRevision.WithTime()
-	vmInfo.CurrentRevision = &rev
-	a.Do(state.UpdatedVM, vmInfo)
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithCurrentRevision(expectedRevision.WithTime()),
+	))
 
 	// We started at 0.6s and finished at 0.9s.
 	latencyObserver.assert(duration("0.3s"), revsource.Downscale)
@@ -926,13 +925,11 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 
 	// Update the VM to set current=1
-	vmInfo := helpers.CreateVmInfo(
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
 		DefaultInitialStateConfig.VM,
 		helpers.WithCurrentCU(2),
-	)
-	rev := expectedRevision.WithTime()
-	vmInfo.CurrentRevision = &rev
-	a.Do(state.UpdatedVM, vmInfo)
+		helpers.WithCurrentRevision(expectedRevision.WithTime()),
+	))
 	latencyObserver.assert(duration("0.2s"), revsource.Upscale|revsource.Immediate)
 
 	// Finally, tell the vm-monitor that it got upscaled:
@@ -1108,6 +1105,21 @@ func TestDownscalePivotBack(t *testing.T) {
 				a.Do(state.NeonVM().RequestSuccessful, clock.Now())
 			},
 		},
+		// NeonVM propagation
+		{
+			pre: func(_ *time.Duration, midAction func()) {
+				a.Do(state.UpdatedVM, helpers.CreateVmInfo(
+					DefaultInitialStateConfig.VM,
+					helpers.WithCurrentCU(1),
+					helpers.WithCurrentRevision(expectedRevision.WithTime()),
+				))
+				latencyObserver.assert(duration("0.2s"), revsource.Downscale)
+				midAction()
+			},
+			post: func(_ *time.Duration) {
+				// No action
+			},
+		},
 		// plugin requests
 		{
 			pre: func(pluginWait *time.Duration, midRequest func()) {
@@ -1220,6 +1232,8 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		clock.Inc(100 * time.Millisecond)
 	}
 	expectedRevision := helpers.NewExpectedRevision(clock.Now)
+	latencyObserver := &latencyObserver{t: t, observations: nil}
+	defer latencyObserver.assertEmpty()
 	resForCU := DefaultComputeUnit.Mul
 
 	state := helpers.CreateInitialState(
@@ -1227,6 +1241,9 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithMinMaxCU(1, 3),
 		helpers.WithCurrentCU(2),
+		helpers.WithConfigSetting(func(config *core.Config) {
+			config.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
+		}),
 	)
 	nextActions := func() core.ActionSet {
 		return state.NextActions(clock.Now())
@@ -1263,6 +1280,8 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	))
 
 	// We should be making a vm-monitor downscaling request
+	expectedRevision.Value += 1
+	expectedRevision.Flags = revsource.Downscale
 	// TODO: In the future, we should have a "force-downscale" alternative so the vm-monitor doesn't
 	// get to deny the downscaling.
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -1305,9 +1324,21 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		Permit:  resForCU(1),
 		Migrate: nil,
 	})
+
+	// Update the VM to set currentCU==1 CU
+	clockTick()
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithCurrentCU(1),
+		helpers.WithMinMaxCU(1, 1),
+		helpers.WithCurrentRevision(expectedRevision.WithTime()),
+	))
+
+	latencyObserver.assert(duration("0.4s"), revsource.Downscale)
+
 	// And then, we shouldn't need to do anything else:
 	a.Call(nextActions).Equals(core.ActionSet{
-		Wait: &core.ActionWait{Duration: duration("4.9s")},
+		Wait: &core.ActionWait{Duration: duration("4.8s")},
 	})
 }
 

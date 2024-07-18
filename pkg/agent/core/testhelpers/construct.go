@@ -159,3 +159,9 @@ func WithCurrentCU(cu uint16) VmInfoOpt {
 		vm.SetUsing(c.ComputeUnit.Mul(cu))
 	})
 }
+
+func WithCurrentRevision(rev vmapi.RevisionWithTime) VmInfoOpt {
+	return vmInfoModifier(func(c InitialVmInfoConfig, vm *api.VmInfo) {
+		vm.CurrentRevision = &rev
+	})
+}
