@@ -246,28 +246,32 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 				Name:    "autoscaling_agent_scaling_latency_seconds",
 				Help:    "End-to-end scaling latency",
 				Buckets: buckets,
-			}, revsource.AllFlagNames,
+			},
+			revsource.AllFlagNames,
 		)),
 		pluginLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "autoscaling_agent_plugin_latency_seconds",
 				Help:    "Plugin request latency",
 				Buckets: buckets,
-			}, revsource.AllFlagNames,
+			},
+			revsource.AllFlagNames,
 		)),
 		monitorLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "autoscaling_agent_monitor_latency_seconds",
 				Help:    "Monitor request latency",
 				Buckets: buckets,
-			}, revsource.AllFlagNames,
+			},
+			revsource.AllFlagNames,
 		)),
 		neonvmLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "autoscaling_agent_neonvm_latency_seconds",
 				Help:    "NeonVM request latency",
 				Buckets: buckets,
-			}, revsource.AllFlagNames,
+			},
+			revsource.AllFlagNames,
 		)),
 	}
 
