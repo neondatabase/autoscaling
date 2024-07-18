@@ -474,12 +474,12 @@ func (s *state) calculateNeonVMAction(
 	pluginRequestedPhase string,
 ) (*ActionNeonVMRequest, *time.Duration) {
 	targetRevision := s.TargetRevision
-	if desiredResources.HasFieldLessThan(s.VM.Using()) {
+	if desiredResources.HasFieldLessThan(s.VM.Using()) && s.Monitor.CurrentRevision.Value > 0 {
 		// We are downscaling, so we needed a permit from the monitor
 		targetRevision = targetRevision.Min(s.Monitor.CurrentRevision)
 	}
 
-	if desiredResources.HasFieldGreaterThan(s.VM.Using()) {
+	if desiredResources.HasFieldGreaterThan(s.VM.Using()) && s.Plugin.CurrentRevision.Value > 0 {
 		// We are upscaling, so we needed a permit from the plugin
 		targetRevision = targetRevision.Min(s.Plugin.CurrentRevision)
 	}
@@ -868,23 +868,20 @@ func (s *state) updateTargetRevision(
 	immediate bool,
 ) {
 	if s.LastDesiredResources == nil {
-		if desired == current {
-			// First iteration, and no scaling required
-			return
-		}
-	} else {
-		if *s.LastDesiredResources == desired {
-			// Nothing changed, so no need to update the target revision
-			return
-		}
+		s.LastDesiredResources = &current
+	}
+
+	if *s.LastDesiredResources == desired {
+		// Nothing changed, so no need to update the target revision
+		return
 	}
 
 	var flags vmv1.Flag
 
-	if desired.HasFieldGreaterThan(current) {
+	if desired.HasFieldGreaterThan(*s.LastDesiredResources) {
 		flags.Set(revsource.Upscale)
 	}
-	if desired.HasFieldLessThan(current) {
+	if desired.HasFieldLessThan(*s.LastDesiredResources) {
 		flags.Set(revsource.Downscale)
 	}
 	if immediate {
@@ -892,7 +889,6 @@ func (s *state) updateTargetRevision(
 	}
 
 	s.TargetRevision = s.Config.RevisionSource.Next(now, flags)
-
 }
 
 func (s *state) updateNeonVMCurrentRevision(currentRevision vmv1.RevisionWithTime) {

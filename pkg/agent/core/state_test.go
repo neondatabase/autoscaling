@@ -1010,6 +1010,8 @@ func TestDownscalePivotBack(t *testing.T) {
 		return clock.Inc(clockTickDuration / 2)
 	}
 	var expectedRevision *helpers.ExpectedRevision
+	latencyObserver := &latencyObserver{t: t, observations: nil}
+	defer latencyObserver.assertEmpty()
 	resForCU := DefaultComputeUnit.Mul
 
 	var state *core.State
@@ -1052,6 +1054,7 @@ func TestDownscalePivotBack(t *testing.T) {
 				a.Do(state.Monitor().DownscaleRequestAllowed, clock.Now(), expectedRevision.WithTime())
 			},
 			post: func(pluginWait *time.Duration) {
+				expectedRevision.Value = 2
 				t.Log(" > start vm-monitor upscale")
 				a.Call(nextActions).Equals(core.ActionSet{
 					Wait: &core.ActionWait{Duration: *pluginWait},
@@ -1161,6 +1164,9 @@ func TestDownscalePivotBack(t *testing.T) {
 			helpers.WithStoredWarnings(a.StoredWarnings()),
 			helpers.WithMinMaxCU(1, 3),
 			helpers.WithCurrentCU(2),
+			helpers.WithConfigSetting(func(c *core.Config) {
+				c.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
+			}),
 		)
 
 		state.Monitor().Active(true)
@@ -1175,6 +1181,10 @@ func TestDownscalePivotBack(t *testing.T) {
 		a.Call(getDesiredResources, state, clock.Now()).
 			Equals(resForCU(1))
 
+		// We start with downscale
+		expectedRevision.Value = 1
+		expectedRevision.Flags = revsource.Downscale
+
 		for j := 0; j <= i; j++ {
 			midRequest := func() {}
 			if j == i {
@@ -1184,6 +1194,7 @@ func TestDownscalePivotBack(t *testing.T) {
 					a.Do(state.UpdateSystemMetrics, newMetrics)
 					a.Call(getDesiredResources, state, clock.Now()).
 						Equals(resForCU(2))
+
 				}
 			}
 
@@ -1191,6 +1202,10 @@ func TestDownscalePivotBack(t *testing.T) {
 		}
 
 		for j := i; j >= 0; j-- {
+			// Now it is upscale
+			expectedRevision.Value = 2
+			expectedRevision.Flags = revsource.Upscale
+
 			steps[j].post(&pluginWait)
 		}
 	}
