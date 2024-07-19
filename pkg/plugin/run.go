@@ -72,10 +72,10 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.
 			return
 		}
 
-		logger = logger.With(zap.Object("pod", req.Pod))
-		logger.Info(
-			"Received autoscaler-agent request",
-			zap.String("client", r.RemoteAddr), zap.Any("request", req),
+		logger = logger.With(
+			zap.Object("pod", req.Pod),
+			zap.String("client", r.RemoteAddr),
+			zap.Any("request", req),
 		)
 
 		resp, statusCode, err := e.handleAgentRequest(logger, req)
@@ -103,12 +103,6 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.
 		if err != nil {
 			logger.Panic("Failed to encode response JSON", zap.Error(err))
 		}
-
-		logger.Info(
-			"Responding to autoscaler-agent request",
-			zap.Int("status", statusCode),
-			zap.Any("response", resp),
-		)
 
 		w.Header().Add("Content-Type", ContentTypeJSON)
 		w.WriteHeader(statusCode)
@@ -220,8 +214,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 
 	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
 
-	permit, status, err := e.handleResources(
-		logger,
+	verdict, permit, status, err := e.handleResources(
 		pod,
 		node,
 		req.ComputeUnit,
@@ -250,15 +243,23 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		}
 	}
 
+	status = 200
 	resp := api.PluginResponse{
 		Permit:  permit,
 		Migrate: migrateDecision,
 	}
-	return &resp, 200, nil
+
+	logger.Info(
+		"Handled agent request",
+		zap.Object("verdict", verdict),
+		zap.Int("status", 200),
+		zap.Any("response", resp),
+	)
+
+	return &resp, status, nil
 }
 
 func (e *AutoscaleEnforcer) handleResources(
-	logger *zap.Logger,
 	pod *podState,
 	node *nodeState,
 	cu api.Resources,
@@ -266,10 +267,10 @@ func (e *AutoscaleEnforcer) handleResources(
 	lastPermit *api.Resources,
 	startingMigration bool,
 	supportsFractionalCPU bool,
-) (api.Resources, int, error) {
+) (verdictSet, api.Resources, int, error) {
 	if !supportsFractionalCPU && req.VCPU%1000 != 0 {
 		err := errors.New("agent requested fractional CPU with protocol version that does not support it")
-		return api.Resources{}, 400, err
+		return verdictSet{}, api.Resources{}, 400, err
 	}
 
 	// Check that we aren't being asked to do something during migration:
@@ -278,9 +279,11 @@ func (e *AutoscaleEnforcer) handleResources(
 		// migrating.
 		if req.VCPU != pod.cpu.Reserved || req.Mem != pod.mem.Reserved {
 			err := errors.New("cannot change resources: agent has already been informed that pod is migrating")
-			return api.Resources{}, 400, err
+			return verdictSet{}, api.Resources{}, 400, err
 		}
-		return api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}, 200, nil
+		message := "No change because pod is migrating"
+		verdict := verdictSet{cpu: message, mem: message}
+		return verdict, api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}, 200, nil
 	}
 
 	cpuFactor := cu.VCPU
@@ -301,15 +304,10 @@ func (e *AutoscaleEnforcer) handleResources(
 	memVerdict := makeResourceTransitioner(&node.mem, &pod.mem).
 		handleRequested(req.Mem, lastMemPermit, startingMigration, memFactor)
 
-	logger.Info(
-		"Handled requested resources from pod",
-		zap.Object("verdict", verdictSet{
-			cpu: cpuVerdict,
-			mem: memVerdict,
-		}),
-	)
+	verdict := verdictSet{cpu: cpuVerdict, mem: memVerdict}
+	permit := api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}
 
-	return api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}, 200, nil
+	return verdict, permit, 200, nil
 }
 
 func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
