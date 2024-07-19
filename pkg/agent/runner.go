@@ -778,12 +778,7 @@ func (r *Runner) DoSchedulerRequest(
 	}
 	request.Header.Set("content-type", "application/json")
 
-	if reqData.LastPermit != nil && *reqData.LastPermit == reqData.Resources {
-		// If the last permit is the same as the current request, we can skip request logging.
-		logger.Debug("Sending request to scheduler", zap.Any("request", reqData))
-	} else {
-		logger.Info("Sending request to scheduler", zap.Any("request", reqData))
-	}
+	logger.Debug("Sending request to scheduler", zap.Any("request", reqData))
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {

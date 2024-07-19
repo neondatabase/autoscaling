@@ -39,7 +39,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 		action := *last.actions.PluginRequest
 
 		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
-			logger.Debug("Starting plugin request", zap.Object("action", action))
+			logger.Info("Starting plugin request", zap.Object("action", action))
 			startTime = time.Now()
 			state.Plugin().StartingRequest(startTime, action.Target)
 		}); !updated {
