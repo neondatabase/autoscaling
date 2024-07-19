@@ -7,7 +7,7 @@ FROM {{.RootDiskImage}} AS rootdisk
 USER root
 {{.SpecMerge}}
 
-FROM alpine:3.16 AS vm-runtime
+FROM alpine:3.17 AS vm-runtime
 # add busybox
 ENV BUSYBOX_VERSION 1.35.0
 RUN set -e \
@@ -15,6 +15,8 @@ RUN set -e \
 	&& wget -q https://busybox.net/downloads/binaries/${BUSYBOX_VERSION}-x86_64-linux-musl/busybox -O /neonvm/bin/busybox \
 	&& chmod +x /neonvm/bin/busybox \
 	&& /neonvm/bin/busybox --install -s /neonvm/bin
+
+COPY helper.move-bins.sh /helper.move-bins.sh
 
 # add udevd and agetty (with shared libs)
 RUN set -e \
@@ -26,27 +28,16 @@ RUN set -e \
 		e2fsprogs-extra \
 		blkid \
 		flock \
-	&& mv /sbin/acpid         /neonvm/bin/ \
-	&& mv /sbin/udevd         /neonvm/bin/ \
-	&& mv /bin/udevadm        /neonvm/bin/ \
-	&& mv /sbin/agetty        /neonvm/bin/ \
-	&& mv /sbin/su-exec       /neonvm/bin/ \
-	&& mv /usr/sbin/resize2fs /neonvm/bin/resize2fs \
-	&& mv /sbin/blkid         /neonvm/bin/blkid \
-	&& mv /usr/bin/flock	  /neonvm/bin/flock \
 	&& mkdir -p /neonvm/lib \
-	&& cp -f /lib/ld-musl-x86_64.so.1  /neonvm/lib/ \
-	&& cp -f /lib/libblkid.so.1.1.0    /neonvm/lib/libblkid.so.1 \
-	&& cp -f /lib/libcrypto.so.1.1     /neonvm/lib/ \
-	&& cp -f /lib/libkmod.so.2.3.7     /neonvm/lib/libkmod.so.2 \
-	&& cp -f /lib/libudev.so.1.6.3     /neonvm/lib/libudev.so.1 \
-	&& cp -f /lib/libz.so.1.2.12       /neonvm/lib/libz.so.1 \
-	&& cp -f /usr/lib/liblzma.so.5.2.5 /neonvm/lib/liblzma.so.5 \
-	&& cp -f /usr/lib/libzstd.so.1.5.2 /neonvm/lib/libzstd.so.1 \
-	&& cp -f /lib/libe2p.so.2          /neonvm/lib/libe2p.so.2 \
-	&& cp -f /lib/libext2fs.so.2       /neonvm/lib/libext2fs.so.2 \
-	&& cp -f /lib/libcom_err.so.2      /neonvm/lib/libcom_err.so.2 \
-	&& cp -f /lib/libblkid.so.1        /neonvm/lib/libblkid.so.1 \
+	&& /helper.move-bins.sh \
+		acpid \
+		udevd \
+		udevadm \
+		agetty \
+		su-exec \
+		resize2fs \
+		blkid \
+		flock \
 	&& mv /usr/share/udhcpc/default.script /neonvm/bin/udhcpc.script \
 	&& sed -i 's/#!\/bin\/sh/#!\/neonvm\/bin\/sh/' /neonvm/bin/udhcpc.script \
 	&& sed -i 's/export PATH=.*/export PATH=\/neonvm\/bin/' /neonvm/bin/udhcpc.script
@@ -66,26 +57,13 @@ RUN set -e \
 RUN set -e \
        && apk add --no-cache --no-progress --quiet \
                chrony \
-       && mv /usr/sbin/chronyd /neonvm/bin/ \
-       && mv /usr/bin/chronyc  /neonvm/bin/ \
-       && cp -f /lib/libc.musl-x86_64.so.1 /neonvm/lib/ \
-       && cp -f /lib/libz.so.1 /neonvm/lib/ \
-       && cp -f /usr/lib/libcap.so.2 /neonvm/lib/ \
-       && cp -f /usr/lib/libffi.so.8 /neonvm/lib/ \
-       && cp -f /usr/lib/libgmp.so.10 /neonvm/lib/ \
-       && cp -f /usr/lib/libgnutls.so.30 /neonvm/lib/ \
-       && cp -f /usr/lib/libhogweed.so.6 /neonvm/lib/ \
-       && cp -f /usr/lib/libnettle.so.8 /neonvm/lib/ \
-       && cp -f /usr/lib/libp11-kit.so.0 /neonvm/lib/ \
-       && cp -f /usr/lib/libtasn1.so.6 /neonvm/lib/ \
-       && cp -f /usr/lib/libunistring.so.2 /neonvm/lib/
+       && /helper.move-bins.sh chronyd chronyc
 
 # ssh server
 RUN set -e \
 	&& apk add --no-cache --no-progress --quiet \
 		openssh-server \
-	&& mv /usr/bin/ssh-keygen /neonvm/bin/ \
-	&& mv /usr/sbin/sshd      /neonvm/bin/
+	&& /helper.move-bins.sh sshd ssh-keygen
 
 # init scripts & configs
 COPY inittab     /neonvm/bin/inittab
@@ -129,6 +107,6 @@ RUN set -e \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
-FROM alpine:3.16
+FROM alpine:3.17
 RUN apk add --no-cache --no-progress --quiet qemu-img
 COPY --from=builder /disk.qcow2 /
