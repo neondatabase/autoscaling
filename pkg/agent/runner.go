@@ -778,7 +778,12 @@ func (r *Runner) DoSchedulerRequest(
 	}
 	request.Header.Set("content-type", "application/json")
 
-	logger.Info("Sending request to scheduler", zap.Any("request", reqData))
+	if reqData.LastPermit != nil && *reqData.LastPermit == reqData.Resources {
+		// If the last permit is the same as the current request, we can skip request logging.
+		logger.Debug("Sending request to scheduler", zap.Any("request", reqData))
+	} else {
+		logger.Info("Sending request to scheduler", zap.Any("request", reqData))
+	}
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -807,7 +812,8 @@ func (r *Runner) DoSchedulerRequest(
 		return nil, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
-	logger.Info("Received response from scheduler", zap.Any("response", respData))
+	// there will be "Plugin request successful" INFO log right after
+	logger.Debug("Received response from scheduler", zap.Any("response", respData))
 
 	return &respData, nil
 }
