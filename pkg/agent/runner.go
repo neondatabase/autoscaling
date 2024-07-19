@@ -604,7 +604,7 @@ func doMetricsRequest(
 		panic(fmt.Errorf("Error constructing metrics request to %q: %w", url, err))
 	}
 
-	logger.Info("Making metrics request to VM", zap.String("url", url))
+	logger.Debug("Making metrics request to VM", zap.String("url", url))
 
 	resp, err := http.DefaultClient.Do(req)
 	if ctx.Err() != nil {
