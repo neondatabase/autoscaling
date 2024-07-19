@@ -121,7 +121,8 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				MonitorRequestedUpscaleValidPeriod: time.Second,
 				MonitorRetryWait:                   time.Second,
 				Log: core.LogConfig{
-					Info: nil,
+					Debug: nil,
+					Info:  nil,
 					Warn: func(msg string, fields ...zap.Field) {
 						warnings = append(warnings, msg)
 					},
@@ -191,8 +192,9 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 		MonitorRequestedUpscaleValidPeriod: 10 * time.Second,
 		MonitorRetryWait:                   3 * time.Second,
 		Log: core.LogConfig{
-			Info: nil,
-			Warn: nil,
+			Debug: nil,
+			Info:  nil,
+			Warn:  nil,
 		},
 	},
 }

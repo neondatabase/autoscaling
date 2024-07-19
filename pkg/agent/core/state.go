@@ -75,8 +75,11 @@ type Config struct {
 }
 
 type LogConfig struct {
+	// Debug, if not nil, will be called to provide debug information during normal functioning.
+	// Usually repeated calls to Info with the same message gets downgraded to Debug.
+	Debug func(string, ...zap.Field)
 	// Info, if not nil, will be called to provide information during normal functioning.
-	// For example, we log the calculated desired resources on every call to NextActions.
+	// For example, we log the calculated desired resources here.
 	Info func(string, ...zap.Field)
 	// Warn, if not nil, will be called to log conditions that are impeding the ability to move the
 	// current resources to what's desired.
@@ -97,6 +100,10 @@ type state struct {
 	// unused. Exists to make it easier to add print debugging (via .config.Warn) for a single call
 	// to NextActions.
 	Debug bool
+
+	// Used to optimize logging of calculated desired resources. We only log them if they've changed
+	// since the last time we logged them or desired is different from what we're using.
+	LoggedResources api.Resources
 
 	// VM gives the current state of the VM - or at least, the state of the fields we care about.
 	//
@@ -199,9 +206,10 @@ func (ns *neonvmState) ongoingRequest() bool {
 func NewState(vm api.VmInfo, config Config) *State {
 	return &State{
 		internal: state{
-			Config: config,
-			Debug:  false,
-			VM:     vm,
+			Config:          config,
+			Debug:           false,
+			LoggedResources: api.Resources{VCPU: 0, Mem: 0},
+			VM:              vm,
 			Plugin: pluginState{
 				OngoingRequest: false,
 				LastRequest:    nil,
@@ -223,6 +231,12 @@ func NewState(vm api.VmInfo, config Config) *State {
 			},
 			Metrics: nil,
 		},
+	}
+}
+
+func (s *state) debug(msg string, fields ...zap.Field) {
+	if s.Config.Log.Debug != nil {
+		s.Config.Log.Debug(msg, fields...)
 	}
 }
 
@@ -792,7 +806,20 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		}
 	}
 
-	s.info("Calculated desired resources", zap.Object("current", s.VM.Using()), zap.Object("target", result))
+	currentResources := s.VM.Using()
+	if result == currentResources && currentResources == s.LoggedResources {
+		// if we've already logged this, then we can skip logging it again
+		s.debug("Calculated desired resources", zap.Object("current", currentResources), zap.Object("target", result))
+	} else {
+		s.info("Calculated desired resources", zap.Object("current", currentResources), zap.Object("target", result))
+
+		if result == currentResources {
+			// skip logging next time
+			s.LoggedResources = currentResources
+		} else {
+			s.LoggedResources = api.Resources{VCPU: 0, Mem: 0}
+		}
+	}
 
 	return result, calculateWaitTime
 }
