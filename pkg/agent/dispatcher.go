@@ -4,6 +4,7 @@ package agent
 // connection through a simple RPC-style protocol.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -165,6 +166,10 @@ func NewDispatcher(
 		var firstSequentialFailure *time.Time
 		continuedFailureAbortTimeout := time.Second * time.Duration(runner.global.config.Monitor.MaxHealthCheckSequentialFailuresSeconds)
 
+		// if we don't have any errors, we will log only every 10th successful health check
+		const maxSuccessiveSkips = 10
+		var successesSkipped int
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -172,9 +177,18 @@ func NewDispatcher(
 			case <-ticker.C:
 			}
 
+			startTime := time.Now()
 			_, err := disp.Call(ctx, logger, timeout, "HealthCheck", api.HealthCheck{})
+			endTime := time.Now()
+
+			logFields := []zap.Field{
+				zap.Duration("duration", endTime.Sub(startTime)),
+				zap.Int("successesSkipped", successesSkipped),
+			}
+
 			if err != nil {
-				logger.Error("vm-monitor health check failed", zap.Error(err))
+				logger.Error("vm-monitor health check failed", append(logFields, zap.Error(err))...)
+				successesSkipped = 0
 
 				if firstSequentialFailure == nil {
 					now := time.Now()
@@ -187,6 +201,13 @@ func NewDispatcher(
 			} else {
 				// health check was successful, so reset the sequential failures count
 				firstSequentialFailure = nil
+
+				if successesSkipped == maxSuccessiveSkips {
+					logger.Info("vm-monitor health check successful", logFields...)
+					successesSkipped = 0
+				} else {
+					successesSkipped++
+				}
 
 				runner.status.update(runner.global, func(s podStatus) podStatus {
 					now := time.Now()
@@ -302,7 +323,12 @@ func (disp *Dispatcher) send(ctx context.Context, logger *zap.Logger, id uint64,
 	// by base64 encoding it, so use RawMessage to avoid serializing to []byte
 	// (done by SerializeMonitorMessage), and then base64 encoding again
 	raw := json.RawMessage(data)
-	logger.Info("sending message to monitor", zap.ByteString("message", raw))
+	if bytes.HasPrefix(data, []byte("{\"content\":{},\"type\":\"HealthCheck\",\"id\":")) {
+		// don't log health checks, they're too frequent
+		logger.Debug("sending message to monitor", zap.ByteString("message", raw))
+	} else {
+		logger.Info("sending message to monitor", zap.ByteString("message", raw))
+	}
 	return wsjson.Write(ctx, disp.conn, &raw)
 }
 
@@ -413,7 +439,13 @@ func (disp *Dispatcher) HandleMessage(
 	if err := wsjson.Read(ctx, disp.conn, &message); err != nil {
 		return fmt.Errorf("Error receiving message: %w", err)
 	}
-	logger.Info("(pre-decoding): received a message", zap.ByteString("message", message))
+
+	if bytes.HasPrefix(message, []byte("{\"type\":\"HealthCheck\",\"id\":")) {
+		// don't log health checks, they're too frequent
+		logger.Debug("(pre-decoding): received a message", zap.ByteString("message", message))
+	} else {
+		logger.Info("(pre-decoding): received a message", zap.ByteString("message", message))
+	}
 
 	var unstructured map[string]interface{}
 	if err := json.Unmarshal(message, &unstructured); err != nil {
@@ -641,7 +673,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 
 		sender, ok := disp.waiters[id]
 		if ok {
-			logger.Info("vm-monitor responded to health check", zap.Uint64("id", id))
+			logger.Debug("vm-monitor responded to health check", zap.Uint64("id", id))
 			// Indicate to the receiver that an error occurred
 			sender.Send(waiterResult{
 				err: nil,
