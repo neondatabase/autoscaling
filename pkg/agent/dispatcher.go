@@ -166,8 +166,9 @@ func NewDispatcher(
 		continuedFailureAbortTimeout := time.Second * time.Duration(runner.global.config.Monitor.MaxHealthCheckSequentialFailuresSeconds)
 
 		// if we don't have any errors, we will log only every 10th successful health check
-		const maxSuccessiveSkips = 10
-		var successesSkipped int
+		const logEveryNth = 10
+		var okSequence int
+		var failSequence int
 
 		for {
 			select {
@@ -182,12 +183,19 @@ func NewDispatcher(
 
 			logFields := []zap.Field{
 				zap.Duration("duration", endTime.Sub(startTime)),
-				zap.Int("successesSkipped", successesSkipped),
+			}
+			if okSequence != 0 {
+				logFields = append(logFields, zap.Int("okSequence", okSequence))
+			}
+			if failSequence != 0 {
+				logFields = append(logFields, zap.Int("failSequence", failSequence))
 			}
 
 			if err != nil {
+				// health check failed, reset the ok sequence count
+				okSequence = 0
+				failSequence++
 				logger.Error("vm-monitor health check failed", append(logFields, zap.Error(err))...)
-				successesSkipped = 0
 
 				if firstSequentialFailure == nil {
 					now := time.Now()
@@ -199,13 +207,12 @@ func NewDispatcher(
 				}
 			} else {
 				// health check was successful, so reset the sequential failures count
+				failSequence = 0
+				okSequence++
 				firstSequentialFailure = nil
 
-				if successesSkipped == maxSuccessiveSkips {
+				if okSequence%logEveryNth == 0 {
 					logger.Info("vm-monitor health check successful", logFields...)
-					successesSkipped = 0
-				} else {
-					successesSkipped++
 				}
 
 				runner.status.update(runner.global, func(s podStatus) podStatus {
