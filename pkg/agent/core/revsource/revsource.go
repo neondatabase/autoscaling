@@ -89,11 +89,11 @@ func Propagate(
 	now time.Time,
 	target vmv1.RevisionWithTime,
 	currentSlot *vmv1.Revision,
-	metricCB ObserveCallback,
+	cb ObserveCallback,
 ) {
-	if metricCB != nil {
+	if cb != nil {
 		diff := now.Sub(target.UpdatedAt.Time)
-		metricCB(diff, target.Flags)
+		cb(diff, target.Flags)
 	}
 	if currentSlot == nil {
 		return

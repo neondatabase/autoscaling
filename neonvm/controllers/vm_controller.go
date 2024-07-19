@@ -800,6 +800,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// do nothing
 	}
 
+	// Propagate TargetRevision to CurrentRevision. This is done only if the VM is fully
+	// reconciled and running.
 	if vm.Status.Phase == vmv1.VmRunning && vm.Spec.TargetRevision != nil {
 		rev := vm.Spec.TargetRevision.WithTime(time.Now())
 		vm.Status.CurrentRevision = &rev

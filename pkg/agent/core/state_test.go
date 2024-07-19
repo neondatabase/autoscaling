@@ -132,7 +132,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					},
 				},
 				RevisionSource: revsource.NewRevisionSource(nil),
-				PromMetricsCallbacks: core.ObservabilityCallbacks{
+				ObservabilityCallbacks: core.ObservabilityCallbacks{
 					PluginLatency:  nil,
 					MonitorLatency: nil,
 					NeonVMLatency:  nil,
@@ -206,7 +206,7 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 			Warn: nil,
 		},
 		RevisionSource: &helpers.NilRevisionSource{},
-		PromMetricsCallbacks: core.ObservabilityCallbacks{
+		ObservabilityCallbacks: core.ObservabilityCallbacks{
 			PluginLatency:  nil,
 			MonitorLatency: nil,
 			NeonVMLatency:  nil,
@@ -503,7 +503,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 		DefaultInitialStateConfig,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithConfigSetting(func(c *core.Config) {
-			c.PromMetricsCallbacks.PluginLatency = latencyObserver.observe
+			c.ObservabilityCallbacks.PluginLatency = latencyObserver.observe
 			// This time, we will test plugin latency
 			c.RevisionSource = revsource.NewRevisionSource(nil)
 		}),

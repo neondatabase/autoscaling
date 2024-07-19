@@ -89,8 +89,8 @@ type Config struct {
 	// RevisionSource is the source of revisions to track the progress during scaling.
 	RevisionSource RevisionSource `json:"-"`
 
-	// PromMetricsCallbacks are the callbacks to update the Prometheus metrics.
-	PromMetricsCallbacks ObservabilityCallbacks `json:"-"`
+	// ObservabilityCallbacks are the callbacks to submit datapoints for observability.
+	ObservabilityCallbacks ObservabilityCallbacks `json:"-"`
 }
 
 type LogConfig struct {
@@ -222,6 +222,9 @@ type neonvmState struct {
 	OngoingRequested *api.Resources
 	RequestFailedAt  *time.Time
 
+	// TargetRevision is the revision agent works towards. Contrary to monitor/plugin, we
+	// store it not only in action, but also here. This is needed, because for NeonVM propagation
+	// happens after the changes are actually applied, when the action object is long gone.
 	TargetRevision  vmv1.RevisionWithTime
 	CurrentRevision vmv1.Revision
 }
@@ -889,7 +892,7 @@ func (s *state) updateNeonVMCurrentRevision(currentRevision vmv1.RevisionWithTim
 	revsource.Propagate(currentRevision.UpdatedAt.Time,
 		s.NeonVM.TargetRevision,
 		&s.NeonVM.CurrentRevision,
-		s.Config.PromMetricsCallbacks.NeonVMLatency,
+		s.Config.ObservabilityCallbacks.NeonVMLatency,
 	)
 	err := s.Config.RevisionSource.Observe(currentRevision.UpdatedAt.Time, currentRevision.Revision)
 	if err != nil {
@@ -1106,7 +1109,7 @@ func (h PluginHandle) RequestSuccessful(
 	revsource.Propagate(now,
 		targetRevision,
 		&h.s.Plugin.CurrentRevision,
-		h.s.Config.PromMetricsCallbacks.PluginLatency,
+		h.s.Config.ObservabilityCallbacks.PluginLatency,
 	)
 	return nil
 }
@@ -1181,7 +1184,7 @@ func (h MonitorHandle) DownscaleRequestAllowed(now time.Time, rev vmv1.RevisionW
 	revsource.Propagate(now,
 		rev,
 		&h.s.Monitor.CurrentRevision,
-		h.s.Config.PromMetricsCallbacks.MonitorLatency,
+		h.s.Config.ObservabilityCallbacks.MonitorLatency,
 	)
 }
 
@@ -1196,7 +1199,7 @@ func (h MonitorHandle) DownscaleRequestDenied(now time.Time, targetRevision vmv1
 	revsource.Propagate(now,
 		targetRevision,
 		&h.s.Monitor.CurrentRevision,
-		h.s.Config.PromMetricsCallbacks.MonitorLatency,
+		h.s.Config.ObservabilityCallbacks.MonitorLatency,
 	)
 }
 
