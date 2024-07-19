@@ -321,11 +321,9 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		Equals(resForCU(2))
 
 	// Now that the initial scheduler request is done, and we have metrics that indicate
-	// scale-up would be a good idea, we should be contacting the scheduler to get approval.
-
-	// Revision advances.
-	expectedRevision.Revision.Value = 1
-	expectedRevision.Revision.Flags = revsource.Upscale
+	// scale-up would be a good idea.
+	expectedRevision.Value = 1
+	expectedRevision.Flags = revsource.Upscale
 
 	// We should be contacting the scheduler to get approval.
 	a.Call(nextActions).Equals(core.ActionSet{
