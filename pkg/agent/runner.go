@@ -812,7 +812,6 @@ func (r *Runner) DoSchedulerRequest(
 		return nil, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
-	// there will be "Plugin request successful" INFO log right after
 	logger.Debug("Received response from scheduler", zap.Any("response", respData))
 
 	return &respData, nil

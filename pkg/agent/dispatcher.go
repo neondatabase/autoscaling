@@ -4,7 +4,6 @@ package agent
 // connection through a simple RPC-style protocol.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -323,12 +322,7 @@ func (disp *Dispatcher) send(ctx context.Context, logger *zap.Logger, id uint64,
 	// by base64 encoding it, so use RawMessage to avoid serializing to []byte
 	// (done by SerializeMonitorMessage), and then base64 encoding again
 	raw := json.RawMessage(data)
-	if bytes.HasPrefix(data, []byte("{\"content\":{},\"type\":\"HealthCheck\",\"id\":")) {
-		// don't log health checks, they're too frequent
-		logger.Debug("sending message to monitor", zap.ByteString("message", raw))
-	} else {
-		logger.Info("sending message to monitor", zap.ByteString("message", raw))
-	}
+	logger.Debug("sending message to monitor", zap.ByteString("message", raw))
 	return wsjson.Write(ctx, disp.conn, &raw)
 }
 
@@ -440,12 +434,7 @@ func (disp *Dispatcher) HandleMessage(
 		return fmt.Errorf("Error receiving message: %w", err)
 	}
 
-	if bytes.HasPrefix(message, []byte("{\"type\":\"HealthCheck\",\"id\":")) {
-		// don't log health checks, they're too frequent
-		logger.Debug("(pre-decoding): received a message", zap.ByteString("message", message))
-	} else {
-		logger.Info("(pre-decoding): received a message", zap.ByteString("message", message))
-	}
+	logger.Debug("(pre-decoding): received a message", zap.ByteString("message", message))
 
 	var unstructured map[string]interface{}
 	if err := json.Unmarshal(message, &unstructured); err != nil {
