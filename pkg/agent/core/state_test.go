@@ -887,7 +887,7 @@ func TestRequestedUpscale(t *testing.T) {
 	a.Do(state.Monitor().UpscaleRequested, clock.Now(), api.MoreResources{Cpu: false, Memory: true})
 	// Revision advances
 	expectedRevision.Value = 1
-	expectedRevision.Flags = revsource.Immediate | revsource.Upscale
+	expectedRevision.Flags = revsource.Upscale
 
 	// First need to check with the scheduler plugin to get approval for upscaling:
 	a.Call(nextActions).Equals(core.ActionSet{
@@ -928,7 +928,7 @@ func TestRequestedUpscale(t *testing.T) {
 		helpers.WithCurrentCU(2),
 		helpers.WithCurrentRevision(expectedRevision.WithTime()),
 	))
-	latencyObserver.assert(duration("0.2s"), revsource.Upscale|revsource.Immediate)
+	latencyObserver.assert(duration("0.2s"), revsource.Upscale)
 
 	// Finally, tell the vm-monitor that it got upscaled:
 	a.Call(nextActions).Equals(core.ActionSet{

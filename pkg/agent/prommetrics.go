@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -52,9 +55,11 @@ type resourceChangePair struct {
 }
 
 const (
-	directionLabel    = "direction"
-	directionValueInc = "inc"
-	directionValueDec = "dec"
+	directionLabel     = "direction"
+	directionValueInc  = "inc"
+	directionValueDec  = "dec"
+	directionValueBoth = "both"
+	directionValueNone = "none"
 )
 
 type runnerMetricState string
@@ -247,7 +252,7 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 				Help:    "End-to-end scaling latency",
 				Buckets: buckets,
 			},
-			revsource.AllFlagNames,
+			[]string{directionLabel},
 		)),
 		pluginLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -255,7 +260,7 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 				Help:    "Plugin request latency",
 				Buckets: buckets,
 			},
-			revsource.AllFlagNames,
+			[]string{directionLabel},
 		)),
 		monitorLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -263,7 +268,7 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 				Help:    "Monitor request latency",
 				Buckets: buckets,
 			},
-			revsource.AllFlagNames,
+			[]string{directionLabel},
 		)),
 		neonvmLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -271,7 +276,7 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 				Help:    "NeonVM request latency",
 				Buckets: buckets,
 			},
-			revsource.AllFlagNames,
+			[]string{directionLabel},
 		)),
 	}
 
@@ -307,6 +312,25 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 	}
 
 	return metrics, reg
+}
+
+func flagsToDirection(flags vmv1.Flag) string {
+	if flags.Has(revsource.Upscale) && flags.Has(revsource.Downscale) {
+		return directionValueBoth
+	}
+	if flags.Has(revsource.Upscale) {
+		return directionValueInc
+	}
+	if flags.Has(revsource.Downscale) {
+		return directionValueDec
+	}
+	return directionValueNone
+}
+
+func WrapHistogramVec(hist *prometheus.HistogramVec) revsource.ObserveCallback {
+	return func(dur time.Duration, flags vmv1.Flag) {
+		hist.WithLabelValues(flagsToDirection(flags)).Observe(dur.Seconds())
+	}
 }
 
 type PerVMMetrics struct {

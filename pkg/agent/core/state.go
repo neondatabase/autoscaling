@@ -849,8 +849,10 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			return nil
 		}
 	}
-	s.updateTargetRevision(now, result, s.VM.Using(), requestedUpscalingAffectedResult)
+	s.updateTargetRevision(now, result, s.VM.Using())
 
+	// TODO: we are both saving the result into LastDesiredResources and returning it. This is
+	// redundant, and we should remove one of the two.
 	s.LastDesiredResources = &result
 
 	s.info("Calculated desired resources",
@@ -861,12 +863,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	return result, calculateWaitTime
 }
 
-func (s *state) updateTargetRevision(
-	now time.Time,
-	desired api.Resources,
-	current api.Resources,
-	immediate bool,
-) {
+func (s *state) updateTargetRevision(now time.Time, desired api.Resources, current api.Resources) {
 	if s.LastDesiredResources == nil {
 		s.LastDesiredResources = &current
 	}
@@ -883,9 +880,6 @@ func (s *state) updateTargetRevision(
 	}
 	if desired.HasFieldLessThan(*s.LastDesiredResources) {
 		flags.Set(revsource.Downscale)
-	}
-	if immediate {
-		flags.Set(revsource.Immediate)
 	}
 
 	s.TargetRevision = s.Config.RevisionSource.Next(now, flags)

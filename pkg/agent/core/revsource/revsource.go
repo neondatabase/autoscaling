@@ -4,33 +4,13 @@ import (
 	"errors"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
 const (
 	Upscale vmv1.Flag = 1 << iota
 	Downscale
-	Immediate
 )
-
-// AllFlags and AllFlagNames must have the same order, so the metrics work correctly.
-var AllFlags = []vmv1.Flag{Upscale, Downscale, Immediate}
-var AllFlagNames = []string{"upscale", "downscale", "immediate"}
-
-// FlagsToLabels converts a set of flags to a list of strings which prometheus can take.
-func FlagsToLabels(flags vmv1.Flag) []string {
-	var ret []string
-	for _, flag := range AllFlags {
-		value := "false"
-		if flags.Has(flag) {
-			value = "true"
-		}
-		ret = append(ret, value)
-	}
-	return ret
-}
 
 // MaxRevisions is the maximum number of revisions that can be stored in the RevisionSource.
 // This is to prevent memory leaks.
@@ -102,13 +82,6 @@ func (c *RevisionSource) Observe(moment time.Time, rev vmv1.Revision) error {
 }
 
 type ObserveCallback func(dur time.Duration, flags vmv1.Flag)
-
-func WrapHistogramVec(hist *prometheus.HistogramVec) ObserveCallback {
-	return func(dur time.Duration, flags vmv1.Flag) {
-		labels := FlagsToLabels(flags)
-		hist.WithLabelValues(labels...).Observe(dur.Seconds())
-	}
-}
 
 // Propagate sets the target revision to be current, optionally measuring the time it took
 // for propagation.

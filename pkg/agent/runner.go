@@ -197,7 +197,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	coreExecLogger := execLogger.Named("core")
 	revisionSource := revsource.NewRevisionSource(
-		revsource.WrapHistogramVec(&r.global.metrics.scalingLatency),
+		WrapHistogramVec(&r.global.metrics.scalingLatency),
 	)
 	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
@@ -217,9 +217,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			},
 			RevisionSource: revisionSource,
 			PromMetricsCallbacks: core.ObservabilityCallbacks{
-				PluginLatency:  revsource.WrapHistogramVec(&r.global.metrics.pluginLatency),
-				MonitorLatency: revsource.WrapHistogramVec(&r.global.metrics.monitorLatency),
-				NeonVMLatency:  revsource.WrapHistogramVec(&r.global.metrics.neonvmLatency),
+				PluginLatency:  WrapHistogramVec(&r.global.metrics.pluginLatency),
+				MonitorLatency: WrapHistogramVec(&r.global.metrics.monitorLatency),
+				NeonVMLatency:  WrapHistogramVec(&r.global.metrics.neonvmLatency),
 			},
 		},
 	})
