@@ -252,7 +252,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	logger.Info(
 		"Handled agent request",
 		zap.Object("verdict", verdict),
-		zap.Int("status", 200),
+		zap.Int("status", status),
 		zap.Any("response", resp),
 	)
 
