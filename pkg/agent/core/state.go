@@ -234,7 +234,7 @@ func (ns *neonvmState) ongoingRequest() bool {
 }
 
 func NewState(vm api.VmInfo, config Config) *State {
-	state := &State{
+	return &State{
 		internal: state{
 			Config: config,
 			Debug:  false,
@@ -267,8 +267,6 @@ func NewState(vm api.VmInfo, config Config) *State {
 			TargetRevision:       vmv1.ZeroRevision,
 		},
 	}
-
-	return state
 }
 
 func (s *state) info(msg string, fields ...zap.Field) {
