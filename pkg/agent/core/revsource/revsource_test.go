@@ -46,7 +46,7 @@ func newTestRevisionSource(t *testing.T) *testRevisionSource {
 		tcm.result = &d
 		tcm.resultFlags = &flags
 	}
-	tcm.RevisionSource = revsource.NewRevisionSource(cb)
+	tcm.RevisionSource = revsource.NewRevisionSource(0, cb)
 
 	return tcm
 }
@@ -109,4 +109,10 @@ func TestStale(t *testing.T) {
 	// No error, but no result either
 	assert.NoError(t, err)
 	assert.Nil(t, trs.result)
+}
+
+func TestNonZeroRev(t *testing.T) {
+	revSource := revsource.NewRevisionSource(5, nil)
+	rev := revSource.Next(time.Now(), 0)
+	assert.Equal(t, int64(6), rev.Value)
 }

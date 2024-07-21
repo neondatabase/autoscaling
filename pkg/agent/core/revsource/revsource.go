@@ -30,11 +30,11 @@ type RevisionSource struct {
 	offset       int64
 }
 
-func NewRevisionSource(cb ObserveCallback) *RevisionSource {
+func NewRevisionSource(initialRevision int64, cb ObserveCallback) *RevisionSource {
 	return &RevisionSource{
 		cb:           cb,
 		measurements: nil,
-		offset:       1, // Start with 1, 0 is reserved for default value.
+		offset:       initialRevision + 1, // Will start from the next one
 	}
 }
 

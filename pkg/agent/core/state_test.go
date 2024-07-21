@@ -131,7 +131,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 						warnings = append(warnings, msg)
 					},
 				},
-				RevisionSource: revsource.NewRevisionSource(nil),
+				RevisionSource: revsource.NewRevisionSource(0, nil),
 				ObservabilityCallbacks: core.ObservabilityCallbacks{
 					PluginLatency:  nil,
 					MonitorLatency: nil,
@@ -297,7 +297,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithTestingLogfWarnings(t),
 		helpers.WithConfigSetting(func(c *core.Config) {
-			c.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
+			c.RevisionSource = revsource.NewRevisionSource(0, latencyObserver.observe)
 		}),
 	)
 	nextActions := func() core.ActionSet {
@@ -505,7 +505,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 		helpers.WithConfigSetting(func(c *core.Config) {
 			c.ObservabilityCallbacks.PluginLatency = latencyObserver.observe
 			// This time, we will test plugin latency
-			c.RevisionSource = revsource.NewRevisionSource(nil)
+			c.RevisionSource = revsource.NewRevisionSource(0, nil)
 		}),
 	)
 
@@ -857,7 +857,7 @@ func TestRequestedUpscale(t *testing.T) {
 		DefaultInitialStateConfig,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithConfigSetting(func(c *core.Config) {
-			c.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
+			c.RevisionSource = revsource.NewRevisionSource(0, latencyObserver.observe)
 			c.MonitorRequestedUpscaleValidPeriod = duration("6s") // Override this for consistency
 		}),
 	)
@@ -1175,7 +1175,7 @@ func TestDownscalePivotBack(t *testing.T) {
 			helpers.WithMinMaxCU(1, 3),
 			helpers.WithCurrentCU(2),
 			helpers.WithConfigSetting(func(c *core.Config) {
-				c.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
+				c.RevisionSource = revsource.NewRevisionSource(0, latencyObserver.observe)
 			}),
 		)
 
@@ -1240,7 +1240,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		helpers.WithMinMaxCU(1, 3),
 		helpers.WithCurrentCU(2),
 		helpers.WithConfigSetting(func(config *core.Config) {
-			config.RevisionSource = revsource.NewRevisionSource(latencyObserver.observe)
+			config.RevisionSource = revsource.NewRevisionSource(0, latencyObserver.observe)
 		}),
 	)
 	nextActions := func() core.ActionSet {

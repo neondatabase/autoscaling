@@ -196,10 +196,14 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
 
 	coreExecLogger := execLogger.Named("core")
-	revisionSource := revsource.NewRevisionSource(
-		WrapHistogramVec(&r.global.metrics.scalingLatency),
-	)
-	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
+
+	vmInfo := getVmInfo()
+	var initialRevision int64
+	if vmInfo.CurrentRevision != nil {
+		initialRevision = vmInfo.CurrentRevision.Value
+	}
+	revisionSource := revsource.NewRevisionSource(initialRevision, WrapHistogramVec(&r.global.metrics.scalingLatency))
+	executorCore := executor.NewExecutorCore(coreExecLogger, vmInfo, executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
 		Core: core.Config{
 			ComputeUnit:                        r.global.config.Scaling.ComputeUnit,
