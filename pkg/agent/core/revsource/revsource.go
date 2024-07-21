@@ -91,15 +91,15 @@ func Propagate(
 	currentSlot *vmv1.Revision,
 	cb ObserveCallback,
 ) {
-	if cb != nil {
-		diff := now.Sub(target.UpdatedAt.Time)
-		cb(diff, target.Flags)
-	}
 	if currentSlot == nil {
 		return
 	}
-	if currentSlot.Value > target.Value {
+	if currentSlot.Value >= target.Value {
 		return
+	}
+	if cb != nil {
+		diff := now.Sub(target.UpdatedAt.Time)
+		cb(diff, target.Flags)
 	}
 	*currentSlot = target.Revision
 }
