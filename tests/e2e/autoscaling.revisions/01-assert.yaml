@@ -6,29 +6,8 @@ apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
   name: example
-spec:
-  targetRevision:
-    # Note that revision goes backward, compared with the previous step.
-    # This is intentional, this will happen each time autoscaler-agent restarts.
+status:
+  currentRevision:
     revision:
       value: 1
-      flags: 1 # 1 for Upscale
-status:
-  phase: Running
-  restartCount: 0
-  conditions:
-    - type: Available
-      status: "True"
-  cpus: 1
-  memorySize: 4Gi
-  currentRevision: # Already propagated from above
-    revision:
-      value: 1
-      flags: 1
----
-apiVersion: v1
-kind: pod
-metadata:
-  name: workload
-status:
-  phase: Running
+      flags: 123

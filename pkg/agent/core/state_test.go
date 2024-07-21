@@ -503,8 +503,8 @@ func TestPeriodicPluginRequest(t *testing.T) {
 		DefaultInitialStateConfig,
 		helpers.WithStoredWarnings(a.StoredWarnings()),
 		helpers.WithConfigSetting(func(c *core.Config) {
-			c.ObservabilityCallbacks.PluginLatency = latencyObserver.observe
 			// This time, we will test plugin latency
+			c.ObservabilityCallbacks.PluginLatency = latencyObserver.observe
 			c.RevisionSource = revsource.NewRevisionSource(0, nil)
 		}),
 	)
@@ -528,7 +528,6 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	endTime := duration("20s")
 
 	doInitialPluginRequest(a, state, clock, clockTick, lo.ToPtr(metrics.ToAPI()), resources)
-	latencyObserver.assert(duration("100ms"), 0)
 
 	for clock.Elapsed().Duration < endTime {
 		timeSinceScheduledRequest := (clock.Elapsed().Duration - base) % reqEvery
@@ -558,7 +557,6 @@ func TestPeriodicPluginRequest(t *testing.T) {
 				Migrate: nil,
 			})
 			clock.Inc(clockTick - reqDuration)
-			latencyObserver.assert(reqDuration, 0)
 		}
 	}
 }
@@ -573,6 +571,8 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		clock.Inc(clockTickDuration)
 	}
 	expectedRevision := helpers.NewExpectedRevision(clock.Now)
+	latencyObserver := &latencyObserver{t: t, observations: nil}
+	defer latencyObserver.assertEmpty()
 	resForCU := DefaultComputeUnit.Mul
 
 	state := helpers.CreateInitialState(

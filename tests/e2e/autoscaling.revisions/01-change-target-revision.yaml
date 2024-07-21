@@ -1,0 +1,17 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+unitTest: false
+---
+
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+spec:
+  targetRevision:
+    # Note that revision goes backward, compared with the previous step.
+    # This is intentional, in case it races with autoscaler-agent restarts.
+    revision:
+      value: 1
+      flags: 123
+    updatedAt: 2020-01-02T15:04:05Z
