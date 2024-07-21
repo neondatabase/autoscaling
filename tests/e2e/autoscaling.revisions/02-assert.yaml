@@ -21,7 +21,7 @@ status:
   memorySize: 4Gi
   currentRevision: # Already propagated from above
     revision:
-      value: 1
+      value: 124
       flags: 1
 ---
 apiVersion: v1
