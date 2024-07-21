@@ -9,7 +9,7 @@ metadata:
 spec:
   targetRevision:
     revision:
-      value: 1
+      value: 2 # 1 was last step
       flags: 1 # 1 for Upscale
 status:
   phase: Running
