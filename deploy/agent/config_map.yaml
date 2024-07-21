@@ -56,7 +56,7 @@ data:
       "scheduler": {
         "schedulerName": "autoscale-scheduler",
         "requestTimeoutSeconds": 2,
-        "requestAtLeastEverySeconds": 5,
+        "requestAtLeastEverySeconds": 15,
         "retryFailedRequestSeconds": 3,
         "retryDeniedUpscaleSeconds": 2,
         "requestPort": 10299,
