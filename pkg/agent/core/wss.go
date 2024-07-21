@@ -19,8 +19,9 @@ type WssEstimatorConfig struct {
 	// translates to an InitialOffset of 14 (-1 because indexes start at zero, but the first
 	// datapoint is 1m).
 	InitialOffset int
-	// WindowSize sets the number of datapoints used in the calculation of the slope in the windows
-	// before & after a point. This value must be >= 2.
+	// WindowSize sets the offset for datapoints used in the calculation of the slope before & after
+	// a point. For window size W, we calculate the slope at point P as value[P]-value[P-(W-1)].
+	// This value must be >= 2.
 	//
 	// In practice, this value is taken from the scaling config's LFCWindowSizeMinutes, with the
 	// expectation that datapoints are all one minute apart. So, a value of 5 minutes translates to
