@@ -729,7 +729,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			// into GiB, then convert that into CU, and then invert the discount from only some
 			// of the memory going towards LFC to get the actual CU required to fit the
 			// predicted working set size.
-			requiredCU := predictedHighestNextMinute * 8192 / s.Config.ComputeUnit.Mem.AsFloat64() / *cfg.LFCSizePerCU
+			requiredCU := predictedHighestNextMinute * 8192 / s.Config.ComputeUnit.Mem.AsFloat64() / *cfg.LFCToMemoryRatio
 			lfcGoalCU := uint32(math.Ceil(requiredCU))
 			goalCU = util.Max(goalCU, lfcGoalCU)
 

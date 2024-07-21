@@ -13,7 +13,7 @@ data:
           "loadAverageFractionTarget": 0.9,
           "memoryUsageFractionTarget": 0.75,
           "enableLFCMetrics": false,
-          "lfcSizePerCU": 0.75,
+          "lfcToMemoryRatio": 0.75,
           "lfcWindowSizeMinutes": 5,
           "lfcMinWaitBeforeDownscaleMinutes": 5
         }
