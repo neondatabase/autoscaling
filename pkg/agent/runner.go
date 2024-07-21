@@ -619,7 +619,7 @@ func doMetricsRequest(
 		panic(fmt.Errorf("Error constructing metrics request to %q: %w", url, err))
 	}
 
-	logger.Info("Making metrics request to VM", zap.String("url", url))
+	logger.Debug("Making metrics request to VM", zap.String("url", url))
 
 	resp, err := http.DefaultClient.Do(req)
 	if ctx.Err() != nil {
@@ -801,7 +801,7 @@ func (r *Runner) DoSchedulerRequest(
 	}
 	request.Header.Set("content-type", "application/json")
 
-	logger.Info("Sending request to scheduler", zap.Any("request", reqData))
+	logger.Debug("Sending request to scheduler", zap.Any("request", reqData))
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -830,7 +830,7 @@ func (r *Runner) DoSchedulerRequest(
 		return nil, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
-	logger.Info("Received response from scheduler", zap.Any("response", respData))
+	logger.Debug("Received response from scheduler", zap.Any("response", respData))
 
 	return &respData, nil
 }
