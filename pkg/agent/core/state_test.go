@@ -561,6 +561,138 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	}
 }
 
+// In this test agent wants to upscale from 1 CU to 4 CU, but the plugin only allows 3 CU.
+// Agent upscales to 3 CU, then tries to upscale to 4 CU again.
+func TestPartialUpscaleThenFull(t *testing.T) {
+	a := helpers.NewAssert(t)
+	clock := helpers.NewFakeClock(t)
+	clockTickDuration := duration("0.1s")
+	clockTick := func() {
+		clock.Inc(clockTickDuration)
+	}
+	expectedRevision := helpers.NewExpectedRevision(clock.Now)
+	scalingLatencyObserver := &latencyObserver{t: t, observations: nil}
+	defer scalingLatencyObserver.assertEmpty()
+
+	pluginLatencyObserver := &latencyObserver{t: t, observations: nil}
+	defer pluginLatencyObserver.assertEmpty()
+
+	resForCU := DefaultComputeUnit.Mul
+
+	state := helpers.CreateInitialState(
+		DefaultInitialStateConfig,
+		helpers.WithStoredWarnings(a.StoredWarnings()),
+		helpers.WithMinMaxCU(1, 4),
+		helpers.WithCurrentCU(1),
+		helpers.WithConfigSetting(func(c *core.Config) {
+			c.RevisionSource = revsource.NewRevisionSource(0, scalingLatencyObserver.observe)
+			c.ObservabilityCallbacks.PluginLatency = pluginLatencyObserver.observe
+		}),
+	)
+
+	nextActions := func() core.ActionSet {
+		return state.NextActions(clock.Now())
+	}
+
+	state.Monitor().Active(true)
+
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
+
+	// Set metrics
+	clockTick()
+	metrics := core.SystemMetrics{
+		LoadAverage1Min:  1.0,
+		MemoryUsageBytes: 12345678,
+	}
+	a.Do(state.UpdateSystemMetrics, metrics)
+
+	// double-check that we agree about the desired resources
+	a.Call(getDesiredResources, state, clock.Now()).
+		Equals(resForCU(4))
+
+	// Upscaling to 4 CU
+	expectedRevision.Value = 1
+	expectedRevision.Flags = revsource.Upscale
+	targetRevision := expectedRevision.WithTime()
+	a.Call(nextActions).Equals(core.ActionSet{
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit:     lo.ToPtr(resForCU(1)),
+			Target:         resForCU(4),
+			Metrics:        lo.ToPtr(metrics.ToAPI()),
+			TargetRevision: targetRevision,
+		},
+	})
+
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(4))
+	clockTick()
+	a.Call(nextActions).Equals(core.ActionSet{})
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), targetRevision, api.PluginResponse{
+		Permit:  resForCU(3),
+		Migrate: nil,
+	})
+
+	pluginLatencyObserver.assert(duration("0.1s"), revsource.Upscale)
+
+	// NeonVM request
+	a.
+		WithWarnings("Wanted to make a request to the scheduler plugin, but but previous request for more resources was denied too recently").
+		Call(nextActions).
+		Equals(core.ActionSet{
+			Wait: &core.ActionWait{Duration: duration("1.9s")},
+			NeonVMRequest: &core.ActionNeonVMRequest{
+				Current:        resForCU(1),
+				Target:         resForCU(3),
+				TargetRevision: expectedRevision.WithTime(),
+			},
+		})
+
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(3))
+	clockTick()
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+	clockTick()
+	a.Do(state.UpdatedVM, helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithCurrentCU(3),
+		helpers.WithCurrentRevision(expectedRevision.WithTime()),
+	))
+	scalingLatencyObserver.assert(duration("0.3s"), revsource.Upscale)
+
+	clock.Inc(duration("2s"))
+
+	// Upscaling to 4 CU
+	targetRevision = expectedRevision.WithTime()
+	a.Call(nextActions).Equals(core.ActionSet{
+		MonitorUpscale: &core.ActionMonitorUpscale{
+			Current:        resForCU(1),
+			Target:         resForCU(3),
+			TargetRevision: expectedRevision.WithTime(),
+		},
+		PluginRequest: &core.ActionPluginRequest{
+			LastPermit:     lo.ToPtr(resForCU(3)),
+			Target:         resForCU(4),
+			Metrics:        lo.ToPtr(metrics.ToAPI()),
+			TargetRevision: expectedRevision.WithTime(),
+		},
+	})
+
+	a.Do(state.Monitor().StartingUpscaleRequest, clock.Now(), resForCU(3))
+	a.Do(state.Plugin().StartingRequest, clock.Now(), resForCU(4))
+	clockTick()
+	a.Do(state.Monitor().UpscaleRequestSuccessful, clock.Now())
+	a.NoError(state.Plugin().RequestSuccessful, clock.Now(), targetRevision, api.PluginResponse{
+		Permit:  resForCU(4),
+		Migrate: nil,
+	})
+	a.Call(nextActions).Equals(core.ActionSet{
+		Wait: &core.ActionWait{Duration: duration("4.9s")},
+		NeonVMRequest: &core.ActionNeonVMRequest{
+			Current:        resForCU(3),
+			Target:         resForCU(4),
+			TargetRevision: expectedRevision.WithTime(),
+		},
+	})
+}
+
 // Checks that when downscaling is denied, we both (a) try again with higher resources, or (b) wait
 // to retry if there aren't higher resources to try with.
 func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
