@@ -183,7 +183,14 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: time.Second}, nil
+	// Only quickly requeue if we're scaling or migrating. Otherwise, we aren't expecting any
+	// changes from QEMU, and it's wasteful to repeatedly check.
+	requeueAfter := time.Second
+	if vm.Status.Phase == vmv1.VmPending || vm.Status.Phase == vmv1.VmRunning {
+		requeueAfter = 15 * time.Second
+	}
+
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
