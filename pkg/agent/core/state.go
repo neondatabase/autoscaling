@@ -456,7 +456,7 @@ func (s *state) calculatePluginAction(
 		}, nil
 	} else {
 		if wantToRequestNewResources && waitingOnRetryBackoff {
-			logFailureReason("but previous request for more resources was denied too recently")
+			logFailureReason("previous request for more resources was denied too recently")
 		}
 		waitTime := timeUntilNextRequestTick
 		if waitingOnRetryBackoff {
