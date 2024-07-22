@@ -635,7 +635,7 @@ func TestPartialUpscaleThenFull(t *testing.T) {
 
 	// NeonVM request
 	a.
-		WithWarnings("Wanted to make a request to the scheduler plugin, but but previous request for more resources was denied too recently").
+		WithWarnings("Wanted to make a request to the scheduler plugin, but previous request for more resources was denied too recently").
 		Call(nextActions).
 		Equals(core.ActionSet{
 			Wait: &core.ActionWait{Duration: duration("1.9s")},
