@@ -893,14 +893,13 @@ func (s *state) updateNeonVMCurrentRevision(currentRevision vmv1.RevisionWithTim
 		s.Config.ObservabilityCallbacks.NeonVMLatency,
 	)
 	err := s.Config.RevisionSource.Observe(currentRevision.UpdatedAt.Time, currentRevision.Revision)
+	if err != nil {
+		s.warnf("Failed to observe clock source: %v", err)
+	}
 
 	// We also zero out LastDesiredResources, because we are now starting from
 	// a new current resources.
 	s.LastDesiredResources = nil
-
-	if err != nil {
-		s.warnf("Failed to observe clock source: %v", err)
-	}
 }
 
 func (s *state) timeUntilRequestedUpscalingExpired(now time.Time) time.Duration {
