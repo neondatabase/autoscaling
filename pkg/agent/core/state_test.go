@@ -660,6 +660,7 @@ func TestPartialUpscaleThenFull(t *testing.T) {
 	clock.Inc(duration("2s"))
 
 	// Upscaling to 4 CU
+	expectedRevision.Value += 1
 	targetRevision = expectedRevision.WithTime()
 	a.Call(nextActions).Equals(core.ActionSet{
 		MonitorUpscale: &core.ActionMonitorUpscale{
@@ -683,6 +684,7 @@ func TestPartialUpscaleThenFull(t *testing.T) {
 		Permit:  resForCU(4),
 		Migrate: nil,
 	})
+	pluginLatencyObserver.assert(duration("0.1s"), revsource.Upscale)
 	a.Call(nextActions).Equals(core.ActionSet{
 		Wait: &core.ActionWait{Duration: duration("4.9s")},
 		NeonVMRequest: &core.ActionNeonVMRequest{
@@ -691,6 +693,18 @@ func TestPartialUpscaleThenFull(t *testing.T) {
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
+	a.Do(state.NeonVM().StartingRequest, clock.Now(), resForCU(4))
+	clockTick()
+	a.Do(state.NeonVM().RequestSuccessful, clock.Now())
+	vmInfo := helpers.CreateVmInfo(
+		DefaultInitialStateConfig.VM,
+		helpers.WithCurrentCU(4),
+		helpers.WithCurrentRevision(expectedRevision.WithTime()),
+	)
+	clockTick()
+	a.Do(state.UpdatedVM, vmInfo)
+
+	scalingLatencyObserver.assert(duration("0.2s"), revsource.Upscale)
 }
 
 // Checks that when downscaling is denied, we both (a) try again with higher resources, or (b) wait
