@@ -33,23 +33,26 @@ func (d StateDump) MarshalJSON() ([]byte, error) {
 func (s *State) Dump() StateDump {
 	return StateDump{
 		internal: state{
-			Debug:   s.internal.Debug,
-			Config:  s.internal.Config,
-			VM:      s.internal.VM,
-			Plugin:  s.internal.Plugin.deepCopy(),
-			Monitor: s.internal.Monitor.deepCopy(),
-			NeonVM:  s.internal.NeonVM.deepCopy(),
-			Metrics: shallowCopy[SystemMetrics](s.internal.Metrics),
+			Debug:                s.internal.Debug,
+			Config:               s.internal.Config,
+			VM:                   s.internal.VM,
+			Plugin:               s.internal.Plugin.deepCopy(),
+			Monitor:              s.internal.Monitor.deepCopy(),
+			NeonVM:               s.internal.NeonVM.deepCopy(),
+			Metrics:              shallowCopy[SystemMetrics](s.internal.Metrics),
+			TargetRevision:       s.internal.TargetRevision,
+			LastDesiredResources: s.internal.LastDesiredResources,
 		},
 	}
 }
 
 func (s *pluginState) deepCopy() pluginState {
 	return pluginState{
-		OngoingRequest: s.OngoingRequest,
-		LastRequest:    shallowCopy[pluginRequested](s.LastRequest),
-		LastFailureAt:  shallowCopy[time.Time](s.LastFailureAt),
-		Permit:         shallowCopy[api.Resources](s.Permit),
+		OngoingRequest:  s.OngoingRequest,
+		LastRequest:     shallowCopy[pluginRequested](s.LastRequest),
+		LastFailureAt:   shallowCopy[time.Time](s.LastFailureAt),
+		Permit:          shallowCopy[api.Resources](s.Permit),
+		CurrentRevision: s.CurrentRevision,
 	}
 }
 
@@ -61,6 +64,7 @@ func (s *monitorState) deepCopy() monitorState {
 		Approved:           shallowCopy[api.Resources](s.Approved),
 		DownscaleFailureAt: shallowCopy[time.Time](s.DownscaleFailureAt),
 		UpscaleFailureAt:   shallowCopy[time.Time](s.UpscaleFailureAt),
+		CurrentRevision:    s.CurrentRevision,
 	}
 }
 
@@ -69,5 +73,7 @@ func (s *neonvmState) deepCopy() neonvmState {
 		LastSuccess:      shallowCopy[api.Resources](s.LastSuccess),
 		OngoingRequested: shallowCopy[api.Resources](s.OngoingRequested),
 		RequestFailedAt:  shallowCopy[time.Time](s.RequestFailedAt),
+		TargetRevision:   s.TargetRevision,
+		CurrentRevision:  s.CurrentRevision,
 	}
 }

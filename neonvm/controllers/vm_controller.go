@@ -807,7 +807,25 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// do nothing
 	}
 
+	// Propagate TargetRevision to CurrentRevision. This is done only if the VM is fully
+	// reconciled and running.
+	if vm.Status.Phase == vmv1.VmRunning {
+		propagateRevision(vm)
+	}
+
 	return nil
+}
+
+func propagateRevision(vm *vmv1.VirtualMachine) {
+	if vm.Spec.TargetRevision == nil {
+		return
+	}
+	if vm.Status.CurrentRevision != nil &&
+		vm.Status.CurrentRevision.Revision == vm.Spec.TargetRevision.Revision {
+		return
+	}
+	rev := vm.Spec.TargetRevision.WithTime(time.Now())
+	vm.Status.CurrentRevision = &rev
 }
 
 func pickMemoryProvider(config *ReconcilerConfig, vm *vmv1.VirtualMachine) vmv1.MemoryProvider {
