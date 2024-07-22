@@ -183,7 +183,14 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: time.Second}, nil
+	// Only quickly requeue if we're scaling or migrating. Otherwise, we aren't expecting any
+	// changes from QEMU, and it's wasteful to repeatedly check.
+	requeueAfter := time.Second
+	if vm.Status.Phase == vmv1.VmPending || vm.Status.Phase == vmv1.VmRunning {
+		requeueAfter = 15 * time.Second
+	}
+
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
@@ -800,7 +807,25 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// do nothing
 	}
 
+	// Propagate TargetRevision to CurrentRevision. This is done only if the VM is fully
+	// reconciled and running.
+	if vm.Status.Phase == vmv1.VmRunning {
+		propagateRevision(vm)
+	}
+
 	return nil
+}
+
+func propagateRevision(vm *vmv1.VirtualMachine) {
+	if vm.Spec.TargetRevision == nil {
+		return
+	}
+	if vm.Status.CurrentRevision != nil &&
+		vm.Status.CurrentRevision.Revision == vm.Spec.TargetRevision.Revision {
+		return
+	}
+	rev := vm.Spec.TargetRevision.WithTime(time.Now())
+	vm.Status.CurrentRevision = &rev
 }
 
 func pickMemoryProvider(config *ReconcilerConfig, vm *vmv1.VirtualMachine) vmv1.MemoryProvider {

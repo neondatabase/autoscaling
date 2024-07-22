@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -26,6 +30,23 @@ type GlobalMetrics struct {
 	runnerStarts       prometheus.Counter
 	runnerRestarts     prometheus.Counter
 	runnerNextActions  prometheus.Counter
+
+	scalingLatency prometheus.HistogramVec
+	pluginLatency  prometheus.HistogramVec
+	monitorLatency prometheus.HistogramVec
+	neonvmLatency  prometheus.HistogramVec
+}
+
+func (m *GlobalMetrics) PluginLatency() *prometheus.HistogramVec {
+	return &m.pluginLatency
+}
+
+func (m *GlobalMetrics) MonitorLatency() *prometheus.HistogramVec {
+	return &m.monitorLatency
+}
+
+func (m *GlobalMetrics) NeonVMLatency() *prometheus.HistogramVec {
+	return &m.neonvmLatency
 }
 
 type resourceChangePair struct {
@@ -34,9 +55,11 @@ type resourceChangePair struct {
 }
 
 const (
-	directionLabel    = "direction"
-	directionValueInc = "inc"
-	directionValueDec = "dec"
+	directionLabel     = "direction"
+	directionValueInc  = "inc"
+	directionValueDec  = "dec"
+	directionValueBoth = "both"
+	directionValueNone = "none"
 )
 
 type runnerMetricState string
@@ -47,6 +70,11 @@ const (
 	runnerMetricStateErrored  runnerMetricState = "errored"
 	runnerMetricStatePanicked runnerMetricState = "panicked"
 )
+
+// Copied bucket values from controller runtime latency metric. We can
+// adjust them in the future if needed.
+var buckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+	1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 40, 50, 60}
 
 func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
@@ -217,6 +245,39 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 				Help: "Number of times (*core.State).NextActions() has been called",
 			},
 		)),
+
+		scalingLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_agent_scaling_latency_seconds",
+				Help:    "End-to-end scaling latency",
+				Buckets: buckets,
+			},
+			[]string{directionLabel},
+		)),
+		pluginLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_agent_plugin_latency_seconds",
+				Help:    "Plugin request latency",
+				Buckets: buckets,
+			},
+			[]string{directionLabel},
+		)),
+		monitorLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_agent_monitor_latency_seconds",
+				Help:    "Monitor request latency",
+				Buckets: buckets,
+			},
+			[]string{directionLabel},
+		)),
+		neonvmLatency: *util.RegisterMetric(reg, prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "autoscaling_agent_neonvm_latency_seconds",
+				Help:    "NeonVM request latency",
+				Buckets: buckets,
+			},
+			[]string{directionLabel},
+		)),
 	}
 
 	// Some of of the metrics should have default keys set to zero. Otherwise, these won't be filled
@@ -251,6 +312,25 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 	}
 
 	return metrics, reg
+}
+
+func flagsToDirection(flags vmv1.Flag) string {
+	if flags.Has(revsource.Upscale) && flags.Has(revsource.Downscale) {
+		return directionValueBoth
+	}
+	if flags.Has(revsource.Upscale) {
+		return directionValueInc
+	}
+	if flags.Has(revsource.Downscale) {
+		return directionValueDec
+	}
+	return directionValueNone
+}
+
+func WrapHistogramVec(hist *prometheus.HistogramVec) revsource.ObserveCallback {
+	return func(dur time.Duration, flags vmv1.Flag) {
+		hist.WithLabelValues(flagsToDirection(flags)).Observe(dur.Seconds())
+	}
 }
 
 type PerVMMetrics struct {

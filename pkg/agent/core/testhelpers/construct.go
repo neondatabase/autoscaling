@@ -86,6 +86,7 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 			ScalingConfig:        nil,
 			ScalingEnabled:       true,
 		},
+		CurrentRevision: nil,
 	}
 
 	for _, o := range opts {
@@ -156,5 +157,11 @@ func WithMinMaxCU(minCU, maxCU uint16) VmInfoOpt {
 func WithCurrentCU(cu uint16) VmInfoOpt {
 	return vmInfoModifier(func(c InitialVmInfoConfig, vm *api.VmInfo) {
 		vm.SetUsing(c.ComputeUnit.Mul(cu))
+	})
+}
+
+func WithCurrentRevision(rev vmapi.RevisionWithTime) VmInfoOpt {
+	return vmInfoModifier(func(c InitialVmInfoConfig, vm *api.VmInfo) {
+		vm.CurrentRevision = &rev
 	})
 }
