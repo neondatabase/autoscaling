@@ -34,12 +34,18 @@ type WssEstimatorConfig struct {
 //
 // In practice, the 'series' is e.g., values of 'neon.lfc_approximate_working_set_size_seconds(d)'
 // for equidistant values of 'd' from 1 minute to 60 minutes.
+//
+// This function panics if:
+// * cfg.WindowSize < 2
+// * cfg.InitialOffset < cfg.WindowSize - 1
 func EstimateTrueWorkingSetSize(
 	series []float64,
 	cfg WssEstimatorConfig,
 ) float64 {
 	if cfg.WindowSize < 2 {
 		panic(fmt.Errorf("cfg.WindowSize must be >= 2 (got %v)", cfg.WindowSize))
+	} else if cfg.InitialOffset < cfg.WindowSize-1 {
+		panic(fmt.Errorf("cfg.InitialOffset must be >= cfg.WindowSize - 1 (got %v < %v - 1)", cfg.InitialOffset, cfg.WindowSize))
 	}
 
 	w := cfg.WindowSize - 1
