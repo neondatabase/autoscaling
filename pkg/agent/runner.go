@@ -207,8 +207,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			MonitorRequestedUpscaleValidPeriod: time.Second * time.Duration(r.global.config.Monitor.RequestedUpscaleValidSeconds),
 			MonitorRetryWait:                   time.Second * time.Duration(r.global.config.Monitor.RetryFailedRequestSeconds),
 			Log: core.LogConfig{
-				Info: coreExecLogger.Info,
-				Warn: coreExecLogger.Warn,
+				Debug: coreExecLogger.Debug,
+				Info:  coreExecLogger.Info,
+				Warn:  coreExecLogger.Warn,
 			},
 		},
 	})
