@@ -48,6 +48,9 @@ func EstimateTrueWorkingSetSize(
 		panic(fmt.Errorf("cfg.InitialOffset must be >= cfg.WindowSize - 1 (got %v < %v - 1)", cfg.InitialOffset, cfg.WindowSize))
 	}
 
+	// For a window size of e.g. 5 points, we're looking back from series[t] to series[t-4], because
+	// series[t] is already included. (and similary for looking forward to series[t+4]).
+	// 'w' is a shorthand for that -1 to make the code in the loop below cleaner.
 	w := cfg.WindowSize - 1
 
 	for t := cfg.InitialOffset; t < len(series)-w; t += 1 {
