@@ -1096,7 +1096,6 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	// - https://github.com/neondatabase/autoscaling/issues/462
 	vm.SetUsing(s.internal.VM.Using())
 	s.internal.VM = vm
-
 	if vm.CurrentRevision != nil {
 		s.internal.updateNeonVMCurrentRevision(*vm.CurrentRevision)
 	}
