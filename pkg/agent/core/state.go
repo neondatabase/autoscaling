@@ -29,10 +29,24 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
+
+type ObservabilityCallbacks struct {
+	PluginLatency  revsource.ObserveCallback
+	MonitorLatency revsource.ObserveCallback
+	NeonVMLatency  revsource.ObserveCallback
+}
+
+type RevisionSource interface {
+	Next(ts time.Time, flags vmv1.Flag) vmv1.Revision
+	Observe(moment time.Time, rev vmv1.Revision) error
+}
 
 // Config represents some of the static configuration underlying the decision-making of State
 type Config struct {
@@ -72,6 +86,12 @@ type Config struct {
 	// Log provides an outlet for (*State).NextActions() to give informative messages or warnings
 	// about conditions that are impeding its ability to execute.
 	Log LogConfig `json:"-"`
+
+	// RevisionSource is the source of revisions to track the progress during scaling.
+	RevisionSource RevisionSource `json:"-"`
+
+	// ObservabilityCallbacks are the callbacks to submit datapoints for observability.
+	ObservabilityCallbacks ObservabilityCallbacks `json:"-"`
 }
 
 type LogConfig struct {
@@ -114,6 +134,14 @@ type state struct {
 	NeonVM neonvmState
 
 	Metrics *SystemMetrics
+
+	LFCMetrics *LFCMetrics
+
+	// TargetRevision is the revision agent works towards.
+	TargetRevision vmv1.Revision
+
+	// LastDesiredResources is the last target agent wanted to scale to.
+	LastDesiredResources *api.Resources
 }
 
 type pluginState struct {
@@ -127,6 +155,9 @@ type pluginState struct {
 	// Permit, if not nil, stores the Permit in the most recent PluginResponse. This field will be
 	// nil if we have not been able to contact *any* scheduler.
 	Permit *api.Resources
+
+	// CurrentRevision is the most recent revision the plugin has acknowledged.
+	CurrentRevision vmv1.Revision
 }
 
 type pluginRequested struct {
@@ -155,6 +186,9 @@ type monitorState struct {
 	// UpscaleFailureAt, if not nil, stores the time at which an upscale request most recently
 	// failed
 	UpscaleFailureAt *time.Time
+
+	// CurrentRevision is the most recent revision the monitor has acknowledged.
+	CurrentRevision vmv1.Revision
 }
 
 func (ms *monitorState) active() bool {
@@ -190,6 +224,12 @@ type neonvmState struct {
 	// OngoingRequested, if not nil, gives the resources requested
 	OngoingRequested *api.Resources
 	RequestFailedAt  *time.Time
+
+	// TargetRevision is the revision agent works towards. Contrary to monitor/plugin, we
+	// store it not only in action, but also here. This is needed, because for NeonVM propagation
+	// happens after the changes are actually applied, when the action object is long gone.
+	TargetRevision  vmv1.RevisionWithTime
+	CurrentRevision vmv1.Revision
 }
 
 func (ns *neonvmState) ongoingRequest() bool {
@@ -203,10 +243,11 @@ func NewState(vm api.VmInfo, config Config) *State {
 			Debug:  false,
 			VM:     vm,
 			Plugin: pluginState{
-				OngoingRequest: false,
-				LastRequest:    nil,
-				LastFailureAt:  nil,
-				Permit:         nil,
+				OngoingRequest:  false,
+				LastRequest:     nil,
+				LastFailureAt:   nil,
+				Permit:          nil,
+				CurrentRevision: vmv1.ZeroRevision,
 			},
 			Monitor: monitorState{
 				OngoingRequest:     nil,
@@ -215,13 +256,19 @@ func NewState(vm api.VmInfo, config Config) *State {
 				Approved:           nil,
 				DownscaleFailureAt: nil,
 				UpscaleFailureAt:   nil,
+				CurrentRevision:    vmv1.ZeroRevision,
 			},
 			NeonVM: neonvmState{
 				LastSuccess:      nil,
 				OngoingRequested: nil,
 				RequestFailedAt:  nil,
+				TargetRevision:   vmv1.ZeroRevision.WithTime(time.Time{}),
+				CurrentRevision:  vmv1.ZeroRevision,
 			},
-			Metrics: nil,
+			Metrics:              nil,
+			LFCMetrics:           nil,
+			LastDesiredResources: nil,
+			TargetRevision:       vmv1.ZeroRevision,
 		},
 	}
 }
@@ -409,10 +456,11 @@ func (s *state) calculatePluginAction(
 					return nil
 				}
 			}(),
+			TargetRevision: s.TargetRevision.WithTime(now),
 		}, nil
 	} else {
 		if wantToRequestNewResources && waitingOnRetryBackoff {
-			logFailureReason("but previous request for more resources was denied too recently")
+			logFailureReason("previous request for more resources was denied too recently")
 		}
 		waitTime := timeUntilNextRequestTick
 		if waitingOnRetryBackoff {
@@ -430,6 +478,17 @@ func (s *state) calculateNeonVMAction(
 	pluginRequested *api.Resources,
 	pluginRequestedPhase string,
 ) (*ActionNeonVMRequest, *time.Duration) {
+	targetRevision := s.TargetRevision
+	if desiredResources.HasFieldLessThan(s.VM.Using()) && s.Monitor.CurrentRevision.Value > 0 {
+		// We are downscaling, so we needed a permit from the monitor
+		targetRevision = targetRevision.Min(s.Monitor.CurrentRevision)
+	}
+
+	if desiredResources.HasFieldGreaterThan(s.VM.Using()) && s.Plugin.CurrentRevision.Value > 0 {
+		// We are upscaling, so we needed a permit from the plugin
+		targetRevision = targetRevision.Min(s.Plugin.CurrentRevision)
+	}
+
 	// clamp desiredResources to what we're allowed to make a request for
 	desiredResources = s.clampResources(
 		s.VM.Using(),                       // current: what we're using already
@@ -456,9 +515,11 @@ func (s *state) calculateNeonVMAction(
 			}
 		}
 
+		s.NeonVM.TargetRevision = targetRevision.WithTime(now)
 		return &ActionNeonVMRequest{
-			Current: s.VM.Using(),
-			Target:  desiredResources,
+			Current:        s.VM.Using(),
+			Target:         desiredResources,
+			TargetRevision: s.NeonVM.TargetRevision,
 		}, nil
 	} else {
 		var reqs []string
@@ -541,8 +602,9 @@ func (s *state) calculateMonitorUpscaleAction(
 
 	// Otherwise, we can make the request:
 	return &ActionMonitorUpscale{
-		Current: *s.Monitor.Approved,
-		Target:  requestResources,
+		Current:        *s.Monitor.Approved,
+		Target:         requestResources,
+		TargetRevision: s.TargetRevision.WithTime(now),
 	}, nil
 }
 
@@ -627,8 +689,9 @@ func (s *state) calculateMonitorDownscaleAction(
 
 	// Nothing else to check, we're good to make the request
 	return &ActionMonitorDownscale{
-		Current: *s.Monitor.Approved,
-		Target:  requestResources,
+		Current:        *s.Monitor.Approved,
+		Target:         requestResources,
+		TargetRevision: s.TargetRevision.WithTime(now),
 	}, nil
 }
 
@@ -667,6 +730,14 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
+	// Record whether we have all the metrics we'll need.
+	// If not, we'll later prevent downscaling to avoid flushing the VM's cache on autoscaler-agent
+	// restart if we have SystemMetrics but not LFCMetrics.
+	hasAllMetrics := s.Metrics != nil && (!*s.scalingConfig().EnableLFCMetrics || s.LFCMetrics != nil)
+	if !hasAllMetrics {
+		s.warn("Making scaling decision without all required metrics available")
+	}
+
 	var goalCU uint32
 	if s.Metrics != nil {
 		// For CPU:
@@ -686,6 +757,48 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
 
 		goalCU = util.Max(cpuGoalCU, memGoalCU)
+
+	}
+
+	// For LFC metrics, if enabled:
+	var lfcLogFields func(zapcore.ObjectEncoder) error
+	if s.LFCMetrics != nil {
+		cfg := s.scalingConfig()
+		wssValues := s.LFCMetrics.ApproximateworkingSetSizeBuckets
+		// At this point, we can assume that the values are equally spaced at 1 minute apart,
+		// starting at 1 minute.
+		offsetIndex := *cfg.LFCMinWaitBeforeDownscaleMinutes - 1 // -1 because values start at 1m
+		windowSize := *cfg.LFCWindowSizeMinutes
+		// Handle invalid metrics:
+		if len(wssValues) < offsetIndex+windowSize {
+			s.warn("not enough working set size values to make scaling determination")
+		} else {
+			estimateWss := EstimateTrueWorkingSetSize(wssValues, WssEstimatorConfig{
+				MaxAllowedIncreaseFactor: 3.0, // hard-code this for now.
+				InitialOffset:            offsetIndex,
+				WindowSize:               windowSize,
+			})
+			projectSliceEnd := offsetIndex // start at offsetIndex to avoid panics if not monotonically non-decreasing
+			for ; projectSliceEnd < len(wssValues) && wssValues[projectSliceEnd] <= estimateWss; projectSliceEnd++ {
+			}
+			projectLen := 0.5 // hard-code this for now.
+			predictedHighestNextMinute := ProjectNextHighest(wssValues[:projectSliceEnd], projectLen)
+
+			// predictedHighestNextMinute is still in units of 8KiB pages. Let's convert that
+			// into GiB, then convert that into CU, and then invert the discount from only some
+			// of the memory going towards LFC to get the actual CU required to fit the
+			// predicted working set size.
+			requiredCU := predictedHighestNextMinute * 8192 / s.Config.ComputeUnit.Mem.AsFloat64() / *cfg.LFCToMemoryRatio
+			lfcGoalCU := uint32(math.Ceil(requiredCU))
+			goalCU = util.Max(goalCU, lfcGoalCU)
+
+			lfcLogFields = func(obj zapcore.ObjectEncoder) error {
+				obj.AddFloat64("estimateWssPages", estimateWss)
+				obj.AddFloat64("predictedNextWssPages", predictedHighestNextMinute)
+				obj.AddFloat64("requiredCU", requiredCU)
+				return nil
+			}
+		}
 	}
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
@@ -723,14 +836,14 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	}
 
 	// resources for the desired "goal" compute units
-	var goalResources api.Resources
+	goalResources := s.Config.ComputeUnit.Mul(uint16(goalCU))
 
-	// If there's no constraints and s.metrics is nil, then we'll end up with goalCU = 0.
-	// But if we have no metrics, we'd prefer to keep things as-is, rather than scaling down.
-	if s.Metrics == nil && goalCU == 0 {
-		goalResources = s.VM.Using()
-	} else {
-		goalResources = s.Config.ComputeUnit.Mul(uint16(goalCU))
+	// If we don't have all the metrics we need to make a proper decision, make sure that we aren't
+	// going to scale down below the current resources.
+	// Otherwise, we can make an under-informed decision that has undesirable impacts (e.g., scaling
+	// down because we don't have LFC metrics and flushing the cache because of it).
+	if !hasAllMetrics {
+		goalResources = goalResources.Max(s.VM.Using())
 	}
 
 	// bound goalResources by the minimum and maximum resource amounts for the VM
@@ -791,10 +904,61 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			return nil
 		}
 	}
+	s.updateTargetRevision(now, result, s.VM.Using())
 
-	s.info("Calculated desired resources", zap.Object("current", s.VM.Using()), zap.Object("target", result))
+	// TODO: we are both saving the result into LastDesiredResources and returning it. This is
+	// redundant, and we should remove one of the two.
+	s.LastDesiredResources = &result
+
+	logFields := []zap.Field{
+		zap.Object("current", s.VM.Using()),
+		zap.Object("target", result),
+		zap.Object("targetRevision", &s.TargetRevision),
+	}
+	if lfcLogFields != nil {
+		logFields = append(logFields, zap.Object("lfc", zapcore.ObjectMarshalerFunc(lfcLogFields)))
+	}
+	s.info("Calculated desired resources", logFields...)
 
 	return result, calculateWaitTime
+}
+
+func (s *state) updateTargetRevision(now time.Time, desired api.Resources, current api.Resources) {
+	if s.LastDesiredResources == nil {
+		s.LastDesiredResources = &current
+	}
+
+	if *s.LastDesiredResources == desired {
+		// Nothing changed, so no need to update the target revision
+		return
+	}
+
+	var flags vmv1.Flag
+
+	if desired.HasFieldGreaterThan(*s.LastDesiredResources) {
+		flags.Set(revsource.Upscale)
+	}
+	if desired.HasFieldLessThan(*s.LastDesiredResources) {
+		flags.Set(revsource.Downscale)
+	}
+
+	s.TargetRevision = s.Config.RevisionSource.Next(now, flags)
+}
+
+func (s *state) updateNeonVMCurrentRevision(currentRevision vmv1.RevisionWithTime) {
+	revsource.Propagate(currentRevision.UpdatedAt.Time,
+		s.NeonVM.TargetRevision,
+		&s.NeonVM.CurrentRevision,
+		s.Config.ObservabilityCallbacks.NeonVMLatency,
+	)
+	err := s.Config.RevisionSource.Observe(currentRevision.UpdatedAt.Time, currentRevision.Revision)
+	if err != nil {
+		s.warnf("Failed to observe clock source: %v", err)
+	}
+
+	// We also zero out LastDesiredResources, because we are now starting from
+	// a new current resources.
+	s.LastDesiredResources = nil
 }
 
 func (s *state) timeUntilRequestedUpscalingExpired(now time.Time) time.Duration {
@@ -932,6 +1096,15 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	// - https://github.com/neondatabase/autoscaling/issues/462
 	vm.SetUsing(s.internal.VM.Using())
 	s.internal.VM = vm
+	if vm.CurrentRevision != nil {
+		s.internal.updateNeonVMCurrentRevision(*vm.CurrentRevision)
+	}
+
+	// Make sure that if LFC metrics are disabled & later enabled, we don't make decisions based on
+	// stale data.
+	if !*s.internal.scalingConfig().EnableLFCMetrics {
+		s.internal.LFCMetrics = nil
+	}
 }
 
 func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
@@ -939,7 +1112,7 @@ func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
 }
 
 func (s *State) UpdateLFCMetrics(metrics LFCMetrics) {
-	// stub implementation, intentionally does nothing yet.
+	s.internal.LFCMetrics = &metrics
 }
 
 // PluginHandle provides write access to the scheduler plugin pieces of an UpdateState
@@ -964,8 +1137,13 @@ func (h PluginHandle) RequestFailed(now time.Time) {
 	h.s.Plugin.LastFailureAt = &now
 }
 
-func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) (_err error) {
+func (h PluginHandle) RequestSuccessful(
+	now time.Time,
+	targetRevision vmv1.RevisionWithTime,
+	resp api.PluginResponse,
+) (_err error) {
 	h.s.Plugin.OngoingRequest = false
+
 	defer func() {
 		if _err != nil {
 			h.s.Plugin.LastFailureAt = &now
@@ -995,6 +1173,11 @@ func (h PluginHandle) RequestSuccessful(now time.Time, resp api.PluginResponse) 
 	// the process of moving the source of truth for ComputeUnit from the scheduler plugin to the
 	// autoscaler-agent.
 	h.s.Plugin.Permit = &resp.Permit
+	revsource.Propagate(now,
+		targetRevision,
+		&h.s.Plugin.CurrentRevision,
+		h.s.Config.ObservabilityCallbacks.PluginLatency,
+	)
 	return nil
 }
 
@@ -1015,6 +1198,7 @@ func (h MonitorHandle) Reset() {
 		Approved:           nil,
 		DownscaleFailureAt: nil,
 		UpscaleFailureAt:   nil,
+		CurrentRevision:    vmv1.ZeroRevision,
 	}
 }
 
@@ -1061,19 +1245,29 @@ func (h MonitorHandle) StartingDownscaleRequest(now time.Time, resources api.Res
 	h.s.Monitor.DownscaleFailureAt = nil
 }
 
-func (h MonitorHandle) DownscaleRequestAllowed(now time.Time) {
+func (h MonitorHandle) DownscaleRequestAllowed(now time.Time, rev vmv1.RevisionWithTime) {
 	h.s.Monitor.Approved = &h.s.Monitor.OngoingRequest.Requested
 	h.s.Monitor.OngoingRequest = nil
+	revsource.Propagate(now,
+		rev,
+		&h.s.Monitor.CurrentRevision,
+		h.s.Config.ObservabilityCallbacks.MonitorLatency,
+	)
 }
 
 // Downscale request was successful but the monitor denied our request.
-func (h MonitorHandle) DownscaleRequestDenied(now time.Time) {
+func (h MonitorHandle) DownscaleRequestDenied(now time.Time, targetRevision vmv1.RevisionWithTime) {
 	h.s.Monitor.DeniedDownscale = &deniedDownscale{
 		At:        now,
 		Current:   *h.s.Monitor.Approved,
 		Requested: h.s.Monitor.OngoingRequest.Requested,
 	}
 	h.s.Monitor.OngoingRequest = nil
+	revsource.Propagate(now,
+		targetRevision,
+		&h.s.Monitor.CurrentRevision,
+		h.s.Config.ObservabilityCallbacks.MonitorLatency,
+	)
 }
 
 func (h MonitorHandle) DownscaleRequestFailed(now time.Time) {

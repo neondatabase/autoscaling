@@ -236,7 +236,7 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		d.failing.RecordSuccess(req.NamespacedName)
 		d.conflicting.RecordSuccess(req.NamespacedName)
-		log.Info("Successful reconciliation", "duration", duration.String())
+		log.Info("Successful reconciliation", "duration", duration.String(), "requeueAfter", res.RequeueAfter)
 	}
 	d.Metrics.ObserveReconcileDuration(outcome, duration)
 	d.Metrics.failing.WithLabelValues(d.ControllerName,

@@ -110,6 +110,7 @@ var _ = Describe("VirtualMachine controller", func() {
 					IsK3s:                   false,
 					UseContainerMgr:         true,
 					MaxConcurrentReconciles: 1,
+					SkipUpdateValidationFor: nil,
 					QEMUDiskCacheSettings:   "cache=none",
 					DefaultMemoryProvider:   vmv1.MemoryProviderDIMMSlots,
 					MemhpAutoMovableRatio:   "301",
