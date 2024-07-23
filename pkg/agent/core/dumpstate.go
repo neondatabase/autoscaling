@@ -40,6 +40,7 @@ func (s *State) Dump() StateDump {
 			Monitor:              s.internal.Monitor.deepCopy(),
 			NeonVM:               s.internal.NeonVM.deepCopy(),
 			Metrics:              shallowCopy[SystemMetrics](s.internal.Metrics),
+			LFCMetrics:           shallowCopy[LFCMetrics](s.internal.LFCMetrics),
 			TargetRevision:       s.internal.TargetRevision,
 			LastDesiredResources: s.internal.LastDesiredResources,
 		},

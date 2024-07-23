@@ -29,6 +29,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
@@ -133,6 +134,8 @@ type state struct {
 	NeonVM neonvmState
 
 	Metrics *SystemMetrics
+
+	LFCMetrics *LFCMetrics
 
 	// TargetRevision is the revision agent works towards.
 	TargetRevision vmv1.Revision
@@ -263,6 +266,7 @@ func NewState(vm api.VmInfo, config Config) *State {
 				CurrentRevision:  vmv1.ZeroRevision,
 			},
 			Metrics:              nil,
+			LFCMetrics:           nil,
 			LastDesiredResources: nil,
 			TargetRevision:       vmv1.ZeroRevision,
 		},
@@ -726,6 +730,14 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
+	// Record whether we have all the metrics we'll need.
+	// If not, we'll later prevent downscaling to avoid flushing the VM's cache on autoscaler-agent
+	// restart if we have SystemMetrics but not LFCMetrics.
+	hasAllMetrics := s.Metrics != nil && (!*s.scalingConfig().EnableLFCMetrics || s.LFCMetrics != nil)
+	if !hasAllMetrics {
+		s.warn("Making scaling decision without all required metrics available")
+	}
+
 	var goalCU uint32
 	if s.Metrics != nil {
 		// For CPU:
@@ -745,6 +757,48 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
 
 		goalCU = util.Max(cpuGoalCU, memGoalCU)
+
+	}
+
+	// For LFC metrics, if enabled:
+	var lfcLogFields func(zapcore.ObjectEncoder) error
+	if s.LFCMetrics != nil {
+		cfg := s.scalingConfig()
+		wssValues := s.LFCMetrics.ApproximateworkingSetSizeBuckets
+		// At this point, we can assume that the values are equally spaced at 1 minute apart,
+		// starting at 1 minute.
+		offsetIndex := *cfg.LFCMinWaitBeforeDownscaleMinutes - 1 // -1 because values start at 1m
+		windowSize := *cfg.LFCWindowSizeMinutes
+		// Handle invalid metrics:
+		if len(wssValues) < offsetIndex+windowSize {
+			s.warn("not enough working set size values to make scaling determination")
+		} else {
+			estimateWss := EstimateTrueWorkingSetSize(wssValues, WssEstimatorConfig{
+				MaxAllowedIncreaseFactor: 3.0, // hard-code this for now.
+				InitialOffset:            offsetIndex,
+				WindowSize:               windowSize,
+			})
+			projectSliceEnd := offsetIndex // start at offsetIndex to avoid panics if not monotonically non-decreasing
+			for ; projectSliceEnd < len(wssValues) && wssValues[projectSliceEnd] <= estimateWss; projectSliceEnd++ {
+			}
+			projectLen := 0.5 // hard-code this for now.
+			predictedHighestNextMinute := ProjectNextHighest(wssValues[:projectSliceEnd], projectLen)
+
+			// predictedHighestNextMinute is still in units of 8KiB pages. Let's convert that
+			// into GiB, then convert that into CU, and then invert the discount from only some
+			// of the memory going towards LFC to get the actual CU required to fit the
+			// predicted working set size.
+			requiredCU := predictedHighestNextMinute * 8192 / s.Config.ComputeUnit.Mem.AsFloat64() / *cfg.LFCToMemoryRatio
+			lfcGoalCU := uint32(math.Ceil(requiredCU))
+			goalCU = util.Max(goalCU, lfcGoalCU)
+
+			lfcLogFields = func(obj zapcore.ObjectEncoder) error {
+				obj.AddFloat64("estimateWssPages", estimateWss)
+				obj.AddFloat64("predictedNextWssPages", predictedHighestNextMinute)
+				obj.AddFloat64("requiredCU", requiredCU)
+				return nil
+			}
+		}
 	}
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
@@ -782,14 +836,14 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	}
 
 	// resources for the desired "goal" compute units
-	var goalResources api.Resources
+	goalResources := s.Config.ComputeUnit.Mul(uint16(goalCU))
 
-	// If there's no constraints and s.metrics is nil, then we'll end up with goalCU = 0.
-	// But if we have no metrics, we'd prefer to keep things as-is, rather than scaling down.
-	if s.Metrics == nil && goalCU == 0 {
-		goalResources = s.VM.Using()
-	} else {
-		goalResources = s.Config.ComputeUnit.Mul(uint16(goalCU))
+	// If we don't have all the metrics we need to make a proper decision, make sure that we aren't
+	// going to scale down below the current resources.
+	// Otherwise, we can make an under-informed decision that has undesirable impacts (e.g., scaling
+	// down because we don't have LFC metrics and flushing the cache because of it).
+	if !hasAllMetrics {
+		goalResources = goalResources.Max(s.VM.Using())
 	}
 
 	// bound goalResources by the minimum and maximum resource amounts for the VM
@@ -856,10 +910,15 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// redundant, and we should remove one of the two.
 	s.LastDesiredResources = &result
 
-	s.info("Calculated desired resources",
+	logFields := []zap.Field{
 		zap.Object("current", s.VM.Using()),
 		zap.Object("target", result),
-		zap.Object("targetRevision", &s.TargetRevision))
+		zap.Object("targetRevision", &s.TargetRevision),
+	}
+	if lfcLogFields != nil {
+		logFields = append(logFields, zap.Object("lfc", zapcore.ObjectMarshalerFunc(lfcLogFields)))
+	}
+	s.info("Calculated desired resources", logFields...)
 
 	return result, calculateWaitTime
 }
@@ -1040,6 +1099,12 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 	if vm.CurrentRevision != nil {
 		s.internal.updateNeonVMCurrentRevision(*vm.CurrentRevision)
 	}
+
+	// Make sure that if LFC metrics are disabled & later enabled, we don't make decisions based on
+	// stale data.
+	if !*s.internal.scalingConfig().EnableLFCMetrics {
+		s.internal.LFCMetrics = nil
+	}
 }
 
 func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
@@ -1047,7 +1112,7 @@ func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
 }
 
 func (s *State) UpdateLFCMetrics(metrics LFCMetrics) {
-	// stub implementation, intentionally does nothing yet.
+	s.internal.LFCMetrics = &metrics
 }
 
 // PluginHandle provides write access to the scheduler plugin pieces of an UpdateState

@@ -343,6 +343,22 @@ type ScalingConfig struct {
 	// For an individual VM, if this field is left out the settings will fall back on the global
 	// default.
 	EnableLFCMetrics *bool `json:"enableLFCMetrics,omitempty"`
+
+	// LFCToMemoryRatio dictates the amount of memory in any given Compute Unit that will be
+	// allocated to the LFC. For example, if the LFC is sized at 75% of memory, then this value
+	// would be 0.75.
+	LFCToMemoryRatio *float64 `json:"lfcToMemoryRatio,omitempty"`
+
+	// LFCMinWaitBeforeDownscaleMinutes dictates the minimum duration we must wait before lowering
+	// the goal CU based on LFC working set size.
+	// For example, a value of 15 means we will not allow downscaling below the working set size
+	// over the past 15 minutes. This allows us to accommodate spiky workloads without flushing the
+	// cache every time.
+	LFCMinWaitBeforeDownscaleMinutes *int `json:"lfcMinWaitBeforeDownscaleMinutes,omitempty"`
+
+	// LFCWindowSizeMinutes dictates the minimum duration we must use during internal calculations
+	// of the rate of increase in LFC working set size.
+	LFCWindowSizeMinutes *int `json:"lfcWindowSizeMinutes,omitempty"`
 }
 
 // WithOverrides returns a new copy of defaults, where fields set in overrides replace the ones in
@@ -362,6 +378,15 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 	}
 	if overrides.EnableLFCMetrics != nil {
 		defaults.EnableLFCMetrics = lo.ToPtr(*overrides.EnableLFCMetrics)
+	}
+	if overrides.LFCToMemoryRatio != nil {
+		defaults.LFCToMemoryRatio = lo.ToPtr(*overrides.LFCToMemoryRatio)
+	}
+	if overrides.LFCWindowSizeMinutes != nil {
+		defaults.LFCWindowSizeMinutes = lo.ToPtr(*overrides.LFCWindowSizeMinutes)
+	}
+	if overrides.LFCMinWaitBeforeDownscaleMinutes != nil {
+		defaults.LFCMinWaitBeforeDownscaleMinutes = lo.ToPtr(*overrides.LFCMinWaitBeforeDownscaleMinutes)
 	}
 
 	return defaults
@@ -406,6 +431,9 @@ func (c *ScalingConfig) validate(requireAll bool) error {
 
 	if requireAll {
 		erc.Whenf(ec, c.EnableLFCMetrics == nil, "%s is a required field", ".enableLFCMetrics")
+		erc.Whenf(ec, c.LFCToMemoryRatio == nil, "%s is a required field", ".lfcToMemoryRatio")
+		erc.Whenf(ec, c.LFCWindowSizeMinutes == nil, "%s is a required field", ".lfcWindowSizeMinutes")
+		erc.Whenf(ec, c.LFCMinWaitBeforeDownscaleMinutes == nil, "%s is a required field", ".lfcMinWaitBeforeDownscaleMinutes")
 	}
 
 	// heads-up! some functions elsewhere depend on the concrete return type of this function.
