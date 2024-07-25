@@ -94,12 +94,12 @@ var _ = BeforeSuite(func() {
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:         scheme,
 		LeaderElection: false,
-		WebhookServer: webhook.NewServer(webhook.Options{
+		WebhookServer: webhook.NewServer(webhook.Options{ //nolint:exhaustruct // Other fields set to default values by webhook Constructor
 			Host:    webhookInstallOptions.LocalServingHost,
 			Port:    webhookInstallOptions.LocalServingPort,
 			CertDir: webhookInstallOptions.LocalServingCertDir,
 		}),
-		Metrics: metricsserver.Options{
+		Metrics: metricsserver.Options{ //nolint:exhaustruct  // Other fields set to default values by MetricsServer Constructor
 			BindAddress: "0",
 		},
 	})
