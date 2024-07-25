@@ -177,7 +177,7 @@ func main() {
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
-		Metrics: metricsserver.Options{
+		Metrics: metricsserver.Options{ //nolint:exhaustruct  // Other fields set to default values by MetricsServer Constructor
 			BindAddress: metricsAddr,
 		},
 		HealthProbeBindAddress: probeAddr,
