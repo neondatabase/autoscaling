@@ -673,6 +673,17 @@ func run(logger *zap.Logger) error {
 		enableSSH = true
 	}
 
+	// Set hostname, with "vm-" prefix to distinguish it from the pod name
+	//
+	// This is just to reduce the risk of mixing things up when ssh'ing to different
+	// computes, the hostname isn't used for anything as such.
+	hostname, err := os.Hostname()
+	if err != nil {
+		logger.Warn("could not read pod's hostname", zap.Error(err))
+	} else {
+		hostname = fmt.Sprintf("vm-%s", hostname)
+	}
+
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{
 		"kernel.core_pattern=core",
@@ -725,7 +736,7 @@ func run(logger *zap.Logger) error {
 
 	tg.Go("qemu-cmd", func(logger *zap.Logger) error {
 		var err error
-		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, enableSSH, swapInfo)
+		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, enableSSH, swapInfo, hostname)
 		return err
 	})
 
@@ -778,6 +789,7 @@ func buildQEMUCmd(
 	vmStatus *vmv1.VirtualMachineStatus,
 	enableSSH bool,
 	swapInfo *vmv1.SwapInfo,
+	hostname string,
 ) ([]string, error) {
 	// prepare qemu command line
 	qemuCmd := []string{
@@ -907,7 +919,7 @@ func buildQEMUCmd(
 	qemuCmd = append(
 		qemuCmd,
 		"-kernel", cfg.kernelPath,
-		"-append", makeKernelCmdline(cfg, vmSpec, vmStatus),
+		"-append", makeKernelCmdline(cfg, vmSpec, vmStatus, hostname),
 	)
 
 	// should runner receive migration ?
@@ -924,7 +936,7 @@ const (
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
-func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus) string {
+func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
 	cmdlineParts := []string{baseKernelCmdline}
 
 	switch cfg.memoryProvider {
@@ -939,6 +951,10 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
 		netDetails := fmt.Sprintf("ip=%s:::%s:%s:eth1:off", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName)
 		cmdlineParts = append(cmdlineParts, netDetails)
+	}
+
+	if len(hostname) != 0 {
+		cmdlineParts = append(cmdlineParts, fmt.Sprintf("hostname=%s", hostname))
 	}
 
 	if cfg.appendKernelCmdline != "" {
