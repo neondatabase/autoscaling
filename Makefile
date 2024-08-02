@@ -400,34 +400,34 @@ $(LOCALBIN):
 
 ## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-# same as used in kubectl v1.27.x ; see https://github.com/kubernetes-sigs/kustomize/tree/master?tab=readme-ov-file#kubectl-integration
-KUSTOMIZE_VERSION ?= v5.0.1
+# same as used in kubectl v1.28.x ; see https://github.com/kubernetes-sigs/kustomize/tree/master?tab=readme-ov-file#kubectl-integration
+KUSTOMIZE_VERSION ?= v5.1.1
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.27.1
+ENVTEST_K8S_VERSION = 1.28.3
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-# k8s deps @ 1.27.1 https://github.com/kubernetes-sigs/controller-tools
-CONTROLLER_TOOLS_VERSION ?= v0.12.1
+# k8s deps @ 1.28.0 https://github.com/kubernetes-sigs/controller-tools
+CONTROLLER_TOOLS_VERSION ?= v0.13.0
 
-CODE_GENERATOR_VERSION ?= v0.27.15
+CODE_GENERATOR_VERSION ?= v0.28.12
 
 KUTTL ?= $(LOCALBIN)/kuttl
 # k8s deps @ 1.28.3
 KUTTL_VERSION ?= v0.16.0
 
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.27.15
+KUBECTL_VERSION ?= v1.28.12
 
 KIND ?= $(LOCALBIN)/kind
 # https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0, supports k8s up to 1.30
 KIND_VERSION ?= v0.23.0
 
 K3D ?= $(LOCALBIN)/k3d
-# k8s deps in go.mod @ v1.27.1 (nb: binary, separate from images)
-K3D_VERSION ?= v5.5.1
+# k8s deps in go.mod @ v1.29.4 (nb: binary, separate from images)
+K3D_VERSION ?= v5.6.3
 
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"

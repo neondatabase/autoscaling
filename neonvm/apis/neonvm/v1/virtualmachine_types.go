@@ -21,36 +21,40 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap/zapcore"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// VirtualMachineNameLabel is the label assigned to each NeonVM Pod, providing the name of the
-// VirtualMachine object for the VM running in it
-//
-// This label can be used both to find which VM is running in a Pod (by getting the value of the
-// label) or to find which Pod a VM is running in (by searching for Pods with the label equal to the
-// VM's name).
-const VirtualMachineNameLabel string = "vm.neon.tech/name"
+const (
+	// VirtualMachineNameLabel is the label assigned to each NeonVM Pod, providing the name of the
+	// VirtualMachine object for the VM running in it
+	//
+	// This label can be used both to find which VM is running in a Pod (by getting the value of the
+	// label) or to find which Pod a VM is running in (by searching for Pods with the label equal to
+	// the VM's name).
+	VirtualMachineNameLabel string = "vm.neon.tech/name"
 
-// Label that determines the version of runner pod. May be missing on older runners
-const RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
+	// Label that determines the version of runner pod. May be missing on older runners
+	RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
 
-// VirtualMachineUsageAnnotation is the annotation added to each runner Pod, mirroring information
-// about the resource allocations of the VM running in the pod.
-//
-// The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
-const VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
+	// VirtualMachineUsageAnnotation is the annotation added to each runner Pod, mirroring
+	// information about the resource allocations of the VM running in the pod.
+	//
+	// The value of this annotation is always a JSON-encoded VirtualMachineUsage object.
+	VirtualMachineUsageAnnotation string = "vm.neon.tech/usage"
 
-// VirtualMachineResourcesAnnotation is the annotation added to each runner Pod, mirroring information
-// about the resource allocations of the VM running in the pod.
-//
-// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
-const VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+	// VirtualMachineResourcesAnnotation is the annotation added to each runner Pod, mirroring
+	// information about the resource allocations of the VM running in the pod.
+	//
+	// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
+	VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+)
 
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
 // JSON-encoded data in the VirtualMachineUsageAnnotation attached to each runner pod.
@@ -139,6 +143,15 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=true
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
+
+	// TargetRevision is the identifier set by external party to track when changes to the spec
+	// propagate to the VM.
+	//
+	// If a certain value is written into Spec.TargetRevision together with the changes, and
+	// the same value is observed in Status.CurrentRevision, it means that the changes were
+	// propagated to the VM.
+	// +optional
+	TargetRevision *RevisionWithTime `json:"targetRevision,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -213,6 +226,66 @@ func (g Guest) ValidateForMemoryProvider(p MemoryProvider) error {
 		}
 	}
 	return nil
+}
+
+// Flag is a bitmask of flags. The meaning is up to the user.
+//
+// Used in Revision below.
+type Flag uint64
+
+func (f *Flag) Set(flag Flag) {
+	*f |= flag
+}
+
+func (f *Flag) Clear(flag Flag) {
+	*f &= ^flag
+}
+
+func (f *Flag) Has(flag Flag) bool {
+	return *f&flag != 0
+}
+
+// Revision is an identifier, which can be assigned to a specific configuration of a VM.
+// Later it can be used to track the application of the configuration.
+type Revision struct {
+	Value int64 `json:"value"`
+	Flags Flag  `json:"flags"`
+}
+
+// ZeroRevision is the default value when revisions updates are disabled.
+var ZeroRevision = Revision{Value: 0, Flags: 0}
+
+func (r Revision) Min(other Revision) Revision {
+	if r.Value < other.Value {
+		return r
+	}
+	return other
+}
+
+func (r Revision) WithTime(t time.Time) RevisionWithTime {
+	return RevisionWithTime{
+		Revision:  r,
+		UpdatedAt: metav1.NewTime(t),
+	}
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that Revision can be used with zap.Object
+func (r *Revision) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddInt64("value", r.Value)
+	enc.AddUint64("flags", uint64(r.Flags))
+	return nil
+}
+
+// RevisionWithTime contains a Revision and the time it was last updated.
+type RevisionWithTime struct {
+	Revision  `json:"revision"`
+	UpdatedAt metav1.Time `json:"updatedAt"`
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler, so that RevisionWithTime can be used with zap.Object
+func (r *RevisionWithTime) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddTime("updatedAt", r.UpdatedAt.Time)
+	return r.Revision.MarshalLogObject(enc)
 }
 
 type GuestSettings struct {
@@ -534,6 +607,11 @@ type VirtualMachineStatus struct {
 	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
+
+	// CurrentRevision is updated with Spec.TargetRevision's value once
+	// the changes are propagated to the VM.
+	// +optional
+	CurrentRevision *RevisionWithTime `json:"currentRevision,omitempty"`
 }
 
 type VmPhase string

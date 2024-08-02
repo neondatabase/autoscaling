@@ -118,6 +118,7 @@ func newTestParams(t *testing.T) *testParams {
 			IsK3s:                   false,
 			UseContainerMgr:         false,
 			MaxConcurrentReconciles: 10,
+			SkipUpdateValidationFor: nil,
 			QEMUDiskCacheSettings:   "",
 			DefaultMemoryProvider:   vmv1.MemoryProviderDIMMSlots,
 			MemhpAutoMovableRatio:   "301",
@@ -240,8 +241,9 @@ func TestRunningPod(t *testing.T) {
 	prettyPrint(t, pod)
 
 	pod.Status.Phase = corev1.PodRunning
-	err = params.client.Update(params.ctx, &pod)
+	err = params.client.Status().Update(params.ctx, &pod)
 	require.NoError(t, err)
+	assert.Equal(t, runnerRunning, runnerStatus(&pod))
 
 	// Round 2
 	res, err = params.r.Reconcile(params.ctx, req)

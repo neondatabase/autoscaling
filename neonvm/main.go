@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -35,9 +36,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -96,6 +99,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var concurrencyLimit int
+	var skipUpdateValidationFor map[types.NamespacedName]struct{}
 	var enableContainerMgr bool
 	var qemuDiskCacheSettings string
 	var defaultMemoryProvider vmv1.MemoryProvider
@@ -108,6 +112,32 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
+	flag.Func(
+		"skip-update-validation-for",
+		"Comma-separated list of object names to skip webhook validation, like 'foo' or 'default/bar'",
+		func(value string) error {
+			objSet := make(map[types.NamespacedName]struct{})
+
+			if value != "" {
+				for _, name := range strings.Split(value, ",") {
+					if name == "" {
+						return errors.New("name must not be empty")
+					}
+
+					var namespacedName types.NamespacedName
+					splitBySlash := strings.SplitN(name, "/", 1)
+					if len(splitBySlash) == 1 {
+						namespacedName = types.NamespacedName{Namespace: "default", Name: splitBySlash[0]}
+					} else {
+						namespacedName = types.NamespacedName{Namespace: splitBySlash[0], Name: splitBySlash[1]}
+					}
+					objSet[namespacedName] = struct{}{}
+				}
+			}
+			skipUpdateValidationFor = objSet
+			return nil
+		},
+	)
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
 	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
@@ -146,9 +176,10 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: metricsAddr,
+		},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "a3b22509.neon.tech",
@@ -175,6 +206,7 @@ func main() {
 		IsK3s:                   isK3s,
 		UseContainerMgr:         enableContainerMgr,
 		MaxConcurrentReconciles: concurrencyLimit,
+		SkipUpdateValidationFor: skipUpdateValidationFor,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
 		DefaultMemoryProvider:   defaultMemoryProvider,
 		MemhpAutoMovableRatio:   memhpAutoMovableRatio,
@@ -194,7 +226,11 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
 		os.Exit(1)
 	}
-	if err = (&vmv1.VirtualMachine{}).SetupWebhookWithManager(mgr); err != nil {
+	vmWebhook := &controllers.VMWebhook{
+		Recorder: mgr.GetEventRecorderFor("virtualmachine-webhook"),
+		Config:   rc,
+	}
+	if err := vmWebhook.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
 		os.Exit(1)
 	}
@@ -211,8 +247,12 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
 		os.Exit(1)
 	}
-	if err = (&vmv1.VirtualMachineMigration{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachineMigration")
+	migrationWebhook := &controllers.VMMigrationWebhook{
+		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-webhook"),
+		Config:   rc,
+	}
+	if err := migrationWebhook.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

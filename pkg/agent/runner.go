@@ -31,7 +31,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -194,7 +196,14 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	pluginRequestJitter := util.NewTimeRange(time.Millisecond, 0, 100).Random()
 
 	coreExecLogger := execLogger.Named("core")
-	executorCore := executor.NewExecutorCore(coreExecLogger, getVmInfo(), executor.Config{
+
+	vmInfo := getVmInfo()
+	var initialRevision int64
+	if vmInfo.CurrentRevision != nil {
+		initialRevision = vmInfo.CurrentRevision.Value
+	}
+	revisionSource := revsource.NewRevisionSource(initialRevision, WrapHistogramVec(&r.global.metrics.scalingLatency))
+	executorCore := executor.NewExecutorCore(coreExecLogger, vmInfo, executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
 		Core: core.Config{
 			ComputeUnit:                        r.global.config.Scaling.ComputeUnit,
@@ -209,6 +218,12 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			Log: core.LogConfig{
 				Info: coreExecLogger.Info,
 				Warn: coreExecLogger.Warn,
+			},
+			RevisionSource: revisionSource,
+			ObservabilityCallbacks: core.ObservabilityCallbacks{
+				PluginLatency:  WrapHistogramVec(&r.global.metrics.pluginLatency),
+				MonitorLatency: WrapHistogramVec(&r.global.metrics.monitorLatency),
+				NeonVMLatency:  WrapHistogramVec(&r.global.metrics.neonvmLatency),
 			},
 		},
 	})
@@ -604,7 +619,7 @@ func doMetricsRequest(
 		panic(fmt.Errorf("Error constructing metrics request to %q: %w", url, err))
 	}
 
-	logger.Info("Making metrics request to VM", zap.String("url", url))
+	logger.Debug("Making metrics request to VM", zap.String("url", url))
 
 	resp, err := http.DefaultClient.Do(req)
 	if ctx.Err() != nil {
@@ -625,7 +640,11 @@ func doMetricsRequest(
 	return nil
 }
 
-func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) error {
+func (r *Runner) doNeonVMRequest(
+	ctx context.Context,
+	target api.Resources,
+	targetRevision vmv1.RevisionWithTime,
+) error {
 	patches := []patch.Operation{{
 		Op:    patch.OpReplace,
 		Path:  "/spec/guest/cpus/use",
@@ -634,6 +653,10 @@ func (r *Runner) doNeonVMRequest(ctx context.Context, target api.Resources) erro
 		Op:    patch.OpReplace,
 		Path:  "/spec/guest/memorySlots/use",
 		Value: uint32(target.Mem / r.memSlotSize),
+	}, {
+		Op:    patch.OpReplace,
+		Path:  "/spec/targetRevision",
+		Value: targetRevision,
 	}}
 
 	patchPayload, err := json.Marshal(patches)
@@ -778,7 +801,7 @@ func (r *Runner) DoSchedulerRequest(
 	}
 	request.Header.Set("content-type", "application/json")
 
-	logger.Info("Sending request to scheduler", zap.Any("request", reqData))
+	logger.Debug("Sending request to scheduler", zap.Any("request", reqData))
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -807,7 +830,7 @@ func (r *Runner) DoSchedulerRequest(
 		return nil, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
-	logger.Info("Received response from scheduler", zap.Any("response", respData))
+	logger.Debug("Received response from scheduler", zap.Any("response", respData))
 
 	return &respData, nil
 }
