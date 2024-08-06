@@ -305,8 +305,7 @@ func Test_handleRequested_nomigration(t *testing.T) {
 			lastPermit: nil,
 			factor:     1,
 
-			// FIXME: this should display buffer information, but isn't.
-			verdict: "Register 4 -> 2 (pressure 0 -> 0); node reserved 7 -> 5 (of 10), node capacityPressure 0 -> 0 (0 -> 0 spoken for)",
+			verdict: "Register 4 [buffer 2] -> 2 (pressure 0 -> 0); node reserved 7 [buffer 2] -> 5 [buffer 0] (of 10), node capacityPressure 0 -> 0 (0 -> 0 spoken for)",
 			podAfter: pod{
 				reserved: 2,
 				buffer:   0,
