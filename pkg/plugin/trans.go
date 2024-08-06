@@ -153,7 +153,7 @@ func (r resourceTransitioner[T]) handleRequested(
 		var oldPodBuffer string
 		var oldNodeBuffer string
 		var newNodeBuffer string
-		if r.pod.Buffer != 0 {
+		if oldState.pod.Buffer != 0 {
 			oldPodBuffer = fmt.Sprintf(" [buffer %d]", oldState.pod.Buffer)
 			oldNodeBuffer = fmt.Sprintf(" [buffer %d]", oldState.node.Buffer)
 			newNodeBuffer = fmt.Sprintf(" [buffer %d]", newState.node.Buffer)
