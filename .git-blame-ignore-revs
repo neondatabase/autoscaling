@@ -27,3 +27,5 @@ d7874af75700c1c5ab671eb6b1c7b66a17a07de4
 b82ad114ddfefb525393d25ce17d88c99739bac9
 # "agent/core: Add internal `state` with public fields (#688)" - rename
 26fbb89317f53e02a656510c485bc5d7a8901076
+# "neonvm/api: Collapse metadata consts to single section (#1018)" - indenting
+850cf991a087cabe743b50271521797a084e82a2
