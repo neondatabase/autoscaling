@@ -12,6 +12,7 @@ data:
         "defaultConfig": {
           "loadAverageFractionTarget": 0.9,
           "memoryUsageFractionTarget": 0.75,
+          "memoryTotalFractionTarget": 0.9,
           "enableLFCMetrics": false,
           "lfcToMemoryRatio": 0.75,
           "lfcWindowSizeMinutes": 5,

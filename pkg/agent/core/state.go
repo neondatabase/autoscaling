@@ -738,6 +738,14 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		s.warn("Making scaling decision without all required metrics available")
 	}
 
+	var warnedNotEnough bool // make sure we don't double-log about working set size values
+	warnNotEnoughLFCMetrics := func() {
+		if !warnedNotEnough {
+			s.warn("not enough working set size values to make scaling determination")
+			warnedNotEnough = true
+		}
+	}
+
 	var goalCU uint32
 	if s.Metrics != nil {
 		// For CPU:
@@ -747,14 +755,35 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		goalCPUs := s.Metrics.LoadAverage1Min / *s.scalingConfig().LoadAverageFractionTarget
 		cpuGoalCU := uint32(math.Round(goalCPUs / s.Config.ComputeUnit.VCPU.AsFloat64()))
 
-		// For Mem:
-		// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
-		// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
-		// that to CUs
+		// For memory:
+		// Goal total memory 'Mem' satisfies:
+		// 1. Mem * MemoryUsageFractionTarget ≥ Mem Usage, and
+		// 2. Mem ≥ Mem Usage + min(Cached Mem, LFC size over a short window)
 		//
-		// NOTE: use uint64 for calculations on bytes as uint32 can overflow
+		// Then, CUs is taken by dividing the goal memory by memory per CU.
+		//
+		// NOTE: use api.Bytes (uint64) for calculations on bytes as uint32 can overflow
+
 		memGoalBytes := api.Bytes(math.Round(s.Metrics.MemoryUsageBytes / *s.scalingConfig().MemoryUsageFractionTarget))
-		memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
+		if s.LFCMetrics != nil {
+			cfg := s.scalingConfig()
+
+			wssValues := s.LFCMetrics.ApproximateworkingSetSizeBuckets
+
+			smallSizeIndex := *cfg.LFCWindowSizeMinutes - 1 // -1 because values start at 1m
+			if len(wssValues) < smallSizeIndex {
+				warnNotEnoughLFCMetrics()
+			} else {
+				smallSizePages := s.LFCMetrics.ApproximateworkingSetSizeBuckets[smallSizeIndex]
+				smallSizeBytes := 8192 * smallSizePages
+				lfcCached := util.Min(s.Metrics.MemoryCachedBytes, smallSizeBytes)
+				totalSize := (lfcCached + s.Metrics.MemoryUsageBytes) / *cfg.MemoryTotalFractionTarget
+				memGoalBytes = util.Max(memGoalBytes, api.Bytes(totalSize))
+			}
+		}
+		// note: this is equal to ceil(memGoalBytes / s.Config.ComputeUnit.Mem), because
+		// ceil(X/M) == floor((X+M-1)/M)
+		memGoalCU := uint32((memGoalBytes + s.Config.ComputeUnit.Mem - 1) / s.Config.ComputeUnit.Mem)
 
 		goalCU = util.Max(cpuGoalCU, memGoalCU)
 
@@ -771,7 +800,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		windowSize := *cfg.LFCWindowSizeMinutes
 		// Handle invalid metrics:
 		if len(wssValues) < offsetIndex+windowSize {
-			s.warn("not enough working set size values to make scaling determination")
+			warnNotEnoughLFCMetrics()
 		} else {
 			estimateWss := EstimateTrueWorkingSetSize(wssValues, WssEstimatorConfig{
 				MaxAllowedIncreaseFactor: 3.0, // hard-code this for now.
