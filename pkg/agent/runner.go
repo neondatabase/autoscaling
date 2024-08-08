@@ -830,7 +830,7 @@ func (r *Runner) DoSchedulerRequest(
 		return nil, fmt.Errorf("Bad JSON response: %w", err)
 	}
 
-	logger.Debug("Received response from scheduler", zap.Any("response", respData))
+	logger.Warn("Received response from scheduler", zap.Any("response", respData), zap.Any("requested", resources))
 
 	return &respData, nil
 }

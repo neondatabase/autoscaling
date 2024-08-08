@@ -16,6 +16,9 @@ type GlobalMetrics struct {
 	schedulerRequestedChange resourceChangePair
 	schedulerApprovedChange  resourceChangePair
 
+	scalingFullDeniesTotal       *prometheus.CounterVec
+	scalingPartialApprovalsTotal *prometheus.CounterVec
+
 	monitorRequestsOutbound *prometheus.CounterVec
 	monitorRequestsInbound  *prometheus.CounterVec
 	monitorRequestedChange  resourceChangePair
@@ -130,7 +133,21 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 				[]string{directionLabel},
 			)),
 		},
-
+		// ---- scaling denies related metrics ----
+		scalingFullDeniesTotal: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_agent_scaling_full_denials_total",
+				Help: "Number of the scheduler or vmmon full denials responses",
+			},
+			[]string{directionLabel},
+		)),
+		scalingPartialApprovalsTotal: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_agent_scaling_partial_approvals_total",
+				Help: "Number of the scheduler partially approved responses",
+			},
+			[]string{directionLabel},
+		)),
 		// ---- MONITOR ----
 		monitorRequestsOutbound: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{

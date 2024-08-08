@@ -34,6 +34,21 @@ func makePluginInterface(r *Runner) *execPluginInterface {
 	return &execPluginInterface{runner: r}
 }
 
+// scalingResponseType indicates type of scaling response from the scheduler plugin
+type scalingResponseType string
+
+const (
+	scalingResponseTypeDenied            = "denied"
+	scalingResponseTypeApproved          = "approved"
+	scalingResponseTypePartiallyApproved = "partiallyApproved"
+	scalingResponseTypeFailed            = "failed"
+)
+
+const (
+	upscaleDirectionLabel   = "inc"
+	downscaleDirectionLabel = "dec"
+)
+
 // Request implements executor.PluginInterface
 func (iface *execPluginInterface) Request(
 	ctx context.Context,
@@ -52,20 +67,26 @@ func (iface *execPluginInterface) Request(
 		iface.runner.recordResourceChange(*lastPermit, resp.Permit, iface.runner.global.metrics.schedulerApprovedChange)
 	}
 
-	successful := func() bool {
+	successful, responseType := func() (bool, scalingResponseType) {
 		if err != nil { // request is failed
-			return false
+			return false, scalingResponseTypeFailed
 		}
 		if resp.Permit == target { // request is fully approved by the scheduler
-			return true
+			return true, scalingResponseTypeApproved
 		}
 		if lastPermit != nil && *lastPermit != resp.Permit { // request is partially approved by the scheduler
-			return true
+			return true, scalingResponseTypePartiallyApproved
 		}
-		return false // scheduler denied the request
+		return false, scalingResponseTypeDenied // scheduler denied the request
 	}()
 	iface.runner.status.update(iface.runner.global, func(ps podStatus) podStatus {
 		if !successful {
+			switch responseType {
+			case scalingResponseTypePartiallyApproved:
+				iface.runner.global.metrics.scalingPartialApprovalsTotal.WithLabelValues(upscaleDirectionLabel).Inc()
+			case scalingResponseTypeDenied:
+				iface.runner.global.metrics.scalingFullDeniesTotal.WithLabelValues(upscaleDirectionLabel).Inc()
+			}
 			ps.failedSchedulerRequestCounter.Inc()
 		}
 		return ps
@@ -182,6 +203,7 @@ func (h *execMonitorHandle) Downscale(
 	} else {
 		h.runner.status.update(h.runner.global, func(ps podStatus) podStatus {
 			ps.failedMonitorRequestCounter.Inc()
+			h.runner.global.metrics.scalingFullDeniesTotal.WithLabelValues(downscaleDirectionLabel).Inc()
 			return ps
 		})
 	}
