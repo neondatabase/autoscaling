@@ -344,7 +344,7 @@ type ScalingConfig struct {
 	// to be consumed by allocated memory (MemTotal minus MemAvailable) plus short-term cached
 	// memory by the LFC.
 	//
-	// This is kind of parallel to MemoryUsageFractionTarget, where the difference is that the the
+	// This is kind of parallel to MemoryUsageFractionTarget, where the difference is that the
 	// "usage" target mostly tries to makes sure there's plenty of memory for postgres, whereas the
 	// "total" target also takes LFC cached memory into account.
 	MemoryTotalFractionTarget *float64 `json:"memoryTotalFractionTarget,omitempty"`
