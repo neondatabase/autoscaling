@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -675,7 +676,11 @@ func (r *Runner) doNeonVMRequest(
 		Patch(requestCtx, r.vmName.Name, ktypes.JSONPatchType, patchPayload, metav1.PatchOptions{})
 
 	if err != nil {
-		r.global.metrics.neonvmRequestsOutbound.WithLabelValues(fmt.Sprintf("[error: %s]", util.RootError(err))).Inc()
+		errMsg := util.RootError(err).Error()
+		// Some error messages contain the object name. We could try to filter them all out, but
+		// it's probably more maintainable to just keep them as-is and remove the name.
+		errMsg = strings.ReplaceAll(errMsg, r.vmName.Name, "<name>")
+		r.global.metrics.neonvmRequestsOutbound.WithLabelValues(fmt.Sprintf("[error: %s]", errMsg)).Inc()
 		return err
 	}
 
