@@ -352,7 +352,7 @@ func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previo
 	if err != nil {
 		return 0, err
 	}
-	defer mon.Close() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
+	defer mon.Close()
 
 	// First, fetch current desired virtio-mem size. If it's the same as targetVirtioMemSize, then
 	// we can report that it was already the same.

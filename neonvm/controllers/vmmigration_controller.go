@@ -628,6 +628,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	return ctrl.Result{}, nil
 }
 
+//nolint:unparam // return type is always ctrl.Result{}
 func (r *VirtualMachineMigrationReconciler) updateMigrationStatus(ctx context.Context, migration *vmv1.VirtualMachineMigration) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	if err := r.Status().Update(ctx, migration); err != nil {
