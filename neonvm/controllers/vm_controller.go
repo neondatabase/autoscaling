@@ -777,12 +777,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// do hotplug/unplug Memory
 		switch *vm.Status.MemoryProvider {
 		case vmv1.MemoryProviderVirtioMem:
-			ramScaled, err = r.doVirtioMemScaling(vm)
+			ramScaled, err = r.doVirtioMemScaling(vm, mon)
 			if err != nil {
 				return err
 			}
 		case vmv1.MemoryProviderDIMMSlots:
-			ramScaled, err = r.doDIMMSlotsScaling(ctx, vm)
+			ramScaled, err = r.doDIMMSlotsScaling(ctx, vm, mon)
 			if err != nil {
 				return err
 			}
@@ -792,18 +792,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 		// set VM phase to running if everything scaled
 		if cpuScaled && ramScaled {
-			// update status by CPUs used in the VM
-			r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
-
-			// get Memory details from hypervisor and update VM status
-			memorySize, err := QmpGetMemorySize(QmpAddr(vm))
-			if err != nil {
-				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
-				return err
-			}
-			// update status by memory sizes used in the VM
-			r.updateVMStatusMemory(vm, memorySize)
-
 			vm.Status.Phase = vmv1.VmRunning
 		}
 
@@ -892,11 +880,11 @@ func pickMemoryProvider(config *ReconcilerConfig, vm *vmv1.VirtualMachine) vmv1.
 	return config.DefaultMemoryProvider
 }
 
-func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _ error) {
+func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine, mon QMPMonitor) (done bool, _ error) {
 	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - vm.Spec.Guest.MemorySlots.Min)
 
 	targetVirtioMemSize := int64(targetSlotCount) * vm.Spec.Guest.MemorySlotSize.Value()
-	previousTarget, err := QmpSetVirtioMem(vm, targetVirtioMemSize)
+	previousTarget, err := qmp.QmpSetVirtioMem(vm, targetVirtioMemSize)
 	if err != nil {
 		return false, err
 	}
@@ -918,7 +906,7 @@ func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _
 	// Maybe we're already using the amount we want?
 	// Update the status to reflect the current size - and if it matches goalTotalSize, ram
 	// scaling is done.
-	currentTotalSize, err := QmpGetMemorySize(QmpAddr(vm))
+	currentTotalSize, err := mon.MemorySize()
 	if err != nil {
 		return false, err
 	}
@@ -928,13 +916,13 @@ func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _
 	return done, nil
 }
 
-func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualMachine) (done bool, _ error) {
+func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualMachine, mon QMPMonitor) (done bool, _ error) {
 	log := log.FromContext(ctx)
 
 	memSlotsMin := vm.Spec.Guest.MemorySlots.Min
 	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - memSlotsMin)
 
-	realSlots, err := QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
+	realSlots, err := r.QMPFactory.QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
 	if realSlots < 0 {
 		return false, err
 	}
@@ -959,7 +947,7 @@ func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualM
 		done = true
 	}
 	// get Memory details from hypervisor and update VM status
-	memorySize, err := QmpGetMemorySize(QmpAddr(vm))
+	memorySize, err := mon.MemorySize()
 	if err != nil {
 		log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
 		return false, err

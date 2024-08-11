@@ -348,16 +348,16 @@ func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previo
 		return 0, nil
 	}
 
-	mon, err := QmpConnect(QmpAddr(vm))
+	mon, err := DefaultQMPFactory.ConnectVM(vm)
 	if err != nil {
 		return 0, err
 	}
-	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
+	defer mon.Close() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	// First, fetch current desired virtio-mem size. If it's the same as targetVirtioMemSize, then
 	// we can report that it was already the same.
 	cmd := []byte(`{"execute": "qom-get", "arguments": {"path": "vm0", "property": "requested-size"}}`)
-	raw, err := mon.Run(cmd)
+	raw, err := mon.mon.Run(cmd)
 	if err != nil {
 		return 0, err
 	}
@@ -379,7 +379,7 @@ func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previo
 		`{"execute": "qom-set", "arguments": {"path": "vm0", "property": "requested-size", "value": %d}}`,
 		targetVirtioMemSize,
 	))
-	_, err = mon.Run(cmd)
+	_, err = mon.mon.Run(cmd)
 	if err != nil {
 		return 0, err
 	}
