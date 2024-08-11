@@ -328,11 +328,11 @@ type QMPRunner interface {
 	Run([]byte) ([]byte, error)
 }
 
-// QmpSetVirtioMem updates virtio-mem to the new target size, returning the previous target.
+// SetVirtioMem updates virtio-mem to the new target size, returning the previous target.
 //
 // If the new target size is equal to the previous one, this function does nothing but query the
 // target.
-func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previous int64, _ error) {
+func (mon Monitor) SetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previous int64, _ error) {
 	// Note: The virtio-mem device only exists when max mem != min mem.
 	// So if min == max, we should just short-cut, skip the queries, and say it's all good.
 	// Refer to the instantiation in neonvm-runner for more.
@@ -347,13 +347,6 @@ func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previo
 		// Otherwise, we're all good, just pretend like we talked to the VM.
 		return 0, nil
 	}
-
-	mon, err := DefaultQMPFactory.ConnectVM(vm)
-	if err != nil {
-		return 0, err
-	}
-	defer mon.Close()
-
 	// First, fetch current desired virtio-mem size. If it's the same as targetVirtioMemSize, then
 	// we can report that it was already the same.
 	cmd := []byte(`{"execute": "qom-get", "arguments": {"path": "vm0", "property": "requested-size"}}`)
@@ -387,12 +380,12 @@ func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previo
 	return previous, nil
 }
 
-// QmpAddMemoryBackend adds a single memory slot to the VM with the given size.
+// addMemoryBackend adds a single memory slot to the VM with the given size.
 //
 // The memory slot does nothing until a corresponding "device" is added to the VM for the same memory slot.
-// See QmpAddMemoryDevice for more.
-// When unplugging, QmpDelMemoryDevice must be called before QmpDelMemoryBackend.
-func QmpAddMemoryBackend(mon QMPRunner, idx int, sizeBytes int64) error {
+// See addMemoryDevice for more.
+// When unplugging, delMemoryDevice must be called before delMemoryBackend.
+func addMemoryBackend(mon QMPRunner, idx int, sizeBytes int64) error {
 	cmd := []byte(fmt.Sprintf(
 		`{"execute": "object-add",
 		  "arguments": {"id": "memslot%d",
@@ -403,7 +396,7 @@ func QmpAddMemoryBackend(mon QMPRunner, idx int, sizeBytes int64) error {
 	return err
 }
 
-func QmpDelMemoryBackend(mon *qmp.SocketMonitor, idx int) error {
+func delMemoryBackend(mon *qmp.SocketMonitor, idx int) error {
 	cmd := []byte(fmt.Sprintf(
 		`{"execute": "object-del",
 		  "arguments": {"id": "memslot%d"}}`, idx,
@@ -412,7 +405,7 @@ func QmpDelMemoryBackend(mon *qmp.SocketMonitor, idx int) error {
 	return err
 }
 
-func QmpAddMemoryDevice(mon *qmp.SocketMonitor, idx int) error {
+func addMemoryDevice(mon *qmp.SocketMonitor, idx int) error {
 	cmd := []byte(fmt.Sprintf(
 		`{"execute": "device_add",
 		  "arguments": {"id": "dimm%d",
@@ -423,7 +416,7 @@ func QmpAddMemoryDevice(mon *qmp.SocketMonitor, idx int) error {
 	return err
 }
 
-func QmpDelMemoryDevice(mon *qmp.SocketMonitor, idx int) error {
+func delMemoryDevice(mon *qmp.SocketMonitor, idx int) error {
 	cmd := []byte(fmt.Sprintf(
 		`{"execute": "device_del",
 		  "arguments": {"id": "dimm%d"}}`, idx,
@@ -526,7 +519,7 @@ func (r *QmpMemorySetter) AddBackends() {
 			break
 		}
 
-		err := QmpAddMemoryBackend(r.mon.mon, idx, r.vm.Spec.Guest.MemorySlotSize.Value())
+		err := addMemoryBackend(r.mon.mon, idx, r.vm.Spec.Guest.MemorySlotSize.Value())
 		if err != nil {
 			r.errs = append(r.errs, err)
 			r.recorder.Event(r.vm, "Warning", "ScaleUp",
@@ -565,7 +558,7 @@ func (r *QmpMemorySetter) AddDevices() {
 			break
 		}
 
-		err := QmpAddMemoryDevice(r.mon.mon, idx)
+		err := addMemoryDevice(r.mon.mon, idx)
 		if err != nil {
 			r.errs = append(r.errs, err)
 			r.recorder.Event(r.vm, "Warning", "ScaleUp",
@@ -598,7 +591,7 @@ func (r *QmpMemorySetter) RemoveDevices() {
 			break
 		}
 
-		err := QmpDelMemoryDevice(r.mon.mon, idx)
+		err := delMemoryDevice(r.mon.mon, idx)
 		if err != nil {
 			r.errs = append(r.errs, err)
 			r.recorder.Event(r.vm, "Warning", "ScaleDown",
@@ -634,7 +627,7 @@ func (r *QmpMemorySetter) RemoveBackends() {
 			break
 		}
 
-		err := QmpDelMemoryBackend(r.mon.mon, idx)
+		err := delMemoryBackend(r.mon.mon, idx)
 		if err != nil {
 			r.errs = append(r.errs, err)
 			r.recorder.Event(r.vm, "Warning", "ScaleDown",
@@ -760,15 +753,15 @@ func QmpSyncMemoryToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachi
 		if err != nil {
 			return err
 		}
-		err = QmpAddMemoryBackend(targetMon.mon, memdevIdx, m.Data.Size)
+		err = addMemoryBackend(targetMon.mon, memdevIdx, m.Data.Size)
 		if err != nil {
 			return err
 		}
 		// now add pc-dimm device
-		err = QmpAddMemoryDevice(targetMon.mon, memdevIdx)
+		err = addMemoryDevice(targetMon.mon, memdevIdx)
 		if err != nil {
 			// device_add command failed... so try remove object that we just created
-			_ = QmpDelMemoryBackend(targetMon.mon, memdevIdx)
+			_ = delMemoryBackend(targetMon.mon, memdevIdx)
 			return err
 		}
 	}

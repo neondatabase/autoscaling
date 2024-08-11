@@ -84,11 +84,12 @@ type QMPFactory interface {
 
 type QMPMonitor interface {
 	Close()
-	CPUs() ([]qmp.CPUSlot, []qmp.CPUSlot, error)
+	CPUs() (plugged []qmp.CPUSlot, empty []qmp.CPUSlot, _ error)
 	PlugCPU() error
 	UnplugCPU() error
 	MemoryDevices() ([]qmp.MemoryDevice, error)
 	MemorySize() (*resource.Quantity, error)
+	SetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previous int64, _ error)
 }
 
 type HTTPClient interface {
@@ -884,7 +885,8 @@ func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine, mon QMPMonito
 	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - vm.Spec.Guest.MemorySlots.Min)
 
 	targetVirtioMemSize := int64(targetSlotCount) * vm.Spec.Guest.MemorySlotSize.Value()
-	previousTarget, err := qmp.QmpSetVirtioMem(vm, targetVirtioMemSize)
+
+	previousTarget, err := mon.SetVirtioMem(vm, targetVirtioMemSize)
 	if err != nil {
 		return false, err
 	}

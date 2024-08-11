@@ -1,10 +1,8 @@
-package qmp_test
+package qmp
 
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	"github.com/neondatabase/autoscaling/neonvm/qmp"
 )
 
 type qmpEvent struct {
@@ -51,7 +49,7 @@ var _ = Describe("VM QMP interaction", func() {
 						"size": 100,
 						"qom-type": "memory-backend-ram"}}`, `{}`)
 
-			err := qmp.QmpAddMemoryBackend(mon, 1, 100)
+			err := addMemoryBackend(mon, 1, 100)
 			Expect(err).To(Not(HaveOccurred()))
 		})
 	})
