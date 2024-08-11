@@ -46,6 +46,10 @@ var (
 	scriptVmInit string
 	//go:embed files/udev-init.sh
 	scriptUdevInit string
+	//go:embed files/cg-setup.sh
+	scriptCgSetup string
+	//go:embed files/cg-run.sh
+	scriptCgRun string
 	//go:embed files/resize-swap.sh
 	scriptResizeSwap string
 	//go:embed files/set-disk-quota.sh
@@ -336,6 +340,8 @@ func main() {
 		{"chrony.conf", configChrony},
 		{"sshd_config", configSshd},
 		{"udev-init.sh", scriptUdevInit},
+		{"cg-setup.sh", scriptCgSetup},
+		{"cg-run.sh", scriptCgRun},
 		{"resize-swap.sh", scriptResizeSwap},
 		{"set-disk-quota.sh", scriptSetDiskQuota},
 	}

@@ -19,12 +19,17 @@ RUN set -e \
 COPY helper.move-bins.sh /helper.move-bins.sh
 
 # add udevd and agetty (with shared libs)
+#
+# We need unshare and nsenter from util-linux-misc because buxybox's implementations don't have
+# support for cgroup namespaces (at least, master as of 2024-08-11).
 RUN set -e \
 	&& apk add --no-cache --no-progress --quiet \
 		acpid \
 		udev \
 		agetty \
 		su-exec \
+        util-linux-misc \
+        cgroup-tools \
 		e2fsprogs-extra \
 		blkid \
 		flock \
@@ -35,6 +40,8 @@ RUN set -e \
 		udevadm \
 		agetty \
 		su-exec \
+        unshare nsenter \
+        cgexec \
 		resize2fs \
 		blkid \
 		flock \
@@ -77,6 +84,9 @@ COPY sshd_config /neonvm/config/sshd_config
 RUN chmod +rx /neonvm/bin/vminit /neonvm/bin/vmstart /neonvm/bin/vmshutdown
 COPY udev-init.sh /neonvm/bin/udev-init.sh
 RUN chmod +rx /neonvm/bin/udev-init.sh
+COPY cg-setup.sh /neonvm/bin/cg-setup.sh
+COPY cg-run.sh /neonvm/bin/cg-run.sh
+RUN chmod +rx /neonvm/bin/cg-setup.sh /neonvm/bin/cg-run.sh
 COPY resize-swap.sh /neonvm/bin/resize-swap
 RUN chmod +rx /neonvm/bin/resize-swap
 COPY set-disk-quota.sh /neonvm/bin/set-disk-quota

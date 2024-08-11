@@ -4,12 +4,12 @@
 ::respawn:/neonvm/bin/udevd
 ::wait:/neonvm/bin/udev-init.sh
 ::respawn:/neonvm/bin/acpid -f -c /neonvm/acpi
-::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector --color never
+::respawn:/neonvm/bin/cg-run.sh /neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector --color never
 ::respawn:/neonvm/bin/chronyd -n -f /neonvm/config/chrony.conf -l /var/log/chrony/chrony.log
-::respawn:/neonvm/bin/sshd -E /var/log/ssh.log -f /neonvm/config/sshd_config
-::respawn:/neonvm/bin/vmstart
+::respawn:/neonvm/bin/cg-run.sh /neonvm/bin/sshd -E /var/log/ssh.log -f /neonvm/config/sshd_config
+::respawn:/neonvm/bin/cg-run.sh /neonvm/bin/vmstart
 {{ range .InittabCommands }}
-::{{.SysvInitAction}}:su -p {{.CommandUser}} -c {{.ShellEscapedCommand}}
+::{{.SysvInitAction}}:/neonvm/bin/cg-run.sh su -p {{.CommandUser}} -c {{.ShellEscapedCommand}}
 {{ end }}
 ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
 ::shutdown:/neonvm/bin/vmshutdown
