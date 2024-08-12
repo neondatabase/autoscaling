@@ -831,6 +831,11 @@ spec:
                         type: array
                     type: object
                 type: object
+              delegatedCPULimits:
+                default: false
+                description: Rely on neonvm-daemon inside the VM for fractional CPU
+                  limiting
+                type: boolean
               disks:
                 description: List of disk that can be mounted by virtual machine.
                 items:

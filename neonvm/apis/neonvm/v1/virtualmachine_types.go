@@ -136,6 +136,11 @@ type VirtualMachineSpec struct {
 	// +optional
 	RunnerImage *string `json:"runnerImage,omitempty"`
 
+	// Rely on neonvm-daemon inside the VM for fractional CPU limiting
+	// +kubebuilder:default:=false
+	// +optional
+	DelegatedCPULimits *bool `json:"delegatedCPULimits,omitempty"`
+
 	// Enable SSH on the VM. It works only if the VM image is built using VM Builder that
 	// has SSH support (TODO: mention VM Builder version).
 	// +kubebuilder:default:=true

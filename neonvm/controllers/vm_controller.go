@@ -1420,6 +1420,8 @@ func podSpec(
 		return nil, fmt.Errorf("marshal VM Status: %w", err)
 	}
 
+	delegatedCPULimits := lo.FromPtr(vm.Spec.DelegatedCPULimits)
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        vm.Status.PodName,
@@ -1486,7 +1488,9 @@ func podSpec(
 					}},
 					Command: func() []string {
 						cmd := []string{"runner"}
-						if config.UseContainerMgr || config.DisableRunnerCgroup {
+						if delegatedCPULimits {
+							cmd = append(cmd, "-delegated-cgroup")
+						} else if config.UseContainerMgr || config.DisableRunnerCgroup {
 							cmd = append(cmd, "-skip-cgroup-management")
 						}
 						if config.DisableRunnerCgroup {
@@ -1535,7 +1539,7 @@ func podSpec(
 							MountPropagation: lo.ToPtr(corev1.MountPropagationNone),
 						}
 
-						if config.UseContainerMgr || config.DisableRunnerCgroup {
+						if config.UseContainerMgr || config.DisableRunnerCgroup || delegatedCPULimits {
 							return []corev1.VolumeMount{images}
 						} else {
 							// the /sys/fs/cgroup mount is only necessary if neonvm-runner has to
@@ -1595,7 +1599,7 @@ func podSpec(
 					},
 				}
 
-				if config.UseContainerMgr {
+				if config.UseContainerMgr && !delegatedCPULimits {
 					return []corev1.Container{runner, containerMgr}
 				} else {
 					// Return only the runner if we aren't supposed to use container-mgr
@@ -1628,7 +1632,9 @@ func podSpec(
 					},
 				}
 
-				if config.UseContainerMgr {
+				if delegatedCPULimits {
+					return []corev1.Volume{images}
+				} else if config.UseContainerMgr {
 					return []corev1.Volume{images, containerdSock}
 				} else if config.DisableRunnerCgroup {
 					return []corev1.Volume{images}
@@ -1687,7 +1693,7 @@ func podSpec(
 	// If a custom neonvm-runner image is requested, use that instead:
 	if vm.Spec.RunnerImage != nil {
 		pod.Spec.Containers[0].Image = *vm.Spec.RunnerImage
-		if config.UseContainerMgr {
+		if config.UseContainerMgr && !delegatedCPULimits {
 			pod.Spec.Containers[1].Image = *vm.Spec.RunnerImage
 		}
 	}

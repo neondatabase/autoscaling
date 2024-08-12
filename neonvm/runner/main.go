@@ -613,6 +613,7 @@ type Config struct {
 	appendKernelCmdline  string
 	skipCgroupManagement bool
 	enableDummyCPUServer bool
+	delegatedCgroup      bool
 	diskCacheSettings    string
 	memoryProvider       vmv1.MemoryProvider
 	autoMovableRatio     string
@@ -626,6 +627,7 @@ func newConfig(logger *zap.Logger) *Config {
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		enableDummyCPUServer: false,
+		delegatedCgroup:      false,
 		diskCacheSettings:    "cache=none",
 		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
 		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
@@ -644,6 +646,9 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.BoolVar(&cfg.enableDummyCPUServer, "enable-dummy-cpu-server",
 		cfg.skipCgroupManagement,
 		"Provide a CPU server (unlike -skip-cgroup-management) but don't actually do anything with it")
+	flag.BoolVar(&cfg.delegatedCgroup, "delegated-cgroup",
+		cfg.delegatedCgroup,
+		"Forward CPU requests to neonvm-daemon inside the VM (requires -skip-cgroup-management=false)")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
@@ -659,7 +664,13 @@ func newConfig(logger *zap.Logger) *Config {
 		logger.Fatal("missing required flag '-memhp-auto-movable-ratio'")
 	}
 	if cfg.enableDummyCPUServer && !cfg.skipCgroupManagement {
-		logger.Fatal("flag -enable-dummy-cpu-server requires -skip-cgroup-management")
+		logger.Fatal("flag '-enable-dummy-cpu-server' requires '-skip-cgroup-management'")
+	}
+	if cfg.delegatedCgroup && cfg.skipCgroupManagement {
+		logger.Fatal("flag '-delegated-cgroup' requires '-skip-cgroup-management'")
+	}
+	if cfg.delegatedCgroup && cfg.enableDummyCPUServer {
+		logger.Fatal("cannot have both '-delegated-cgroup' and '-enable-dummy-cpu-server'")
 	}
 
 	return cfg
@@ -1000,7 +1011,7 @@ func runQEMU(
 
 	var cgroupPath string
 
-	if !cfg.skipCgroupManagement {
+	if !cfg.skipCgroupManagement && !cfg.delegatedCgroup {
 		selfCgroupPath, err := getSelfCgroupPath(logger)
 		if err != nil {
 			return fmt.Errorf("Failed to get self cgroup path: %w", err)
@@ -1030,7 +1041,7 @@ func runQEMU(
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-	if !cfg.skipCgroupManagement || cfg.enableDummyCPUServer {
+	if !cfg.skipCgroupManagement || cfg.enableDummyCPUServer || cfg.delegatedCgroup {
 		var callbacks cpuServerCallbacks
 
 		if cfg.enableDummyCPUServer {
@@ -1046,8 +1057,20 @@ func runQEMU(
 					return nil
 				},
 			}
+		} else if cfg.delegatedCgroup {
+			// cgroup IS delegated -- we're not handling it, and instead need to pass it off to
+			// neonvm-daemon inside the VM.
+			callbacks = cpuServerCallbacks{
+				get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
+					return getNeonvmDaemonCPU()
+				},
+				set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
+					return setNeonvmDaemonCPU(cpu)
+				},
+			}
 		} else {
-			// Standard implementation -- actually set the cgroup
+			// Standard implementation -- we're handling it ourselves, and QEMU is running in a
+			// local cgroup.
 			callbacks = cpuServerCallbacks{
 				get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
 					return getCgroupQuota(cgroupPath)
@@ -1066,7 +1089,7 @@ func runQEMU(
 
 	var bin string
 	var cmd []string
-	if !cfg.skipCgroupManagement {
+	if !cfg.skipCgroupManagement && !cfg.delegatedCgroup {
 		bin = "cgexec"
 		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
 	} else {
@@ -1487,6 +1510,74 @@ func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
 	cpu := vmv1.MilliCPU(uint32(quota * 1000 / cgroupPeriod))
 	cpu /= cpuLimitOvercommitFactor
 	return &cpu, nil
+}
+
+func getNeonvmDaemonCPU() (*vmv1.MilliCPU, error) {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return nil, fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:25183/cpu", vmIP)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("could not read response body: %w", err)
+	}
+
+	milliCPU, err := strconv.Atoi(string(body))
+	if err != nil {
+		return nil, fmt.Errorf("could not parse response body: %w", err)
+	}
+
+	return lo.ToPtr(vmv1.MilliCPU(milliCPU)), nil
+}
+
+func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:25183/cpu", vmIP)
+	body := bytes.NewReader([]byte(fmt.Sprintf("%d", uint32(cpu))))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	if err != nil {
+		return fmt.Errorf("could not build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
