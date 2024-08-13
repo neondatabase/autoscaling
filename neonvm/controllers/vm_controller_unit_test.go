@@ -117,6 +117,7 @@ func newTestParams(t *testing.T) *testParams {
 		Config: &ReconcilerConfig{
 			IsK3s:                   false,
 			UseContainerMgr:         false,
+			DisableRunnerCgroup:     false,
 			MaxConcurrentReconciles: 10,
 			SkipUpdateValidationFor: nil,
 			QEMUDiskCacheSettings:   "",
