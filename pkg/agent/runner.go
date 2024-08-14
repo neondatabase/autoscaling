@@ -834,8 +834,11 @@ func (r *Runner) DoSchedulerRequest(
 		// Fatal because invalid JSON might also be semantically invalid
 		return nil, fmt.Errorf("Bad JSON response: %w", err)
 	}
-
-	logger.Debug("Received response from scheduler", zap.Any("response", respData))
+	level := zap.DebugLevel
+	if respData.Permit.HasFieldLessThan(resources) {
+		level = zap.WarnLevel
+	}
+	logger.Log(level, "Received response from scheduler", zap.Any("response", respData), zap.Any("requested", resources))
 
 	return &respData, nil
 }
