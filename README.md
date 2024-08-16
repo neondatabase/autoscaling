@@ -2,24 +2,25 @@
 
 Vertical autoscaling for a fleet of postgres instances running in a Kubernetes cluster.
 
+For more on how Neon's Autoscaling works, check out <https://neon.tech/docs/introduction/autoscaling>.
+
+## Development status
+
+Autoscaling is used internally within Neon, and makes some minor assumptions about Neon-specifics.
+
+We do not officially support use of autoscaling externally — in other words, you're welcome to try
+it out yourself, submit bugs, fork the code, etc., but we make no guarantees about timely responses
+to issues from running locally.
+
+For help from the community, check out our Discord: <https://neon.tech/discord>.
+
 ## Quick access
-
-Images are available as:
-
-| Component name | Image name |
-|----------------|------------|
-| scheduler (and plugin) | `neondatabase/autoscale-scheduler` |
-| autoscaler-agent | `neondatabase/autoscaler-agent` |
 
 The deployment files and a vm-builder binary are attached to each release.
 
-For information on inter-version compatibility, see
-[`pkg/api/VERSIONING.md`](./pkg/api/VERSIONING.md).
+Check out [Building and running](#building-and-running) below for local development.
 
-For now, the currently deployed configuration on staging is manually replicated
-in the [`staging` branch](https://github.com/neondatabase/autoscaling/tree/staging).
-
-## Overview
+## How it works
 
 We want to dynamically change the amount of CPUs and memory of running postgres instances, _without
 breaking TCP connections to postgres_.
@@ -28,20 +29,21 @@ This relatively easy when there's already spare resources on the physical (Kuber
 takes careful coordination to move postgres instances from one node to another when the original
 node doesn't have the room.
 
-We've [tried a bunch](https://github.com/neondatabase/cloud/issues/1651) of existing tools and
-settled on the following:
+We've tried a bunch of existing tools and settled on the following:
 
 * Use [VM live migration](https://www.qemu.org/docs/master/devel/migration/index.html) to move running
   postgres instances between physical nodes
 * QEMU is used as our hypervisor
 * [NeonVM](https://github.com/neondatabase/autoscaling/tree/main/neonvm) orchestrates NeonVM VMs as custom resources in
-  K8s, and is responsible for scaling allocated resources (CPU and memory _slots_)
+  K8s, and is responsible for scaling allocated resources (CPU and memory)
 * A modified K8s scheduler ensures that we don't overcommit resources and triggers migrations when
   demand is above a pre-configured threshold
 * Each K8s node has an `autoscaler-agent` pod that triggers scaling decisions and makes resource
   requests to the K8s scheduler on the VMs' behalf to reserve additional resources for them
-* Each compute node runs the _VM monitor_ binary, which communicates to the autoscaler-agent so that it can
-  immediately respond to memory pressure by allocating more (among other things).
+* Each compute node runs the `vm-monitor` binary, which communicates to the autoscaler-agent so that it can
+  immediately respond to memory pressure by scaling up (among other things).
+* For Neon's postgres instances, we also track cache usage and potentially scale based on the
+  heuristically determined working set size, which dramatically speeds up OLTP workloads.
 
 Networking is preserved across migrations by giving each VM an additional IP address on a bridge
 network spanning the cluster with a flat topology; the L2 network figures out "by itself" where to
