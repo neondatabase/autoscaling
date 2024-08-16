@@ -112,16 +112,16 @@ func Test_handleReserve(t *testing.T) {
 		{
 			name: "AlreadyOverbudgetWithBuffer",
 
-			podMin:             8,
+			podMin:             4,
 			podMax:             8,
 			nodeTotal:          12,
 			nodeReservedBefore: 16,
-			nodeBufferBefore:   0,
+			nodeBufferBefore:   8,
 
 			overbudget:        true,
-			verdict:           "node reserved 16 + 8 -> 24 of total 12",
+			verdict:           "node reserved 16 [buffer 8] + 8 [buffer 4] -> 24 [buffer 12] of total 12",
 			nodeReservedAfter: 24,
-			nodeBufferAfter:   0,
+			nodeBufferAfter:   12,
 		},
 	}
 
