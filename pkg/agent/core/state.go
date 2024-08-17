@@ -23,13 +23,11 @@ package core
 import (
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
@@ -729,76 +727,17 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
-	// Record whether we have all the metrics we'll need.
-	// If not, we'll later prevent downscaling to avoid flushing the VM's cache on autoscaler-agent
-	// restart if we have SystemMetrics but not LFCMetrics.
-	hasAllMetrics := s.Metrics != nil && (!*s.scalingConfig().EnableLFCMetrics || s.LFCMetrics != nil)
-	if !hasAllMetrics {
-		s.warn("Making scaling decision without all required metrics available")
-	}
-
-	var goalCU uint32
-	if s.Metrics != nil {
-		// For CPU:
-		// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
-		// average),
-		// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
-		goalCPUs := s.Metrics.LoadAverage1Min / *s.scalingConfig().LoadAverageFractionTarget
-		cpuGoalCU := uint32(math.Round(goalCPUs / s.Config.ComputeUnit.VCPU.AsFloat64()))
-
-		// For Mem:
-		// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
-		// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
-		// that to CUs
-		//
-		// NOTE: use uint64 for calculations on bytes as uint32 can overflow
-		memGoalBytes := api.Bytes(math.Round(s.Metrics.MemoryUsageBytes / *s.scalingConfig().MemoryUsageFractionTarget))
-		memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
-
-		goalCU = max(cpuGoalCU, memGoalCU)
-
-	}
-
-	// For LFC metrics, if enabled:
-	var lfcLogFields func(zapcore.ObjectEncoder) error
-	if s.LFCMetrics != nil {
-		cfg := s.scalingConfig()
-		wssValues := s.LFCMetrics.ApproximateworkingSetSizeBuckets
-		// At this point, we can assume that the values are equally spaced at 1 minute apart,
-		// starting at 1 minute.
-		offsetIndex := *cfg.LFCMinWaitBeforeDownscaleMinutes - 1 // -1 because values start at 1m
-		windowSize := *cfg.LFCWindowSizeMinutes
-		// Handle invalid metrics:
-		if len(wssValues) < offsetIndex+windowSize {
-			s.warn("not enough working set size values to make scaling determination")
-		} else {
-			estimateWss := EstimateTrueWorkingSetSize(wssValues, WssEstimatorConfig{
-				MaxAllowedIncreaseFactor: 3.0, // hard-code this for now.
-				InitialOffset:            offsetIndex,
-				WindowSize:               windowSize,
-			})
-			projectSliceEnd := offsetIndex // start at offsetIndex to avoid panics if not monotonically non-decreasing
-			for ; projectSliceEnd < len(wssValues) && wssValues[projectSliceEnd] <= estimateWss; projectSliceEnd++ {
-			}
-			projectLen := 0.5 // hard-code this for now.
-			predictedHighestNextMinute := ProjectNextHighest(wssValues[:projectSliceEnd], projectLen)
-
-			// predictedHighestNextMinute is still in units of 8KiB pages. Let's convert that
-			// into GiB, then convert that into CU, and then invert the discount from only some
-			// of the memory going towards LFC to get the actual CU required to fit the
-			// predicted working set size.
-			requiredCU := predictedHighestNextMinute * 8192 / s.Config.ComputeUnit.Mem.AsFloat64() / *cfg.LFCToMemoryRatio
-			lfcGoalCU := uint32(math.Ceil(requiredCU))
-			goalCU = max(goalCU, lfcGoalCU)
-
-			lfcLogFields = func(obj zapcore.ObjectEncoder) error {
-				obj.AddFloat64("estimateWssPages", estimateWss)
-				obj.AddFloat64("predictedNextWssPages", predictedHighestNextMinute)
-				obj.AddFloat64("requiredCU", requiredCU)
-				return nil
-			}
-		}
-	}
+	sg, goalCULogFields := calculateGoalCU(
+		s.warn,
+		s.scalingConfig(),
+		s.Config.ComputeUnit,
+		s.Metrics,
+		s.LFCMetrics,
+	)
+	goalCU := sg.goalCU
+	// If we don't have all the metrics we need, we'll later prevent downscaling to avoid flushing
+	// the VM's cache on autoscaler-agent restart if we have SystemMetrics but not LFCMetrics.
+	hasAllMetrics := sg.hasAllMetrics
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
 	// requested upscaling or denied downscaling affected the outcome.
@@ -914,9 +853,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		zap.Object("target", result),
 		zap.Object("targetRevision", &s.TargetRevision),
 	}
-	if lfcLogFields != nil {
-		logFields = append(logFields, zap.Object("lfc", zapcore.ObjectMarshalerFunc(lfcLogFields)))
-	}
+	logFields = append(logFields, goalCULogFields...)
 	s.info("Calculated desired resources", logFields...)
 
 	return result, calculateWaitTime
