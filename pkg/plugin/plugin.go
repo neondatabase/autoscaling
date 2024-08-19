@@ -153,7 +153,7 @@ func makeAutoscaleEnforcerPlugin(
 				incEventCount()
 			}
 			pushToQueue(logger, pod.Name, func() {
-				p.handleStarted(hlogger, pod)
+				p.handleStarted(hlogger, pod, preexisting)
 				if preexisting {
 					initEvents.dec()
 				}
@@ -822,6 +822,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		// don't include buffer because we know that future changes by the autoscaler-agent must go
 		// through us.
 		includeBuffer: false,
+		preexisting:   false,
 	})
 	if err != nil {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, err.Error())
