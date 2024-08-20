@@ -22,8 +22,6 @@ jobs:
       - name: build vm-builder
         run:  make bin/vm-builder
 
-      - name: docker - install qemu
-        uses: docker/setup-qemu-action@v2
       - name: docker - setup buildx
         uses: docker/setup-buildx-action@v2
       - name: login to docker hub

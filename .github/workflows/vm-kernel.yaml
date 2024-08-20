@@ -152,8 +152,6 @@ jobs:
           mkdir -p .docker-custom
           echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
 
-      - name: docker - install qemu
-        uses: docker/setup-qemu-action@v2
       - name: docker - setup buildx
         uses: docker/setup-buildx-action@v2
       - name: login to docker hub
