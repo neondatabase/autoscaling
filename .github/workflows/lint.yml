@@ -19,16 +19,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - uses: golangci/golangci-lint-action@v3
+      - uses: golangci/golangci-lint-action@v6
         with:
           # Required: the version of golangci-lint is required and
           # should be specified with patch version.
           version: v1.59.1
           args: --timeout 5m
-          github-token: ${{ secrets.github_token }}
-          # caching issues, see: https://github.com/golangci/golangci-lint-action/issues/244#issuecomment-1052190775
-          skip-pkg-cache: true
-          skip-build-cache: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-go-mod-tidy:
     name: check go mod tidy
