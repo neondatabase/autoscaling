@@ -125,12 +125,9 @@ jobs:
         run: |
           echo "tag=$(cat cluster-autoscaler/ca.tag)" >> $GITHUB_OUTPUT
 
-      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
-      # The default value is ~/.docker
       - name: set custom docker config directory
-        run: |
-          mkdir -p .docker-custom
-          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
+        uses: ./.github/actions/set-docker-config-dir
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Login to Dockerhub
@@ -281,8 +278,3 @@ jobs:
             docker buildx imagetools create -t ${{ env.ECR_PROD }}/${image}:${{ inputs.tag }} \
                                                neondatabase/${image}:${{ inputs.tag }}
           done
-
-      - name: Remove custom docker config directory
-        if: always()
-        run: |
-          rm -rf .docker-custom

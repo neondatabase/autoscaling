@@ -145,12 +145,8 @@ jobs:
       - name: git checkout
         uses: actions/checkout@v4
 
-      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
-      # The default value is ~/.docker
       - name: set custom docker config directory
-        run: |
-          mkdir -p .docker-custom
-          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
+        uses: ./.github/actions/set-docker-config-dir
 
       - name: docker - setup buildx
         uses: docker/setup-buildx-action@v3
@@ -205,8 +201,3 @@ jobs:
           cache-from: type=registry,ref=cache.neon.build/vm-kernel:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/vm-kernel:cache,mode=max' || '' }}
           tags: ${{ steps.get-tags.outputs.tags }}
-
-      - name: remove custom docker config directory
-        if: always()
-        run: |
-          rm -rf .docker-custom
