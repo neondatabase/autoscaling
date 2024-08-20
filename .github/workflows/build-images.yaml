@@ -101,7 +101,7 @@ jobs:
         with:
           fetch-depth: 0 # fetch all, so that we also include tags
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
           # Disable cache on self-hosted runners to avoid /usr/bin/tar errors, see https://github.com/actions/setup-go/issues/403
