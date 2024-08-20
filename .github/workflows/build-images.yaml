@@ -170,7 +170,7 @@ jobs:
           docker rm -f ${ID}
 
       - name: Build and push neonvm-runner image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -190,7 +190,7 @@ jobs:
           fi
 
       - name: Build and push neonvm-controller image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -202,7 +202,7 @@ jobs:
             BUILDTAGS=${{ steps.controller-build-tags.outputs.buildtags }}
 
       - name: Build and push neonvm-vxlan-controller image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -211,7 +211,7 @@ jobs:
           tags: ${{ needs.tags.outputs.vxlan-controller }}
 
       - name: Build and push autoscale-scheduler image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -222,7 +222,7 @@ jobs:
             GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
 
       - name: Build and push autoscaler-agent image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -233,7 +233,7 @@ jobs:
             GIT_INFO=${{ steps.get-git-info.outputs.info }}
 
       - name: Build and push cluster-autoscaler image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
         with:
           context: cluster-autoscaler
