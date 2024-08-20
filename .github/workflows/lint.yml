@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: reviewdog/action-actionlint@54e8faeff91fe07595b1ad3cfdc6aee0157bf51b # v1.40.0
+      - uses: reviewdog/action-actionlint@eaf7d6d28c81a1965d0a848128dde7c42f726097 # v1.54.0
         env:
           # SC2046 - Quote this to prevent word splitting.                - https://www.shellcheck.net/wiki/SC2046
           # SC2086 - Double quote to prevent globbing and word splitting. - https://www.shellcheck.net/wiki/SC2086
