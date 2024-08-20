@@ -62,7 +62,7 @@ jobs:
     needs: [ get-tag, e2e ]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: download vm-builder
         uses: actions/download-artifact@v4

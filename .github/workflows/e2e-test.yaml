@@ -81,7 +81,7 @@ jobs:
           - ${{ inputs.cluster || 'k3d' }}
     runs-on: [ self-hosted, gen3, large ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch all, so that we also include tags
 

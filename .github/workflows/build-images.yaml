@@ -97,7 +97,7 @@ jobs:
     needs: [ tags, vm-kernel ]
     runs-on: [ self-hosted, gen3, large ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch all, so that we also include tags
 
@@ -114,7 +114,7 @@ jobs:
         id: get-git-info
         run: |
           # note: --tags enables matching on lightweight (i.e. not annotated) tags, which normally
-          # wouldn't be necessary, except that actions/checkout@v3 does weird things to setup the
+          # wouldn't be necessary, except that actions/checkout@v4 does weird things to setup the
           # repository that means that we actually end up checked out with *just* a lightweight tag
           # to the tagged commit.
           echo "info=$(git describe --tags --long --dirty)" >> $GITHUB_OUTPUT
