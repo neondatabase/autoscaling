@@ -119,7 +119,7 @@ jobs:
 
       - name: login to docker hub
         if: steps.check-if-retag-needed.outputs.retag-needed == 'true'
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
@@ -157,7 +157,7 @@ jobs:
       - name: docker - setup buildx
         uses: docker/setup-buildx-action@v2
       - name: login to docker hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
