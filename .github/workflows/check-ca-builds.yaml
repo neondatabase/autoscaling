@@ -17,8 +17,8 @@ jobs:
   build-ca:
     runs-on: [ self-hosted, gen3, small ]
     steps:
-      - uses: actions/checkout@v3
-      - uses: docker/setup-buildx-action@v2
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
 
         # FIXME: is there a way to use docker/build-push without actually pushing here? It'd be good
         # to take advantage of all their extra stuff (build caches, etc.)

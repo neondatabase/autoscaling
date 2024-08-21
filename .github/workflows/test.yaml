@@ -11,19 +11,20 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - uses: technote-space/get-diff-action@v6
+      - uses: tj-actions/changed-files@c65cd883420fd2eb864698a825fc4162dd94482c # v44.5.7
+        id: changed-files
         with:
-          PATTERNS: |
+          files: |
             **/**.go
             "!test/"
             go.mod
             go.sum
       - name: Run Go Tests
-        if: env.GIT_DIFF
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' }}
         run: |
           make test
       - name: Archive code coverage results

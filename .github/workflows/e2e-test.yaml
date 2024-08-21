@@ -81,11 +81,11 @@ jobs:
           - ${{ inputs.cluster || 'k3d' }}
     runs-on: [ self-hosted, gen3, large ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch all, so that we also include tags
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
           # Disable cache on self-hosted runners to avoid /usr/bin/tar errors, see https://github.com/actions/setup-go/issues/403
@@ -137,7 +137,7 @@ jobs:
         run: |
           mkdir -p .docker-custom
           echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
-      - uses: docker/login-action@v2
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}

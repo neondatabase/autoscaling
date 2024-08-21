@@ -97,11 +97,11 @@ jobs:
     needs: [ tags, vm-kernel ]
     runs-on: [ self-hosted, gen3, large ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch all, so that we also include tags
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
           # Disable cache on self-hosted runners to avoid /usr/bin/tar errors, see https://github.com/actions/setup-go/issues/403
@@ -114,7 +114,7 @@ jobs:
         id: get-git-info
         run: |
           # note: --tags enables matching on lightweight (i.e. not annotated) tags, which normally
-          # wouldn't be necessary, except that actions/checkout@v3 does weird things to setup the
+          # wouldn't be necessary, except that actions/checkout@v4 does weird things to setup the
           # repository that means that we actually end up checked out with *just* a lightweight tag
           # to the tagged commit.
           echo "info=$(git describe --tags --long --dirty)" >> $GITHUB_OUTPUT
@@ -131,10 +131,10 @@ jobs:
         run: |
           mkdir -p .docker-custom
           echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
-      - uses: docker/setup-buildx-action@v2
+      - uses: docker/setup-buildx-action@v3
 
       - name: Login to Dockerhub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
@@ -170,7 +170,7 @@ jobs:
           docker rm -f ${ID}
 
       - name: Build and push neonvm-runner image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -190,7 +190,7 @@ jobs:
           fi
 
       - name: Build and push neonvm-controller image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -202,7 +202,7 @@ jobs:
             BUILDTAGS=${{ steps.controller-build-tags.outputs.buildtags }}
 
       - name: Build and push neonvm-vxlan-controller image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -211,7 +211,7 @@ jobs:
           tags: ${{ needs.tags.outputs.vxlan-controller }}
 
       - name: Build and push autoscale-scheduler image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -222,7 +222,7 @@ jobs:
             GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
 
       - name: Build and push autoscaler-agent image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -233,7 +233,7 @@ jobs:
             GIT_INFO=${{ steps.get-git-info.outputs.info }}
 
       - name: Build and push cluster-autoscaler image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
         with:
           context: cluster-autoscaler
