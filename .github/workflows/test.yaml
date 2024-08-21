@@ -6,7 +6,6 @@ on:
       - "**.go"
     branches:
       - main
-
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -29,3 +28,8 @@ jobs:
         if: env.GIT_DIFF
         run: |
           make test
+      - name: Archive code coverage results
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage
+          path: cover.out
