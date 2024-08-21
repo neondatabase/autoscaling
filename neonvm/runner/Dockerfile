@@ -1,5 +1,5 @@
 # Build the Go binary
-FROM golang:1.21 as builder
+FROM golang:1.21 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -27,7 +27,7 @@ COPY pkg/util pkg/util
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /runner neonvm/runner/main.go
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o /container-mgr neonvm/runner/container-mgr/*.go
 
-FROM alpine:3.18 as crictl
+FROM alpine:3.18 AS crictl
 
 RUN apk add --no-cache \
     curl
