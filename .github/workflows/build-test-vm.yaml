@@ -70,12 +70,8 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
-      # The default value is ~/.docker
       - name: set custom docker config directory
-        run: |
-          mkdir -p .docker-custom
-          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
+        uses: ./.github/actions/set-docker-config-dir
 
       - name: login to docker hub
         uses: docker/login-action@v3
@@ -89,8 +85,3 @@ jobs:
       - name: docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
         run: |
           docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
-
-      - name: Remove custom docker config directory
-        if: always()
-        run: |
-          rm -rf .docker-custom
