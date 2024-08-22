@@ -5,6 +5,7 @@ on:
       - "cluster-autoscaler/ca.tag"
       - "cluster-autoscaler/ca.patch"
       - "cluster-autoscaler/Dockerfile"
+      - ".github/workflows/check-ca-builds.yaml"
   push:
     branches:
       - main
@@ -12,15 +13,46 @@ on:
       - "cluster-autoscaler/ca.tag"
       - "cluster-autoscaler/ca.patch"
       - "cluster-autoscaler/Dockerfile"
+      - ".github/workflows/check-ca-builds.yaml"
 
 jobs:
   build-ca:
     runs-on: [ self-hosted, gen3, small ]
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
 
-        # FIXME: is there a way to use docker/build-push without actually pushing here? It'd be good
-        # to take advantage of all their extra stuff (build caches, etc.)
-      - name: Build cluster-autoscaler
-        run: docker buildx build --build-arg CA_GIT_TAG=$(cat cluster-autoscaler/ca.tag) cluster-autoscaler
+      # Use custom DOCKER_CONFIG directory to avoid conflicts with default settings
+      # The default value is ~/.docker
+      - name: set custom docker config directory
+        run: |
+          mkdir -p .docker-custom
+          echo DOCKER_CONFIG=$(pwd)/.docker-custom >> $GITHUB_ENV
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to Docker cache registry
+        uses: docker/login-action@v3
+        with:
+          registry: cache.neon.build
+          username: ${{ secrets.NEON_CI_DOCKERCACHE_USERNAME }}
+          password: ${{ secrets.NEON_CI_DOCKERCACHE_PASSWORD }}
+
+      - name: get CA base git tag
+        id: get-ca-tag
+        run: |
+          echo "tag=$(cat cluster-autoscaler/ca.tag)" | tee -a $GITHUB_OUTPUT
+
+      - name: Build cluster-autoscaler image
+        uses: docker/build-push-action@v6
+        with:
+          context: cluster-autoscaler
+          platforms: linux/amd64
+          push: false
+          file: cluster-autoscaler/Dockerfile
+          cache-from: type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
+          build-args: |
+            CA_GIT_TAG=${{ steps.get-ca-tag.outputs.tag }}
+
+      - name: Remove custom docker config directory
+        if: always()
+        run: |
+          rm -rf .docker-custom
