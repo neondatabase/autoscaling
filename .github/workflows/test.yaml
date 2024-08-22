@@ -23,8 +23,9 @@ jobs:
             "!test/"
             go.mod
             go.sum
+      # run tests on PR only if there are code changes and always on main
       - name: Run Go Tests
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' }}
+        if: ${{ (steps.changed-files.outputs.any_changed == 'true'  && github.event_name == 'pull_request') || github.ref == 'refs/heads/main' }}
         run: |
           make test
       - name: Archive code coverage results
