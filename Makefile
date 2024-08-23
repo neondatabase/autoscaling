@@ -410,7 +410,7 @@ ENVTEST_K8S_VERSION = 1.28.3
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 # k8s deps @ 1.28.0 https://github.com/kubernetes-sigs/controller-tools
-CONTROLLER_TOOLS_VERSION ?= v0.13.0
+CONTROLLER_TOOLS_VERSION ?= v0.14.0
 
 CODE_GENERATOR_VERSION ?= v0.28.12
 
