@@ -8,7 +8,7 @@ RUN set -e \
     && test -n "${KERNEL_VERSION}" \
     && echo "force this as a requirement for build-deps" > /build/arg-check-succeeded
 
-FROM ubuntu:23.10 as build-deps
+FROM ubuntu:23.10 AS build-deps
 WORKDIR /build
 
 RUN apt-get update && apt-get -y install \

@@ -19,10 +19,6 @@ For information on inter-version compatibility, see
 For now, the currently deployed configuration on staging is manually replicated
 in the [`staging` branch](https://github.com/neondatabase/autoscaling/tree/staging).
 
-## Releasing
-
-For Neon folks, documentation for doing releases can be found [here](https://www.notion.so/neondatabase/Releasing-Autoscaling-8d7cb8b9467e42b9b12c8bbd0ae07c81).
-
 ## Overview
 
 We want to dynamically change the amount of CPUs and memory of running postgres instances, _without

@@ -25,7 +25,7 @@ RUN set -e \
 		su-exec \
 		postgresql14
 # init postgres
-ENV PGDATA /var/lib/postgresql
+ENV PGDATA=/var/lib/postgresql
 RUN set -e \
     && mkdir -p ${PGDATA} /run/postgresql \
     && chown -R postgres:postgres ${PGDATA} /run/postgresql \

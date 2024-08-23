@@ -15,28 +15,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - uses: golangci/golangci-lint-action@v3
+      - uses: golangci/golangci-lint-action@v6
         with:
           # Required: the version of golangci-lint is required and
           # should be specified with patch version.
           version: v1.59.1
           args: --timeout 5m
-          github-token: ${{ secrets.github_token }}
-          # caching issues, see: https://github.com/golangci/golangci-lint-action/issues/244#issuecomment-1052190775
-          skip-pkg-cache: true
-          skip-build-cache: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-go-mod-tidy:
     name: check go mod tidy
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
       - name: go mod tidy
@@ -56,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: make generate
         run: |
           make generate
@@ -74,8 +71,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v3
-      - uses: codespell-project/actions-codespell@94259cd8be02ad2903ba34a22d9c13de21a74461 # v2.0
+      - uses: actions/checkout@v4
+      - uses: codespell-project/actions-codespell@406322ec52dd7b488e48c1c4b82e2a8b3a1bf630 # v2.1
         with:
           check_hidden: true
           ignore_words_list: NotIn # k8s match selectors; codespell tries to correct it to 'noting', 'not in', or 'notion'
@@ -85,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: reviewdog/action-actionlint@54e8faeff91fe07595b1ad3cfdc6aee0157bf51b # v1.40.0
+      - uses: reviewdog/action-actionlint@eaf7d6d28c81a1965d0a848128dde7c42f726097 # v1.54.0
         env:
           # SC2046 - Quote this to prevent word splitting.                - https://www.shellcheck.net/wiki/SC2046
           # SC2086 - Double quote to prevent globbing and word splitting. - https://www.shellcheck.net/wiki/SC2086
