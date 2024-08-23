@@ -31,7 +31,7 @@ node doesn't have the room.
 We've [tried a bunch](https://github.com/neondatabase/cloud/issues/1651) of existing tools and
 settled on the following:
 
-* Use [VM live migration](https://www.qemu.org/docs/master/devel/migration.html) to move running
+* Use [VM live migration](https://www.qemu.org/docs/master/devel/migration/index.html) to move running
   postgres instances between physical nodes
 * QEMU is used as our hypervisor
 * [NeonVM](https://github.com/neondatabase/autoscaling/tree/main/neonvm) orchestrates NeonVM VMs as custom resources in
