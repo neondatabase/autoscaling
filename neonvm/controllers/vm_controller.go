@@ -932,20 +932,8 @@ const (
 
 // runnerStatus returns a description of the status of the VM inside the runner pod.
 //
-// This is *similar* to the value of pod.Status.Phase, but takes into consideration the statuses of
-// the individual containers within the pod. This is because Kubernetes sets the pod phase to Failed
-// or Succeeded only if *all* pods have exited, whereas we'd like to consider the VM to be Failed or
-// Succeeded if *any* pod has exited.
-//
-// The full set of outputs is:
-//
-//   - runnerUnknown, if pod.Status.Phase is Unknown
-//   - runnerPending, if pod.Status.Phase is "" or Pending
-//   - runnerRunning, if pod.Status.Phase is Running, and no containers have exited
-//   - runnerFailed, if pod.Status.Phase is Failed, or if any container has failed, or if any
-//     container other than neonvm-runner has exited
-//   - runnerSucceeded, if pod.Status.Phase is Succeeded, or if neonvm-runner has exited
-//     successfully
+// This is *similar* to the value of pod.Status.Phase, but we'd like to retain our own abstraction
+// to have more control over the semantics.
 func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	switch pod.Status.Phase {
 	case "", corev1.PodPending:
@@ -956,43 +944,8 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 		return runnerFailed
 	case corev1.PodUnknown:
 		return runnerUnknown
-
-	// See comment above for context on this logic
 	case corev1.PodRunning:
-		nonRunnerContainerSucceeded := false
-		runnerContainerSucceeded := false
-
-		for _, stat := range pod.Status.ContainerStatuses {
-			if stat.State.Terminated != nil {
-				failed := stat.State.Terminated.ExitCode != 0
-				isRunner := stat.Name == "neonvm-runner"
-
-				if failed {
-					// return that the "runner" has failed if any container has.
-					return runnerFailed
-				} else /* succeeded */ {
-					if isRunner {
-						// neonvm-runner succeeded. We'll return runnerSucceeded if no other
-						// container has failed.
-						runnerContainerSucceeded = true
-					} else {
-						// Other container has succeeded. We'll return runnerSucceeded if
-						// neonvm-runner has succeeded, but runnerFailed if this exited while
-						// neonvm-runner is still going.
-						nonRunnerContainerSucceeded = true
-					}
-				}
-			}
-		}
-
-		if runnerContainerSucceeded {
-			return runnerSucceeded
-		} else if nonRunnerContainerSucceeded {
-			return runnerFailed
-		} else {
-			return runnerRunning
-		}
-
+		return runnerRunning
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
