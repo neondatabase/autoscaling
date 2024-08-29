@@ -48,7 +48,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/tools/record"
 
@@ -94,7 +93,6 @@ type VMReconciler struct {
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachines/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=virtualmachines/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
-//+kubebuilder:rbac:groups=core,resources=nodes,verbs=list
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;list;watch
@@ -1486,10 +1484,8 @@ func podSpec(
 					}},
 					Command: func() []string {
 						cmd := []string{"runner"}
-						if config.UseContainerMgr || config.DisableRunnerCgroup {
-							cmd = append(cmd, "-skip-cgroup-management")
-						}
 						if config.DisableRunnerCgroup {
+							cmd = append(cmd, "-skip-cgroup-management")
 							// cgroup management disabled, but we still need something to provide
 							// the server, so the runner will just provide a dummy implementation.
 							cmd = append(cmd, "-enable-dummy-cpu-server")
@@ -1535,7 +1531,7 @@ func podSpec(
 							MountPropagation: lo.ToPtr(corev1.MountPropagationNone),
 						}
 
-						if config.UseContainerMgr || config.DisableRunnerCgroup {
+						if config.DisableRunnerCgroup {
 							return []corev1.VolumeMount{images}
 						} else {
 							// the /sys/fs/cgroup mount is only necessary if neonvm-runner has to
@@ -1545,62 +1541,8 @@ func podSpec(
 					}(),
 					Resources: vm.Spec.PodResources,
 				}
-				containerMgr := corev1.Container{
-					Image: image,
-					Name:  "neonvm-container-mgr",
-					Command: []string{
-						"container-mgr",
-						"-port", strconv.Itoa(int(vm.Spec.RunnerPort)),
-						"-init-milli-cpu", strconv.Itoa(int(vm.Spec.Guest.CPUs.Use)),
-					},
-					Env: []corev1.EnvVar{
-						{
-							Name: "K8S_POD_UID",
-							ValueFrom: &corev1.EnvVarSource{
-								FieldRef: &corev1.ObjectFieldSelector{
-									FieldPath: "metadata.uid",
-								},
-							},
-						},
-						{
-							Name:  "CRI_ENDPOINT",
-							Value: fmt.Sprintf("unix://%s", config.criEndpointSocketPath()),
-						},
-					},
-					LivenessProbe: &corev1.Probe{
-						InitialDelaySeconds: 10,
-						ProbeHandler: corev1.ProbeHandler{
-							HTTPGet: &corev1.HTTPGetAction{
-								Path: "/healthz",
-								Port: intstr.FromInt(int(vm.Spec.RunnerPort)),
-							},
-						},
-					},
-					Resources: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("50m"),
-							corev1.ResourceMemory: resource.MustParse("50Mi"),
-						},
-						Limits: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("1"), // cpu limit > request, because usage is spiky
-							corev1.ResourceMemory: resource.MustParse("50Mi"),
-						},
-					},
-					// socket for crictl to connect to
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      "containerdsock",
-							MountPath: config.criEndpointSocketPath(),
-						},
-					},
-				}
 
-				if config.UseContainerMgr {
-					return []corev1.Container{runner, containerMgr}
-				} else {
-					// Return only the runner if we aren't supposed to use container-mgr
-					return []corev1.Container{runner}
-				}
+				return []corev1.Container{runner}
 			}(),
 			Volumes: func() []corev1.Volume {
 				images := corev1.Volume{
@@ -1618,19 +1560,7 @@ func podSpec(
 						},
 					},
 				}
-				containerdSock := corev1.Volume{
-					Name: "containerdsock",
-					VolumeSource: corev1.VolumeSource{
-						HostPath: &corev1.HostPathVolumeSource{
-							Path: config.criEndpointSocketPath(),
-							Type: lo.ToPtr(corev1.HostPathSocket),
-						},
-					},
-				}
-
-				if config.UseContainerMgr {
-					return []corev1.Volume{images, containerdSock}
-				} else if config.DisableRunnerCgroup {
+				if config.DisableRunnerCgroup {
 					return []corev1.Volume{images}
 				} else {
 					return []corev1.Volume{images, cgroup}
@@ -1687,9 +1617,6 @@ func podSpec(
 	// If a custom neonvm-runner image is requested, use that instead:
 	if vm.Spec.RunnerImage != nil {
 		pod.Spec.Containers[0].Image = *vm.Spec.RunnerImage
-		if config.UseContainerMgr {
-			pod.Spec.Containers[1].Image = *vm.Spec.RunnerImage
-		}
 	}
 
 	// If a custom kernel is used, add that image:

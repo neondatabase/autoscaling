@@ -38,16 +38,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -100,7 +97,6 @@ func main() {
 	var probeAddr string
 	var concurrencyLimit int
 	var skipUpdateValidationFor map[types.NamespacedName]struct{}
-	var enableContainerMgr bool
 	var disableRunnerCgroup bool
 	var qemuDiskCacheSettings string
 	var defaultMemoryProvider vmv1.MemoryProvider
@@ -139,8 +135,6 @@ func main() {
 			return nil
 		},
 	)
-	// note: cannot have both -enable-container-mgr and -disable-runner-cgroup.
-	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.BoolVar(&disableRunnerCgroup, "disable-runner-cgroup", false, "Disable creation of a cgroup in neonvm-runner for fractional CPU limiting")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
 	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
@@ -153,10 +147,6 @@ func main() {
 
 	if defaultMemoryProvider == "" {
 		fmt.Fprintln(os.Stderr, "missing required flag '-default-memory-provider'")
-		os.Exit(1)
-	}
-	if disableRunnerCgroup && enableContainerMgr {
-		fmt.Fprintln(os.Stderr, "Cannot have both '-enable-container-mgr' and '-disable-runner-cgroup'")
 		os.Exit(1)
 	}
 
@@ -174,14 +164,6 @@ func main() {
 	cfg := ctrl.GetConfigOrDie()
 	cfg.QPS = 1000
 	cfg.Burst = 2000
-
-	// fetch node info to determine if we're running in k3s
-	isK3s, err := checkIfRunningInK3sCluster(cfg)
-	if err != nil {
-		setupLog.Error(err, "unable to check if running in k3s")
-		os.Exit(1)
-	}
-
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
@@ -210,8 +192,6 @@ func main() {
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
 
 	rc := &controllers.ReconcilerConfig{
-		IsK3s:                   isK3s,
-		UseContainerMgr:         enableContainerMgr,
 		DisableRunnerCgroup:     disableRunnerCgroup,
 		MaxConcurrentReconciles: concurrencyLimit,
 		SkipUpdateValidationFor: skipUpdateValidationFor,
@@ -289,28 +269,6 @@ func main() {
 		setupLog.Error(err, "run manager error")
 		os.Exit(1)
 	}
-}
-
-func checkIfRunningInK3sCluster(cfg *rest.Config) (bool, error) {
-	client, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return false, fmt.Errorf("failed to create new k8s client: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Second)
-	defer cancel()
-
-	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return false, err
-	}
-
-	for _, node := range nodes.Items {
-		if strings.HasPrefix(node.Status.NodeInfo.OSImage, "K3s") {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func debugServerFunc(reconcilers ...controllers.ReconcilerWithMetrics) manager.RunnableFunc {

@@ -85,7 +85,6 @@ func (r *VirtualMachine) ValidateCreate() (admission.Warnings, error) {
 		"runtime",
 		"swapdisk",
 		"sysfscgroup",
-		"containerdsock",
 		"ssh-privatekey",
 		"ssh-publickey",
 		"ssh-authorized-keys",
