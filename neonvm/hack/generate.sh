@@ -4,7 +4,7 @@
 
 set -eu -o pipefail
 
-bash $GOPATH/src/k8s.io/code-generator/kube_codegen.sh "deepcopy,client,informer,lister" \
+bash $GOPATH/src/k8s.io/code-generator/generate-groups.sh "deepcopy,client,informer,lister" \
     github.com/neondatabase/autoscaling/neonvm/client \
     github.com/neondatabase/autoscaling/neonvm/apis \
     neonvm:v1 \
