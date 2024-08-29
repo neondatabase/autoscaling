@@ -36,7 +36,7 @@ files:
     hostPath: cgconfig.conf
 build: |
   # Build vm-monitor
-  FROM rust:1.79-alpine as monitor-builder
+  FROM rust:1.79-alpine AS monitor-builder
   WORKDIR /workspace
 
   RUN apk add musl-dev git openssl-dev
@@ -85,7 +85,7 @@ merge: |
                 postgresql16
 
   # Initialize postgres
-  ENV PGDATA /var/lib/postgresql
+  ENV PGDATA=/var/lib/postgresql
   RUN set -e \
       && mkdir -p ${PGDATA} /run/postgresql \
       && chown -R postgres:postgres ${PGDATA} /run/postgresql \

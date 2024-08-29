@@ -84,8 +84,10 @@ X11Forwarding no
 # no default banner path
 #Banner none
 
-# override default of no subsystems
-Subsystem	sftp	/usr/lib/ssh/sftp-server
+# Override default of no subsystems
+# Use internal-sftp for SFTP connections. This is the modern method and doesn't require additional binaries,
+# as the logic is implemented directly within the sshd binary.
+Subsystem	sftp	internal-sftp
 
 # Example of overriding settings on a per-user basis
 #Match User anoncvs
