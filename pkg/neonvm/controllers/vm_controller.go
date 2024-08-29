@@ -939,6 +939,14 @@ const (
 // This is *similar* to the value of pod.Status.Phase, but we'd like to retain our own abstraction
 // to have more control over the semantics.
 func runnerStatus(pod *corev1.Pod) runnerStatusKind {
+	// Add 5 seconds to account for clock skew and k8s lagging behind.
+	deadline := metav1.NewTime(metav1.Now().Add(-5 * time.Second))
+
+	// If the pod is being deleted, we consider it failed. The deletion might be stalled
+	// because the node is shutting down, or the pod is stuck pulling an image.
+	if pod.DeletionTimestamp != nil && pod.DeletionTimestamp.Before(&deadline) {
+		return runnerFailed
+	}
 	switch pod.Status.Phase {
 	case "", corev1.PodPending:
 		return runnerPending
