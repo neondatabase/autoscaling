@@ -14,12 +14,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - nodes
-  verbs:
-  - list
-- apiGroups:
-  - ""
-  resources:
   - pods
   verbs:
   - create

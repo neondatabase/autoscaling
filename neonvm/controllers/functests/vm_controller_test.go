@@ -107,8 +107,6 @@ var _ = Describe("VirtualMachine controller", func() {
 				Scheme:   k8sClient.Scheme(),
 				Recorder: nil,
 				Config: &controllers.ReconcilerConfig{
-					IsK3s:                   false,
-					UseContainerMgr:         true,
 					DisableRunnerCgroup:     false,
 					MaxConcurrentReconciles: 1,
 					SkipUpdateValidationFor: nil,

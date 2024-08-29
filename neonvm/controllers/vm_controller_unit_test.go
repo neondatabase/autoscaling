@@ -115,8 +115,6 @@ func newTestParams(t *testing.T) *testParams {
 		Recorder: params.mockRecorder,
 		Scheme:   scheme,
 		Config: &ReconcilerConfig{
-			IsK3s:                   false,
-			UseContainerMgr:         false,
 			DisableRunnerCgroup:     false,
 			MaxConcurrentReconciles: 10,
 			SkipUpdateValidationFor: nil,
