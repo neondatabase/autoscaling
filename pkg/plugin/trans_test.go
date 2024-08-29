@@ -369,18 +369,16 @@ func Test_handleRequested_nomigration(t *testing.T) {
 			lastPermit: lo.ToPtr[uint](4),
 			factor:     2,
 
-			// FIXME: This is actually incorrect / not working. The request should be rejected with
-			// only 6 reserved, because otherwise we end up over the total (as seen below).
-			verdict: "",
+			verdict: "Register 4 -> 6 (wanted 8) (pressure 0 -> 2); node reserved 7 -> 9 (of 10), node capacityPressure 0 -> 2 (0 -> 0 spoken for)",
 			podAfter: pod{
-				reserved: 8,
+				reserved: 6,
 				buffer:   0,
-				pressure: 0,
+				pressure: 2,
 			},
 			nodeAfter: node{
-				reserved: 11,
+				reserved: 9,
 				buffer:   0,
-				pressure: 0,
+				pressure: 2,
 			},
 		},
 		{
@@ -403,18 +401,16 @@ func Test_handleRequested_nomigration(t *testing.T) {
 			lastPermit: lo.ToPtr[uint](2),
 			factor:     1,
 
-			// FIXME: This is actually incorrect / not working. The request should be rejected with
-			// only 2 reserved, because otherwise we end up over the total (as seen below).
-			verdict: "",
+			verdict: "Register 2 -> 2 (wanted 3) (pressure 0 -> 1); node reserved 12 -> 12 (of 10), node capacityPressure 0 -> 1 (0 -> 0 spoken for)",
 			podAfter: pod{
-				reserved: 3,
+				reserved: 2,
 				buffer:   0,
-				pressure: 0,
+				pressure: 1,
 			},
 			nodeAfter: node{
-				reserved: 13,
+				reserved: 12,
 				buffer:   0,
-				pressure: 0,
+				pressure: 1,
 			},
 		},
 		{
