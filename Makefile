@@ -88,7 +88,6 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	set -x ; \
 	docker run --rm \
 		"$${volumes[@]}" \
-		--volume "$$volumes" \
 		--workdir /go/src/github.com/neondatabase/autoscaling \
 		--user $(shell id -u $(USER)):$(shell id -g $(USER)) \
 		$$(cat $$iidfile) \
