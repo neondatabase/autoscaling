@@ -1375,6 +1375,24 @@ func podSpec(
 		return nil, fmt.Errorf("marshal VM Status: %w", err)
 	}
 
+	// We have to add tolerations explicitly here.
+	// Otherwise, if the k8s node becomes unavailable, the default
+	// tolerations will be added, which are 300s (5m) long, which is
+	// not acceptable for us.
+	tolerations := append([]corev1.Toleration{}, vm.Spec.Tolerations...)
+	tolerations = append(tolerations,
+		corev1.Toleration{
+			Key:               "node.kubernetes.io/not-ready",
+			TolerationSeconds: lo.ToPtr(int64(30)),
+			Effect:            "NoExecute",
+		},
+		corev1.Toleration{
+			Key:               "node.kubernetes.io/unreachable",
+			TolerationSeconds: lo.ToPtr(int64(30)),
+			Effect:            "NoExecute",
+		},
+	)
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        vm.Status.PodName,
@@ -1389,7 +1407,7 @@ func podSpec(
 			TerminationGracePeriodSeconds: vm.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  vm.Spec.NodeSelector,
 			ImagePullSecrets:              vm.Spec.ImagePullSecrets,
-			Tolerations:                   vm.Spec.Tolerations,
+			Tolerations:                   tolerations,
 			ServiceAccountName:            vm.Spec.ServiceAccountName,
 			SchedulerName:                 vm.Spec.SchedulerName,
 			Affinity:                      affinity,
