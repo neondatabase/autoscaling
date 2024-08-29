@@ -82,8 +82,8 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	volumes=('--volume' "$$PWD:/go/src/github.com/neondatabase/autoscaling") ; \
 	if [ -f .git ]; then \
 		gitdir="$$(git rev-parse --git-common-dir)" ; \
-		volumes+=('--volume') ; \
-		volumes+=("$$gitdir:$$gitdir") ; \
+		gitdir="$$(cd -P -- $$gitdir && pwd)" ; \
+		volumes+=('--volume' "$$gitdir:$$gitdir") ; \
 	fi ; \
 	set -x ; \
 	docker run --rm \
