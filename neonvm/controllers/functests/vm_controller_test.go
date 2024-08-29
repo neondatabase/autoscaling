@@ -109,6 +109,7 @@ var _ = Describe("VirtualMachine controller", func() {
 				Config: &controllers.ReconcilerConfig{
 					IsK3s:                   false,
 					UseContainerMgr:         true,
+					DisableRunnerCgroup:     false,
 					MaxConcurrentReconciles: 1,
 					SkipUpdateValidationFor: nil,
 					QEMUDiskCacheSettings:   "cache=none",

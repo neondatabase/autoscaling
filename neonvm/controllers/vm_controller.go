@@ -1486,8 +1486,13 @@ func podSpec(
 					}},
 					Command: func() []string {
 						cmd := []string{"runner"}
-						if config.UseContainerMgr {
+						if config.UseContainerMgr || config.DisableRunnerCgroup {
 							cmd = append(cmd, "-skip-cgroup-management")
+						}
+						if config.DisableRunnerCgroup {
+							// cgroup management disabled, but we still need something to provide
+							// the server, so the runner will just provide a dummy implementation.
+							cmd = append(cmd, "-enable-dummy-cpu-server")
 						}
 						cmd = append(
 							cmd,
@@ -1530,7 +1535,7 @@ func podSpec(
 							MountPropagation: lo.ToPtr(corev1.MountPropagationNone),
 						}
 
-						if config.UseContainerMgr {
+						if config.UseContainerMgr || config.DisableRunnerCgroup {
 							return []corev1.VolumeMount{images}
 						} else {
 							// the /sys/fs/cgroup mount is only necessary if neonvm-runner has to
@@ -1625,6 +1630,8 @@ func podSpec(
 
 				if config.UseContainerMgr {
 					return []corev1.Volume{images, containerdSock}
+				} else if config.DisableRunnerCgroup {
+					return []corev1.Volume{images}
 				} else {
 					return []corev1.Volume{images, cgroup}
 				}
