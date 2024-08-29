@@ -23,6 +23,14 @@ type ReconcilerConfig struct {
 	// This is defined as a config option so we can do a gradual rollout of this change.
 	UseContainerMgr bool
 
+	// DisableRunnerCgroup, if true, disables running QEMU in a cgroup in new VM runner pods.
+	// Fractional CPU scaling will continue to *pretend* to work, but it will not do anything in
+	// practice.
+	//
+	// Under the hood, this results in passing -skip-cgroup-management and -enable-dummy-cpu-server
+	// to neonvm-runner.
+	DisableRunnerCgroup bool
+
 	MaxConcurrentReconciles int
 
 	// SkipUpdateValidationFor is the set of object names that we should ignore when doing webhook
