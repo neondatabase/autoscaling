@@ -313,7 +313,8 @@ func (r resourceTransitioner[T]) handleRequestedGeneric(
 		// the factor.
 		maxIncrease := (remainingReservable / opts.factor) * opts.factor
 		// ... but we must allow at least opts.forceApprovalMinimum
-		maxIncrease = util.Max(maxIncrease, opts.forceApprovalMinimum)
+		increaseFromForceApproval := util.SaturatingSub(opts.forceApprovalMinimum, r.pod.Reserved)
+		maxIncrease = util.Max(maxIncrease, increaseFromForceApproval)
 
 		if increase > maxIncrease /* increases are bound by what's left in the node */ {
 			r.pod.CapacityPressure = increase - maxIncrease
