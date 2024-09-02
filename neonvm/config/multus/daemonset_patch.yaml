@@ -22,3 +22,37 @@ spec:
                   operator: In
                   values:
                     - linux
+      initContainers:
+        - name: install-multus-binary
+          image: ghcr.io/k8snetworkplumbingwg/multus-cni:v3.9.2-thick-amd64
+          command:
+            - "cp"
+            - "/usr/src/multus-cni/bin/multus"
+            - "/host/opt/cni/bin/multus"
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "15Mi"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: cnibin
+              mountPath: /host/opt/cni/bin
+              mountPropagation: Bidirectional
+        - name: generate-kubeconfig
+          image: ghcr.io/k8snetworkplumbingwg/multus-cni:v3.9.2-thick-amd64
+          command:
+            - "/usr/src/multus-cni/bin/generate-kubeconfig"
+          args:
+            - "-k8s-service-host=$(KUBERNETES_SERVICE_HOST)"
+            - "-k8s-service-port=$(KUBERNETES_SERVICE_PORT)"
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "15Mi"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: cni
+              mountPath: /host/etc/cni/net.d
+              mountPropagation: Bidirectional
