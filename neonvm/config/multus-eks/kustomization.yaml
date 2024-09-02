@@ -2,7 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 bases:
-- base.yaml
+- nad-crd.yaml
+- rbac.yaml
+- daemonset.yaml
 
 images:
 - name: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/multus-cni
