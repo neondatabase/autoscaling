@@ -29,10 +29,6 @@ spec:
                 operator: In
                 values:
                 - linux
-              - key: eks.amazonaws.com/compute-type
-                operator: NotIn
-                values:
-                - fargate
       hostNetwork: true
       tolerations:
       - operator: Exists
@@ -40,14 +36,9 @@ spec:
       serviceAccountName: multus
       containers:
       - name: kube-multus
-        image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/multus-cni:v3.9.2-eksbuild.1
-        command: ["/entrypoint.sh"]
-        args:
-        - "--multus-conf-file=auto"
-        - "--cni-version=0.4.0"
-        - "--multus-master-cni-file-name=10-aws.conflist"
-        - "--multus-log-level=error"
-        - "--multus-log-file=/var/log/aws-routed-eni/multus.log"
+        image: multus-cni:replaceme
+        command: ["replaceme"]
+        args: ["replaceme"]
         resources:
           requests:
             cpu: "100m"
