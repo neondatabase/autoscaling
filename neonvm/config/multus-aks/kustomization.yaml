@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+- ../multus-common
+
+images:
+- name: multus-cni
+  newName: ghcr.io/k8snetworkplumbingwg/multus-cni
+  newTag: v3.9.2
+
+patches:
+- target:
+    kind: DaemonSet
+    name: kube-multus-ds
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/command
+      value: ["/entrypoint.sh"]
+    - op: replace
+      path: /spec/template/spec/containers/0/args
+      value:
+        - "--multus-conf-file=auto"
+        - "--cni-version=0.3.1"
+        - "--multus-master-cni-file-name=10-azure.conflist"
+        - "--multus-log-level=error"
+        - "--multus-log-file=/var/log/neon-multus.log"
+
