@@ -4,14 +4,33 @@ on:
   push:
     branches:
       - main
+
+env:
+  BUCKET: neon-github-public-dev
+  BUCKET_PATH: autoscaling/code-coverage
+  REPORT_PREFIX: https://neon-github-public-dev.s3.amazonaws.com/autoscaling/code-coverage
+
+
 jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      # permissions are required for the fgrosse/go-coverage-report action
+      contents: read
+      actions: read
+      pull-requests: write
+      # aws-actions/configure-aws-credentials
+      id-token: write
     strategy:
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::369495373322:role/gha-oidc-s3-rw
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
@@ -25,11 +44,71 @@ jobs:
             go.sum
       # run tests on PR only if there are code changes and always on main
       - name: Run Go Tests
-        if: ${{ (steps.changed-files.outputs.any_changed == 'true'  && github.event_name == 'pull_request') || github.ref == 'refs/heads/main' }}
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request' || github.ref_name == 'main' }}
         run: |
           make test
       - name: Archive code coverage results
         uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request' || github.ref_name == 'main') }}
         with:
           name: code-coverage
           path: cover.out
+      - name: Upload html coverage report
+        id: html-artifact
+        env:
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request')}}
+        run: |
+          aws s3 cp cover.html "s3://${BUCKET}/${BUCKET_PATH}/${COMMIT_SHA}/index.html"
+      - name: "Code coverage report"
+        uses: fgrosse/go-coverage-report@v1.2.0
+        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request')}}
+        with:
+          coverage-artifact-name: "code-coverage"
+          coverage-file-name: "cover.out"
+
+      - name: Create comment with html report
+        uses: actions/github-script@v6
+        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request')}}
+        env:
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        with:
+          script: |
+            const commentIdentifier = "Coverage Δ"; // the same marker as in the fgrosse/go-coverage-report
+            const htmlCoverageTitle = "\n ### HTML Report"
+
+            // Get all comments on the pull request
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            // Find the comment that contains the identifier
+            const existingComment = comments.find(comment => comment.body.includes(commentIdentifier));
+            const htmlCoverageTitleIdx = existingComment.body.indexOf(htmlCoverageTitle)
+            var originalCommentBody = existingComment.body
+
+            if (htmlCoverageTitleIdx != -1) {
+              originalCommentBody = existingComment.body.slice(0, htmlCoverageTitleIdx)
+            }
+            const reportURL = "${{env.REPORT_PREFIX}}/${{env.COMMIT_SHA}}/index.html"
+            const newBody = `${originalCommentBody}${htmlCoverageTitle} \n <a href="${reportURL}">Click to open</a>`;
+
+            if (existingComment) {
+              // Update the existing comment
+              await github.rest.issues.updateComment({
+                comment_id: existingComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: newBody,
+              });
+            } else {
+              // Create a new comment
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: newBody,
+              });
+            }
