@@ -48,6 +48,8 @@ var (
 	scriptUdevInit string
 	//go:embed files/resize-swap.sh
 	scriptResizeSwap string
+	//go:embed files/set-disk-quota.sh
+	scriptSetDiskQuota string
 	//go:embed files/vector.yaml
 	configVector string
 	//go:embed files/chrony.conf
@@ -335,6 +337,7 @@ func main() {
 		{"sshd_config", configSshd},
 		{"udev-init.sh", scriptUdevInit},
 		{"resize-swap.sh", scriptResizeSwap},
+		{"set-disk-quota.sh", scriptSetDiskQuota},
 	}
 
 	for _, f := range files {
