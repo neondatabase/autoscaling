@@ -154,33 +154,25 @@ func (r *Runner) Spawn(ctx context.Context, logger *zap.Logger, vmInfoUpdated ut
 			r.global.TriggerRestartIfNecessary(ctx, logger, r.podName, r.podIP)
 		}()
 
-		err := r.Run(ctx, logger, vmInfoUpdated)
+		r.Run(ctx, logger, vmInfoUpdated)
 		endTime := time.Now()
 
 		exitKind := podStatusExitCanceled // normal exit, only by context being canceled.
-		if err != nil {
-			exitKind = podStatusExitErrored
-			r.global.metrics.runnerFatalErrors.Inc()
-		}
 		r.status.update(r.global, func(stat podStatus) podStatus {
 			stat.endState = &podStatusEndState{
 				ExitKind: exitKind,
-				Error:    err,
+				Error:    nil,
 				Time:     endTime,
 			}
 			return stat
 		})
 
-		if err != nil {
-			logger.Error("Ended with error", zap.Error(err))
-		} else {
-			logger.Info("Ended without error")
-		}
+		logger.Info("Ended without error")
 	}()
 }
 
 // Run is the main entrypoint to the long-running per-VM pod tasks
-func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util.CondChannelReceiver) error {
+func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util.CondChannelReceiver) {
 	ctx, r.shutdown = context.WithCancel(ctx)
 	defer r.shutdown()
 
@@ -324,7 +316,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	// pod was deleted, or the autoscaler-agent is exiting.
 	select {
 	case <-ctx.Done():
-		return nil
+		return
 	case err := <-r.backgroundPanic:
 		panic(err)
 	}
