@@ -12,9 +12,14 @@ GO_BASE_IMG ?= autoscaling-go-base:dev
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG16_DISK_TEST_IMG ?= pg16-disk-test:dev
 
-## Golang details
+## Golang details (for local tooling)
 GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
+
+# The target architecture for linux kernel. Possible values: amd64 or arm64. 
+# Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile.kernel-builder
+KERNEL_TARGET_ARCH ?= amd64
+
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
@@ -244,8 +249,21 @@ ifndef ignore-not-found
   ignore-not-found = false
 endif
 
+# Build the kernel for the amd64 architecture. Uses generic target.
+.PHONY: kernel_amd64
+kernel_amd64: KERNEL_TARGET_ARCH=amd64
+kernel_amd64: kernel
+
+# Build the kernel for the arm64 architecture. Uses generic target.
+.PHONY: kernel_arm64
+kernel_arm64: KERNEL_TARGET_ARCH=arm64
+kernel_arm64: kernel
+
+# Build the kernel for the target architecture.
+# The builder image platform is not specified because the kernel is built for the target architecture using crosscompilation.
+# Target is generic and can be used for any supported architecture by specifying the KERNEL_TARGET_ARCH variable.
 .PHONY: kernel
-kernel: ## Build linux kernel.
+kernel:
 	rm -f neonvm/hack/kernel/vmlinuz; \
 	linux_config=$$(ls neonvm/hack/kernel/linux-config-*) \
 	kernel_version=$${linux_config##*-} \
@@ -253,7 +271,7 @@ kernel: ## Build linux kernel.
 	trap "rm $$iidfile" EXIT; \
 	docker buildx build \
 	    --build-arg KERNEL_VERSION=$$kernel_version \
-		--platform linux/amd64 \
+		--target "kernel_${KERNEL_TARGET_ARCH}" \
 		--pull \
 		--load \
 		--iidfile $$iidfile \

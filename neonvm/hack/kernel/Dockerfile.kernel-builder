@@ -15,6 +15,8 @@ RUN apt-get update && apt-get -y install \
     curl \
     ca-certificates \
     build-essential \
+    gcc-x86-64-linux-gnu \
+    gcc-aarch64-linux-gnu \
     flex \
     bison \
     libelf-dev \
@@ -46,16 +48,31 @@ RUN set -e \
     && tar --strip-components=1 -C linux-${KERNEL_VERSION} -xf linux-${KERNEL_VERSION}.tar.xz
 
 
-FROM build-deps AS build
 
+### Cross-compilation related steps
+
+# Build the kernel on amd64
+FROM build-deps AS build_amd64
 ARG KERNEL_VERSION
-
 ADD linux-config-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
+RUN cd linux-${KERNEL_VERSION} && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- -j `nproc`
 
-RUN cd linux-${KERNEL_VERSION} && make -j `nproc`
-
+# Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
-FROM alpine:3.19
+FROM alpine:3.19 AS kernel_amd64
 ARG KERNEL_VERSION
-COPY --from=build /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
+COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
+
+# Build the kernel on amd64
+FROM build-deps AS build_arm64
+ARG KERNEL_VERSION
+ADD linux-config-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
+RUN cd linux-${KERNEL_VERSION} && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j `nproc`
+
+# Copy the kernel image to a separate step
+# Use alpine so that `cp` is available when loading custom kernels for the runner pod.
+# See the neonvm controller's pod creation logic for more detail.
+FROM alpine:3.18 AS kernel_arm64
+ARG KERNEL_VERSION
+COPY --from=build_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
