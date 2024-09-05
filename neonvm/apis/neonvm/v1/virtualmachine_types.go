@@ -311,13 +311,17 @@ type GuestSettings struct {
 	//
 	// +optional
 	SwapInfo *SwapInfo `json:"swapInfo,omitempty"`
+
+	// If true, the VM kernel will not count disk IO towards load average
+	DisableLoadavgIO *bool `json:"disableLoadavgIO,omitempty"`
 }
 
 func (s *GuestSettings) WithoutSwapFields() *GuestSettings {
 	return &GuestSettings{
-		Sysctl:   s.Sysctl,
-		Swap:     nil,
-		SwapInfo: nil,
+		Sysctl:           s.Sysctl,
+		Swap:             nil,
+		SwapInfo:         nil,
+		DisableLoadavgIO: s.DisableLoadavgIO,
 	}
 }
 

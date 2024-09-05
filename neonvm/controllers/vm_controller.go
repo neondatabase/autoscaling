@@ -1502,6 +1502,11 @@ func podSpec(
 						if memoryProvider == vmv1.MemoryProviderVirtioMem {
 							cmd = append(cmd, "-memhp-auto-movable-ratio", config.MemhpAutoMovableRatio)
 						}
+						if gs := vm.Spec.Guest.Settings; gs != nil {
+							if lo.FromPtrOr(gs.DisableLoadavgIO, false) {
+								cmd = append(cmd, "-disable-loadavg-io")
+							}
+						}
 						// put these last, so that the earlier args are easier to see (because these
 						// can get quite large)
 						cmd = append(

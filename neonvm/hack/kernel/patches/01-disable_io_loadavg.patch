@@ -1,0 +1,28 @@
+diff -ru a/kernel/sched/loadavg.c b/kernel/sched/loadavg.c
+--- a/kernel/sched/loadavg.c	2024-05-25 07:21:36.000000000 -0700
++++ b/kernel/sched/loadavg.c	2024-09-05 13:21:10.490828441 -0700
+@@ -60,6 +60,14 @@
+ unsigned long avenrun[3];
+ EXPORT_SYMBOL(avenrun); /* should be removed */
+ 
++/* custom setting to disable IO in load average calculations */
++static bool disable_loadavg_io = false;
++static int __init setup_disable_loadavg_io(char *str)
++{
++	return kstrtobool(str, &disable_loadavg_io) == 0;
++}
++__setup("disable_loadavg_io=", setup_disable_loadavg_io);
++
+ /**
+  * get_avenrun - get the load average array
+  * @loads:	pointer to dest load array
+@@ -80,7 +88,8 @@
+ 	long nr_active, delta = 0;
+ 
+ 	nr_active = this_rq->nr_running - adjust;
+-	nr_active += (int)this_rq->nr_uninterruptible;
++	if (!disable_loadavg_io)
++		nr_active += (int)this_rq->nr_uninterruptible;
+ 
+ 	if (nr_active != this_rq->calc_load_active) {
+ 		delta = nr_active - this_rq->calc_load_active;

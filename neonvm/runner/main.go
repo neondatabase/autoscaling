@@ -600,6 +600,7 @@ type Config struct {
 	diskCacheSettings    string
 	memoryProvider       vmv1.MemoryProvider
 	autoMovableRatio     string
+	disableLoadavgIO     bool
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -613,6 +614,7 @@ func newConfig(logger *zap.Logger) *Config {
 		diskCacheSettings:    "cache=none",
 		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
 		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
+		disableLoadavgIO:     false,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -633,6 +635,10 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
 	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
 		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
+	flag.BoolVar(&cfg.disableLoadavgIO, "disable-loadavg-io",
+		cfg.disableLoadavgIO,
+		"Don't count tasks in uninterruptible sleep (typically disk IO) towards load average, in the guest kernel",
+	)
 
 	flag.Parse()
 
@@ -965,6 +971,10 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 
 	if len(hostname) != 0 {
 		cmdlineParts = append(cmdlineParts, fmt.Sprintf("hostname=%s", hostname))
+	}
+
+	if cfg.disableLoadavgIO {
+		cmdlineParts = append(cmdlineParts, "disable_loadavg_io=y")
 	}
 
 	if cfg.appendKernelCmdline != "" {
