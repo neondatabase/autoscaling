@@ -87,14 +87,20 @@ jobs:
 
             // Find the comment that contains the identifier
             const existingComment = comments.find(comment => comment.body.includes(commentIdentifier));
-            const htmlCoverageTitleIdx = existingComment.body.indexOf(htmlCoverageTitle)
-            var originalCommentBody = existingComment.body
+            // If there's no original comment, create a new one with hidden comment identifier
+            // to make it easier to find next time
+            let originalCommentBody = `<!-- ${commentIdentifier} -->No changes to the coverage.\n\n`
+            if (existingComment) {
+              const htmlCoverageTitleIdx = existingComment.body.indexOf(htmlCoverageTitle)
+              originalCommentBody = existingComment.body
 
-            if (htmlCoverageTitleIdx != -1) {
-              originalCommentBody = existingComment.body.slice(0, htmlCoverageTitleIdx)
+              if (htmlCoverageTitleIdx != -1) {
+                originalCommentBody = existingComment.body.slice(0, htmlCoverageTitleIdx)
+              }
             }
+
             const reportURL = "${{env.REPORT_PREFIX}}/${{env.COMMIT_SHA}}/index.html"
-            const newBody = `${originalCommentBody}${htmlCoverageTitle} \n <a href="${reportURL}">Click to open</a>`;
+            const newBody = `${originalCommentBody}${htmlCoverageTitle}\n<a href="${reportURL}">Click to open</a>`;
 
             if (existingComment) {
               // Update the existing comment
