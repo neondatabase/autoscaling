@@ -1743,11 +1743,7 @@ func podSpec(
 	}
 
 	if settings := vm.Spec.Guest.Settings; settings != nil {
-		swapInfo, err := settings.GetSwapInfo()
-		if err != nil {
-			return nil, fmt.Errorf("error getting SwapInfo from VirtualMachine guest settings: %w", err)
-		}
-		if swapInfo != nil {
+		if swapSize := settings.Swap; swapSize != nil {
 			diskName := "swapdisk"
 			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
 				Name:      diskName,
@@ -1757,7 +1753,7 @@ func podSpec(
 				Name: diskName,
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{
-						SizeLimit: &swapInfo.Size,
+						SizeLimit: swapSize,
 					},
 				},
 			})
