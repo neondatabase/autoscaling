@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/jpillora/backoff"
 	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/samber/lo"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
 
@@ -594,6 +596,7 @@ type Config struct {
 	kernelPath           string
 	appendKernelCmdline  string
 	skipCgroupManagement bool
+	enableDummyCPUServer bool
 	diskCacheSettings    string
 	memoryProvider       vmv1.MemoryProvider
 	autoMovableRatio     string
@@ -606,6 +609,7 @@ func newConfig(logger *zap.Logger) *Config {
 		kernelPath:           defaultKernelPath,
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
+		enableDummyCPUServer: false,
 		diskCacheSettings:    "cache=none",
 		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
 		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
@@ -620,7 +624,10 @@ func newConfig(logger *zap.Logger) *Config {
 		cfg.appendKernelCmdline, "Additional kernel command line arguments")
 	flag.BoolVar(&cfg.skipCgroupManagement, "skip-cgroup-management",
 		cfg.skipCgroupManagement,
-		"Don't try to manage CPU (use if running alongside container-mgr)")
+		"Don't try to manage CPU (use if running alongside container-mgr, or if dummy CPU server is enabled)")
+	flag.BoolVar(&cfg.enableDummyCPUServer, "enable-dummy-cpu-server",
+		cfg.skipCgroupManagement,
+		"Provide a CPU server (unlike -skip-cgroup-management) but don't actually do anything with it")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
@@ -634,6 +641,9 @@ func newConfig(logger *zap.Logger) *Config {
 	}
 	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem && cfg.autoMovableRatio == "" {
 		logger.Fatal("missing required flag '-memhp-auto-movable-ratio'")
+	}
+	if cfg.enableDummyCPUServer && !cfg.skipCgroupManagement {
+		logger.Fatal("flag -enable-dummy-cpu-server requires -skip-cgroup-management")
 	}
 
 	return cfg
@@ -1007,9 +1017,36 @@ func runQEMU(
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-	if !cfg.skipCgroupManagement {
+	if !cfg.skipCgroupManagement || cfg.enableDummyCPUServer {
+		var callbacks cpuServerCallbacks
+
+		if cfg.enableDummyCPUServer {
+			lastValue := &atomic.Uint32{}
+			lastValue.Store(uint32(vmSpec.Guest.CPUs.Min))
+
+			callbacks = cpuServerCallbacks{
+				get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
+					return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
+				},
+				set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
+					lastValue.Store(uint32(cpu))
+					return nil
+				},
+			}
+		} else {
+			// Standard implementation -- actually set the cgroup
+			callbacks = cpuServerCallbacks{
+				get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
+					return getCgroupQuota(cgroupPath)
+				},
+				set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
+					return setCgroupLimit(logger, cpu, cgroupPath)
+				},
+			}
+		}
+
 		wg.Add(1)
-		go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
+		go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, callbacks, &wg)
 	}
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
@@ -1040,7 +1077,12 @@ func runQEMU(
 	return err
 }
 
-func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
+func handleCPUChange(
+	logger *zap.Logger,
+	w http.ResponseWriter,
+	r *http.Request,
+	set func(*zap.Logger, vmv1.MilliCPU) error,
+) {
 	if r.Method != "POST" {
 		logger.Error("unexpected method", zap.String("method", r.Method))
 		w.WriteHeader(400)
@@ -1062,7 +1104,7 @@ func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request,
 
 	// update cgroup
 	logger.Info("got CPU update", zap.Float64("CPU", parsed.VCPUs.AsFloat64()))
-	err = setCgroupLimit(logger, parsed.VCPUs, cgroupPath)
+	err = set(logger, parsed.VCPUs)
 	if err != nil {
 		logger.Error("could not set cgroup limit", zap.Error(err))
 		w.WriteHeader(500)
@@ -1072,14 +1114,19 @@ func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(200)
 }
 
-func handleCPUCurrent(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
+func handleCPUCurrent(
+	logger *zap.Logger,
+	w http.ResponseWriter,
+	r *http.Request,
+	get func(*zap.Logger) (*vmv1.MilliCPU, error),
+) {
 	if r.Method != "GET" {
 		logger.Error("unexpected method", zap.String("method", r.Method))
 		w.WriteHeader(400)
 		return
 	}
 
-	cpus, err := getCgroupQuota(cgroupPath)
+	cpus, err := get(logger)
 	if err != nil {
 		logger.Error("could not get cgroup quota", zap.Error(err))
 		w.WriteHeader(500)
@@ -1097,17 +1144,28 @@ func handleCPUCurrent(logger *zap.Logger, w http.ResponseWriter, r *http.Request
 	w.Write(body) //nolint:errcheck // Not much to do with the error here. TODO: log it?
 }
 
-func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cgroupPath string, wg *sync.WaitGroup) {
+type cpuServerCallbacks struct {
+	get func(*zap.Logger) (*vmv1.MilliCPU, error)
+	set func(*zap.Logger, vmv1.MilliCPU) error
+}
+
+func listenForCPUChanges(
+	ctx context.Context,
+	logger *zap.Logger,
+	port int32,
+	callbacks cpuServerCallbacks,
+	wg *sync.WaitGroup,
+) {
 	defer wg.Done()
 	mux := http.NewServeMux()
 	loggerHandlers := logger.Named("http-handlers")
 	cpuChangeLogger := loggerHandlers.Named("cpu_change")
 	mux.HandleFunc("/cpu_change", func(w http.ResponseWriter, r *http.Request) {
-		handleCPUChange(cpuChangeLogger, w, r, cgroupPath)
+		handleCPUChange(cpuChangeLogger, w, r, callbacks.set)
 	})
 	cpuCurrentLogger := loggerHandlers.Named("cpu_current")
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
-		handleCPUCurrent(cpuCurrentLogger, w, r, cgroupPath)
+		handleCPUCurrent(cpuCurrentLogger, w, r, callbacks.get)
 	})
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),

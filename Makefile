@@ -70,22 +70,30 @@ help: ## Display this help.
 .PHONY: generate
 generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	# Use uid and gid of current user to avoid mismatched permissions
-	iidfile=$$(mktemp /tmp/iid-XXXXXX) && \
+	set -e ; \
+	iidfile=$$(mktemp /tmp/iid-XXXXXX) ; \
 	docker build \
 		--build-arg USER_ID=$(shell id -u $(USER)) \
 		--build-arg GROUP_ID=$(shell id -g $(USER)) \
 		--build-arg CONTROLLER_TOOLS_VERSION=$(CONTROLLER_TOOLS_VERSION) \
 		--build-arg CODE_GENERATOR_VERSION=$(CODE_GENERATOR_VERSION) \
 		--file neonvm/hack/Dockerfile.generate \
-		--iidfile $$iidfile . && \
+		--iidfile $$iidfile . ; \
+	volumes=('--volume' "$$PWD:/go/src/github.com/neondatabase/autoscaling") ; \
+	if [ -f .git ]; then \
+		gitdir="$$(git rev-parse --git-common-dir)" ; \
+		gitdir="$$(cd -P -- $$gitdir && pwd)" ; \
+		volumes+=('--volume' "$$gitdir:$$gitdir") ; \
+	fi ; \
+	set -x ; \
 	docker run --rm \
-		--volume $$PWD:/go/src/github.com/neondatabase/autoscaling \
+		"$${volumes[@]}" \
 		--workdir /go/src/github.com/neondatabase/autoscaling \
 		--user $(shell id -u $(USER)):$(shell id -g $(USER)) \
 		$$(cat $$iidfile) \
-		./neonvm/hack/generate.sh && \
-	docker rmi $$(cat $$iidfile)
-	rm -rf $$iidfile
+		./neonvm/hack/generate.sh ; \
+	docker rmi $$(cat $$iidfile) ; \
+	rm -rf $$iidfile ; \
 	go fmt ./...
 
 .PHONY: fmt
