@@ -317,7 +317,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	log := log.FromContext(ctx)
 
 	// Let's check and just set the condition status as Unknown when no status are available
-	if vm.Status.Conditions == nil || len(vm.Status.Conditions) == 0 {
+	if len(vm.Status.Conditions) == 0 {
 		// set Unknown condition status for AvailableVirtualMachine
 		meta.SetStatusCondition(&vm.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 	}

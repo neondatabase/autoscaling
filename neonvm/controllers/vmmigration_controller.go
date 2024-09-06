@@ -183,7 +183,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	// MAIN RECONCILE LOOP START
 
 	// Let's check and just set the condition status as Unknown when no status are available
-	if migration.Status.Conditions == nil || len(migration.Status.Conditions) == 0 {
+	if len(migration.Status.Conditions) == 0 {
 		log.Info("Set initial Unknown condition status")
 		meta.SetStatusCondition(&migration.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachineMigration, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 		return r.updateMigrationStatus(ctx, migration)
