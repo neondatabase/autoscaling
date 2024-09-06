@@ -38,6 +38,7 @@ jobs:
         id: changed-files
         with:
           files: |
+            .github/workflows/test.yaml
             **/**.go
             "!test/"
             go.mod
