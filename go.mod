@@ -1,6 +1,6 @@
 module github.com/neondatabase/autoscaling
 
-go 1.22
+go 1.22.0
 
 replace (
 	github.com/google/gnostic => github.com/google/gnostic v0.7.0
