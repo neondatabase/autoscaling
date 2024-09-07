@@ -4,8 +4,6 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
-
-	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
 
 // ReconcilerConfig stores shared configuration for VirtualMachineReconciler and
@@ -30,10 +28,6 @@ type ReconcilerConfig struct {
 	// This field is passed to neonvm-runner as the `-qemu-disk-cache-settings` arg, and is directly
 	// used in setting up the VM disks via QEMU's `-drive` flag.
 	QEMUDiskCacheSettings string
-
-	// DefaultMemoryProvider is the memory provider (dimm slots or virtio-mem) that will be used for
-	// new VMs (or, when old ones restart) if nothing is explicitly set.
-	DefaultMemoryProvider vmv1.MemoryProvider
 
 	// MemhpAutoMovableRatio specifies the value that new neonvm-runners will set as the
 	// kernel's 'memory_hotplug.auto_movable_ratio', iff the memory provider is virtio-mem.
