@@ -16,24 +16,6 @@ func SaturatingSub[T constraints.Unsigned](x, y T) T {
 	}
 }
 
-// Max returns the maximum of the two values
-func Max[T constraints.Ordered](x, y T) T {
-	if x > y {
-		return x
-	} else {
-		return y
-	}
-}
-
-// Min returns the minimum of the two values
-func Min[T constraints.Ordered](x, y T) T {
-	if x < y {
-		return x
-	} else {
-		return y
-	}
-}
-
 // AbsDiff returns the absolute value of the difference between x and y
 func AbsDiff[T constraints.Unsigned](x, y T) T {
 	if x > y {
