@@ -417,8 +417,12 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 ENVTEST_K8S_VERSION = 1.28.3
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-# k8s deps @ 1.28.0 https://github.com/kubernetes-sigs/controller-tools
-CONTROLLER_TOOLS_VERSION ?= v0.13.0
+# We went ahead of k8s 1.28 with controller-tools v0.14.0 (which depends on k8s 1.29) to unblock go 1.22 upgrade.
+# It should be *relatively* safe as the only changes from this controller-tools version are description in CRD.
+# Once we upgrade to k8s 1.29, there's no need to change CONTROLLER_TOOLS_VERSION, and this 3 lines can be removed.
+#
+# k8s deps @ 1.29.0 https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
+CONTROLLER_TOOLS_VERSION ?= v0.14.0
 
 CODE_GENERATOR_VERSION ?= v0.28.12
 
