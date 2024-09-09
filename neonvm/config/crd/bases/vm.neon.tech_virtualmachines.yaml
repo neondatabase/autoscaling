@@ -2504,6 +2504,10 @@ spec:
                       Additional settings for the VM.
                       Cannot be updated.
                     properties:
+                      disableLoadavgIO:
+                        description: If true, the VM kernel will not count disk IO
+                          towards load average
+                        type: boolean
                       swap:
                         anyOf:
                         - type: integer
