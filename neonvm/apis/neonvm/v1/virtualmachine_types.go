@@ -489,6 +489,10 @@ type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
 	// Discard enables the "discard" mount option for the filesystem
 	Discard bool `json:"discard,omitempty"`
+	// EnableQuotas enables the "prjquota" mount option for the ext4 filesystem.
+	// More info here:
+	// https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_file_systems/limiting-storage-space-usage-on-ext4-with-quotas_managing-file-systems
+	EnableQuotas bool `json:"enableQuotas,omitempty"`
 }
 
 type TmpfsDiskSource struct {
