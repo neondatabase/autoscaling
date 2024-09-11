@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 WORKDIR /workspace
 
 RUN apk add gcc musl-dev # gcc (and therefore musl-dev) is required for cgo extensions
