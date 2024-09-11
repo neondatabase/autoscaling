@@ -34,7 +34,6 @@ import (
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type ObservabilityCallbacks struct {
@@ -354,7 +353,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	}
 	for _, w := range requiredWaits {
 		if w != nil {
-			requiredWait = util.Min(requiredWait, *w)
+			requiredWait = min(requiredWait, *w)
 		}
 	}
 
@@ -464,7 +463,7 @@ func (s *state) calculatePluginAction(
 		}
 		waitTime := timeUntilNextRequestTick
 		if waitingOnRetryBackoff {
-			waitTime = util.Min(waitTime, timeUntilRetryBackoffExpires)
+			waitTime = min(waitTime, timeUntilRetryBackoffExpires)
 		}
 		return nil, &waitTime
 	}
@@ -756,7 +755,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		memGoalBytes := api.Bytes(math.Round(s.Metrics.MemoryUsageBytes / *s.scalingConfig().MemoryUsageFractionTarget))
 		memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
 
-		goalCU = util.Max(cpuGoalCU, memGoalCU)
+		goalCU = max(cpuGoalCU, memGoalCU)
 
 	}
 
@@ -790,7 +789,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			// predicted working set size.
 			requiredCU := predictedHighestNextMinute * 8192 / s.Config.ComputeUnit.Mem.AsFloat64() / *cfg.LFCToMemoryRatio
 			lfcGoalCU := uint32(math.Ceil(requiredCU))
-			goalCU = util.Max(goalCU, lfcGoalCU)
+			goalCU = max(goalCU, lfcGoalCU)
 
 			lfcLogFields = func(obj zapcore.ObjectEncoder) error {
 				obj.AddFloat64("estimateWssPages", estimateWss)
@@ -818,7 +817,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			// FIXME: this isn't quite correct, because if initialGoalCU is already equal to the
 			// maximum goal CU we *could* have, this won't actually have an effect.
 			requestedUpscalingAffectedResult = true
-			goalCU = util.Max(goalCU, reqCU)
+			goalCU = max(goalCU, reqCU)
 		}
 	}
 
@@ -831,7 +830,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		reqCU := s.requiredCUForDeniedDownscale(s.Config.ComputeUnit, s.Monitor.DeniedDownscale.Requested)
 		if reqCU > initialGoalCU {
 			deniedDownscaleAffectedResult = true
-			goalCU = util.Max(goalCU, reqCU)
+			goalCU = max(goalCU, reqCU)
 		}
 	}
 
@@ -890,11 +889,11 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		waitTime := time.Duration(int64(1<<63 - 1)) // time.Duration is an int64. As an "unset" value, use the maximum.
 
 		if deniedDownscaleAffectedResult && actions.MonitorDownscale == nil && s.Monitor.OngoingRequest == nil {
-			waitTime = util.Min(waitTime, timeUntilDeniedDownscaleExpired)
+			waitTime = min(waitTime, timeUntilDeniedDownscaleExpired)
 			waiting = true
 		}
 		if requestedUpscalingAffectedResult {
-			waitTime = util.Min(waitTime, timeUntilRequestedUpscalingExpired)
+			waitTime = min(waitTime, timeUntilRequestedUpscalingExpired)
 			waiting = true
 		}
 
@@ -980,10 +979,10 @@ func (s *state) requiredCUForRequestedUpscaling(computeUnit api.Resources, reque
 	// note: 1 + floor(x / M) gives the minimum integer value greater than x / M.
 
 	if requested.Cpu {
-		required = util.Max(required, 1+uint32(base.VCPU/computeUnit.VCPU))
+		required = max(required, 1+uint32(base.VCPU/computeUnit.VCPU))
 	}
 	if requested.Memory {
-		required = util.Max(required, 1+uint32(base.Mem/computeUnit.Mem))
+		required = max(required, 1+uint32(base.Mem/computeUnit.Mem))
 	}
 
 	return required
@@ -1004,7 +1003,7 @@ func (s *state) requiredCUForDeniedDownscale(computeUnit, deniedResources api.Re
 	requiredFromCPU := 1 + uint32(deniedResources.VCPU/computeUnit.VCPU)
 	requiredFromMem := 1 + uint32(deniedResources.Mem/computeUnit.Mem)
 
-	return util.Max(requiredFromCPU, requiredFromMem)
+	return max(requiredFromCPU, requiredFromMem)
 }
 
 func (s *state) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources, denied deniedDownscale) api.Resources {
@@ -1014,8 +1013,8 @@ func (s *state) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources
 	// phrasing it like this cleanly handles some subtle edge cases when denied.current isn't a
 	// multiple of the compute unit.
 	return api.Resources{
-		VCPU: util.Min(denied.Current.VCPU, computeUnit.VCPU*(1+denied.Requested.VCPU/computeUnit.VCPU)),
-		Mem:  util.Min(denied.Current.Mem, computeUnit.Mem*(1+denied.Requested.Mem/computeUnit.Mem)),
+		VCPU: min(denied.Current.VCPU, computeUnit.VCPU*(1+denied.Requested.VCPU/computeUnit.VCPU)),
+		Mem:  min(denied.Current.Mem, computeUnit.Mem*(1+denied.Requested.Mem/computeUnit.Mem)),
 	}
 }
 
@@ -1044,16 +1043,16 @@ func (s *state) clampResources(
 
 	cpu := desired.VCPU
 	if desired.VCPU < current.VCPU && lowerBound != nil {
-		cpu = util.Max(desired.VCPU, lowerBound.VCPU)
+		cpu = max(desired.VCPU, lowerBound.VCPU)
 	} else if desired.VCPU > current.VCPU && upperBound != nil {
-		cpu = util.Min(desired.VCPU, upperBound.VCPU)
+		cpu = min(desired.VCPU, upperBound.VCPU)
 	}
 
 	mem := desired.Mem
 	if desired.Mem < current.Mem && lowerBound != nil {
-		mem = util.Max(desired.Mem, lowerBound.Mem)
+		mem = max(desired.Mem, lowerBound.Mem)
 	} else if desired.Mem > current.Mem && upperBound != nil {
-		mem = util.Min(desired.Mem, upperBound.Mem)
+		mem = min(desired.Mem, upperBound.Mem)
 	}
 
 	return api.Resources{VCPU: cpu, Mem: mem}

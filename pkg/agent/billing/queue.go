@@ -11,8 +11,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/exp/slices"
-
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 // this is generic just so there's less typing - "billing.IncrementalEvent" is long!
@@ -63,7 +61,7 @@ func (q eventQueuePuller[E]) get(limit int) []E {
 	q.internals.mu.Lock()
 	defer q.internals.mu.Unlock()
 
-	count := util.Min(limit, len(q.internals.items))
+	count := min(limit, len(q.internals.items))
 	// NOTE: this kind of access escaping the mutex is only sound because this access is only
 	// granted to the puller, and there's only one puller, and it isn't sound to use the output of a
 	// previous get() after calling drop().
