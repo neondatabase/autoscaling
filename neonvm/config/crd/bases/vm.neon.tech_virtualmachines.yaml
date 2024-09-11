@@ -2508,48 +2508,9 @@ spec:
                         anyOf:
                         - type: integer
                         - type: string
-                        description: |-
-                          Swap adds a swap disk with the provided size.
-
-
-                          If Swap is provided, SwapInfo MUST NOT be provided, and vice versa.
+                        description: Swap adds a swap disk with the provided size.
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
-                      swapInfo:
-                        description: |-
-                          SwapInfo controls settings for adding a swap disk to the VM.
-
-
-                          SwapInfo is a temporary newer version of the Swap field.
-
-
-                          Eventually, after all VMs have moved from Swap to SwapInfo, we can change the type of the Swap
-                          field to SwapInfo, move VMs from SwapInfo back to Swap, and then remove SwapInfo.
-
-
-                          More information here: https://neondb.slack.com/archives/C06SW383C79/p1713298689471319
-                        properties:
-                          size:
-                            anyOf:
-                            - type: integer
-                            - type: string
-                            description: |-
-                              Size sets the size of the swap in the VM. The amount of space used on the host may be
-                              slightly more (by a few MiBs). The information reported by `cat /proc/meminfo` may show
-                              slightly less, due to a single page header (typically 4KiB).
-                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                            x-kubernetes-int-or-string: true
-                          skipSwapon:
-                            description: |-
-                              SkipSwapon instructs the VM to *not* run swapon for the swap on startup.
-
-
-                              This is intended to be used in cases where you will *always* resize the swap post-startup,
-                              and don't need it available before that resizing.
-                            type: boolean
-                        required:
-                        - size
-                        type: object
                       sysctl:
                         description: Individual lines to add to a sysctl.conf file.
                           See sysctl.conf(5) for more
