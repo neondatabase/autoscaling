@@ -106,13 +106,6 @@ func (r *VirtualMachine) ValidateCreate() (admission.Warnings, error) {
 		}
 	}
 
-	// validate that at most one type of swap is provided:
-	if settings := r.Spec.Guest.Settings; settings != nil {
-		if settings.Swap != nil && settings.SwapInfo != nil {
-			return nil, errors.New("cannot have both 'swap' and 'swapInfo' enabled")
-		}
-	}
-
 	return nil, nil
 }
 
@@ -139,15 +132,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) (admission.Warnings,
 		{".spec.guest.command", func(v *VirtualMachine) any { return v.Spec.Guest.Command }},
 		{".spec.guest.args", func(v *VirtualMachine) any { return v.Spec.Guest.Args }},
 		{".spec.guest.env", func(v *VirtualMachine) any { return v.Spec.Guest.Env }},
-		{".spec.guest.settings", func(v *VirtualMachine) any {
-			if v.Spec.Guest.Settings == nil {
-				//nolint:gocritic // linter complains that we could say 'nil' directly. It's typed vs untyped nil.
-				return v.Spec.Guest.Settings
-			} else {
-				// Selectively allow swap fields to change between Swap and SwapInfo. More below.
-				return v.Spec.Guest.Settings.WithoutSwapFields()
-			}
-		}},
+		{".spec.guest.settings", func(v *VirtualMachine) any { return v.Spec.Guest.Settings }},
 		{".spec.disks", func(v *VirtualMachine) any { return v.Spec.Disks }},
 		{".spec.podResources", func(v *VirtualMachine) any { return v.Spec.PodResources }},
 		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},
@@ -158,30 +143,6 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) (admission.Warnings,
 	for _, info := range immutableFields {
 		if !reflect.DeepEqual(info.getter(r), info.getter(before)) {
 			return nil, fmt.Errorf("%s is immutable", info.fieldName)
-		}
-	}
-
-	// validate swap changes by comparing the SwapInfo for each.
-	//
-	// If there's an error with the old object, but NOT an error with the new one, we'll allow the
-	// new one to proceed. This is to prevent any VirtualMachine objects getting stuck during
-	// rollout of swap changes, in case there's logic bugs in handling the change.
-	//
-	// If we didn't have that exception, we could *in theory* end up with an object in a bad state,
-	// but be unable to fix it because the old state is bad - even if the new one is ok - because
-	// the webhook would return an error from the old state being invalid, which disallows the update
-	if r.Spec.Guest.Settings != nil /* from above, if new GuestSettings != nil, then old is as well */ {
-		newSwapInfo, err := r.Spec.Guest.Settings.GetSwapInfo()
-		if err != nil {
-			return nil, err
-		}
-		oldSwapInfo, err := before.Spec.Guest.Settings.GetSwapInfo()
-		if err != nil {
-			// do nothing; we'll allow fixing broken objects.
-		} else {
-			if !reflect.DeepEqual(newSwapInfo, oldSwapInfo) {
-				return nil, errors.New(".spec.guest.settings.{swap,swapInfo} is immutable")
-			}
 		}
 	}
 
