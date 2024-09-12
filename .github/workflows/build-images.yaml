@@ -58,6 +58,13 @@ env:
   ECR_DEV:                "369495373322.dkr.ecr.eu-central-1.amazonaws.com"
   ECR_PROD:               "093970136003.dkr.ecr.eu-central-1.amazonaws.com"
 
+  # Why localhost? We use a local registry so that when docker/build-push-action tries to pull the
+  # image we built locally, it'll actually have a place to pull from.
+  #
+  # Otherwise, if we just try to use a local image, it fails trying to pull it from dockerhub.
+  # See https://github.com/moby/buildkit/issues/2343 for more information.
+  GO_BASE_IMG: "localhost:5000/neondatabase/autoscaling-go-base:dev"
+
 defaults:
   run:
     shell: bash -euo pipefail {0}
@@ -96,6 +103,13 @@ jobs:
     if: ${{ format('{0}', inputs.skip) != 'true' }}
     needs: [ tags, vm-kernel ]
     runs-on: [ self-hosted, gen3, large ]
+
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -129,6 +143,8 @@ jobs:
         uses: ./.github/actions/set-docker-config-dir
 
       - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
 
       - name: Login to Dockerhub
         uses: docker/login-action@v3
@@ -173,6 +189,18 @@ jobs:
           docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
           docker rm -f ${ID}
 
+      - name: Build go dependencies image
+        uses: docker/build-push-action@v6
+        id: build-go-dependencies-image
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: Dockerfile.go-base
+          cache-from: type=registry,ref=cache.neon.build/autoscaling-go-base:cache
+          cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaling-go-base:cache,mode=max' || '' }}
+          tags: ${{ env.GO_BASE_IMG }}
+
       - name: Build and push neonvm-runner image
         uses: docker/build-push-action@v6
         with:
@@ -183,6 +211,8 @@ jobs:
           cache-from: type=registry,ref=cache.neon.build/neonvm-runner:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-runner:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.runner }}
+          build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
       - name: Generate neonvm-controller build tags
         id: controller-build-tags
@@ -206,6 +236,7 @@ jobs:
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-controller:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.controller }}
           build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             VM_RUNNER_IMAGE=${{ needs.tags.outputs.runner }}
             BUILDTAGS=${{ steps.controller-build-tags.outputs.buildtags }}
 
@@ -219,6 +250,8 @@ jobs:
           cache-from: type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.vxlan-controller }}
+          build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
       - name: Build and push autoscale-scheduler image
         uses: docker/build-push-action@v6
@@ -231,6 +264,7 @@ jobs:
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscale-scheduler:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.scheduler }}
           build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
 
       - name: Build and push autoscaler-agent image
@@ -244,6 +278,7 @@ jobs:
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaler-agent:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.autoscaler-agent }}
           build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}
 
       - name: Build and push cluster-autoscaler image
