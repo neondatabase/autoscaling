@@ -25,6 +25,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     -ldflags "-X 'github.com/neondatabase/autoscaling/pkg/util.BuildGitInfo=$GIT_INFO'" \
     cmd/autoscaler-agent/main.go
 
-FROM alpine
+FROM alpine:3.19
 COPY --from=builder /workspace/main /usr/bin/autoscaler-agent
 ENTRYPOINT ["/usr/bin/autoscaler-agent"]

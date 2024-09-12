@@ -24,6 +24,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     -ldflags "-X 'github.com/neondatabase/autoscaling/pkg/util.BuildGitInfo=$GIT_INFO'" \
     cmd/autoscale-scheduler/main.go
 
-FROM alpine
+FROM alpine:3.19
 COPY --from=builder /workspace/main /usr/bin/kube-scheduler
 ENTRYPOINT ["/usr/bin/kube-scheduler"]
