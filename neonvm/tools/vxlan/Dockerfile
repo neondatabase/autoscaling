@@ -4,7 +4,7 @@ FROM $GO_BASE_IMG AS builder
 COPY . .
 RUN CGO_ENABLED=0 go build -o /vxlan-controller neonvm/tools/vxlan/controller/main.go
 
-FROM alpine:3.19
+FROM alpine:3.20
 
 RUN apk add --no-cache \
     tini \

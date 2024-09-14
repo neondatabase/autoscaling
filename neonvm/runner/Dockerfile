@@ -6,7 +6,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /runner neonvm/runner/main.go
 RUN CGO_ENABLED=0 go build -o /container-mgr neonvm/runner/container-mgr/*.go
 
-FROM alpine:3.19 AS crictl
+FROM alpine:3.20 AS crictl
 
 RUN apk add --no-cache \
     curl
@@ -17,7 +17,7 @@ ENV VERSION="v1.27.1"
 RUN curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz" -o crictl.tar.gz \
 	&& tar zxvf crictl.tar.gz -C /
 
-FROM alpine:3.19
+FROM alpine:3.20
 
 RUN apk add --no-cache \
     tini \
