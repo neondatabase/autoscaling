@@ -14,10 +14,12 @@ jobs:
       fail-fast: true
       matrix:
         image:
-          - alpine:3.16
+          - alpine:3.19
           - debian:11
+          - debian:12
           - postgres:14-alpine
           - postgres:15-alpine
+          - postgres:16-alpine
           - ubuntu:22.04
 
     runs-on: ubuntu-latest
