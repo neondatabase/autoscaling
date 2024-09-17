@@ -5,6 +5,10 @@ IMG_RUNNER ?= runner:dev
 IMG_SCHEDULER ?= autoscale-scheduler:dev
 IMG_AUTOSCALER_AGENT ?= autoscaler-agent:dev
 
+# Shared base image for caching compiled dependencies.
+# It's only used during image builds, so doesn't need to be pushed.
+GO_BASE_IMG ?= autoscaling-go-base:dev
+
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG16_DISK_TEST_IMG ?= pg16-disk-test:dev
 
@@ -153,32 +157,53 @@ docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_SCHEDULER)
 	docker push -q $(IMG_AUTOSCALER_AGENT)
 
+.PHONY: docker-build-go-base
+docker-build-go-base:
+	docker build \
+		--tag $(GO_BASE_IMG) \
+		--file Dockerfile.go-base \
+		.
+
 .PHONY: docker-build-controller
-docker-build-controller: ## Build docker image for NeonVM controller
-	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) --build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
+docker-build-controller: docker-build-go-base ## Build docker image for NeonVM controller
+	docker build \
+		--tag $(IMG_CONTROLLER) \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) \
+		--build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) \
+		--file neonvm/Dockerfile \
+		.
 
 .PHONY: docker-build-runner
-docker-build-runner: ## Build docker image for NeonVM runner
-	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
+docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runner
+	docker build \
+		--tag $(IMG_RUNNER) \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--file neonvm/runner/Dockerfile \
+		.
 
 .PHONY: docker-build-vxlan-controller
-docker-build-vxlan-controller: ## Build docker image for NeonVM vxlan controller
-	docker build -t $(IMG_VXLAN_CONTROLLER) -f neonvm/tools/vxlan/Dockerfile .
+docker-build-vxlan-controller: docker-build-go-base ## Build docker image for NeonVM vxlan controller
+	docker build \
+		--tag $(IMG_VXLAN_CONTROLLER) \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--file neonvm/tools/vxlan/Dockerfile \
+		.
 
 .PHONY: docker-build-autoscaler-agent
-docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
+docker-build-autoscaler-agent: docker-build-go-base ## Build docker image for autoscaler-agent
 	docker buildx build \
 		--tag $(IMG_AUTOSCALER_AGENT) \
-		--load \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscaler-agent/Dockerfile \
 		.
 
 .PHONY: docker-build-scheduler
-docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
+docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscaling) scheduler
 	docker buildx build \
 		--tag $(IMG_SCHEDULER) \
-		--load \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscale-scheduler/Dockerfile \
 		.
