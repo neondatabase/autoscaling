@@ -1,29 +1,15 @@
-FROM golang:1.21-alpine AS builder
-WORKDIR /workspace
-
-RUN apk add gcc musl-dev # gcc (and therefore musl-dev) is required for cgo extensions
-
-COPY go.mod go.mod
-COPY go.sum go.sum
-RUN go mod download
-
-COPY neonvm/apis             neonvm/apis
-COPY neonvm/client           neonvm/client
-COPY pkg/api                 pkg/api
-COPY pkg/plugin              pkg/plugin
-COPY pkg/util                pkg/util
-COPY cmd/autoscale-scheduler cmd/autoscale-scheduler
+ARG GO_BASE_IMG=autoscaling-go-base:dev
+FROM $GO_BASE_IMG AS builder
 
 ARG GIT_INFO
 
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    go build -a \
-	# future compat: don't modify go.mod if we have a vendor directory \
-	-mod readonly \
-    # -ldflags "-X ..." allows us to overwrite the value of a variable in a package \
+COPY . .
+# NOTE: Build flags here must be the same as in the base image, otherwise we'll rebuild
+# dependencies. See /Dockerfile.go-base for detail on the "why".
+RUN CGO_ENABLED=0 go build \
     -ldflags "-X 'github.com/neondatabase/autoscaling/pkg/util.BuildGitInfo=$GIT_INFO'" \
     cmd/autoscale-scheduler/main.go
 
-FROM alpine
+FROM alpine:3.19
 COPY --from=builder /workspace/main /usr/bin/kube-scheduler
 ENTRYPOINT ["/usr/bin/kube-scheduler"]

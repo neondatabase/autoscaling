@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"golang.org/x/exp/constraints"
-
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 // VersionRange is a helper type to represent a range of versions.
@@ -34,10 +32,10 @@ func (r VersionRange[V]) String() string {
 // If either range is invalid, or no such version exists (i.e. the ranges are disjoint), then the
 // returned values will be (0, false).
 func (r VersionRange[V]) LatestSharedVersion(cmp VersionRange[V]) (_ V, ok bool) {
-	max := util.Min(r.Max, cmp.Max)
-	min := util.Max(r.Min, cmp.Min)
-	if max >= min {
-		return max, true
+	maxVersion := min(r.Max, cmp.Max)
+	minVersion := max(r.Min, cmp.Min)
+	if maxVersion >= minVersion {
+		return maxVersion, true
 	} else {
 		var v V
 		return v, false

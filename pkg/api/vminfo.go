@@ -225,35 +225,35 @@ func extractVmInfoGeneric(
 		info.Config.ScalingConfig = &config
 	}
 
-	min := info.Min()
+	minResources := info.Min()
 	using := info.Using()
-	max := info.Max()
+	maxResources := info.Max()
 
 	// we can't do validation for resource.Quantity with kubebuilder
 	// so do it here
-	if err := min.CheckValuesAreReasonablySized(); err != nil {
+	if err := minResources.CheckValuesAreReasonablySized(); err != nil {
 		return nil, fmt.Errorf("min resources are invalid: %w", err)
 	}
 
-	if err := max.CheckValuesAreReasonablySized(); err != nil {
+	if err := maxResources.CheckValuesAreReasonablySized(); err != nil {
 		return nil, fmt.Errorf("max resources are invalid: %w", err)
 	}
 
 	// check: min <= max
-	if min.HasFieldGreaterThan(max) {
-		return nil, fmt.Errorf("min resources %+v has field greater than maximum %+v", min, max)
+	if minResources.HasFieldGreaterThan(maxResources) {
+		return nil, fmt.Errorf("min resources %+v has field greater than maximum %+v", minResources, maxResources)
 	}
 
 	// check: min <= using <= max
-	if using.HasFieldLessThan(min) {
+	if using.HasFieldLessThan(minResources) {
 		logger.Warn(
 			"Current usage has field less than minimum",
-			zap.Object("using", using), zap.Object("min", min),
+			zap.Object("using", using), zap.Object("min", minResources),
 		)
-	} else if using.HasFieldGreaterThan(max) {
+	} else if using.HasFieldGreaterThan(maxResources) {
 		logger.Warn(
 			"Current usage has field greater than maximum",
-			zap.Object("using", using), zap.Object("max", max),
+			zap.Object("using", using), zap.Object("max", maxResources),
 		)
 	}
 

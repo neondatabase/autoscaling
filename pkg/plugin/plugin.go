@@ -701,7 +701,7 @@ func (e *AutoscaleEnforcer) Score(
 	cpuFScore, cpuIScore := calculateScore(cpuFraction, cpuScale)
 	memFScore, memIScore := calculateScore(memFraction, memScale)
 
-	score := util.Min(cpuIScore, memIScore)
+	score := min(cpuIScore, memIScore)
 	logger.Info(
 		"Scored pod placement for node",
 		zap.Int64("score", score),

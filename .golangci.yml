@@ -30,11 +30,11 @@ linters:
     - asciicheck       # all identifiers are ASCII
     - bidichk          # no Unicode bidi sequences as per CVE-2021-42574
     - bodyclose        # HTTP response bodies are closed
+    - copyloopvar      # detects places where loop variables are copied
     - dupword          # things like 'the the' in comments/strings
     - durationcheck    # bad time.Duration arithmetic
     - errorlint        # common errors with Go 1.13+ error wrapping
     - exhaustruct      # all struct fields are initialized
-    - exportloopref    # escaping pointers to loop variables
     - gci              # deterministic import ordering
     - gocritic         # lots of small checks, see <https://go-critic.com/overview>
     - noctx            # HTTP requests are passed a Context

@@ -246,7 +246,7 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 			timeSlice := metricsTimeSlice{
 				metrics: vmMetricsInstant{
 					// strategically under-bill by assigning the minimum to the entire time slice.
-					cpu: util.Min(oldMetrics.cpu, presentMetrics.cpu),
+					cpu: min(oldMetrics.cpu, presentMetrics.cpu),
 				},
 				// note: we know s.lastTime != nil because otherwise old would be empty.
 				startTime: *s.lastCollectTime,
