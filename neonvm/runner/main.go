@@ -640,10 +640,10 @@ func newConfig(logger *zap.Logger) *Config {
 		cfg.appendKernelCmdline, "Additional kernel command line arguments")
 	flag.BoolVar(&cfg.skipCgroupManagement, "skip-cgroup-management",
 		cfg.skipCgroupManagement,
-		"Don't try to manage CPU (use if running alongside container-mgr, or if dummy CPU server is enabled)")
+		"Don't try to manage CPU")
 	flag.BoolVar(&cfg.enableDummyCPUServer, "enable-dummy-cpu-server",
 		cfg.skipCgroupManagement,
-		"Provide a CPU server (unlike -skip-cgroup-management) but don't actually do anything with it")
+		"Use with -skip-cgroup-management. Provide a CPU server but don't actually do anything with it")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
