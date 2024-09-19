@@ -219,9 +219,7 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 	defer status.mu.Unlock()
 
 	if status.endState == nil {
-		logger.Error("TriggerRestartIfNecessary called with nil endState (should only be called after the pod is finished, when endState != nil)")
-		s.metrics.runnerFatalErrors.Inc()
-		return
+		logger.Panic("TriggerRestartIfNecessary called with nil endState (should only be called after the pod is finished, when endState != nil)")
 	}
 
 	endTime := status.endState.Time
@@ -229,7 +227,6 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 	if endTime.IsZero() {
 		// If we don't check this, we run the risk of spinning on failures.
 		logger.Error("TriggerRestartIfNecessary called with zero'd Time for pod")
-		s.metrics.runnerFatalErrors.Inc()
 		// Continue on, but with the time overridden, so we guarantee our minimum wait.
 		endTime = time.Now()
 	}
@@ -241,13 +238,13 @@ func (s *agentState) TriggerRestartIfNecessary(runnerCtx context.Context, logger
 	case podStatusExitCanceled:
 		logger.Info("Runner's context was canceled; no need to restart")
 		return // successful exit, no need to restart.
-	case podStatusExitPanicked, podStatusExitErrored:
+	case podStatusExitPanicked:
 		// Should restart; continue.
 		logger.Info("Runner had abnormal exit kind; it will restart", zap.String("exitKind", string(exitKind)))
 	default:
 		logger.Error("TriggerRestartIfNecessary called with unexpected ExitKind", zap.String("exitKind", string(exitKind)))
-		s.metrics.runnerFatalErrors.Inc()
-		return
+		// continue on; false positives (restarting when we shouldn't) are much better than the
+		// alternative here (not restarting when we should)
 	}
 
 	// Begin steps (2) and (3) -- wait, then restart.
@@ -466,7 +463,6 @@ type podStatusExitKind string
 
 const (
 	podStatusExitPanicked podStatusExitKind = "panicked"
-	podStatusExitErrored  podStatusExitKind = "errored"
 	podStatusExitCanceled podStatusExitKind = "canceled" // top-down signal that the Runner should stop.
 )
 
@@ -486,8 +482,6 @@ func (s *lockedPodStatus) update(global *agentState, with func(podStatus) podSta
 		case podStatusExitCanceled:
 			// If canceled, don't change the state.
 			newState = s.state
-		case podStatusExitErrored:
-			newState = runnerMetricStateErrored
 		case podStatusExitPanicked:
 			newState = runnerMetricStatePanicked
 		}
@@ -571,7 +565,7 @@ func (s *lockedPodStatus) periodicallyRefreshState(ctx context.Context, logger *
 		// time between the VM meeting the conditions for being "stuck" and us recognizing it.
 		s.update(global, func(stat podStatus) podStatus {
 			isStuck, reasons := stat.isStuck(global, time.Now())
-			if isStuck && stat.state != runnerMetricStateErrored && stat.state != runnerMetricStatePanicked {
+			if isStuck && stat.state != runnerMetricStatePanicked {
 				if stat.endpointID != "" {
 					logger.Warn("Runner with endpoint is currently stuck",
 						zap.String("endpointID", stat.endpointID), zap.String("reasons", strings.Join(reasons, ",")))
