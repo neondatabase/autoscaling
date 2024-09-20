@@ -27,6 +27,8 @@ endif
 # https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
 export GOFLAGS=-buildvcs=false
 
+GOFUMPT_VERSION ?= v0.7.0
+
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
 SHELL = /usr/bin/env bash -o pipefail
@@ -102,7 +104,7 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
-	go fmt ./...
+	go run mvdan.cc/gofumpt@${GOFUMPT_VERSION} -w .
 
 .PHONY: vet
 vet: ## Run go vet against code.
