@@ -269,6 +269,7 @@ kernel:
 	kernel_version=$${linux_config##*-} \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
+	echo ${kernel_version} ; \
 	docker buildx build \
 	    --build-arg KERNEL_VERSION=$$kernel_version \
 		--target "kernel_${KERNEL_TARGET_ARCH}" \

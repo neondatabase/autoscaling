@@ -14,7 +14,7 @@ WORKDIR /workspace
 # FIXME: There's non-overlapping version support for <1.27 and >=1.27.
 # We should carefully consider how we go about future-proofing this (or not).
 ENV VERSION="v1.27.1"
-RUN curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz" -o crictl.tar.gz \
+RUN curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-arm64.tar.gz" -o crictl.tar.gz \
 	&& tar zxvf crictl.tar.gz -C /
 
 FROM alpine:3.19
@@ -32,6 +32,7 @@ RUN apk add --no-cache \
     busybox-extras \
     e2fsprogs \
     qemu-system-x86_64 \
+    qemu-system-aarch64 \
     qemu-img \
 	cgroup-tools \
     openssh
