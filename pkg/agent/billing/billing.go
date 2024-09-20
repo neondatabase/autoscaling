@@ -148,7 +148,6 @@ func (mc *MetricsCollector) Run(
 	store VMStoreForNode,
 	metrics PromMetrics,
 ) error {
-
 	collectTicker := time.NewTicker(time.Second * time.Duration(mc.conf.CollectEverySeconds))
 	defer collectTicker.Stop()
 	// Offset by half a second, so it's a bit more deterministic.

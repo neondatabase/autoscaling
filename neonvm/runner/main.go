@@ -180,7 +180,7 @@ func getLines(input []byte, commentMarker []byte) [][]byte {
 	lines := bytes.Split(input, []byte("\n"))
 	var output [][]byte
 	for _, currentLine := range lines {
-		var commentIndex = bytes.Index(currentLine, commentMarker)
+		commentIndex := bytes.Index(currentLine, commentMarker)
 		if commentIndex == -1 {
 			output = append(output, currentLine)
 		} else {
@@ -330,7 +330,7 @@ func createISO9660runtime(
 		}
 	}
 
-	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
 	}
@@ -516,7 +516,7 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 		}
 	}
 
-	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
 	}
@@ -1715,7 +1715,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	// Adding VM's IP address to the /etc/hosts, so we can access it easily from
 	// the pod. This is particularly useful for ssh into the VM from the runner
 	// pod.
-	f, err := os.OpenFile("/etc/hosts", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile("/etc/hosts", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}

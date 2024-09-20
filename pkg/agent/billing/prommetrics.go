@@ -90,8 +90,10 @@ func (m PromMetrics) forBatch() batchMetrics {
 	}
 }
 
-type isEndpointFlag bool
-type autoscalingEnabledFlag bool
+type (
+	isEndpointFlag         bool
+	autoscalingEnabledFlag bool
+)
 
 func (b batchMetrics) inc(isEndpoint isEndpointFlag, autoscalingEnabled autoscalingEnabledFlag, phase vmapi.VmPhase) {
 	key := batchMetricsLabels{

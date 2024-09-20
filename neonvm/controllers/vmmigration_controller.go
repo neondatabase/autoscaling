@@ -155,10 +155,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			message := fmt.Sprintf("VM (%s) not found", migration.Spec.VmName)
 			r.Recorder.Event(migration, "Warning", "Failed", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachineMigration,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachineMigration,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: message})
+					Message: message,
+				})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
 		}
@@ -349,10 +351,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				log.Info(message)
 				r.Recorder.Event(migration, "Normal", "Started", message)
 				meta.SetStatusCondition(&migration.Status.Conditions,
-					metav1.Condition{Type: typeAvailableVirtualMachineMigration,
+					metav1.Condition{
+						Type:    typeAvailableVirtualMachineMigration,
 						Status:  metav1.ConditionTrue,
 						Reason:  "Reconciling",
-						Message: message})
+						Message: message,
+					})
 				// finally update migration phase to Running
 				migration.Status.Phase = vmv1.VmmRunning
 				return r.updateMigrationStatus(ctx, migration)
@@ -363,10 +367,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Failed", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachineMigration,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachineMigration,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: message})
+					Message: message,
+				})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
 		case runnerFailed:
@@ -374,10 +380,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Failed", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachineMigration,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachineMigration,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: message})
+					Message: message,
+				})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
 		case runnerUnknown:
@@ -385,10 +393,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			log.Info(message)
 			r.Recorder.Event(migration, "Warning", "Unknown", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachineMigration,
+				metav1.Condition{
+					Type:    typeAvailableVirtualMachineMigration,
 					Status:  metav1.ConditionUnknown,
 					Reason:  "Reconciling",
-					Message: message})
+					Message: message,
+				})
 			migration.Status.Phase = vmv1.VmmPending
 			return r.updateMigrationStatus(ctx, migration)
 		default:
@@ -405,10 +415,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			message := fmt.Sprintf("Target Pod (%s) disappeared", migration.Status.TargetPodName)
 			r.Recorder.Event(migration, "Error", "NotFound", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachineMigration,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachineMigration,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: message})
+					Message: message,
+				})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
 		} else if err != nil {

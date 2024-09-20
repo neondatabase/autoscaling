@@ -801,7 +801,6 @@ func QmpGetMemorySize(ip string, port int32) (*resource.Quantity, error) {
 }
 
 func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigration *vmv1.VirtualMachineMigration) error {
-
 	// QMP port
 	port := virtualmachine.Spec.QMP
 

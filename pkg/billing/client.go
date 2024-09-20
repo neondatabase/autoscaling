@@ -112,7 +112,6 @@ func NewS3Client(ctx context.Context, cfg S3ClientConfig) (*S3Client, error) {
 	defer cancel()
 
 	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
-
 	if err != nil {
 		return nil, S3Error{Err: err}
 	}
@@ -189,7 +188,6 @@ func (c S3Client) send(ctx context.Context, payload []byte, _ TraceID) error {
 		Key:    &key,
 		Body:   r,
 	})
-
 	if err != nil {
 		return S3Error{Err: err}
 	}
