@@ -54,7 +54,7 @@ RUN set -e \
 # Build the kernel on amd64
 FROM build-deps AS build_amd64
 ARG KERNEL_VERSION
-ADD linux-config-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
+ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- -j `nproc`
 
 # Copy the kernel image to a separate step
@@ -67,7 +67,7 @@ COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vm
 # Build the kernel on amd64
 FROM build-deps AS build_arm64
 ARG KERNEL_VERSION
-ADD linux-config-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
+ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j `nproc`
 
 # Copy the kernel image to a separate step
