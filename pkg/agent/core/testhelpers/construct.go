@@ -96,9 +96,11 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 	return vm
 }
 
-type coreConfigModifier func(*core.Config)
-type vmInfoConfigModifier func(*InitialVmInfoConfig)
-type vmInfoModifier func(InitialVmInfoConfig, *api.VmInfo)
+type (
+	coreConfigModifier   func(*core.Config)
+	vmInfoConfigModifier func(*InitialVmInfoConfig)
+	vmInfoModifier       func(InitialVmInfoConfig, *api.VmInfo)
+)
 
 var (
 	_ VmInfoOpt = vmInfoConfigModifier(nil)
