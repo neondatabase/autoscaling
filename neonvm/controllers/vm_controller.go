@@ -1303,7 +1303,7 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 					{
 						Key:      "kubernetes.io/arch",
 						Operator: "In",
-						Values:   []string{"amd64"},
+						Values:   []string{"arm64"},
 					},
 					{
 						Key:      "kubernetes.io/os",
