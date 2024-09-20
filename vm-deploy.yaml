@@ -11,6 +11,23 @@ metadata:
     # Set to "true" to continuously migrate the VM (TESTING ONLY)
     autoscaling.neon.tech/testing-only-always-migrate: "false"
 spec:
+  terminationGracePeriodSeconds: 300
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values:
+            - amd64
+            - arm64
+            - ppc64le
+            - s390x
+          - key: kubernetes.io/os
+            operator: In
+            values:
+            - linux
   schedulerName: autoscale-scheduler
   enableSSH: true
   guest:

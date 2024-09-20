@@ -49,7 +49,7 @@ import (
 )
 
 const (
-	QEMU_BIN          = "qemu-system-x86_64"
+	QEMU_BIN          = "qemu-system-aarch64"
 	QEMU_IMG_BIN      = "qemu-img"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
 
@@ -799,7 +799,7 @@ func buildQEMUCmd(
 	// prepare qemu command line
 	qemuCmd := []string{
 		"-runas", "qemu",
-		"-machine", "q35",
+		"-machine", "virt",
 		"-nographic",
 		"-no-reboot",
 		"-nodefaults",
