@@ -1,4 +1,4 @@
-package billing
+package reporting
 
 // Implementation of the event queue for mediating event generation and event sending.
 //
@@ -13,7 +13,6 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-// this is generic just so there's less typing - "billing.IncrementalEvent" is long!
 type eventQueueInternals[E any] struct {
 	mu        sync.Mutex
 	items     []E
