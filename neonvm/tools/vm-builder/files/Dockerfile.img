@@ -42,12 +42,6 @@ RUN set -e \
 	&& sed -i 's/#!\/bin\/sh/#!\/neonvm\/bin\/sh/' /neonvm/bin/udhcpc.script \
 	&& sed -i 's/export PATH=.*/export PATH=\/neonvm\/bin/' /neonvm/bin/udhcpc.script
 
-# tools for qemu disk creation
-RUN set -e \
-	&& apk add --no-cache --no-progress --quiet \
-		qemu-img \
-		e2fsprogs
-
 # Install vector.dev binary
 RUN set -e \
     && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
@@ -98,6 +92,13 @@ RUN set -e \
 FROM vm-runtime AS builder
 ARG DISK_SIZE
 COPY --from=rootdisk-mod / /rootdisk
+
+# tools for qemu disk creation
+RUN set -e \
+	&& apk add --no-cache --no-progress --quiet \
+		qemu-img \
+		e2fsprogs
+
 RUN set -e \
     && mkdir -p /rootdisk/etc \
     && mkdir -p /rootdisk/etc/vector \
@@ -108,5 +109,4 @@ RUN set -e \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
 FROM alpine:3.19
-RUN apk add --no-cache --no-progress --quiet qemu-img
 COPY --from=builder /disk.qcow2 /
