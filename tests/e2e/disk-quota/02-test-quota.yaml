@@ -1,0 +1,37 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+unitTest: false
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      mountpoint="/var/db/postgres/compute"
+
+      # Test 1: Create a 100MB file as 'postgres' user, which should succeed
+      echo "Creating 100MB file as 'postgres' user, expected to succeed."
+      kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm su - postgres -c "sh -c 'dd if=/dev/urandom of=$mountpoint/small_file.bin bs=1M count=100'"
+      echo "100MB file created successfully by 'postgres' user."
+
+      # Verify the file size is 100MB
+      file_size=$(kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm su - postgres -c "sh -c 'du -m $mountpoint/small_file.bin'" | cut -f1)
+      if [ "$file_size" -ne 100 ]; then
+        echo "File size verification failed: expected 100MB, but got $file_size MB."
+        exit 1
+      fi
+      echo "File size verification passed for 100MB file."
+
+      # Test 2: Attempt to create a 1000MB file as 'postgres' user, which should fail due to quota limits
+      echo "Creating 1000MB file as 'postgres' user, expected to fail."
+      set +e  # Disable exit on error to capture the failure
+      kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm su - postgres -c "sh -c 'dd if=/dev/urandom of=$mountpoint/big_file.bin bs=1M count=1024'"
+      dd_exit_code=$?
+      set -e  # Re-enable exit on error
+
+      # Verify that the creation of the 1000MB file failed
+      if [ "$dd_exit_code" -eq 0 ]; then
+        echo "Test failed: 1000MB file was created, but it should have failed due to quota."
+        exit 1
+      else
+        echo "Test passed: 1000MB file creation failed as expected."
+      fi
+      
