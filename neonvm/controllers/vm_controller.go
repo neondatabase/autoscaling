@@ -772,35 +772,28 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return err
 		}
 
-		// We must keep the VM status the same until we know the neonvm-runner container has been
-		// terminated, otherwise we could end up starting a new runner pod while the VM in the old
-		// one is still running.
-		//
-		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
-		// one* container inside the runner pod has finished; the VM itself may still be running.
-		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
-			// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
-			vm.Cleanup()
+		// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
+		vm.Cleanup()
 
-			var shouldRestart bool
-			switch vm.Spec.RestartPolicy {
-			case vmv1.RestartPolicyAlways:
-				shouldRestart = true
-			case vmv1.RestartPolicyOnFailure:
-				shouldRestart = vm.Status.Phase == vmv1.VmFailed
-			case vmv1.RestartPolicyNever:
-				shouldRestart = false
-			}
-
-			if shouldRestart {
-				log.Info("Restarting VM runner pod", "VM.Phase", vm.Status.Phase, "RestartPolicy", vm.Spec.RestartPolicy)
-				vm.Status.Phase = vmv1.VmPending // reset to trigger restart
-				vm.Status.RestartCount += 1      // increment restart count
-				r.Metrics.vmRestartCounts.Inc()
-			}
-
-			// TODO for RestartPolicyNever: implement TTL or do nothing
+		var shouldRestart bool
+		switch vm.Spec.RestartPolicy {
+		case vmv1.RestartPolicyAlways:
+			shouldRestart = true
+		case vmv1.RestartPolicyOnFailure:
+			shouldRestart = vm.Status.Phase == vmv1.VmFailed
+		case vmv1.RestartPolicyNever:
+			shouldRestart = false
 		}
+
+		if shouldRestart {
+			log.Info("Restarting VM runner pod", "VM.Phase", vm.Status.Phase, "RestartPolicy", vm.Spec.RestartPolicy)
+			vm.Status.Phase = vmv1.VmPending // reset to trigger restart
+			vm.Status.RestartCount += 1      // increment restart count
+			r.Metrics.vmRestartCounts.Inc()
+		}
+
+		// TODO for RestartPolicyNever: implement TTL or do nothing
+
 	default:
 		// do nothing
 	}
@@ -955,23 +948,6 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
-}
-
-// runnerContainerStopped returns true iff the neonvm-runner container has exited.
-//
-// The guarantee is simple: It is only safe to start a new runner pod for a VM if
-// runnerContainerStopped returns true (otherwise, we may end up with >1 instance of the same VM).
-func runnerContainerStopped(pod *corev1.Pod) bool {
-	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-		return true
-	}
-
-	for _, stat := range pod.Status.ContainerStatuses {
-		if stat.Name == "neonvm-runner" {
-			return stat.State.Terminated != nil
-		}
-	}
-	return false
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
