@@ -123,6 +123,7 @@ func newTestParams(t *testing.T) *testParams {
 			MemhpAutoMovableRatio:   "301",
 			FailurePendingPeriod:    time.Minute,
 			FailingRefreshInterval:  time.Minute,
+			AtMostOnePod:            false,
 		},
 		Metrics: reconcilerMetrics,
 	}

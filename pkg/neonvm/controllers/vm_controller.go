@@ -776,13 +776,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return err
 		}
 
-		// We must keep the VM status the same until we know the neonvm-runner container has been
-		// terminated, otherwise we could end up starting a new runner pod while the VM in the old
-		// one is still running.
+		// By default, we cleanup the VM, even if previous pod still exists. This behavior is for the case
+		// where the pod is stuck deleting, and we want to progress without waiting for it.
 		//
-		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
-		// one* container inside the runner pod has finished; the VM itself may still be running.
-		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
+		// However, this opens up a possibility for cascading failures where the pods would be constantly
+		// recreated, and then stuck deleting. That's why we have AtMostOnePod.
+		if !r.Config.AtMostOnePod || apierrors.IsNotFound(err) {
 			// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
 			vm.Cleanup()
 
@@ -961,23 +960,6 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
-}
-
-// runnerContainerStopped returns true iff the neonvm-runner container has exited.
-//
-// The guarantee is simple: It is only safe to start a new runner pod for a VM if
-// runnerContainerStopped returns true (otherwise, we may end up with >1 instance of the same VM).
-func runnerContainerStopped(pod *corev1.Pod) bool {
-	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-		return true
-	}
-
-	for _, stat := range pod.Status.ContainerStatuses {
-		if stat.Name == "neonvm-runner" {
-			return stat.State.Terminated != nil
-		}
-	}
-	return false
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
