@@ -100,6 +100,7 @@ func main() {
 	var memhpAutoMovableRatio string
 	var failurePendingPeriod time.Duration
 	var failingRefreshInterval time.Duration
+	var atMostOnePod bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -140,6 +141,9 @@ func main() {
 		"the period for the propagation of reconciliation failures to the observability instruments")
 	flag.DurationVar(&failingRefreshInterval, "failing-refresh-interval", 1*time.Minute,
 		"the interval between consecutive updates of metrics and logs, related to failing reconciliations")
+	flag.BoolVar(&atMostOnePod, "at-most-one-pod", false,
+		"If true, the controller will ensure that at most one pod is running at a time. "+
+			"Otherwise, the outdated pod might be left to terminate, while the new one is already running.")
 	flag.Parse()
 
 	if defaultMemoryProvider == "" {
@@ -195,6 +199,7 @@ func main() {
 		MemhpAutoMovableRatio:   memhpAutoMovableRatio,
 		FailurePendingPeriod:    failurePendingPeriod,
 		FailingRefreshInterval:  failingRefreshInterval,
+		AtMostOnePod:            atMostOnePod,
 	}
 
 	vmReconciler := &controllers.VMReconciler{

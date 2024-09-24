@@ -50,4 +50,7 @@ type ReconcilerConfig struct {
 	// FailingRefreshInterval is the interval between consecutive
 	// updates of metrics and logs, related to failing reconciliations
 	FailingRefreshInterval time.Duration
+
+	// AtMostOnePod is the flag that indicates whether we should only have one pod per VM.
+	AtMostOnePod bool
 }
