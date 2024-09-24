@@ -59,6 +59,12 @@ RUN set -e \
 		openssh-server \
 	&& /helper.move-bins.sh sshd ssh-keygen
 
+# quota tools
+RUN set -e \
+	&& apk add --no-cache --no-progress --quiet \
+		quota-tools \
+	&& /helper.move-bins.sh quota edquota quotacheck quotaoff quotaon quotastats setquota repquota tune2fs
+
 # init scripts & configs
 COPY inittab     /neonvm/bin/inittab
 COPY vminit      /neonvm/bin/vminit
@@ -73,6 +79,8 @@ COPY udev-init.sh /neonvm/bin/udev-init.sh
 RUN chmod +rx /neonvm/bin/udev-init.sh
 COPY resize-swap.sh /neonvm/bin/resize-swap
 RUN chmod +rx /neonvm/bin/resize-swap
+COPY set-disk-quota.sh /neonvm/bin/set-disk-quota
+RUN chmod +rx /neonvm/bin/set-disk-quota
 
 # rootdisk modification
 FROM rootdisk AS rootdisk-mod

@@ -279,6 +279,11 @@ func createISO9660runtime(
 					opts = "-o discard"
 				}
 
+				if disk.EmptyDisk.EnableQuotas {
+					mounts = append(mounts, fmt.Sprintf(`tune2fs -Q prjquota $(/neonvm/bin/blkid -L %s)`, disk.Name))
+					mounts = append(mounts, fmt.Sprintf(`tune2fs -E mount_opts=prjquota $(/neonvm/bin/blkid -L %s)`, disk.Name))
+				}
+
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
 				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))

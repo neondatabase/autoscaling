@@ -1,0 +1,22 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 20
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      
+      # Run repquota in CSV format and capture the output
+      csv_output=$(kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm /neonvm/bin/repquota -a -P -O csv)
+
+      # Extract values of Project and BlockHardLimit from the CSV output
+      project=$(echo "$csv_output" | awk -F',' 'NR==2 {print $1}')
+      block_hard_limit=$(echo "$csv_output" | awk -F',' 'NR==2 {print $6}')
+
+      # Define the expected values for Project and BlockHardLimit
+      expected_project="#0"
+      expected_block_hard_limit="1048576" # 1 GiB
+
+      # Assert the Project and BlockHardLimit values
+      [ "$project" = "$expected_project" ]
+      [ "$block_hard_limit" = "$expected_block_hard_limit" ]
