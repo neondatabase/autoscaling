@@ -14,6 +14,8 @@ else
 fi
 
 echo "Setting disk quota for $mountpoint to $size KB"
+
+# setquota -P <project_id> <block-softlimit> <block-hardlimit> <inode-softlimit> <inode-hardlimit> <filesystem>
 /neonvm/bin/setquota -P 0 0 "$size" 0 0 "$mountpoint"
 
 echo "DONE! Disk quota set"
