@@ -433,14 +433,27 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		return errors.New("diskSize or contentPath should be specified")
 	}
 
-	if contentPath == nil {
-		if err := execFg("mkfs.ext4", "-q", "-L", diskName, "-b", fmt.Sprintf("%d", ext4blockSize), "ext4.raw", fmt.Sprintf("%d", ext4blockCount)); err != nil {
-			return err
-		}
-	} else {
-		if err := execFg("mkfs.ext4", "-q", "-L", diskName, "-d", *contentPath, "-b", fmt.Sprintf("%d", ext4blockSize), "ext4.raw", fmt.Sprintf("%d", ext4blockCount)); err != nil {
-			return err
-		}
+	mkfsArgs := []string{
+		"-q", // quiet
+		"-L", // volume-label
+		diskName,
+	}
+
+	if contentPath != nil {
+		// [ -d root-directory|tarball ]
+		mkfsArgs = append(mkfsArgs, "-d", *contentPath)
+	}
+
+	mkfsArgs = append(
+		mkfsArgs,
+		"-b", // block-size
+		fmt.Sprintf("%d", ext4blockSize),
+		"ext4.raw",                        // device
+		fmt.Sprintf("%d", ext4blockCount), // fs-size
+	)
+
+	if err := execFg("mkfs.ext4", mkfsArgs...); err != nil {
+		return err
 	}
 
 	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
