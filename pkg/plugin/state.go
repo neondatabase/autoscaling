@@ -698,7 +698,6 @@ func (e *AutoscaleEnforcer) speculativeReserve(
 	includeBuffer bool,
 	accept func(verdict verdictSet, overBudget bool) bool,
 ) (ok bool, _ verdictSet) {
-
 	// Construct the speculative state of the pod
 	//
 	// We'll pass this into (resourceTransitioner).handleReserve(), but only commit the changes if

@@ -455,10 +455,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			vm.Status.PodIP = vmRunner.Status.PodIP
 			vm.Status.Phase = vmv1.VmRunning
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachine,
+				metav1.Condition{
+					Type:    typeAvailableVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) created successfully", vm.Status.PodName, vm.Name),
+				})
 			{
 				// Calculating VM startup latency metrics
 				now := time.Now()
@@ -473,24 +475,30 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		case runnerSucceeded:
 			vm.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachine,
+				metav1.Condition{
+					Type:    typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name),
+				})
 		case runnerFailed:
 			vm.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachine,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
+				})
 		case runnerUnknown:
 			vm.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachine,
+				metav1.Condition{
+					Type:    typeAvailableVirtualMachine,
 					Status:  metav1.ConditionUnknown,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
+				})
 		default:
 			// do nothing
 		}
@@ -505,10 +513,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					vm.Status.PodName))
 			vm.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachine,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", vm.Status.PodName, vm.Name),
+				})
 		} else if err != nil {
 			log.Error(err, "Failed to get runner Pod")
 			return err
@@ -593,24 +603,30 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		case runnerSucceeded:
 			vm.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachine,
+				metav1.Condition{
+					Type:    typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name),
+				})
 		case runnerFailed:
 			vm.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachine,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
+				})
 		case runnerUnknown:
 			vm.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachine,
+				metav1.Condition{
+					Type:    typeAvailableVirtualMachine,
 					Status:  metav1.ConditionUnknown,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
+				})
 		default:
 			// do nothing
 		}
@@ -626,10 +642,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					vm.Status.PodName))
 			vm.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachine,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) not found", vm.Status.PodName, vm.Name),
+				})
 		} else if err != nil {
 			log.Error(err, "Failed to get runner Pod")
 			return err
@@ -646,26 +664,32 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		case runnerSucceeded:
 			vm.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachine,
+				metav1.Condition{
+					Type:    typeAvailableVirtualMachine,
 					Status:  metav1.ConditionFalse,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) succeeded", vm.Status.PodName, vm.Name),
+				})
 			return nil
 		case runnerFailed:
 			vm.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeDegradedVirtualMachine,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachine,
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
+				})
 			return nil
 		case runnerUnknown:
 			vm.Status.Phase = vmv1.VmPending
 			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{Type: typeAvailableVirtualMachine,
+				metav1.Condition{
+					Type:    typeAvailableVirtualMachine,
 					Status:  metav1.ConditionUnknown,
 					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name)})
+					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
+				})
 			return nil
 		default:
 			// do nothing
@@ -1385,7 +1409,7 @@ func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgr
 // imageForVirtualMachine gets the Operand image which is managed by this controller
 // from the VM_RUNNER_IMAGE environment variable defined in the config/manager/manager.yaml
 func imageForVmRunner() (string, error) {
-	var imageEnvVar = "VM_RUNNER_IMAGE"
+	imageEnvVar := "VM_RUNNER_IMAGE"
 	image, found := os.LookupEnv(imageEnvVar)
 	if !found {
 		return "", fmt.Errorf("unable to find %s environment variable with the image", imageEnvVar)
@@ -1660,7 +1684,7 @@ func podSpec(
 							{
 								Key:  "ssh-privatekey",
 								Path: "id_ed25519",
-								Mode: lo.ToPtr[int32](0600),
+								Mode: lo.ToPtr[int32](0o600),
 							},
 						},
 					},
@@ -1675,7 +1699,7 @@ func podSpec(
 							{
 								Key:  "ssh-publickey",
 								Path: "authorized_keys",
-								Mode: lo.ToPtr[int32](0644),
+								Mode: lo.ToPtr[int32](0o644),
 							},
 						},
 					},

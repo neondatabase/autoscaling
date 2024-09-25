@@ -68,7 +68,6 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName string, vmNamespace string)
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
 func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error) {
-
 	// get Kubernetes client config
 	cfg, err := config.GetConfig()
 	if err != nil {
@@ -171,7 +170,6 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 
 // Performing IPAM actions with Leader Election to avoid duplicates
 func (i *IPAM) acquireORrelease(ctx context.Context, vmName string, vmNamespace string, action int) (net.IPNet, error) {
-
 	var ip net.IPNet
 	var err error
 	var ipamerr error

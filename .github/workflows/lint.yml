@@ -48,6 +48,27 @@ jobs:
             exit 1
           fi
 
+  fmt:
+    name: make fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: make fmt
+        run: |
+          make fmt
+      - name: check diff
+        run: |
+          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
+            git ls-files --exclude-standard --others .
+            git diff .
+            echo "ERROR: 'make fmt' modified the source tree."
+            exit 1
+          fi
+
   generated:
     name: check generated files
     runs-on: ubuntu-latest
