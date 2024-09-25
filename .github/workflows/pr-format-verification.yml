@@ -60,7 +60,7 @@ jobs:
           # Check that title matches the regex:
           TITLE_REGEX='^[a-z0-9-.]+(/[a-z0-9-.]+)*(,[a-z0-9-.]+(/[a-z0-9-.]+)*)*: .*$'
 
-          if ! grep -qP "$TITLE_REGEX" <(echo "$title") >/dev/null ; then
+          if ! grep -qiP "$TITLE_REGEX" <(echo "$title") >/dev/null ; then
               echo "$ON_FAILURE" >/dev/stderr
               exit 1
           fi
