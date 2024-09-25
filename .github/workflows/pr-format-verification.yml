@@ -1,0 +1,66 @@
+name: PR format verification
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      # By default, a workflow only runs when a pull_request event's activity type is opened, synchronize, or reopened.
+      - opened
+      - synchronize
+      - edited
+      - reopened
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  pr-format-verification:
+    name: Check PR title
+    # Only run the job if the PR is not created by dependabot.
+    # We still want dependabot PRs to go through, they contain important security updates,
+    # and there's no good way of getting dependabot to conform to our PR format
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Verify PR Title
+        env:
+          ON_FAILURE: |
+            PR title must be prefixed with component names (e.g., "vm-builder: ..." or "agent/subsystem,neonvm: ...") OR body must contain the string "<!-- affects all -->"
+
+            Some common component names:
+             * "agent" (the autoscaler-agent)
+             * "plugin" (the scheduler)
+             * "neonvm-controller" / "neonvm-runner" / "vm-builder" (individual parts of "neonvm")
+             * "neonvm" (when the PR affects most neonvm-related components)
+             * "ci" / "CI" - depending on your capitalization
+
+            Some common subsystems:
+             * "agent/billing" (generation of billing events in the autoscaler-agent)
+             * "agent/core" (core scaling algorithm in the autoscaler-agent)
+             * "plugin/trans" (core resource logic in the scheduler plugin)
+             * "ci/lint" (lints workflow in CI)
+
+            Check recent PRs for examples: https://github.com/neondatabase/autoscaling/pulls?q=is%3Apr+is%3Aclosed
+        run: |
+          title="$(jq --raw-output .pull_request.title "$GITHUB_EVENT_PATH")"
+          body="$(jq --raw-output .pull_request.body "$GITHUB_EVENT_PATH")"
+
+          # If the PR body contains the magic string, ignore it.
+          if grep -q '<!-- affects all -->' <(echo "$body") >/dev/null ; then
+              exit 0
+          fi
+
+          # If the title looks like 'Revert "..."', then give it a pass.
+          if grep -q '^Revert "' <(echo "$title") >/dev/null ; then
+              exit 0
+          fi
+
+          # Check that title matches the regex:
+          TITLE_REGEX='^[a-z0-9-.]+(/[a-z0-9-.]+)*(,[a-z0-9-.]+(/[a-z0-9-.]+)*)*: .*$'
+
+          if ! grep -qP "$TITLE_REGEX" <(echo "$title") >/dev/null ; then
+              echo "$ON_FAILURE" >/dev/stderr
+              exit 1
+          fi
