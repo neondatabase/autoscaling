@@ -102,7 +102,10 @@ jobs:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
     needs: [ tags, vm-kernel ]
-    runs-on: [ self-hosted, gen3, large ]
+    runs-on: [ self-hosted, large ]
+    permissions:
+      contents: read  # This is required for actions/checkout
+      id-token: write # This is required for aws-actions/configure-aws-credentials
 
     services:
       registry:
@@ -146,6 +149,7 @@ jobs:
         with:
           driver-opts: network=host
 
+
       - name: Login to Dockerhub
         uses: docker/login-action@v3
         with:
@@ -159,21 +163,33 @@ jobs:
           username: ${{ secrets.NEON_CI_DOCKERCACHE_USERNAME }}
           password: ${{ secrets.NEON_CI_DOCKERCACHE_PASSWORD }}
 
+      - name: Configure dev AWS credentials
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: eu-central-1
+          mask-aws-account-id: true
+          role-to-assume: ${{ secrets.DEV_GHA_OIDC_ECR_ROLE }}
+
       - name: Login to dev ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ env.ECR_DEV }}
-          username: ${{ secrets.DEV_GHA_RUNNER_LIMITED_AWS_ACCESS_KEY_ID }}
-          password: ${{ secrets.DEV_GHA_RUNNER_LIMITED_AWS_SECRET_ACCESS_KEY }}
+
+      - name: Configure prod AWS credentials
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: eu-central-1
+          mask-aws-account-id: true
+          role-to-assume: ${{ secrets.PROD_GHA_OIDC_ECR_ROLE }}
 
       - name: Login to prod ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ env.ECR_PROD }}
-          username: ${{ secrets.PROD_GHA_RUNNER_LIMITED_AWS_ACCESS_KEY_ID }}
-          password: ${{ secrets.PROD_GHA_RUNNER_LIMITED_AWS_SECRET_ACCESS_KEY }}
 
       - name: Check dependencies
         run: |
