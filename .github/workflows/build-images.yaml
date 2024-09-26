@@ -51,6 +51,7 @@ env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
   IMG_VXLAN_CONTROLLER:   "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:             "neondatabase/neonvm-runner"
+  IMG_DAEMON:             "neondatabase/neonvm-daemon"
   IMG_KERNEL:             "neondatabase/vm-kernel"
   IMG_SCHEDULER:          "neondatabase/autoscale-scheduler"
   IMG_AUTOSCALER_AGENT:   "neondatabase/autoscaler-agent"
@@ -85,6 +86,7 @@ jobs:
           echo "controller=${{ env.IMG_CONTROLLER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "vxlan-controller=${{ env.IMG_VXLAN_CONTROLLER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "runner=${{ env.IMG_RUNNER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "scheduler=${{ env.IMG_SCHEDULER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "autoscaler-agent=${{ env.IMG_AUTOSCALER_AGENT }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "cluster-autoscaler=${{ env.IMG_CLUSTER_AUTOSCALER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
@@ -106,6 +108,7 @@ jobs:
     permissions:
       contents: read  # This is required for actions/checkout
       id-token: write # This is required for aws-actions/configure-aws-credentials
+    runs-on: [ self-hosted, gen3, large ]
 
     services:
       registry:
@@ -230,6 +233,15 @@ jobs:
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
+      - name: Build and push neonvm-daemon image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: neonvm/daemon/Dockerfile
+          tags: ${{ needs.tags.outputs.daemon }}
+
       - name: Generate neonvm-controller build tags
         id: controller-build-tags
         env:
@@ -317,6 +329,7 @@ jobs:
             neonvm-controller \
             neonvm-vxlan-controller \
             neonvm-runner \
+            neonvm-daemon \
             vm-kernel \
             autoscale-scheduler \
             autoscaler-agent \
