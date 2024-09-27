@@ -74,11 +74,8 @@ func run(mgr manager.Manager) error {
 	ctx = srv.SetBaseContext(ctx)
 	ctx = srv.WithOrchestrator(ctx)
 	orca := srv.GetOrchestrator(ctx)
-	defer func() {
-		if err := orca.Wait(); err != nil {
-			setupLog.Error(err, "failed to shut down orchestrator")
-		}
 
+	defer func() {
 		setupLog.Info("main loop returned, exiting")
 	}()
 
@@ -196,11 +193,9 @@ func main() {
 		// speeds up voluntary leader transitions as the new leader don't have to wait
 		// LeaseDuration time first.
 		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
+		// This option is only safe as long as the program immediately exits after the manager
+		// stops.
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -285,6 +280,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// NOTE: THE CONTROLLER MUST IMMEDIATELY EXIT AFTER RUNNING THE MANAGER.
 	if err := run(mgr); err != nil {
 		setupLog.Error(err, "run manager error")
 		os.Exit(1)
