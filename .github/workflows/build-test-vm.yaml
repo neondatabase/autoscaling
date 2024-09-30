@@ -29,6 +29,7 @@ on:
 
 env:
   IMG_POSTGRES_16_BULLSEYE: "neondatabase/vm-postgres-16-bullseye"
+  IMG_DAEMON: "neondatabase/neonvm-daemon"
 
 defaults:
   run:
@@ -38,11 +39,13 @@ jobs:
   tags:
     outputs:
       vm-postgres-16-bullseye: ${{ steps.show-tags.outputs.vm-postgres-16-bullseye }}
+      daemon: ${{ steps.show-tags.outputs.daemon }}
     runs-on: ubuntu-latest
     steps:
       - id: show-tags
         run: |
           echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
@@ -81,7 +84,7 @@ jobs:
 
       - name: build ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
         run: |
-          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
+          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-16-bullseye }} -daemon-image ${{ needs.tags.outputs.daemon }}
       - name: docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
         run: |
           docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
