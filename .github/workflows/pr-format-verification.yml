@@ -58,7 +58,11 @@ jobs:
           fi
 
           # Check that title matches the regex:
-          TITLE_REGEX='^[a-z0-9-.]+(/[a-z0-9-.]+)*(,[a-z0-9-.]+(/[a-z0-9-.]+)*)*: .*$'
+          WORD='[a-z0-9-.]+'
+          COMPONENT="$WORD(/$WORD)*" # one or more '/'-separated words
+          TITLE_PREFIX="$COMPONENT(,$COMPONENT)*" # one or more ','-separated components
+          TITLE_MSG='.+' # Any non-empty message.
+          TITLE_REGEX="^$TITLE_PREFIX: $TITLE_MSG\$"
 
           if ! grep -qiP "$TITLE_REGEX" <(echo "$title") >/dev/null ; then
               echo "$ON_FAILURE" >/dev/stderr
