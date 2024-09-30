@@ -76,3 +76,7 @@ RUN cd linux-${KERNEL_VERSION} && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gn
 FROM --platform=linux/arm64 alpine:3.19 AS kernel_arm64
 ARG KERNEL_VERSION
 COPY --from=build_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
+
+# Dummy default target without target architecture
+FROM alpine:3.19
+RUN echo "No target architecture specified, can't build kernel image" && exit 1
