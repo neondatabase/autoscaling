@@ -46,10 +46,8 @@ var (
 	scriptVmInit string
 	//go:embed files/udev-init.sh
 	scriptUdevInit string
-	//go:embed files/cg-setup.sh
-	scriptCgSetup string
-	//go:embed files/cg-run.sh
-	scriptCgRun string
+	scriptCgSetup  string
+	scriptCgRun    string
 	//go:embed files/resize-swap.sh
 	scriptResizeSwap string
 	//go:embed files/set-disk-quota.sh
