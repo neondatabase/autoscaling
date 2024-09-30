@@ -46,6 +46,9 @@ on:
       autoscaler-agent:
         description: 'autoscaler-agent image'
         value: ${{ jobs.tags.outputs.autoscaler-agent }}
+      daemon:
+        description: 'neonvm-daemon image'
+        value: ${{ jobs.tags.outputs.daemon }}
 
 env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
@@ -79,6 +82,7 @@ jobs:
       scheduler:          ${{ steps.show-tags.outputs.scheduler }}
       autoscaler-agent:   ${{ steps.show-tags.outputs.autoscaler-agent }}
       cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
+      daemon:             ${{ steps.show-tags.outputs.daemon}}
     runs-on: ubuntu-latest
     steps:
       - id: show-tags
@@ -241,6 +245,8 @@ jobs:
           push: true
           file: neonvm/daemon/Dockerfile
           tags: ${{ needs.tags.outputs.daemon }}
+          build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
       - name: Generate neonvm-controller build tags
         id: controller-build-tags
