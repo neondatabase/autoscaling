@@ -236,16 +236,16 @@ jobs:
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
-      - name: Build and push neonvm-daemon image
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          file: neonvm/daemon/Dockerfile
-          tags: ${{ needs.tags.outputs.daemon }}
-          build-args: |
-            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+      # - name: Build and push neonvm-daemon image
+      #   uses: docker/build-push-action@v3
+      #   with:
+      #     context: .
+      #     platforms: linux/amd64
+      #     push: true
+      #     file: neonvm/daemon/Dockerfile
+      #     tags: ${{ needs.tags.outputs.daemon }}
+      #     build-args: |
+      #       GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
       - name: Generate neonvm-controller build tags
         id: controller-build-tags
