@@ -138,8 +138,8 @@ build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 	GOOS=linux go build -o bin/runner           neonvm/runner/*.go
 
 .PHONY: bin/vm-builder
-bin/vm-builder: ## Build vm-builder binary.
-	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" -X main.NeonvmDaemonImage=${IMG_DAEMON}" neonvm/tools/vm-builder/main.go 
+bin/vm-builder: docker-build-daemon ## Build vm-builder binary.
+	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
@@ -188,10 +188,9 @@ docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runne
 		.
 
 .PHONY: docker-build-daemon
-docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemon.
+docker-build-daemon: ## Build docker image for NeonVM daemon.
 	docker build \
 		--tag $(IMG_DAEMON) \
-		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--file neonvm/daemon/Dockerfile \
 		.
 
