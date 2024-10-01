@@ -112,7 +112,6 @@ jobs:
           IMG_CONTROLLER:       ${{ needs.build-images.outputs.controller }}
           IMG_VXLAN_CONTROLLER: ${{ needs.build-images.outputs.vxlan-controller }}
           IMG_RUNNER:           ${{ needs.build-images.outputs.runner }}
-          IMG_DAEMON:           ${{ needs.build-images.outputs.daemon }}
           IMG_SCHEDULER:        ${{ needs.build-images.outputs.scheduler }}
           IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs.autoscaler-agent }}
 

@@ -30,7 +30,7 @@ on:
 env:
   IMG_POSTGRES_16_BULLSEYE: "neondatabase/vm-postgres-16-bullseye"
   # using locally build base image
-  IMG_DAEMON: "autoscaling-go-base:dev"
+  IMG_DAEMON: "daemon:dev"
 
 defaults:
   run:
@@ -62,7 +62,7 @@ jobs:
           cache: false
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
         timeout-minutes: 10
-      
+ 
       - run: make bin/vm-builder
 
       - name: upload vm-builder

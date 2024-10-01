@@ -46,15 +46,11 @@ on:
       autoscaler-agent:
         description: 'autoscaler-agent image'
         value: ${{ jobs.tags.outputs.autoscaler-agent }}
-      daemon:
-        description: 'neonvm-daemon image'
-        value: ${{ jobs.tags.outputs.daemon }}
 
 env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
   IMG_VXLAN_CONTROLLER:   "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:             "neondatabase/neonvm-runner"
-  IMG_DAEMON:             "neondatabase/neonvm-daemon"
   IMG_KERNEL:             "neondatabase/vm-kernel"
   IMG_SCHEDULER:          "neondatabase/autoscale-scheduler"
   IMG_AUTOSCALER_AGENT:   "neondatabase/autoscaler-agent"
@@ -82,7 +78,6 @@ jobs:
       scheduler:          ${{ steps.show-tags.outputs.scheduler }}
       autoscaler-agent:   ${{ steps.show-tags.outputs.autoscaler-agent }}
       cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
-      daemon:             ${{ steps.show-tags.outputs.daemon}}
     runs-on: ubuntu-latest
     steps:
       - id: show-tags
@@ -90,7 +85,6 @@ jobs:
           echo "controller=${{ env.IMG_CONTROLLER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "vxlan-controller=${{ env.IMG_VXLAN_CONTROLLER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "runner=${{ env.IMG_RUNNER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "scheduler=${{ env.IMG_SCHEDULER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "autoscaler-agent=${{ env.IMG_AUTOSCALER_AGENT }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "cluster-autoscaler=${{ env.IMG_CLUSTER_AUTOSCALER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
@@ -236,17 +230,6 @@ jobs:
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
-      # - name: Build and push neonvm-daemon image
-      #   uses: docker/build-push-action@v3
-      #   with:
-      #     context: .
-      #     platforms: linux/amd64
-      #     push: true
-      #     file: neonvm/daemon/Dockerfile
-      #     tags: ${{ needs.tags.outputs.daemon }}
-      #     build-args: |
-      #       GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-
       - name: Generate neonvm-controller build tags
         id: controller-build-tags
         env:
@@ -334,7 +317,6 @@ jobs:
             neonvm-controller \
             neonvm-vxlan-controller \
             neonvm-runner \
-            neonvm-daemon \
             vm-kernel \
             autoscale-scheduler \
             autoscaler-agent \
