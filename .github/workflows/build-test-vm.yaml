@@ -29,7 +29,8 @@ on:
 
 env:
   IMG_POSTGRES_16_BULLSEYE: "neondatabase/vm-postgres-16-bullseye"
-  IMG_DAEMON: "neondatabase/neonvm-daemon"
+  # using locally build base image
+  IMG_DAEMON: "autoscaling-go-base:dev"
 
 defaults:
   run:
@@ -45,7 +46,7 @@ jobs:
       - id: show-tags
         run: |
           echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}" | tee -a $GITHUB_OUTPUT
 
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
@@ -61,7 +62,7 @@ jobs:
           cache: false
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
         timeout-minutes: 10
-
+      
       - run: make bin/vm-builder
 
       - name: upload vm-builder
