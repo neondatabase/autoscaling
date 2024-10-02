@@ -723,6 +723,11 @@ func (in *VirtualMachineSpec) DeepCopyInto(out *VirtualMachineSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.DelegatedCPULimits != nil {
+		in, out := &in.DelegatedCPULimits, &out.DelegatedCPULimits
+		*out = new(bool)
+		**out = **in
+	}
 	if in.EnableSSH != nil {
 		in, out := &in.EnableSSH, &out.EnableSSH
 		*out = new(bool)

@@ -26,7 +26,8 @@ if [ ! -f /neonvm/runtime/resize-swap-internal.sh ]; then
     exit 1
 fi
 
-/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh "$size"
+# we need to break out of the current mount namespace in order to make changes on the host.
+/neonvm/bin/nsenter --mount=/proc/1/ns/mnt /neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh "$size"
 if [ "$once" = 'yes' ]; then
     # remove *this* script so that it cannot be called again.
     rm /neonvm/bin/resize-swap
