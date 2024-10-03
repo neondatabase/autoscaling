@@ -616,6 +616,7 @@ type Config struct {
 	diskCacheSettings    string
 	memoryProvider       vmv1.MemoryProvider
 	autoMovableRatio     string
+	useOnlineOfflining   bool
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -629,6 +630,7 @@ func newConfig(logger *zap.Logger) *Config {
 		diskCacheSettings:    "cache=none",
 		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
 		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
+		useOnlineOfflining:   false,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -649,7 +651,7 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
 	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
 		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
-
+	flag.BoolVar(&cfg.useOnlineOfflining, "use-online-offlining", false, "Use online offlining for CPU scaling")
 	flag.Parse()
 
 	if cfg.memoryProvider == "" {
@@ -759,7 +761,7 @@ func run(logger *zap.Logger) error {
 
 	tg.Go("qemu-cmd", func(logger *zap.Logger) error {
 		var err error
-		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, enableSSH, swapSize, hostname)
+		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, enableSSH, swapSize, hostname, cfg.useOnlineOfflining)
 		return err
 	})
 
@@ -813,6 +815,7 @@ func buildQEMUCmd(
 	enableSSH bool,
 	swapSize *resource.Quantity,
 	hostname string,
+	useOnlineOfflining bool,
 ) ([]string, error) {
 	// prepare qemu command line
 	qemuCmd := []string{
@@ -890,12 +893,23 @@ func buildQEMUCmd(
 		logger.Warn("not using KVM acceleration")
 	}
 	qemuCmd = append(qemuCmd, "-cpu", "max")
-	qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
-		"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
-		vmSpec.Guest.CPUs.Min.RoundedUp(),
-		vmSpec.Guest.CPUs.Max.RoundedUp(),
-		vmSpec.Guest.CPUs.Max.RoundedUp(),
-	))
+	if useOnlineOfflining {
+		// if we use online offlining we specify start cpus equal to max cpus
+		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
+			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
+			vmSpec.Guest.CPUs.Max.RoundedUp(),
+			vmSpec.Guest.CPUs.Max.RoundedUp(),
+			vmSpec.Guest.CPUs.Max.RoundedUp(),
+		))
+	} else {
+		// if we use hotplug we specify start cpus equal to min cpus and scale using udev rules for cpu plug events
+		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
+			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
+			vmSpec.Guest.CPUs.Min.RoundedUp(),
+			vmSpec.Guest.CPUs.Max.RoundedUp(),
+			vmSpec.Guest.CPUs.Max.RoundedUp(),
+		))
+	}
 
 	// memory details
 	logger.Info(fmt.Sprintf("Using memory provider %s", cfg.memoryProvider))
@@ -982,6 +996,10 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 
 	if cfg.appendKernelCmdline != "" {
 		cmdlineParts = append(cmdlineParts, cfg.appendKernelCmdline)
+	}
+	if cfg.useOnlineOfflining {
+		// if we use online offlining we need to specify the start cpus as min CPUs
+		cmdlineParts = append(cmdlineParts, fmt.Sprintf("maxcpus=%d", vmSpec.Guest.CPUs.Min.RoundedUp()))
 	}
 
 	return strings.Join(cmdlineParts, " ")

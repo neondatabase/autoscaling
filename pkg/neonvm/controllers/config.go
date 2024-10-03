@@ -11,6 +11,11 @@ import (
 // ReconcilerConfig stores shared configuration for VirtualMachineReconciler and
 // VirtualMachineMigrationReconciler.
 type ReconcilerConfig struct {
+	// UseOnlineOfflining, if true, enables using online offlining for new VM runner pods instead of QMP cpu hotplugging.
+	//
+	// This is defined as a config option so we can do a gradual rollout of this change.
+	UseOnlineOfflining bool
+
 	// DisableRunnerCgroup, if true, disables running QEMU in a cgroup in new VM runner pods.
 	// Fractional CPU scaling will continue to *pretend* to work, but it will not do anything in
 	// practice.
