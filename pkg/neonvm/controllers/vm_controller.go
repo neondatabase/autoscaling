@@ -1459,6 +1459,9 @@ func podSpec(
 					}},
 					Command: func() []string {
 						cmd := []string{"runner"}
+						if config.UseOnlineOfflining {
+							cmd = append(cmd, "-use-online-offlining") // TODO: need to force enable-dummy-cpu-server
+						}
 						if config.DisableRunnerCgroup {
 							cmd = append(cmd, "-skip-cgroup-management")
 							// cgroup management disabled, but we still need something to provide

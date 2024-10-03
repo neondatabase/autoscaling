@@ -55,6 +55,7 @@ spec:
         - "--concurrency-limit=128"
         - "--skip-update-validation-for="
         - "--disable-runner-cgroup"
+        - "--use-online-offlining"        
         # See #775 and its links.
         # * cache.writeback=on - don't set O_DSYNC (don't flush every write)
         # * cache.direct=on    - use O_DIRECT (don't abuse host's page cache!)
