@@ -95,6 +95,7 @@ func main() {
 	var concurrencyLimit int
 	var skipUpdateValidationFor map[types.NamespacedName]struct{}
 	var disableRunnerCgroup bool
+	var useOnlineOfflining bool
 	var qemuDiskCacheSettings string
 	var defaultMemoryProvider vmv1.MemoryProvider
 	var memhpAutoMovableRatio string
@@ -106,6 +107,7 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.BoolVar(&useOnlineOfflining, "use-online-offlining", false, "Use online offlining for CPU scaling")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	flag.Func(
 		"skip-update-validation-for",
@@ -191,7 +193,7 @@ func main() {
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
 
 	rc := &controllers.ReconcilerConfig{
-		DisableRunnerCgroup:     disableRunnerCgroup,
+		UseOnlineOfflining:      useOnlineOfflining,
 		MaxConcurrentReconciles: concurrencyLimit,
 		SkipUpdateValidationFor: skipUpdateValidationFor,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
