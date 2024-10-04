@@ -11,10 +11,10 @@ import (
 // CPU directory path
 const cpuPath = "/sys/devices/system/cpu/"
 
-type CPUOnlineOffliner struct {
+type CPUSysFsStateScaler struct {
 }
 
-func (c *CPUOnlineOffliner) EnsureOnlineCPUs(X int) error {
+func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(X int) error {
 	cpus, err := getAllCPUs()
 	if err != nil {
 		return err
@@ -89,7 +89,7 @@ func (c *CPUOnlineOffliner) EnsureOnlineCPUs(X int) error {
 }
 
 // GetActiveCPUsCount() returns the count of online CPUs.
-func (c *CPUOnlineOffliner) GetActiveCPUsCount() (uint32, error) {
+func (c *CPUSysFsStateScaler) GetActiveCPUsCount() (uint32, error) {
 	cpus, err := getAllCPUs()
 	if err != nil {
 		return 0, err
@@ -110,7 +110,7 @@ func (c *CPUOnlineOffliner) GetActiveCPUsCount() (uint32, error) {
 }
 
 // GetTotalCPUsCount returns the total number of CPUs (online + offline).
-func (c *CPUOnlineOffliner) GetTotalCPUsCount() (uint32, error) {
+func (c *CPUSysFsStateScaler) GetTotalCPUsCount() (uint32, error) {
 	cpus, err := getAllCPUs()
 	if err != nil {
 		return 0, err
@@ -189,7 +189,7 @@ func setCPUOnline(cpu int, online bool) error {
 
 	err := os.WriteFile(filepath.Join(cpuPath, fmt.Sprintf("cpu%d/online", cpu)), []byte(state), 0644)
 	if err != nil {
-		return fmt.Errorf("failed to set CPU %d online status: %v", cpu, err)
+		return fmt.Errorf("failed to set CPU %d online status: %w", cpu, err)
 	}
 
 	return nil
