@@ -42,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -95,7 +96,7 @@ func main() {
 	var concurrencyLimit int
 	var skipUpdateValidationFor map[types.NamespacedName]struct{}
 	var disableRunnerCgroup bool
-	var useOnlineOfflining bool
+	var useCpuSysfsStateScaling bool
 	var qemuDiskCacheSettings string
 	var defaultMemoryProvider vmv1.MemoryProvider
 	var memhpAutoMovableRatio string
@@ -106,7 +107,6 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.BoolVar(&useOnlineOfflining, "use-online-offlining", false, "Use online offlining for CPU scaling")
 	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	flag.Func(
 		"skip-update-validation-for",
@@ -134,6 +134,7 @@ func main() {
 			return nil
 		},
 	)
+	flag.BoolVar(&useCpuSysfsStateScaling, "use-cpu-sysfs-state-scaling", false, "Use sysfs cpu state scaling for CPU scaling")
 	flag.BoolVar(&disableRunnerCgroup, "disable-runner-cgroup", false, "Disable creation of a cgroup in neonvm-runner for fractional CPU limiting")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
 	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
@@ -189,7 +190,7 @@ func main() {
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
 
 	rc := &controllers.ReconcilerConfig{
-		UseOnlineOfflining:      useOnlineOfflining,
+		DisableRunnerCgroup:     disableRunnerCgroup,
 		MaxConcurrentReconciles: concurrencyLimit,
 		SkipUpdateValidationFor: skipUpdateValidationFor,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
