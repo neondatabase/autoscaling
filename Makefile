@@ -133,9 +133,10 @@ test: fmt vet envtest ## Run tests.
 
 .PHONY: build
 build: fmt vet bin/vm-builder ## Build all neonvm binaries.
-	GOOS=linux go build -o bin/controller       neonvm/main.go
-	GOOS=linux go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
-	GOOS=linux go build -o bin/runner           neonvm/runner/*.go
+	GOOS=linux go build -o bin/controller       neonvm-controller/cmd/main.go
+	GOOS=linux go build -o bin/vxlan-controller neonvm-vxlan-controller/cmd/main.go
+	GOOS=linux go build -o bin/daemon           neonvm-daemon/main.go
+	GOOS=linux go build -o bin/runner           neonvm-runner/cmd/main.go
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.

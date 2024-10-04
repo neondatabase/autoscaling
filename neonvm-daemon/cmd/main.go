@@ -4,15 +4,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/neondatabase/autoscaling/neonvm/daemon/pkg/cpuscaling"
 	"go.uber.org/zap"
+
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/cpuscaling"
 )
 
 func main() {
@@ -31,8 +32,9 @@ func main() {
 	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
 
 	logger.Info("Starting neonvm-daemon", zap.String("addr", *addr))
-	cpuHotPlugController := &cpuscaling.CPUOnlineOffliner{}
+	cpuHotPlugController := &cpuscaling.CPUSysFsStateScaler{}
 	srv := cpuServer{
+		cpuOperationsMutex:  &sync.Mutex{},
 		cpuSystemWideScaler: cpuHotPlugController,
 		logger:              logger.Named("cpu-srv"),
 	}
@@ -43,47 +45,29 @@ type cpuServer struct {
 	// Protects CPU operations from concurrent access to prevent multiple ensureOnlineCPUs calls from running concurrently
 	// and ensure that status response is always actual
 	cpuOperationsMutex  *sync.Mutex
-	cpuSystemWideScaler *cpuscaling.CPUOnlineOffliner
+	cpuSystemWideScaler *cpuscaling.CPUSysFsStateScaler
 	logger              *zap.Logger
 }
 
-// milliCPU is a type that represents CPU in milli units
-type milliCPU uint64
-
-// milliCPUFromString converts a byte slice to milliCPU
-func milliCPUFromString(s []byte) (milliCPU, error) {
-	cpu, err := strconv.ParseUint(string(s), 10, 32)
-	if err != nil {
-		return 0, err
-	}
-	return milliCPU(cpu), nil
-}
-
-// ToCPU converts milliCPU to CPU
-func (m milliCPU) ToCPU() int {
-	cpu := float64(m) / 1000.0
-	// Use math.Ceil to round up to the next CPU.
-	return int(math.Ceil(cpu))
-}
-
 func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
+	// should be replaced with cgroups milliseconds to be exposed instead of having CPU
 	s.cpuOperationsMutex.Lock()
 	defer s.cpuOperationsMutex.Unlock()
-	totalCPUs, err := s.cpuSystemWideScaler.GetTotalCPUsCount()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
 	activeCPUs, err := s.cpuSystemWideScaler.GetActiveCPUsCount()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.Write([]byte(fmt.Sprintf("%d %d", activeCPUs, totalCPUs)))
 	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write([]byte(fmt.Sprintf("%d", activeCPUs*1000))); err != nil {
+		s.logger.Error("could not write response", zap.Error(err))
+	}
 }
 
 func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
+	// TODO: should the call to this method be conditional, only if the statefs cpu scaling is enabled?
+	// on the other hand, currently this endpoint is called by runner only if the statefs scaling is enabled
+	// and it is a bit tricky to pass vmSpec here
 	s.cpuOperationsMutex.Lock()
 	defer s.cpuOperationsMutex.Unlock()
 	body, err := io.ReadAll(r.Body)
@@ -92,19 +76,20 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-
-	milliCPU, err := milliCPUFromString(body)
+	updateInt, err := strconv.Atoi(string(body))
+	update := vmv1.MilliCPU(updateInt)
 	if err != nil {
-		s.logger.Error("could not parse request body as uint32", zap.Error(err))
+		s.logger.Error("could not unmarshal request body", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if err := s.cpuSystemWideScaler.EnsureOnlineCPUs(milliCPU.ToCPU()); err != nil {
-		s.logger.Error("failed to ensure online CPUs", zap.Error(err))
+	s.logger.Info("Setting CPU status", zap.String("body", string(body)))
+	if err := s.cpuSystemWideScaler.EnsureOnlineCPUs(int(update.RoundedUp())); err != nil {
+		s.logger.Error("could not ensure online CPUs", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *cpuServer) run(addr string) {
