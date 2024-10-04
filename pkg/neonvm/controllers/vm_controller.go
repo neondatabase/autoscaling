@@ -81,8 +81,7 @@ type VMReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 	Config   *ReconcilerConfig
-
-	Metrics ReconcilerMetrics `exhaustruct:"optional"`
+	Metrics  ReconcilerMetrics `exhaustruct:"optional"`
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -273,18 +272,18 @@ func (r *VMReconciler) updateVMStatusCPU(
 	ctx context.Context,
 	vm *vmv1.VirtualMachine,
 	vmRunner *corev1.Pod,
-	qmpPluggedCPUs uint32,
+	activeCPUs uint32,
 	cgroupUsage *api.VCPUCgroup,
 ) {
 	log := log.FromContext(ctx)
 
 	// We expect:
 	// - vm.Status.CPUs = cgroupUsage.VCPUs
-	// - vm.Status.CPUs.RoundUp() == qmpPluggedCPUs
+	// - vm.Status.CPUs.RoundUp() == activeCPUs
 	// Otherwise, we update the status.
 	var currentCPUUsage vmv1.MilliCPU
 	if cgroupUsage != nil {
-		if cgroupUsage.VCPUs.RoundedUp() != qmpPluggedCPUs {
+		if cgroupUsage.VCPUs.RoundedUp() != activeCPUs {
 			// This is not expected but it's fine. We only report the
 			// mismatch here and will resolve it in the next reconcile
 			// iteration loops by comparing these values to spec CPU use
@@ -292,12 +291,12 @@ func (r *VMReconciler) updateVMStatusCPU(
 			log.Error(nil, "Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
 				"VirtualMachine", vm.Name,
 				"Runner Pod", vmRunner.Name,
-				"plugged CPUs", qmpPluggedCPUs,
+				"plugged CPUs", activeCPUs,
 				"cgroup vCPUs", cgroupUsage.VCPUs)
 		}
-		currentCPUUsage = min(cgroupUsage.VCPUs, vmv1.MilliCPU(1000*qmpPluggedCPUs))
+		currentCPUUsage = min(cgroupUsage.VCPUs, vmv1.MilliCPU(1000*activeCPUs))
 	} else {
-		currentCPUUsage = vmv1.MilliCPU(1000 * qmpPluggedCPUs)
+		currentCPUUsage = vmv1.MilliCPU(1000 * activeCPUs)
 	}
 	if vm.Status.CPUs == nil || *vm.Status.CPUs != currentCPUUsage {
 		vm.Status.CPUs = &currentCPUUsage
@@ -310,10 +309,10 @@ func (r *VMReconciler) updateVMStatusCPU(
 
 func (r *VMReconciler) updateVMStatusMemory(
 	vm *vmv1.VirtualMachine,
-	qmpMemorySize *resource.Quantity,
+	QmpMemorySize *resource.Quantity,
 ) {
-	if vm.Status.MemorySize == nil || !qmpMemorySize.Equal(*vm.Status.MemorySize) {
-		vm.Status.MemorySize = qmpMemorySize
+	if vm.Status.MemorySize == nil || !QmpMemorySize.Equal(*vm.Status.MemorySize) {
+		vm.Status.MemorySize = QmpMemorySize
 		r.Recorder.Event(vm, "Normal", "MemoryInfo",
 			fmt.Sprintf("VirtualMachine %s uses %v memory",
 				vm.Name,
@@ -563,21 +562,25 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				return err
 			}
 
-			// get CPU details from QEMU
-			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
-			if err != nil {
-				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
-				return err
-			}
-			pluggedCPU := uint32(len(cpuSlotsPlugged))
-
 			// get cgroups CPU details from runner pod
 			cgroupUsage, err := getRunnerCgroup(ctx, vm)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 				return err
 			}
-
+			var pluggedCPU uint32
+			if vm.Spec.CpuScalingMode != nil && *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
+				log.Info("CPU scaling mode is set to CpuSysfsState, CPU usage check based on cgroups")
+				pluggedCPU = cgroupUsage.VCPUs.RoundedUp()
+			} else {
+				// get CPU details from QEMU
+				cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
+				if err != nil {
+					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
+					return err
+				}
+				pluggedCPU = uint32(len(cpuSlotsPlugged))
+			}
 			// update status by CPUs used in the VM
 			r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
@@ -699,62 +702,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return err
 		}
 
-		cpuScaled := false
+		cpuScaled, err := r.handleCPUScaling(ctx, vm, vmRunner)
+		if err != nil {
+			log.Error(err, "failed to handle CPU scaling")
+			return err
+		}
 		ramScaled := false
-
-		// do hotplug/unplug CPU
-		// firstly get current state from QEMU
-		cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
-		if err != nil {
-			log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
-			return err
-		}
-		specCPU := vm.Spec.Guest.CPUs.Use
-		pluggedCPU := uint32(len(cpuSlotsPlugged))
-
-		cgroupUsage, err := getRunnerCgroup(ctx, vm)
-		if err != nil {
-			log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
-			return err
-		}
-
-		// compare guest spec to count of plugged and runner pod cgroups
-		if specCPU.RoundedUp() > pluggedCPU {
-			// going to plug one CPU
-			log.Info("Plug one more CPU into VM")
-			if err := QmpPlugCpu(QmpAddr(vm)); err != nil {
-				return err
-			}
-			r.Recorder.Event(vm, "Normal", "ScaleUp",
-				fmt.Sprintf("One more CPU was plugged into VM %s",
-					vm.Name))
-		} else if specCPU.RoundedUp() < pluggedCPU {
-			// going to unplug one CPU
-			log.Info("Unplug one CPU from VM")
-			if err := QmpUnplugCpu(QmpAddr(vm)); err != nil {
-				return err
-			}
-			r.Recorder.Event(vm, "Normal", "ScaleDown",
-				fmt.Sprintf("One CPU was unplugged from VM %s",
-					vm.Name))
-		} else if specCPU != cgroupUsage.VCPUs {
-			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", specCPU)
-			if err := setRunnerCgroup(ctx, vm, specCPU); err != nil {
-				return err
-			}
-			reason := "ScaleDown"
-			if specCPU > cgroupUsage.VCPUs {
-				reason = "ScaleUp"
-			}
-			r.Recorder.Event(vm, "Normal", reason,
-				fmt.Sprintf("Runner pod cgroups was updated on VM %s",
-					vm.Name))
-		} else {
-			// seems already plugged correctly
-			cpuScaled = true
-		}
-		// update status by CPUs used in the VM
-		r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 		// do hotplug/unplug Memory
 		switch *vm.Status.MemoryProvider {
@@ -1299,7 +1252,7 @@ func setRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.Mill
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("unexpected status %s", resp.Status)
+		return fmt.Errorf("setRunnerCgroup: unexpected status %s", resp.Status)
 	}
 	return nil
 }
@@ -1321,7 +1274,7 @@ func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgr
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected status %s", resp.Status)
+		return nil, fmt.Errorf("getRunnerCgroup: unexpected status %s", resp.Status)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -1329,7 +1282,6 @@ func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgr
 	if err != nil {
 		return nil, err
 	}
-
 	var result api.VCPUCgroup
 	err = json.Unmarshal(body, &result)
 	if err != nil {
@@ -1461,9 +1413,6 @@ func podSpec(
 					}},
 					Command: func() []string {
 						cmd := []string{"runner"}
-						if config.UseOnlineOfflining {
-							cmd = append(cmd, "-use-online-offlining") // TODO: need to force enable-dummy-cpu-server
-						}
 						if config.DisableRunnerCgroup {
 							cmd = append(cmd, "-skip-cgroup-management")
 							// cgroup management disabled, but we still need something to provide
