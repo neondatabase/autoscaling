@@ -225,35 +225,35 @@ func extractVmInfoGeneric(
 		info.Config.ScalingConfig = &config
 	}
 
-	min := info.Min()
+	minResources := info.Min()
 	using := info.Using()
-	max := info.Max()
+	maxResources := info.Max()
 
 	// we can't do validation for resource.Quantity with kubebuilder
 	// so do it here
-	if err := min.CheckValuesAreReasonablySized(); err != nil {
+	if err := minResources.CheckValuesAreReasonablySized(); err != nil {
 		return nil, fmt.Errorf("min resources are invalid: %w", err)
 	}
 
-	if err := max.CheckValuesAreReasonablySized(); err != nil {
+	if err := maxResources.CheckValuesAreReasonablySized(); err != nil {
 		return nil, fmt.Errorf("max resources are invalid: %w", err)
 	}
 
 	// check: min <= max
-	if min.HasFieldGreaterThan(max) {
-		return nil, fmt.Errorf("min resources %+v has field greater than maximum %+v", min, max)
+	if minResources.HasFieldGreaterThan(maxResources) {
+		return nil, fmt.Errorf("min resources %+v has field greater than maximum %+v", minResources, maxResources)
 	}
 
 	// check: min <= using <= max
-	if using.HasFieldLessThan(min) {
+	if using.HasFieldLessThan(minResources) {
 		logger.Warn(
 			"Current usage has field less than minimum",
-			zap.Object("using", using), zap.Object("min", min),
+			zap.Object("using", using), zap.Object("min", minResources),
 		)
-	} else if using.HasFieldGreaterThan(max) {
+	} else if using.HasFieldGreaterThan(maxResources) {
 		logger.Warn(
 			"Current usage has field greater than maximum",
-			zap.Object("using", using), zap.Object("max", max),
+			zap.Object("using", using), zap.Object("max", maxResources),
 		)
 	}
 
@@ -328,13 +328,23 @@ type ScalingConfig struct {
 	// this field is left out the settings will fall back on the global default.
 	LoadAverageFractionTarget *float64 `json:"loadAverageFractionTarget,omitempty"`
 
-	// MemoryUsageFractionTarget sets the desired fraction of current memory that
-	// we would like to be using. For example, with a value of 0.7, on a 4GB VM
-	// we'd like to be using 2.8GB of memory.
+	// MemoryUsageFractionTarget sets the maximum fraction of total memory that postgres allocations
+	// (MemoryUsage) must fit into. This doesn't count the LFC memory.
+	// This memory may also be viewed as "unreclaimable" (contrary to e.g. page cache).
+	//
+	// For example, with a value of 0.75 on a 4GiB VM, we will try to upscale if the unreclaimable
+	// memory usage exceeds 3GiB.
 	//
 	// When specifying the autoscaler-agent config, this field is required. For an individual VM, if
 	// this field is left out the settings will fall back on the global default.
 	MemoryUsageFractionTarget *float64 `json:"memoryUsageFractionTarget,omitempty"`
+
+	// MemoryTotalFractionTarget sets the maximum fraction of total memory that postgres allocations
+	// PLUS LFC memory (MemoryUsage + MemoryCached) must fit into.
+	//
+	// Compared with MemoryUsageFractionTarget, this value can be set higher (e.g. 0.9 vs 0.75),
+	// because we can tolerate higher fraction of consumption for both in-VM memory consumers.
+	MemoryTotalFractionTarget *float64 `json:"memoryTotalFractionTarget,omitempty"`
 
 	// EnableLFCMetrics, if true, enables fetching additional metrics about the Local File Cache
 	// (LFC) to provide as input to the scaling algorithm.
@@ -375,6 +385,9 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 	}
 	if overrides.MemoryUsageFractionTarget != nil {
 		defaults.MemoryUsageFractionTarget = lo.ToPtr(*overrides.MemoryUsageFractionTarget)
+	}
+	if overrides.MemoryTotalFractionTarget != nil {
+		defaults.MemoryTotalFractionTarget = lo.ToPtr(*overrides.MemoryTotalFractionTarget)
 	}
 	if overrides.EnableLFCMetrics != nil {
 		defaults.EnableLFCMetrics = lo.ToPtr(*overrides.EnableLFCMetrics)
@@ -427,6 +440,13 @@ func (c *ScalingConfig) validate(requireAll bool) error {
 		erc.Whenf(ec, *c.MemoryUsageFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryUsageFractionTarget")
 	} else if requireAll {
 		ec.Add(fmt.Errorf("%s is a required field", ".memoryUsageFractionTarget"))
+	}
+	// Make sure c.MemoryTotalFractionTarget is between 0 and 1
+	if c.MemoryTotalFractionTarget != nil {
+		erc.Whenf(ec, *c.MemoryTotalFractionTarget < 0.0, "%s must be set to value >= 0", ".memoryTotalFractionTarget")
+		erc.Whenf(ec, *c.MemoryTotalFractionTarget >= 1.0, "%s must be set to value < 1 ", ".memoryTotalFractionTarget")
+	} else if requireAll {
+		ec.Add(fmt.Errorf("%s is a required field", ".memoryTotalFractionTarget"))
 	}
 
 	if requireAll {

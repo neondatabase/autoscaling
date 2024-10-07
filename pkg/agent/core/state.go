@@ -23,18 +23,15 @@ package core
 import (
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type ObservabilityCallbacks struct {
@@ -354,7 +351,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	}
 	for _, w := range requiredWaits {
 		if w != nil {
-			requiredWait = util.Min(requiredWait, *w)
+			requiredWait = min(requiredWait, *w)
 		}
 	}
 
@@ -464,7 +461,7 @@ func (s *state) calculatePluginAction(
 		}
 		waitTime := timeUntilNextRequestTick
 		if waitingOnRetryBackoff {
-			waitTime = util.Min(waitTime, timeUntilRetryBackoffExpires)
+			waitTime = min(waitTime, timeUntilRetryBackoffExpires)
 		}
 		return nil, &waitTime
 	}
@@ -730,76 +727,17 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
-	// Record whether we have all the metrics we'll need.
-	// If not, we'll later prevent downscaling to avoid flushing the VM's cache on autoscaler-agent
-	// restart if we have SystemMetrics but not LFCMetrics.
-	hasAllMetrics := s.Metrics != nil && (!*s.scalingConfig().EnableLFCMetrics || s.LFCMetrics != nil)
-	if !hasAllMetrics {
-		s.warn("Making scaling decision without all required metrics available")
-	}
-
-	var goalCU uint32
-	if s.Metrics != nil {
-		// For CPU:
-		// Goal compute unit is at the point where (CPUs) × (LoadAverageFractionTarget) == (load
-		// average),
-		// which we can get by dividing LA by LAFT, and then dividing by the number of CPUs per CU
-		goalCPUs := s.Metrics.LoadAverage1Min / *s.scalingConfig().LoadAverageFractionTarget
-		cpuGoalCU := uint32(math.Round(goalCPUs / s.Config.ComputeUnit.VCPU.AsFloat64()))
-
-		// For Mem:
-		// Goal compute unit is at the point where (Mem) * (MemoryUsageFractionTarget) == (Mem Usage)
-		// We can get the desired memory allocation in bytes by dividing MU by MUFT, and then convert
-		// that to CUs
-		//
-		// NOTE: use uint64 for calculations on bytes as uint32 can overflow
-		memGoalBytes := api.Bytes(math.Round(s.Metrics.MemoryUsageBytes / *s.scalingConfig().MemoryUsageFractionTarget))
-		memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
-
-		goalCU = util.Max(cpuGoalCU, memGoalCU)
-
-	}
-
-	// For LFC metrics, if enabled:
-	var lfcLogFields func(zapcore.ObjectEncoder) error
-	if s.LFCMetrics != nil {
-		cfg := s.scalingConfig()
-		wssValues := s.LFCMetrics.ApproximateworkingSetSizeBuckets
-		// At this point, we can assume that the values are equally spaced at 1 minute apart,
-		// starting at 1 minute.
-		offsetIndex := *cfg.LFCMinWaitBeforeDownscaleMinutes - 1 // -1 because values start at 1m
-		windowSize := *cfg.LFCWindowSizeMinutes
-		// Handle invalid metrics:
-		if len(wssValues) < offsetIndex+windowSize {
-			s.warn("not enough working set size values to make scaling determination")
-		} else {
-			estimateWss := EstimateTrueWorkingSetSize(wssValues, WssEstimatorConfig{
-				MaxAllowedIncreaseFactor: 3.0, // hard-code this for now.
-				InitialOffset:            offsetIndex,
-				WindowSize:               windowSize,
-			})
-			projectSliceEnd := offsetIndex // start at offsetIndex to avoid panics if not monotonically non-decreasing
-			for ; projectSliceEnd < len(wssValues) && wssValues[projectSliceEnd] <= estimateWss; projectSliceEnd++ {
-			}
-			projectLen := 0.5 // hard-code this for now.
-			predictedHighestNextMinute := ProjectNextHighest(wssValues[:projectSliceEnd], projectLen)
-
-			// predictedHighestNextMinute is still in units of 8KiB pages. Let's convert that
-			// into GiB, then convert that into CU, and then invert the discount from only some
-			// of the memory going towards LFC to get the actual CU required to fit the
-			// predicted working set size.
-			requiredCU := predictedHighestNextMinute * 8192 / s.Config.ComputeUnit.Mem.AsFloat64() / *cfg.LFCToMemoryRatio
-			lfcGoalCU := uint32(math.Ceil(requiredCU))
-			goalCU = util.Max(goalCU, lfcGoalCU)
-
-			lfcLogFields = func(obj zapcore.ObjectEncoder) error {
-				obj.AddFloat64("estimateWssPages", estimateWss)
-				obj.AddFloat64("predictedNextWssPages", predictedHighestNextMinute)
-				obj.AddFloat64("requiredCU", requiredCU)
-				return nil
-			}
-		}
-	}
+	sg, goalCULogFields := calculateGoalCU(
+		s.warn,
+		s.scalingConfig(),
+		s.Config.ComputeUnit,
+		s.Metrics,
+		s.LFCMetrics,
+	)
+	goalCU := sg.goalCU
+	// If we don't have all the metrics we need, we'll later prevent downscaling to avoid flushing
+	// the VM's cache on autoscaler-agent restart if we have SystemMetrics but not LFCMetrics.
+	hasAllMetrics := sg.hasAllMetrics
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
 	// requested upscaling or denied downscaling affected the outcome.
@@ -818,7 +756,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			// FIXME: this isn't quite correct, because if initialGoalCU is already equal to the
 			// maximum goal CU we *could* have, this won't actually have an effect.
 			requestedUpscalingAffectedResult = true
-			goalCU = util.Max(goalCU, reqCU)
+			goalCU = max(goalCU, reqCU)
 		}
 	}
 
@@ -831,7 +769,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		reqCU := s.requiredCUForDeniedDownscale(s.Config.ComputeUnit, s.Monitor.DeniedDownscale.Requested)
 		if reqCU > initialGoalCU {
 			deniedDownscaleAffectedResult = true
-			goalCU = util.Max(goalCU, reqCU)
+			goalCU = max(goalCU, reqCU)
 		}
 	}
 
@@ -890,11 +828,11 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		waitTime := time.Duration(int64(1<<63 - 1)) // time.Duration is an int64. As an "unset" value, use the maximum.
 
 		if deniedDownscaleAffectedResult && actions.MonitorDownscale == nil && s.Monitor.OngoingRequest == nil {
-			waitTime = util.Min(waitTime, timeUntilDeniedDownscaleExpired)
+			waitTime = min(waitTime, timeUntilDeniedDownscaleExpired)
 			waiting = true
 		}
 		if requestedUpscalingAffectedResult {
-			waitTime = util.Min(waitTime, timeUntilRequestedUpscalingExpired)
+			waitTime = min(waitTime, timeUntilRequestedUpscalingExpired)
 			waiting = true
 		}
 
@@ -915,9 +853,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		zap.Object("target", result),
 		zap.Object("targetRevision", &s.TargetRevision),
 	}
-	if lfcLogFields != nil {
-		logFields = append(logFields, zap.Object("lfc", zapcore.ObjectMarshalerFunc(lfcLogFields)))
-	}
+	logFields = append(logFields, goalCULogFields...)
 	s.info("Calculated desired resources", logFields...)
 
 	return result, calculateWaitTime
@@ -980,10 +916,10 @@ func (s *state) requiredCUForRequestedUpscaling(computeUnit api.Resources, reque
 	// note: 1 + floor(x / M) gives the minimum integer value greater than x / M.
 
 	if requested.Cpu {
-		required = util.Max(required, 1+uint32(base.VCPU/computeUnit.VCPU))
+		required = max(required, 1+uint32(base.VCPU/computeUnit.VCPU))
 	}
 	if requested.Memory {
-		required = util.Max(required, 1+uint32(base.Mem/computeUnit.Mem))
+		required = max(required, 1+uint32(base.Mem/computeUnit.Mem))
 	}
 
 	return required
@@ -1004,7 +940,7 @@ func (s *state) requiredCUForDeniedDownscale(computeUnit, deniedResources api.Re
 	requiredFromCPU := 1 + uint32(deniedResources.VCPU/computeUnit.VCPU)
 	requiredFromMem := 1 + uint32(deniedResources.Mem/computeUnit.Mem)
 
-	return util.Max(requiredFromCPU, requiredFromMem)
+	return max(requiredFromCPU, requiredFromMem)
 }
 
 func (s *state) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources, denied deniedDownscale) api.Resources {
@@ -1014,8 +950,8 @@ func (s *state) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources
 	// phrasing it like this cleanly handles some subtle edge cases when denied.current isn't a
 	// multiple of the compute unit.
 	return api.Resources{
-		VCPU: util.Min(denied.Current.VCPU, computeUnit.VCPU*(1+denied.Requested.VCPU/computeUnit.VCPU)),
-		Mem:  util.Min(denied.Current.Mem, computeUnit.Mem*(1+denied.Requested.Mem/computeUnit.Mem)),
+		VCPU: min(denied.Current.VCPU, computeUnit.VCPU*(1+denied.Requested.VCPU/computeUnit.VCPU)),
+		Mem:  min(denied.Current.Mem, computeUnit.Mem*(1+denied.Requested.Mem/computeUnit.Mem)),
 	}
 }
 
@@ -1044,16 +980,16 @@ func (s *state) clampResources(
 
 	cpu := desired.VCPU
 	if desired.VCPU < current.VCPU && lowerBound != nil {
-		cpu = util.Max(desired.VCPU, lowerBound.VCPU)
+		cpu = max(desired.VCPU, lowerBound.VCPU)
 	} else if desired.VCPU > current.VCPU && upperBound != nil {
-		cpu = util.Min(desired.VCPU, upperBound.VCPU)
+		cpu = min(desired.VCPU, upperBound.VCPU)
 	}
 
 	mem := desired.Mem
 	if desired.Mem < current.Mem && lowerBound != nil {
-		mem = util.Max(desired.Mem, lowerBound.Mem)
+		mem = max(desired.Mem, lowerBound.Mem)
 	} else if desired.Mem > current.Mem && upperBound != nil {
-		mem = util.Min(desired.Mem, upperBound.Mem)
+		mem = min(desired.Mem, upperBound.Mem)
 	}
 
 	return api.Resources{VCPU: cpu, Mem: mem}

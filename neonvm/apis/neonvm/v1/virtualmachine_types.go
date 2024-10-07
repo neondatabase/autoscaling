@@ -18,12 +18,10 @@ package v1
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap/zapcore"
 
 	corev1 "k8s.io/api/core/v1"
@@ -295,67 +293,8 @@ type GuestSettings struct {
 
 	// Swap adds a swap disk with the provided size.
 	//
-	// If Swap is provided, SwapInfo MUST NOT be provided, and vice versa.
-	//
 	// +optional
 	Swap *resource.Quantity `json:"swap,omitempty"`
-
-	// SwapInfo controls settings for adding a swap disk to the VM.
-	//
-	// SwapInfo is a temporary newer version of the Swap field.
-	//
-	// Eventually, after all VMs have moved from Swap to SwapInfo, we can change the type of the Swap
-	// field to SwapInfo, move VMs from SwapInfo back to Swap, and then remove SwapInfo.
-	//
-	// More information here: https://neondb.slack.com/archives/C06SW383C79/p1713298689471319
-	//
-	// +optional
-	SwapInfo *SwapInfo `json:"swapInfo,omitempty"`
-}
-
-func (s *GuestSettings) WithoutSwapFields() *GuestSettings {
-	return &GuestSettings{
-		Sysctl:   s.Sysctl,
-		Swap:     nil,
-		SwapInfo: nil,
-	}
-}
-
-// SwapInfo returns information about the swap requested, if there is any.
-//
-// This is an abstraction over the Swap/SwapInfo fields, providing a unified internal interface.
-//
-// SwapInfo returns error if both Swap and SwapInfo are provided. Typically the Kubernetes API
-// guarantees that is not the case.
-func (s *GuestSettings) GetSwapInfo() (*SwapInfo, error) {
-	if s.Swap != nil && s.SwapInfo != nil {
-		return nil, errors.New("cannot have both 'swap' and 'swapInfo' enabled")
-	}
-
-	if s.Swap != nil {
-		return &SwapInfo{
-			Size:       *s.Swap,
-			SkipSwapon: nil,
-		}, nil
-	} else if s.SwapInfo != nil {
-		return lo.ToPtr(*s.SwapInfo), nil
-	}
-
-	return nil, nil
-}
-
-type SwapInfo struct {
-	// Size sets the size of the swap in the VM. The amount of space used on the host may be
-	// slightly more (by a few MiBs). The information reported by `cat /proc/meminfo` may show
-	// slightly less, due to a single page header (typically 4KiB).
-	Size resource.Quantity `json:"size"`
-	// SkipSwapon instructs the VM to *not* run swapon for the swap on startup.
-	//
-	// This is intended to be used in cases where you will *always* resize the swap post-startup,
-	// and don't need it available before that resizing.
-	//
-	// +optional
-	SkipSwapon *bool `json:"skipSwapon,omitempty"`
 }
 
 type CPUs struct {
@@ -550,6 +489,10 @@ type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
 	// Discard enables the "discard" mount option for the filesystem
 	Discard bool `json:"discard,omitempty"`
+	// EnableQuotas enables the "prjquota" mount option for the ext4 filesystem.
+	// More info here:
+	// https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_file_systems/limiting-storage-space-usage-on-ext4-with-quotas_managing-file-systems
+	EnableQuotas bool `json:"enableQuotas,omitempty"`
 }
 
 type TmpfsDiskSource struct {

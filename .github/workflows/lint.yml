@@ -23,7 +23,7 @@ jobs:
         with:
           # Required: the version of golangci-lint is required and
           # should be specified with patch version.
-          version: v1.59.1
+          version: v1.60.3
           args: --timeout 5m
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -76,7 +76,7 @@ jobs:
         with:
           check_hidden: true
           ignore_words_list: NotIn # k8s match selectors; codespell tries to correct it to 'noting', 'not in', or 'notion'
-          skip: go.sum,./cluster-autoscaler/ca.patch
+          skip: go.sum,./cluster-autoscaler/ca.patch,./neonvm/config/multus-common/nad-crd.yaml
 
   actionlint:
     runs-on: ubuntu-latest

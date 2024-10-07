@@ -7,7 +7,7 @@ FROM {{.RootDiskImage}} AS rootdisk
 USER root
 {{.SpecMerge}}
 
-FROM alpine:3.18 AS vm-runtime
+FROM alpine:3.19 AS vm-runtime
 # add busybox
 ENV BUSYBOX_VERSION 1.35.0
 RUN set -e \
@@ -42,12 +42,6 @@ RUN set -e \
 	&& sed -i 's/#!\/bin\/sh/#!\/neonvm\/bin\/sh/' /neonvm/bin/udhcpc.script \
 	&& sed -i 's/export PATH=.*/export PATH=\/neonvm\/bin/' /neonvm/bin/udhcpc.script
 
-# tools for qemu disk creation
-RUN set -e \
-	&& apk add --no-cache --no-progress --quiet \
-		qemu-img \
-		e2fsprogs
-
 # Install vector.dev binary
 RUN set -e \
     && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
@@ -65,6 +59,12 @@ RUN set -e \
 		openssh-server \
 	&& /helper.move-bins.sh sshd ssh-keygen
 
+# quota tools
+RUN set -e \
+	&& apk add --no-cache --no-progress --quiet \
+		quota-tools \
+	&& /helper.move-bins.sh quota edquota quotacheck quotaoff quotaon quotastats setquota repquota tune2fs
+
 # init scripts & configs
 COPY inittab     /neonvm/bin/inittab
 COPY vminit      /neonvm/bin/vminit
@@ -79,6 +79,8 @@ COPY udev-init.sh /neonvm/bin/udev-init.sh
 RUN chmod +rx /neonvm/bin/udev-init.sh
 COPY resize-swap.sh /neonvm/bin/resize-swap
 RUN chmod +rx /neonvm/bin/resize-swap
+COPY set-disk-quota.sh /neonvm/bin/set-disk-quota
+RUN chmod +rx /neonvm/bin/set-disk-quota
 
 # rootdisk modification
 FROM rootdisk AS rootdisk-mod
@@ -95,9 +97,16 @@ RUN set -e \
     && /neonvm/bin/id -g sshd > /dev/null 2>&1 || /neonvm/bin/addgroup sshd \
     && /neonvm/bin/id -u sshd > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
 
-FROM vm-runtime AS builder
+FROM alpine:3.19 AS builder
 ARG DISK_SIZE
 COPY --from=rootdisk-mod / /rootdisk
+
+# tools for qemu disk creation
+RUN set -e \
+	&& apk add --no-cache --no-progress --quiet \
+		qemu-img \
+		e2fsprogs
+
 RUN set -e \
     && mkdir -p /rootdisk/etc \
     && mkdir -p /rootdisk/etc/vector \
@@ -107,6 +116,5 @@ RUN set -e \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
-FROM alpine:3.18
-RUN apk add --no-cache --no-progress --quiet qemu-img
+FROM alpine:3.19
 COPY --from=builder /disk.qcow2 /

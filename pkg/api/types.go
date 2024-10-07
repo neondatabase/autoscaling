@@ -343,16 +343,16 @@ func (r Resources) HasFieldLessThan(cmp Resources) bool {
 // Min returns a new Resources value with each field F as the minimum of r.F and cmp.F
 func (r Resources) Min(cmp Resources) Resources {
 	return Resources{
-		VCPU: util.Min(r.VCPU, cmp.VCPU),
-		Mem:  util.Min(r.Mem, cmp.Mem),
+		VCPU: min(r.VCPU, cmp.VCPU),
+		Mem:  min(r.Mem, cmp.Mem),
 	}
 }
 
 // Max returns a new Resources value with each field F as the maximum of r.F and cmp.F
 func (r Resources) Max(cmp Resources) Resources {
 	return Resources{
-		VCPU: util.Max(r.VCPU, cmp.VCPU),
-		Mem:  util.Max(r.Mem, cmp.Mem),
+		VCPU: max(r.VCPU, cmp.VCPU),
+		Mem:  max(r.Mem, cmp.Mem),
 	}
 }
 

@@ -16,15 +16,18 @@ import (
 	"text/template"
 
 	"github.com/alessio/shellescape"
+	"github.com/distribution/reference"
+	cliconfig "github.com/docker/cli/cli/config"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
-// vm-builder --src alpine:3.18 --dst vm-alpine:dev --file vm-alpine.qcow2
+// vm-builder --src alpine:3.19 --dst vm-alpine:dev --file vm-alpine.qcow2
 
 var (
 	//go:embed files/Dockerfile.img
@@ -45,6 +48,8 @@ var (
 	scriptUdevInit string
 	//go:embed files/resize-swap.sh
 	scriptResizeSwap string
+	//go:embed files/set-disk-quota.sh
+	scriptSetDiskQuota string
 	//go:embed files/vector.yaml
 	configVector string
 	//go:embed files/chrony.conf
@@ -56,8 +61,8 @@ var (
 var (
 	Version string
 
-	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.18`)
-	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.18`)
+	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.19`)
+	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.19`)
 	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
 	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
 	specFile  = flag.String("spec", "", `File containing additional customization: --spec=spec.yaml`)
@@ -147,6 +152,22 @@ func main() {
 		}
 	}
 
+	log.Println("Load docker credentials")
+	dockerConfig, err := cliconfig.Load("" /* auto-detect right directory */)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	credentials, err := dockerConfig.GetAllCredentials()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	authConfigs := make(map[string]registry.AuthConfig)
+	for key, value := range credentials {
+		log.Printf("Found docker credentials for %s", key)
+		authConfigs[key] = registry.AuthConfig(value)
+	}
+
 	ctx := context.Background()
 
 	log.Println("Setup docker connection")
@@ -180,8 +201,39 @@ func main() {
 		// pull source image
 		// use a closure so deferred close is closer
 		err := func() error {
+			named, err := reference.ParseNormalizedNamed(*srcImage)
+			if err != nil {
+				return err
+			}
+			reg := reference.Domain(named)
+
+			imagePullOptions := types.ImagePullOptions{}
+			if authConfig, ok := authConfigs[reg]; ok {
+				encoded, err := registry.EncodeAuthConfig(authConfig)
+				if err != nil {
+					return err
+				}
+				imagePullOptions.RegistryAuth = encoded
+			} else {
+				// Special case handling of docker.io weirdness.
+				// ref https://github.com/moby/moby/blob/e7347f8a8c2fd3d2abd34b638d6fc8c18b0278d1/registry/config.go#L26-L49
+				// (and other handling around index.docker.io in that file...)
+				//
+				// See also e.g. https://github.com/containrrr/watchtower/issues/1176
+				legacyConfig, hasLegacyDockerConfig := authConfigs["https://index.docker.io/v1/"]
+				if hasLegacyDockerConfig && (reg == "docker.io" || reg == "registry-1.docker.io") {
+					encoded, err := registry.EncodeAuthConfig(legacyConfig)
+					if err != nil {
+						return err
+					}
+					imagePullOptions.RegistryAuth = encoded
+				} else {
+					log.Printf("No docker credentials found for %s", reg)
+				}
+			}
+
 			log.Printf("Pull source docker image: %s", *srcImage)
-			pull, err := cli.ImagePull(ctx, *srcImage, types.ImagePullOptions{})
+			pull, err := cli.ImagePull(ctx, *srcImage, imagePullOptions)
 			if err != nil {
 				return err
 			}
@@ -285,6 +337,7 @@ func main() {
 		{"sshd_config", configSshd},
 		{"udev-init.sh", scriptUdevInit},
 		{"resize-swap.sh", scriptResizeSwap},
+		{"set-disk-quota.sh", scriptSetDiskQuota},
 	}
 
 	for _, f := range files {
@@ -296,9 +349,8 @@ func main() {
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
 	opt := types.ImageBuildOptions{
-		Tags: []string{
-			dstIm,
-		},
+		AuthConfigs:    authConfigs,
+		Tags:           []string{dstIm},
 		BuildArgs:      buildArgs,
 		SuppressOutput: *quiet,
 		NoCache:        false,

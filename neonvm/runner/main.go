@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/jpillora/backoff"
 	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/samber/lo"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
 
@@ -211,7 +213,7 @@ func createISO9660runtime(
 	env []vmv1.EnvVar,
 	disks []vmv1.Disk,
 	enableSSH bool,
-	swapInfo *vmv1.SwapInfo,
+	swapSize *resource.Quantity,
 	shmsize *resource.Quantity,
 ) error {
 	writer, err := iso9660.NewWriter()
@@ -261,8 +263,8 @@ func createISO9660runtime(
 		mounts = append(mounts, "/neonvm/bin/mount  -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
 	}
 
-	if swapInfo != nil && (swapInfo.SkipSwapon == nil || !*swapInfo.SkipSwapon) {
-		mounts = append(mounts, fmt.Sprintf("/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh %d", swapInfo.Size.Value()))
+	if swapSize != nil {
+		mounts = append(mounts, fmt.Sprintf("/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh %d", swapSize.Value()))
 	}
 
 	if len(disks) != 0 {
@@ -275,6 +277,11 @@ func createISO9660runtime(
 				opts := ""
 				if disk.EmptyDisk.Discard {
 					opts = "-o discard"
+				}
+
+				if disk.EmptyDisk.EnableQuotas {
+					mounts = append(mounts, fmt.Sprintf(`tune2fs -Q prjquota $(/neonvm/bin/blkid -L %s)`, disk.Name))
+					mounts = append(mounts, fmt.Sprintf(`tune2fs -E mount_opts=prjquota $(/neonvm/bin/blkid -L %s)`, disk.Name))
 				}
 
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
@@ -301,7 +308,7 @@ func createISO9660runtime(
 		return err
 	}
 
-	if swapInfo != nil {
+	if swapSize != nil {
 		lines := []string{
 			`#!/neonvm/bin/sh`,
 			`set -euxo pipefail`,
@@ -388,14 +395,12 @@ func calcDirUsage(dirPath string) (int64, error) {
 	return size, nil
 }
 
-func createSwap(diskPath string, swapInfo vmv1.SwapInfo) error {
-	diskSize := swapInfo.Size
+func createSwap(diskPath string, swapSize *resource.Quantity) error {
 	tmpRawFile := "swap.raw"
 
-	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", diskSize.Value())); err != nil {
+	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", swapSize.Value())); err != nil {
 		return err
 	}
-	// Even if swapInfo.SkipSwapon, we still need to mkswap to propagate the label.
 	if err := execFg("mkswap", "-L", swapName, tmpRawFile); err != nil {
 		return err
 	}
@@ -433,14 +438,27 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		return errors.New("diskSize or contentPath should be specified")
 	}
 
-	if contentPath == nil {
-		if err := execFg("mkfs.ext4", "-q", "-L", diskName, "-b", fmt.Sprintf("%d", ext4blockSize), "ext4.raw", fmt.Sprintf("%d", ext4blockCount)); err != nil {
-			return err
-		}
-	} else {
-		if err := execFg("mkfs.ext4", "-q", "-L", diskName, "-d", *contentPath, "-b", fmt.Sprintf("%d", ext4blockSize), "ext4.raw", fmt.Sprintf("%d", ext4blockCount)); err != nil {
-			return err
-		}
+	mkfsArgs := []string{
+		"-q", // quiet
+		"-L", // volume-label
+		diskName,
+	}
+
+	if contentPath != nil {
+		// [ -d root-directory|tarball ]
+		mkfsArgs = append(mkfsArgs, "-d", *contentPath)
+	}
+
+	mkfsArgs = append(
+		mkfsArgs,
+		"-b", // block-size
+		fmt.Sprintf("%d", ext4blockSize),
+		"ext4.raw",                        // device
+		fmt.Sprintf("%d", ext4blockCount), // fs-size
+	)
+
+	if err := execFg("mkfs.ext4", mkfsArgs...); err != nil {
+		return err
 	}
 
 	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
@@ -594,6 +612,7 @@ type Config struct {
 	kernelPath           string
 	appendKernelCmdline  string
 	skipCgroupManagement bool
+	enableDummyCPUServer bool
 	diskCacheSettings    string
 	memoryProvider       vmv1.MemoryProvider
 	autoMovableRatio     string
@@ -606,6 +625,7 @@ func newConfig(logger *zap.Logger) *Config {
 		kernelPath:           defaultKernelPath,
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
+		enableDummyCPUServer: false,
 		diskCacheSettings:    "cache=none",
 		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
 		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
@@ -620,7 +640,10 @@ func newConfig(logger *zap.Logger) *Config {
 		cfg.appendKernelCmdline, "Additional kernel command line arguments")
 	flag.BoolVar(&cfg.skipCgroupManagement, "skip-cgroup-management",
 		cfg.skipCgroupManagement,
-		"Don't try to manage CPU (use if running alongside container-mgr)")
+		"Don't try to manage CPU (use if running alongside container-mgr, or if dummy CPU server is enabled)")
+	flag.BoolVar(&cfg.enableDummyCPUServer, "enable-dummy-cpu-server",
+		cfg.skipCgroupManagement,
+		"Provide a CPU server (unlike -skip-cgroup-management) but don't actually do anything with it")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
@@ -634,6 +657,9 @@ func newConfig(logger *zap.Logger) *Config {
 	}
 	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem && cfg.autoMovableRatio == "" {
 		logger.Fatal("missing required flag '-memhp-auto-movable-ratio'")
+	}
+	if cfg.enableDummyCPUServer && !cfg.skipCgroupManagement {
+		logger.Fatal("flag -enable-dummy-cpu-server requires -skip-cgroup-management")
 	}
 
 	return cfg
@@ -690,13 +716,10 @@ func run(logger *zap.Logger) error {
 		"kernel.core_uses_pid=1",
 	}
 	var shmSize *resource.Quantity
-	var swapInfo *vmv1.SwapInfo
+	var swapSize *resource.Quantity
 	if vmSpec.Guest.Settings != nil {
 		sysctl = append(sysctl, vmSpec.Guest.Settings.Sysctl...)
-		swapInfo, err = vmSpec.Guest.Settings.GetSwapInfo()
-		if err != nil {
-			return fmt.Errorf("failed to get SwapInfo from VirtualMachine object: %w", err)
-		}
+		swapSize = vmSpec.Guest.Settings.Swap
 
 		// By default, Linux sets the size of /dev/shm to 1/2 of the physical memory.  If
 		// swap is configured, we want to set /dev/shm higher, because we can autoscale
@@ -704,8 +727,8 @@ func run(logger *zap.Logger) error {
 		//
 		// See https://github.com/neondatabase/autoscaling/issues/800
 		initialMemorySize := vmSpec.Guest.MemorySlotSize.Value() * int64(vmSpec.Guest.MemorySlots.Min)
-		if swapInfo != nil && swapInfo.Size.Value() > initialMemorySize/2 {
-			shmSize = &swapInfo.Size
+		if swapSize != nil && swapSize.Value() > initialMemorySize/2 {
+			shmSize = swapSize
 		}
 	}
 
@@ -723,7 +746,7 @@ func run(logger *zap.Logger) error {
 			vmSpec.Guest.Env,
 			vmSpec.Disks,
 			enableSSH,
-			swapInfo,
+			swapSize,
 			shmSize,
 		)
 	})
@@ -736,7 +759,7 @@ func run(logger *zap.Logger) error {
 
 	tg.Go("qemu-cmd", func(logger *zap.Logger) error {
 		var err error
-		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, enableSSH, swapInfo, hostname)
+		qemuCmd, err = buildQEMUCmd(cfg, logger, vmSpec, &vmStatus, enableSSH, swapSize, hostname)
 		return err
 	})
 
@@ -788,7 +811,7 @@ func buildQEMUCmd(
 	vmSpec *vmv1.VirtualMachineSpec,
 	vmStatus *vmv1.VirtualMachineStatus,
 	enableSSH bool,
-	swapInfo *vmv1.SwapInfo,
+	swapSize *resource.Quantity,
 	hostname string,
 ) ([]string, error) {
 	// prepare qemu command line
@@ -823,10 +846,10 @@ func buildQEMUCmd(
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
 	}
 
-	if swapInfo != nil {
+	if swapSize != nil {
 		dPath := fmt.Sprintf("%s/swapdisk.qcow2", mountedDiskPath)
 		logger.Info("creating QCOW2 image for swap", zap.String("diskPath", dPath))
-		if err := createSwap(dPath, *swapInfo); err != nil {
+		if err := createSwap(dPath, swapSize); err != nil {
 			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
@@ -1007,9 +1030,36 @@ func runQEMU(
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-	if !cfg.skipCgroupManagement {
+	if !cfg.skipCgroupManagement || cfg.enableDummyCPUServer {
+		var callbacks cpuServerCallbacks
+
+		if cfg.enableDummyCPUServer {
+			lastValue := &atomic.Uint32{}
+			lastValue.Store(uint32(vmSpec.Guest.CPUs.Min))
+
+			callbacks = cpuServerCallbacks{
+				get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
+					return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
+				},
+				set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
+					lastValue.Store(uint32(cpu))
+					return nil
+				},
+			}
+		} else {
+			// Standard implementation -- actually set the cgroup
+			callbacks = cpuServerCallbacks{
+				get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
+					return getCgroupQuota(cgroupPath)
+				},
+				set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
+					return setCgroupLimit(logger, cpu, cgroupPath)
+				},
+			}
+		}
+
 		wg.Add(1)
-		go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, cgroupPath, &wg)
+		go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, callbacks, &wg)
 	}
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
@@ -1040,7 +1090,12 @@ func runQEMU(
 	return err
 }
 
-func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
+func handleCPUChange(
+	logger *zap.Logger,
+	w http.ResponseWriter,
+	r *http.Request,
+	set func(*zap.Logger, vmv1.MilliCPU) error,
+) {
 	if r.Method != "POST" {
 		logger.Error("unexpected method", zap.String("method", r.Method))
 		w.WriteHeader(400)
@@ -1062,7 +1117,7 @@ func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request,
 
 	// update cgroup
 	logger.Info("got CPU update", zap.Float64("CPU", parsed.VCPUs.AsFloat64()))
-	err = setCgroupLimit(logger, parsed.VCPUs, cgroupPath)
+	err = set(logger, parsed.VCPUs)
 	if err != nil {
 		logger.Error("could not set cgroup limit", zap.Error(err))
 		w.WriteHeader(500)
@@ -1072,14 +1127,19 @@ func handleCPUChange(logger *zap.Logger, w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(200)
 }
 
-func handleCPUCurrent(logger *zap.Logger, w http.ResponseWriter, r *http.Request, cgroupPath string) {
+func handleCPUCurrent(
+	logger *zap.Logger,
+	w http.ResponseWriter,
+	r *http.Request,
+	get func(*zap.Logger) (*vmv1.MilliCPU, error),
+) {
 	if r.Method != "GET" {
 		logger.Error("unexpected method", zap.String("method", r.Method))
 		w.WriteHeader(400)
 		return
 	}
 
-	cpus, err := getCgroupQuota(cgroupPath)
+	cpus, err := get(logger)
 	if err != nil {
 		logger.Error("could not get cgroup quota", zap.Error(err))
 		w.WriteHeader(500)
@@ -1097,17 +1157,28 @@ func handleCPUCurrent(logger *zap.Logger, w http.ResponseWriter, r *http.Request
 	w.Write(body) //nolint:errcheck // Not much to do with the error here. TODO: log it?
 }
 
-func listenForCPUChanges(ctx context.Context, logger *zap.Logger, port int32, cgroupPath string, wg *sync.WaitGroup) {
+type cpuServerCallbacks struct {
+	get func(*zap.Logger) (*vmv1.MilliCPU, error)
+	set func(*zap.Logger, vmv1.MilliCPU) error
+}
+
+func listenForCPUChanges(
+	ctx context.Context,
+	logger *zap.Logger,
+	port int32,
+	callbacks cpuServerCallbacks,
+	wg *sync.WaitGroup,
+) {
 	defer wg.Done()
 	mux := http.NewServeMux()
 	loggerHandlers := logger.Named("http-handlers")
 	cpuChangeLogger := loggerHandlers.Named("cpu_change")
 	mux.HandleFunc("/cpu_change", func(w http.ResponseWriter, r *http.Request) {
-		handleCPUChange(cpuChangeLogger, w, r, cgroupPath)
+		handleCPUChange(cpuChangeLogger, w, r, callbacks.set)
 	})
 	cpuCurrentLogger := loggerHandlers.Named("cpu_current")
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
-		handleCPUCurrent(cpuCurrentLogger, w, r, cgroupPath)
+		handleCPUCurrent(cpuCurrentLogger, w, r, callbacks.get)
 	})
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),

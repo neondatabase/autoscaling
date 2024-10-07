@@ -28,7 +28,6 @@ type GlobalMetrics struct {
 	neonvmRequestedChange  resourceChangePair
 
 	runnersCount       *prometheus.GaugeVec
-	runnerFatalErrors  prometheus.Counter
 	runnerThreadPanics prometheus.Counter
 	runnerStarts       prometheus.Counter
 	runnerRestarts     prometheus.Counter
@@ -70,7 +69,6 @@ type runnerMetricState string
 const (
 	runnerMetricStateOk       runnerMetricState = "ok"
 	runnerMetricStateStuck    runnerMetricState = "stuck"
-	runnerMetricStateErrored  runnerMetricState = "errored"
 	runnerMetricStatePanicked runnerMetricState = "panicked"
 )
 
@@ -232,12 +230,6 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 			// NB: is_endpoint ∈ ("true", "false"), state ∈ runnerMetricState = ("ok", "stuck", "errored", "panicked")
 			[]string{"is_endpoint", "state"},
 		)),
-		runnerFatalErrors: util.RegisterMetric(reg, prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "autoscaling_agent_runner_fatal_errors_total",
-				Help: "Number of fatal errors from autoscaler-agent per-VM main runner thread",
-			},
-		)),
 		runnerThreadPanics: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_runner_thread_panics_total",
@@ -320,7 +312,6 @@ func makeGlobalMetrics() (GlobalMetrics, *prometheus.Registry) {
 	runnerStates := []runnerMetricState{
 		runnerMetricStateOk,
 		runnerMetricStateStuck,
-		runnerMetricStateErrored,
 		runnerMetricStatePanicked,
 	}
 	for _, s := range runnerStates {

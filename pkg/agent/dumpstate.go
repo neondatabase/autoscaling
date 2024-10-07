@@ -97,7 +97,6 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 
 	for i, pod := range podList {
 		sema <- struct{}{} // enforce only 'concurrencyLimit' threads running at a time
-		i, pod := i, pod
 		go func() {
 			defer func() {
 				<-sema

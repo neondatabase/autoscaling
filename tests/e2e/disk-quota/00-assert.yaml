@@ -1,13 +1,17 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestAssert
-timeout: 60
+timeout: 20
 commands:
   - script: |
       set -eux
       pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
-      swap="$(kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm cat /proc/meminfo | grep '^SwapTotal' | grep -oE '[[:digit:]]+ kB')"
-      # swapon was skipped, so there should be no swap.
-      [ "$swap" = '0 kB' ]
+      
+      # Run repquota to display enabled project quotas
+      full_quota_report=$(kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm /neonvm/bin/repquota -P -a)
+
+      # Check if exactly one quota is enabled by counting the lines containing "Report for project quotas on device"
+      quota_count=$(echo "$full_quota_report" | grep "Report for project quotas on device" | wc -l)
+      [ "$quota_count" -eq 1 ]
 ---
 apiVersion: v1
 kind: Pod

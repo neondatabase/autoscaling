@@ -313,7 +313,8 @@ func (r resourceTransitioner[T]) handleRequestedGeneric(
 		// the factor.
 		maxIncrease := (remainingReservable / opts.factor) * opts.factor
 		// ... but we must allow at least opts.forceApprovalMinimum
-		maxIncrease = util.Max(maxIncrease, opts.forceApprovalMinimum)
+		increaseFromForceApproval := util.SaturatingSub(opts.forceApprovalMinimum, r.pod.Reserved)
+		maxIncrease = max(maxIncrease, increaseFromForceApproval)
 
 		if increase > maxIncrease /* increases are bound by what's left in the node */ {
 			r.pod.CapacityPressure = increase - maxIncrease
@@ -515,7 +516,7 @@ func handleUpdatedLimits[T constraints.Unsigned](
 		// Note that we don't want to reserve *below* what we think the VM is using if the bounds
 		// decrease; it may be that the autoscaler-agent has not yet reacted to that.
 		using := pod.Reserved - pod.Buffer
-		pod.Reserved = util.Max(newMax, using)
+		pod.Reserved = max(newMax, using)
 		pod.Buffer = pod.Reserved - using
 
 		node.Reserved = node.Reserved + pod.Reserved - oldPodReserved

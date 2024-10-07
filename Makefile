@@ -5,6 +5,10 @@ IMG_RUNNER ?= runner:dev
 IMG_SCHEDULER ?= autoscale-scheduler:dev
 IMG_AUTOSCALER_AGENT ?= autoscaler-agent:dev
 
+# Shared base image for caching compiled dependencies.
+# It's only used during image builds, so doesn't need to be pushed.
+GO_BASE_IMG ?= autoscaling-go-base:dev
+
 E2E_TESTS_VM_IMG ?= vm-postgres:15-bullseye
 PG16_DISK_TEST_IMG ?= pg16-disk-test:dev
 
@@ -70,22 +74,30 @@ help: ## Display this help.
 .PHONY: generate
 generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	# Use uid and gid of current user to avoid mismatched permissions
-	iidfile=$$(mktemp /tmp/iid-XXXXXX) && \
+	set -e ; \
+	iidfile=$$(mktemp /tmp/iid-XXXXXX) ; \
 	docker build \
 		--build-arg USER_ID=$(shell id -u $(USER)) \
 		--build-arg GROUP_ID=$(shell id -g $(USER)) \
 		--build-arg CONTROLLER_TOOLS_VERSION=$(CONTROLLER_TOOLS_VERSION) \
 		--build-arg CODE_GENERATOR_VERSION=$(CODE_GENERATOR_VERSION) \
 		--file neonvm/hack/Dockerfile.generate \
-		--iidfile $$iidfile . && \
+		--iidfile $$iidfile . ; \
+	volumes=('--volume' "$$PWD:/go/src/github.com/neondatabase/autoscaling") ; \
+	if [ -f .git ]; then \
+		gitdir="$$(git rev-parse --git-common-dir)" ; \
+		gitdir="$$(cd -P -- $$gitdir && pwd)" ; \
+		volumes+=('--volume' "$$gitdir:$$gitdir") ; \
+	fi ; \
+	set -x ; \
 	docker run --rm \
-		--volume $$PWD:/go/src/github.com/neondatabase/autoscaling \
+		"$${volumes[@]}" \
 		--workdir /go/src/github.com/neondatabase/autoscaling \
 		--user $(shell id -u $(USER)):$(shell id -g $(USER)) \
 		$$(cat $$iidfile) \
-		./neonvm/hack/generate.sh && \
-	docker rmi $$(cat $$iidfile)
-	rm -rf $$iidfile
+		./neonvm/hack/generate.sh ; \
+	docker rmi $$(cat $$iidfile) ; \
+	rm -rf $$iidfile ; \
 	go fmt ./...
 
 .PHONY: fmt
@@ -145,32 +157,53 @@ docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_SCHEDULER)
 	docker push -q $(IMG_AUTOSCALER_AGENT)
 
+.PHONY: docker-build-go-base
+docker-build-go-base:
+	docker build \
+		--tag $(GO_BASE_IMG) \
+		--file Dockerfile.go-base \
+		.
+
 .PHONY: docker-build-controller
-docker-build-controller: ## Build docker image for NeonVM controller
-	docker build --build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) --build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) -t $(IMG_CONTROLLER) -f neonvm/Dockerfile .
+docker-build-controller: docker-build-go-base ## Build docker image for NeonVM controller
+	docker build \
+		--tag $(IMG_CONTROLLER) \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) \
+		--build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) \
+		--file neonvm/Dockerfile \
+		.
 
 .PHONY: docker-build-runner
-docker-build-runner: ## Build docker image for NeonVM runner
-	docker build -t $(IMG_RUNNER) -f neonvm/runner/Dockerfile .
+docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runner
+	docker build \
+		--tag $(IMG_RUNNER) \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--file neonvm/runner/Dockerfile \
+		.
 
 .PHONY: docker-build-vxlan-controller
-docker-build-vxlan-controller: ## Build docker image for NeonVM vxlan controller
-	docker build -t $(IMG_VXLAN_CONTROLLER) -f neonvm/tools/vxlan/Dockerfile .
+docker-build-vxlan-controller: docker-build-go-base ## Build docker image for NeonVM vxlan controller
+	docker build \
+		--tag $(IMG_VXLAN_CONTROLLER) \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--file neonvm/tools/vxlan/Dockerfile \
+		.
 
 .PHONY: docker-build-autoscaler-agent
-docker-build-autoscaler-agent: ## Build docker image for autoscaler-agent
+docker-build-autoscaler-agent: docker-build-go-base ## Build docker image for autoscaler-agent
 	docker buildx build \
 		--tag $(IMG_AUTOSCALER_AGENT) \
-		--load \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscaler-agent/Dockerfile \
 		.
 
 .PHONY: docker-build-scheduler
-docker-build-scheduler: ## Build docker image for (autoscaling) scheduler
+docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscaling) scheduler
 	docker buildx build \
 		--tag $(IMG_SCHEDULER) \
-		--load \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file build/autoscale-scheduler/Dockerfile \
 		.
@@ -256,6 +289,7 @@ render-manifests: $(RENDERED) kustomize
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
 	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
@@ -278,6 +312,7 @@ render-release: $(RENDERED) kustomize
 	cd deploy/agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
 	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
@@ -409,8 +444,12 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 ENVTEST_K8S_VERSION = 1.28.3
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-# k8s deps @ 1.28.0 https://github.com/kubernetes-sigs/controller-tools
-CONTROLLER_TOOLS_VERSION ?= v0.13.0
+# We went ahead of k8s 1.28 with controller-tools v0.14.0 (which depends on k8s 1.29) to unblock go 1.22 upgrade.
+# It should be *relatively* safe as the only changes from this controller-tools version are description in CRD.
+# Once we upgrade to k8s 1.29, there's no need to change CONTROLLER_TOOLS_VERSION, and this 3 lines can be removed.
+#
+# k8s deps @ 1.29.0 https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
+CONTROLLER_TOOLS_VERSION ?= v0.14.0
 
 CODE_GENERATOR_VERSION ?= v0.28.12
 

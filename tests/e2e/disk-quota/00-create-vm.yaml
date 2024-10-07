@@ -21,8 +21,10 @@ spec:
     rootDisk:
       image: vm-postgres:15-bullseye
       size: 1Gi
-    settings:
-      # use new format
-      swapInfo:
-        size: 1Gi
-        skipSwapon: true
+  disks:
+  - emptyDisk:
+      discard: true
+      size: 2Gi
+      enableQuotas: true
+    mountPath: /var/db/postgres/compute
+    name: pgdata

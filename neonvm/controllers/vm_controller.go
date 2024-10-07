@@ -317,7 +317,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	log := log.FromContext(ctx)
 
 	// Let's check and just set the condition status as Unknown when no status are available
-	if vm.Status.Conditions == nil || len(vm.Status.Conditions) == 0 {
+	if len(vm.Status.Conditions) == 0 {
 		// set Unknown condition status for AvailableVirtualMachine
 		meta.SetStatusCondition(&vm.Status.Conditions, metav1.Condition{Type: typeAvailableVirtualMachine, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
 	}
@@ -1486,8 +1486,13 @@ func podSpec(
 					}},
 					Command: func() []string {
 						cmd := []string{"runner"}
-						if config.UseContainerMgr {
+						if config.UseContainerMgr || config.DisableRunnerCgroup {
 							cmd = append(cmd, "-skip-cgroup-management")
+						}
+						if config.DisableRunnerCgroup {
+							// cgroup management disabled, but we still need something to provide
+							// the server, so the runner will just provide a dummy implementation.
+							cmd = append(cmd, "-enable-dummy-cpu-server")
 						}
 						cmd = append(
 							cmd,
@@ -1530,7 +1535,7 @@ func podSpec(
 							MountPropagation: lo.ToPtr(corev1.MountPropagationNone),
 						}
 
-						if config.UseContainerMgr {
+						if config.UseContainerMgr || config.DisableRunnerCgroup {
 							return []corev1.VolumeMount{images}
 						} else {
 							// the /sys/fs/cgroup mount is only necessary if neonvm-runner has to
@@ -1625,6 +1630,8 @@ func podSpec(
 
 				if config.UseContainerMgr {
 					return []corev1.Volume{images, containerdSock}
+				} else if config.DisableRunnerCgroup {
+					return []corev1.Volume{images}
 				} else {
 					return []corev1.Volume{images, cgroup}
 				}
@@ -1736,11 +1743,7 @@ func podSpec(
 	}
 
 	if settings := vm.Spec.Guest.Settings; settings != nil {
-		swapInfo, err := settings.GetSwapInfo()
-		if err != nil {
-			return nil, fmt.Errorf("error getting SwapInfo from VirtualMachine guest settings: %w", err)
-		}
-		if swapInfo != nil {
+		if swapSize := settings.Swap; swapSize != nil {
 			diskName := "swapdisk"
 			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
 				Name:      diskName,
@@ -1750,7 +1753,7 @@ func podSpec(
 				Name: diskName,
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{
-						SizeLimit: &swapInfo.Size,
+						SizeLimit: swapSize,
 					},
 				},
 			})

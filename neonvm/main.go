@@ -74,11 +74,8 @@ func run(mgr manager.Manager) error {
 	ctx = srv.SetBaseContext(ctx)
 	ctx = srv.WithOrchestrator(ctx)
 	orca := srv.GetOrchestrator(ctx)
-	defer func() {
-		if err := orca.Wait(); err != nil {
-			setupLog.Error(err, "failed to shut down orchestrator")
-		}
 
+	defer func() {
 		setupLog.Info("main loop returned, exiting")
 	}()
 
@@ -101,6 +98,7 @@ func main() {
 	var concurrencyLimit int
 	var skipUpdateValidationFor map[types.NamespacedName]struct{}
 	var enableContainerMgr bool
+	var disableRunnerCgroup bool
 	var qemuDiskCacheSettings string
 	var defaultMemoryProvider vmv1.MemoryProvider
 	var memhpAutoMovableRatio string
@@ -138,7 +136,9 @@ func main() {
 			return nil
 		},
 	)
+	// note: cannot have both -enable-container-mgr and -disable-runner-cgroup.
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
+	flag.BoolVar(&disableRunnerCgroup, "disable-runner-cgroup", false, "Disable creation of a cgroup in neonvm-runner for fractional CPU limiting")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
 	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
 	flag.StringVar(&memhpAutoMovableRatio, "memhp-auto-movable-ratio", "301", "For virtio-mem, set VM kernel's memory_hotplug.auto_movable_ratio")
@@ -150,6 +150,10 @@ func main() {
 
 	if defaultMemoryProvider == "" {
 		fmt.Fprintln(os.Stderr, "missing required flag '-default-memory-provider'")
+		os.Exit(1)
+	}
+	if disableRunnerCgroup && enableContainerMgr {
+		fmt.Fprintln(os.Stderr, "Cannot have both '-enable-container-mgr' and '-disable-runner-cgroup'")
 		os.Exit(1)
 	}
 
@@ -189,11 +193,9 @@ func main() {
 		// speeds up voluntary leader transitions as the new leader don't have to wait
 		// LeaseDuration time first.
 		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
+		// This option is only safe as long as the program immediately exits after the manager
+		// stops.
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -205,6 +207,7 @@ func main() {
 	rc := &controllers.ReconcilerConfig{
 		IsK3s:                   isK3s,
 		UseContainerMgr:         enableContainerMgr,
+		DisableRunnerCgroup:     disableRunnerCgroup,
 		MaxConcurrentReconciles: concurrencyLimit,
 		SkipUpdateValidationFor: skipUpdateValidationFor,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
@@ -277,6 +280,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// NOTE: THE CONTROLLER MUST IMMEDIATELY EXIT AFTER RUNNING THE MANAGER.
 	if err := run(mgr); err != nil {
 		setupLog.Error(err, "run manager error")
 		os.Exit(1)
