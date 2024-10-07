@@ -100,7 +100,6 @@ func main() {
 	var enableContainerMgr bool
 	var disableRunnerCgroup bool
 	var qemuDiskCacheSettings string
-	var defaultMemoryProvider vmv1.MemoryProvider
 	var memhpAutoMovableRatio string
 	var failurePendingPeriod time.Duration
 	var failingRefreshInterval time.Duration
@@ -140,7 +139,6 @@ func main() {
 	flag.BoolVar(&enableContainerMgr, "enable-container-mgr", false, "Enable crictl-based container-mgr alongside each VM")
 	flag.BoolVar(&disableRunnerCgroup, "disable-runner-cgroup", false, "Disable creation of a cgroup in neonvm-runner for fractional CPU limiting")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
-	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
 	flag.StringVar(&memhpAutoMovableRatio, "memhp-auto-movable-ratio", "301", "For virtio-mem, set VM kernel's memory_hotplug.auto_movable_ratio")
 	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
 		"the period for the propagation of reconciliation failures to the observability instruments")
@@ -148,10 +146,6 @@ func main() {
 		"the interval between consecutive updates of metrics and logs, related to failing reconciliations")
 	flag.Parse()
 
-	if defaultMemoryProvider == "" {
-		fmt.Fprintln(os.Stderr, "missing required flag '-default-memory-provider'")
-		os.Exit(1)
-	}
 	if disableRunnerCgroup && enableContainerMgr {
 		fmt.Fprintln(os.Stderr, "Cannot have both '-enable-container-mgr' and '-disable-runner-cgroup'")
 		os.Exit(1)
@@ -211,7 +205,6 @@ func main() {
 		MaxConcurrentReconciles: concurrencyLimit,
 		SkipUpdateValidationFor: skipUpdateValidationFor,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
-		DefaultMemoryProvider:   defaultMemoryProvider,
 		MemhpAutoMovableRatio:   memhpAutoMovableRatio,
 		FailurePendingPeriod:    failurePendingPeriod,
 		FailingRefreshInterval:  failingRefreshInterval,
