@@ -203,6 +203,11 @@ func updateFDB(vxlanName string, nodeIPs []string, ownIP string) error {
 
 	for _, ip := range nodeIPs {
 		if ip != ownIP {
+			if net.ParseIP(ip).To4() == nil {
+				log.Printf("not adding IPv6 addr %q to FDB broadcast entry, no support for it", ip)
+				continue
+			}
+
 			broadcastFdbEntry := netlink.Neigh{
 				LinkIndex:    link.Attrs().Index,
 				Family:       syscall.AF_BRIDGE,
