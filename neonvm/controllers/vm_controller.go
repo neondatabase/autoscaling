@@ -28,7 +28,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"reflect"
 	"strconv"
 	"time"
 
@@ -55,7 +54,9 @@ import (
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/neonvm/controllers/buildtag"
 	"github.com/neondatabase/autoscaling/neonvm/pkg/ipam"
+	"github.com/neondatabase/autoscaling/neonvm/qmp"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
 )
 
@@ -76,6 +77,25 @@ const (
 	maxSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
 )
 
+type QMPFactory interface {
+	ConnectVM(*vmv1.VirtualMachine) (QMPMonitor, error)
+	QmpSetMemorySlots(context.Context, *vmv1.VirtualMachine, int, record.EventRecorder) (int, error)
+}
+
+type QMPMonitor interface {
+	Close()
+	CPUs() (plugged []qmp.CPUSlot, empty []qmp.CPUSlot, _ error)
+	PlugCPU() error
+	UnplugCPU() error
+	MemoryDevices() ([]qmp.MemoryDevice, error)
+	MemorySize() (*resource.Quantity, error)
+	SetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previous int64, _ error)
+}
+
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 // VMReconciler reconciles a VirtualMachine object
 type VMReconciler struct {
 	client.Client
@@ -83,7 +103,9 @@ type VMReconciler struct {
 	Recorder record.EventRecorder
 	Config   *ReconcilerConfig
 
-	Metrics ReconcilerMetrics `exhaustruct:"optional"`
+	Metrics    ReconcilerMetrics `exhaustruct:"optional"`
+	QMPFactory QMPFactory
+	HTTPClient HTTPClient
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -175,7 +197,7 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	}
 
 	// If the status changed, try to update the object
-	if !DeepEqual(statusBefore, vm.Status) {
+	if !util.JSONDeepEqual(statusBefore, vm.Status) {
 		if err := r.Status().Update(ctx, &vm); err != nil {
 			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
 				"virtualmachine", vm.Name)
@@ -541,8 +563,15 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				return err
 			}
 
+			mon, err := r.QMPFactory.ConnectVM(vm)
+			defer mon.Close()
+			if err != nil {
+				log.Error(err, "Failed to connect to QMP monitor", "VirtualMachine", vm.Name)
+				return err
+			}
+
 			// get CPU details from QEMU
-			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
+			cpuSlotsPlugged, _, err := mon.CPUs()
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
 				return err
@@ -550,7 +579,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			pluggedCPU := uint32(len(cpuSlotsPlugged))
 
 			// get cgroups CPU details from runner pod
-			cgroupUsage, err := getRunnerCgroup(ctx, vm)
+			cgroupUsage, err := r.getRunnerCgroup(ctx, vm)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 				return err
@@ -560,7 +589,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 			// get Memory details from hypervisor and update VM status
-			memorySize, err := QmpGetMemorySize(QmpAddr(vm))
+			memorySize, err := mon.MemorySize()
 			if err != nil {
 				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
 				return err
@@ -685,9 +714,16 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		cpuScaled := false
 		ramScaled := false
 
+		mon, err := r.QMPFactory.ConnectVM(vm)
+		if err != nil {
+			log.Error(err, "Failed to connect to QMP monitor", "VirtualMachine",
+				vm.Name)
+		}
+		defer mon.Close()
+
 		// do hotplug/unplug CPU
 		// firstly get current state from QEMU
-		cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
+		cpuSlotsPlugged, _, err := mon.CPUs()
 		if err != nil {
 			log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
 			return err
@@ -695,7 +731,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		specCPU := vm.Spec.Guest.CPUs.Use
 		pluggedCPU := uint32(len(cpuSlotsPlugged))
 
-		cgroupUsage, err := getRunnerCgroup(ctx, vm)
+		cgroupUsage, err := r.getRunnerCgroup(ctx, vm)
 		if err != nil {
 			log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 			return err
@@ -705,7 +741,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		if specCPU.RoundedUp() > pluggedCPU {
 			// going to plug one CPU
 			log.Info("Plug one more CPU into VM")
-			if err := QmpPlugCpu(QmpAddr(vm)); err != nil {
+			if err := mon.PlugCPU(); err != nil {
 				return err
 			}
 			r.Recorder.Event(vm, "Normal", "ScaleUp",
@@ -714,7 +750,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		} else if specCPU.RoundedUp() < pluggedCPU {
 			// going to unplug one CPU
 			log.Info("Unplug one CPU from VM")
-			if err := QmpUnplugCpu(QmpAddr(vm)); err != nil {
+			if err := mon.UnplugCPU(); err != nil {
 				return err
 			}
 			r.Recorder.Event(vm, "Normal", "ScaleDown",
@@ -742,12 +778,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// do hotplug/unplug Memory
 		switch *vm.Status.MemoryProvider {
 		case vmv1.MemoryProviderVirtioMem:
-			ramScaled, err = r.doVirtioMemScaling(vm)
+			ramScaled, err = r.doVirtioMemScaling(vm, mon)
 			if err != nil {
 				return err
 			}
 		case vmv1.MemoryProviderDIMMSlots:
-			ramScaled, err = r.doDIMMSlotsScaling(ctx, vm)
+			ramScaled, err = r.doDIMMSlotsScaling(ctx, vm, mon)
 			if err != nil {
 				return err
 			}
@@ -845,11 +881,12 @@ func pickMemoryProvider(config *ReconcilerConfig, vm *vmv1.VirtualMachine) vmv1.
 	return config.DefaultMemoryProvider
 }
 
-func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _ error) {
+func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine, mon QMPMonitor) (done bool, _ error) {
 	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - vm.Spec.Guest.MemorySlots.Min)
 
 	targetVirtioMemSize := int64(targetSlotCount) * vm.Spec.Guest.MemorySlotSize.Value()
-	previousTarget, err := QmpSetVirtioMem(vm, targetVirtioMemSize)
+
+	previousTarget, err := mon.SetVirtioMem(vm, targetVirtioMemSize)
 	if err != nil {
 		return false, err
 	}
@@ -871,7 +908,7 @@ func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _
 	// Maybe we're already using the amount we want?
 	// Update the status to reflect the current size - and if it matches goalTotalSize, ram
 	// scaling is done.
-	currentTotalSize, err := QmpGetMemorySize(QmpAddr(vm))
+	currentTotalSize, err := mon.MemorySize()
 	if err != nil {
 		return false, err
 	}
@@ -881,13 +918,13 @@ func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _
 	return done, nil
 }
 
-func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualMachine) (done bool, _ error) {
+func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualMachine, mon QMPMonitor) (done bool, _ error) {
 	log := log.FromContext(ctx)
 
 	memSlotsMin := vm.Spec.Guest.MemorySlots.Min
 	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - memSlotsMin)
 
-	realSlots, err := QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
+	realSlots, err := r.QMPFactory.QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
 	if realSlots < 0 {
 		return false, err
 	}
@@ -912,7 +949,7 @@ func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualM
 		done = true
 	}
 	// get Memory details from hypervisor and update VM status
-	memorySize, err := QmpGetMemorySize(QmpAddr(vm))
+	memorySize, err := mon.MemorySize()
 	if err != nil {
 		log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
 		return false, err
@@ -1347,7 +1384,7 @@ func setRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.Mill
 	return nil
 }
 
-func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgroup, error) {
+func (r *VMReconciler) getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgroup, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -1358,7 +1395,7 @@ func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgr
 		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1851,20 +1888,6 @@ func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics
 		Named(cntrlName).
 		Complete(reconciler)
 	return reconciler, err
-}
-
-func DeepEqual(v1, v2 interface{}) bool {
-	if reflect.DeepEqual(v1, v2) {
-		return true
-	}
-	var x1 interface{}
-	bytesA, _ := json.Marshal(v1)
-	_ = json.Unmarshal(bytesA, &x1)
-	var x2 interface{}
-	bytesB, _ := json.Marshal(v2)
-	_ = json.Unmarshal(bytesB, &x2)
-
-	return reflect.DeepEqual(x1, x2)
 }
 
 // TODO: reimplement to r.Patch()
