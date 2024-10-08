@@ -12,7 +12,7 @@ status:
   conditions:
     - type: Available
       status: "True"
-  memoryProvider: DIMMSlots
+  memoryProvider: VirtioMem
 ---
 apiVersion: v1
 kind: pod
