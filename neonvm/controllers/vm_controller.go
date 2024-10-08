@@ -772,35 +772,28 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return err
 		}
 
-		// We must keep the VM status the same until we know the neonvm-runner container has been
-		// terminated, otherwise we could end up starting a new runner pod while the VM in the old
-		// one is still running.
-		//
-		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
-		// one* container inside the runner pod has finished; the VM itself may still be running.
-		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
-			// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
-			vm.Cleanup()
+		// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
+		vm.Cleanup()
 
-			var shouldRestart bool
-			switch vm.Spec.RestartPolicy {
-			case vmv1.RestartPolicyAlways:
-				shouldRestart = true
-			case vmv1.RestartPolicyOnFailure:
-				shouldRestart = vm.Status.Phase == vmv1.VmFailed
-			case vmv1.RestartPolicyNever:
-				shouldRestart = false
-			}
-
-			if shouldRestart {
-				log.Info("Restarting VM runner pod", "VM.Phase", vm.Status.Phase, "RestartPolicy", vm.Spec.RestartPolicy)
-				vm.Status.Phase = vmv1.VmPending // reset to trigger restart
-				vm.Status.RestartCount += 1      // increment restart count
-				r.Metrics.vmRestartCounts.Inc()
-			}
-
-			// TODO for RestartPolicyNever: implement TTL or do nothing
+		var shouldRestart bool
+		switch vm.Spec.RestartPolicy {
+		case vmv1.RestartPolicyAlways:
+			shouldRestart = true
+		case vmv1.RestartPolicyOnFailure:
+			shouldRestart = vm.Status.Phase == vmv1.VmFailed
+		case vmv1.RestartPolicyNever:
+			shouldRestart = false
 		}
+
+		if shouldRestart {
+			log.Info("Restarting VM runner pod", "VM.Phase", vm.Status.Phase, "RestartPolicy", vm.Spec.RestartPolicy)
+			vm.Status.Phase = vmv1.VmPending // reset to trigger restart
+			vm.Status.RestartCount += 1      // increment restart count
+			r.Metrics.vmRestartCounts.Inc()
+		}
+
+		// TODO for RestartPolicyNever: implement TTL or do nothing
+
 	default:
 		// do nothing
 	}
@@ -935,6 +928,12 @@ const (
 // This is *similar* to the value of pod.Status.Phase, but we'd like to retain our own abstraction
 // to have more control over the semantics.
 func runnerStatus(pod *corev1.Pod) runnerStatusKind {
+	// Add 5 seconds to account for clock skew and k8s lagging behind.
+	deadline := metav1.NewTime(metav1.Now().Add(-5 * time.Second))
+
+	if pod.DeletionTimestamp != nil && pod.DeletionTimestamp.Before(lo.ToPtr(deadline)) {
+		return runnerFailed
+	}
 	switch pod.Status.Phase {
 	case "", corev1.PodPending:
 		return runnerPending
@@ -949,23 +948,6 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
-}
-
-// runnerContainerStopped returns true iff the neonvm-runner container has exited.
-//
-// The guarantee is simple: It is only safe to start a new runner pod for a VM if
-// runnerContainerStopped returns true (otherwise, we may end up with >1 instance of the same VM).
-func runnerContainerStopped(pod *corev1.Pod) bool {
-	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-		return true
-	}
-
-	for _, stat := range pod.Status.ContainerStatuses {
-		if stat.Name == "neonvm-runner" {
-			return stat.State.Terminated != nil
-		}
-	}
-	return false
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
@@ -1371,6 +1353,20 @@ func podSpec(
 		return nil, fmt.Errorf("marshal VM Status: %w", err)
 	}
 
+	tolerations := append([]corev1.Toleration{}, vm.Spec.Tolerations...)
+	tolerations = append(tolerations,
+		corev1.Toleration{
+			Key:               "node.kubernetes.io/not-ready",
+			TolerationSeconds: lo.ToPtr(int64(30)),
+			Effect:            "NoExecute",
+		},
+		corev1.Toleration{
+			Key:               "node.kubernetes.io/unreachable",
+			TolerationSeconds: lo.ToPtr(int64(30)),
+			Effect:            "NoExecute",
+		},
+	)
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        vm.Status.PodName,
@@ -1385,7 +1381,7 @@ func podSpec(
 			TerminationGracePeriodSeconds: vm.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  vm.Spec.NodeSelector,
 			ImagePullSecrets:              vm.Spec.ImagePullSecrets,
-			Tolerations:                   vm.Spec.Tolerations,
+			Tolerations:                   tolerations,
 			ServiceAccountName:            vm.Spec.ServiceAccountName,
 			SchedulerName:                 vm.Spec.SchedulerName,
 			Affinity:                      affinity,
