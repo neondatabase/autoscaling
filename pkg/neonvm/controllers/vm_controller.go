@@ -174,7 +174,7 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	// If the status changed, try to update the object
 	if !DeepEqual(statusBefore, vm.Status) {
-		if err := r.Status().Update(ctx, &vm); err != nil {
+		if err := patchStatus(ctx, r.Client, &vm); err != nil {
 			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
 				"virtualmachine", vm.Name)
 			return ctrl.Result{}, err
@@ -189,6 +189,25 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	}
 
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+// patchStatus is a helper function to set the status of a VM object, even if the copy provided has
+// an outdated ResourceVersion (and so, would otherwise fail to Update)
+func patchStatus(ctx context.Context, c client.Client, vm *vmv1.VirtualMachine) error {
+	patch := patch.JSONPatch{
+		{
+			Op:    patch.OpReplace,
+			Path:  "/status",
+			Value: vm.Status,
+		},
+	}
+
+	patchData, err := json.Marshal(patch)
+	if err != nil {
+		panic(fmt.Errorf("failed to serialize JSON patch: %w", err))
+	}
+
+	return c.Patch(ctx, vm, client.RawPatch(types.JSONPatchType, patchData))
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
