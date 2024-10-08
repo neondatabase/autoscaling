@@ -36,19 +36,24 @@ This isn't the only architecture document. You may also want to look at:
 
 ## High-level overview
 
-At a high level, this repository provides two components:
+At a high level, this repository provides five components with a non-trivial amount of code:
 
-1. A modified Kubernetes scheduler (using the [plugin interface]) — known as "the (scheduler)
+1. A Kubernetes custom resource definition (CRD) and controller (`neonvm-controller`) for managing
+   resizeable VMs — NeonVM.
+2. The underlying NeonVM pods run `neonvm-runner`
+3. NeonVM virtual machine images are built with `vm-builder`
+4. A modified Kubernetes scheduler (using the [plugin interface]) — known as "the (scheduler)
    plugin", `AutoscaleEnforcer`, `autoscale-scheduler`
-2. A daemonset responsible for making VM scaling decisions & checking with interested parties
+5. A daemonset responsible for making VM scaling decisions & checking with interested parties
    — known as `autoscaler-agent` or simply `agent`
 
-A third component, a binary running inside of the VM to (a) handle being upscaled
+One last component, a binary running inside of the VM to (a) handle being upscaled
 (b) validate that downscaling is ok, and (c) request immediate upscaling due to sharp changes in demand
-— known as "the (VM) monitor", lives in
-[`neondatabase/vm-monitor`](https://github.com/neondatabase/vm-monitor)
+— known as "the (VM) monitor", lives in [`neondatabase/neon/.../vm-monitor`].
 
 [plugin interface]: https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
+
+For information on NeonVM, see [README-NeonVM.md](./README-NeonVM.md).
 
 The scheduler plugin is responsible for handling resource requests from the `autoscaler-agent`,
 capping increases so that node resources aren't overcommitted.
@@ -81,47 +86,46 @@ discussed more in the [high-level consequences] section below.
 
 ## Repository structure
 
-* `build/` — scripts for building the scheduler (`autoscale-scheduler`) and `autoscaler-agent`
-* `cluster-autoscaler/` — patch and Dockerfile for building a NeonVM-compatible [cluster-autoscaler]
-* `cmd/` — entrypoints for the `autoscaler-agent` and scheduler plugin. Very little
-    functionality implemented here. (See: `pkg/agent` and `pkg/plugin`)
-* `deploy/` — YAML files used during cluster init. Of these, only the following two are manually
-  written:
-    * `deploy/autoscaler-agent.yaml`
-    * `deploy/autoscale-scheduler.yaml`
-* `kind/` — files specific to creating our [kind](https://kind.sigs.k8s.io/) cluster
-    * `kind/config.yaml` — configuration for the kind cluster
-* `neonvm/` — QEMU-based virtualisation API and controllers for k8s
-   * See [`neonvm/README.md`](./neonvm/README.md) for details
-* `pkg/` — core go code from the scheduler plugin and `autoscaler-agent`. Where applicable, the
-  purpose of individual files is commented at the top.
-    * `pkg/agent/` — implementation of `autoscaler-agent`
-    * `pkg/api/` — all types for inter-component communications, plus some protocol-relevant types
-        independently used by multiple components.
-    * `pkg/billing/` — consumption metrics API, primarily used in
-        [`pkg/agent/billing.go`](pkg/agent/billing.go)
-    * `pkg/plugin/` — implementation of the scheduler plugin
-    * `pkg/util/` — miscellaneous utilities that are too general to be included in `agent` or
-      `plugin`.
-* `scripts/` — a collection of scripts for common tasks. Items of note:
-    * `scripts/patch-*.json` — patches for testing live-updating of a VM or config
-    * `scripts/replace-scheduler.sh` — replaces the currently running scheduler, for quick redeploy
-    * `scripts/repeat-delete-scheduler.sh` — repeatedly deletes the scheduler (which will be
-        recreated by the deployment). For debugging.
-    * `scripts/run-bench.sh` — starts a CPU-intensive pgbench connected to a VM. Useful to watch
-      the TPS and get confirmation that autoscaled CPUs are being used.
-    * `scripts/scheduler-logs.sh` — convenience script to tail the scheduler's logs
-    * `scripts/ssh-into-vm.sh` — `ssh`es into a VM. Useful for debugging.
-    * `scripts/start-vm-bridge.sh`
-* `tests/` — end-to-end tests
+At a high level, each component gets its own directory and resulting YAML for its deployment, where
+applicable.
+
+These are:
+
+* `autoscale-scheduler` — the scheduler (with our plugin)
+* `autoscaler-agent`
+* `cluster-autoscaler` — patch for building a NeonVM-compatible [cluster-autoscaler]
+* `neonvm` — CRDs and other related YAMLs for NeonVM, alongside Go definitions and a generated
+    client. Note that the generated YAML includes a dependency on `neonvm-controller` via a webhook
+    for create/update/delete operations on the CRDs.
+* `neonvm-controller` — controller for the NeonVM CRDs
+* `neonvm-kernel` — files relating to the virtual machine kernel we use in NeonVM
+* `neonvm-runner` — per-VM management process, created by `neonvm-controller`
+* `neonvm-vxlan-controller`
+* `vm-builder` — binary for building VM images for use by NeonVM
+
+[cluster-autoscaler]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler
+
+Each component directory contains:
+
+* `cmd/` — the entrypoint of the component, containing `main.go`
+* `Dockerfile` — for building the component, if applicable
+* `kustomize.yaml` — if the component is separately deployed, instructions for how Kustomize should
+    generate the YAML
+* `*.yaml` — if the component is separately deployed, there will be other YAML files as the
+    resources for Kustomize to include -- e.g. `daemonset.yaml` or `config_map.yaml`.
+
+### Other directories
+
+* `k3d/` and `kind/` — configuration for local test clusters
+* `pkg/` — the bulk of the Go codebase. For more complex components, `cmd/main.go` often just calls
+    the relevant entrypoint function in its `pkg/` directory. `pkg/` also includes the common
+    packages shared by multiple components.
+* `scripts` — a collection of scripts for common tasks
+* `tests` — end-to-end tests
     * `tests/e2e` — [`kuttl`](https://kuttl.dev/) test scenarios itself
-* `scripts-common.sh` — file with a handful of useful functions, used both in `build` and `scripts`
-* `vm-deploy.yaml` — sample creation of a single VM, for testing autoscaling
 * `vm-examples/` — collection of VMs:
     * `pg16-disk-test/` — VM with Postgres 16 and and ssh access
       * Refer to [`vm-examples/pg16-disk-test/README.md`](./vm-examples/pg16-disk-test)  for more information.
-
-[cluster-autoscaler]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler
 
 ## Agent-Scheduler protocol details
 

@@ -88,6 +88,8 @@ jobs:
             rendered_manifests/autoscale-scheduler.yaml
             rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml
+            rendered_manifests/neonvm-controller.yaml
+            rendered_manifests/neonvm-vxlan-controller.yaml
             rendered_manifests/neonvm-runner-image-loader.yaml
             rendered_manifests/multus.yaml
             rendered_manifests/multus-aks.yaml

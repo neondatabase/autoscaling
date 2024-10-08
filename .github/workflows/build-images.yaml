@@ -202,7 +202,7 @@ jobs:
         run: |
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm/hack/kernel/vmlinuz
+          docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz
           docker rm -f ${ID}
 
       - name: Build go dependencies image
@@ -223,7 +223,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: neonvm/runner/Dockerfile
+          file: neonvm-runner/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-runner:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-runner:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.runner }}
@@ -247,7 +247,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: neonvm/Dockerfile
+          file: neonvm-controller/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-controller:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-controller:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.controller }}
@@ -262,7 +262,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: neonvm/tools/vxlan/Dockerfile
+          file: neonvm-vxlan-controller/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.vxlan-controller }}
@@ -275,7 +275,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: build/autoscale-scheduler/Dockerfile
+          file: autoscale-scheduler/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/autoscale-scheduler:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscale-scheduler:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.scheduler }}
@@ -289,7 +289,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          file: build/autoscaler-agent/Dockerfile
+          file: autoscaler-agent/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/autoscaler-agent:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaler-agent:cache,mode=max' || '' }}
           tags: ${{ needs.tags.outputs.autoscaler-agent }}
