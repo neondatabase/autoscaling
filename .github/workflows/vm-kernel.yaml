@@ -194,6 +194,9 @@ jobs:
           build-args: KERNEL_VERSION=${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
           context: neonvm/hack/kernel
           platforms: linux/amd64
+          # neonvm/hack/kernel/Dockerfile.kernel-builder has different targets for different architectures
+          # so we need to specify the target explicitly 
+          target: kernel_amd64
           # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
           push: true
           pull: true
