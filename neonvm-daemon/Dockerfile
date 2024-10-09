@@ -4,7 +4,7 @@ FROM golang:1.23-alpine AS builder
 COPY . .
 
 # Build
-RUN CGO_ENABLED=0 go build -a -o /neonvmd neonvm/daemon/main.go
+RUN CGO_ENABLED=0 go build -o /neonvmd neonvm-daemon/main.go
 
 FROM scratch
 COPY --from=builder /neonvmd /neonvmd

@@ -7,7 +7,7 @@ FROM {{.RootDiskImage}} AS rootdisk
 USER root
 {{.SpecMerge}}
 
-FROM {{.NeonvmDaemonImage}} AS vm-daemon-loader
+FROM {{.NeonvmDaemonImage}} AS neonvm-daemon-loader
 
 FROM alpine:3.19 AS vm-runtime
 # add busybox
@@ -21,9 +21,6 @@ RUN set -e \
 COPY helper.move-bins.sh /helper.move-bins.sh
 
 # add udevd and agetty (with shared libs)
-#
-# We need unshare and nsenter from util-linux-misc because buxybox's implementations don't have
-# support for cgroup namespaces (at least, master as of 2024-08-11).
 RUN set -e \
 	&& apk add --no-cache --no-progress --quiet \
 		acpid \
@@ -42,7 +39,6 @@ RUN set -e \
 		udevadm \
 		agetty \
 		su-exec \
-        unshare nsenter \
         cgexec \
 		resize2fs \
 		blkid \
@@ -74,7 +70,7 @@ RUN set -e \
 		quota-tools \
 	&& /helper.move-bins.sh quota edquota quotacheck quotaoff quotaon quotastats setquota repquota tune2fs
 
-COPY --from=vm-daemon-loader /neonvmd /neonvm/bin/neonvmd
+COPY --from=neonvm-daemon-loader /neonvmd /neonvm/bin/neonvmd
 
 # init scripts & configs
 COPY inittab     /neonvm/bin/inittab
@@ -108,7 +104,7 @@ RUN set -e \
     && /neonvm/bin/id -g sshd > /dev/null 2>&1 || /neonvm/bin/addgroup sshd \
     && /neonvm/bin/id -u sshd > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
 
-FROM vm-runtime AS builder
+FROM alpine:3.19 AS builder
 ARG DISK_SIZE
 COPY --from=rootdisk-mod / /rootdisk
 
