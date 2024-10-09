@@ -191,7 +191,7 @@ docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runne
 docker-build-daemon: ## Build docker image for NeonVM daemon.
 	docker build \
 		--tag $(IMG_DAEMON) \
-		--file neonvm/daemon/Dockerfile \
+		--file neonvm-daemon/Dockerfile \
 		.
 
 .PHONY: docker-build-vxlan-controller
