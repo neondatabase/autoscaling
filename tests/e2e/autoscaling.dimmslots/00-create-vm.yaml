@@ -36,6 +36,7 @@ spec:
       min: 1
       max: 5
       use: 1
+    memoryProvider: DIMMSlots
     rootDisk:
       image: vm-postgres:15-bullseye
       size: 8Gi
