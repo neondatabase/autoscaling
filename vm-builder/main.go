@@ -59,7 +59,8 @@ var (
 )
 
 var (
-	Version string
+	Version           string
+	NeonvmDaemonImage string
 
 	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.19`)
 	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.19`)
@@ -69,6 +70,8 @@ var (
 	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
 	version   = flag.Bool("version", false, `Print vm-builder version`)
+
+	daemonImageFlag = flag.String("daemon-image", "", `Specify the neonvm-daemon image: --daemon-image=neonvm-daemon:dev`)
 )
 
 func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
@@ -109,6 +112,8 @@ type TemplatesContext struct {
 	Env           []string
 	RootDiskImage string
 
+	NeonvmDaemonImage string
+
 	SpecBuild       string
 	SpecMerge       string
 	InittabCommands []inittabCommand
@@ -128,6 +133,17 @@ func main() {
 	if *version {
 		fmt.Println(Version)
 		os.Exit(0)
+	}
+
+	if len(*daemonImageFlag) == 0 && len(NeonvmDaemonImage) == 0 {
+		log.Println("neonvm-daemon image not set, needs to be explicitly passed in, or compiled with -ldflags '-X main.NeonvmDaemonImage=...'")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	neonvmDaemonImage := NeonvmDaemonImage
+	if len(*daemonImageFlag) != 0 {
+		neonvmDaemonImage = *daemonImageFlag
 	}
 
 	if len(*srcImage) == 0 {
@@ -269,6 +285,8 @@ func main() {
 		Cmd:           imageSpec.Config.Cmd,
 		Env:           imageSpec.Config.Env,
 		RootDiskImage: *srcImage,
+
+		NeonvmDaemonImage: neonvmDaemonImage,
 
 		SpecBuild:       "",  // overridden below if spec != nil
 		SpecMerge:       "",  // overridden below if spec != nil
