@@ -165,8 +165,8 @@ jobs:
       - name: get kernel version
         id: get-kernel-version
         run: |
-          linux_config=$(ls neonvm-kernel/linux-config-*)  # returns something like "neonvm-kernel/linux-config-6.1.63"
-          kernel_version=${linux_config##*-}               # returns something like "6.1.63"
+          linux_config=$(ls neonvm-kernel/linux-config-*)  # returns something like "neonvm-kernel/linux-config-amd64-6.1.63"
+          kernel_version=${linux_config##*-}               # returns something like "amd64-6.1.63"
 
           echo VM_KERNEL_VERSION=$kernel_version >> $GITHUB_OUTPUT
 
@@ -194,7 +194,7 @@ jobs:
           build-args: KERNEL_VERSION=${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
           context: neonvm-kernel
           platforms: linux/amd64
-          # neonvm/hack/kernel/Dockerfile.kernel-builder has different targets for different architectures
+          # neonvm-kernel/Dockerfile.kernel-builder has different targets for different architectures
           # so we need to specify the target explicitly 
           target: kernel_amd64
           # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
