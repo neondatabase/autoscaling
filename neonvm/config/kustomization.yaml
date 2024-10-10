@@ -16,29 +16,18 @@ bases:
 - namespace
 - crd
 - rbac
-- controller
 - webhook
 - certmanager
 # [PROMETHEUS] To enable prometheus monitor, uncomment all sections with 'PROMETHEUS'.
 #- ../common/prometheus
-- vxlan-controller
 - network
 - device-plugin
-- ../runner-image-loader/bases
 
 patchesStrategicMerge:
 - webhookcainjection_patch.yaml
 
 # the following config is for teaching kustomize how to do var substitution
 vars:
-- name: VM_RUNNER_IMAGE # full name of the neonvm-runner image
-  objref:
-    kind: DaemonSet
-    name: runner-image-loader
-    group: apps
-    version: v1
-  fieldref:
-    fieldpath: spec.template.spec.containers.[name=neonvm-runner-loader].image
 - name: CERTIFICATE_NAMESPACE # namespace of the certificate CR
   objref:
     kind: Certificate
@@ -65,36 +54,3 @@ vars:
     kind: Service
     version: v1
     name: webhook-service
-# overlay networking variables
-- name: NAD_IPAM_NAME
-  objref:
-    kind: NetworkAttachmentDefinition
-    group: k8s.cni.cncf.io
-    version: v1
-    name: overlay-ipam # this name should match the one in overlay-ipam.yaml
-  fieldref:
-    fieldpath: metadata.name
-- name: NAD_IPAM_NAMESPACE
-  objref:
-    kind: NetworkAttachmentDefinition
-    group: k8s.cni.cncf.io
-    version: v1
-    name: overlay-ipam # this name should match the one in overlay-ipam.yaml
-  fieldref:
-    fieldpath: metadata.namespace
-- name: NAD_RUNNER_NAME
-  objref:
-    kind: NetworkAttachmentDefinition
-    group: k8s.cni.cncf.io
-    version: v1
-    name: overlay-for-vms # this name should match the one in overlay-for-vms.yaml
-  fieldref:
-    fieldpath: metadata.name
-- name: NAD_RUNNER_NAMESPACE
-  objref:
-    kind: NetworkAttachmentDefinition
-    group: k8s.cni.cncf.io
-    version: v1
-    name: overlay-for-vms # this name should match the one in overlay-for-vms.yaml
-  fieldref:
-    fieldpath: metadata.namespace
