@@ -148,7 +148,7 @@ func TestAzureClient_send(t *testing.T) {
 				payload: payload,
 				ctx:     ctx,
 				cfg:     cfg,
-				client:  NewAzureBlobStorageClientWithBaseClient(baseClient, generateKey, cfg),
+				client:  NewAzureBlobStorageClientWithBaseClient(baseClient, cfg, generateKey),
 			}
 			tt.when(t, i)
 

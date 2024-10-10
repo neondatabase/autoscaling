@@ -67,13 +67,13 @@ func NewAzureBlobStorageClient(
 		return nil, &AzureError{err}
 	}
 
-	return NewAzureBlobStorageClientWithBaseClient(client, generateKey, cfg), nil
+	return NewAzureBlobStorageClientWithBaseClient(client, cfg, generateKey), nil
 }
 
 func NewAzureBlobStorageClientWithBaseClient(
 	client *azblob.Client,
-	generateKey func() string,
 	cfg AzureBlobStorageClientConfig,
+	generateKey func() string,
 ) *AzureClient {
 	return &AzureClient{
 		cfg:         cfg,
