@@ -166,10 +166,10 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	}
 
 	statusBefore := vm.Status.DeepCopy()
-	if err := r.doReconcile(ctx, &vm); err != nil {
+	reconcileErr := r.doReconcile(ctx, &vm)
+	if reconcileErr != nil {
 		r.Recorder.Eventf(&vm, corev1.EventTypeWarning, "Failed",
-			"Failed to reconcile (%s): %s", vm.Name, err)
-		return ctrl.Result{}, err
+			"Failed to reconcile (%s): %s", vm.Name, reconcileErr)
 	}
 
 	// If the status changed, try to update the object
@@ -177,18 +177,28 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		if err := r.Status().Update(ctx, &vm); err != nil {
 			log.Error(err, "Failed to update VirtualMachine status after reconcile loop",
 				"virtualmachine", vm.Name)
-			return ctrl.Result{}, err
+
+			if reconcileErr != nil {
+				// surface the original error
+				return ctrl.Result{}, reconcileErr
+			} else {
+				// otherwise, return this one
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
 	// Only quickly requeue if we're scaling or migrating. Otherwise, we aren't expecting any
 	// changes from QEMU, and it's wasteful to repeatedly check.
-	requeueAfter := time.Second
-	if vm.Status.Phase == vmv1.VmPending || vm.Status.Phase == vmv1.VmRunning {
-		requeueAfter = 15 * time.Second
+	var requeueAfter time.Duration
+	if reconcileErr != nil {
+		requeueAfter = time.Second
+		if vm.Status.Phase == vmv1.VmPending || vm.Status.Phase == vmv1.VmRunning {
+			requeueAfter = 15 * time.Second
+		}
 	}
 
-	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter}, reconcileErr
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
