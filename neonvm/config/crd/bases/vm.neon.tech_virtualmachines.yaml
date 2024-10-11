@@ -44,6 +44,10 @@ spec:
       name: Image
       priority: 1
       type: string
+    - jsonPath: .spec.cpuScalingMode
+      name: CPUScalingMode
+      priority: 1
+      type: string
     name: v1
     schema:
       openAPIV3Schema:
@@ -831,6 +835,12 @@ spec:
                         type: array
                     type: object
                 type: object
+              cpuScalingMode:
+                description: Use QMP scaling mode for CPU or online/offline CPU states.
+                enum:
+                - qmpScaling
+                - sysfsScaling
+                type: string
               disks:
                 description: List of disk that can be mounted by virtual machine.
                 items:
