@@ -44,36 +44,28 @@ jobs:
   setup-build-vm-kernel-image:
     outputs:
       image: ${{ steps.get-kernel-image.outputs.image }}
-      last-kernel-sha: ${{ steps.get-last-kernel-commit-sha.outputs.last-kernel-sha }}
+      kernel-cache-tag: ${{ steps.get-kernel-cache-tag.outputs.kernel-cache-tag }}
 
     runs-on: ubuntu-latest
 
     steps:
-      - name: get last kernel commit sha
-        id: get-last-kernel-commit-sha
+      - uses: actions/checkout@v4
+
+      - name: set kernel cache tag
+        id: get-kernel-cache-tag
         env:
-          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_CACHE_TAG: |
+            ${{ hashFiles('.github/workflows/vm-kernel.yaml',
+                          'neonvm-kernel/**') }}
         run: |
-          CACHE_TAG=$(
-            gh api \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              --method GET \
-              --field path=neonvm-kernel \
-              --field sha=${COMMIT_SHA} \
-              --field per_page=1 \
-              --jq ".[0].sha" \
-              "/repos/${GITHUB_REPOSITORY}/commits"
-          )
-          echo "last-kernel-sha=${CACHE_TAG}" >> $GITHUB_OUTPUT
+          echo "kernel-cache-tag=${KERNEL_CACHE_TAG}" >> $GITHUB_OUTPUT
 
       - name: get kernel image
         id: get-kernel-image
         env:
           FORCED_TAG: ${{ inputs.return-image-for-tag }}
           FORCE_REBUILD: ${{ inputs.force-rebuild }}
-          CACHE_TAG: ${{ steps.get-last-kernel-commit-sha.outputs.last-kernel-sha }}
+          CACHE_TAG: ${{ steps.get-kernel-cache-tag.outputs.kernel-cache-tag }}
         run: |
           if [ -n "${FORCED_TAG}" ]; then
             DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}:${FORCED_TAG} -v | jq -r '.Descriptor.digest')
@@ -174,7 +166,7 @@ jobs:
         id: get-tags
         env:
           KERNEL_VERSION_TAG: ${{ inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
-          CACHE_TAG: ${{ needs.setup-build-vm-kernel-image.outputs.last-kernel-sha }}
+          CACHE_TAG: ${{ needs.setup-build-vm-kernel-image.outputs.kernel-cache-tag }}
         run: |
           # A comma-separated list of tags
           TAGS="${VM_KERNEL_IMAGE}:${KERNEL_VERSION_TAG}"
@@ -195,7 +187,7 @@ jobs:
           context: neonvm-kernel
           platforms: linux/amd64
           # neonvm-kernel/Dockerfile.kernel-builder has different targets for different architectures
-          # so we need to specify the target explicitly 
+          # so we need to specify the target explicitly
           target: kernel_amd64
           # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
           push: true
