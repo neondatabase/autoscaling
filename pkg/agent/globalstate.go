@@ -41,6 +41,7 @@ type agentState struct {
 	vmClient     *vmclient.Clientset
 	schedTracker *schedwatch.SchedulerTracker
 	metrics      GlobalMetrics
+	vmMetrics    *PerVMMetrics
 
 	scalingReporter *scalingevents.Reporter
 }
@@ -49,6 +50,7 @@ func (r MainRunner) newAgentState(
 	baseLogger *zap.Logger,
 	podIP string,
 	schedTracker *schedwatch.SchedulerTracker,
+	perVMMetrics *PerVMMetrics,
 	scalingReporter *scalingevents.Reporter,
 ) (*agentState, *prometheus.Registry) {
 	metrics, promReg := makeGlobalMetrics()
@@ -63,6 +65,7 @@ func (r MainRunner) newAgentState(
 		podIP:        podIP,
 		schedTracker: schedTracker,
 		metrics:      metrics,
+		vmMetrics:    perVMMetrics,
 
 		scalingReporter: scalingReporter,
 	}
