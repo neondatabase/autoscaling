@@ -26,6 +26,13 @@ data:
         "accumulateEverySeconds": 24,
         "clients": {}
       },
+      "scalingEvents": {
+        "cuMultiplier": 0.25,
+        "rereportThreshold": 0.25,
+        "clusterName": "replaceme",
+        "regionName": "replaceme",
+        "clients": {}
+      },
       "monitor": {
           "serverPort": 10301,
           "responseTimeoutSeconds": 5,
