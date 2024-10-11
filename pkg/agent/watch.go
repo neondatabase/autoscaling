@@ -64,7 +64,7 @@ func startVMWatcher(
 	config *Config,
 	vmClient *vmclient.Clientset,
 	metrics watch.Metrics,
-	perVMMetrics PerVMMetrics,
+	perVMMetrics *PerVMMetrics,
 	nodeName string,
 	submitEvent func(vmEvent),
 ) (*watch.Store[vmv1.VirtualMachine], error) {
@@ -91,7 +91,7 @@ func startVMWatcher(
 		metav1.ListOptions{},
 		watch.HandlerFuncs[*vmv1.VirtualMachine]{
 			AddFunc: func(vm *vmv1.VirtualMachine, preexisting bool) {
-				setVMMetrics(&perVMMetrics, vm, nodeName)
+				setVMMetrics(perVMMetrics, vm, nodeName)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(logger, vm, vmEventAdded)
@@ -106,7 +106,7 @@ func startVMWatcher(
 				}
 			},
 			UpdateFunc: func(oldVM, newVM *vmv1.VirtualMachine) {
-				updateVMMetrics(&perVMMetrics, oldVM, newVM, nodeName)
+				updateVMMetrics(perVMMetrics, oldVM, newVM, nodeName)
 
 				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
 				newIsOurs := vmIsOurResponsibility(newVM, config, nodeName)
@@ -140,7 +140,7 @@ func startVMWatcher(
 				submitEvent(event)
 			},
 			DeleteFunc: func(vm *vmv1.VirtualMachine, maybeStale bool) {
-				deleteVMMetrics(&perVMMetrics, vm, nodeName)
+				deleteVMMetrics(perVMMetrics, vm, nodeName)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
 					event, err := makeVMEvent(logger, vm, vmEventDeleted)
@@ -319,6 +319,14 @@ func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeName 
 	for _, m := range restartCountMetrics {
 		perVMMetrics.restartCount.With(m.labels).Set(m.value)
 	}
+
+	// Add the VM to the internal tracker:
+	perVMMetrics.activeMu.Lock()
+	defer perVMMetrics.activeMu.Unlock()
+	perVMMetrics.activeVMs[util.GetNamespacedName(vm)] = vmMetadata{
+		endpointID: vm.Labels[endpointLabel],
+		projectID:  vm.Labels[projectLabel],
+	}
 }
 
 func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmv1.VirtualMachine, nodeName string) {
@@ -357,6 +365,14 @@ func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmv1.VirtualMachi
 	oldRestartCountMetrics := makeVMRestartMetrics(oldVM)
 	newRestartCountMetrics := makeVMRestartMetrics(newVM)
 	updateMetrics(perVMMetrics.restartCount, oldRestartCountMetrics, newRestartCountMetrics)
+
+	// Update the VM in the internal tracker:
+	perVMMetrics.activeMu.Lock()
+	defer perVMMetrics.activeMu.Unlock()
+	perVMMetrics.activeVMs[util.GetNamespacedName(newVM /* name can't change */)] = vmMetadata{
+		endpointID: newVM.Labels[endpointLabel],
+		projectID:  newVM.Labels[projectLabel],
+	}
 }
 
 func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeName string) {
@@ -378,4 +394,14 @@ func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeNa
 	for _, m := range restartCountMetrics {
 		perVMMetrics.restartCount.Delete(m.labels)
 	}
+
+	// Remove the VM from the internal tracker:
+	perVMMetrics.activeMu.Lock()
+	defer perVMMetrics.activeMu.Unlock()
+	delete(perVMMetrics.activeVMs, util.GetNamespacedName(vm))
+	// ... and any metrics that were associated with it:
+	perVMMetrics.desiredCU.DeletePartialMatch(prometheus.Labels{
+		"vm_namespace": vm.Namespace,
+		"vm_name":      vm.Name,
+	})
 }

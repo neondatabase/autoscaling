@@ -58,7 +58,13 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 		return fmt.Errorf("Error creating scaling events reporter: %w", err)
 	}
 
-	globalState, globalPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, schedTracker, scalingReporter)
+	globalState, globalPromReg := r.newAgentState(
+		logger,
+		r.EnvArgs.K8sPodIP,
+		schedTracker,
+		perVMMetrics,
+		scalingReporter,
+	)
 	watchMetrics.MustRegister(globalPromReg)
 
 	logger.Info("Starting billing metrics collector")
