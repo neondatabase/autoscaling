@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -19,6 +20,7 @@ type scalingGoal struct {
 
 func calculateGoalCU(
 	warn func(string),
+	report func(goalCU uint32, parts scalingevents.GoalCUComponents),
 	cfg api.ScalingConfig,
 	computeUnit api.Resources,
 	systemMetrics *SystemMetrics,
@@ -29,14 +31,16 @@ func calculateGoalCU(
 		warn("Making scaling decision without all required metrics available")
 	}
 
-	var lfcGoalCU, cpuGoalCU, memGoalCU, memTotalGoalCU uint32
+	var lfcGoalCU, cpuGoalCU, memGoalCU, memTotalGoalCU float64
 	var logFields []zap.Field
+	var reportedGoals scalingevents.GoalCUComponents
 
 	var wss *api.Bytes // estimated working set size
 
 	if lfcMetrics != nil {
 		var lfcLogFunc func(zapcore.ObjectEncoder) error
 		lfcGoalCU, wss, lfcLogFunc = calculateLFCGoalCU(warn, cfg, computeUnit, *lfcMetrics)
+		reportedGoals.LFC = lo.ToPtr(lfcGoalCU)
 		if lfcLogFunc != nil {
 			logFields = append(logFields, zap.Object("lfc", zapcore.ObjectMarshalerFunc(lfcLogFunc)))
 		}
@@ -44,15 +48,27 @@ func calculateGoalCU(
 
 	if systemMetrics != nil {
 		cpuGoalCU = calculateCPUGoalCU(cfg, computeUnit, *systemMetrics)
+		reportedGoals.CPU = lo.ToPtr(cpuGoalCU)
 
 		memGoalCU = calculateMemGoalCU(cfg, computeUnit, *systemMetrics)
+		reportedGoals.Mem = lo.ToPtr(memGoalCU)
 	}
 
 	if systemMetrics != nil && wss != nil {
 		memTotalGoalCU = calculateMemTotalGoalCU(cfg, computeUnit, *systemMetrics, *wss)
+		reportedGoals.Mem = lo.ToPtr(max(*reportedGoals.Mem, memTotalGoalCU))
 	}
 
-	goalCU := max(cpuGoalCU, memGoalCU, memTotalGoalCU, lfcGoalCU)
+	goalCU := uint32(math.Ceil(max(
+		math.Round(cpuGoalCU), // for historical compatibility, use round() instead of ceil()
+		memGoalCU,
+		memTotalGoalCU,
+		lfcGoalCU,
+	)))
+	if hasAllMetrics {
+		// Report this information, for scaling metrics.
+		report(goalCU, reportedGoals)
+	}
 
 	return scalingGoal{hasAllMetrics: hasAllMetrics, goalCU: goalCU}, logFields
 }
@@ -64,10 +80,9 @@ func calculateCPUGoalCU(
 	cfg api.ScalingConfig,
 	computeUnit api.Resources,
 	systemMetrics SystemMetrics,
-) uint32 {
+) float64 {
 	goalCPUs := systemMetrics.LoadAverage1Min / *cfg.LoadAverageFractionTarget
-	cpuGoalCU := uint32(math.Round(goalCPUs / computeUnit.VCPU.AsFloat64()))
-	return cpuGoalCU
+	return goalCPUs / computeUnit.VCPU.AsFloat64()
 }
 
 // For Mem:
@@ -78,13 +93,11 @@ func calculateMemGoalCU(
 	cfg api.ScalingConfig,
 	computeUnit api.Resources,
 	systemMetrics SystemMetrics,
-) uint32 {
+) float64 {
 	// goal memory size, just looking at allocated memory (not including page cache...)
-	memGoalBytes := api.Bytes(math.Round(systemMetrics.MemoryUsageBytes / *cfg.MemoryUsageFractionTarget))
+	memGoalBytes := math.Round(systemMetrics.MemoryUsageBytes / *cfg.MemoryUsageFractionTarget)
 
-	// note: this is equal to ceil(memGoalBytes / computeUnit.Mem), because ceil(X/M) == floor((X+M-1)/M)
-	memGoalCU := uint32((memGoalBytes + computeUnit.Mem - 1) / computeUnit.Mem)
-	return memGoalCU
+	return memGoalBytes / float64(computeUnit.Mem)
 }
 
 // goal memory size, looking at allocated memory and min(page cache usage, LFC working set size)
@@ -93,12 +106,11 @@ func calculateMemTotalGoalCU(
 	computeUnit api.Resources,
 	systemMetrics SystemMetrics,
 	wss api.Bytes,
-) uint32 {
+) float64 {
 	lfcCached := min(float64(wss), systemMetrics.MemoryCachedBytes)
-	totalGoalBytes := api.Bytes((lfcCached + systemMetrics.MemoryUsageBytes) / *cfg.MemoryTotalFractionTarget)
+	totalGoalBytes := (lfcCached + systemMetrics.MemoryUsageBytes) / *cfg.MemoryTotalFractionTarget
 
-	memTotalGoalCU := uint32((totalGoalBytes + computeUnit.Mem - 1) / computeUnit.Mem)
-	return memTotalGoalCU
+	return totalGoalBytes / float64(computeUnit.Mem)
 }
 
 func calculateLFCGoalCU(
@@ -106,7 +118,7 @@ func calculateLFCGoalCU(
 	cfg api.ScalingConfig,
 	computeUnit api.Resources,
 	lfcMetrics LFCMetrics,
-) (uint32, *api.Bytes, func(zapcore.ObjectEncoder) error) {
+) (float64, *api.Bytes, func(zapcore.ObjectEncoder) error) {
 	wssValues := lfcMetrics.ApproximateworkingSetSizeBuckets
 	// At this point, we can assume that the values are equally spaced at 1 minute apart,
 	// starting at 1 minute.
@@ -135,7 +147,6 @@ func calculateLFCGoalCU(
 		requiredMem := estimateWssMem / *cfg.LFCToMemoryRatio
 		// ... and then convert that into the actual CU required to fit the working set:
 		requiredCU := requiredMem / computeUnit.Mem.AsFloat64()
-		lfcGoalCU := uint32(math.Ceil(requiredCU))
 
 		lfcLogFields := func(obj zapcore.ObjectEncoder) error {
 			obj.AddFloat64("estimateWssPages", estimateWss)
@@ -144,6 +155,6 @@ func calculateLFCGoalCU(
 			return nil
 		}
 
-		return lfcGoalCU, lo.ToPtr(api.Bytes(estimateWssMem)), lfcLogFields
+		return requiredCU, lo.ToPtr(api.Bytes(estimateWssMem)), lfcLogFields
 	}
 }

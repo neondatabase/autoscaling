@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -36,6 +37,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
+	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -195,6 +197,11 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	if vmInfo.CurrentRevision != nil {
 		initialRevision = vmInfo.CurrentRevision.Value
 	}
+	// "dsrl" stands for "desired scaling report limiter" -- helper to avoid spamming events.
+	dsrl := &desiredScalingReportLimiter{
+		lastTarget: nil,
+		lastParts:  nil,
+	}
 	revisionSource := revsource.NewRevisionSource(initialRevision, WrapHistogramVec(&r.global.metrics.scalingLatency))
 	executorCore := executor.NewExecutorCore(coreExecLogger, vmInfo, executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
@@ -217,6 +224,10 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 				PluginLatency:  WrapHistogramVec(&r.global.metrics.pluginLatency),
 				MonitorLatency: WrapHistogramVec(&r.global.metrics.monitorLatency),
 				NeonVMLatency:  WrapHistogramVec(&r.global.metrics.neonvmLatency),
+				ScalingEvent:   r.reportScalingEvent,
+				DesiredScaling: func(ts time.Time, current, target uint32, parts scalingevents.GoalCUComponents) {
+					r.reportDesiredScaling(dsrl, ts, current, target, parts)
+				},
 			},
 		},
 	})
@@ -320,6 +331,102 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	case err := <-r.backgroundPanic:
 		panic(err)
 	}
+}
+
+func (r *Runner) reportScalingEvent(timestamp time.Time, currentCU, targetCU uint32) {
+	var endpointID string
+
+	enabled := func() bool {
+		r.status.mu.Lock()
+		defer r.status.mu.Unlock()
+
+		endpointID = r.status.endpointID
+		return endpointID != "" && r.status.vmInfo.Config.ReportScalingEvents
+	}()
+	if !enabled {
+		return
+	}
+
+	reporter := r.global.scalingReporter
+	reporter.Submit(reporter.NewRealEvent(
+		timestamp,
+		endpointID,
+		currentCU,
+		targetCU,
+	))
+}
+
+func (r *Runner) reportDesiredScaling(
+	rl *desiredScalingReportLimiter,
+	timestamp time.Time,
+	currentCU uint32,
+	targetCU uint32,
+	parts scalingevents.GoalCUComponents,
+) {
+	var endpointID string
+
+	enabled := func() bool {
+		r.status.mu.Lock()
+		defer r.status.mu.Unlock()
+
+		endpointID = r.status.endpointID
+		return endpointID != "" && r.status.vmInfo.Config.ReportDesiredScaling
+	}()
+	if !enabled {
+		return
+	}
+
+	// TODO: Use this opportunity to report the desired scaling in the per-VM
+	// metrics.
+
+	rl.report(r.global.scalingReporter, timestamp, endpointID, currentCU, targetCU, parts)
+}
+
+type desiredScalingReportLimiter struct {
+	lastTarget *uint32
+	lastParts  *scalingevents.GoalCUComponents
+}
+
+func (rl *desiredScalingReportLimiter) report(
+	reporter *scalingevents.Reporter,
+	timestamp time.Time,
+	endpointID string,
+	currentCU uint32,
+	targetCU uint32,
+	parts scalingevents.GoalCUComponents,
+) {
+	closeEnough := func(x *float64, y *float64) bool {
+		if (x != nil) != (y != nil) {
+			return false
+		} else if x == nil /* && y == nil */ {
+			return true
+		} else {
+			// true iff x and y are within the threshold of each other
+			return math.Abs(*x-*y) < 0.25
+		}
+	}
+
+	// Check if we should skip this time.
+	if rl.lastTarget != nil && rl.lastParts != nil {
+		skip := *rl.lastTarget == targetCU &&
+			closeEnough(rl.lastParts.CPU, parts.CPU) &&
+			closeEnough(rl.lastParts.Mem, parts.Mem) &&
+			closeEnough(rl.lastParts.LFC, parts.LFC)
+		if skip {
+			return
+		}
+	}
+
+	// Not skipping.
+	rl.lastTarget = &targetCU
+	rl.lastParts = &parts
+	reporter.Submit(reporter.NewHypotheticalEvent(
+		timestamp,
+		endpointID,
+		currentCU,
+		targetCU,
+		parts,
+	))
 }
 
 //////////////////////

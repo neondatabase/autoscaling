@@ -85,6 +85,8 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 			AlwaysMigrate:        false,
 			ScalingConfig:        nil,
 			ScalingEnabled:       true,
+			ReportScalingEvents:  false,
+			ReportDesiredScaling: false,
 		},
 		CurrentRevision: nil,
 	}
