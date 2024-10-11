@@ -165,6 +165,16 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
+	// examine cpuScalingMode and set it to the default value if it is not set
+	if vm.Spec.CpuScalingMode == nil || *vm.Spec.CpuScalingMode == "" {
+		vm.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingModeQMP)
+		if err := r.tryUpdateVM(ctx, &vm); err != nil {
+			log.Error(err, "Failed to set default CPU scaling mode")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	statusBefore := vm.Status.DeepCopy()
 	if err := r.doReconcile(ctx, &vm); err != nil {
 		r.Recorder.Eventf(&vm, corev1.EventTypeWarning, "Failed",
