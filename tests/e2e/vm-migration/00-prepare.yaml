@@ -1,7 +1,7 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 apply:
-- ../../../neonvm/samples/vm-example.virtio-mem.yaml
+- ../../../neonvm/samples/vm-example.yaml
 unitTest: false
 ---
 apiVersion: v1
