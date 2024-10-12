@@ -26,8 +26,6 @@ func main() {
 	logger := zap.Must(logConfig.Build()).Named("autoscaler-agent")
 	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
 
-	logger.Info("", zap.Any("buildInfo", util.GetBuildInfo()))
-
 	envArgs, err := agent.ArgsFromEnv()
 	if err != nil {
 		logger.Panic("Failed to get args from environment", zap.Error(err))
