@@ -2,6 +2,7 @@
 IMG_CONTROLLER ?= controller:dev
 IMG_VXLAN_CONTROLLER ?= vxlan-controller:dev
 IMG_RUNNER ?= runner:dev
+IMG_DAEMON ?= daemon:dev
 IMG_SCHEDULER ?= autoscale-scheduler:dev
 IMG_AUTOSCALER_AGENT ?= autoscaler-agent:dev
 
@@ -138,8 +139,7 @@ build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO}" vm-builder/main.go
-
+	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
@@ -152,7 +152,7 @@ lint: ## Run golangci-lint against code.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: docker-build-controller docker-build-runner docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler
+docker-build: docker-build-controller docker-build-runner docker-build-daemon docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler
 
 .PHONY: docker-push
 docker-push: docker-build ## Push docker images to docker registry
@@ -185,6 +185,13 @@ docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runne
 		--tag $(IMG_RUNNER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--file neonvm-runner/Dockerfile \
+		.
+
+.PHONY: docker-build-daemon
+docker-build-daemon: ## Build docker image for NeonVM daemon.
+	docker build \
+		--tag $(IMG_DAEMON) \
+		--file neonvm-daemon/Dockerfile \
 		.
 
 .PHONY: docker-build-vxlan-controller
