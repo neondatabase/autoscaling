@@ -33,9 +33,8 @@ func (c *dumpStateConfig) validate() (string, error) {
 }
 
 type stateDump struct {
-	Stopped   bool            `json:"stopped"`
-	BuildInfo util.BuildInfo  `json:"buildInfo"`
-	State     pluginStateDump `json:"state"`
+	Stopped bool            `json:"stopped"`
+	State   pluginStateDump `json:"state"`
 }
 
 func (p *AutoscaleEnforcer) startDumpStateServer(shutdownCtx context.Context, logger *zap.Logger) error {
@@ -87,9 +86,8 @@ func (p *AutoscaleEnforcer) dumpState(ctx context.Context, stopped bool) (*state
 	}
 
 	return &stateDump{
-		Stopped:   stopped,
-		BuildInfo: util.GetBuildInfo(),
-		State:     *state,
+		Stopped: stopped,
+		State:   *state,
 	}, nil
 }
 

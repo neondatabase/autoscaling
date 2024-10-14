@@ -1234,12 +1234,6 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 		return false, fmt.Errorf("Error checking if migration exists: %w", err)
 	}
 
-	gitVersion := util.GetBuildInfo().GitInfo
-	// FIXME: make this not depend on GetBuildInfo() internals.
-	if gitVersion == "<unknown>" {
-		gitVersion = "unknown"
-	}
-
 	vmm := &vmapi.VirtualMachineMigration{
 		ObjectMeta: metav1.ObjectMeta{
 			// TODO: it's maybe possible for this to run into name length limits? Unclear what we
@@ -1247,12 +1241,7 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 			Name:      vmmName.Name,
 			Namespace: pod.name.Namespace,
 			Labels: map[string]string{
-				// NB: There's requirements on what constitutes a valid label. Thankfully, the
-				// output of `git describe` always will.
-				//
-				// See also:
-				// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set
-				LabelPluginCreatedMigration: gitVersion,
+				LabelPluginCreatedMigration: "true",
 			},
 		},
 		Spec: vmapi.VirtualMachineMigrationSpec{
