@@ -139,6 +139,9 @@ type state struct {
 
 	// LastDesiredResources is the last target agent wanted to scale to.
 	LastDesiredResources *api.Resources
+
+	// History of recent metrics for decision-making
+	RecentMetrics []SystemMetrics
 }
 
 type pluginState struct {
@@ -266,6 +269,7 @@ func NewState(vm api.VmInfo, config Config) *State {
 			LFCMetrics:           nil,
 			LastDesiredResources: nil,
 			TargetRevision:       vmv1.ZeroRevision,
+			RecentMetrics:        []SystemMetrics{},
 		},
 	}
 }
@@ -439,6 +443,16 @@ func (s *state) calculatePluginAction(
 		}
 	}
 
+	// Introduce rate-limiting on scaling
+	if s.Plugin.LastRequest != nil {
+		timeSinceLastRequest := now.Sub(s.Plugin.LastRequest.At)
+		if timeSinceLastRequest < s.Config.PluginRequestTick {
+			waitTime := s.Config.PluginRequestTick - timeSinceLastRequest
+			logFailureReason("rate-limiting in effect, waiting before making another request")
+			return nil, &waitTime
+		}
+	}
+
 	// At this point, all that's left is either making the request, or saying to wait.
 	// The rest of the complication is just around accurate logging.
 	if timeForRequest || shouldRequestNewResources {
@@ -540,7 +554,7 @@ func (s *state) calculateMonitorUpscaleAction(
 	desiredResources api.Resources,
 ) (*ActionMonitorUpscale, *time.Duration) {
 	// can't do anything if we don't have an active connection to the vm-monitor
-	if !s.Monitor.active() {
+	if (!s.Monitor.active()) {
 		return nil, nil
 	}
 
@@ -1045,6 +1059,12 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 
 func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
 	s.internal.Metrics = &metrics
+	// Add the new metrics to the history
+	s.internal.RecentMetrics = append(s.internal.RecentMetrics, metrics)
+	// Keep the history size within a reasonable limit (e.g., last 10 entries)
+	if len(s.internal.RecentMetrics) > 10 {
+		s.internal.RecentMetrics = s.internal.RecentMetrics[1:]
+	}
 }
 
 func (s *State) UpdateLFCMetrics(metrics LFCMetrics) {
