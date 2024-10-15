@@ -328,11 +328,15 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
 	}
 
-	// Set memory provider for old VMs that don't have it in the Status.
+	// Forwards compatibility: Set virtio-mem memory provider for VMs that don't have it in the
+	// status.
+	// We need to do this so that when we switch to no longer setting memoryProvider, we won't
+	// regress and try to set it to dimm slots.
+	// See #1060 for the relevant tracking issue.
 	if vm.Status.PodName != "" && vm.Status.MemoryProvider == nil {
-		oldMemProvider := vmv1.MemoryProviderDIMMSlots
-		log.Error(nil, "Setting default MemoryProvider for VM", "MemoryProvider", oldMemProvider)
-		vm.Status.MemoryProvider = lo.ToPtr(oldMemProvider)
+		newMemProvider := vmv1.MemoryProviderVirtioMem
+		log.Error(nil, "Setting default MemoryProvider for VM", "MemoryProvider", newMemProvider)
+		vm.Status.MemoryProvider = lo.ToPtr(newMemProvider)
 	}
 
 	switch vm.Status.Phase {
