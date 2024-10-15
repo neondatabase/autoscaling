@@ -19,9 +19,8 @@ import (
 )
 
 type StateDump struct {
-	Stopped   bool           `json:"stopped"`
-	BuildInfo util.BuildInfo `json:"buildInfo"`
-	Pods      []podStateDump `json:"pods"`
+	Stopped bool           `json:"stopped"`
+	Pods    []podStateDump `json:"pods"`
 }
 
 func (s *agentState) StartDumpStateServer(shutdownCtx context.Context, logger *zap.Logger, config *DumpStateConfig) error {
@@ -85,9 +84,8 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 	}
 
 	state := StateDump{
-		Stopped:   stopped,
-		BuildInfo: util.GetBuildInfo(),
-		Pods:      make([]podStateDump, len(podList)),
+		Stopped: stopped,
+		Pods:    make([]podStateDump, len(podList)),
 	}
 
 	wg := sync.WaitGroup{}
