@@ -5,7 +5,7 @@ commands:
   - script: |
       set -eux
       pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
-      kubectl exec -n "$NAMESPACE" $pod -- ssh guest-vm ps aux -o comm | grep neonvmd | [ $(wc -l) -eq 1 ] || echo "neonvmd process is not found in the $pod"
+      kubectl exec -n "$NAMESPACE" $pod -- ssh guest-vm /neonvm/bin/ps aux -o comm | grep neonvmd | [ $(wc -l) -eq 1 ] || (echo "neonvmd process is not found in the $pod" && exit 1)
 ---
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
