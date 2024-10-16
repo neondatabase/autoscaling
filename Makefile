@@ -188,6 +188,7 @@ docker-build-controller: docker-build-go-base ## Build docker image for NeonVM c
 docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runner
 	docker build \
 		--tag $(IMG_RUNNER) \
+		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--file neonvm-runner/Dockerfile \
 		.
