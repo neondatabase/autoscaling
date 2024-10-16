@@ -72,6 +72,7 @@ var (
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 
 	daemonImageFlag = flag.String("daemon-image", "", `Specify the neonvm-daemon image: --daemon-image=neonvm-daemon:dev`)
+	targetArch      = flag.String("target-arch", "linux/amd64", `Target architecture: --arch linux/amd64`)
 )
 
 func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
@@ -84,7 +85,6 @@ func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplSt
 	if err = tmpl.Execute(&buf, tmplArgs); err != nil {
 		return fmt.Errorf("failed to execute template for %q: %w", filename, err)
 	}
-
 	return addFileToTar(tw, filename, buf.Bytes())
 }
 
@@ -129,7 +129,6 @@ type inittabCommand struct {
 func main() {
 	flag.Parse()
 	var dstIm string
-
 	if *version {
 		fmt.Println(Version)
 		os.Exit(0)
@@ -366,6 +365,7 @@ func main() {
 
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
+	buildArgs["TARGET_ARCH"] = targetArch
 	opt := types.ImageBuildOptions{
 		AuthConfigs:    authConfigs,
 		Tags:           []string{dstIm},
@@ -376,6 +376,7 @@ func main() {
 		Dockerfile:     "Dockerfile",
 		Remove:         true,
 		ForceRemove:    true,
+		Platform:       *targetArch,
 	}
 	buildResp, err := cli.ImageBuild(ctx, tarBuffer, opt)
 	if err != nil {

@@ -5,16 +5,34 @@ metadata:
   name: postgres16-disk-test
   annotations:
     # In this example, these bounds aren't necessary. So... here's what they look like :)
-    autoscaling.neon.tech/bounds: '{ "min": { "cpu": 0.25, "mem": "1Gi" }, "max": { "cpu": 1.25, "mem": "5Gi" } }'
+    autoscaling.neon.tech/bounds: '{ "min": { "cpu": 0.25, "mem": "1Gi" }, "max": { "cpu": 3, "mem": "5Gi" } }'
   labels:
     autoscaling.neon.tech/enabled: "true"
     # Set to "true" to continuously migrate the VM (TESTING ONLY)
     autoscaling.neon.tech/testing-only-always-migrate: "false"
 spec:
+  cpuScalingMode: sysfsScaling
+  terminationGracePeriodSeconds: 300
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values:
+            - amd64
+            - arm64
+            - ppc64le
+            - s390x
+          - key: kubernetes.io/os
+            operator: In
+            values:
+            - linux
   schedulerName: autoscale-scheduler
   enableSSH: true
   guest:
-    cpus: { min: 0.25, use: 0.25, max: 3 }
+    cpus: { min: 1, use: 1, max: 3}
     memorySlotSize: 1Gi
     memorySlots: { min: 1, use: 1, max: 5 }
     rootDisk:
@@ -26,3 +44,21 @@ spec:
       - port: 10301 # monitor
     settings:
       swap: 1Gi
+  extraNetwork:
+      enable: true
+  disks:
+    - name: pgdata
+      mountPath: /var/lib/postgresql
+      emptyDisk:
+        size: 16Gi
+    - name: postgres-config
+      mountPath: /etc/postgresql
+      configMap:
+        name: example-config
+        items:
+          - key: postgresql.conf
+            path: postgresql.conf
+    - name: cache
+      mountPath: /neonvm/cache
+      tmpfs:
+        size: 1Gi
