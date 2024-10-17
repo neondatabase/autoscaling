@@ -21,7 +21,7 @@ RUN set -e \
     chmod +x /neonvm/bin/busybox \
     && /neonvm/bin/busybox --install -s /neonvm/bin 
 
-	COPY helper.move-bins.sh /helper.move-bins.sh
+COPY helper.move-bins.sh /helper.move-bins.sh
 
 # add udevd and agetty (with shared libs)
 RUN set -e \
