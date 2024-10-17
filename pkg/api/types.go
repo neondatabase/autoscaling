@@ -476,10 +476,15 @@ type RunnerProtoVersion uint32
 
 const (
 	RunnerProtoV1 RunnerProtoVersion = iota + 1
+	RunnerProtoV2
 )
 
 func (v RunnerProtoVersion) SupportsCgroupFractionalCPU() bool {
 	return v >= RunnerProtoV1
+}
+
+func (v RunnerProtoVersion) SupportsCpuSysfsStateScaling() bool {
+	return v >= RunnerProtoV2
 }
 
 ////////////////////////////////////
