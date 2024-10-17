@@ -52,6 +52,14 @@ const (
 	//
 	// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
 	VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+
+	// CpuScalingModeQMP is the value of the VirtualMachineSpec.CpuScalingMode field that indicates
+	// that the VM should use QMP to scale CPUs.
+	CpuScalingModeQMP string = "qmpScaling"
+
+	// CpuScalingModeCpuSysfsState is the value of the VirtualMachineSpec.CpuScalingMode field that
+	// indicates that the VM should use the CPU sysfs state interface to scale CPUs.
+	CpuScalingModeCpuSysfsState string = "sysfsScaling"
 )
 
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
@@ -150,6 +158,11 @@ type VirtualMachineSpec struct {
 	// propagated to the VM.
 	// +optional
 	TargetRevision *RevisionWithTime `json:"targetRevision,omitempty"`
+
+	// Use QMP scaling mode for CPU or online/offline CPU states.
+	// +kubebuilder:validation:Enum=qmpScaling;sysfsScaling
+	// +optional
+	CpuScalingMode *string `json:"cpuScalingMode,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -605,6 +618,7 @@ func (p VmPhase) IsAlive() bool {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Node",type=string,priority=1,JSONPath=`.status.node`
 // +kubebuilder:printcolumn:name="Image",type=string,priority=1,JSONPath=`.spec.guest.rootDisk.image`
+// +kubebuilder:printcolumn:name="CPUScalingMode",type=string,priority=1,JSONPath=`.spec.cpuScalingMode`
 type VirtualMachine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

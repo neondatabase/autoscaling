@@ -649,7 +649,6 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
 	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
 		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
-
 	flag.Parse()
 
 	if cfg.memoryProvider == "" {
@@ -890,12 +889,28 @@ func buildQEMUCmd(
 		logger.Warn("not using KVM acceleration")
 	}
 	qemuCmd = append(qemuCmd, "-cpu", "max")
-	qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
-		"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
-		vmSpec.Guest.CPUs.Min.RoundedUp(),
-		vmSpec.Guest.CPUs.Max.RoundedUp(),
-		vmSpec.Guest.CPUs.Max.RoundedUp(),
-	))
+
+	// cpu scaling details
+	maxCPUs := vmSpec.Guest.CPUs.Max.RoundedUp()
+	minCPUs := vmSpec.Guest.CPUs.Min.RoundedUp()
+
+	if vmSpec.CpuScalingMode != nil && *vmSpec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
+		// if we use sysfs based scaling we specify start cpus equal to max cpus
+		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
+			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
+			maxCPUs,
+			maxCPUs,
+			maxCPUs,
+		))
+	} else {
+		// if we use hotplug we specify start cpus equal to min cpus and scale using udev rules for cpu plug events
+		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
+			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
+			minCPUs,
+			maxCPUs,
+			maxCPUs,
+		))
+	}
 
 	// memory details
 	logger.Info(fmt.Sprintf("Using memory provider %s", cfg.memoryProvider))
@@ -983,6 +998,10 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 	if cfg.appendKernelCmdline != "" {
 		cmdlineParts = append(cmdlineParts, cfg.appendKernelCmdline)
 	}
+	if vmSpec.CpuScalingMode != nil && *vmSpec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
+		// if we use sysfs based scaling we need to specify the start cpus as min CPUs
+		cmdlineParts = append(cmdlineParts, fmt.Sprintf("maxcpus=%d", vmSpec.Guest.CPUs.Min.RoundedUp()))
+	}
 
 	return strings.Join(cmdlineParts, " ")
 }
@@ -1029,8 +1048,12 @@ func runQEMU(
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
+	useCpuSysfsStateScaling := false
+	if vmSpec.CpuScalingMode != nil && *vmSpec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
+		useCpuSysfsStateScaling = true
+	}
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-	if !cfg.skipCgroupManagement || cfg.enableDummyCPUServer {
+	if !cfg.skipCgroupManagement || cfg.enableDummyCPUServer || useCpuSysfsStateScaling {
 		var callbacks cpuServerCallbacks
 
 		if cfg.enableDummyCPUServer {
@@ -1042,6 +1065,13 @@ func runQEMU(
 					return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
 				},
 				set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
+					if useCpuSysfsStateScaling {
+						err := setNeonvmDaemonCPU(cpu)
+						if err != nil {
+							logger.Error("setting CPU through NeonVM Daemon failed", zap.Any("cpu", cpu), zap.Error(err))
+							return err
+						}
+					}
 					lastValue.Store(uint32(cpu))
 					return nil
 				},
@@ -1811,4 +1841,34 @@ func overlayNetwork(iface string) (mac.MAC, error) {
 	}
 
 	return mac, nil
+}
+
+func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:25183/cpu", vmIP)
+	body := bytes.NewReader([]byte(fmt.Sprintf("%d", uint32(cpu))))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	if err != nil {
+		return fmt.Errorf("could not build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	return nil
 }

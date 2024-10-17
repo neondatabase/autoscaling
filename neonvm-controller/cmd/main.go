@@ -95,6 +95,7 @@ func main() {
 	var concurrencyLimit int
 	var skipUpdateValidationFor map[types.NamespacedName]struct{}
 	var disableRunnerCgroup bool
+	var useCpuSysfsStateScaling bool
 	var qemuDiskCacheSettings string
 	var defaultMemoryProvider vmv1.MemoryProvider
 	var memhpAutoMovableRatio string
@@ -133,6 +134,7 @@ func main() {
 			return nil
 		},
 	)
+	flag.BoolVar(&useCpuSysfsStateScaling, "use-cpu-sysfs-state-scaling", false, "Use sysfs cpu state scaling for CPU scaling")
 	flag.BoolVar(&disableRunnerCgroup, "disable-runner-cgroup", false, "Disable creation of a cgroup in neonvm-runner for fractional CPU limiting")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
 	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
