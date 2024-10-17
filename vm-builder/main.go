@@ -38,6 +38,10 @@ var (
 	scriptVmStart string
 	//go:embed files/inittab
 	scriptInitTab string
+	//go:embed files/agetty-init-amd64
+	scriptAgettyInitAmd64 string
+	//go:embed files/agetty-init-arm64
+	scriptAgettyInitArm64 string
 	//go:embed files/vmacpi
 	scriptVmAcpi string
 	//go:embed files/vmshutdown
@@ -365,6 +369,8 @@ func main() {
 		{"vmstart", scriptVmStart},
 		{"vmshutdown", scriptVmShutdown},
 		{"inittab", scriptInitTab},
+		{"agetty-init-amd64", scriptAgettyInitAmd64},
+		{"agetty-init-arm64", scriptAgettyInitArm64},
 		{"vmacpi", scriptVmAcpi},
 		{"vminit", scriptVmInit},
 		{"vector.yaml", configVector},
