@@ -376,8 +376,12 @@ func (r *Runner) reportDesiredScaling(
 		return
 	}
 
-	// TODO: Use this opportunity to report the desired scaling in the per-VM
-	// metrics.
+	r.global.vmMetrics.updateDesiredCU(
+		r.vmName,
+		r.global.config.ScalingEvents.CUMultiplier, // have to multiply before exposing as metrics here.
+		targetCU,
+		parts,
+	)
 
 	rl.report(r.global.scalingReporter, timestamp, endpointID, currentCU, targetCU, parts)
 }
