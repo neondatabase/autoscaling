@@ -8,18 +8,20 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/reporting"
 )
 
 type PromMetrics struct {
+	reporting *reporting.EventSinkMetrics
+
 	vmsProcessedTotal *prometheus.CounterVec
 	vmsCurrent        *prometheus.GaugeVec
-	queueSizeCurrent  *prometheus.GaugeVec
-	lastSendDuration  *prometheus.GaugeVec
-	sendErrorsTotal   *prometheus.CounterVec
 }
 
 func NewPromMetrics() PromMetrics {
 	return PromMetrics{
+		reporting: reporting.NewEventSinkMetrics("autoscaling_agent_billing"),
+
 		vmsProcessedTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_billing_vms_processed_total",
@@ -34,36 +36,13 @@ func NewPromMetrics() PromMetrics {
 			},
 			[]string{"is_endpoint", "autoscaling_enabled", "phase"},
 		),
-		queueSizeCurrent: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "autoscaling_agent_billing_queue_size",
-				Help: "Size of the billing subsystem's queue of unsent events",
-			},
-			[]string{"client"},
-		),
-		lastSendDuration: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "autoscaling_agent_billing_last_send_duration_seconds",
-				Help: "Duration, in seconds, that it took to send the latest set of billing events (or current time if ongoing)",
-			},
-			[]string{"client"},
-		),
-		sendErrorsTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "autoscaling_agent_billing_send_errors_total",
-				Help: "Total errors from attempting to send billing events",
-			},
-			[]string{"client", "cause"},
-		),
 	}
 }
 
 func (m PromMetrics) MustRegister(reg *prometheus.Registry) {
+	m.reporting.MustRegister(reg)
 	reg.MustRegister(m.vmsProcessedTotal)
 	reg.MustRegister(m.vmsCurrent)
-	reg.MustRegister(m.queueSizeCurrent)
-	reg.MustRegister(m.lastSendDuration)
-	reg.MustRegister(m.sendErrorsTotal)
 }
 
 type batchMetrics struct {
