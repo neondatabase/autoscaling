@@ -95,4 +95,4 @@ jobs:
             rendered_manifests/multus-aks.yaml
             rendered_manifests/multus-eks.yaml
             rendered_manifests/whereabouts.yaml
-            deploy/vmscrape.yaml
+            vmscrape.yaml
