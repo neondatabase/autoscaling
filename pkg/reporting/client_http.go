@@ -57,15 +57,30 @@ func NewHTTPClient(client *http.Client, cfg HTTPClientConfig) HTTPClient {
 	}
 }
 
-func (c HTTPClient) Send(ctx context.Context, payload []byte, traceID string) SimplifiableError {
-	r, err := http.NewRequestWithContext(ctx, c.cfg.Method, c.cfg.URL, bytes.NewReader(payload))
+// NewRequest implements BaseClient
+func (c HTTPClient) NewRequest(traceID string) ClientRequest {
+	return &httpRequest{
+		HTTPClient: c,
+		traceID:    traceID,
+	}
+}
+
+// httpRequest is the implementation of ClientRequest used by HTTPClient
+type httpRequest struct {
+	HTTPClient
+	traceID string
+}
+
+// Send implements ClientRequest
+func (r *httpRequest) Send(ctx context.Context, payload []byte) SimplifiableError {
+	req, err := http.NewRequestWithContext(ctx, r.cfg.Method, r.cfg.URL, bytes.NewReader(payload))
 	if err != nil {
 		return httpRequestError{err: err}
 	}
-	r.Header.Set("content-type", "application/json")
-	r.Header.Set("x-trace-id", traceID)
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-trace-id", r.traceID)
 
-	resp, err := c.client.Do(r)
+	resp, err := r.client.Do(req)
 	if err != nil {
 		return httpRequestError{err: err}
 	}
@@ -80,10 +95,11 @@ func (c HTTPClient) Send(ctx context.Context, payload []byte, traceID string) Si
 	return nil
 }
 
-func (c HTTPClient) LogFields() zap.Field {
+// LogFields implements ClientRequest
+func (r *httpRequest) LogFields() zap.Field {
 	return zap.Inline(zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
-		enc.AddString("url", c.cfg.URL)
-		enc.AddString("method", c.cfg.Method)
+		enc.AddString("url", r.cfg.URL)
+		enc.AddString("method", r.cfg.Method)
 		return nil
 	}))
 }

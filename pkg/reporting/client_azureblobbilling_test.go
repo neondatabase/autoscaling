@@ -152,7 +152,7 @@ func TestAzureClient_send(t *testing.T) {
 			}
 			tt.when(t, i)
 
-			err = i.client.Send(ctx, i.payload, i.traceID)
+			err = i.client.NewRequest(i.traceID).Send(ctx, i.payload)
 
 			tt.then(t, output{
 				err: err,

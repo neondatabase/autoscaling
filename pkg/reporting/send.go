@@ -102,11 +102,13 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 
 		traceID := s.client.GenerateTraceID()
 
+		req := s.client.Base.NewRequest(traceID)
+
 		logger.Info(
 			"Pushing events",
 			zap.Int("count", count),
 			zap.String("traceID", traceID),
-			s.client.Base.LogFields(),
+			req.LogFields(),
 		)
 
 		reqStart := time.Now()
@@ -122,7 +124,7 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 				return err
 			}
 
-			return s.client.Base.Send(reqCtx, payload, traceID)
+			return req.Send(reqCtx, payload)
 		}()
 		reqDuration := time.Since(reqStart)
 
@@ -134,7 +136,7 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 				zap.Int("count", count),
 				zap.Duration("after", reqDuration),
 				zap.String("traceID", traceID),
-				s.client.Base.LogFields(),
+				req.LogFields(),
 				zap.Int("total", total),
 				zap.Duration("totalTime", time.Since(startTime)),
 				zap.Error(err),
@@ -157,7 +159,7 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 			zap.Int("count", count),
 			zap.Duration("after", reqDuration),
 			zap.String("traceID", string(traceID)),
-			s.client.Base.LogFields(),
+			req.LogFields(),
 			zap.Int("total", total),
 			zap.Duration("totalTime", currentTotalTime),
 		)

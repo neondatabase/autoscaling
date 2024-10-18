@@ -82,22 +82,36 @@ func NewAzureBlobStorageClientWithBaseClient(
 	}
 }
 
-func (c AzureClient) LogFields() zap.Field {
+// NewRequest implements BaseClient
+func (c AzureClient) NewRequest(traceID string) ClientRequest {
+	return &azureRequest{
+		AzureClient: c,
+		key:         c.generateKey(),
+	}
+}
+
+// azureRequest is the implementation of ClientRequest used by AzureClient
+type azureRequest struct {
+	AzureClient
+	key string
+}
+
+// LogFields implements ClientRequest
+func (r *azureRequest) LogFields() zap.Field {
 	return zap.Inline(zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
-		enc.AddString("container", c.cfg.Container)
-		// // TODO: need to make a dedicated "request" object that's aware of the path used.
-		// enc.AddString("prefixInContainer", c.cfg.PrefixInContainer)
-		enc.AddString("endpoint", c.cfg.Endpoint)
+		enc.AddString("container", r.cfg.Container)
+		enc.AddString("key", r.key)
+		enc.AddString("endpoint", r.cfg.Endpoint)
 		return nil
 	}))
 }
 
-func (c AzureClient) Send(ctx context.Context, payload []byte, traceID string) SimplifiableError {
+// Send implements ClientRequest
+func (r *azureRequest) Send(ctx context.Context, payload []byte) SimplifiableError {
 	var err error
 
-	key := c.generateKey()
 	opts := azblob.UploadBufferOptions{} //nolint:exhaustruct // It's part of Azure SDK
-	_, err = c.client.UploadBuffer(ctx, c.cfg.Container, key, payload, &opts)
+	_, err = r.client.UploadBuffer(ctx, r.cfg.Container, r.key, payload, &opts)
 	if err != nil {
 		return AzureError{Err: err}
 	}

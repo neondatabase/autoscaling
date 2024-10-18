@@ -72,27 +72,40 @@ func NewS3Client(
 	}, nil
 }
 
-// LogFields implements BaseClient
-func (c *S3Client) LogFields() zap.Field {
+// NewRequest implements BaseClient
+func (c *S3Client) NewRequest(traceID string) ClientRequest {
+	return &s3Request{
+		S3Client: c,
+		key:      c.generateKey(),
+	}
+}
+
+// s3Request is the implementation of ClientRequest used by S3Client
+type s3Request struct {
+	*S3Client
+	key string
+}
+
+// LogFields implements ClientRequest
+func (r *s3Request) LogFields() zap.Field {
 	return zap.Inline(zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
-		enc.AddString("bucket", c.cfg.Bucket)
-		// // TODO: need to make a dedicated "request" object that's aware of the path used.
-		// enc.AddString("prefixInBucket", c.cfg.PrefixInBucket)
-		enc.AddString("region", c.cfg.Region)
-		enc.AddString("endpoint", c.cfg.Endpoint)
+		enc.AddString("bucket", r.cfg.Bucket)
+		enc.AddString("key", r.key)
+		enc.AddString("region", r.cfg.Region)
+		enc.AddString("endpoint", r.cfg.Endpoint)
 		return nil
 	}))
 }
 
-func (c *S3Client) Send(ctx context.Context, payload []byte, traceID string) SimplifiableError {
+// Send implements ClientRequest
+func (r *s3Request) Send(ctx context.Context, payload []byte) SimplifiableError {
 	var err error
 
-	key := c.generateKey()
-	r := bytes.NewReader(payload)
-	_, err = c.client.PutObject(ctx, &s3.PutObjectInput{ //nolint:exhaustruct // AWS SDK
-		Bucket: &c.cfg.Bucket,
-		Key:    &key,
-		Body:   r,
+	body := bytes.NewReader(payload)
+	_, err = r.client.PutObject(ctx, &s3.PutObjectInput{ //nolint:exhaustruct // AWS SDK
+		Bucket: &r.cfg.Bucket,
+		Key:    &r.key,
+		Body:   body,
 	})
 
 	if err != nil {
