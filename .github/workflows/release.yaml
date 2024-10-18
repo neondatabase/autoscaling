@@ -68,7 +68,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: vm-builder
-          path: .
+          path: vm-builder
 
       - name: download manifests
         uses: actions/download-artifact@v4
@@ -84,7 +84,7 @@ jobs:
         with:
           fail_on_unmatched_files: true
           files: |
-            vm-builder
+            vm-builder/vm-builder
             rendered_manifests/autoscale-scheduler.yaml
             rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml
