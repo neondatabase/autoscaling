@@ -75,14 +75,14 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 		}
 	}
 
-	mc, err := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing)
+	mc, err := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing, metrics)
 	if err != nil {
 		return fmt.Errorf("error creating billing metrics collector: %w", err)
 	}
 
 	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
 	tg.Go("billing", func(logger *zap.Logger) error {
-		return mc.Run(tg.Ctx(), logger, storeForNode, metrics)
+		return mc.Run(tg.Ctx(), logger, storeForNode)
 	})
 	tg.Go("main-loop", func(logger *zap.Logger) error {
 		logger.Info("Entering main loop")
