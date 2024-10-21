@@ -65,9 +65,6 @@ func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
 }
 
 func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
-	// TODO: should the call to this method be conditional, only if the statefs cpu scaling is enabled?
-	// on the other hand, currently this endpoint is called by runner only if the statefs scaling is enabled
-	// and it is a bit tricky to pass vmSpec here
 	s.cpuOperationsMutex.Lock()
 	defer s.cpuOperationsMutex.Unlock()
 	body, err := io.ReadAll(r.Body)
