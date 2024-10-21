@@ -37,7 +37,7 @@ spec:
       min: 1
       max: 5
       use: 1
-    memoryProvider: DIMMSlots
+    memoryProvider: VirtioMem
     rootDisk:
       image: vm-postgres:15-bullseye
       size: 8Gi
@@ -56,7 +56,7 @@ spec:
       - name: monitor
         port: 10301
   extraNetwork:
-      enable: true
+      enable: false
   disks:
     - name: pgdata
       mountPath: /var/lib/postgresql
