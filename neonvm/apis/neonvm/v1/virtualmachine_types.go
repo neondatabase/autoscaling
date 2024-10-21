@@ -57,9 +57,9 @@ const (
 	// that the VM should use QMP to scale CPUs.
 	CpuScalingModeQMP string = "qmpScaling"
 
-	// CpuScalingModeCpuSysfsState is the value of the VirtualMachineSpec.CpuScalingMode field that
+	// CpuScalingModeSysfs is the value of the VirtualMachineSpec.CpuScalingMode field that
 	// indicates that the VM should use the CPU sysfs state interface to scale CPUs.
-	CpuScalingModeCpuSysfsState string = "sysfsScaling"
+	CpuScalingModeSysfs string = "sysfsScaling"
 )
 
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the

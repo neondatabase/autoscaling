@@ -124,6 +124,7 @@ func newTestParams(t *testing.T) *testParams {
 			FailurePendingPeriod:    time.Minute,
 			FailingRefreshInterval:  time.Minute,
 			AtMostOnePod:            false,
+			DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
 		},
 		Metrics: reconcilerMetrics,
 	}

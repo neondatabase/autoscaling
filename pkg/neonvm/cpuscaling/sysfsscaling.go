@@ -14,7 +14,7 @@ const cpuPath = "/sys/devices/system/cpu/"
 type CPUSysFsStateScaler struct {
 }
 
-func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(X int) error {
+func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(targetCount int) error {
 	cpus, err := getAllCPUs()
 	if err != nil {
 		return err
@@ -25,7 +25,7 @@ func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(X int) error {
 		return err
 	}
 
-	if onlineCount < uint32(X) {
+	if onlineCount < uint32(targetCount) {
 		for _, cpu := range cpus {
 			if cpu == 0 {
 				// Skip CPU 0 as it is always online and can't be toggled
@@ -47,11 +47,11 @@ func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(X int) error {
 			}
 
 			// Stop when we reach the target count
-			if onlineCount == uint32(X) {
+			if onlineCount == uint32(targetCount) {
 				break
 			}
 		}
-	} else if onlineCount > uint32(X) {
+	} else if onlineCount > uint32(targetCount) {
 		// Remove CPUs if there are more than X online
 		for i := len(cpus) - 1; i >= 0; i-- {
 			cpu := cpus[i]
@@ -75,14 +75,14 @@ func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(X int) error {
 			}
 
 			// Stop when we reach the target count
-			if onlineCount == uint32(X) {
+			if onlineCount == uint32(targetCount) {
 				break
 			}
 		}
 	}
 
-	if onlineCount != uint32(X) {
-		return fmt.Errorf("failed to ensure %d CPUs are online, current online CPUs: %d", X, onlineCount)
+	if onlineCount != uint32(targetCount) {
+		return fmt.Errorf("failed to ensure %d CPUs are online, current online CPUs: %d", targetCount, onlineCount)
 	}
 
 	return nil
