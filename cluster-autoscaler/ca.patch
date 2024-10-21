@@ -1,17 +1,13 @@
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
---- a/cluster-autoscaler/utils/kubernetes/listers.go	(revision daeb681311f0d14688e499ba59e8c43ee089e7da)
-+++ b/cluster-autoscaler/utils/kubernetes/listers.go	(date 1728573355649)
-@@ -17,21 +17,26 @@
+index 198fdfb37..8bf006c58 100644
+--- a/cluster-autoscaler/utils/kubernetes/listers.go
++++ b/cluster-autoscaler/utils/kubernetes/listers.go
+@@ -17,21 +17,26 @@ limitations under the License.
  package kubernetes
-
+ 
  import (
 -	"time"
-+  "encoding/json"
-+  "k8s.io/apimachinery/pkg/api/resource"
-+  "k8s.io/apimachinery/pkg/runtime"
-+  "k8s.io/apimachinery/pkg/watch"
-+  "time"
-
+-
 -	appsv1 "k8s.io/api/apps/v1"
 -	batchv1 "k8s.io/api/batch/v1"
 -	apiv1 "k8s.io/api/core/v1"
@@ -25,6 +21,12 @@ diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler
 -	v1policylister "k8s.io/client-go/listers/policy/v1"
 -	"k8s.io/client-go/tools/cache"
 -	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
++  "encoding/json"
++  "k8s.io/apimachinery/pkg/api/resource"
++  "k8s.io/apimachinery/pkg/runtime"
++  "k8s.io/apimachinery/pkg/watch"
++  "time"
++
 +  appsv1 "k8s.io/api/apps/v1"
 +  batchv1 "k8s.io/api/batch/v1"
 +  apiv1 "k8s.io/api/core/v1"
@@ -40,9 +42,9 @@ diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler
 +  "k8s.io/client-go/tools/cache"
 +  podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
  )
-
+ 
  // ListerRegistry is a registry providing various listers to list pods or nodes matching conditions
-@@ -169,6 +174,7 @@
+@@ -169,6 +174,7 @@ func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struc
  	selector := fields.ParseSelectorOrDie("spec.nodeName!=" + "" + ",status.phase!=" +
  		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
  	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", apiv1.NamespaceAll, selector)
@@ -50,7 +52,7 @@ diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler
  	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
  	podLister := v1lister.NewPodLister(store)
  	go reflector.Run(stopchannel)
-@@ -212,6 +218,7 @@
+@@ -212,6 +218,7 @@ func NewScheduledAndUnschedulablePodLister(kubeClient client.Interface, stopchan
  	selector := fields.ParseSelectorOrDie("status.phase!=" +
  		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
  	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", apiv1.NamespaceAll, selector)
@@ -58,7 +60,7 @@ diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler
  	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
  	podLister := v1lister.NewPodLister(store)
  	go reflector.Run(stopchannel)
-@@ -221,6 +228,105 @@
+@@ -221,6 +228,105 @@ func NewScheduledAndUnschedulablePodLister(kubeClient client.Interface, stopchan
  	}
  }
  

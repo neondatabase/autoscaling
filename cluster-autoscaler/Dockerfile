@@ -1,6 +1,6 @@
 # NOTE: This must match CA's builder/Dockerfile:
 # https://github.com/kubernetes/autoscaler/blob/<GIT_TAG>/builder/Dockerfile
-FROM golang:1.20.12 AS builder
+FROM golang:1.21.6 AS builder
 
 WORKDIR /workspace
 
