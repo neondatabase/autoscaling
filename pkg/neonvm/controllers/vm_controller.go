@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	sysruntime "runtime"
 	"strconv"
 	"time"
 
@@ -1212,7 +1213,6 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
-
 	// if NodeSelectorTerms list is empty - add default values (arch==amd64 or os==linux)
 	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
@@ -1222,7 +1222,7 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 					{
 						Key:      "kubernetes.io/arch",
 						Operator: "In",
-						Values:   []string{"amd64"},
+						Values:   []string{sysruntime.GOARCH},
 					},
 					{
 						Key:      "kubernetes.io/os",
