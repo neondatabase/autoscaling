@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,8 +53,12 @@ import (
 )
 
 const (
-	QEMU_BIN          = "qemu-system-x86_64"
-	QEMU_IMG_BIN      = "qemu-img"
+	qemuBinArm64 = "qemu-system-aarch64"
+	qemuBinX8664 = "qemu-system-x86_64"
+	qemuImgBin   = "qemu-img"
+
+	architectureArm64 = "arm64"
+	architectureAmd64 = "amd64"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
 
 	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
@@ -403,14 +408,14 @@ func calcDirUsage(dirPath string) (int64, error) {
 func createSwap(diskPath string, swapSize *resource.Quantity) error {
 	tmpRawFile := "swap.raw"
 
-	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", swapSize.Value())); err != nil {
+	if err := execFg(qemuImgBin, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", swapSize.Value())); err != nil {
 		return err
 	}
 	if err := execFg("mkswap", "-L", swapName, tmpRawFile); err != nil {
 		return err
 	}
 
-	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", tmpRawFile, diskPath); err != nil {
+	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", tmpRawFile, diskPath); err != nil {
 		return err
 	}
 
@@ -466,7 +471,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		return err
 	}
 
-	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
+	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
 		return err
 	}
 
@@ -621,6 +626,7 @@ type Config struct {
 	memoryProvider       vmv1.MemoryProvider
 	autoMovableRatio     string
 	cpuScalingMode       vmv1.CpuScalingMode
+	architecture         string
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -631,9 +637,10 @@ func newConfig(logger *zap.Logger) *Config {
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
-		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
-		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
-		cpuScalingMode:       "", // Require that this is explicitly set. We'll check later.
+		memoryProvider:       "",             // Require that this is explicitly set. We'll check later.
+		autoMovableRatio:     "",             // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
+		cpuScalingMode:       "",             // Require that this is explicitly set. We'll check later.
+		architecture:         runtime.GOARCH, // arm64, amd64
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -868,7 +875,7 @@ func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
 		VirtualSize int64 `json:"virtual-size"`
 	}
 	// get current disk size by qemu-img info command
-	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
+	qemuImgOut, err := exec.Command(qemuImgBin, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
 		return fmt.Errorf("could not get root image size: %w", err)
 	}
@@ -882,7 +889,7 @@ func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
 	if !vmSpec.Guest.RootDisk.Size.IsZero() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
 			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
-			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
+			if err := execFg(qemuImgBin, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
 				return fmt.Errorf("failed to resize rootDisk: %w", err)
 			}
 		} else {
@@ -904,7 +911,7 @@ func buildQEMUCmd(
 	// prepare qemu command line
 	qemuCmd := []string{
 		"-runas", "qemu",
-		"-machine", "q35",
+		"-machine", getMachineType(cfg.architecture),
 		"-nographic",
 		"-no-reboot",
 		"-nodefaults",
@@ -1141,7 +1148,6 @@ func runQEMU(
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-
 	var callbacks cpuServerCallbacks
 	// lastValue is used to store last fractional CPU request
 	// we need to store the value as is because we can't convert it back from MilliCPU
@@ -1173,13 +1179,14 @@ func runQEMU(
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 
+	qemuBin := getQemuBinaryName(cfg.architecture)
 	var bin string
 	var cmd []string
 	if !cfg.skipCgroupManagement {
 		bin = "cgexec"
-		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
+		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), qemuBin}, qemuCmd...)
 	} else {
-		bin = QEMU_BIN
+		bin = qemuBin
 		cmd = qemuCmd
 	}
 
@@ -1197,6 +1204,28 @@ func runQEMU(
 	wg.Wait()
 
 	return err
+}
+
+func getQemuBinaryName(architecture string) string {
+	switch architecture {
+	case architectureArm64:
+		return qemuBinArm64
+	case architectureAmd64:
+		return qemuBinX8664
+	default:
+		panic(fmt.Errorf("unknown architecture %s", architecture))
+	}
+}
+
+func getMachineType(architecture string) string {
+	switch architecture {
+	case architectureArm64:
+		return "virt"
+	case architectureAmd64:
+		return "q35"
+	default:
+		panic(fmt.Errorf("unknown architecture %s", architecture))
+	}
 }
 
 func handleCPUChange(
