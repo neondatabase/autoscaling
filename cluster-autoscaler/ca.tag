@@ -1,1 +1,1 @@
-cluster-autoscaler-1.28.6
+cluster-autoscaler-1.29.4
