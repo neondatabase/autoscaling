@@ -19,16 +19,16 @@ func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMac
 
 	log := log.FromContext(ctx)
 	useCpuSysfsStateScaling := false
-	if vm.Spec.CpuScalingMode != nil && *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
+	if vm.Spec.CpuScalingMode != nil && *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeSysfs {
 		useCpuSysfsStateScaling = true
 	}
 
 	var scaled bool
 	var err error
 	if !useCpuSysfsStateScaling {
-		scaled, err = r.handleQMPBasedCPUScaling(ctx, vm, vmRunner)
+		scaled, err = r.handleCPUScalingQMP(ctx, vm, vmRunner)
 	} else {
-		scaled, err = r.delegateScalingToNeonvmDaemon(ctx, vm, vmRunner)
+		scaled, err = r.handleCPUScalingSysfs(ctx, vm, vmRunner)
 	}
 
 	if err != nil {
@@ -39,8 +39,8 @@ func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMac
 	return scaled, nil
 }
 
-// handleQMPBasedCPUScaling handles CPU scaling using QMP, extracted as is from doReconcile
-func (r *VMReconciler) handleQMPBasedCPUScaling(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
+// handleCPUScalingQMP handles CPU scaling using QMP, extracted as is from doReconcile
+func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
 	log := log.FromContext(ctx)
 	specCPU := vm.Spec.Guest.CPUs.Use
 	cgroupUsage, err := getRunnerCgroup(ctx, vm)
@@ -91,7 +91,7 @@ func (r *VMReconciler) handleQMPBasedCPUScaling(ctx context.Context, vm *vmv1.Vi
 	return hotPlugCPUScaled, nil
 }
 
-func (r *VMReconciler) delegateScalingToNeonvmDaemon(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
+func (r *VMReconciler) handleCPUScalingSysfs(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
 	log := log.FromContext(ctx)
 	specCPU := vm.Spec.Guest.CPUs.Use
 

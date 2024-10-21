@@ -20,7 +20,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -612,10 +611,10 @@ type Config struct {
 	kernelPath           string
 	appendKernelCmdline  string
 	skipCgroupManagement bool
-	enableDummyCPUServer bool
 	diskCacheSettings    string
 	memoryProvider       vmv1.MemoryProvider
 	autoMovableRatio     string
+	cpuScalingMode       string
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -625,10 +624,10 @@ func newConfig(logger *zap.Logger) *Config {
 		kernelPath:           defaultKernelPath,
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
-		enableDummyCPUServer: false,
 		diskCacheSettings:    "cache=none",
 		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
 		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
+		cpuScalingMode:       "", // Require that this is explicitly set. We'll check later.
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -641,14 +640,12 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.BoolVar(&cfg.skipCgroupManagement, "skip-cgroup-management",
 		cfg.skipCgroupManagement,
 		"Don't try to manage CPU")
-	flag.BoolVar(&cfg.enableDummyCPUServer, "enable-dummy-cpu-server",
-		cfg.skipCgroupManagement,
-		"Use with -skip-cgroup-management. Provide a CPU server but don't actually do anything with it")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
 	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
 		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
+	flag.StringVar(&cfg.cpuScalingMode, "cpu-scaling-mode", "", "Set CPU scaling mode")
 	flag.Parse()
 
 	if cfg.memoryProvider == "" {
@@ -657,8 +654,8 @@ func newConfig(logger *zap.Logger) *Config {
 	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem && cfg.autoMovableRatio == "" {
 		logger.Fatal("missing required flag '-memhp-auto-movable-ratio'")
 	}
-	if cfg.enableDummyCPUServer && !cfg.skipCgroupManagement {
-		logger.Fatal("flag -enable-dummy-cpu-server requires -skip-cgroup-management")
+	if cfg.cpuScalingMode == "" {
+		logger.Fatal("missing required flag '-cpu-scaling-mode'")
 	}
 
 	return cfg
@@ -894,22 +891,26 @@ func buildQEMUCmd(
 	maxCPUs := vmSpec.Guest.CPUs.Max.RoundedUp()
 	minCPUs := vmSpec.Guest.CPUs.Min.RoundedUp()
 
-	if vmSpec.CpuScalingMode != nil && *vmSpec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
-		// if we use sysfs based scaling we specify start cpus equal to max cpus
+	switch cfg.cpuScalingMode {
+	case vmv1.CpuScalingModeSysfs:
 		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
+			// if we use sysfs based scaling we specify initial value for cpus qemu arg equal to max cpus
 			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
 			maxCPUs,
 			maxCPUs,
 			maxCPUs,
 		))
-	} else {
-		// if we use hotplug we specify start cpus equal to min cpus and scale using udev rules for cpu plug events
+	case vmv1.CpuScalingModeQMP:
+		// if we use hotplug we specify initial value for cpus qemu arg equal to min cpus and scale using udev rules for cpu plug events
 		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
 			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
 			minCPUs,
 			maxCPUs,
 			maxCPUs,
 		))
+	default:
+		// we should never get here because we validate the flag in newConfig
+		panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
 	}
 
 	// memory details
@@ -998,8 +999,8 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 	if cfg.appendKernelCmdline != "" {
 		cmdlineParts = append(cmdlineParts, cfg.appendKernelCmdline)
 	}
-	if vmSpec.CpuScalingMode != nil && *vmSpec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
-		// if we use sysfs based scaling we need to specify the start cpus as min CPUs
+	if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
+		// if we use sysfs based scaling we need to specify the start cpus as min CPUs to mark every CPU except 0 as offline
 		cmdlineParts = append(cmdlineParts, fmt.Sprintf("maxcpus=%d", vmSpec.Guest.CPUs.Min.RoundedUp()))
 	}
 
@@ -1048,49 +1049,32 @@ func runQEMU(
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	useCpuSysfsStateScaling := false
-	if vmSpec.CpuScalingMode != nil && *vmSpec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
-		useCpuSysfsStateScaling = true
-	}
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-	if !cfg.skipCgroupManagement || cfg.enableDummyCPUServer || useCpuSysfsStateScaling {
-		var callbacks cpuServerCallbacks
 
-		if cfg.enableDummyCPUServer {
-			lastValue := &atomic.Uint32{}
-			lastValue.Store(uint32(vmSpec.Guest.CPUs.Min))
+	var callbacks cpuServerCallbacks
 
-			callbacks = cpuServerCallbacks{
-				get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
-					return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
-				},
-				set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
-					if useCpuSysfsStateScaling {
-						err := setNeonvmDaemonCPU(cpu)
-						if err != nil {
-							logger.Error("setting CPU through NeonVM Daemon failed", zap.Any("cpu", cpu), zap.Error(err))
-							return err
-						}
-					}
-					lastValue.Store(uint32(cpu))
-					return nil
-				},
+	lastValue := &atomic.Uint32{}
+	lastValue.Store(uint32(vmSpec.Guest.CPUs.Min))
+
+	callbacks = cpuServerCallbacks{
+		get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
+			return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
+		},
+		set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
+			if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
+				err := setNeonvmDaemonCPU(cpu)
+				if err != nil {
+					logger.Error("setting CPU through NeonVM Daemon failed", zap.Any("cpu", cpu), zap.Error(err))
+					return err
+				}
 			}
-		} else {
-			// Standard implementation -- actually set the cgroup
-			callbacks = cpuServerCallbacks{
-				get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
-					return getCgroupQuota(cgroupPath)
-				},
-				set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
-					return setCgroupLimit(logger, cpu, cgroupPath)
-				},
-			}
-		}
-
-		wg.Add(1)
-		go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, callbacks, &wg)
+			lastValue.Store(uint32(cpu))
+			return nil
+		},
 	}
+
+	wg.Add(1)
+	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, callbacks, &wg)
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 
@@ -1491,32 +1475,6 @@ func setCgroupLimit(logger *zap.Logger, r vmv1.MilliCPU, cgroupPath string) erro
 	}
 
 	return nil
-}
-
-func getCgroupQuota(cgroupPath string) (*vmv1.MilliCPU, error) {
-	isV2 := cgroups.Mode() == cgroups.Unified
-	var path string
-	if isV2 {
-		path = filepath.Join(cgroupMountPoint, cgroupPath, "cpu.max")
-	} else {
-		path = filepath.Join(cgroupMountPoint, "cpu", cgroupPath, "cpu.cfs_quota_us")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	arr := strings.Split(strings.Trim(string(data), "\n"), " ")
-	if len(arr) == 0 {
-		return nil, errors.New("unexpected cgroup data")
-	}
-	quota, err := strconv.ParseUint(arr[0], 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	cpu := vmv1.MilliCPU(uint32(quota * 1000 / cgroupPeriod))
-	cpu /= cpuLimitOvercommitFactor
-	return &cpu, nil
 }
 
 func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {

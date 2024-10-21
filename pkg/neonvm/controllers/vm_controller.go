@@ -166,7 +166,8 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	// examine cpuScalingMode and set it to the default value if it is not set
 	if vm.Spec.CpuScalingMode == nil || *vm.Spec.CpuScalingMode == "" {
-		vm.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingModeQMP)
+		log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
+		vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
 		if err := r.tryUpdateVM(ctx, &vm); err != nil {
 			log.Error(err, "Failed to set default CPU scaling mode")
 			return ctrl.Result{}, err
@@ -309,10 +310,10 @@ func (r *VMReconciler) updateVMStatusCPU(
 
 func (r *VMReconciler) updateVMStatusMemory(
 	vm *vmv1.VirtualMachine,
-	QmpMemorySize *resource.Quantity,
+	qmpMemorySize *resource.Quantity,
 ) {
-	if vm.Status.MemorySize == nil || !QmpMemorySize.Equal(*vm.Status.MemorySize) {
-		vm.Status.MemorySize = QmpMemorySize
+	if vm.Status.MemorySize == nil || !qmpMemorySize.Equal(*vm.Status.MemorySize) {
+		vm.Status.MemorySize = qmpMemorySize
 		r.Recorder.Event(vm, "Normal", "MemoryInfo",
 			fmt.Sprintf("VirtualMachine %s uses %v memory",
 				vm.Name,
@@ -559,18 +560,31 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				return err
 			}
 			var pluggedCPU uint32
-			if vm.Spec.CpuScalingMode != nil && *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeCpuSysfsState {
+
+			if vm.Spec.CpuScalingMode == nil { // should not happen
+				err := fmt.Errorf("CPU scaling mode is not set")
+				log.Error(err, "Unknown CPU scaling mode", "VirtualMachine", vm.Name)
+				return err
+			}
+
+			switch *vm.Spec.CpuScalingMode {
+			case vmv1.CpuScalingModeSysfs:
 				log.Info("CPU scaling mode is set to CpuSysfsState, CPU usage check based on cgroups")
 				pluggedCPU = cgroupUsage.VCPUs.RoundedUp()
-			} else {
-				// get CPU details from QEMU
+			case vmv1.CpuScalingModeQMP:
+				log.Info("CPU scaling mode is set to QMP, CPU usage check based on QMP")
 				cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
 				if err != nil {
 					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
 					return err
 				}
 				pluggedCPU = uint32(len(cpuSlotsPlugged))
+			default:
+				err := fmt.Errorf("unsupported CPU scaling mode: %s", *vm.Spec.CpuScalingMode)
+				log.Error(err, "Unknown CPU scaling mode", "VirtualMachine", vm.Name, "CPU scaling mode", *vm.Spec.CpuScalingMode)
+				return err
 			}
+
 			// update status by CPUs used in the VM
 			r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
@@ -1412,10 +1426,9 @@ func podSpec(
 					Command: func() []string {
 						cmd := []string{"runner"}
 						if config.DisableRunnerCgroup {
-							cmd = append(cmd, "-skip-cgroup-management")
 							// cgroup management disabled, but we still need something to provide
 							// the server, so the runner will just provide a dummy implementation.
-							cmd = append(cmd, "-enable-dummy-cpu-server")
+							cmd = append(cmd, "-skip-cgroup-management")
 						}
 						cmd = append(
 							cmd,
@@ -1432,6 +1445,9 @@ func podSpec(
 							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 						)
+						// NB: We don't need to check if the value is nil because the default value
+						// was set in Reconcile
+						cmd = append(cmd, "-cpu-scaling-mode", *vm.Spec.CpuScalingMode)
 						return cmd
 					}(),
 					Env: []corev1.EnvVar{{
