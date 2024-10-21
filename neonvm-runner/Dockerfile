@@ -5,7 +5,6 @@ COPY . .
 # Build
 RUN CGO_ENABLED=0 go build -o /runner neonvm-runner/cmd/*.go
 
-
 FROM alpine:3.19
 
 RUN apk add --no-cache \
@@ -21,6 +20,7 @@ RUN apk add --no-cache \
     busybox-extras \
     e2fsprogs \
     qemu-system-x86_64 \
+    qemu-system-aarch64 \
     qemu-img \
     cgroup-tools \
     openssh
