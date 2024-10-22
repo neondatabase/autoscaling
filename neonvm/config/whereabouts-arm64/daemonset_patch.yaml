@@ -1,0 +1,24 @@
+# patch the DaemonSet so that it's only running on nodes that we'd support
+#
+# The image we're is a linux amd64 image; it doesn't work on ARM or non-Linux.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: whereabouts
+  namespace: kube-system
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values:
+                    - arm64
+                - key: kubernetes.io/os
+                  operator: In
+                  values:
+                    - linux
