@@ -311,8 +311,8 @@ func main() {
 		SpecBuild:       "",  // overridden below if spec != nil
 		SpecMerge:       "",  // overridden below if spec != nil
 		InittabCommands: nil, // overridden below if spec != nil
+		ShutdownHook:    "",  // overridden below if spec != nil
 		AgettyInitLine:  getAgettyInitLine(*targetArch),
-		ShutdownHook:    "", // overridden below if spec != nil
 	}
 
 	if len(imageSpec.Config.User) != 0 {
@@ -369,8 +369,6 @@ func main() {
 		{"vmstart", scriptVmStart},
 		{"vmshutdown", scriptVmShutdown},
 		{"inittab", scriptInitTab},
-		{"agetty-init-amd64", scriptAgettyInitAmd64},
-		{"agetty-init-arm64", scriptAgettyInitArm64},
 		{"vmacpi", scriptVmAcpi},
 		{"vminit", scriptVmInit},
 		{"vector.yaml", configVector},
