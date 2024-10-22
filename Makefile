@@ -344,12 +344,10 @@ render-release: $(RENDERED) kustomize
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
 	$(KUSTOMIZE) build neonvm/config/whereabouts-amd64 > $(RENDERED)/whereabouts-amd64.yaml
-	# TODO: I ain't sure if we need arm64 for render-release target
-	# $(KUSTOMIZE) build neonvm/config/whereabouts-arm64 > $(RENDERED)/whereabouts-arm64.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-arm64 > $(RENDERED)/whereabouts-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-amd64 > $(RENDERED)/multus-amd64.yaml
-	# TODO: I ain't sure if we need arm64 for render-release target
 	$(KUSTOMIZE) build neonvm/config/multus-arm64 > $(RENDERED)/multus-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
