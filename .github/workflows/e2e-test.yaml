@@ -167,9 +167,9 @@ jobs:
         run: |
           rendered () { echo "rendered_manifests/$1"; }
 
-          kubectl apply -f $(rendered multus.yaml)
+          kubectl apply -f $(rendered multus-amd64.yaml)
           kubectl -n kube-system rollout status daemonset kube-multus-ds
-          kubectl apply -f $(rendered whereabouts.yaml)
+          kubectl apply -f $(rendered whereabouts-amd64.yaml)
           kubectl -n kube-system rollout status daemonset whereabouts
           kubectl apply -f $(rendered neonvm-runner-image-loader.yaml)
           kubectl -n neonvm-system rollout status daemonset neonvm-runner-image-loader
