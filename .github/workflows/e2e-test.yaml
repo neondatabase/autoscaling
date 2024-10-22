@@ -54,6 +54,9 @@ jobs:
   build-images:
     needs: get-tag
     uses: ./.github/workflows/build-images.yaml
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     with:
       skip: ${{ inputs.tag != '' }}
       tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
@@ -62,24 +65,59 @@ jobs:
       # settings and used properly in the tests. But if skip (because inputs.tag != ''), then this
       # setting will have no effect and the release images will be normal.
       controller-preserve-runner-pods: true
+      matrix-step-name: build-images
+      matrix-key: ${{ matrix.arch }}
+      arch: ${{ matrix.arch }}
     secrets: inherit
+
+  get-build-images-matrix-results:
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    steps:
+      - uses: cloudposse/github-action-matrix-outputs-read@v1
+        id: read
+        with:
+          matrix-step-name: build-images
+    outputs:
+      result: "${{ steps.read.outputs.result }}"
 
   build-test-vm:
     needs: get-tag
     uses: ./.github/workflows/build-test-vm.yaml
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     with:
       skip: ${{ inputs.tag != '' }}
       tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
+      matrix-step-name: build-test-vm
+      matrix-key: ${{ matrix.arch }}
+      arch: ${{ matrix.arch }}
     secrets: inherit
 
+  get-build-test-vm-matrix-results:
+    runs-on: ubuntu-latest
+    needs: [build-test-vm]
+    steps:
+      - uses: cloudposse/github-action-matrix-outputs-read@v1
+        id: read
+        with:
+          matrix-step-name: build-test-vm
+    outputs:
+      result: "${{ steps.read.outputs.result }}"
+
   e2e-tests:
-    needs: [ build-images, build-test-vm ]
+    needs: [ get-build-images-matrix-results, get-build-test-vm-matrix-results ]
     strategy:
       fail-fast: false
       matrix:
         cluster:
           - ${{ inputs.cluster || 'k3d' }}
-    runs-on: [ self-hosted, gen3, large ]
+        # run tests on amd64 only, since scope of the PR is to build images, there is separate issue for e2e tests
+        arch: [ amd64 ]
+
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'large-arm64' || 'large')) }}
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,18 +147,18 @@ jobs:
 
       - run: make render-release
         env:
-          IMG_CONTROLLER:       ${{ needs.build-images.outputs.controller }}
-          IMG_VXLAN_CONTROLLER: ${{ needs.build-images.outputs.vxlan-controller }}
-          IMG_RUNNER:           ${{ needs.build-images.outputs.runner }}
-          IMG_SCHEDULER:        ${{ needs.build-images.outputs.scheduler }}
-          IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs.autoscaler-agent }}
+          IMG_CONTROLLER:       ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).controller[matrix.arch] }}
+          IMG_VXLAN_CONTROLLER: ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).vxlan-controller[matrix.arch] }}
+          IMG_RUNNER:           ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).runner[matrix.arch]}}
+          IMG_SCHEDULER:        ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).scheduler[matrix.arch]}}
+          IMG_AUTOSCALER_AGENT: ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).autoscaler-agent[matrix.arch]}}
 
       - name: upload manifests
         # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
-        if: ${{ format('{0}', inputs.push-yamls) == 'true' }}
+        if: ${{ format('{0}', inputs.push-yamls) == 'true'}}
         uses: actions/upload-artifact@v4
         with:
-          name: rendered_manifests
+          name: ${{ format('rendered_manifests-{0}', matrix.arch) }}
           # nb: prefix before wildcard is removed from the uploaded files, so the artifact should
           # contain e.g.
           #   - autoscale-scheduler.yaml
@@ -167,9 +205,9 @@ jobs:
         run: |
           rendered () { echo "rendered_manifests/$1"; }
 
-          kubectl apply -f $(rendered multus-amd64.yaml)
+          kubectl apply -f $(rendered multus-${{ matrix.arch}}.yaml)
           kubectl -n kube-system rollout status daemonset kube-multus-ds
-          kubectl apply -f $(rendered whereabouts-amd64.yaml)
+          kubectl apply -f $(rendered whereabouts-${{matrix.arch}}.yaml)
           kubectl -n kube-system rollout status daemonset whereabouts
           kubectl apply -f $(rendered neonvm-runner-image-loader.yaml)
           kubectl -n neonvm-system rollout status daemonset neonvm-runner-image-loader
@@ -186,7 +224,7 @@ jobs:
 
       - name: load e2e test vm image
         env:
-          TEST_IMAGE: ${{ needs.build-test-vm.outputs.vm-postgres-16-bullseye }}
+          TEST_IMAGE: ${{ fromJson(needs.get-build-test-vm-matrix-results.outputs.result).vm-postgres-16-bullseye[matrix.arch]}}
         timeout-minutes: 2
         run: |
           # Pull the docker image so we can re-tag it, because using a consistent tag inside the
