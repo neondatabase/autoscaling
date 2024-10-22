@@ -316,10 +316,12 @@ render-manifests: $(RENDERED) kustomize
 	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
-	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-amd64 > $(RENDERED)/whereabouts-amd64.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-arm64 > $(RENDERED)/whereabouts-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-amd64 > $(RENDERED)/multus-amd64.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-arm64 > $(RENDERED)/multus-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
 	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
@@ -341,10 +343,14 @@ render-release: $(RENDERED) kustomize
 	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER)
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
-	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-amd64 > $(RENDERED)/whereabouts-amd64.yaml
+	# TODO: I ain't sure if we need arm64 for render-release target
+	# $(KUSTOMIZE) build neonvm/config/whereabouts-arm64 > $(RENDERED)/whereabouts-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-amd64 > $(RENDERED)/multus-amd64.yaml
+	# TODO: I ain't sure if we need arm64 for render-release target
+	$(KUSTOMIZE) build neonvm/config/multus-arm64 > $(RENDERED)/multus-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
 	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
@@ -360,9 +366,9 @@ render-release: $(RENDERED) kustomize
 
 .PHONY: deploy
 deploy: check-local-context docker-build load-images render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
+	$(KUBECTL) apply -f $(RENDERED)/multus-$(TARGET_ARCH).yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
-	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
+	$(KUBECTL) apply -f $(RENDERED)/whereabouts-$(TARGET_ARCH).yaml
 	$(KUBECTL) -n kube-system rollout status daemonset whereabouts
 	$(KUBECTL) apply -f $(RENDERED)/neonvm-runner-image-loader.yaml
 	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-runner-image-loader
