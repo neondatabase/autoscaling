@@ -17,7 +17,11 @@ on:
 
 jobs:
   build-ca:
-    runs-on: [ self-hosted, gen3, small ]
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ amd64, arm64 ]
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'large-arm64' || 'large')) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +40,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: cluster-autoscaler
-          platforms: linux/amd64
+          platforms: ${{format('linux/{0}', matrix.arch)}}
           push: false
+          target: ${{format('cluster_autoscaler_{0}', matrix.arch)}}
           file: cluster-autoscaler/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
