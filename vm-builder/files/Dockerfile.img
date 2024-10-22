@@ -9,14 +9,17 @@ USER root
 
 FROM {{.NeonvmDaemonImage}} AS neonvm-daemon-loader
 
+FROM busybox:1.35.0-musl AS busybox-loader
+
 FROM alpine:3.19 AS vm-runtime
+ARG TARGET_ARCH
+RUN set -e && mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config 
 # add busybox
-ENV BUSYBOX_VERSION 1.35.0
+COPY --from=busybox-loader /bin/busybox /neonvm/bin/busybox
+
 RUN set -e \
-	&& mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config \
-	&& wget -q https://busybox.net/downloads/binaries/${BUSYBOX_VERSION}-x86_64-linux-musl/busybox -O /neonvm/bin/busybox \
-	&& chmod +x /neonvm/bin/busybox \
-	&& /neonvm/bin/busybox --install -s /neonvm/bin
+    chmod +x /neonvm/bin/busybox \
+    && /neonvm/bin/busybox --install -s /neonvm/bin 
 
 COPY helper.move-bins.sh /helper.move-bins.sh
 
@@ -49,8 +52,10 @@ RUN set -e \
 
 # Install vector.dev binary
 RUN set -e \
-    && wget https://packages.timber.io/vector/0.26.0/vector-0.26.0-x86_64-unknown-linux-musl.tar.gz -O - \
-    | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-x86_64-unknown-linux-musl/bin/vector
+    && ARCH=$( [ "$TARGET_ARCH" = "linux/arm64" ] && echo "aarch64" || echo "x86_64") \
+    && wget https://packages.timber.io/vector/0.26.0/vector-${ARCH}-unknown-linux-musl.tar.gz -O - \
+    | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-${ARCH}-unknown-linux-musl/bin/vector
+
 
 # chrony
 RUN set -e \
