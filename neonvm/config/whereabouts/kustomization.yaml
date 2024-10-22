@@ -11,5 +11,5 @@ patchesStrategicMerge:
 - daemonset_patch.yaml
 
 images:
-- name: ghcr.io/k8snetworkplumbingwg/whereabouts
-  newTag: v0.6.2-amd64
+- name: neondatabase/whereabouts
+  newTag: v0.6.2
