@@ -623,10 +623,14 @@ type Config struct {
 	appendKernelCmdline  string
 	skipCgroupManagement bool
 	diskCacheSettings    string
-	memoryProvider       vmv1.MemoryProvider
-	autoMovableRatio     string
-	cpuScalingMode       vmv1.CpuScalingMode
-	architecture         string
+	// memoryProvider is a memory provider to use. Validated in newConfig.
+	memoryProvider vmv1.MemoryProvider
+	// autoMovableRatio value for VirtioMem provider. Validated in newConfig.
+	autoMovableRatio string
+	// cpuScalingMode is a mode to use for CPU scaling. Validated in newConfig.
+	cpuScalingMode vmv1.CpuScalingMode
+	// System CPU architecture. Set automatically equal to runtime.GOARCH.
+	architecture string
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -637,10 +641,10 @@ func newConfig(logger *zap.Logger) *Config {
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
-		memoryProvider:       "",             // Require that this is explicitly set. We'll check later.
-		autoMovableRatio:     "",             // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
-		cpuScalingMode:       "",             // Require that this is explicitly set. We'll check later.
-		architecture:         runtime.GOARCH, // arm64, amd64
+		memoryProvider:       "",
+		autoMovableRatio:     "",
+		cpuScalingMode:       "",
+		architecture:         runtime.GOARCH,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
