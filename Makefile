@@ -321,7 +321,7 @@ render-manifests: $(RENDERED) kustomize
 	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-dev > $(RENDERED)/multus-dev.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
 	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
@@ -346,7 +346,7 @@ render-release: $(RENDERED) kustomize
 	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-dev > $(RENDERED)/multus-dev.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
 	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
@@ -362,7 +362,7 @@ render-release: $(RENDERED) kustomize
 
 .PHONY: deploy
 deploy: check-local-context docker-build load-images render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
+	$(KUBECTL) apply -f $(RENDERED)/multus-dev.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
 	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset whereabouts
