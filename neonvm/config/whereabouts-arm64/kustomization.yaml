@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+# whereabouts CNI
+- https://raw.githubusercontent.com/k8snetworkplumbingwg/whereabouts/v0.6.2/doc/crds/whereabouts.cni.cncf.io_ippools.yaml
+- https://raw.githubusercontent.com/k8snetworkplumbingwg/whereabouts/v0.6.2/doc/crds/whereabouts.cni.cncf.io_overlappingrangeipreservations.yaml
+- https://raw.githubusercontent.com/k8snetworkplumbingwg/whereabouts/v0.6.2/doc/crds/daemonset-install.yaml
+
+patchesStrategicMerge:
+- daemonset_patch.yaml
+
+images:
+- name: ghcr.io/k8snetworkplumbingwg/whereabouts
+  newTag: v0.6.2-arm64
