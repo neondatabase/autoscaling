@@ -344,12 +344,10 @@ render-release: $(RENDERED) kustomize
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
 	$(KUSTOMIZE) build neonvm/config/whereabouts-amd64 > $(RENDERED)/whereabouts-amd64.yaml
-	# TODO: I ain't sure if we need arm64 for render-release target
-	# $(KUSTOMIZE) build neonvm/config/whereabouts-arm64 > $(RENDERED)/whereabouts-arm64.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-arm64 > $(RENDERED)/whereabouts-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-amd64 > $(RENDERED)/multus-amd64.yaml
-	# TODO: I ain't sure if we need arm64 for render-release target
 	$(KUSTOMIZE) build neonvm/config/multus-arm64 > $(RENDERED)/multus-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
@@ -439,6 +437,16 @@ e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
 
+# arm doesn't support cpu hot plug and memory hot plug and CI runners are based on qemu so no kvm acceleration as well
+arm_patch_e2e: yq
+	@find tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.cpuScalingMode = "sysfsScaling") // .' -i {}
+	@find tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.enableAcceleration = false) // .' -i {}
+	@find tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .status.memoryProvider = "VirtioMem") // .' -i {}
+	@find tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.guest.memoryProvider = "VirtioMem") // .' -i {}
+
+revert_path_e2e:
+	git checkout tests/e2e
+
 ##@ Local kind cluster
 
 .PHONY: kind-setup
@@ -507,7 +515,12 @@ else ifeq ($(GOARCH), amd64)
 else
     $(error Unsupported architecture: $(GOARCH))
 endif
+
+YQ_ARCH ?= $(GOARCH)
+YQ ?= $(LOCALBIN)/yq
+
 KUBECTL ?= $(LOCALBIN)/kubectl
+
 KUBECTL_VERSION ?= v1.28.12
 
 KIND ?= $(LOCALBIN)/kind
@@ -544,6 +557,11 @@ $(KIND): $(LOCALBIN)
 kubectl: $(KUBECTL) ## Download kubectl locally if necessary.
 $(KUBECTL): $(LOCALBIN)
 	@test -s $(LOCALBIN)/kubectl || { curl -sfSLo $(KUBECTL) https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(GOOS)/$(GOARCH)/kubectl && chmod +x $(KUBECTL); }
+
+.PHONY: yq
+yq: $(YQ)
+$(YQ):
+	@test -s $(YQ)  || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64 && chmod +x $(YQ); }
 
 .PHONY: kuttl
 kuttl: $(KUTTL) ## Download kuttl locally if necessary.

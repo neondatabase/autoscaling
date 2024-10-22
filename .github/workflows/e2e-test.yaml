@@ -50,7 +50,7 @@ jobs:
           test -n "$SHA"
           sha="${SHA::7}"
           echo "tag=$sha.$GITHUB_RUN_ID" | tee -a $GITHUB_OUTPUT
-
+  
   build-images:
     needs: get-tag
     uses: ./.github/workflows/build-images.yaml
@@ -77,9 +77,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cluster:
-          - ${{ inputs.cluster || 'k3d' }}
-    runs-on: [ self-hosted, gen3, large ]
+        cluster: [ k3d ]
+        # run tests on amd64 only, since scope of the PR is to build images, there is separate issue for e2e tests
+        arch: [ amd64 ]
+    
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'large-arm64' || 'large')) }}
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,18 +112,18 @@ jobs:
 
       - run: make render-release
         env:
-          IMG_CONTROLLER:       ${{ needs.build-images.outputs.controller }}
-          IMG_VXLAN_CONTROLLER: ${{ needs.build-images.outputs.vxlan-controller }}
-          IMG_RUNNER:           ${{ needs.build-images.outputs.runner }}
-          IMG_SCHEDULER:        ${{ needs.build-images.outputs.scheduler }}
-          IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs.autoscaler-agent }}
+          IMG_CONTROLLER:       ${{ needs.build-images.outputs[format('controller-{0}', matrix.arch)] }}
+          IMG_VXLAN_CONTROLLER: ${{ needs.build-images.outputs[format('vxlan-controller-{0}', matrix.arch)] }}
+          IMG_RUNNER:           ${{ needs.build-images.outputs[format('runner-{0}', matrix.arch)] }}
+          IMG_SCHEDULER:        ${{ needs.build-images.outputs[format('scheduler-{0}', matrix.arch)] }}
+          IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs[format('autoscaler-agent-{0}', matrix.arch)] }}
 
       - name: upload manifests
         # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
-        if: ${{ format('{0}', inputs.push-yamls) == 'true' }}
+        if: ${{ format('{0}', inputs.push-yamls) == 'true'}}
         uses: actions/upload-artifact@v4
         with:
-          name: rendered_manifests
+          name: ${{ format('rendered_manifests-{0}', matrix.arch) }}
           # nb: prefix before wildcard is removed from the uploaded files, so the artifact should
           # contain e.g.
           #   - autoscale-scheduler.yaml
@@ -167,9 +170,9 @@ jobs:
         run: |
           rendered () { echo "rendered_manifests/$1"; }
 
-          kubectl apply -f $(rendered multus-amd64.yaml)
+          kubectl apply -f $(rendered multus-${{ matrix.arch}}.yaml)
           kubectl -n kube-system rollout status daemonset kube-multus-ds
-          kubectl apply -f $(rendered whereabouts-amd64.yaml)
+          kubectl apply -f $(rendered whereabouts-${{matrix.arch}}.yaml)
           kubectl -n kube-system rollout status daemonset whereabouts
           kubectl apply -f $(rendered neonvm-runner-image-loader.yaml)
           kubectl -n neonvm-system rollout status daemonset neonvm-runner-image-loader
@@ -186,7 +189,7 @@ jobs:
 
       - name: load e2e test vm image
         env:
-          TEST_IMAGE: ${{ needs.build-test-vm.outputs.vm-postgres-16-bullseye }}
+          TEST_IMAGE: ${{ needs.build-test-vm.outputs[format('vm-postgres-16-bullseye-{0}', matrix.arch)] }}
         timeout-minutes: 2
         run: |
           # Pull the docker image so we can re-tag it, because using a consistent tag inside the
@@ -194,10 +197,18 @@ jobs:
           docker pull "$TEST_IMAGE"
           docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
           make load-example-vms
-
+      
+      - name: Patch e2e tests to not use acceleration in arm runners
+        if: matrix.arch == 'arm64'
+        run: make arm_patch_e2e
+      
       - run: make e2e
         timeout-minutes: 15
-
+      
+      - name: Setup tmate session
+        if: always()
+        uses: mxschmitt/action-tmate@v3
+        
       - name: Get k8s logs and events
         if: always()
         run: |
