@@ -92,7 +92,7 @@ func addFileToTar(tw *tar.Writer, filename string, contents []byte) error {
 	tarHeader := &tar.Header{
 		Name: filename,
 		Size: int64(len(contents)),
-		Mode: 0755, // TODO: shouldn't just set this for everything.
+		Mode: 0o755, // TODO: shouldn't just set this for everything.
 	}
 
 	if err := tw.WriteHeader(tarHeader); err != nil {
@@ -452,7 +452,6 @@ func main() {
 		}
 
 	}
-
 }
 
 type imageSpec struct {

@@ -214,7 +214,6 @@ func (s *nodeState) dump() nodeStateDump {
 }
 
 func (s *podState) dump() podStateDump {
-
 	var vm *vmPodState
 	if s.vm != nil {
 		vm = lo.ToPtr(s.vm.dump())

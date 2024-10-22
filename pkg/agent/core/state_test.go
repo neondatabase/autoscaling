@@ -1495,7 +1495,6 @@ func TestDownscalePivotBack(t *testing.T) {
 					a.Do(state.UpdateSystemMetrics, newMetrics)
 					a.Call(getDesiredResources, state, clock.Now()).
 						Equals(resForCU(2))
-
 				}
 			}
 
