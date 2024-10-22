@@ -201,6 +201,7 @@ docker-build-vxlan-controller: docker-build-go-base ## Build docker image for Ne
 	docker build \
 		--tag $(IMG_VXLAN_CONTROLLER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
 		--file neonvm-vxlan-controller/Dockerfile \
 		.
 
