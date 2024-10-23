@@ -124,6 +124,7 @@ func newTestParams(t *testing.T) *testParams {
 			FailurePendingPeriod:    time.Minute,
 			FailingRefreshInterval:  time.Minute,
 			AtMostOnePod:            false,
+			DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
 		},
 		Metrics: reconcilerMetrics,
 	}
@@ -167,6 +168,11 @@ func TestReconcile(t *testing.T) {
 	}, res)
 	assert.Contains(t, params.getVM().Finalizers, virtualmachineFinalizer)
 
+	// Added default value for the cpuScalingMode
+	res, err = params.r.Reconcile(params.ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, true, res.Requeue)
+
 	// Round 2
 	res, err = params.r.Reconcile(params.ctx, req)
 	assert.NoError(t, err)
@@ -185,8 +191,11 @@ func TestReconcile(t *testing.T) {
 	// We now have a pod
 	vm := params.getVM()
 	assert.NotEmpty(t, vm.Status.PodName)
-	// Spec is unchanged
-	assert.Equal(t, vm.Spec, origVM.Spec)
+	// Spec is unchanged except cpuScalingMode
+	var origVMWithCPUScalingMode vmv1.VirtualMachine
+	origVM.DeepCopy().DeepCopyInto(&origVMWithCPUScalingMode)
+	origVMWithCPUScalingMode.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingModeQMP)
+	assert.Equal(t, vm.Spec, origVMWithCPUScalingMode.Spec)
 
 	// Round 4
 	res, err = params.r.Reconcile(params.ctx, req)
@@ -217,7 +226,12 @@ func TestRunningPod(t *testing.T) {
 	// Round 1
 	params.mockRecorder.On("Event", mock.Anything, "Normal", "Created",
 		mock.Anything)
+	// Requeue because we expect default values to be set
 	res, err := params.r.Reconcile(params.ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, true, res.Requeue)
+
+	res, err = params.r.Reconcile(params.ctx, req)
 	require.NoError(t, err)
 	assert.Equal(t, false, res.Requeue)
 

@@ -3,11 +3,17 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
+
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/cpuscaling"
 )
 
 func main() {
@@ -26,24 +32,73 @@ func main() {
 	defer logger.Sync() //nolint:errcheck // what are we gonna do, log something about it?
 
 	logger.Info("Starting neonvm-daemon", zap.String("addr", *addr))
-
-	srv := cpuServer{}
-	srv.run(logger, *addr)
+	cpuHotPlugController := &cpuscaling.CPUSysFsStateScaler{}
+	srv := cpuServer{
+		cpuOperationsMutex:  &sync.Mutex{},
+		cpuSystemWideScaler: cpuHotPlugController,
+		logger:              logger.Named("cpu-srv"),
+	}
+	srv.run(*addr)
 }
 
-type cpuServer struct{}
+type cpuServer struct {
+	// Protects CPU operations from concurrent access to prevent multiple ensureOnlineCPUs calls from running concurrently
+	// and ensure that status response is always actual
+	cpuOperationsMutex  *sync.Mutex
+	cpuSystemWideScaler *cpuscaling.CPUSysFsStateScaler
+	logger              *zap.Logger
+}
 
-func (s *cpuServer) run(logger *zap.Logger, addr string) {
-	logger = logger.Named("cpu-srv")
+func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
+	// should be replaced with cgroups milliseconds to be exposed instead of having CPU
+	s.cpuOperationsMutex.Lock()
+	defer s.cpuOperationsMutex.Unlock()
+	activeCPUs, err := s.cpuSystemWideScaler.GetActiveCPUsCount()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write([]byte(fmt.Sprintf("%d", activeCPUs*1000))); err != nil {
+		s.logger.Error("could not write response", zap.Error(err))
+	}
+}
+
+func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
+	s.cpuOperationsMutex.Lock()
+	defer s.cpuOperationsMutex.Unlock()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Error("could not read request body", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	updateInt, err := strconv.Atoi(string(body))
+	update := vmv1.MilliCPU(updateInt)
+	if err != nil {
+		s.logger.Error("could not unmarshal request body", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	s.logger.Info("Setting CPU status", zap.String("body", string(body)))
+	if err := s.cpuSystemWideScaler.EnsureOnlineCPUs(int(update.RoundedUp())); err != nil {
+		s.logger.Error("could not ensure online CPUs", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *cpuServer) run(addr string) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cpu", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			logger.Error("unimplemented!")
-			w.WriteHeader(http.StatusInternalServerError)
+			s.handleGetCPUStatus(w)
+			return
 		} else if r.Method == http.MethodPut {
-			logger.Error("unimplemented!")
-			w.WriteHeader(http.StatusInternalServerError)
+			s.handleSetCPUStatus(w, r)
+			return
 		} else {
 			// unknown method
 			w.WriteHeader(http.StatusNotFound)
@@ -61,7 +116,7 @@ func (s *cpuServer) run(logger *zap.Logger, addr string) {
 
 	err := server.ListenAndServe()
 	if err != nil {
-		logger.Fatal("CPU server exited with error", zap.Error(err))
+		s.logger.Fatal("CPU server exited with error", zap.Error(err))
 	}
-	logger.Info("CPU server exited without error")
+	s.logger.Info("CPU server exited without error")
 }
