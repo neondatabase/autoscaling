@@ -19,6 +19,21 @@ status:
   conditions:
     - type: Available
       status: "True"
+# original spec had no affinity but it should be added during the migration to prevent the VM from being scheduled on a different architecture      
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values:
+            - amd64
+          - key: kubernetes.io/os
+            operator: In
+            values:
+            - linux
 ---
 apiVersion: v1
 kind: pod
