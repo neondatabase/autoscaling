@@ -172,6 +172,23 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		if err := ctrl.SetControllerReference(vm, migration, r.Scheme); err != nil {
 			return ctrl.Result{}, err
 		}
+		// First check if VM has the affinity with CPU architecture
+		// if it doesn't we need to set it explicitly
+		// to prevent migration going to the node with different architecture
+		if !hasArchitectureAffinity(vm) {
+			sourceNode := &corev1.Node{}
+			//nolint:exhaustruct // corev1.Node objects is not namespaced
+			err := r.Get(ctx, types.NamespacedName{Name: vm.Status.Node}, sourceNode)
+			if err != nil {
+				log.Error(err, "Failed to get source node")
+				return ctrl.Result{}, err
+			}
+			addArchitectureAffinity(vm, sourceNode)
+			if err = r.Update(ctx, vm); err != nil {
+				log.Error(err, "Failed to update node affinity of the source vm")
+				return ctrl.Result{RequeueAfter: time.Second}, err
+			}
+		}
 		if err := r.Update(ctx, migration); err != nil {
 			log.Info("Failed to add owner to Migration", "error", err)
 			return ctrl.Result{}, err
@@ -224,6 +241,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
 			enableSSH := *vm.Spec.EnableSSH
 			var sshSecret *corev1.Secret
+
 			if enableSSH {
 				// We require the SSH secret to exist because we cannot unmount and
 				// mount the new secret into the VM after the live migration. If a
@@ -752,4 +770,47 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	}
 
 	return pod, nil
+}
+
+func hasArchitectureAffinity(vm *vmv1.VirtualMachine) bool {
+	if vm.Spec.Affinity != nil && vm.Spec.Affinity.NodeAffinity != nil && vm.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		for _, term := range vm.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			for _, expr := range term.MatchExpressions {
+				if expr.Key == "kubernetes.io/arch" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func addArchitectureAffinity(vm *vmv1.VirtualMachine, sourceNode *corev1.Node) {
+	if vm.Spec.Affinity == nil {
+		vm.Spec.Affinity = &corev1.Affinity{}
+	}
+	if vm.Spec.Affinity.NodeAffinity == nil {
+		vm.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	if vm.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		vm.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+
+	vm.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
+		vm.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
+		corev1.NodeSelectorTerm{
+			MatchExpressions: []corev1.NodeSelectorRequirement{
+				{
+					Key:      "kubernetes.io/arch",
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{sourceNode.Status.NodeInfo.Architecture},
+				},
+				{
+					Key:      "kubernetes.io/os",
+					Operator: "In",
+					Values:   []string{"linux"},
+				},
+			},
+		},
+	)
 }
