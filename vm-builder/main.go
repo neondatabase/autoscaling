@@ -111,6 +111,7 @@ type TemplatesContext struct {
 	Cmd           []string
 	Env           []string
 	RootDiskImage string
+	Workdir       string
 
 	NeonvmDaemonImage string
 
@@ -285,6 +286,7 @@ func main() {
 		Cmd:           imageSpec.Config.Cmd,
 		Env:           imageSpec.Config.Env,
 		RootDiskImage: *srcImage,
+		Workdir:       "/home/computeruse/",
 
 		NeonvmDaemonImage: neonvmDaemonImage,
 

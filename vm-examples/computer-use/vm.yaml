@@ -1,0 +1,64 @@
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: anthopic-vm1
+  labels:
+    autoscaling.neon.tech/enabled: "true"
+  annotations:
+    autoscaling.neon.tech/bounds: '{ "min": { "cpu": "250m", "mem": "1Gi" }, "max": {"cpu": 1, "mem": "4Gi" } }'
+spec:
+  schedulerName: autoscale-scheduler
+  guest:
+    cpus:
+      min: 0.25
+      max: 2
+      use: 0.5
+    memorySlotSize: 1Gi
+    memorySlots:
+      min: 1
+      max: 5
+      use: 1
+    memoryProvider: VirtioMem
+    rootDisk:
+      image: vm-computer-use:latest
+      size: 20Gi
+    env:
+      - name: ANTHROPIC_API_KEY
+        value: 
+    ports:
+      - name: vnc
+        port: 5900
+      - name: port8501
+        port: 8501
+      - name: novnc
+        port: 6080
+      - name: web-server
+        port: 8080
+  extraNetwork:
+      enable: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vm1
+spec:
+  ports:
+    - name: vnc
+      port: 5900
+      protocol: TCP
+      targetPort: vnc
+    - name: port8501
+      port: 8501
+      protocol: TCP
+      targetPort: port8501
+    - name: novnc
+      port: 6080
+      protocol: TCP
+      targetPort: novnc
+    - name: web-server
+      port: 8080
+      protocol: TCP
+      targetPort: web-server
+  type: NodePort
+  selector:
+    vm.neon.tech/name: anthopic-vm1
