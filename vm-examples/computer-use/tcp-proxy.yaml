@@ -11,10 +11,10 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
-          socat tcp-listen:8080,fork,reuseaddr tcp:10.244.1.16:8080 & \
-          socat tcp-listen:6080,fork,reuseaddr tcp:10.244.1.16:6080 & \
-          socat tcp-listen:8501,fork,reuseaddr tcp:10.244.1.16:8501 & \
-          socat tcp-listen:5900,fork,reuseaddr tcp:10.244.1.16:5900
+          socat tcp-listen:8080,fork,reuseaddr tcp:10.244.1.45:8080 & \
+          socat tcp-listen:6080,fork,reuseaddr tcp:10.244.1.45:6080 & \
+          socat tcp-listen:8501,fork,reuseaddr tcp:10.244.1.45:8501 & \
+          socat tcp-listen:5900,fork,reuseaddr tcp:10.244.1.45:5900
       ports:
         - containerPort: 8080
         - containerPort: 6080

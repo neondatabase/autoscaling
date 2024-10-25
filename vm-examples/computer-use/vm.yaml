@@ -1,22 +1,22 @@
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
-  name: anthopic-vm1
+  name: vm123
   labels:
     autoscaling.neon.tech/enabled: "true"
   annotations:
-    autoscaling.neon.tech/bounds: '{ "min": { "cpu": "250m", "mem": "1Gi" }, "max": {"cpu": 1, "mem": "4Gi" } }'
+    autoscaling.neon.tech/bounds: '{ "min": { "cpu": "250m", "mem": "1Gi" }, "max": {"cpu": 10, "mem": "40Gi" } }'
 spec:
   schedulerName: autoscale-scheduler
   guest:
     cpus:
       min: 0.25
-      max: 2
-      use: 0.5
+      max: 10
+      use: 1
     memorySlotSize: 1Gi
     memorySlots:
       min: 1
-      max: 5
+      max: 40
       use: 1
     memoryProvider: VirtioMem
     rootDisk:
