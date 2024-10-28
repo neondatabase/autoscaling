@@ -145,6 +145,11 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) (admission.Warnings,
 		}
 	}
 
+	// allow to change CPU scaling mode only if it's not set
+	if r.Spec.CpuScalingMode != nil && before.Spec.CpuScalingMode != nil && *r.Spec.CpuScalingMode != *before.Spec.CpuScalingMode {
+		return nil, fmt.Errorf(".spec.cpuScalingMode is immutable")
+	}
+
 	// validate .spec.guest.cpu.use
 	if r.Spec.Guest.CPUs.Use < r.Spec.Guest.CPUs.Min {
 		return nil, fmt.Errorf(".cpus.use (%v) should be greater than or equal to the .cpus.min (%v)",
