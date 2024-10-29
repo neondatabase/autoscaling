@@ -328,11 +328,15 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
 	}
 
-	// Set memory provider for old VMs that don't have it in the Status.
+	// Forwards compatibility: Set virtio-mem memory provider for VMs that don't have it in the
+	// status.
+	// We need to do this so that when we switch to no longer setting memoryProvider, we won't
+	// regress and try to set it to dimm slots.
+	// See #1060 for the relevant tracking issue.
 	if vm.Status.PodName != "" && vm.Status.MemoryProvider == nil {
-		oldMemProvider := vmv1.MemoryProviderDIMMSlots
-		log.Error(nil, "Setting default MemoryProvider for VM", "MemoryProvider", oldMemProvider)
-		vm.Status.MemoryProvider = lo.ToPtr(oldMemProvider)
+		newMemProvider := vmv1.MemoryProviderVirtioMem
+		log.Error(nil, "Setting default MemoryProvider for VM", "MemoryProvider", newMemProvider)
+		vm.Status.MemoryProvider = lo.ToPtr(newMemProvider)
 	}
 
 	switch vm.Status.Phase {
@@ -772,13 +776,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return err
 		}
 
-		// We must keep the VM status the same until we know the neonvm-runner container has been
-		// terminated, otherwise we could end up starting a new runner pod while the VM in the old
-		// one is still running.
+		// By default, we cleanup the VM, even if previous pod still exists. This behavior is for the case
+		// where the pod is stuck deleting, and we want to progress without waiting for it.
 		//
-		// Note that this is required because 'VmSucceeded' and 'VmFailed' are true if *at least
-		// one* container inside the runner pod has finished; the VM itself may still be running.
-		if apierrors.IsNotFound(err) || runnerContainerStopped(vmRunner) {
+		// However, this opens up a possibility for cascading failures where the pods would be constantly
+		// recreated, and then stuck deleting. That's why we have AtMostOnePod.
+		if !r.Config.AtMostOnePod || apierrors.IsNotFound(err) {
 			// NB: Cleanup() leaves status .Phase and .RestartCount (+ some others) but unsets other fields.
 			vm.Cleanup()
 
@@ -935,6 +938,14 @@ const (
 // This is *similar* to the value of pod.Status.Phase, but we'd like to retain our own abstraction
 // to have more control over the semantics.
 func runnerStatus(pod *corev1.Pod) runnerStatusKind {
+	// Add 5 seconds to account for clock skew and k8s lagging behind.
+	deadline := metav1.NewTime(metav1.Now().Add(-5 * time.Second))
+
+	// If the pod is being deleted, we consider it failed. The deletion might be stalled
+	// because the node is shutting down, or the pod is stuck pulling an image.
+	if pod.DeletionTimestamp != nil && pod.DeletionTimestamp.Before(&deadline) {
+		return runnerFailed
+	}
 	switch pod.Status.Phase {
 	case "", corev1.PodPending:
 		return runnerPending
@@ -949,23 +960,6 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
-}
-
-// runnerContainerStopped returns true iff the neonvm-runner container has exited.
-//
-// The guarantee is simple: It is only safe to start a new runner pod for a VM if
-// runnerContainerStopped returns true (otherwise, we may end up with >1 instance of the same VM).
-func runnerContainerStopped(pod *corev1.Pod) bool {
-	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-		return true
-	}
-
-	for _, stat := range pod.Status.ContainerStatuses {
-		if stat.Name == "neonvm-runner" {
-			return stat.State.Terminated != nil
-		}
-	}
-	return false
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
@@ -1371,6 +1365,24 @@ func podSpec(
 		return nil, fmt.Errorf("marshal VM Status: %w", err)
 	}
 
+	// We have to add tolerations explicitly here.
+	// Otherwise, if the k8s node becomes unavailable, the default
+	// tolerations will be added, which are 300s (5m) long, which is
+	// not acceptable for us.
+	tolerations := append([]corev1.Toleration{}, vm.Spec.Tolerations...)
+	tolerations = append(tolerations,
+		corev1.Toleration{
+			Key:               "node.kubernetes.io/not-ready",
+			TolerationSeconds: lo.ToPtr(int64(30)),
+			Effect:            "NoExecute",
+		},
+		corev1.Toleration{
+			Key:               "node.kubernetes.io/unreachable",
+			TolerationSeconds: lo.ToPtr(int64(30)),
+			Effect:            "NoExecute",
+		},
+	)
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        vm.Status.PodName,
@@ -1385,7 +1397,7 @@ func podSpec(
 			TerminationGracePeriodSeconds: vm.Spec.TerminationGracePeriodSeconds,
 			NodeSelector:                  vm.Spec.NodeSelector,
 			ImagePullSecrets:              vm.Spec.ImagePullSecrets,
-			Tolerations:                   vm.Spec.Tolerations,
+			Tolerations:                   tolerations,
 			ServiceAccountName:            vm.Spec.ServiceAccountName,
 			SchedulerName:                 vm.Spec.SchedulerName,
 			Affinity:                      affinity,

@@ -7,6 +7,8 @@ FROM {{.RootDiskImage}} AS rootdisk
 USER root
 {{.SpecMerge}}
 
+FROM {{.NeonvmDaemonImage}} AS neonvm-daemon-loader
+
 FROM alpine:3.19 AS vm-runtime
 # add busybox
 ENV BUSYBOX_VERSION 1.35.0
@@ -25,6 +27,8 @@ RUN set -e \
 		udev \
 		agetty \
 		su-exec \
+        util-linux-misc \
+        cgroup-tools \
 		e2fsprogs-extra \
 		blkid \
 		flock \
@@ -35,6 +39,7 @@ RUN set -e \
 		udevadm \
 		agetty \
 		su-exec \
+        cgexec \
 		resize2fs \
 		blkid \
 		flock \
@@ -64,6 +69,8 @@ RUN set -e \
 	&& apk add --no-cache --no-progress --quiet \
 		quota-tools \
 	&& /helper.move-bins.sh quota edquota quotacheck quotaoff quotaon quotastats setquota repquota tune2fs
+
+COPY --from=neonvm-daemon-loader /neonvmd /neonvm/bin/neonvmd
 
 # init scripts & configs
 COPY inittab     /neonvm/bin/inittab

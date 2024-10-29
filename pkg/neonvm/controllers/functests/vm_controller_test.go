@@ -115,6 +115,7 @@ var _ = Describe("VirtualMachine controller", func() {
 					MemhpAutoMovableRatio:   "301",
 					FailurePendingPeriod:    1 * time.Minute,
 					FailingRefreshInterval:  1 * time.Minute,
+					AtMostOnePod:            false,
 				},
 			}
 
