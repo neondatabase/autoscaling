@@ -8,21 +8,17 @@ images:
 - name: kube-multus
   newName: ghcr.io/k8snetworkplumbingwg/multus-cni
   newTag: v4.1.3-thick
-  
-resources:
-- config_map.yaml
+
+
 patchesStrategicMerge:
 - cluster_role.yaml
 - daemonset_patch.yaml
 
 patches:
-- target:
-    kind: DaemonSet
-    name: kube-multus-ds
+- target: 
+    kind: ServiceAccount
+    name: multus
   patch: |-
     - op: replace
-      path: /spec/template/spec/containers/0/command
-      value: ["/usr/src/multus-cni/bin/multus-daemon"]
-    - op: replace
-      path: /spec/template/spec/containers/0/args
-      value: []
+      path: /automountServiceAccountToken
+      value: true
