@@ -40,7 +40,7 @@ func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMac
 func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
 	log := log.FromContext(ctx)
 	specCPU := vm.Spec.Guest.CPUs.Use
-	cgroupUsage, err := getRunnerCgroup(ctx, vm)
+	cgroupUsage, err := getRunnerCPULimits(ctx, vm)
 	if err != nil {
 		log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 		return false, err
@@ -92,7 +92,7 @@ func (r *VMReconciler) handleCPUScalingSysfs(ctx context.Context, vm *vmv1.Virtu
 	log := log.FromContext(ctx)
 	specCPU := vm.Spec.Guest.CPUs.Use
 
-	cgroupUsage, err := getRunnerCgroup(ctx, vm)
+	cgroupUsage, err := getRunnerCPULimits(ctx, vm)
 	if err != nil {
 		log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 		return false, err
@@ -107,7 +107,7 @@ func (r *VMReconciler) handleCPUScalingSysfs(ctx context.Context, vm *vmv1.Virtu
 
 func (r *VMReconciler) handleCgroupCPUUpdate(ctx context.Context, vm *vmv1.VirtualMachine, cgroupUsage *api.VCPUCgroup) (bool, error) {
 	specCPU := vm.Spec.Guest.CPUs.Use
-	if err := setRunnerCgroup(ctx, vm, specCPU); err != nil {
+	if err := setRunnerCPULimits(ctx, vm, specCPU); err != nil {
 		return false, err
 	}
 	reason := "ScaleDown"
