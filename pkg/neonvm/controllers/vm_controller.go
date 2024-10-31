@@ -579,10 +579,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 			switch *vm.Spec.CpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
-				log.Info("CPU scaling mode is set to CpuSysfsState, CPU usage check based on cgroups")
+				log.Info("CPU usage check based on cgroups", "CpuScalingMode", *vm.Spec.CpuScalingMode)
 				pluggedCPU = cgroupUsage.VCPUs.RoundedUp()
 			case vmv1.CpuScalingModeQMP:
-				log.Info("CPU scaling mode is set to QMP, CPU usage check based on QMP")
+				log.Info("CPU usage check based on QMP", "CpuScalingMode", *vm.Spec.CpuScalingMode)
 				cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
 				if err != nil {
 					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)

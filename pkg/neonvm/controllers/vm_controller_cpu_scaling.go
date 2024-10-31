@@ -18,10 +18,7 @@ import (
 func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
 
 	log := log.FromContext(ctx)
-	useCpuSysfsStateScaling := false
-	if vm.Spec.CpuScalingMode != nil && *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeSysfs {
-		useCpuSysfsStateScaling = true
-	}
+	useCpuSysfsStateScaling := *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeSysfs
 
 	var scaled bool
 	var err error
@@ -32,7 +29,7 @@ func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMac
 	}
 
 	if err != nil {
-		log.Error(err, "Failed to scale CPU", "VirtualMachine", vm.Name, "use_cpu_sysfs_state", useCpuSysfsStateScaling)
+		log.Error(err, "Failed to scale CPU", "VirtualMachine", vm.Name, "CpuScalingMode", vm.Spec.CpuScalingMode)
 		return false, err
 	}
 

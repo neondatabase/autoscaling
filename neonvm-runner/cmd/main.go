@@ -894,14 +894,14 @@ func buildQEMUCmd(
 	switch cfg.cpuScalingMode {
 	case vmv1.CpuScalingModeSysfs:
 		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
-			// if we use sysfs based scaling we specify initial value for cpus qemu arg equal to max cpus
+			// Boot with all CPUs plugged, we will online them on-demand
 			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
 			maxCPUs,
 			maxCPUs,
 			maxCPUs,
 		))
 	case vmv1.CpuScalingModeQMP:
-		// if we use hotplug we specify initial value for cpus qemu arg equal to min cpus and scale using udev rules for cpu plug events
+		// Boot with minCPUs hotplugged, but with slots reserved for maxCPUs.
 		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
 			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
 			minCPUs,
@@ -1000,7 +1000,7 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 		cmdlineParts = append(cmdlineParts, cfg.appendKernelCmdline)
 	}
 	if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
-		// if we use sysfs based scaling we need to specify the start cpus as min CPUs to mark every CPU except 0 as offline
+		// Limit the number of online CPUs kernel boots with. More CPUs will be enabled on upscaling
 		cmdlineParts = append(cmdlineParts, fmt.Sprintf("maxcpus=%d", vmSpec.Guest.CPUs.Min.RoundedUp()))
 	}
 
