@@ -1,8 +1,10 @@
-package controllers
+package controllers_test
 
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	. "github.com/neondatabase/autoscaling/pkg/neonvm/controllers"
 )
 
 type qmpEvent struct {

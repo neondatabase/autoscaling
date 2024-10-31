@@ -836,7 +836,8 @@ spec:
                     type: object
                 type: object
               cpuScalingMode:
-                description: Use QMP scaling mode for CPU or online/offline CPU states.
+                description: Controls how CPU scaling is performed, either hotplug
+                  new CPUs with QMP, or enable them in sysfs.
                 enum:
                 - qmpScaling
                 - sysfsScaling

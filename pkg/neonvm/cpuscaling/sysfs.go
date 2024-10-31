@@ -20,7 +20,7 @@ func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(targetCount int) error {
 		return err
 	}
 
-	onlineCount, err := c.GetActiveCPUsCount()
+	onlineCount, err := c.ActiveCPUsCount()
 	if err != nil {
 		return err
 	}
@@ -88,8 +88,8 @@ func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(targetCount int) error {
 	return nil
 }
 
-// GetActiveCPUsCount() returns the count of online CPUs.
-func (c *CPUSysFsStateScaler) GetActiveCPUsCount() (uint32, error) {
+// ActiveCPUsCount() returns the count of online CPUs.
+func (c *CPUSysFsStateScaler) ActiveCPUsCount() (uint32, error) {
 	cpus, err := getAllCPUs()
 	if err != nil {
 		return 0, err

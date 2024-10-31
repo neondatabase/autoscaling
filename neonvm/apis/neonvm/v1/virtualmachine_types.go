@@ -159,7 +159,7 @@ type VirtualMachineSpec struct {
 	// +optional
 	TargetRevision *RevisionWithTime `json:"targetRevision,omitempty"`
 
-	// Use QMP scaling mode for CPU or online/offline CPU states.
+	// Controls how CPU scaling is performed, either hotplug new CPUs with QMP, or enable them in sysfs.
 	// +kubebuilder:validation:Enum=qmpScaling;sysfsScaling
 	// +optional
 	CpuScalingMode *string `json:"cpuScalingMode,omitempty"`
