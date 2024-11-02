@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -103,12 +102,12 @@ type LogConfig struct {
 
 // State holds all of the necessary internal state for a VM in order to make scaling
 // decisions
-type State struct {
-	internal state
+type State[A AlgorithmState] struct {
+	internal state[A]
 }
 
 // one level of indirection below State so that the fields can be public, and JSON-serializable
-type state struct {
+type state[A AlgorithmState] struct {
 	Config Config
 
 	// unused. Exists to make it easier to add print debugging (via .config.Warn) for a single call
@@ -130,9 +129,7 @@ type state struct {
 	// NeonVM records all state relevant to the NeonVM k8s API
 	NeonVM neonvmState
 
-	Metrics *SystemMetrics
-
-	LFCMetrics *LFCMetrics
+	Metrics A
 
 	// TargetRevision is the revision agent works towards.
 	TargetRevision vmv1.Revision
@@ -233,9 +230,9 @@ func (ns *neonvmState) ongoingRequest() bool {
 	return ns.OngoingRequested != nil
 }
 
-func NewState(vm api.VmInfo, config Config) *State {
-	return &State{
-		internal: state{
+func NewState[A AlgorithmState](vm api.VmInfo, config Config, algorithm A) *State[A] {
+	return &State[A]{
+		internal: state[A]{
 			Config: config,
 			Debug:  false,
 			VM:     vm,
@@ -262,37 +259,36 @@ func NewState(vm api.VmInfo, config Config) *State {
 				TargetRevision:   vmv1.ZeroRevision.WithTime(time.Time{}),
 				CurrentRevision:  vmv1.ZeroRevision,
 			},
-			Metrics:              nil,
-			LFCMetrics:           nil,
+			Metrics:              algorithm,
 			LastDesiredResources: nil,
 			TargetRevision:       vmv1.ZeroRevision,
 		},
 	}
 }
 
-func (s *state) info(msg string, fields ...zap.Field) {
+func (s *state[A]) info(msg string, fields ...zap.Field) {
 	if s.Config.Log.Info != nil {
 		s.Config.Log.Info(msg, fields...)
 	}
 }
 
-func (s *state) warn(msg string /* , fields ...zap.Field */) {
+func (s *state[A]) warn(msg string /* , fields ...zap.Field */) {
 	if s.Config.Log.Warn != nil {
 		s.Config.Log.Warn(msg /* , fields... */)
 	}
 }
 
-func (s *state) warnf(msg string, args ...any) {
+func (s *state[A]) warnf(msg string, args ...any) {
 	s.warn(fmt.Sprintf(msg, args...))
 }
 
 // NextActions is used to implement the state machine. It's a pure function that *just* indicates
 // what the executor should do.
-func (s *State) NextActions(now time.Time) ActionSet {
+func (s *State[A]) NextActions(now time.Time) ActionSet {
 	return s.internal.nextActions(now)
 }
 
-func (s *state) nextActions(now time.Time) ActionSet {
+func (s *state[A]) nextActions(now time.Time) ActionSet {
 	var actions ActionSet
 
 	desiredResources, calcDesiredResourcesWait := s.desiredResourcesFromMetricsOrRequestedUpscaling(now)
@@ -363,7 +359,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	return actions
 }
 
-func (s *state) calculatePluginAction(
+func (s *state[A]) calculatePluginAction(
 	now time.Time,
 	desiredResources api.Resources,
 ) (*ActionPluginRequest, *time.Duration) {
@@ -443,16 +439,9 @@ func (s *state) calculatePluginAction(
 	// The rest of the complication is just around accurate logging.
 	if timeForRequest || shouldRequestNewResources {
 		return &ActionPluginRequest{
-			LastPermit: s.Plugin.Permit,
-			Target:     permittedRequestResources,
-			// convert maybe-nil '*Metrics' to maybe-nil '*core.Metrics'
-			Metrics: func() *api.Metrics {
-				if s.Metrics != nil {
-					return lo.ToPtr(s.Metrics.ToAPI())
-				} else {
-					return nil
-				}
-			}(),
+			LastPermit:     s.Plugin.Permit,
+			Target:         permittedRequestResources,
+			Metrics:        s.Metrics.LatestAPIMetrics(),
 			TargetRevision: s.TargetRevision.WithTime(now),
 		}, nil
 	} else {
@@ -469,7 +458,7 @@ func (s *state) calculatePluginAction(
 
 func ptr[T any](t T) *T { return &t }
 
-func (s *state) calculateNeonVMAction(
+func (s *state[A]) calculateNeonVMAction(
 	now time.Time,
 	desiredResources api.Resources,
 	pluginRequested *api.Resources,
@@ -535,7 +524,7 @@ func (s *state) calculateNeonVMAction(
 	}
 }
 
-func (s *state) calculateMonitorUpscaleAction(
+func (s *state[A]) calculateMonitorUpscaleAction(
 	now time.Time,
 	desiredResources api.Resources,
 ) (*ActionMonitorUpscale, *time.Duration) {
@@ -605,7 +594,7 @@ func (s *state) calculateMonitorUpscaleAction(
 	}, nil
 }
 
-func (s *state) calculateMonitorDownscaleAction(
+func (s *state[A]) calculateMonitorDownscaleAction(
 	now time.Time,
 	desiredResources api.Resources,
 	plannedUpscaleRequest bool,
@@ -692,17 +681,17 @@ func (s *state) calculateMonitorDownscaleAction(
 	}, nil
 }
 
-func (s *state) scalingConfig() api.ScalingConfig {
+func (s *state[A]) scalingConfig() api.ScalingConfig {
 	// nb: WithOverrides allows its arg to be nil, in which case it does nothing.
 	return s.Config.DefaultScalingConfig.WithOverrides(s.VM.Config.ScalingConfig)
 }
 
 // public version, for testing.
-func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (api.Resources, func(ActionSet) *time.Duration) {
+func (s *State[A]) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (api.Resources, func(ActionSet) *time.Duration) {
 	return s.internal.desiredResourcesFromMetricsOrRequestedUpscaling(now)
 }
 
-func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (api.Resources, func(ActionSet) *time.Duration) {
+func (s *state[A]) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (api.Resources, func(ActionSet) *time.Duration) {
 	// There's some annoying edge cases that this function has to be able to handle properly. For
 	// the sake of completeness, they are:
 	//
@@ -727,17 +716,18 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
-	sg, goalCULogFields := calculateGoalCU(
+	sg, goalCULogFields := s.Metrics.CalculateGoalCU(
 		s.warn,
 		s.scalingConfig(),
 		s.Config.ComputeUnit,
-		s.Metrics,
-		s.LFCMetrics,
 	)
-	goalCU := sg.goalCU
+	goalCU := sg.GoalCU
 	// If we don't have all the metrics we need, we'll later prevent downscaling to avoid flushing
 	// the VM's cache on autoscaler-agent restart if we have SystemMetrics but not LFCMetrics.
-	hasAllMetrics := sg.hasAllMetrics
+	hasAllMetrics := sg.HasAllMetrics
+	if !hasAllMetrics {
+		s.warn("Making scaling decision without all required metrics available")
+	}
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
 	// requested upscaling or denied downscaling affected the outcome.
@@ -859,7 +849,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	return result, calculateWaitTime
 }
 
-func (s *state) updateTargetRevision(now time.Time, desired api.Resources, current api.Resources) {
+func (s *state[A]) updateTargetRevision(now time.Time, desired api.Resources, current api.Resources) {
 	if s.LastDesiredResources == nil {
 		s.LastDesiredResources = &current
 	}
@@ -881,7 +871,7 @@ func (s *state) updateTargetRevision(now time.Time, desired api.Resources, curre
 	s.TargetRevision = s.Config.RevisionSource.Next(now, flags)
 }
 
-func (s *state) updateNeonVMCurrentRevision(currentRevision vmv1.RevisionWithTime) {
+func (s *state[A]) updateNeonVMCurrentRevision(currentRevision vmv1.RevisionWithTime) {
 	revsource.Propagate(currentRevision.UpdatedAt.Time,
 		s.NeonVM.TargetRevision,
 		&s.NeonVM.CurrentRevision,
@@ -897,7 +887,7 @@ func (s *state) updateNeonVMCurrentRevision(currentRevision vmv1.RevisionWithTim
 	s.LastDesiredResources = nil
 }
 
-func (s *state) timeUntilRequestedUpscalingExpired(now time.Time) time.Duration {
+func (s *state[A]) timeUntilRequestedUpscalingExpired(now time.Time) time.Duration {
 	if s.Monitor.RequestedUpscale != nil {
 		return s.Monitor.RequestedUpscale.At.Add(s.Config.MonitorRequestedUpscaleValidPeriod).Sub(now)
 	} else {
@@ -908,7 +898,7 @@ func (s *state) timeUntilRequestedUpscalingExpired(now time.Time) time.Duration 
 // NB: we could just use s.plugin.computeUnit or s.monitor.requestedUpscale from inside the
 // function, but those are sometimes nil. This way, it's clear that it's the caller's responsibility
 // to ensure that the values are non-nil.
-func (s *state) requiredCUForRequestedUpscaling(computeUnit api.Resources, requestedUpscale requestedUpscale) uint32 {
+func (s *state[A]) requiredCUForRequestedUpscaling(computeUnit api.Resources, requestedUpscale requestedUpscale) uint32 {
 	var required uint32
 	requested := requestedUpscale.Requested
 	base := requestedUpscale.Base
@@ -925,7 +915,7 @@ func (s *state) requiredCUForRequestedUpscaling(computeUnit api.Resources, reque
 	return required
 }
 
-func (s *state) timeUntilDeniedDownscaleExpired(now time.Time) time.Duration {
+func (s *state[A]) timeUntilDeniedDownscaleExpired(now time.Time) time.Duration {
 	if s.Monitor.DeniedDownscale != nil {
 		return s.Monitor.DeniedDownscale.At.Add(s.Config.MonitorDeniedDownscaleCooldown).Sub(now)
 	} else {
@@ -935,7 +925,7 @@ func (s *state) timeUntilDeniedDownscaleExpired(now time.Time) time.Duration {
 
 // NB: like requiredCUForRequestedUpscaling, we make the caller provide the values so that it's
 // more clear that it's the caller's responsibility to ensure the values are non-nil.
-func (s *state) requiredCUForDeniedDownscale(computeUnit, deniedResources api.Resources) uint32 {
+func (s *state[A]) requiredCUForDeniedDownscale(computeUnit, deniedResources api.Resources) uint32 {
 	// note: floor(x / M) + 1 gives the minimum integer value greater than x / M.
 	requiredFromCPU := 1 + uint32(deniedResources.VCPU/computeUnit.VCPU)
 	requiredFromMem := 1 + uint32(deniedResources.Mem/computeUnit.Mem)
@@ -943,7 +933,7 @@ func (s *state) requiredCUForDeniedDownscale(computeUnit, deniedResources api.Re
 	return max(requiredFromCPU, requiredFromMem)
 }
 
-func (s *state) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources, denied deniedDownscale) api.Resources {
+func (s *state[A]) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources, denied deniedDownscale) api.Resources {
 	// for each resource, increase the value by one CU's worth, but not greater than the value we
 	// were at while attempting to downscale.
 	//
@@ -957,7 +947,7 @@ func (s *state) minRequiredResourcesForDeniedDownscale(computeUnit api.Resources
 
 // clampResources uses the directionality of the difference between s.vm.Using() and desired to
 // clamp the desired resources with the upper *or* lower bound
-func (s *state) clampResources(
+func (s *state[A]) clampResources(
 	current api.Resources,
 	desired api.Resources,
 	lowerBound *api.Resources,
@@ -995,7 +985,7 @@ func (s *state) clampResources(
 	return api.Resources{VCPU: cpu, Mem: mem}
 }
 
-func (s *state) monitorApprovedLowerBound() api.Resources {
+func (s *state[A]) monitorApprovedLowerBound() api.Resources {
 	if s.Monitor.Approved != nil {
 		return *s.Monitor.Approved
 	} else {
@@ -1003,7 +993,7 @@ func (s *state) monitorApprovedLowerBound() api.Resources {
 	}
 }
 
-func (s *state) pluginApprovedUpperBound() api.Resources {
+func (s *state[A]) pluginApprovedUpperBound() api.Resources {
 	if s.Plugin.Permit != nil {
 		return *s.Plugin.Permit
 	} else {
@@ -1017,11 +1007,11 @@ func (s *state) pluginApprovedUpperBound() api.Resources {
 
 // Debug sets s.debug = enabled. This method is exclusively meant to be used in tests, to make it
 // easier to enable print debugging only for a single call to NextActions, via s.warn() or otherwise.
-func (s *State) Debug(enabled bool) {
+func (s *State[A]) Debug(enabled bool) {
 	s.internal.Debug = enabled
 }
 
-func (s *State) UpdatedVM(vm api.VmInfo) {
+func (s *State[A]) UpdatedVM(vm api.VmInfo) {
 	// FIXME: overriding this is required right now because we trust that a successful request to
 	// NeonVM means the VM was already updated, which... isn't true, and otherwise we could run into
 	// sync issues.
@@ -1036,31 +1026,23 @@ func (s *State) UpdatedVM(vm api.VmInfo) {
 		s.internal.updateNeonVMCurrentRevision(*vm.CurrentRevision)
 	}
 
-	// Make sure that if LFC metrics are disabled & later enabled, we don't make decisions based on
-	// stale data.
-	if !*s.internal.scalingConfig().EnableLFCMetrics {
-		s.internal.LFCMetrics = nil
-	}
+	s.internal.Metrics.ScalingConfigUpdated(s.internal.scalingConfig())
 }
 
-func (s *State) UpdateSystemMetrics(metrics SystemMetrics) {
-	s.internal.Metrics = &metrics
-}
-
-func (s *State) UpdateLFCMetrics(metrics LFCMetrics) {
-	s.internal.LFCMetrics = &metrics
+func (s *State[A]) UpdateMetrics(update func(A)) {
+	update(s.internal.Metrics)
 }
 
 // PluginHandle provides write access to the scheduler plugin pieces of an UpdateState
-type PluginHandle struct {
-	s *state
+type PluginHandle[A AlgorithmState] struct {
+	s *state[A]
 }
 
-func (s *State) Plugin() PluginHandle {
-	return PluginHandle{&s.internal}
+func (s *State[A]) Plugin() PluginHandle[A] {
+	return PluginHandle[A]{&s.internal}
 }
 
-func (h PluginHandle) StartingRequest(now time.Time, resources api.Resources) {
+func (h PluginHandle[A]) StartingRequest(now time.Time, resources api.Resources) {
 	h.s.Plugin.LastRequest = &pluginRequested{
 		At:        now,
 		Resources: resources,
@@ -1068,12 +1050,12 @@ func (h PluginHandle) StartingRequest(now time.Time, resources api.Resources) {
 	h.s.Plugin.OngoingRequest = true
 }
 
-func (h PluginHandle) RequestFailed(now time.Time) {
+func (h PluginHandle[A]) RequestFailed(now time.Time) {
 	h.s.Plugin.OngoingRequest = false
 	h.s.Plugin.LastFailureAt = &now
 }
 
-func (h PluginHandle) RequestSuccessful(
+func (h PluginHandle[A]) RequestSuccessful(
 	now time.Time,
 	targetRevision vmv1.RevisionWithTime,
 	resp api.PluginResponse,
@@ -1118,15 +1100,15 @@ func (h PluginHandle) RequestSuccessful(
 }
 
 // MonitorHandle provides write access to the vm-monitor pieces of an UpdateState
-type MonitorHandle struct {
-	s *state
+type MonitorHandle[A AlgorithmState] struct {
+	s *state[A]
 }
 
-func (s *State) Monitor() MonitorHandle {
-	return MonitorHandle{&s.internal}
+func (s *State[A]) Monitor() MonitorHandle[A] {
+	return MonitorHandle[A]{&s.internal}
 }
 
-func (h MonitorHandle) Reset() {
+func (h MonitorHandle[A]) Reset() {
 	h.s.Monitor = monitorState{
 		OngoingRequest:     nil,
 		RequestedUpscale:   nil,
@@ -1138,7 +1120,7 @@ func (h MonitorHandle) Reset() {
 	}
 }
 
-func (h MonitorHandle) Active(active bool) {
+func (h MonitorHandle[A]) Active(active bool) {
 	if active {
 		approved := h.s.VM.Using()
 		h.s.Monitor.Approved = &approved // TODO: this is racy
@@ -1147,7 +1129,7 @@ func (h MonitorHandle) Active(active bool) {
 	}
 }
 
-func (h MonitorHandle) UpscaleRequested(now time.Time, resources api.MoreResources) {
+func (h MonitorHandle[A]) UpscaleRequested(now time.Time, resources api.MoreResources) {
 	h.s.Monitor.RequestedUpscale = &requestedUpscale{
 		At:        now,
 		Base:      *h.s.Monitor.Approved,
@@ -1155,7 +1137,7 @@ func (h MonitorHandle) UpscaleRequested(now time.Time, resources api.MoreResourc
 	}
 }
 
-func (h MonitorHandle) StartingUpscaleRequest(now time.Time, resources api.Resources) {
+func (h MonitorHandle[A]) StartingUpscaleRequest(now time.Time, resources api.Resources) {
 	h.s.Monitor.OngoingRequest = &ongoingMonitorRequest{
 		Kind:      monitorRequestKindUpscale,
 		Requested: resources,
@@ -1163,17 +1145,17 @@ func (h MonitorHandle) StartingUpscaleRequest(now time.Time, resources api.Resou
 	h.s.Monitor.UpscaleFailureAt = nil
 }
 
-func (h MonitorHandle) UpscaleRequestSuccessful(now time.Time) {
+func (h MonitorHandle[A]) UpscaleRequestSuccessful(now time.Time) {
 	h.s.Monitor.Approved = &h.s.Monitor.OngoingRequest.Requested
 	h.s.Monitor.OngoingRequest = nil
 }
 
-func (h MonitorHandle) UpscaleRequestFailed(now time.Time) {
+func (h MonitorHandle[A]) UpscaleRequestFailed(now time.Time) {
 	h.s.Monitor.OngoingRequest = nil
 	h.s.Monitor.UpscaleFailureAt = &now
 }
 
-func (h MonitorHandle) StartingDownscaleRequest(now time.Time, resources api.Resources) {
+func (h MonitorHandle[A]) StartingDownscaleRequest(now time.Time, resources api.Resources) {
 	h.s.Monitor.OngoingRequest = &ongoingMonitorRequest{
 		Kind:      monitorRequestKindDownscale,
 		Requested: resources,
@@ -1181,7 +1163,7 @@ func (h MonitorHandle) StartingDownscaleRequest(now time.Time, resources api.Res
 	h.s.Monitor.DownscaleFailureAt = nil
 }
 
-func (h MonitorHandle) DownscaleRequestAllowed(now time.Time, rev vmv1.RevisionWithTime) {
+func (h MonitorHandle[A]) DownscaleRequestAllowed(now time.Time, rev vmv1.RevisionWithTime) {
 	h.s.Monitor.Approved = &h.s.Monitor.OngoingRequest.Requested
 	h.s.Monitor.OngoingRequest = nil
 	revsource.Propagate(now,
@@ -1192,7 +1174,7 @@ func (h MonitorHandle) DownscaleRequestAllowed(now time.Time, rev vmv1.RevisionW
 }
 
 // Downscale request was successful but the monitor denied our request.
-func (h MonitorHandle) DownscaleRequestDenied(now time.Time, targetRevision vmv1.RevisionWithTime) {
+func (h MonitorHandle[A]) DownscaleRequestDenied(now time.Time, targetRevision vmv1.RevisionWithTime) {
 	h.s.Monitor.DeniedDownscale = &deniedDownscale{
 		At:        now,
 		Current:   *h.s.Monitor.Approved,
@@ -1206,25 +1188,25 @@ func (h MonitorHandle) DownscaleRequestDenied(now time.Time, targetRevision vmv1
 	)
 }
 
-func (h MonitorHandle) DownscaleRequestFailed(now time.Time) {
+func (h MonitorHandle[A]) DownscaleRequestFailed(now time.Time) {
 	h.s.Monitor.OngoingRequest = nil
 	h.s.Monitor.DownscaleFailureAt = &now
 }
 
-type NeonVMHandle struct {
-	s *state
+type NeonVMHandle[A AlgorithmState] struct {
+	s *state[A]
 }
 
-func (s *State) NeonVM() NeonVMHandle {
-	return NeonVMHandle{&s.internal}
+func (s *State[A]) NeonVM() NeonVMHandle[A] {
+	return NeonVMHandle[A]{&s.internal}
 }
 
-func (h NeonVMHandle) StartingRequest(now time.Time, resources api.Resources) {
+func (h NeonVMHandle[A]) StartingRequest(now time.Time, resources api.Resources) {
 	// FIXME: add time to ongoing request info (or maybe only in RequestFailed?)
 	h.s.NeonVM.OngoingRequested = &resources
 }
 
-func (h NeonVMHandle) RequestSuccessful(now time.Time) {
+func (h NeonVMHandle[A]) RequestSuccessful(now time.Time) {
 	if h.s.NeonVM.OngoingRequested == nil {
 		panic("received NeonVM().RequestSuccessful() update without ongoing request")
 	}
@@ -1240,7 +1222,7 @@ func (h NeonVMHandle) RequestSuccessful(now time.Time) {
 	h.s.NeonVM.OngoingRequested = nil
 }
 
-func (h NeonVMHandle) RequestFailed(now time.Time) {
+func (h NeonVMHandle[A]) RequestFailed(now time.Time) {
 	h.s.NeonVM.OngoingRequested = nil
 	h.s.NeonVM.RequestFailedAt = &now
 }

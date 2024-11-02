@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	"github.com/neondatabase/autoscaling/pkg/agent/core"
 )
 
 func (c *ExecutorCore) DoSleeper(ctx context.Context, logger *zap.Logger) {
@@ -60,7 +58,7 @@ func (c *ExecutorCore) DoSleeper(ctx context.Context, logger *zap.Logger) {
 			// Otherwise, trigger cache invalidation because we've waited for the requested
 			// amount of time:
 			default:
-				c.update(func(*core.State) {})
+				c.update(func(*coreState) {})
 				updates.Awake()
 				last = c.getActions()
 			}

@@ -22,7 +22,7 @@ func shallowCopy[T any](ptr *T) *T {
 //
 // It implements json.Marshaler.
 type StateDump struct {
-	internal state
+	internal state[*StdAlgorithm]
 }
 
 func (d StateDump) MarshalJSON() ([]byte, error) {
@@ -30,17 +30,16 @@ func (d StateDump) MarshalJSON() ([]byte, error) {
 }
 
 // Dump produces a JSON-serializable copy of the State
-func (s *State) Dump() StateDump {
+func DumpState(s *State[*StdAlgorithm]) StateDump {
 	return StateDump{
-		internal: state{
+		internal: state[*StdAlgorithm]{
 			Debug:                s.internal.Debug,
 			Config:               s.internal.Config,
 			VM:                   s.internal.VM,
 			Plugin:               s.internal.Plugin.deepCopy(),
 			Monitor:              s.internal.Monitor.deepCopy(),
 			NeonVM:               s.internal.NeonVM.deepCopy(),
-			Metrics:              shallowCopy[SystemMetrics](s.internal.Metrics),
-			LFCMetrics:           shallowCopy[LFCMetrics](s.internal.LFCMetrics),
+			Metrics:              shallowCopy[StdAlgorithm](s.internal.Metrics),
 			TargetRevision:       s.internal.TargetRevision,
 			LastDesiredResources: s.internal.LastDesiredResources,
 		},

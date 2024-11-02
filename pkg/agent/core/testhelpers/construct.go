@@ -19,10 +19,12 @@ type InitialVmInfoConfig struct {
 	MaxCU uint16
 }
 
-type InitialStateConfig struct {
+type InitialStateConfig[A core.AlgorithmState] struct {
 	VM InitialVmInfoConfig
 
 	Core core.Config
+
+	Algorithm func() A
 }
 
 type InitialStateOpt interface {
@@ -36,7 +38,10 @@ type VmInfoOpt interface {
 	modifyVmInfoWithConfig(InitialVmInfoConfig, *api.VmInfo)
 }
 
-func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *core.State {
+func CreateInitialState[A core.AlgorithmState](
+	config InitialStateConfig[A],
+	opts ...InitialStateOpt,
+) *core.State[A] {
 	vmOpts := []VmInfoOpt{}
 	for _, o := range opts {
 		if vo, ok := o.(VmInfoOpt); ok {
@@ -50,7 +55,7 @@ func CreateInitialState(config InitialStateConfig, opts ...InitialStateOpt) *cor
 		o.modifyStateConfig(&config.Core)
 	}
 
-	return core.NewState(vm, config.Core)
+	return core.NewState(vm, config.Core, config.Algorithm())
 }
 
 func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {

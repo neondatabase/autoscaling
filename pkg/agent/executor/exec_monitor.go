@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -54,7 +53,7 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		var monitorIface MonitorHandle
 		action := *last.actions.MonitorDownscale
 
-		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
+		if updated := c.updateIfActionsUnchanged(last, func(state *coreState) {
 			logger.Info("Starting vm-monitor downscale request", zap.Object("action", action))
 			startTime = time.Now()
 			monitorIface = c.clients.Monitor.GetHandle()
@@ -72,7 +71,7 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 		result, err := monitorIface.Downscale(ctx, ifaceLogger, action.Current, action.Target)
 		endTime := time.Now()
 
-		c.update(func(state *core.State) {
+		c.update(func(state *coreState) {
 			unchanged := generationUnchanged(monitorIface)
 			logFields := []zap.Field{
 				zap.Object("action", action),
@@ -144,7 +143,7 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 		var monitorIface MonitorHandle
 		action := *last.actions.MonitorUpscale
 
-		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
+		if updated := c.updateIfActionsUnchanged(last, func(state *coreState) {
 			logger.Info("Starting vm-monitor upscale request", zap.Object("action", action))
 			startTime = time.Now()
 			monitorIface = c.clients.Monitor.GetHandle()
@@ -162,7 +161,7 @@ func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger 
 		err := monitorIface.Upscale(ctx, ifaceLogger, action.Current, action.Target)
 		endTime := time.Now()
 
-		c.update(func(state *core.State) {
+		c.update(func(state *coreState) {
 			unchanged := generationUnchanged(monitorIface)
 			logFields := []zap.Field{
 				zap.Object("action", action),
