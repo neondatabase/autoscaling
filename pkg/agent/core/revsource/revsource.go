@@ -64,7 +64,7 @@ func (c *RevisionSource) Observe(moment time.Time, rev vmv1.Revision) error {
 	}
 
 	idx := rev.Value - c.offset
-	if idx > int64(len(c.measurements)) {
+	if idx >= int64(len(c.measurements)) {
 		return errors.New("revision is in the future")
 	}
 

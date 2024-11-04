@@ -93,7 +93,6 @@ func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) VmM
 		Use:      uint16(memSlots.Use),
 		SlotSize: Bytes(memSlotSize.Value()),
 	}
-
 }
 
 // VmConfig stores the autoscaling-specific "extra" configuration derived from labels and

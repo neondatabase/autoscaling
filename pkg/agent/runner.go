@@ -666,7 +666,6 @@ func (r *Runner) doNeonVMRequest(
 	// Also relevant: <https://github.com/neondatabase/autoscaling/issues/23>
 	_, err = r.global.vmClient.NeonvmV1().VirtualMachines(r.vmName.Namespace).
 		Patch(requestCtx, r.vmName.Name, ktypes.JSONPatchType, patchPayload, metav1.PatchOptions{})
-
 	if err != nil {
 		errMsg := util.RootError(err).Error()
 		// Some error messages contain the object name. We could try to filter them all out, but

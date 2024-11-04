@@ -17,7 +17,6 @@ func doAcquire(
 	vmName string,
 	vmNamespace string,
 ) (net.IPNet, []whereaboutstypes.IPReservation, error) {
-
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 
@@ -48,7 +47,6 @@ func doRelease(
 	vmName string,
 	vmNamespace string,
 ) (net.IPNet, []whereaboutstypes.IPReservation, error) {
-
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 

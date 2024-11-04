@@ -742,10 +742,12 @@ func keyForObj[T any](obj *T) util.NamespacedName {
 func (i *NameIndex[T]) Add(obj *T) {
 	i.namespacedNames[keyForObj(obj)] = obj
 }
+
 func (i *NameIndex[T]) Update(oldObj, newObj *T) {
 	i.Delete(oldObj)
 	i.Add(newObj)
 }
+
 func (i *NameIndex[T]) Delete(obj *T) {
 	delete(i.namespacedNames, keyForObj(obj))
 }
@@ -781,10 +783,12 @@ func getName[T any](obj *T) string {
 func (i *FlatNameIndex[T]) Add(obj *T) {
 	i.names[getName(obj)] = obj
 }
+
 func (i *FlatNameIndex[T]) Update(oldObj, newObj *T) {
 	i.Delete(oldObj)
 	i.Add(newObj)
 }
+
 func (i *FlatNameIndex[T]) Delete(obj *T) {
 	delete(i.names, getName(obj))
 }
