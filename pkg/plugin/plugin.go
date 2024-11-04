@@ -22,8 +22,10 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
 
-const Name = "AutoscaleEnforcer"
-const LabelPluginCreatedMigration = "autoscaling.neon.tech/created-by-scheduler"
+const (
+	Name                        = "AutoscaleEnforcer"
+	LabelPluginCreatedMigration = "autoscaling.neon.tech/created-by-scheduler"
+)
 
 // AutoscaleEnforcer is the scheduler plugin to coordinate autoscaling
 type AutoscaleEnforcer struct {
@@ -40,16 +42,20 @@ type AutoscaleEnforcer struct {
 }
 
 // abbreviations, because these types are pretty verbose
-type IndexedVMStore = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]
-type IndexedNodeStore = watch.IndexedStore[corev1.Node, *watch.FlatNameIndex[corev1.Node]]
+type (
+	IndexedVMStore   = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]
+	IndexedNodeStore = watch.IndexedStore[corev1.Node, *watch.FlatNameIndex[corev1.Node]]
+)
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
-var _ framework.Plugin = (*AutoscaleEnforcer)(nil)
-var _ framework.PreFilterPlugin = (*AutoscaleEnforcer)(nil)
-var _ framework.PostFilterPlugin = (*AutoscaleEnforcer)(nil)
-var _ framework.FilterPlugin = (*AutoscaleEnforcer)(nil)
-var _ framework.ScorePlugin = (*AutoscaleEnforcer)(nil)
-var _ framework.ReservePlugin = (*AutoscaleEnforcer)(nil)
+var (
+	_ framework.Plugin           = (*AutoscaleEnforcer)(nil)
+	_ framework.PreFilterPlugin  = (*AutoscaleEnforcer)(nil)
+	_ framework.PostFilterPlugin = (*AutoscaleEnforcer)(nil)
+	_ framework.FilterPlugin     = (*AutoscaleEnforcer)(nil)
+	_ framework.ScorePlugin      = (*AutoscaleEnforcer)(nil)
+	_ framework.ReservePlugin    = (*AutoscaleEnforcer)(nil)
+)
 
 func NewAutoscaleEnforcerPlugin(ctx context.Context, logger *zap.Logger, config *Config) func(runtime.Object, framework.Handle) (framework.Plugin, error) {
 	return func(obj runtime.Object, h framework.Handle) (framework.Plugin, error) {

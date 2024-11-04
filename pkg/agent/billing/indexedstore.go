@@ -37,10 +37,12 @@ func (i *VMNodeIndex) Add(vm *vmapi.VirtualMachine) {
 		i.forNode[vm.UID] = vm
 	}
 }
+
 func (i *VMNodeIndex) Update(oldVM, newVM *vmapi.VirtualMachine) {
 	i.Delete(oldVM)
 	i.Add(newVM)
 }
+
 func (i *VMNodeIndex) Delete(vm *vmapi.VirtualMachine) {
 	// note: delete is a no-op if the key isn't present.
 	delete(i.forNode, vm.UID)

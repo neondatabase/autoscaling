@@ -27,7 +27,6 @@ var (
 )
 
 func main() {
-
 	opts := zap.Options{ //nolint:exhaustruct // typical options struct; not all fields expected to be filled.
 		Development:     true,
 		StacktraceLevel: zapcore.Level(zapcore.PanicLevel),
@@ -90,5 +89,4 @@ func main() {
 		time.Sleep(time.Millisecond * 200)
 	}
 	wg.Wait()
-
 }
