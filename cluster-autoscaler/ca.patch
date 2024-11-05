@@ -1,5 +1,5 @@
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
-index d0033550f..fa3c2ec30 100644
+index 198fdfb37..d534fc1ef 100644
 --- a/cluster-autoscaler/utils/kubernetes/listers.go
 +++ b/cluster-autoscaler/utils/kubernetes/listers.go
 @@ -17,14 +17,19 @@ limitations under the License.
@@ -22,15 +22,7 @@ index d0033550f..fa3c2ec30 100644
  	client "k8s.io/client-go/kubernetes"
  	v1appslister "k8s.io/client-go/listers/apps/v1"
  	v1batchlister "k8s.io/client-go/listers/batch/v1"
-@@ -185,6 +190,7 @@ func NewUnschedulablePodInNamespaceLister(kubeClient client.Interface, namespace
- 	selector := fields.ParseSelectorOrDie("spec.nodeName==" + "" + ",status.phase!=" +
- 		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
- 	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
-+	podListWatch = wrapListWatchWithNeonVMUsage(podListWatch)
- 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
- 	podLister := v1lister.NewPodLister(store)
- 	go reflector.Run(stopchannel)
-@@ -209,6 +215,7 @@ func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struc
+@@ -169,6 +174,7 @@ func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struc
  	selector := fields.ParseSelectorOrDie("spec.nodeName!=" + "" + ",status.phase!=" +
  		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
  	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", apiv1.NamespaceAll, selector)
@@ -38,7 +30,15 @@ index d0033550f..fa3c2ec30 100644
  	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
  	podLister := v1lister.NewPodLister(store)
  	go reflector.Run(stopchannel)
-@@ -218,6 +225,105 @@ func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struc
+@@ -212,6 +218,7 @@ func NewScheduledAndUnschedulablePodLister(kubeClient client.Interface, stopchan
+ 	selector := fields.ParseSelectorOrDie("status.phase!=" +
+ 		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
+ 	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", apiv1.NamespaceAll, selector)
++	podListWatch = wrapListWatchWithNeonVMUsage(podListWatch)
+ 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
+ 	podLister := v1lister.NewPodLister(store)
+ 	go reflector.Run(stopchannel)
+@@ -221,6 +228,105 @@ func NewScheduledAndUnschedulablePodLister(kubeClient client.Interface, stopchan
  	}
  }
  
