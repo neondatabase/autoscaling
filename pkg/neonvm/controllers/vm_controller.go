@@ -501,15 +501,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
 				})
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
-				})
 		default:
 			// do nothing
 		}
@@ -629,15 +620,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
 				})
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
-				})
 		default:
 			// do nothing
 		}
@@ -690,16 +672,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
-				})
-			return nil
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
 				})
 			return nil
 		default:
@@ -959,7 +931,6 @@ func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualM
 type runnerStatusKind string
 
 const (
-	runnerUnknown   runnerStatusKind = "Unknown"
 	runnerPending   runnerStatusKind = "Pending"
 	runnerRunning   runnerStatusKind = "Running"
 	runnerFailed    runnerStatusKind = "Failed"
@@ -986,8 +957,6 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 		return runnerSucceeded
 	case corev1.PodFailed:
 		return runnerFailed
-	case corev1.PodUnknown:
-		return runnerUnknown
 	case corev1.PodRunning:
 		return runnerRunning
 	default:
