@@ -13,8 +13,10 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zapio"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
+	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	"github.com/neondatabase/autoscaling/pkg/plugin"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -65,7 +67,9 @@ func runProgram(logger *zap.Logger) (err error) {
 	// everything fit nicely, we'll redirect it to zap as well.
 	redirectKlog(logger.Named("klog"))
 
-	constructor := plugin.NewAutoscaleEnforcerPlugin(ctx, logger, conf)
+	constructor := func(ctx context.Context, configuration runtime.Object, f framework.Handle) (framework.Plugin, error) {
+		return plugin.NewAutoscaleEnforcerPlugin(ctx, logger, conf)(configuration, f)
+	}
 	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, constructor))
 	// Don't output the full usage whenever any error occurs (otherwise, startup errors get drowned
 	// out by many pages of scheduler command flags)
