@@ -17,7 +17,7 @@ PG16_DISK_TEST_IMG ?= pg16-disk-test:dev
 GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
 
-# The target architecture for linux kernel. Possible values: amd64 or arm64. 
+# The target architecture for linux kernel. Possible values: amd64 or arm64.
 # Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile.kernel-builder
 KERNEL_TARGET_ARCH ?= amd64
 
@@ -141,7 +141,7 @@ build: vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go 
+	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go
 .PHONY: run
 run: vet ## Run a controller from your host.
 	go run ./neonvm/main.go
@@ -491,7 +491,7 @@ KUTTL ?= $(LOCALBIN)/kuttl
 KUTTL_VERSION ?= v0.16.0
 
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.28.12
+KUBECTL_VERSION ?= v1.29.10
 
 KIND ?= $(LOCALBIN)/kind
 # https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0, supports k8s up to 1.30

@@ -57,8 +57,8 @@ var (
 	_ framework.ReservePlugin    = (*AutoscaleEnforcer)(nil)
 )
 
-func NewAutoscaleEnforcerPlugin(logger *zap.Logger, config *Config) func(context.Context, runtime.Object, framework.Handle) (framework.Plugin, error) {
-	return func(ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
+func NewAutoscaleEnforcerPlugin(ctx context.Context, logger *zap.Logger, config *Config) func(context.Context, runtime.Object, framework.Handle) (framework.Plugin, error) {
+	return func(_ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
 		return makeAutoscaleEnforcerPlugin(ctx, logger, h, config)
 	}
 }
