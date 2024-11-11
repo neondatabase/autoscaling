@@ -136,14 +136,8 @@ jobs:
           # to the tagged commit.
           echo "info=$(git describe --tags --long --dirty)" >> $GITHUB_OUTPUT
 
-      - name: get CA base git tag
-        id: get-ca-tag
-        if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
-        run: |
-          echo "tag=$(cat cluster-autoscaler/ca.tag)" >> $GITHUB_OUTPUT
-
       - name: set custom docker config directory
-        uses: ./.github/actions/set-docker-config-dir
+        uses: neondatabase/dev-actions/set-docker-config-dir@6094485bf440001c94a94a3f9e221e81ff6b6193
 
       - uses: docker/setup-buildx-action@v3
         with:
@@ -307,8 +301,6 @@ jobs:
           tags: ${{ needs.tags.outputs.cluster-autoscaler }}
           cache-from: type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache,mode=max' || '' }}
-          build-args: |
-            CA_GIT_TAG=${{ steps.get-ca-tag.outputs.tag }}
 
       - name: Copy all images to ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
