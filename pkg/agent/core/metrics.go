@@ -94,6 +94,11 @@ func (m *SystemMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) e
 	}
 
 	load1 := getFloat("host_load1")
+	// If neonvm-daemon's improved load average metric is available, we should use that instead.
+	if _, ok := mfs["neonvmd_load1"]; ok {
+		load1 = getFloat("neonvmd_load1")
+	}
+
 	memTotal := getFloat("host_memory_total_bytes")
 	memAvailable := getFloat("host_memory_available_bytes")
 	memCached := getFloat("host_memory_cached_bytes")

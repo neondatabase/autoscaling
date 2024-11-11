@@ -5,6 +5,12 @@ api:
   address: "0.0.0.0:8686"
   playground: false
 sources:
+  neonvmd:
+    type: prometheus_scrape
+    endpoints:
+      - http://localhost:9101/metrics
+    scrape_interval_secs: 1
+
   host_metrics:
     filesystem:
       devices:
