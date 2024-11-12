@@ -188,8 +188,7 @@ jobs:
 
           # `docker/build-push-action@v6` returns all ${TAGS} in metadata ("image.name" field), so it can't be used a image name right away.
           # Choose one of them as a "canonical" tag and use it to construct the job output (along with a digest provided by `docker/build-push-action@v6`).
-          echo "canonical=${VM_KERNEL_IMAGE}:${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
-          echo "canonical_placeholder=${VM_KERNEL_IMAGE_PLACEHOLDER}:${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
+          { echo "canonical=${VM_KERNEL_IMAGE}:${GITHUB_RUN_ID}"; echo "canonical_placeholder=${VM_KERNEL_IMAGE_PLACEHOLDER}:${GITHUB_RUN_ID}" } >> $GITHUB_OUTPUT
 
 
       - name: build linux kernel
