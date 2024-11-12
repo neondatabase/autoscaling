@@ -101,7 +101,6 @@ func (r *VMReconciler) handleCPUScalingSysfs(ctx context.Context, vm *vmv1.Virtu
 	}
 	r.updateVMStatusCPU(ctx, vm, vmRunner, cgroupUsage.VCPUs.RoundedUp(), cgroupUsage)
 	return true, nil
-
 }
 
 func (r *VMReconciler) handleCgroupCPUUpdate(ctx context.Context, vm *vmv1.VirtualMachine, cgroupUsage *api.VCPUCgroup) (bool, error) {

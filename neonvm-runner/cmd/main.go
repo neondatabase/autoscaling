@@ -1052,7 +1052,10 @@ func runQEMU(
 	go terminateQemuOnSigterm(ctx, logger, &wg)
 
 	var callbacks cpuServerCallbacks
-
+	// lastValue is used to store last fractional CPU request
+	// we need to store the value as is because we can't convert it back from MilliCPU
+	// and otherwise we would have infinite reconciliation loop
+	// this will eventually be dropped in favor of real fractional CPU scaling based on the cgroups
 	lastValue := &atomic.Uint32{}
 	lastValue.Store(uint32(vmSpec.Guest.CPUs.Min))
 

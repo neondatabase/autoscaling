@@ -11,8 +11,7 @@ import (
 // CPU directory path
 const cpuPath = "/sys/devices/system/cpu/"
 
-type CPUSysFsStateScaler struct {
-}
+type CPUSysFsStateScaler struct{}
 
 func (c *CPUSysFsStateScaler) EnsureOnlineCPUs(targetCount int) error {
 	cpus, err := getAllCPUs()
@@ -187,7 +186,7 @@ func setCPUOnline(cpu int, online bool) error {
 		state = "1"
 	}
 
-	err := os.WriteFile(filepath.Join(cpuPath, fmt.Sprintf("cpu%d/online", cpu)), []byte(state), 0644)
+	err := os.WriteFile(filepath.Join(cpuPath, fmt.Sprintf("cpu%d/online", cpu)), []byte(state), 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to set CPU %d online status: %w", cpu, err)
 	}

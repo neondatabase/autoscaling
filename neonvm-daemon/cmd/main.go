@@ -89,7 +89,6 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *cpuServer) run(addr string) {
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cpu", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
