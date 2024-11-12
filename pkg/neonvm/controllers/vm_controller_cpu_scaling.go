@@ -16,7 +16,6 @@ import (
 // if vm scaling mode is set to CpuSysfsState, the scaling is delegated to neonvm-daemon
 // otherwise the scaling is first done by scaling amount of cores in the VM using QMP and then by updating the cgroup
 func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
-
 	log := log.FromContext(ctx)
 	useCpuSysfsStateScaling := *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeSysfs
 
