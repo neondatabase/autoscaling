@@ -60,7 +60,6 @@ func TestAzureClient_send(t *testing.T) {
 		ctx     context.Context
 		cfg     AzureBlobStorageClientConfig
 		payload []byte
-		traceID string
 		client  *AzureClient
 	}
 	type output struct {
@@ -144,7 +143,7 @@ func TestAzureClient_send(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			i := &input{ //nolint:exhaustruct // OK for tests
+			i := &input{
 				payload: payload,
 				ctx:     ctx,
 				cfg:     cfg,
@@ -152,7 +151,7 @@ func TestAzureClient_send(t *testing.T) {
 			}
 			tt.when(t, i)
 
-			err = i.client.NewRequest(i.traceID).Send(ctx, i.payload)
+			err = i.client.NewRequest().Send(ctx, i.payload)
 
 			tt.then(t, output{
 				err: err,

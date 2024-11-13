@@ -52,7 +52,6 @@ func NewS3Client(
 	defer cancel()
 
 	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
-
 	if err != nil {
 		return nil, S3Error{Err: err}
 	}
@@ -73,7 +72,7 @@ func NewS3Client(
 }
 
 // NewRequest implements BaseClient
-func (c *S3Client) NewRequest(traceID string) ClientRequest {
+func (c *S3Client) NewRequest() ClientRequest {
 	return &s3Request{
 		S3Client: c,
 		key:      c.generateKey(),
@@ -107,7 +106,6 @@ func (r *s3Request) Send(ctx context.Context, payload []byte) SimplifiableError 
 		Key:    &r.key,
 		Body:   body,
 	})
-
 	if err != nil {
 		return S3Error{Err: err}
 	}

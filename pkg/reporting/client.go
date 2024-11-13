@@ -11,11 +11,10 @@ import (
 )
 
 type Client[E any] struct {
-	Name            string
-	Base            BaseClient
-	BaseConfig      BaseClientConfig
-	GenerateTraceID func() string
-	SerializeBatch  func(events []E) ([]byte, SimplifiableError)
+	Name           string
+	Base           BaseClient
+	BaseConfig     BaseClientConfig
+	SerializeBatch func(events []E) ([]byte, SimplifiableError)
 }
 
 // BaseClient is the shared lower-level interface to send the processed data somewhere.
@@ -25,7 +24,7 @@ type Client[E any] struct {
 //
 // See S3Client, AzureBlobClient, and HTTPClient.
 type BaseClient interface {
-	NewRequest(traceID string) ClientRequest
+	NewRequest() ClientRequest
 }
 
 var (

@@ -100,14 +100,11 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 			return
 		}
 
-		traceID := s.client.GenerateTraceID()
-
-		req := s.client.Base.NewRequest(traceID)
+		req := s.client.Base.NewRequest()
 
 		logger.Info(
 			"Pushing events",
 			zap.Int("count", count),
-			zap.String("traceID", traceID),
 			req.LogFields(),
 		)
 
@@ -135,7 +132,6 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 				"Failed to push billing events",
 				zap.Int("count", count),
 				zap.Duration("after", reqDuration),
-				zap.String("traceID", traceID),
 				req.LogFields(),
 				zap.Int("total", total),
 				zap.Duration("totalTime", time.Since(startTime)),
@@ -158,7 +154,6 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 			"Successfully pushed some events",
 			zap.Int("count", count),
 			zap.Duration("after", reqDuration),
-			zap.String("traceID", string(traceID)),
 			req.LogFields(),
 			zap.Int("total", total),
 			zap.Duration("totalTime", currentTotalTime),

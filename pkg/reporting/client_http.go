@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/lithammer/shortuuid"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -58,10 +59,10 @@ func NewHTTPClient(client *http.Client, cfg HTTPClientConfig) HTTPClient {
 }
 
 // NewRequest implements BaseClient
-func (c HTTPClient) NewRequest(traceID string) ClientRequest {
+func (c HTTPClient) NewRequest() ClientRequest {
 	return &httpRequest{
 		HTTPClient: c,
-		traceID:    traceID,
+		traceID:    shortuuid.New(),
 	}
 }
 
@@ -100,6 +101,7 @@ func (r *httpRequest) LogFields() zap.Field {
 	return zap.Inline(zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
 		enc.AddString("url", r.cfg.URL)
 		enc.AddString("method", r.cfg.Method)
+		enc.AddString("traceID", r.traceID)
 		return nil
 	}))
 }

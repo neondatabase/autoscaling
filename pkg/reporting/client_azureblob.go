@@ -83,7 +83,7 @@ func NewAzureBlobStorageClientWithBaseClient(
 }
 
 // NewRequest implements BaseClient
-func (c AzureClient) NewRequest(traceID string) ClientRequest {
+func (c AzureClient) NewRequest() ClientRequest {
 	return &azureRequest{
 		AzureClient: c,
 		key:         c.generateKey(),
