@@ -3,9 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
-	"net/http"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,7 +13,7 @@ import (
 	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/billing"
-	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/reporting"
 )
 
 type Config struct {
@@ -24,33 +22,6 @@ type Config struct {
 	ActiveTimeMetricName   string        `json:"activeTimeMetricName"`
 	CollectEverySeconds    uint          `json:"collectEverySeconds"`
 	AccumulateEverySeconds uint          `json:"accumulateEverySeconds"`
-}
-
-type ClientsConfig struct {
-	AzureBlob *AzureBlobStorageConfig `json:"azureBlob"`
-	HTTP      *HTTPClientConfig       `json:"http"`
-	S3        *S3ClientConfig         `json:"s3"`
-}
-
-type AzureBlobStorageConfig struct {
-	BaseClientConfig
-	billing.AzureBlobStorageClientConfig
-}
-
-type HTTPClientConfig struct {
-	BaseClientConfig
-	URL string `json:"url"`
-}
-
-type S3ClientConfig struct {
-	BaseClientConfig
-	billing.S3ClientConfig
-}
-
-type BaseClientConfig struct {
-	PushEverySeconds          uint `json:"pushEverySeconds"`
-	PushRequestTimeoutSeconds uint `json:"pushRequestTimeoutSeconds"`
-	MaxBatchSize              uint `json:"maxBatchSize"`
 }
 
 type metricsState struct {
@@ -94,60 +65,39 @@ type vmMetricsSeconds struct {
 
 type MetricsCollector struct {
 	conf    *Config
-	clients []clientInfo
+	sink    *reporting.EventSink[*billing.IncrementalEvent]
+	metrics PromMetrics
 }
 
 func NewMetricsCollector(
 	ctx context.Context,
 	parentLogger *zap.Logger,
 	conf *Config,
+	metrics PromMetrics,
 ) (*MetricsCollector, error) {
 	logger := parentLogger.Named("billing")
-	mc := &MetricsCollector{
+
+	clients, err := createClients(ctx, logger, conf.Clients)
+	if err != nil {
+		return nil, err
+	}
+
+	sink := reporting.NewEventSink(logger, metrics.reporting, clients...)
+
+	return &MetricsCollector{
 		conf:    conf,
-		clients: make([]clientInfo, 0),
-	}
-
-	if c := conf.Clients.AzureBlob; c != nil {
-		client, err := billing.NewAzureBlobStorageClient(c.AzureBlobStorageClientConfig)
-		if err != nil {
-			return nil, fmt.Errorf("error creating AzureBlobStorageClient: %w", err)
-		}
-		mc.clients = append(mc.clients, clientInfo{
-			client: client,
-			name:   "azureblob",
-			config: c.BaseClientConfig,
-		})
-	}
-	if c := conf.Clients.HTTP; c != nil {
-		mc.clients = append(mc.clients, clientInfo{
-			client: billing.NewHTTPClient(c.URL, http.DefaultClient),
-			name:   "http",
-			config: c.BaseClientConfig,
-		})
-	}
-	if c := conf.Clients.S3; c != nil {
-		client, err := billing.NewS3Client(ctx, c.S3ClientConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create S3 client: %w", err)
-		}
-		logger.Info("Created S3 client", client.LogFields())
-		mc.clients = append(mc.clients, clientInfo{
-			client: client,
-			name:   "s3",
-			config: c.BaseClientConfig,
-		})
-	}
-
-	return mc, nil
+		sink:    sink,
+		metrics: metrics,
+	}, nil
 }
 
 func (mc *MetricsCollector) Run(
 	ctx context.Context,
 	logger *zap.Logger,
 	store VMStoreForNode,
-	metrics PromMetrics,
 ) error {
+	logger = logger.Named("collect")
+
 	collectTicker := time.NewTicker(time.Second * time.Duration(mc.conf.CollectEverySeconds))
 	defer collectTicker.Stop()
 	// Offset by half a second, so it's a bit more deterministic.
@@ -162,29 +112,7 @@ func (mc *MetricsCollector) Run(
 		pushWindowStart: time.Now(),
 	}
 
-	var queueWriters []eventQueuePusher[*billing.IncrementalEvent]
-
-	for _, c := range mc.clients {
-		qw, queueReader := newEventQueue[*billing.IncrementalEvent](metrics.queueSizeCurrent.WithLabelValues(c.name))
-		queueWriters = append(queueWriters, qw)
-
-		// Start the sender
-		signalDone, thisThreadFinished := util.NewCondChannelPair()
-		defer signalDone.Send() //nolint:gocritic // this defer-in-loop is intentional.
-		sender := eventSender{
-			clientInfo:        c,
-			metrics:           metrics,
-			queue:             queueReader,
-			collectorFinished: thisThreadFinished,
-			lastSendDuration:  0,
-		}
-		go sender.senderLoop(logger.Named(fmt.Sprintf("send-%s", c.name)))
-	}
-
-	// The rest of this function is to do with collection
-	logger = logger.Named("collect")
-
-	state.collect(logger, store, metrics)
+	state.collect(logger, store, mc.metrics)
 
 	for {
 		select {
@@ -195,10 +123,10 @@ func (mc *MetricsCollector) Run(
 				logger.Panic("Validation check failed", zap.Error(err))
 				return err
 			}
-			state.collect(logger, store, metrics)
+			state.collect(logger, store, mc.metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
-			state.drainEnqueue(logger, mc.conf, billing.GetHostname(), queueWriters)
+			state.drainEnqueue(logger, mc.conf, billing.GetHostname(), mc.sink)
 		case <-ctx.Done():
 			return nil
 		}
@@ -331,18 +259,18 @@ func logAddedEvent(logger *zap.Logger, event *billing.IncrementalEvent) *billing
 }
 
 // drainEnqueue clears the current history, adding it as events to the queue
-func (s *metricsState) drainEnqueue(logger *zap.Logger, conf *Config, hostname string, queues []eventQueuePusher[*billing.IncrementalEvent]) {
+func (s *metricsState) drainEnqueue(
+	logger *zap.Logger,
+	conf *Config,
+	hostname string,
+	sink *reporting.EventSink[*billing.IncrementalEvent],
+) {
 	now := time.Now()
 
 	countInBatch := 0
 	batchSize := 2 * len(s.historical)
 
-	// Helper function that adds an event to all queues
-	enqueue := func(event *billing.IncrementalEvent) {
-		for _, q := range queues {
-			q.enqueue(event)
-		}
-	}
+	enqueue := sink.Enqueue
 
 	for key, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
