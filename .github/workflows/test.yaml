@@ -63,7 +63,7 @@ jobs:
           aws s3 cp cover.html "s3://${BUCKET}/${BUCKET_PATH}/${COMMIT_SHA}/index.html"
       - name: "Code coverage report"
         uses: fgrosse/go-coverage-report@v1.2.0
-        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request')}}
+        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request' && github.event.base_ref == 'main') }}
         with:
           coverage-artifact-name: "code-coverage"
           coverage-file-name: "cover.out"

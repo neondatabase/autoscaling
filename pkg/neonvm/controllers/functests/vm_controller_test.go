@@ -36,7 +36,6 @@ import (
 
 var _ = Describe("VirtualMachine controller", func() {
 	Context("VirtualMachine controller test", func() {
-
 		const VirtualMachineName = "test-virtualmachine"
 
 		ctx := context.Background()

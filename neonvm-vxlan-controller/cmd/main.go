@@ -31,9 +31,7 @@ const (
 	extraNetCidr      = "10.100.0.0/16"
 )
 
-var (
-	deleteIfaces = flag.Bool("delete", false, `delete VXLAN interfaces`)
-)
+var deleteIfaces = flag.Bool("delete", false, `delete VXLAN interfaces`)
 
 func main() {
 	flag.Parse()
@@ -192,7 +190,6 @@ func createVxlanInterface(name string, vxlanID int, ownIP string, bridgeName str
 }
 
 func updateFDB(vxlanName string, nodeIPs []string, ownIP string) error {
-
 	broadcastFdbMac, _ := net.ParseMAC("00:00:00:00:00:00")
 
 	// get vxlan interface details
@@ -248,7 +245,6 @@ func deleteLink(name string) error {
 }
 
 func upsertIptablesRules() error {
-
 	// manage iptables
 	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Timeout(5))
 	if err != nil {

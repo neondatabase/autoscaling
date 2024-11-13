@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: set custom docker config directory
-        uses: ./.github/actions/set-docker-config-dir
+        uses: neondatabase/dev-actions/set-docker-config-dir@6094485bf440001c94a94a3f9e221e81ff6b6193
 
       - uses: docker/setup-buildx-action@v3
       - name: Login to Docker cache registry
@@ -32,11 +32,6 @@ jobs:
           username: ${{ secrets.NEON_CI_DOCKERCACHE_USERNAME }}
           password: ${{ secrets.NEON_CI_DOCKERCACHE_PASSWORD }}
 
-      - name: get CA base git tag
-        id: get-ca-tag
-        run: |
-          echo "tag=$(cat cluster-autoscaler/ca.tag)" | tee -a $GITHUB_OUTPUT
-
       - name: Build cluster-autoscaler image
         uses: docker/build-push-action@v6
         with:
@@ -45,5 +40,3 @@ jobs:
           push: false
           file: cluster-autoscaler/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
-          build-args: |
-            CA_GIT_TAG=${{ steps.get-ca-tag.outputs.tag }}

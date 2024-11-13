@@ -3,6 +3,9 @@ name: vm-example
 on:
   schedule:
     - cron:  '42 4 * * 2'  # run once a week
+  pull_request:
+    paths:
+      - ".github/workflows/vm-example.yaml"
   workflow_dispatch: # adds ability to run this manually
 
 jobs:
@@ -18,6 +21,9 @@ jobs:
         with:
           go-version-file: 'go.mod'
         timeout-minutes: 10
+
+      - name: build daemon
+        run:  make docker-build-daemon
 
       - name: build vm-builder
         run:  make bin/vm-builder

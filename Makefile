@@ -33,6 +33,8 @@ endif
 # https://github.com/neondatabase/autoscaling/pull/130#issuecomment-1496276620
 export GOFLAGS=-buildvcs=false
 
+GOFUMPT_VERSION ?= v0.7.0
+
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
 SHELL = /usr/bin/env bash -o pipefail
@@ -108,7 +110,7 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
-	go fmt ./...
+	go run mvdan.cc/gofumpt@${GOFUMPT_VERSION} -w .
 
 .PHONY: vet
 vet: ## Run go vet against code.
@@ -119,7 +121,7 @@ vet: ## Run go vet against code.
 
 TESTARGS ?= ./...
 .PHONY: test
-test: fmt vet envtest ## Run tests.
+test: vet envtest ## Run tests.
 	# chmodding KUBEBUILDER_ASSETS dir to make it deletable by owner,
 	# otherwise it fails with actions/checkout on self-hosted GitHub runners
 	# 	ref: https://github.com/kubernetes-sigs/controller-runtime/pull/2245
@@ -132,7 +134,7 @@ test: fmt vet envtest ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: fmt vet bin/vm-builder ## Build all neonvm binaries.
+build: vet bin/vm-builder ## Build all neonvm binaries.
 	GOOS=linux go build -o bin/controller       neonvm/main.go
 	GOOS=linux go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
 	GOOS=linux go build -o bin/runner           neonvm/runner/*.go
@@ -141,7 +143,7 @@ build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 bin/vm-builder: ## Build vm-builder binary.
 	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go 
 .PHONY: run
-run: fmt vet ## Run a controller from your host.
+run: vet ## Run a controller from your host.
 	go run ./neonvm/main.go
 
 .PHONY: lint
