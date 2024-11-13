@@ -265,9 +265,9 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			state := core.NewState(makeVM(), makeStateConfig(c.enableLFCMetrics), core.DefaultAlgorithm())
 
 			// set the metrics
-			state.UpdateMetrics(func(a *core.StdAlgorithm) {
-				a.System = c.systemMetrics
-				a.LFC = c.lfcMetrics
+			state.UpdateAlgorithmState(func(a *core.StdAlgorithm) {
+				a.SystemMetrics = c.systemMetrics
+				a.LFCMetrics = c.lfcMetrics
 			})
 
 			now := time.Now()
@@ -403,7 +403,7 @@ func duration(s string) time.Duration {
 }
 
 func setGoalCU(state *core.State[*manualGoalCU], cu int) {
-	state.UpdateMetrics(func(alg *manualGoalCU) {
+	state.UpdateAlgorithmState(func(alg *manualGoalCU) {
 		alg.cu = lo.ToPtr(uint32(cu))
 	})
 }

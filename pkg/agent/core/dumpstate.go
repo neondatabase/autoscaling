@@ -39,7 +39,7 @@ func DumpState(s *State[*StdAlgorithm]) StateDump {
 			Plugin:               s.internal.Plugin.deepCopy(),
 			Monitor:              s.internal.Monitor.deepCopy(),
 			NeonVM:               s.internal.NeonVM.deepCopy(),
-			Metrics:              shallowCopy[StdAlgorithm](s.internal.Metrics),
+			Algorithm:            shallowCopy[StdAlgorithm](s.internal.Algorithm),
 			TargetRevision:       s.internal.TargetRevision,
 			LastDesiredResources: s.internal.LastDesiredResources,
 		},

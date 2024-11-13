@@ -129,7 +129,7 @@ type state[A AlgorithmState] struct {
 	// NeonVM records all state relevant to the NeonVM k8s API
 	NeonVM neonvmState
 
-	Metrics A
+	Algorithm A
 
 	// TargetRevision is the revision agent works towards.
 	TargetRevision vmv1.Revision
@@ -259,7 +259,7 @@ func NewState[A AlgorithmState](vm api.VmInfo, config Config, algorithm A) *Stat
 				TargetRevision:   vmv1.ZeroRevision.WithTime(time.Time{}),
 				CurrentRevision:  vmv1.ZeroRevision,
 			},
-			Metrics:              algorithm,
+			Algorithm:            algorithm,
 			LastDesiredResources: nil,
 			TargetRevision:       vmv1.ZeroRevision,
 		},
@@ -441,7 +441,7 @@ func (s *state[A]) calculatePluginAction(
 		return &ActionPluginRequest{
 			LastPermit:     s.Plugin.Permit,
 			Target:         permittedRequestResources,
-			Metrics:        s.Metrics.LatestAPIMetrics(),
+			Metrics:        s.Algorithm.LatestAPIMetrics(),
 			TargetRevision: s.TargetRevision.WithTime(now),
 		}, nil
 	} else {
@@ -716,7 +716,7 @@ func (s *state[A]) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
-	sg, goalCULogFields := s.Metrics.CalculateGoalCU(
+	sg, goalCULogFields := s.Algorithm.CalculateGoalCU(
 		s.warn,
 		s.scalingConfig(),
 		s.Config.ComputeUnit,
@@ -1026,11 +1026,11 @@ func (s *State[A]) UpdatedVM(vm api.VmInfo) {
 		s.internal.updateNeonVMCurrentRevision(*vm.CurrentRevision)
 	}
 
-	s.internal.Metrics.ScalingConfigUpdated(s.internal.scalingConfig())
+	s.internal.Algorithm.ScalingConfigUpdated(s.internal.scalingConfig())
 }
 
-func (s *State[A]) UpdateMetrics(update func(A)) {
-	update(s.internal.Metrics)
+func (s *State[A]) UpdateAlgorithmState(update func(A)) {
+	update(s.internal.Algorithm)
 }
 
 // PluginHandle provides write access to the scheduler plugin pieces of an UpdateState

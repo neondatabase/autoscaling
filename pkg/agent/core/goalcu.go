@@ -46,21 +46,21 @@ type ScalingGoal struct {
 
 // StdAlgorithm is the standard implementation of AlgorithmState for usage in production.
 type StdAlgorithm struct {
-	System *SystemMetrics
-	LFC    *LFCMetrics
+	SystemMetrics *SystemMetrics
+	LFCMetrics    *LFCMetrics
 }
 
 func DefaultAlgorithm() *StdAlgorithm {
 	return &StdAlgorithm{
-		System: nil,
-		LFC:    nil,
+		SystemMetrics: nil,
+		LFCMetrics:    nil,
 	}
 }
 
 // LatestAPIMetrics implements AlgorithmState
 func (m *StdAlgorithm) LatestAPIMetrics() *api.Metrics {
-	if m.System != nil {
-		return lo.ToPtr(m.System.ToAPI())
+	if m.SystemMetrics != nil {
+		return lo.ToPtr(m.SystemMetrics.ToAPI())
 	} else {
 		return nil
 	}
@@ -70,7 +70,7 @@ func (m *StdAlgorithm) ScalingConfigUpdated(conf api.ScalingConfig) {
 	// Make sure that if LFC metrics are disabled & later enabled, we don't make decisions based on
 	// stale data.
 	if !*conf.EnableLFCMetrics {
-		m.LFC = nil
+		m.LFCMetrics = nil
 	}
 }
 
@@ -80,29 +80,29 @@ func (m *StdAlgorithm) CalculateGoalCU(
 	cfg api.ScalingConfig,
 	computeUnit api.Resources,
 ) (ScalingGoal, []zap.Field) {
-	hasAllMetrics := m.System != nil && (!*cfg.EnableLFCMetrics || m.LFC != nil)
+	hasAllMetrics := m.SystemMetrics != nil && (!*cfg.EnableLFCMetrics || m.LFCMetrics != nil)
 
 	var lfcGoalCU, cpuGoalCU, memGoalCU, memTotalGoalCU uint32
 	var logFields []zap.Field
 
 	var wss *api.Bytes // estimated working set size
 
-	if m.LFC != nil {
+	if m.LFCMetrics != nil {
 		var lfcLogFunc func(zapcore.ObjectEncoder) error
-		lfcGoalCU, wss, lfcLogFunc = calculateLFCGoalCU(warn, cfg, computeUnit, *m.LFC)
+		lfcGoalCU, wss, lfcLogFunc = calculateLFCGoalCU(warn, cfg, computeUnit, *m.LFCMetrics)
 		if lfcLogFunc != nil {
 			logFields = append(logFields, zap.Object("lfc", zapcore.ObjectMarshalerFunc(lfcLogFunc)))
 		}
 	}
 
-	if m.System != nil {
-		cpuGoalCU = calculateCPUGoalCU(cfg, computeUnit, *m.System)
+	if m.SystemMetrics != nil {
+		cpuGoalCU = calculateCPUGoalCU(cfg, computeUnit, *m.SystemMetrics)
 
-		memGoalCU = calculateMemGoalCU(cfg, computeUnit, *m.System)
+		memGoalCU = calculateMemGoalCU(cfg, computeUnit, *m.SystemMetrics)
 	}
 
-	if m.System != nil && wss != nil {
-		memTotalGoalCU = calculateMemTotalGoalCU(cfg, computeUnit, *m.System, *wss)
+	if m.SystemMetrics != nil && wss != nil {
+		memTotalGoalCU = calculateMemTotalGoalCU(cfg, computeUnit, *m.SystemMetrics, *wss)
 	}
 
 	goalCU := max(cpuGoalCU, memGoalCU, memTotalGoalCU, lfcGoalCU)

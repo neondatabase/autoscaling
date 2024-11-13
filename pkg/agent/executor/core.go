@@ -166,8 +166,8 @@ type ExecutorCoreUpdater struct {
 // withLock while holding the lock.
 func (c ExecutorCoreUpdater) UpdateSystemMetrics(metrics core.SystemMetrics, withLock func()) {
 	c.core.update(func(state *coreState) {
-		state.UpdateMetrics(func(m *core.StdAlgorithm) {
-			m.System = &metrics
+		state.UpdateAlgorithmState(func(m *core.StdAlgorithm) {
+			m.SystemMetrics = &metrics
 		})
 		withLock()
 	})
@@ -177,8 +177,8 @@ func (c ExecutorCoreUpdater) UpdateSystemMetrics(metrics core.SystemMetrics, wit
 // while holding the lock.
 func (c ExecutorCoreUpdater) UpdateLFCMetrics(metrics core.LFCMetrics, withLock func()) {
 	c.core.update(func(state *coreState) {
-		state.UpdateMetrics(func(m *core.StdAlgorithm) {
-			m.LFC = &metrics
+		state.UpdateAlgorithmState(func(m *core.StdAlgorithm) {
+			m.LFCMetrics = &metrics
 		})
 		withLock()
 	})
