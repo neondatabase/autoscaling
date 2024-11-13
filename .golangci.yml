@@ -25,6 +25,7 @@ linters:
     - staticcheck # some rules from staticcheck.io
     - typecheck   # typechecks code, like the compiler
     - unused      # checks for unused constants/variables/functions/types
+    - gofumpt     # Formatter.
 
     # explicitly enabled:
     - asciicheck       # all identifiers are ASCII

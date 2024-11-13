@@ -4,10 +4,12 @@ FROM golang:1.20.12 AS builder
 
 WORKDIR /workspace
 
-ARG CA_GIT_TAG
+COPY ca.branch ca.branch
+COPY ca.commit ca.commit
 
 # Download the repo. It's... quite large, but thankfully this should get cached
-RUN git clone --depth=1 -b $CA_GIT_TAG https://github.com/kubernetes/autoscaler
+RUN git clone -b `cat ca.branch` https://github.com/kubernetes/autoscaler
+RUN CA_GIT_TAG=`cat ca.commit` cd autoscaler && git reset --hard $CA_GIT_TAG
 
 # Only ADD the patch after downloading, to avoid wrecking the cache
 COPY ca.patch ca.patch
