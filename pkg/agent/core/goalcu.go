@@ -12,18 +12,24 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-type scalingGoal struct {
-	hasAllMetrics bool
-	goalCU        uint32
+type ScalingGoal struct {
+	HasAllMetrics bool
+	GoalCU        uint32
 }
 
-func calculateGoalCU(
+type StdAlgorithm struct{}
+
+func DefaultAlgorithm() *StdAlgorithm {
+	return &StdAlgorithm{}
+}
+
+func (*StdAlgorithm) CalculateGoalCU(
 	warn func(string),
 	cfg api.ScalingConfig,
 	computeUnit api.Resources,
 	systemMetrics *SystemMetrics,
 	lfcMetrics *LFCMetrics,
-) (scalingGoal, []zap.Field) {
+) (ScalingGoal, []zap.Field) {
 	hasAllMetrics := systemMetrics != nil && (!*cfg.EnableLFCMetrics || lfcMetrics != nil)
 	if !hasAllMetrics {
 		warn("Making scaling decision without all required metrics available")
@@ -54,7 +60,7 @@ func calculateGoalCU(
 
 	goalCU := max(cpuGoalCU, memGoalCU, memTotalGoalCU, lfcGoalCU)
 
-	return scalingGoal{hasAllMetrics: hasAllMetrics, goalCU: goalCU}, logFields
+	return ScalingGoal{HasAllMetrics: hasAllMetrics, GoalCU: goalCU}, logFields
 }
 
 // For CPU:

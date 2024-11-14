@@ -87,6 +87,9 @@ type Config struct {
 	// RevisionSource is the source of revisions to track the progress during scaling.
 	RevisionSource RevisionSource `json:"-"`
 
+	// Algorithm is the algorithm to use for calculating the goal CU.
+	AlgorithmFactory func() Algorithm `json:"-"`
+
 	// ObservabilityCallbacks are the callbacks to submit datapoints for observability.
 	ObservabilityCallbacks ObservabilityCallbacks `json:"-"`
 }
@@ -139,6 +142,18 @@ type state struct {
 
 	// LastDesiredResources is the last target agent wanted to scale to.
 	LastDesiredResources *api.Resources
+
+	Algorithm Algorithm
+}
+
+type Algorithm interface {
+	CalculateGoalCU(
+		warn func(string),
+		cfg api.ScalingConfig,
+		computeUnit api.Resources,
+		systemMetrics *SystemMetrics,
+		lfcMetrics *LFCMetrics,
+	) (ScalingGoal, []zap.Field)
 }
 
 type pluginState struct {
@@ -236,9 +251,10 @@ func (ns *neonvmState) ongoingRequest() bool {
 func NewState(vm api.VmInfo, config Config) *State {
 	return &State{
 		internal: state{
-			Config: config,
-			Debug:  false,
-			VM:     vm,
+			Config:    config,
+			Debug:     false,
+			VM:        vm,
+			Algorithm: config.AlgorithmFactory(),
 			Plugin: pluginState{
 				OngoingRequest:  false,
 				LastRequest:     nil,
@@ -727,17 +743,17 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
-	sg, goalCULogFields := calculateGoalCU(
+	sg, goalCULogFields := s.Algorithm.CalculateGoalCU(
 		s.warn,
 		s.scalingConfig(),
 		s.Config.ComputeUnit,
 		s.Metrics,
 		s.LFCMetrics,
 	)
-	goalCU := sg.goalCU
+	goalCU := sg.GoalCU
 	// If we don't have all the metrics we need, we'll later prevent downscaling to avoid flushing
 	// the VM's cache on autoscaler-agent restart if we have SystemMetrics but not LFCMetrics.
-	hasAllMetrics := sg.hasAllMetrics
+	hasAllMetrics := sg.HasAllMetrics
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
 	// requested upscaling or denied downscaling affected the outcome.

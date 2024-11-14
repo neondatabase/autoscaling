@@ -258,6 +258,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					MonitorLatency: nil,
 					NeonVMLatency:  nil,
 				},
+				AlgorithmFactory: func() core.Algorithm { return core.DefaultAlgorithm() },
 			}
 		}
 
@@ -343,12 +344,30 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 			MonitorLatency: nil,
 			NeonVMLatency:  nil,
 		},
+		AlgorithmFactory: func() core.Algorithm { return core.DefaultAlgorithm() },
 	},
 }
 
 func getDesiredResources(state *core.State, now time.Time) api.Resources {
 	res, _ := state.DesiredResourcesFromMetricsOrRequestedUpscaling(now)
 	return res
+}
+
+type manualCuAlgorithm struct {
+	goalCu core.ScalingGoal
+}
+
+func (a *manualCuAlgorithm) CalculateGoalCU(
+	warn func(string),
+	cfg api.ScalingConfig,
+	computeUnit api.Resources,
+	systemMetrics *core.SystemMetrics,
+	lfcMetrics *core.LFCMetrics,
+) (core.ScalingGoal, []zap.Field) {
+	if !a.goalCu.HasAllMetrics {
+		warn("Making scaling decision without all required metrics available")
+	}
+	return a.goalCu, nil
 }
 
 func doInitialPluginRequest(
@@ -427,6 +446,8 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	expectedRevision := helpers.NewExpectedRevision(clock.Now)
 	resForCU := DefaultComputeUnit.Mul
 
+	manualCUAlgo := &manualCuAlgorithm{goalCu: core.ScalingGoal{GoalCU: 0, HasAllMetrics: false}}
+
 	latencyObserver := &latencyObserver{t: t, observations: nil}
 	defer latencyObserver.assertEmpty()
 	state := helpers.CreateInitialState(
@@ -435,6 +456,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		helpers.WithTestingLogfWarnings(t),
 		helpers.WithConfigSetting(func(c *core.Config) {
 			c.RevisionSource = revsource.NewRevisionSource(0, latencyObserver.observe)
+			c.AlgorithmFactory = func() core.Algorithm { return manualCUAlgo }
 		}),
 	)
 	nextActions := func() core.ActionSet {
@@ -453,6 +475,10 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
+
+	manualCUAlgo.goalCu.GoalCU = 2
+	manualCUAlgo.goalCu.HasAllMetrics = true
+
 	a.Do(state.UpdateSystemMetrics, lastMetrics)
 	// double-check that we agree about the desired resources
 	a.Call(getDesiredResources, state, clock.Now()).
@@ -546,16 +572,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	expectedRevision.Value += 1
 	expectedRevision.Flags = revsource.Downscale
 
-	// Set metrics back so that desired resources should now be zero
-	lastMetrics = core.SystemMetrics{
-		LoadAverage1Min:   0.0,
-		MemoryUsageBytes:  0.0,
-		MemoryCachedBytes: 0.0,
-	}
-	a.Do(state.UpdateSystemMetrics, lastMetrics)
-	// double-check that we agree about the new desired resources
-	a.Call(getDesiredResources, state, clock.Now()).
-		Equals(resForCU(1))
+	manualCUAlgo.goalCu.GoalCU = 1
 
 	// First step in downscaling is getting approval from the vm-monitor:
 	a.Call(nextActions).Equals(core.ActionSet{

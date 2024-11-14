@@ -43,6 +43,7 @@ func (s *State) Dump() StateDump {
 			LFCMetrics:           shallowCopy[LFCMetrics](s.internal.LFCMetrics),
 			TargetRevision:       s.internal.TargetRevision,
 			LastDesiredResources: s.internal.LastDesiredResources,
+			Algorithm:            nil,
 		},
 	}
 }
