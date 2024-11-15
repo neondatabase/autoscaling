@@ -54,5 +54,5 @@ type ReconcilerConfig struct {
 	// AtMostOnePod is the flag that indicates whether we should only have one pod per VM.
 	AtMostOnePod bool
 	// DefaultCPUScalingMode is the default CPU scaling mode that will be used for VMs with empty spec.cpuScalingMode
-	DefaultCPUScalingMode string
+	DefaultCPUScalingMode vmv1.CpuScalingMode
 }

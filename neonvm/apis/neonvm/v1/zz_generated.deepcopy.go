@@ -735,7 +735,7 @@ func (in *VirtualMachineSpec) DeepCopyInto(out *VirtualMachineSpec) {
 	}
 	if in.CpuScalingMode != nil {
 		in, out := &in.CpuScalingMode, &out.CpuScalingMode
-		*out = new(string)
+		*out = new(CpuScalingMode)
 		**out = **in
 	}
 }

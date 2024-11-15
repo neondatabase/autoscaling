@@ -12,9 +12,10 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-// handleCPUScaling is extracted from doReconcile and encapsulates the logic to handle CPU scaling.
-// if vm scaling mode is set to CpuSysfsState, the scaling is delegated to neonvm-daemon
-// otherwise the scaling is first done by scaling amount of cores in the VM using QMP and then by updating the cgroup
+// handleCPUScaling encapsulates the logic to handle CPU scaling.
+// If vm scaling mode is set to CpuScalingModeSysfs, the scaling is delegated to neonvm-daemon to scale using sys fs state of the CPU cores.
+// otherwise the scaling is first done by scaling amount of cores in the VM using QMP and then by updating the cgroups through neonvm-daemon.
+// At the moment the cgroup update is not implemented in the daemon, so effectively the scaling is done by QMP or by using sys fs state for the CPU cores.
 func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
 	log := log.FromContext(ctx)
 	useCpuSysfsStateScaling := *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeSysfs
@@ -35,7 +36,7 @@ func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMac
 	return scaled, nil
 }
 
-// handleCPUScalingQMP handles CPU scaling using QMP, extracted as is from doReconcile
+// handleCPUScalingQMP handles CPU scaling using qemu CPU hotplug/unplug feature.
 func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
 	log := log.FromContext(ctx)
 	specCPU := vm.Spec.Guest.CPUs.Use

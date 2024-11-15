@@ -614,7 +614,7 @@ type Config struct {
 	diskCacheSettings    string
 	memoryProvider       vmv1.MemoryProvider
 	autoMovableRatio     string
-	cpuScalingMode       string
+	cpuScalingMode       vmv1.CpuScalingMode
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -645,7 +645,7 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
 	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
 		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
-	flag.StringVar(&cfg.cpuScalingMode, "cpu-scaling-mode", "", "Set CPU scaling mode")
+	flag.Func("cpu-scaling-mode", "Set CPU scaling mode", cfg.cpuScalingMode.FlagFunc)
 	flag.Parse()
 
 	if cfg.memoryProvider == "" {

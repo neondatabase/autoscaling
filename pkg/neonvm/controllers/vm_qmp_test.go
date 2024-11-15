@@ -4,7 +4,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "github.com/neondatabase/autoscaling/pkg/neonvm/controllers"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers"
 )
 
 type qmpEvent struct {
@@ -43,14 +43,14 @@ var _ = Describe("VM QMP interaction", func() {
 	Context("QMP test", func() {
 		It("should support basic QMP operations", func() {
 			By("adding memslot")
-			qmpMock := newQMPMock()
-			defer qmpMock.done()
-			qmpMock.expect(`
+			qmp := newQMPMock()
+			defer qmp.done()
+			qmp.expect(`
 				{"execute": "object-add",
 				 "arguments": {"id": "memslot1",
 						"size": 100,
 						"qom-type": "memory-backend-ram"}}`, `{}`)
-			err := QmpAddMemoryBackend(qmpMock, 1, 100)
+			err := controllers.QmpAddMemoryBackend(qmp, 1, 100)
 			Expect(err).To(Not(HaveOccurred()))
 		})
 	})

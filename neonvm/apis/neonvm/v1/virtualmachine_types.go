@@ -52,14 +52,6 @@ const (
 	//
 	// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
 	VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
-
-	// CpuScalingModeQMP is the value of the VirtualMachineSpec.CpuScalingMode field that indicates
-	// that the VM should use QMP to scale CPUs.
-	CpuScalingModeQMP string = "qmpScaling"
-
-	// CpuScalingModeSysfs is the value of the VirtualMachineSpec.CpuScalingMode field that
-	// indicates that the VM should use the CPU sysfs state interface to scale CPUs.
-	CpuScalingModeSysfs string = "sysfsScaling"
 )
 
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
@@ -160,9 +152,9 @@ type VirtualMachineSpec struct {
 	TargetRevision *RevisionWithTime `json:"targetRevision,omitempty"`
 
 	// Controls how CPU scaling is performed, either hotplug new CPUs with QMP, or enable them in sysfs.
-	// +kubebuilder:validation:Enum=qmpScaling;sysfsScaling
+	// +kubebuilder:default:=QmpScaling
 	// +optional
-	CpuScalingMode *string `json:"cpuScalingMode,omitempty"`
+	CpuScalingMode *CpuScalingMode `json:"cpuScalingMode,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -172,6 +164,34 @@ func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
 		MemorySlotSize: spec.Guest.MemorySlotSize,
 	}
 }
+
+// +kubebuilder:validation:Enum=QmpScaling;SysfsScaling
+type CpuScalingMode string
+
+// FlagFunc is a parsing function to be used with flag.Func
+func (p *CpuScalingMode) FlagFunc(value string) error {
+	possibleValues := []string{
+		string(CpuScalingModeQMP),
+		string(CpuScalingModeSysfs),
+	}
+
+	if !slices.Contains(possibleValues, value) {
+		return fmt.Errorf("Unknown CpuScalingMode %q, must be one of %v", value, possibleValues)
+	}
+
+	*p = CpuScalingMode(value)
+	return nil
+}
+
+const (
+	// CpuScalingModeQMP is the value of the VirtualMachineSpec.CpuScalingMode field that indicates
+	// that the VM should use QMP to scale CPUs.
+	CpuScalingModeQMP CpuScalingMode = "QmpScaling"
+
+	// CpuScalingModeSysfs is the value of the VirtualMachineSpec.CpuScalingMode field that
+	// indicates that the VM should use the CPU sysfs state interface to scale CPUs.
+	CpuScalingModeSysfs CpuScalingMode = "SysfsScaling"
+)
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
 type RestartPolicy string

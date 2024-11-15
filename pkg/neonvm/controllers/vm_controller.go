@@ -164,7 +164,7 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	// examine cpuScalingMode and set it to the default value if it is not set
 	if vm.Spec.CpuScalingMode == nil || *vm.Spec.CpuScalingMode == "" {
 		log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
-		vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
+		vm.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingMode(r.Config.DefaultCPUScalingMode))
 		if err := r.tryUpdateVM(ctx, &vm); err != nil {
 			log.Error(err, "Failed to set default CPU scaling mode")
 			return ctrl.Result{}, err
@@ -1360,8 +1360,6 @@ func podSpec(
 					Command: func() []string {
 						cmd := []string{"runner"}
 						if config.DisableRunnerCgroup {
-							// cgroup management disabled, but we still need something to provide
-							// the server, so the runner will just provide a dummy implementation.
 							cmd = append(cmd, "-skip-cgroup-management")
 						}
 						cmd = append(
@@ -1381,7 +1379,7 @@ func podSpec(
 						)
 						// NB: We don't need to check if the value is nil because the default value
 						// was set in Reconcile
-						cmd = append(cmd, "-cpu-scaling-mode", *vm.Spec.CpuScalingMode)
+						cmd = append(cmd, "-cpu-scaling-mode", string(*vm.Spec.CpuScalingMode))
 						return cmd
 					}(),
 					Env: []corev1.EnvVar{{

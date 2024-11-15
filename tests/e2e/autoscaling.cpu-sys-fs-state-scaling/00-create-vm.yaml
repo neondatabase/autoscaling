@@ -25,7 +25,7 @@ metadata:
   annotations:
     autoscaling.neon.tech/bounds: '{ "min": { "cpu": "250m", "mem": "1Gi" }, "max": {"cpu": 3, "mem": "4Gi" } }'
 spec:
-  cpuScalingMode: sysfsScaling
+  cpuScalingMode: SysfsScaling
   schedulerName: autoscale-scheduler
   guest:
     cpus:
