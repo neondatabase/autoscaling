@@ -34,7 +34,7 @@ func main() {
 	logger.Info("Starting neonvm-daemon", zap.String("addr", *addr))
 	srv := cpuServer{
 		cpuOperationsMutex: &sync.Mutex{},
-		cpuScaler:          &cpuscaling.CPUSysFsStateScaler{},
+		cpuScaler:          cpuscaling.NewCPUScaler(),
 		logger:             logger.Named("cpu-srv"),
 	}
 	srv.run(*addr)
@@ -44,7 +44,7 @@ type cpuServer struct {
 	// Protects CPU operations from concurrent access to prevent multiple ensureOnlineCPUs calls from running concurrently
 	// and ensure that status response is always actual
 	cpuOperationsMutex *sync.Mutex
-	cpuScaler          *cpuscaling.CPUSysFsStateScaler
+	cpuScaler          *cpuscaling.CPUScaler
 	logger             *zap.Logger
 }
 
@@ -80,7 +80,7 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger.Info("Setting CPU status", zap.String("body", string(body)))
-	if err := s.cpuScaler.EnsureOnlineCPUs(int(update.RoundedUp())); err != nil {
+	if err := s.cpuScaler.ReconcileOnlineCPU(int(update.RoundedUp())); err != nil {
 		s.logger.Error("could not ensure online CPUs", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
