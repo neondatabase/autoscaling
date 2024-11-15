@@ -40,12 +40,15 @@ func (r *VMReconciler) handleCPUScaling(ctx context.Context, vm *vmv1.VirtualMac
 func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.VirtualMachine, vmRunner *corev1.Pod) (bool, error) {
 	log := log.FromContext(ctx)
 	specCPU := vm.Spec.Guest.CPUs.Use
+
+	// get cgroups CPU details from runner pod
 	cgroupUsage, err := getRunnerCPULimits(ctx, vm)
 	if err != nil {
 		log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 		return false, err
 	}
-	var hotPlugCPUScaled bool
+
+	// get CPU details from QEMU
 	var pluggedCPU uint32
 	cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
 	if err != nil {
@@ -54,7 +57,9 @@ func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.Virtual
 	}
 	pluggedCPU = uint32(len(cpuSlotsPlugged))
 
-	log.Info("Using QMP CPU control")
+	// start scaling CPU
+	log.Info("Scaling using QMP CPU control")
+	var hotPlugCPUScaled bool
 	if specCPU.RoundedUp() > pluggedCPU {
 		// going to plug one CPU
 		log.Info("Plug one more CPU into VM")
@@ -84,6 +89,8 @@ func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.Virtual
 		log.Info("No need to plug or unplug CPU")
 		hotPlugCPUScaled = true
 	}
+
+	// update status by CPUs used in the VM
 	r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 	return hotPlugCPUScaled, nil
 }
