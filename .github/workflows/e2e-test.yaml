@@ -91,6 +91,7 @@ jobs:
           - arch: amd64
             # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
             push-yamls: ${{ inputs.push-yamls }}
+        arch: [ amd64, arm64 ]
 
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
 
@@ -213,6 +214,9 @@ jobs:
           docker pull "$TEST_IMAGE"
           docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
           make load-example-vms
+
+      - run: make arm_patch_e2e
+        if: matrix.arch == 'arm64'
 
       - run: make e2e
         timeout-minutes: 15

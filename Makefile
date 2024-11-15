@@ -522,6 +522,10 @@ endif
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.30.7
 
+
+YQ ?= $(LOCALBIN)/yq
+YQ_VERSION ?= v4.45.1
+
 ETCD ?= $(LOCALBIN)/etcd
 
 # Use the same version kuberentes is tested against, see
@@ -596,3 +600,15 @@ $(ETCD): $(LOCALBIN)
 			rm $(LOCALBIN)/etcd-temp; \
 		fi \
 	}
+
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): $(LOCALBIN)
+	test -s $(LOCALBIN)/yq || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_linux_$(TARGET_ARCH) && chmod +x $(YQ); }
+
+# modify suites to work on arm64
+# Set cpuScalingMode to SysfsScaling
+# Set targetArchitecture to arm64
+arm_patch_e2e: yq
+	@find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.cpuScalingMode = "SysfsScaling") // .' -i {}
+	@find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.targetArchitecture = "arm64") // .' -i {}
