@@ -114,7 +114,7 @@ jobs:
         cluster:
           - ${{ inputs.cluster || 'k3d' }}
         # run tests on amd64 only, since scope of the PR is to build images, there is separate issue for e2e tests
-        arch: [ amd64 ]
+        arch: [ arm64 ]
 
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'large-arm64' || 'large')) }}
 
