@@ -24,8 +24,6 @@ import (
 // repository containing this code. Names follow semver, although this does not necessarily
 // guarantee support - for example, the plugin may only support a single version, even though others
 // may appear to be semver-compatible.
-//
-// Version compatibility is documented in the neighboring file VERSIONING.md.
 type PluginProtoVersion uint32
 
 const (
@@ -174,7 +172,8 @@ func (v PluginProtoVersion) IncludesExtendedMetrics() bool {
 	return v < PluginProtoV5_0
 }
 
-// AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
+// AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin on
+// behalf of a Pod on the agent's node.
 //
 // All AgentRequests expect a PluginResponse.
 type AgentRequest struct {
@@ -182,7 +181,8 @@ type AgentRequest struct {
 	//
 	// If the scheduler does not support this version, then it will respond with a 400 status.
 	ProtoVersion PluginProtoVersion `json:"protoVersion"`
-	// Pod is the namespaced name of the pod making the request
+	// Pod is the namespaced name of the Pod that the autoscaler-agent is making the request on
+	// behalf of.
 	Pod util.NamespacedName `json:"pod"`
 	// ComputeUnit gives the value of the agent's configured compute unit to use for the VM.
 	//
@@ -595,8 +595,6 @@ func SerializeMonitorMessage(content any, id uint64) ([]byte, error) {
 // Each version of the agent<->monitor protocol is named independently from releases of the
 // repository containing this code. Names follow semver, although this does not necessarily
 // guarantee support - for example, the monitor may only support versions above v1.1.
-//
-// Version compatibility is documented in the neighboring file VERSIONING.md.
 type MonitorProtoVersion uint32
 
 const (
