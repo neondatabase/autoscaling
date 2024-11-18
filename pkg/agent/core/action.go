@@ -24,7 +24,6 @@ type ActionWait struct {
 type ActionPluginRequest struct {
 	LastPermit     *api.Resources        `json:"current"`
 	Target         api.Resources         `json:"target"`
-	Metrics        *api.Metrics          `json:"metrics"`
 	TargetRevision vmv1.RevisionWithTime `json:"targetRevision"`
 }
 
@@ -74,7 +73,6 @@ func (a ActionWait) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 func (a ActionPluginRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	_ = addObjectPtr(enc, "lastPermit", a.LastPermit)
 	_ = enc.AddObject("target", a.Target)
-	_ = enc.AddReflected("metrics", a.Metrics)
 	return nil
 }
 

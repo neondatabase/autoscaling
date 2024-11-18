@@ -231,10 +231,6 @@ func (s *podState) dump() podStateDump {
 
 func (s *vmPodState) dump() vmPodState {
 	// Copy some of the "may be nil" pointer fields
-	var metrics *api.Metrics
-	if s.Metrics != nil {
-		metrics = lo.ToPtr(*s.Metrics)
-	}
 	var migrationState *podMigrationState
 	if s.MigrationState != nil {
 		migrationState = &podMigrationState{
@@ -244,9 +240,9 @@ func (s *vmPodState) dump() vmPodState {
 
 	return vmPodState{
 		Name:           s.Name,
+		PodCreatedAt:   s.PodCreatedAt,
 		MemSlotSize:    s.MemSlotSize,
 		Config:         s.Config,
-		Metrics:        metrics,
 		MqIndex:        s.MqIndex,
 		MigrationState: migrationState,
 	}

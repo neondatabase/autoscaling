@@ -47,7 +47,7 @@ import (
 //
 // Currently, each autoscaler-agent supports only one version at a time. In the future, this may
 // change.
-const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
+const PluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV6_0
 
 // Runner is per-VM Pod god object responsible for handling everything
 //
@@ -754,7 +754,6 @@ func (r *Runner) DoSchedulerRequest(
 	logger *zap.Logger,
 	resources api.Resources,
 	lastPermit *api.Resources,
-	metrics *api.Metrics,
 ) (_ *api.PluginResponse, err error) {
 	reqData := &api.AgentRequest{
 		ProtoVersion: PluginProtocolVersion,
@@ -762,7 +761,6 @@ func (r *Runner) DoSchedulerRequest(
 		ComputeUnit:  r.global.config.Scaling.ComputeUnit,
 		Resources:    resources,
 		LastPermit:   lastPermit,
-		Metrics:      metrics,
 	}
 
 	// make sure we log any error we're returning:

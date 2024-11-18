@@ -184,16 +184,19 @@ type vmPodState struct {
 	// owns this pod
 	Name util.NamespacedName
 
+	// PodCreatedAt is the time at which the pod was created.
+	//
+	// This is used for prioritization in live migration, where we prioritize pods that have been
+	// running for longer, as a way of naturally making sure that individual VMs are not migrated too
+	// frequently.
+	PodCreatedAt time.Time
+
 	// MemSlotSize stores the value of the VM's .Spec.Guest.MemorySlotSize, for compatibility with
 	// earlier versions of the agent<->plugin protocol.
 	MemSlotSize api.Bytes
 
 	// Config stores the values of per-VM settings for this VM
 	Config api.VmConfig
-
-	// Metrics is the most recent Metrics update we received for this pod. A nil pointer means that
-	// we have not yet received Metrics.
-	Metrics *api.Metrics
 
 	// MqIndex stores this pod's index in the migrationQueue. This value is -1 iff metrics is nil or
 	// it is currently migrating.
@@ -309,16 +312,6 @@ func (s *nodeState) tooMuchPressure(logger *zap.Logger) bool {
 	)
 
 	return result
-}
-
-// checkOkToMigrate allows us to check that it's still ok to start migrating a pod, after it was
-// previously selected for migration
-//
-// A returned error indicates that the pod's resource usage has changed enough that we should try to
-// migrate something else first. The error provides justification for this.
-func (s *vmPodState) checkOkToMigrate(oldMetrics api.Metrics) error {
-	// TODO. Note: s.metrics may be nil.
-	return nil
 }
 
 func (s *vmPodState) currentlyMigrating() bool {
@@ -710,9 +703,9 @@ func (e *AutoscaleEnforcer) speculativeReserve(
 	if vmInfo != nil {
 		vmState = &vmPodState{
 			Name:           vmInfo.NamespacedName(),
+			PodCreatedAt:   pod.CreationTimestamp.Time,
 			MemSlotSize:    vmInfo.Mem.SlotSize,
 			Config:         vmInfo.Config,
-			Metrics:        nil,
 			MqIndex:        -1,
 			MigrationState: nil,
 		}
@@ -1183,13 +1176,8 @@ func (e *AutoscaleEnforcer) cleanupMigration(logger *zap.Logger, vmm *vmapi.Virt
 }
 
 func (s *vmPodState) isBetterMigrationTarget(other *vmPodState) bool {
-	// TODO: this deprioritizes VMs whose metrics we can't collect. Maybe we don't want that?
-	if s.Metrics == nil || other.Metrics == nil {
-		return s.Metrics != nil && other.Metrics == nil
-	}
-
 	// TODO - this is just a first-pass approximation. Maybe it's ok for now? Maybe it's not. Idk.
-	return s.Metrics.LoadAverage1Min < other.Metrics.LoadAverage1Min
+	return s.PodCreatedAt.Before(other.PodCreatedAt)
 }
 
 // this method can only be called while holding a lock. It will be released temporarily while we

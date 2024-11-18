@@ -13,8 +13,6 @@ import (
 	promtypes "github.com/prometheus/client_model/go"
 	promfmt "github.com/prometheus/common/expfmt"
 	"github.com/tychoish/fun/erc"
-
-	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 type SystemMetrics struct {
@@ -22,14 +20,6 @@ type SystemMetrics struct {
 
 	MemoryUsageBytes  float64
 	MemoryCachedBytes float64
-}
-
-func (m SystemMetrics) ToAPI() api.Metrics {
-	return api.Metrics{
-		LoadAverage1Min:  float32(m.LoadAverage1Min),
-		LoadAverage5Min:  nil,
-		MemoryUsageBytes: nil,
-	}
 }
 
 type LFCMetrics struct {

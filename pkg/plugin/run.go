@@ -23,10 +23,9 @@ const (
 	ContentTypeError string = "text/plain"
 )
 
-// The scheduler plugin currently supports v3.0 to v5.0 of the agent<->scheduler plugin protocol.
 const (
-	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
-	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
+	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
+	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV6_0
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
@@ -128,9 +127,8 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 ) (_ *api.PluginResponse, status int, _ error) {
 	nodeName := "<none>" // override this later if we have a node name
 	defer func() {
-		hasMetrics := req.Metrics != nil
 		e.metrics.validResourceRequests.
-			WithLabelValues(strconv.Itoa(status), nodeName, strconv.FormatBool(hasMetrics)).
+			WithLabelValues(strconv.Itoa(status), nodeName).
 			Inc()
 	}()
 
@@ -150,25 +148,9 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		)
 	}
 
-	// if req.Metrics is nil, check that the protocol version allows that.
-	if req.Metrics == nil && !req.ProtoVersion.AllowsNilMetrics() {
-		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)
-	}
-
 	// check that req.ComputeUnit has no zeros
 	if err := req.ComputeUnit.ValidateNonZero(); err != nil {
 		return nil, 400, fmt.Errorf("computeUnit fields must be non-zero: %w", err)
-	}
-	// check that nil-ness of req.Metrics.{LoadAverage5Min,MemoryUsageBytes} match what's expected
-	// for the protocol version.
-	if req.Metrics != nil {
-		if (req.Metrics.LoadAverage5Min != nil) != (req.Metrics.MemoryUsageBytes != nil) {
-			return nil, 400, fmt.Errorf("presence of metrics.loadAvg5M must match presence of metrics.memoryUsageBytes")
-		} else if req.Metrics.LoadAverage5Min == nil && req.ProtoVersion.IncludesExtendedMetrics() {
-			return nil, 400, fmt.Errorf("nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
-		} else if req.Metrics.LoadAverage5Min != nil && !req.ProtoVersion.IncludesExtendedMetrics() {
-			return nil, 400, fmt.Errorf("non-nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
-		}
 	}
 
 	e.state.lock.Lock()
@@ -205,10 +187,7 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 	// Also, now that we know which VM this refers to (and which node it's on), add that to the logger for later.
 	logger = logger.With(zap.Object("virtualmachine", pod.vm.Name), zap.String("node", nodeName))
 
-	mustMigrate := pod.vm.MigrationState == nil &&
-		// Check whether the pod *will* migrate, then update its resources, and THEN start its
-		// migration, using the possibly-changed resources.
-		e.updateMetricsAndCheckMustMigrate(logger, pod.vm, node, req.Metrics)
+	mustMigrate := e.checkMustMigrate(logger, pod.vm, node)
 
 	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
 
@@ -308,53 +287,26 @@ func (e *AutoscaleEnforcer) handleResources(
 	return verdict, permit, 200, nil
 }
 
-func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
+func (e *AutoscaleEnforcer) checkMustMigrate(
 	logger *zap.Logger,
 	vm *vmPodState,
 	node *nodeState,
-	metrics *api.Metrics,
 ) bool {
+	if vm.currentlyMigrating() {
+		return false // don't do anything; it's already migrating.
+	}
+
 	// This pod should migrate if (a) it's allowed to migrate, (b) node resource usage is high
 	// enough that we should migrate *something*, and (c) it's next up in the priority queue.
-	// We will give it a chance later to veto if the metrics have changed too much.
 	//
 	// Alternatively, "the pod is marked to always migrate" causes it to migrate even if none of
-	// the above conditions are met, so long as it has *previously* provided metrics.
+	// the above conditions are met.
 	canMigrate := vm.Config.AutoMigrationEnabled && e.state.conf.migrationEnabled()
 	shouldMigrate := node.mq.isNextInQueue(vm) && node.tooMuchPressure(logger)
-	forcedMigrate := vm.Config.AlwaysMigrate && vm.Metrics != nil
-
-	logger.Info("Updating pod metrics", zap.Any("metrics", metrics))
-	oldMetrics := vm.Metrics
-	vm.Metrics = metrics
-	if vm.currentlyMigrating() {
-		return false // don't do anything else; it's already migrating.
-	}
+	forcedMigrate := vm.Config.AlwaysMigrate
 
 	node.mq.addOrUpdate(vm)
 
 	// nb: forcedMigrate takes priority over canMigrate
-	if (!canMigrate || !shouldMigrate) && !forcedMigrate {
-		return false
-	}
-
-	// Give the pod a chance to veto migration if its metrics have significantly changed...
-	var veto error
-	if oldMetrics != nil && !forcedMigrate {
-		veto = vm.checkOkToMigrate(*oldMetrics)
-	}
-
-	// ... but override the veto if it's still the best candidate anyways.
-	stillFirst := node.mq.isNextInQueue(vm)
-
-	if forcedMigrate || stillFirst || veto == nil {
-		if veto != nil {
-			logger.Info("Pod attempted veto of self migration, still highest priority", zap.NamedError("veto", veto))
-		}
-
-		return true
-	} else {
-		logger.Warn("Pod vetoed self migration", zap.NamedError("veto", veto))
-		return false
-	}
+	return (canMigrate && shouldMigrate) || forcedMigrate
 }

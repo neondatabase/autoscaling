@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -443,16 +442,8 @@ func (s *state) calculatePluginAction(
 	// The rest of the complication is just around accurate logging.
 	if timeForRequest || shouldRequestNewResources {
 		return &ActionPluginRequest{
-			LastPermit: s.Plugin.Permit,
-			Target:     permittedRequestResources,
-			// convert maybe-nil '*Metrics' to maybe-nil '*core.Metrics'
-			Metrics: func() *api.Metrics {
-				if s.Metrics != nil {
-					return lo.ToPtr(s.Metrics.ToAPI())
-				} else {
-					return nil
-				}
-			}(),
+			LastPermit:     s.Plugin.Permit,
+			Target:         permittedRequestResources,
 			TargetRevision: s.TargetRevision.WithTime(now),
 		}, nil
 	} else {
