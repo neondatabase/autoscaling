@@ -24,8 +24,6 @@ import (
 // repository containing this code. Names follow semver, although this does not necessarily
 // guarantee support - for example, the plugin may only support a single version, even though others
 // may appear to be semver-compatible.
-//
-// Version compatibility is documented in the neighboring file VERSIONING.md.
 type PluginProtoVersion uint32
 
 const (
@@ -595,8 +593,6 @@ func SerializeMonitorMessage(content any, id uint64) ([]byte, error) {
 // Each version of the agent<->monitor protocol is named independently from releases of the
 // repository containing this code. Names follow semver, although this does not necessarily
 // guarantee support - for example, the monitor may only support versions above v1.1.
-//
-// Version compatibility is documented in the neighboring file VERSIONING.md.
 type MonitorProtoVersion uint32
 
 const (
