@@ -1,30 +1,18 @@
-package billing
-
-// Logic responsible for sending billing events by repeatedly pulling from the eventQueue
+package reporting
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
-
-	"github.com/neondatabase/autoscaling/pkg/billing"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-type clientInfo struct {
-	client billing.Client
-	name   string
-	config BaseClientConfig
-}
+type eventSender[E any] struct {
+	client Client[E]
 
-type eventSender struct {
-	clientInfo
-
-	metrics           PromMetrics
-	queue             eventQueuePuller[*billing.IncrementalEvent]
-	collectorFinished util.CondChannelReceiver
+	metrics *EventSinkMetrics
+	queue   eventQueuePuller[E]
+	done    <-chan struct{}
 
 	// lastSendDuration tracks the "real" last full duration of (eventSender).sendAllCurrentEvents().
 	//
@@ -49,16 +37,16 @@ type eventSender struct {
 	lastSendDuration time.Duration
 }
 
-func (s eventSender) senderLoop(logger *zap.Logger) {
-	ticker := time.NewTicker(time.Second * time.Duration(s.config.PushEverySeconds))
+func (s eventSender[E]) senderLoop(logger *zap.Logger) {
+	ticker := time.NewTicker(time.Second * time.Duration(s.client.BaseConfig.PushEverySeconds))
 	defer ticker.Stop()
 
 	for {
 		final := false
 
 		select {
-		case <-s.collectorFinished.Recv():
-			logger.Info("Received notification that collector finished")
+		case <-s.done:
+			logger.Info("Received notification that events submission is done")
 			final = true
 		case <-ticker.C:
 		}
@@ -72,13 +60,13 @@ func (s eventSender) senderLoop(logger *zap.Logger) {
 	}
 }
 
-func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
+func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 	logger.Info("Pushing all available events")
 
 	if s.queue.size() == 0 {
-		logger.Info("No billing events to push")
+		logger.Info("No events to push")
 		s.lastSendDuration = 0
-		s.metrics.lastSendDuration.WithLabelValues(s.clientInfo.name).Set(1e-6) // small value, to indicate that nothing happened
+		s.metrics.lastSendDuration.WithLabelValues(s.client.Name).Set(1e-6) // small value, to indicate that nothing happened
 		return
 	}
 
@@ -97,12 +85,12 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 			logger.Info("Current queue size is non-zero", zap.Int("queueSize", size))
 		}
 
-		chunk := s.queue.get(int(s.config.MaxBatchSize))
+		chunk := s.queue.get(int(s.client.BaseConfig.MaxBatchSize))
 		count := len(chunk)
 		if count == 0 {
 			totalTime := time.Since(startTime)
 			s.lastSendDuration = totalTime
-			s.metrics.lastSendDuration.WithLabelValues(s.clientInfo.name).Set(totalTime.Seconds())
+			s.metrics.lastSendDuration.WithLabelValues(s.client.Name).Set(totalTime.Seconds())
 
 			logger.Info(
 				"All available events have been sent",
@@ -112,21 +100,28 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 			return
 		}
 
-		traceID := billing.GenerateTraceID()
+		req := s.client.Base.NewRequest()
 
 		logger.Info(
-			"Pushing billing events",
+			"Pushing events",
 			zap.Int("count", count),
-			zap.String("traceID", string(traceID)),
-			s.client.LogFields(),
+			req.LogFields(),
 		)
 
 		reqStart := time.Now()
-		err := func() error {
-			reqCtx, cancel := context.WithTimeout(context.TODO(), time.Second*time.Duration(s.config.PushRequestTimeoutSeconds))
+		err := func() SimplifiableError {
+			reqCtx, cancel := context.WithTimeout(
+				context.TODO(),
+				time.Second*time.Duration(s.client.BaseConfig.PushRequestTimeoutSeconds),
+			)
 			defer cancel()
 
-			return billing.Send(reqCtx, s.client, traceID, chunk)
+			payload, err := s.client.SerializeBatch(chunk)
+			if err != nil {
+				return err
+			}
+
+			return req.Send(reqCtx, payload)
 		}()
 		reqDuration := time.Since(reqStart)
 
@@ -137,31 +132,17 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 				"Failed to push billing events",
 				zap.Int("count", count),
 				zap.Duration("after", reqDuration),
-				zap.String("traceID", string(traceID)),
-				s.client.LogFields(),
+				req.LogFields(),
 				zap.Int("total", total),
 				zap.Duration("totalTime", time.Since(startTime)),
 				zap.Error(err),
 			)
 
-			var rootErr string
-			//nolint:errorlint // The type switch (instead of errors.As) is ok; billing.Send() guarantees the error types.
-			switch e := err.(type) {
-			case billing.JSONError:
-				rootErr = "JSON marshaling"
-			case billing.UnexpectedStatusCodeError:
-				rootErr = fmt.Sprintf("HTTP code %d", e.StatusCode)
-			case billing.S3Error:
-				rootErr = "S3 error"
-			case billing.AzureError:
-				rootErr = "Azure Blob error"
-			default:
-				rootErr = util.RootError(err).Error()
-			}
-			s.metrics.sendErrorsTotal.WithLabelValues(s.clientInfo.name, rootErr).Inc()
+			rootErr := err.Simplified()
+			s.metrics.sendErrorsTotal.WithLabelValues(s.client.Name, rootErr).Inc()
 
 			s.lastSendDuration = 0
-			s.metrics.lastSendDuration.WithLabelValues(s.clientInfo.name).Set(0.0) // use 0 as a flag that something went wrong; there's no valid time here.
+			s.metrics.lastSendDuration.WithLabelValues(s.client.Name).Set(0.0) // use 0 as a flag that something went wrong; there's no valid time here.
 			return
 		}
 
@@ -170,18 +151,17 @@ func (s eventSender) sendAllCurrentEvents(logger *zap.Logger) {
 		currentTotalTime := time.Since(startTime)
 
 		logger.Info(
-			"Successfully pushed some billing events",
+			"Successfully pushed some events",
 			zap.Int("count", count),
 			zap.Duration("after", reqDuration),
-			zap.String("traceID", string(traceID)),
-			s.client.LogFields(),
+			req.LogFields(),
 			zap.Int("total", total),
 			zap.Duration("totalTime", currentTotalTime),
 		)
 
 		if currentTotalTime > s.lastSendDuration {
 			s.lastSendDuration = currentTotalTime
-			s.metrics.lastSendDuration.WithLabelValues(s.clientInfo.name).Set(currentTotalTime.Seconds())
+			s.metrics.lastSendDuration.WithLabelValues(s.client.Name).Set(currentTotalTime.Seconds())
 		}
 	}
 }

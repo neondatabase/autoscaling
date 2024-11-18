@@ -9,6 +9,7 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/agent/billing"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/reporting"
 )
 
 type Config struct {
@@ -167,7 +168,7 @@ func (c *Config) validate() error {
 		zeroTmpl  = "field %q cannot be zero"
 	)
 
-	validateBaseBillingConfig := func(cfg *billing.BaseClientConfig, key string) {
+	validateBaseReportingConfig := func(cfg *reporting.BaseClientConfig, key string) {
 		erc.Whenf(ec, cfg.PushEverySeconds == 0, zeroTmpl, fmt.Sprintf("%s.pushEverySeconds", key))
 		erc.Whenf(ec, cfg.PushRequestTimeoutSeconds == 0, zeroTmpl, fmt.Sprintf("%s.pushRequestTimeoutSeconds", key))
 		erc.Whenf(ec, cfg.MaxBatchSize == 0, zeroTmpl, fmt.Sprintf("%s.maxBatchSize", key))
@@ -178,16 +179,16 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
 	erc.Whenf(ec, c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
 	if c.Billing.Clients.AzureBlob != nil {
-		validateBaseBillingConfig(&c.Billing.Clients.AzureBlob.BaseClientConfig, ".billing.clients.azure")
+		validateBaseReportingConfig(&c.Billing.Clients.AzureBlob.BaseClientConfig, ".billing.clients.azure")
 		erc.Whenf(ec, c.Billing.Clients.AzureBlob.Endpoint == "", emptyTmpl, ".billing.clients.azure.endpoint")
 		erc.Whenf(ec, c.Billing.Clients.AzureBlob.Container == "", emptyTmpl, ".billing.clients.azure.container")
 	}
 	if c.Billing.Clients.HTTP != nil {
-		validateBaseBillingConfig(&c.Billing.Clients.HTTP.BaseClientConfig, ".billing.clients.http")
+		validateBaseReportingConfig(&c.Billing.Clients.HTTP.BaseClientConfig, ".billing.clients.http")
 		erc.Whenf(ec, c.Billing.Clients.HTTP.URL == "", emptyTmpl, ".billing.clients.http.url")
 	}
 	if c.Billing.Clients.S3 != nil {
-		validateBaseBillingConfig(&c.Billing.Clients.S3.BaseClientConfig, "billing.clients.s3")
+		validateBaseReportingConfig(&c.Billing.Clients.S3.BaseClientConfig, "billing.clients.s3")
 		erc.Whenf(ec, c.Billing.Clients.S3.Bucket == "", emptyTmpl, ".billing.clients.s3.bucket")
 		erc.Whenf(ec, c.Billing.Clients.S3.Region == "", emptyTmpl, ".billing.clients.s3.region")
 		erc.Whenf(ec, c.Billing.Clients.S3.PrefixInBucket == "", emptyTmpl, ".billing.clients.s3.prefixInBucket")
