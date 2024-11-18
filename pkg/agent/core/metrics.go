@@ -18,8 +18,8 @@ import (
 )
 
 type SystemMetrics struct {
-	LoadAverage1Min float64
-
+	LoadAverage1Min   float64
+	LoadAverage5Min   float64
 	MemoryUsageBytes  float64
 	MemoryCachedBytes float64
 }
@@ -94,12 +94,14 @@ func (m *SystemMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) e
 	}
 
 	load1 := getFloat("host_load1")
+	load5 := getFloat("host_load5")
 	memTotal := getFloat("host_memory_total_bytes")
 	memAvailable := getFloat("host_memory_available_bytes")
 	memCached := getFloat("host_memory_cached_bytes")
 
 	tmp := SystemMetrics{
 		LoadAverage1Min: load1,
+		LoadAverage5Min: load5,
 		// Add an extra 100 MiB to account for kernel memory usage
 		MemoryUsageBytes:  memTotal - memAvailable + 100*(1<<20),
 		MemoryCachedBytes: memCached,

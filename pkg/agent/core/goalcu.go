@@ -8,6 +8,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/exp/constraints"
 
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -65,9 +66,27 @@ func calculateCPUGoalCU(
 	computeUnit api.Resources,
 	systemMetrics SystemMetrics,
 ) uint32 {
-	goalCPUs := systemMetrics.LoadAverage1Min / *cfg.LoadAverageFractionTarget
+	stableThreshold := *cfg.CPUStableZoneRatio * systemMetrics.LoadAverage5Min
+	mixedThreshold := stableThreshold + *cfg.CPUMixedZoneRatio*systemMetrics.LoadAverage5Min
+
+	diff := math.Abs(systemMetrics.LoadAverage1Min - systemMetrics.LoadAverage5Min)
+	load1Weight := blendingFactor(diff, stableThreshold, mixedThreshold)
+
+	blendedLoadAverage := load1Weight*systemMetrics.LoadAverage1Min + (1-load1Weight)*systemMetrics.LoadAverage5Min
+
+	goalCPUs := blendedLoadAverage / *cfg.LoadAverageFractionTarget
 	cpuGoalCU := uint32(math.Round(goalCPUs / computeUnit.VCPU.AsFloat64()))
 	return cpuGoalCU
+}
+
+func blendingFactor[T constraints.Float](value, t1, t2 T) T {
+	if value < t1 {
+		return 0
+	} else if value >= t2 {
+		return 1
+	} else {
+		return (value - t1) / (t2 - t1 + 1e-6)
+	}
 }
 
 // For Mem:

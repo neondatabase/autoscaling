@@ -41,6 +41,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "BasicScaleup",
 			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:   0.30,
+				LoadAverage5Min:   0.0,
 				MemoryUsageBytes:  0.0,
 				MemoryCachedBytes: 0.0,
 			},
@@ -58,6 +59,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "MismatchedApprovedNoScaledown",
 			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:   0.0, // ordinarily would like to scale down
+				LoadAverage5Min:   0.0,
 				MemoryUsageBytes:  0.0,
 				MemoryCachedBytes: 0.0,
 			},
@@ -77,6 +79,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "MismatchedApprovedNoScaledownButVMAtMaximum",
 			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:   0.0, // ordinarily would like to scale down
+				LoadAverage5Min:   0.0,
 				MemoryUsageBytes:  0.0,
 				MemoryCachedBytes: 0.0,
 			},
@@ -96,6 +99,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "BasicLFCScaleup",
 			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:   0.0,
+				LoadAverage5Min:   0.0,
 				MemoryUsageBytes:  0.0,
 				MemoryCachedBytes: 0.0,
 			},
@@ -131,6 +135,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "CanScaleUpWithoutExpectedLFCMetrics",
 			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:   0.30,
+				LoadAverage5Min:   0.0,
 				MemoryUsageBytes:  0.0,
 				MemoryCachedBytes: 0.0,
 			},
@@ -152,6 +157,7 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 			name: "CanScaleToBoundsWithoutExpectedMetrics",
 			systemMetrics: &core.SystemMetrics{
 				LoadAverage1Min:   0.30,
+				LoadAverage5Min:   0.0,
 				MemoryUsageBytes:  0.0,
 				MemoryCachedBytes: 0.0,
 			},
@@ -237,6 +243,8 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					LFCToMemoryRatio:                 lo.ToPtr(0.75),
 					LFCWindowSizeMinutes:             lo.ToPtr(5),
 					LFCMinWaitBeforeDownscaleMinutes: lo.ToPtr(5),
+					CPUStableZoneRatio:               lo.ToPtr(0.0),
+					CPUMixedZoneRatio:                lo.ToPtr(0.0),
 				},
 				// these don't really matter, because we're not using (*State).NextActions()
 				NeonVMRetryWait:                    time.Second,
@@ -325,6 +333,8 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 			LFCToMemoryRatio:                 lo.ToPtr(0.75),
 			LFCWindowSizeMinutes:             lo.ToPtr(5),
 			LFCMinWaitBeforeDownscaleMinutes: lo.ToPtr(15),
+			CPUStableZoneRatio:               lo.ToPtr(0.0),
+			CPUMixedZoneRatio:                lo.ToPtr(0.0),
 		},
 		NeonVMRetryWait:                    5 * time.Second,
 		PluginRequestTick:                  5 * time.Second,
@@ -450,6 +460,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	clockTick().AssertEquals(duration("0.2s"))
 	lastMetrics := core.SystemMetrics{
 		LoadAverage1Min:   0.3,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -549,6 +560,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	// Set metrics back so that desired resources should now be zero
 	lastMetrics = core.SystemMetrics{
 		LoadAverage1Min:   0.0,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -652,6 +664,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 
 	metrics := core.SystemMetrics{
 		LoadAverage1Min:   0.0,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -742,6 +755,7 @@ func TestPartialUpscaleThenFull(t *testing.T) {
 	clockTick()
 	metrics := core.SystemMetrics{
 		LoadAverage1Min:   1.0,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  12345678,
 		MemoryCachedBytes: 0.0,
 	}
@@ -886,6 +900,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 	clockTick()
 	metrics := core.SystemMetrics{
 		LoadAverage1Min:   0.0,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -1162,6 +1177,7 @@ func TestRequestedUpscale(t *testing.T) {
 	clockTick()
 	lastMetrics := core.SystemMetrics{
 		LoadAverage1Min:   0.0,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -1305,11 +1321,13 @@ func TestDownscalePivotBack(t *testing.T) {
 
 	initialMetrics := core.SystemMetrics{
 		LoadAverage1Min:   0.0,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
 	newMetrics := core.SystemMetrics{
 		LoadAverage1Min:   0.3,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -1547,6 +1565,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	// Set metrics so the desired resources are still 2 CU
 	metrics := core.SystemMetrics{
 		LoadAverage1Min:   0.3,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -1662,6 +1681,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	// Set metrics so the desired resources are still 2 CU
 	metrics := core.SystemMetrics{
 		LoadAverage1Min:   0.3,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -1762,6 +1782,7 @@ func TestFailedRequestRetry(t *testing.T) {
 	clockTick()
 	metrics := core.SystemMetrics{
 		LoadAverage1Min:   0.3,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  0.0,
 		MemoryCachedBytes: 0.0,
 	}
@@ -1919,6 +1940,7 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 	// the actual metrics we got in the actual logs
 	metrics := core.SystemMetrics{
 		LoadAverage1Min:   0.0,
+		LoadAverage5Min:   0.0,
 		MemoryUsageBytes:  150589570, // 143.6 MiB
 		MemoryCachedBytes: 0.0,
 	}

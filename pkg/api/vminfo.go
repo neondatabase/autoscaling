@@ -368,6 +368,16 @@ type ScalingConfig struct {
 	// LFCWindowSizeMinutes dictates the minimum duration we must use during internal calculations
 	// of the rate of increase in LFC working set size.
 	LFCWindowSizeMinutes *int `json:"lfcWindowSizeMinutes,omitempty"`
+
+	// CPUStableZoneRatio is the ratio of the stable load zone size relative to load5.
+	// For example, a value of 0.25 means that stable zone will be load5±25%.
+	CPUStableZoneRatio *float64 `json:"cpuStableZoneRatio,omitempty"`
+
+	// CPUMixedZoneRatio is the ratio of the mixed load zone size relative to load5.
+	// Since mixed zone starts after stable zone, values CPUStableZoneRatio=0.25 and CPUMixedZoneRatio=0.15
+	// means that stable zone will be from 0.75*load5 to 1.25*load5, and mixed zone will be
+	// from 0.6*load5 to 0.75*load5, and from 1.25*load5 to 1.4*load5.
+	CPUMixedZoneRatio *float64 `json:"cpuMixedZoneRatio,omitempty"`
 }
 
 // WithOverrides returns a new copy of defaults, where fields set in overrides replace the ones in
@@ -399,6 +409,13 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 	}
 	if overrides.LFCMinWaitBeforeDownscaleMinutes != nil {
 		defaults.LFCMinWaitBeforeDownscaleMinutes = lo.ToPtr(*overrides.LFCMinWaitBeforeDownscaleMinutes)
+	}
+
+	if overrides.CPUStableZoneRatio != nil {
+		defaults.CPUStableZoneRatio = lo.ToPtr(*overrides.CPUStableZoneRatio)
+	}
+	if overrides.CPUMixedZoneRatio != nil {
+		defaults.CPUMixedZoneRatio = lo.ToPtr(*overrides.CPUMixedZoneRatio)
 	}
 
 	return defaults
@@ -453,6 +470,8 @@ func (c *ScalingConfig) validate(requireAll bool) error {
 		erc.Whenf(ec, c.LFCToMemoryRatio == nil, "%s is a required field", ".lfcToMemoryRatio")
 		erc.Whenf(ec, c.LFCWindowSizeMinutes == nil, "%s is a required field", ".lfcWindowSizeMinutes")
 		erc.Whenf(ec, c.LFCMinWaitBeforeDownscaleMinutes == nil, "%s is a required field", ".lfcMinWaitBeforeDownscaleMinutes")
+		erc.Whenf(ec, c.CPUStableZoneRatio == nil, "%s is a required field", ".cpuStableZoneRatio")
+		erc.Whenf(ec, c.CPUMixedZoneRatio == nil, "%s is a required field", ".cpuMixedZoneRatio")
 	}
 
 	// heads-up! some functions elsewhere depend on the concrete return type of this function.
