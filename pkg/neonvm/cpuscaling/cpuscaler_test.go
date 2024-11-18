@@ -43,6 +43,16 @@ func (cs *MockState) PossibleCPUs() (int, int, error) {
 	return 0, len(cs.state) - 1, nil
 }
 
+func (cs *MockState) ActiveCPUsCount() (int, error) {
+	count := 0
+	for _, state := range cs.state {
+		if state == cpuOnline {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func TestReconcileCPU(t *testing.T) {
 	t.Run("multiple cpu available", func(t *testing.T) {
 		scaler := &CPUScaler{
@@ -106,7 +116,7 @@ func TestReconcileCPU(t *testing.T) {
 }
 
 func assertActiveCPUsCount(t *testing.T, scaler *CPUScaler, n int) {
-	activeCPUs, err := scaler.ActiveCPUsCount()
+	activeCPUs, err := scaler.cpuState.ActiveCPUsCount()
 	assert.NoError(t, err)
 	assert.Equal(t, n, activeCPUs)
 }

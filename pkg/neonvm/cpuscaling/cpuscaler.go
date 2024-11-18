@@ -4,6 +4,7 @@ import "fmt"
 
 type CPUStater interface {
 	PossibleCPUs() (start int, end int, err error)
+	ActiveCPUsCount() (int, error)
 	SetState(cpuNum int, cpuState cpuState) error
 	GetState(cpuNum int) (cpuState, error)
 }
@@ -26,18 +27,7 @@ func NewCPUScaler() *CPUScaler {
 }
 
 func (c *CPUScaler) ReconcileOnlineCPU(targetCount int) error {
-	start, end, err := c.cpuState.PossibleCPUs()
-	if err != nil {
-		return err
-	}
-
-	if start == end {
-		// we can't scale only one CPU
-		// so we return early
-		return nil
-	}
-
-	onlineCount, err := c.ActiveCPUsCount()
+	onlineCount, err := c.cpuState.ActiveCPUsCount()
 	if err != nil {
 		return err
 	}
@@ -48,11 +38,22 @@ func (c *CPUScaler) ReconcileOnlineCPU(targetCount int) error {
 	} else if onlineCount > targetCount {
 		targetCpuStateToSet = cpuOffline
 	}
-	return c.reconcileToState(int(onlineCount), targetCount, targetCpuStateToSet, start, end)
+	return c.reconcileToState(int(onlineCount), targetCount, targetCpuStateToSet)
 }
 
-func (c *CPUScaler) reconcileToState(onlineCount int, targetCount int, targetState cpuState, start int, end int) error {
-	for cpu := start; cpu <= end; cpu++ {
+func (c *CPUScaler) reconcileToState(onlineCount int, targetCount int, targetState cpuState) error {
+	fistCPU, lastCPU, err := c.cpuState.PossibleCPUs()
+	if err != nil {
+		return err
+	}
+
+	if fistCPU == lastCPU {
+		// we can't scale only one CPU
+		// so we return early
+		return fmt.Errorf("failed to scale: only single CPU is available")
+	}
+
+	for cpu := fistCPU; cpu <= lastCPU; cpu++ {
 
 		// Skip CPU 0 as it is always online and can't be offed
 		if cpu == 0 && targetState == cpuOffline {
@@ -92,23 +93,6 @@ func (c *CPUScaler) reconcileToState(onlineCount int, targetCount int, targetSta
 	return nil
 }
 
-// ActiveCPUsCount() returns the count of online CPUs.
 func (c *CPUScaler) ActiveCPUsCount() (int, error) {
-	start, end, err := c.cpuState.PossibleCPUs()
-	if err != nil {
-		return 0, err
-	}
-
-	var onlineCount int
-	for cpu := start; cpu <= end; cpu++ {
-		state, err := c.cpuState.GetState(cpu)
-		if err != nil {
-			return 0, err
-		}
-		if state == cpuOnline {
-			onlineCount++
-		}
-	}
-
-	return onlineCount, nil
+	return c.cpuState.ActiveCPUsCount()
 }

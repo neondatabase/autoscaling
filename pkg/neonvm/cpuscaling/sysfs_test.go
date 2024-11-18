@@ -29,3 +29,17 @@ func TestParseCPURange(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []int{1, 1}, []int{start, end})
 }
+
+func TestParseMultipleCPURange(t *testing.T) {
+	sysFsState := cpuSysfsState{}
+
+	// Parsing multiple range
+	cpus, err := sysFsState.parseMultipleCPURange("0-1,3-5, 9")
+	assert.NoError(t, err)
+	assert.Equal(t, []int{0, 1, 3, 4, 5, 9}, cpus)
+
+	// Parsing single CPU
+	cpus, err = sysFsState.parseMultipleCPURange("0,1,2,3")
+	assert.NoError(t, err)
+	assert.Equal(t, []int{0, 1, 2, 3}, cpus)
+}

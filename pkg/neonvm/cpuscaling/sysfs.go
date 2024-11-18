@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -31,27 +32,24 @@ func (cs *cpuSysfsState) SetState(cpuNum int, cpuState cpuState) error {
 }
 
 func (cs *cpuSysfsState) GetState(cpuNum int) (cpuState, error) {
-	data, err := os.ReadFile(filepath.Join(cpuPath, fmt.Sprintf("cpu%d/online", cpuNum)))
-
-	if os.IsNotExist(err) {
-		// If the file doesn't exist for CPU 0, assume it's online
-		if cpuNum == 0 {
-			return cpuOnline, nil
-		}
-		return cpuOffline, err
-	}
-
+	data, err := os.ReadFile(filepath.Join(cpuPath, "online"))
 	if err != nil {
 		return cpuOffline, err
 	}
 
-	online := strings.TrimSpace(string(data))
-	if online == "1" {
+	onlineCPUs, err := cs.parseMultipleCPURange(string(data))
+	if err != nil {
+		return cpuOffline, err
+	}
+
+	if slices.Contains(onlineCPUs, cpuNum) {
 		return cpuOnline, nil
 	}
+
 	return cpuOffline, nil
 }
 
+// PossibleCPUs returns the start and end indexes of all possible CPUs.
 func (cs *cpuSysfsState) PossibleCPUs() (int, int, error) {
 	data, err := os.ReadFile(filepath.Join(cpuPath, "possible"))
 	if err != nil {
@@ -85,4 +83,45 @@ func (cs *cpuSysfsState) parseCPURange(cpuRange string) (int, int, error) {
 		return -1, -1, err
 	}
 	return start, end, nil
+}
+
+// parseMultipleCPURange parses the multiple CPU range string (e.g., "0-3,5-7") and returns a list of CPUs.
+func (cs *cpuSysfsState) parseMultipleCPURange(cpuRange string) ([]int, error) {
+	cpuRange = strings.TrimSpace(cpuRange)
+	parts := strings.Split(cpuRange, ",")
+
+	var cpus []int
+	for _, part := range parts {
+		start, end, err := cs.parseCPURange(part)
+		if err != nil {
+			return nil, err
+		}
+
+		for cpu := start; cpu <= end; cpu++ {
+			cpus = append(cpus, cpu)
+		}
+	}
+
+	return cpus, nil
+}
+
+// ActiveCPUsCount() returns the count of online CPUs.
+func (c *cpuSysfsState) ActiveCPUsCount() (int, error) {
+	start, end, err := c.PossibleCPUs()
+	if err != nil {
+		return 0, err
+	}
+
+	var onlineCount int
+	for cpu := start; cpu <= end; cpu++ {
+		state, err := c.GetState(cpu)
+		if err != nil {
+			return 0, err
+		}
+		if state == cpuOnline {
+			onlineCount++
+		}
+	}
+
+	return onlineCount, nil
 }
