@@ -174,7 +174,8 @@ func (v PluginProtoVersion) IncludesExtendedMetrics() bool {
 	return v < PluginProtoV5_0
 }
 
-// AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
+// AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin on
+// behalf of a Pod on the agent's node.
 //
 // All AgentRequests expect a PluginResponse.
 type AgentRequest struct {
@@ -182,7 +183,8 @@ type AgentRequest struct {
 	//
 	// If the scheduler does not support this version, then it will respond with a 400 status.
 	ProtoVersion PluginProtoVersion `json:"protoVersion"`
-	// Pod is the namespaced name of the pod making the request
+	// Pod is the namespaced name of the Pod that the autoscaler-agent is making the request on
+	// behalf of.
 	Pod util.NamespacedName `json:"pod"`
 	// ComputeUnit gives the value of the agent's configured compute unit to use for the VM.
 	//
