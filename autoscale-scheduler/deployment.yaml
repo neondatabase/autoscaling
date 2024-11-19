@@ -63,3 +63,13 @@ spec:
         - name: plugin-config-volume
           configMap:
             name: scheduler-plugin-config
+
+      tolerations:
+        # Add explicit (short) tolerations for node failure, because otherwise the default of 5m
+        # will be used, which is unacceptably long for us.
+        - key: node.kubernetes.io/not-ready
+          tolerationSeconds: 30
+          effect: NoExecute
+        - key: node.kubernetes.io/unreachable
+          tolerationSeconds: 30
+          effect: NoExecute
