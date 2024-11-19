@@ -78,7 +78,8 @@ type VMReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 	Config   *ReconcilerConfig
-	Metrics  ReconcilerMetrics `exhaustruct:"optional"`
+
+	Metrics ReconcilerMetrics `exhaustruct:"optional"`
 }
 
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
@@ -162,9 +163,9 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	}
 
 	// examine cpuScalingMode and set it to the default value if it is not set
-	if vm.Spec.CpuScalingMode == nil || *vm.Spec.CpuScalingMode == "" {
+	if vm.Spec.CpuScalingMode == nil {
 		log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
-		vm.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingMode(r.Config.DefaultCPUScalingMode))
+		vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
 		if err := r.tryUpdateVM(ctx, &vm); err != nil {
 			log.Error(err, "Failed to set default CPU scaling mode")
 			return ctrl.Result{}, err
@@ -576,10 +577,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 			switch *vm.Spec.CpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
-				log.Info("CPU usage check based on cgroups", "CpuScalingMode", *vm.Spec.CpuScalingMode)
 				pluggedCPU = cgroupUsage.VCPUs.RoundedUp()
 			case vmv1.CpuScalingModeQMP:
-				log.Info("CPU usage check based on QMP", "CpuScalingMode", *vm.Spec.CpuScalingMode)
 				cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
 				if err != nil {
 					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)

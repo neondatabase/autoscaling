@@ -86,7 +86,6 @@ func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.Virtual
 			return false, err
 		}
 	} else {
-		log.Info("No need to plug or unplug CPU")
 		hotPlugCPUScaled = true
 	}
 

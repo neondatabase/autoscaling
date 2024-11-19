@@ -32,21 +32,29 @@ func (cs *cpuSysfsState) SetState(cpuNum int, cpuState cpuState) error {
 }
 
 func (cs *cpuSysfsState) GetState(cpuNum int) (cpuState, error) {
-	data, err := os.ReadFile(filepath.Join(cpuPath, "online"))
+	onlineCPUs, err := cs.getAllOnlineCPUs()
 	if err != nil {
 		return cpuOffline, err
 	}
-
-	onlineCPUs, err := cs.parseMultipleCPURange(string(data))
-	if err != nil {
-		return cpuOffline, err
-	}
-
 	if slices.Contains(onlineCPUs, cpuNum) {
 		return cpuOnline, nil
 	}
 
 	return cpuOffline, nil
+}
+
+func (cs *cpuSysfsState) getAllOnlineCPUs() ([]int, error) {
+	data, err := os.ReadFile(filepath.Join(cpuPath, "online"))
+	if err != nil {
+		return nil, err
+	}
+
+	onlineCPUs, err := cs.parseMultipleCPURange(string(data))
+	if err != nil {
+		return onlineCPUs, err
+	}
+
+	return onlineCPUs, nil
 }
 
 // PossibleCPUs returns the start and end indexes of all possible CPUs.
@@ -59,7 +67,7 @@ func (cs *cpuSysfsState) PossibleCPUs() (int, int, error) {
 	return cs.parseCPURange(string(data))
 }
 
-// parseCPURange parses the CPU range string (e.g., "0-3") and returns a list of CPUs.
+// parseCPURange parses the CPU range string (e.g., "0-3") and returns start and end indexes.
 func (cs *cpuSysfsState) parseCPURange(cpuRange string) (int, int, error) {
 	cpuRange = strings.TrimSpace(cpuRange)
 	parts := strings.Split(cpuRange, "-")
@@ -86,9 +94,9 @@ func (cs *cpuSysfsState) parseCPURange(cpuRange string) (int, int, error) {
 }
 
 // parseMultipleCPURange parses the multiple CPU range string (e.g., "0-3,5-7") and returns a list of CPUs.
-func (cs *cpuSysfsState) parseMultipleCPURange(cpuRange string) ([]int, error) {
-	cpuRange = strings.TrimSpace(cpuRange)
-	parts := strings.Split(cpuRange, ",")
+func (cs *cpuSysfsState) parseMultipleCPURange(cpuRanges string) ([]int, error) {
+	cpuRanges = strings.TrimSpace(cpuRanges)
+	parts := strings.Split(cpuRanges, ",")
 
 	var cpus []int
 	for _, part := range parts {

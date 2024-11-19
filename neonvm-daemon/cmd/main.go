@@ -51,6 +51,7 @@ type cpuServer struct {
 func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
 	s.cpuOperationsMutex.Lock()
 	defer s.cpuOperationsMutex.Unlock()
+
 	activeCPUs, err := s.cpuScaler.ActiveCPUsCount()
 	if err != nil {
 		s.logger.Error("could not get active CPUs count", zap.Error(err))
@@ -58,6 +59,7 @@ func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+
 	if _, err := w.Write([]byte(fmt.Sprintf("%d", activeCPUs*1000))); err != nil {
 		s.logger.Error("could not write response", zap.Error(err))
 	}
@@ -66,20 +68,24 @@ func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
 func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 	s.cpuOperationsMutex.Lock()
 	defer s.cpuOperationsMutex.Unlock()
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		s.logger.Error("could not read request body", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	defer r.Body.Close()
+
 	updateInt, err := strconv.Atoi(string(body))
-	update := vmv1.MilliCPU(updateInt)
 	if err != nil {
 		s.logger.Error("could not unmarshal request body", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	s.logger.Info("Setting CPU status", zap.String("body", string(body)))
+
+	s.logger.Debug("Setting CPU status", zap.String("body", string(body)))
+	update := vmv1.MilliCPU(updateInt)
 	if err := s.cpuScaler.ReconcileOnlineCPU(int(update.RoundedUp())); err != nil {
 		s.logger.Error("could not ensure online CPUs", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
