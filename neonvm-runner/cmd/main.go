@@ -953,6 +953,10 @@ func buildQEMUCmd(
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
 	}
 
+	if cfg.architecture == architectureArm64 {
+		qemuCmd = append(qemuCmd, "-bios", "/vm/QEMU_EFI_ARM.fd")
+	}
+
 	for _, disk := range vmSpec.Disks {
 		switch {
 		case disk.EmptyDisk != nil:
@@ -1104,6 +1108,11 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 	if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
 		// Limit the number of online CPUs kernel boots with. More CPUs will be enabled on upscaling
 		cmdlineParts = append(cmdlineParts, fmt.Sprintf("maxcpus=%d", vmSpec.Guest.CPUs.Min.RoundedUp()))
+	}
+
+	if cfg.architecture == architectureArm64 {
+		// explicitly enable acpi if we run on arm
+		cmdlineParts = append(cmdlineParts, "acpi=on")
 	}
 
 	return strings.Join(cmdlineParts, " ")
