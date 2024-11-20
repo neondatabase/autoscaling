@@ -25,8 +25,11 @@ RUN apk add --no-cache \
     cgroup-tools \
     openssh
 
+
 COPY --from=builder /runner /usr/bin/runner
 COPY neonvm-kernel/vmlinuz /vm/kernel/vmlinuz
 COPY neonvm-runner/ssh_config /etc/ssh/ssh_config
+# QEMU_EFI used only by runner running on the arm architecture
+RUN wget https://releases.linaro.org/components/kernel/uefi-linaro/16.02/release/qemu64/QEMU_EFI.fd -O /vm/QEMU_EFI_ARM.fd
 
 ENTRYPOINT ["/sbin/tini", "--", "runner"]
