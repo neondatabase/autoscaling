@@ -3,9 +3,10 @@ package core
 import (
 	"testing"
 
-	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 func Test_calculateGoalCU(t *testing.T) {
