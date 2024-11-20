@@ -1,7 +1,6 @@
 package cpuscaling
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,33 +23,29 @@ func NewMockState(size int) *MockState {
 	return m
 }
 
-func (m *MockState) GetState(cpuNum int) (cpuState, error) {
-	if cpuNum < 0 || cpuNum >= len(m.state) {
-		return cpuOffline, os.ErrNotExist
-	}
-	return m.state[cpuNum], nil
-}
-
-func (m *MockState) SetState(cpuNum int, state cpuState) error {
-	if cpuNum < 0 || cpuNum >= len(m.state) {
-		return os.ErrNotExist
-	}
-	m.state[cpuNum] = state
-	return nil
-}
-
-func (cs *MockState) PossibleCPUs() (int, int, error) {
-	return 0, len(cs.state) - 1, nil
-}
-
-func (cs *MockState) ActiveCPUsCount() (int, error) {
-	count := 0
-	for _, state := range cs.state {
+func (m *MockState) OnlineCPUs() ([]int, error) {
+	result := make([]int, 0, len(m.state))
+	for i, state := range m.state {
 		if state == cpuOnline {
-			count++
+			result = append(result, i)
 		}
 	}
-	return count, nil
+	return result, nil
+}
+
+func (m *MockState) OfflineCPUs() ([]int, error) {
+	result := make([]int, 0, len(m.state))
+	for i, state := range m.state {
+		if state == cpuOffline {
+			result = append(result, i)
+		}
+	}
+	return result, nil
+}
+
+func (m *MockState) SetState(cpuID int, cpuState cpuState) error {
+	m.state[cpuID] = cpuState
+	return nil
 }
 
 func TestReconcileCPU(t *testing.T) {
@@ -66,7 +61,7 @@ func TestReconcileCPU(t *testing.T) {
 		assert.NoError(t, scaler.ReconcileOnlineCPU(3))
 		assertActiveCPUsCount(t, scaler, 3)
 
-		// Scale down
+		// // Scale down
 		assert.NoError(t, scaler.ReconcileOnlineCPU(2))
 		assertActiveCPUsCount(t, scaler, 2)
 	})
@@ -116,7 +111,8 @@ func TestReconcileCPU(t *testing.T) {
 }
 
 func assertActiveCPUsCount(t *testing.T, scaler *CPUScaler, n int) {
-	activeCPUs, err := scaler.cpuState.ActiveCPUsCount()
+	t.Helper() // to tell the test suite that this is a helper method to correctly render the line number
+	onlineCPUs, err := scaler.cpuState.OnlineCPUs()
 	assert.NoError(t, err)
-	assert.Equal(t, n, activeCPUs)
+	assert.Equal(t, n, len(onlineCPUs))
 }

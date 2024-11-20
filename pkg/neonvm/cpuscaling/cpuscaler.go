@@ -1,12 +1,14 @@
 package cpuscaling
 
-import "fmt"
+import (
+	"errors"
+	"slices"
+)
 
 type CPUStater interface {
-	PossibleCPUs() (start int, end int, err error)
-	ActiveCPUsCount() (int, error)
-	SetState(cpuNum int, cpuState cpuState) error
-	GetState(cpuNum int) (cpuState, error)
+	OnlineCPUs() ([]int, error)
+	OfflineCPUs() ([]int, error)
+	SetState(cpuID int, cpuState cpuState) error
 }
 
 type cpuState string
@@ -27,72 +29,63 @@ func NewCPUScaler() *CPUScaler {
 }
 
 func (c *CPUScaler) ReconcileOnlineCPU(targetCount int) error {
-	onlineCount, err := c.cpuState.ActiveCPUsCount()
+	online, err := c.cpuState.OnlineCPUs()
 	if err != nil {
 		return err
 	}
 
-	targetCpuStateToSet := cpuOnline
-	if onlineCount < targetCount {
-		targetCpuStateToSet = cpuOnline
-	} else if onlineCount > targetCount {
-		targetCpuStateToSet = cpuOffline
-	}
-	return c.reconcileToState(int(onlineCount), targetCount, targetCpuStateToSet)
-}
-
-func (c *CPUScaler) reconcileToState(onlineCount int, targetCount int, targetState cpuState) error {
-	fistCPU, lastCPU, err := c.cpuState.PossibleCPUs()
-	if err != nil {
-		return err
+	if len(online) == targetCount {
+		return nil
 	}
 
-	if fistCPU == lastCPU {
-		// we can't scale only one CPU
-		// so we return early
-		return fmt.Errorf("failed to scale: only single CPU is available")
-	}
+	if len(online) > targetCount {
+		diff := len(online) - targetCount
+		// offline 'diff' CPUs that are currently online
+		// reverse online slice so that we offline in the reverse order of onlining.
+		slices.Reverse(online)
+		return c.setStateTo(cpuOffline, diff, online)
 
-	for cpu := fistCPU; cpu <= lastCPU; cpu++ {
-
-		// Skip CPU 0 as it is always online and can't be offed
-		if cpu == 0 && targetState == cpuOffline {
-			continue
-		}
-
-		cpuState, err := c.cpuState.GetState(cpu)
+	} else if len(online) < targetCount {
+		offline, err := c.cpuState.OfflineCPUs()
 		if err != nil {
-			return err
+			return nil
 		}
 
-		if cpuState != targetState {
-			// mark cpu with targetState
-			err := c.cpuState.SetState(cpu, targetState)
-			if err != nil {
-				return err
-			}
-
-			// update counter
-			if targetState == cpuOnline {
-				onlineCount++
-			} else {
-				onlineCount--
-			}
-		}
-
-		// Stop when we reach the target count
-		if onlineCount == targetCount {
-			break
-		}
-	}
-
-	if onlineCount != targetCount {
-		return fmt.Errorf("failed to ensure %d CPUs are online, current online CPUs: %d", targetCount, onlineCount)
+		diff := targetCount - len(online)
+		// online 'diff' CPUs that are currently offline
+		return c.setStateTo(cpuOnline, diff, offline)
 	}
 
 	return nil
 }
 
+func (c *CPUScaler) setStateTo(state cpuState, count int, candidateCPUs []int) error {
+	for _, cpuID := range candidateCPUs {
+		if cpuID == 0 {
+			// Not allowed to change the status of CPU 0
+			continue
+		}
+
+		if err := c.cpuState.SetState(cpuID, state); err != nil {
+			return err
+		}
+
+		count -= 1
+		// nothing left to do
+		if count <= 0 {
+			return nil
+		}
+	}
+
+	// Got through the entire list but didn't change the state of enough CPUs
+	return errors.New("could not change the state of enough CPUs")
+}
+
+// ActiveCPUsCount() returns the count of online CPUs.
 func (c *CPUScaler) ActiveCPUsCount() (int, error) {
-	return c.cpuState.ActiveCPUsCount()
+	onlineCPUs, err := c.cpuState.OnlineCPUs()
+	if err != nil {
+		return 0, err
+	}
+	return len(onlineCPUs), nil
 }

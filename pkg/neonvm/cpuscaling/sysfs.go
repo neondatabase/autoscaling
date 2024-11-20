@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -31,43 +30,32 @@ func (cs *cpuSysfsState) SetState(cpuNum int, cpuState cpuState) error {
 	return nil
 }
 
-func (cs *cpuSysfsState) GetState(cpuNum int) (cpuState, error) {
-	onlineCPUs, err := cs.getAllOnlineCPUs()
-	if err != nil {
-		return cpuOffline, err
-	}
-	if slices.Contains(onlineCPUs, cpuNum) {
-		return cpuOnline, nil
-	}
-
-	return cpuOffline, nil
-}
-
-func (cs *cpuSysfsState) getAllOnlineCPUs() ([]int, error) {
+func (cs *cpuSysfsState) OnlineCPUs() ([]int, error) {
 	data, err := os.ReadFile(filepath.Join(cpuPath, "online"))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read online CPUs: %w", err)
 	}
-
-	onlineCPUs, err := cs.parseMultipleCPURange(string(data))
+	cpuIDs, err := cs.parseMultipleCPURange(string(data))
 	if err != nil {
-		return onlineCPUs, err
+		// log value of the file in case we can't parse to help debugging
+		return nil, fmt.Errorf("failed to parse online CPUs %q: %w", string(data), err)
 	}
-
-	return onlineCPUs, nil
+	return cpuIDs, nil
 }
 
-// PossibleCPUs returns the start and end indexes of all possible CPUs.
-func (cs *cpuSysfsState) PossibleCPUs() (int, int, error) {
-	data, err := os.ReadFile(filepath.Join(cpuPath, "possible"))
+func (cs *cpuSysfsState) OfflineCPUs() ([]int, error) {
+	data, err := os.ReadFile(filepath.Join(cpuPath, "offline"))
 	if err != nil {
-		return -1, -1, err
+		return nil, fmt.Errorf("failed to read offline CPUs: %w", err)
 	}
-
-	return cs.parseCPURange(string(data))
+	cpuIDs, err := cs.parseMultipleCPURange(string(data))
+	if err != nil {
+		// log value of the file in case we can't parse to help debugging
+		return nil, fmt.Errorf("failed to parse offline CPUs %q: %w", string(data), err)
+	}
+	return cpuIDs, nil
 }
 
-// parseCPURange parses the CPU range string (e.g., "0-3") and returns start and end indexes.
 func (cs *cpuSysfsState) parseCPURange(cpuRange string) (int, int, error) {
 	cpuRange = strings.TrimSpace(cpuRange)
 	parts := strings.Split(cpuRange, "-")
@@ -111,25 +99,4 @@ func (cs *cpuSysfsState) parseMultipleCPURange(cpuRanges string) ([]int, error) 
 	}
 
 	return cpus, nil
-}
-
-// ActiveCPUsCount() returns the count of online CPUs.
-func (c *cpuSysfsState) ActiveCPUsCount() (int, error) {
-	start, end, err := c.PossibleCPUs()
-	if err != nil {
-		return 0, err
-	}
-
-	var onlineCount int
-	for cpu := start; cpu <= end; cpu++ {
-		state, err := c.GetState(cpu)
-		if err != nil {
-			return 0, err
-		}
-		if state == cpuOnline {
-			onlineCount++
-		}
-	}
-
-	return onlineCount, nil
 }
