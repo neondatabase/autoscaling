@@ -10,17 +10,17 @@ RUN apk add --no-cache \
     tini \
     dnsmasq \
     iptables \
-    iproute2
+    curl iproute2
 
 # add CNI plugins
 RUN set -e \
-    && wget -q https://github.com/containernetworking/plugins/releases/download/v1.2.0/cni-plugins-linux-amd64-v1.2.0.tgz -O cni.tgz \
+    && curl -L https://github.com/containernetworking/plugins/releases/download/v1.2.0/cni-plugins-linux-amd64-v1.2.0.tgz -o cni.tgz \
     && mkdir -p /opt/cni/bin \
     && tar -xzf cni.tgz -C /opt/cni/bin \
     && rm -f cni.tgz
 
 RUN set -e \
-    && wget -q https://github.com/grpc-ecosystem/grpc-health-probe/releases/latest/download/grpc_health_probe-linux-amd64 -O /usr/bin/grpc_health_probe \
+    && curl -L https://github.com/grpc-ecosystem/grpc-health-probe/releases/latest/download/grpc_health_probe-linux-amd64 -o /usr/bin/grpc_health_probe \
     && chmod +x /usr/bin/grpc_health_probe
 
 COPY --from=builder /vxlan-controller /usr/bin/vxlan-controller

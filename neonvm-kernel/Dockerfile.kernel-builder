@@ -1,5 +1,5 @@
 # Force initial check that KERNEL_VERSION is set appropriately
-FROM ubuntu:23.10 AS check-arg
+FROM ubuntu:24.04 AS check-arg
 ARG KERNEL_VERSION
 WORKDIR /build
 
@@ -8,7 +8,7 @@ RUN set -e \
     && test -n "${KERNEL_VERSION}" \
     && echo "force this as a requirement for build-deps" > /build/arg-check-succeeded
 
-FROM ubuntu:23.10 AS build-deps
+FROM ubuntu:24.04 AS build-deps
 WORKDIR /build
 
 RUN apt-get update && apt-get -y install \
