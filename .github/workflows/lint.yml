@@ -75,7 +75,7 @@ jobs:
       - uses: codespell-project/actions-codespell@406322ec52dd7b488e48c1c4b82e2a8b3a1bf630 # v2.1
         with:
           check_hidden: true
-          ignore_words_list: NotIn # k8s match selectors; codespell tries to correct it to 'noting', 'not in', or 'notion'
+          ignore_words_list: NotIn, notin # k8s match selectors; codespell tries to correct it to 'noting', 'not in', or 'notion'
           skip: go.sum,./cluster-autoscaler/ca.patch,./neonvm/config/multus-common/nad-crd.yaml
 
   actionlint:
