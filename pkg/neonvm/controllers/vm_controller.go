@@ -311,6 +311,42 @@ func (r *VMReconciler) updateVMStatusMemory(
 	}
 }
 
+func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMachine) error {
+	if vm.Spec.ExtraNetwork == nil || !vm.Spec.ExtraNetwork.Enable || len(vm.Status.ExtraNetIP) != 0 {
+		// If the VM has extra network disabled or already has an IP, do nothing.
+		return nil
+	}
+
+	log := log.FromContext(ctx)
+
+	// Create IPAM object
+	nadName, err := nadIpamName()
+	if err != nil {
+		return err
+	}
+	nadNamespace, err := nadIpamNamespace()
+	if err != nil {
+		return err
+	}
+	ipam, err := ipam.New(ctx, nadName, nadNamespace)
+	if err != nil {
+		log.Error(err, "failed to create IPAM")
+		return err
+	}
+	defer ipam.Close()
+	ip, err := ipam.AcquireIP(ctx, vm.Name, vm.Namespace)
+	if err != nil {
+		log.Error(err, "fail to acquire IP")
+		return err
+	}
+	message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
+	log.Info(message)
+	vm.Status.ExtraNetIP = ip.IP.String()
+	vm.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
+	r.Recorder.Event(vm, "Normal", "OverlayNet", message)
+	return nil
+}
+
 func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine) error {
 	log := log.FromContext(ctx)
 
@@ -342,35 +378,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	switch vm.Status.Phase {
 
 	case "":
-		// Acquire overlay IP address
-		if vm.Spec.ExtraNetwork != nil &&
-			vm.Spec.ExtraNetwork.Enable &&
-			len(vm.Status.ExtraNetIP) == 0 {
-			// Create IPAM object
-			nadName, err := nadIpamName()
-			if err != nil {
-				return err
-			}
-			nadNamespace, err := nadIpamNamespace()
-			if err != nil {
-				return err
-			}
-			ipam, err := ipam.New(ctx, nadName, nadNamespace)
-			if err != nil {
-				log.Error(err, "failed to create IPAM")
-				return err
-			}
-			defer ipam.Close()
-			ip, err := ipam.AcquireIP(ctx, vm.Name, vm.Namespace)
-			if err != nil {
-				log.Error(err, "fail to acquire IP")
-				return err
-			}
-			message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
-			log.Info(message)
-			vm.Status.ExtraNetIP = ip.IP.String()
-			vm.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
-			r.Recorder.Event(vm, "Normal", "OverlayNet", message)
+		if err := r.acquireOverlayIP(ctx, vm); err != nil {
+			return err
 		}
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
@@ -492,15 +501,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
 				})
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
-				})
 		default:
 			// do nothing
 		}
@@ -620,15 +620,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
 				})
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
-				})
 		default:
 			// do nothing
 		}
@@ -681,16 +672,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Status:  metav1.ConditionTrue,
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
-				})
-			return nil
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
 				})
 			return nil
 		default:
@@ -950,7 +931,6 @@ func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualM
 type runnerStatusKind string
 
 const (
-	runnerUnknown   runnerStatusKind = "Unknown"
 	runnerPending   runnerStatusKind = "Pending"
 	runnerRunning   runnerStatusKind = "Running"
 	runnerFailed    runnerStatusKind = "Failed"
@@ -977,8 +957,6 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 		return runnerSucceeded
 	case corev1.PodFailed:
 		return runnerFailed
-	case corev1.PodUnknown:
-		return runnerUnknown
 	case corev1.PodRunning:
 		return runnerRunning
 	default:

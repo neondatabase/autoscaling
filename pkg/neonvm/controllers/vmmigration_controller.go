@@ -388,19 +388,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				})
 			migration.Status.Phase = vmv1.VmmFailed
 			return r.updateMigrationStatus(ctx, migration)
-		case runnerUnknown:
-			message := fmt.Sprintf("Target Pod (%s) in Unknown phase", targetRunner.Name)
-			log.Info(message)
-			r.Recorder.Event(migration, "Warning", "Unknown", message)
-			meta.SetStatusCondition(&migration.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachineMigration,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: message,
-				})
-			migration.Status.Phase = vmv1.VmmPending
-			return r.updateMigrationStatus(ctx, migration)
 		default:
 			// not sure what to do, so try rqueue
 			return ctrl.Result{RequeueAfter: time.Second}, nil
