@@ -7,7 +7,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
 )
 
@@ -74,7 +74,7 @@ type (
 	autoscalingEnabledFlag bool
 )
 
-func (b batchMetrics) inc(isEndpoint isEndpointFlag, autoscalingEnabled autoscalingEnabledFlag, phase vmapi.VmPhase) {
+func (b batchMetrics) inc(isEndpoint isEndpointFlag, autoscalingEnabled autoscalingEnabledFlag, phase vmv1.VmPhase) {
 	key := batchMetricsLabels{
 		isEndpoint:         strconv.FormatBool(bool(isEndpoint)),
 		autoscalingEnabled: strconv.FormatBool(bool(autoscalingEnabled)),

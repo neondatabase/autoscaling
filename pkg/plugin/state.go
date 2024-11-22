@@ -17,7 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
@@ -38,7 +38,7 @@ type pluginState struct {
 
 	// maxTotalReservableCPU stores the maximum value of any node's totalReservableCPU(), so that we
 	// can appropriately scale our scoring
-	maxTotalReservableCPU vmapi.MilliCPU
+	maxTotalReservableCPU vmv1.MilliCPU
 	// maxTotalReservableMem is the same as maxTotalReservableCPU, but for bytes of memory instead
 	// of CPU
 	maxTotalReservableMem api.Bytes
@@ -62,7 +62,7 @@ type nodeState struct {
 	availabilityZone string
 
 	// cpu tracks the state of vCPU resources -- what's available and how
-	cpu nodeResourceState[vmapi.MilliCPU]
+	cpu nodeResourceState[vmv1.MilliCPU]
 	// mem tracks the state of bytes of memory -- what's available and how
 	mem nodeResourceState[api.Bytes]
 
@@ -93,7 +93,7 @@ func (s *nodeResourceState[T]) fields() []nodeResourceStateField[T] {
 }
 
 func (s *nodeState) updateMetrics(metrics PromMetrics) {
-	s.cpu.updateMetrics(metrics.nodeCPUResources, s.name, s.nodeGroup, s.availabilityZone, vmapi.MilliCPU.AsFloat64)
+	s.cpu.updateMetrics(metrics.nodeCPUResources, s.name, s.nodeGroup, s.availabilityZone, vmv1.MilliCPU.AsFloat64)
 	s.mem.updateMetrics(metrics.nodeMemResources, s.name, s.nodeGroup, s.availabilityZone, api.Bytes.AsFloat64)
 }
 
@@ -171,7 +171,7 @@ type podState struct {
 	node *nodeState
 
 	// cpu is the current state of this pod's vCPU utilization and pressure
-	cpu podResourceState[vmapi.MilliCPU]
+	cpu podResourceState[vmv1.MilliCPU]
 	// memBytes is the current state of this pod's memory utilization and pressure
 	mem podResourceState[api.Bytes]
 
@@ -251,7 +251,7 @@ func (p *podState) logFields() []zap.Field {
 }
 
 // remainingReservableCPU returns the remaining CPU that can be allocated to VM pods
-func (s *nodeState) remainingReservableCPU() vmapi.MilliCPU {
+func (s *nodeState) remainingReservableCPU() vmv1.MilliCPU {
 	return util.SaturatingSub(s.cpu.Total, s.cpu.Reserved)
 }
 
@@ -272,7 +272,7 @@ func (s *nodeState) tooMuchPressure(logger *zap.Logger) bool {
 
 		logger.Debug(
 			"tooMuchPressure = false (clearly)",
-			zap.Any("cpu", okPair[vmapi.MilliCPU]{Reserved: s.cpu.Reserved, Watermark: s.cpu.Watermark}),
+			zap.Any("cpu", okPair[vmv1.MilliCPU]{Reserved: s.cpu.Reserved, Watermark: s.cpu.Watermark}),
 			zap.Any("mem", okPair[api.Bytes]{Reserved: s.mem.Reserved, Watermark: s.mem.Watermark}),
 		)
 		return false
@@ -286,7 +286,7 @@ func (s *nodeState) tooMuchPressure(logger *zap.Logger) bool {
 		TooMuch         bool
 	}
 
-	var cpu info[vmapi.MilliCPU]
+	var cpu info[vmv1.MilliCPU]
 	var mem info[api.Bytes]
 
 	cpu.LogicalPressure = util.SaturatingSub(s.cpu.Reserved, s.cpu.Watermark)
@@ -500,7 +500,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 
 	logger.Info(
 		"Built initial node state",
-		zap.Any("cpu", resourceInfo[vmapi.MilliCPU]{
+		zap.Any("cpu", resourceInfo[vmv1.MilliCPU]{
 			Total:     n.cpu.Total,
 			Watermark: n.cpu.Watermark,
 		}),
@@ -514,7 +514,7 @@ func buildInitialNodeState(logger *zap.Logger, node *corev1.Node, conf *Config) 
 }
 
 func extractPodResources(pod *corev1.Pod) api.Resources {
-	var cpu vmapi.MilliCPU
+	var cpu vmv1.MilliCPU
 	var mem api.Bytes
 
 	for _, container := range pod.Spec.Containers {
@@ -523,7 +523,7 @@ func extractPodResources(pod *corev1.Pod) api.Resources {
 		//
 		// NB: .Cpu() returns a pointer to a value equal to zero if the resource is not present. So
 		// we can just add it either way.
-		cpu += vmapi.MilliCPUFromResourceQuantity(*container.Resources.Requests.Cpu())
+		cpu += vmv1.MilliCPUFromResourceQuantity(*container.Resources.Requests.Cpu())
 		mem += api.BytesFromResourceQuantity(*container.Resources.Requests.Memory())
 	}
 
@@ -703,7 +703,7 @@ func (e *AutoscaleEnforcer) speculativeReserve(
 	// We'll pass this into (resourceTransitioner).handleReserve(), but only commit the changes if
 	// the caller allows us to.
 
-	var cpuState podResourceState[vmapi.MilliCPU]
+	var cpuState podResourceState[vmv1.MilliCPU]
 	var memState podResourceState[api.Bytes]
 	var vmState *vmPodState
 
@@ -718,7 +718,7 @@ func (e *AutoscaleEnforcer) speculativeReserve(
 		}
 		// initially build the resource states assuming that we're including buffer, and then update
 		// later to remove it if that turns out not to be right.
-		cpuState = podResourceState[vmapi.MilliCPU]{
+		cpuState = podResourceState[vmv1.MilliCPU]{
 			Reserved:         vmInfo.Max().VCPU,
 			Buffer:           util.SaturatingSub(vmInfo.Max().VCPU, vmInfo.Using().VCPU),
 			CapacityPressure: 0,
@@ -749,7 +749,7 @@ func (e *AutoscaleEnforcer) speculativeReserve(
 	} else {
 		res := extractPodResources(pod)
 
-		cpuState = podResourceState[vmapi.MilliCPU]{
+		cpuState = podResourceState[vmv1.MilliCPU]{
 			Reserved:         res.VCPU,
 			Buffer:           0,
 			CapacityPressure: 0,
@@ -1088,7 +1088,7 @@ func (e *AutoscaleEnforcer) handleNonAutoscalingUsageChange(logger *zap.Logger, 
 }
 
 // NB: expected to be run in its own thread.
-func (e *AutoscaleEnforcer) cleanupMigration(logger *zap.Logger, vmm *vmapi.VirtualMachineMigration) {
+func (e *AutoscaleEnforcer) cleanupMigration(logger *zap.Logger, vmm *vmv1.VirtualMachineMigration) {
 	vmmName := util.GetNamespacedName(vmm)
 
 	logger = logger.With(
@@ -1104,7 +1104,7 @@ func (e *AutoscaleEnforcer) cleanupMigration(logger *zap.Logger, vmm *vmapi.Virt
 	// Failed migrations should be noisy. Everything to do with cleaning up a failed migration
 	// should be logged at "Warn" or higher.
 	var logInfo func(string, ...zap.Field)
-	if vmm.Status.Phase == vmapi.VmmSucceeded {
+	if vmm.Status.Phase == vmv1.VmmSucceeded {
 		logInfo = logger.Info
 	} else {
 		logInfo = logger.Warn
@@ -1233,7 +1233,7 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 		return false, fmt.Errorf("Error checking if migration exists: %w", err)
 	}
 
-	vmm := &vmapi.VirtualMachineMigration{
+	vmm := &vmv1.VirtualMachineMigration{
 		ObjectMeta: metav1.ObjectMeta{
 			// TODO: it's maybe possible for this to run into name length limits? Unclear what we
 			// should do if that happens.
@@ -1243,7 +1243,7 @@ func (e *AutoscaleEnforcer) startMigration(ctx context.Context, logger *zap.Logg
 				LabelPluginCreatedMigration: "true",
 			},
 		},
-		Spec: vmapi.VirtualMachineMigrationSpec{
+		Spec: vmv1.VirtualMachineMigrationSpec{
 			VmName: pod.vm.Name.Name,
 
 			// FIXME: NeonVM's VirtualMachineMigrationSpec has a bunch of boolean fields that aren't

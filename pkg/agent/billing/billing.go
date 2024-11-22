@@ -10,7 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/billing"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
@@ -51,7 +51,7 @@ func (m *metricsTimeSlice) Duration() time.Duration { return m.endTime.Sub(m.sta
 
 type vmMetricsInstant struct {
 	// cpu stores the cpu allocation at a particular instant.
-	cpu vmapi.MilliCPU
+	cpu vmv1.MilliCPU
 }
 
 // vmMetricsSeconds is like vmMetrics, but the values cover the allocation over time
@@ -141,11 +141,11 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 
 	old := s.present
 	s.present = make(map[metricsKey]vmMetricsInstant)
-	var vmsOnThisNode []*vmapi.VirtualMachine
+	var vmsOnThisNode []*vmv1.VirtualMachine
 	if store.Failing() {
 		logger.Error("VM store is currently stopped. No events will be recorded")
 	} else {
-		vmsOnThisNode = store.ListIndexed(func(i *VMNodeIndex) []*vmapi.VirtualMachine {
+		vmsOnThisNode = store.ListIndexed(func(i *VMNodeIndex) []*vmv1.VirtualMachine {
 			return i.List()
 		})
 	}

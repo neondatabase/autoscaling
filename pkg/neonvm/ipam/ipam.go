@@ -21,7 +21,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
-	neonvmapiv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	neonvm "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 )
 
@@ -347,7 +347,7 @@ func (i *IPAM) Close() error {
 // NeonvmIPPool represents an IPPool resource and its parsed set of allocations
 type NeonvmIPPool struct {
 	vmClient neonvm.Interface
-	pool     *neonvmapiv1.IPPool
+	pool     *vmv1.IPPool
 	firstip  net.IP
 }
 
@@ -371,14 +371,14 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 	pool, err := i.vmClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Get(ctx, poolName, metav1.GetOptions{})
 	if err != nil && apierrors.IsNotFound(err) {
 		// pool does not exist, create it
-		newPool := &neonvmapiv1.IPPool{
+		newPool := &vmv1.IPPool{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      poolName,
 				Namespace: i.Config.NetworkNamespace,
 			},
-			Spec: neonvmapiv1.IPPoolSpec{
+			Spec: vmv1.IPPoolSpec{
 				Range:       ipRange,
-				Allocations: make(map[string]neonvmapiv1.IPAllocation),
+				Allocations: make(map[string]vmv1.IPAllocation),
 			},
 		}
 		_, err = i.vmClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Create(ctx, newPool, metav1.CreateOptions{})
@@ -421,7 +421,7 @@ func (p *NeonvmIPPool) Update(ctx context.Context, reservation []whereaboutstype
 }
 
 // taken from whereabouts code as it not exported
-func toIPReservation(ctx context.Context, allocations map[string]neonvmapiv1.IPAllocation, firstip net.IP) []whereaboutstypes.IPReservation {
+func toIPReservation(ctx context.Context, allocations map[string]vmv1.IPAllocation, firstip net.IP) []whereaboutstypes.IPReservation {
 	log := log.FromContext(ctx)
 	reservelist := []whereaboutstypes.IPReservation{}
 	for offset, a := range allocations {
@@ -444,11 +444,11 @@ func toIPReservation(ctx context.Context, allocations map[string]neonvmapiv1.IPA
 }
 
 // taken from whereabouts code as it not exported
-func toAllocations(reservelist []whereaboutstypes.IPReservation, firstip net.IP) map[string]neonvmapiv1.IPAllocation {
-	allocations := make(map[string]neonvmapiv1.IPAllocation)
+func toAllocations(reservelist []whereaboutstypes.IPReservation, firstip net.IP) map[string]vmv1.IPAllocation {
+	allocations := make(map[string]vmv1.IPAllocation)
 	for _, r := range reservelist {
 		index := whereaboutsallocate.IPGetOffset(r.IP, firstip)
-		allocations[fmt.Sprintf("%d", index)] = neonvmapiv1.IPAllocation{ContainerID: r.ContainerID, PodRef: r.PodRef}
+		allocations[fmt.Sprintf("%d", index)] = vmv1.IPAllocation{ContainerID: r.ContainerID, PodRef: r.PodRef}
 	}
 	return allocations
 }
