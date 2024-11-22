@@ -15,29 +15,33 @@ in use, although this can be overridden on an individual VM basis using the
 
 ## Upgrading the kernel
 
+NB: upgrading kernel config should be done for both supported architectures.
 Assuming a plain upgrade (i.e. no additional features to enable), upgrading the kernel can be done
 with the following sequence of actions:
 
 1. On the host, run:
    ```sh
+   export OLD_VERSION=<replace with version>
+   export NEW_VERSION=<replace with version>
+   export KERNEL_ARCH=amd64 # replace with the wanted arch, x86_64 or arm64
    cd neonvm-kernel # this directory
    docker build --build-arg KERNEL_VERSION=$NEW_VERSION --platform linux/x86_64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder .
-   docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
+   docker run --rm -e OLD_VERSION=$OLD_VERSION -e NEW_VERSION=$NEW_VERSION -e ARCH=$KERNEL_ARCH -v $PWD:/host --name kernel-build -it kernel-build-deps bash
    ```
 2. Then, inside the container, run:
    ```sh
    cd linux-$NEW_VERSION
-   cp /host/linux-config-6.1.92 .config # Copy current config in
-   make menuconfig
+   cp /host/linux-config-$ARCH-$OLD_VERSION .config # Copy current config in
+   make ARCH=$KERNEL_ARCH menuconfig
    # do nothing; just save and exit, overwriting .config
-   cp .config /host/linux-config-$NEW_VERSION # NOTE: Different from existing!
+   cp .config /host/linux-config-$ARCH-$NEW_VERSION # NOTE: Different from existing!
    ```
 3. Back on the host, finish with:
    ```sh
    # compare the two versions
-   diff linux-config-6.1.92 linux-config-$NEW_VERSION
+   diff linux-config-$ARCH-$OLD_VERSION linux-config-$ARCH-$NEW_VERSION
    # If all looks good, delete the old version. This is required so auto-selection works.
-   rm linux-config-6.1.92
+   rm linux-config-$ARCH-$OLD_VERSION
    ```
 
 Afterwards, it's probably also good to do a search-and-replace repo-wide to update all places that
