@@ -489,7 +489,7 @@ KUTTL ?= $(LOCALBIN)/kuttl
 KUTTL_VERSION ?= v0.16.0
 
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.28.12
+KUBECTL_VERSION ?= v1.29.10
 
 KIND ?= $(LOCALBIN)/kind
 # https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0, supports k8s up to 1.30
@@ -497,7 +497,7 @@ KIND_VERSION ?= v0.23.0
 
 K3D ?= $(LOCALBIN)/k3d
 # k8s deps in go.mod @ v1.29.4 (nb: binary, separate from images)
-K3D_VERSION ?= v5.6.3
+K3D_VERSION ?= v5.7.4
 
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
