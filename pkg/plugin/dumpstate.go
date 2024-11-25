@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -103,8 +103,8 @@ type pluginStateDump struct {
 
 	Pods []podNameAndPointer `json:"pods"`
 
-	MaxTotalReservableCPU vmapi.MilliCPU `json:"maxTotalReservableCPU"`
-	MaxTotalReservableMem api.Bytes      `json:"maxTotalReservableMem"`
+	MaxTotalReservableCPU vmv1.MilliCPU `json:"maxTotalReservableCPU"`
+	MaxTotalReservableMem api.Bytes     `json:"maxTotalReservableMem"`
 
 	Conf Config `json:"config"`
 }
@@ -121,19 +121,19 @@ type nodeStateDump struct {
 	Name             string                                     `json:"name"`
 	NodeGroup        string                                     `json:"nodeGroup"`
 	AvailabilityZone string                                     `json:"availabilityZone"`
-	CPU              nodeResourceState[vmapi.MilliCPU]          `json:"cpu"`
+	CPU              nodeResourceState[vmv1.MilliCPU]           `json:"cpu"`
 	Mem              nodeResourceState[api.Bytes]               `json:"mem"`
 	Pods             []keyed[util.NamespacedName, podStateDump] `json:"pods"`
 	Mq               []*podNameAndPointer                       `json:"mq"`
 }
 
 type podStateDump struct {
-	Obj  pointerString                    `json:"obj"`
-	Name util.NamespacedName              `json:"name"`
-	Node pointerString                    `json:"node"`
-	CPU  podResourceState[vmapi.MilliCPU] `json:"cpu"`
-	Mem  podResourceState[api.Bytes]      `json:"mem"`
-	VM   *vmPodState                      `json:"vm"`
+	Obj  pointerString                   `json:"obj"`
+	Name util.NamespacedName             `json:"name"`
+	Node pointerString                   `json:"node"`
+	CPU  podResourceState[vmv1.MilliCPU] `json:"cpu"`
+	Mem  podResourceState[api.Bytes]     `json:"mem"`
+	VM   *vmPodState                     `json:"vm"`
 }
 
 func makePointerString[T any](t *T) pointerString {

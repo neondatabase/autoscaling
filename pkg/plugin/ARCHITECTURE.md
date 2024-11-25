@@ -113,7 +113,7 @@ resource-related types are:
 type nodeState struct {
     pods map[util.NamespacedName]*podState
 
-    cpu nodeResourceState[vmapi.MilliCPU]
+    cpu nodeResourceState[vmv1.MilliCPU]
     mem nodeResourceState[api.Bytes]
 
     // -- other fields omitted --
@@ -134,7 +134,7 @@ type podState struct {
     name util.NamespacedName
 
     // -- other fields omitted --
-    cpu podResourceState[vmapi.MilliCPU]
+    cpu podResourceState[vmv1.MilliCPU]
     mem podResourceState[api.Bytes]
 }
 

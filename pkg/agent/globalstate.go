@@ -15,7 +15,7 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -64,9 +64,9 @@ func (r MainRunner) newAgentState(
 	return state, promReg
 }
 
-func vmIsOurResponsibility(vm *vmapi.VirtualMachine, config *Config, nodeName string) bool {
+func vmIsOurResponsibility(vm *vmv1.VirtualMachine, config *Config, nodeName string) bool {
 	return vm.Status.Node == nodeName &&
-		(vm.Status.Phase.IsAlive() && vm.Status.Phase != vmapi.VmMigrating) &&
+		(vm.Status.Phase.IsAlive() && vm.Status.Phase != vmv1.VmMigrating) &&
 		vm.Status.PodIP != "" &&
 		api.HasAutoscalingEnabled(vm) &&
 		vm.Spec.SchedulerName == config.Scheduler.SchedulerName
