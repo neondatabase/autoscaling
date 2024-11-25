@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -44,7 +43,7 @@ func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *
 		var startTime time.Time
 		action := *last.actions.NeonVMRequest
 
-		if updated := c.updateIfActionsUnchanged(last, func(state *core.State) {
+		if updated := c.updateIfActionsUnchanged(last, func(state *coreState) {
 			logger.Info("Starting NeonVM request", zap.Object("action", action))
 			startTime = time.Now()
 			state.NeonVM().StartingRequest(startTime, action.Target)
@@ -58,7 +57,7 @@ func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *
 
 		logFields := []zap.Field{zap.Object("action", action), zap.Duration("duration", endTime.Sub(startTime))}
 
-		c.update(func(state *core.State) {
+		c.update(func(state *coreState) {
 			if err != nil {
 				logger.Error("NeonVM request failed", append(logFields, zap.Error(err))...)
 				state.NeonVM().RequestFailed(endTime)

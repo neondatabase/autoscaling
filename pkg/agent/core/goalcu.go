@@ -12,49 +12,102 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-type scalingGoal struct {
-	hasAllMetrics bool
-	goalCU        uint32
+// AlgorithmState abstracts over providers of "goal CU" calculation.
+//
+// This interface exists so that our unit tests for State.NextActions() don't need to be rewritten
+// when the algorithm changes.
+//
+// StdAlgorithm is expected to be used for anything outside unit tests.
+type AlgorithmState interface {
+	// CalculateGoalCU returns the desired compute units to scale to, plus any log fields with
+	// additional useful information.
+	CalculateGoalCU(
+		warn func(string),
+		cfg api.ScalingConfig,
+		computeUnit api.Resources,
+	) (ScalingGoal, []zap.Field)
+
+	// LatestAPIMetrics returns the api.Metrics that should be sent to the scheduler for
+	// prioritization of live migration.
+	LatestAPIMetrics() *api.Metrics
+
+	// ScalingConfigUpdated gives the algorithm a chance to update its internal state to reflect
+	// that the scaling config has been updated.
+	//
+	// In practice, this is only used by StdAlgorithm to reset its LFC metrics when they become
+	// disabled, so that we don't accidentally use stale metrics if/when it's re-enabled.
+	ScalingConfigUpdated(api.ScalingConfig)
 }
 
-func calculateGoalCU(
+type ScalingGoal struct {
+	HasAllMetrics bool
+	GoalCU        uint32
+}
+
+// StdAlgorithm is the standard implementation of AlgorithmState for usage in production.
+type StdAlgorithm struct {
+	SystemMetrics *SystemMetrics
+	LFCMetrics    *LFCMetrics
+}
+
+func DefaultAlgorithm() *StdAlgorithm {
+	return &StdAlgorithm{
+		SystemMetrics: nil,
+		LFCMetrics:    nil,
+	}
+}
+
+// LatestAPIMetrics implements AlgorithmState
+func (m *StdAlgorithm) LatestAPIMetrics() *api.Metrics {
+	if m.SystemMetrics != nil {
+		return lo.ToPtr(m.SystemMetrics.ToAPI())
+	} else {
+		return nil
+	}
+}
+
+func (m *StdAlgorithm) ScalingConfigUpdated(conf api.ScalingConfig) {
+	// Make sure that if LFC metrics are disabled & later enabled, we don't make decisions based on
+	// stale data.
+	if !*conf.EnableLFCMetrics {
+		m.LFCMetrics = nil
+	}
+}
+
+// CalculateGoalCU implements AlgorithmState
+func (m *StdAlgorithm) CalculateGoalCU(
 	warn func(string),
 	cfg api.ScalingConfig,
 	computeUnit api.Resources,
-	systemMetrics *SystemMetrics,
-	lfcMetrics *LFCMetrics,
-) (scalingGoal, []zap.Field) {
-	hasAllMetrics := systemMetrics != nil && (!*cfg.EnableLFCMetrics || lfcMetrics != nil)
-	if !hasAllMetrics {
-		warn("Making scaling decision without all required metrics available")
-	}
+) (ScalingGoal, []zap.Field) {
+	hasAllMetrics := m.SystemMetrics != nil && (!*cfg.EnableLFCMetrics || m.LFCMetrics != nil)
 
 	var lfcGoalCU, cpuGoalCU, memGoalCU, memTotalGoalCU uint32
 	var logFields []zap.Field
 
 	var wss *api.Bytes // estimated working set size
 
-	if lfcMetrics != nil {
+	if m.LFCMetrics != nil {
 		var lfcLogFunc func(zapcore.ObjectEncoder) error
-		lfcGoalCU, wss, lfcLogFunc = calculateLFCGoalCU(warn, cfg, computeUnit, *lfcMetrics)
+		lfcGoalCU, wss, lfcLogFunc = calculateLFCGoalCU(warn, cfg, computeUnit, *m.LFCMetrics)
 		if lfcLogFunc != nil {
 			logFields = append(logFields, zap.Object("lfc", zapcore.ObjectMarshalerFunc(lfcLogFunc)))
 		}
 	}
 
-	if systemMetrics != nil {
-		cpuGoalCU = calculateCPUGoalCU(cfg, computeUnit, *systemMetrics)
+	if m.SystemMetrics != nil {
+		cpuGoalCU = calculateCPUGoalCU(cfg, computeUnit, *m.SystemMetrics)
 
-		memGoalCU = calculateMemGoalCU(cfg, computeUnit, *systemMetrics)
+		memGoalCU = calculateMemGoalCU(cfg, computeUnit, *m.SystemMetrics)
 	}
 
-	if systemMetrics != nil && wss != nil {
-		memTotalGoalCU = calculateMemTotalGoalCU(cfg, computeUnit, *systemMetrics, *wss)
+	if m.SystemMetrics != nil && wss != nil {
+		memTotalGoalCU = calculateMemTotalGoalCU(cfg, computeUnit, *m.SystemMetrics, *wss)
 	}
 
 	goalCU := max(cpuGoalCU, memGoalCU, memTotalGoalCU, lfcGoalCU)
 
-	return scalingGoal{hasAllMetrics: hasAllMetrics, goalCU: goalCU}, logFields
+	return ScalingGoal{HasAllMetrics: hasAllMetrics, GoalCU: goalCU}, logFields
 }
 
 // For CPU:

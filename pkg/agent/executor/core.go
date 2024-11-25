@@ -33,12 +33,14 @@ type Config struct {
 	Core core.Config
 }
 
+type coreState = core.State[*core.StdAlgorithm]
+
 type ExecutorCore struct {
 	mu sync.Mutex
 
 	stateLogger *zap.Logger
 
-	core *core.State
+	core *coreState
 
 	actions       *timedActions
 	lastActionsID timedActionsID
@@ -57,7 +59,7 @@ func NewExecutorCore(stateLogger *zap.Logger, vm api.VmInfo, config Config) *Exe
 	return &ExecutorCore{
 		mu:            sync.Mutex{},
 		stateLogger:   stateLogger,
-		core:          core.NewState(vm, config.Core),
+		core:          core.NewState(vm, config.Core, core.DefaultAlgorithm()),
 		actions:       nil, // (*ExecutorCore).getActions() checks if this is nil
 		lastActionsID: -1,
 		onNextActions: config.OnNextActions,
@@ -103,7 +105,7 @@ func (c *ExecutorCore) getActions() timedActions {
 
 		// NOTE: Even though we cache the actions generated using time.Now(), it's *generally* ok.
 		now := time.Now()
-		c.stateLogger.Debug("Recalculating ActionSet", zap.Time("now", now), zap.Any("state", c.core.Dump()))
+		c.stateLogger.Debug("Recalculating ActionSet", zap.Time("now", now), zap.Any("state", core.DumpState(c.core)))
 		c.actions = &timedActions{id: id, actions: c.core.NextActions(now)}
 		c.lastActionsID = id
 		c.stateLogger.Debug("New ActionSet", zap.Time("now", now), zap.Any("actions", c.actions.actions))
@@ -112,7 +114,7 @@ func (c *ExecutorCore) getActions() timedActions {
 	return *c.actions
 }
 
-func (c *ExecutorCore) update(with func(*core.State)) {
+func (c *ExecutorCore) update(with func(*coreState)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -125,7 +127,7 @@ func (c *ExecutorCore) update(with func(*core.State)) {
 // is not called and this returns false.
 //
 // Otherwise, if the actions are up-to-date, then this is equivalent to c.update(with), and returns true.
-func (c *ExecutorCore) updateIfActionsUnchanged(actions timedActions, with func(*core.State)) (updated bool) {
+func (c *ExecutorCore) updateIfActionsUnchanged(actions timedActions, with func(*coreState)) (updated bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -146,7 +148,7 @@ type StateDump = core.StateDump
 func (c *ExecutorCore) StateDump() StateDump {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.core.Dump()
+	return core.DumpState(c.core)
 }
 
 // Updater returns a handle on the object used for making external changes to the ExecutorCore,
@@ -160,20 +162,24 @@ type ExecutorCoreUpdater struct {
 	core *ExecutorCore
 }
 
-// UpdateSystemMetrics calls (*core.State).UpdateSystemMetrics() on the inner core.State and runs
+// UpdateSystemMetrics calls (*core.State).UpdateMetrics() on the inner core.State and runs
 // withLock while holding the lock.
 func (c ExecutorCoreUpdater) UpdateSystemMetrics(metrics core.SystemMetrics, withLock func()) {
-	c.core.update(func(state *core.State) {
-		state.UpdateSystemMetrics(metrics)
+	c.core.update(func(state *coreState) {
+		state.UpdateAlgorithmState(func(m *core.StdAlgorithm) {
+			m.SystemMetrics = &metrics
+		})
 		withLock()
 	})
 }
 
-// UpdateLFCMetrics calls (*core.State).UpdateLFCMetrics() on the inner core.State and runs withLock
+// UpdateLFCMetrics calls (*core.State).UpdateMetrics() on the inner core.State and runs withLock
 // while holding the lock.
 func (c ExecutorCoreUpdater) UpdateLFCMetrics(metrics core.LFCMetrics, withLock func()) {
-	c.core.update(func(state *core.State) {
-		state.UpdateLFCMetrics(metrics)
+	c.core.update(func(state *coreState) {
+		state.UpdateAlgorithmState(func(m *core.StdAlgorithm) {
+			m.LFCMetrics = &metrics
+		})
 		withLock()
 	})
 }
@@ -181,7 +187,7 @@ func (c ExecutorCoreUpdater) UpdateLFCMetrics(metrics core.LFCMetrics, withLock 
 // UpdatedVM calls (*core.State).UpdatedVM() on the inner core.State and runs withLock while
 // holding the lock.
 func (c ExecutorCoreUpdater) UpdatedVM(vm api.VmInfo, withLock func()) {
-	c.core.update(func(state *core.State) {
+	c.core.update(func(state *coreState) {
 		state.UpdatedVM(vm)
 		withLock()
 	})
@@ -190,7 +196,7 @@ func (c ExecutorCoreUpdater) UpdatedVM(vm api.VmInfo, withLock func()) {
 // ResetMonitor calls (*core.State).Monitor().Reset() on the inner core.State and runs withLock
 // while holding the lock.
 func (c ExecutorCoreUpdater) ResetMonitor(withLock func()) {
-	c.core.update(func(state *core.State) {
+	c.core.update(func(state *coreState) {
 		state.Monitor().Reset()
 		withLock()
 	})
@@ -199,7 +205,7 @@ func (c ExecutorCoreUpdater) ResetMonitor(withLock func()) {
 // UpscaleRequested calls (*core.State).Monitor().UpscaleRequested(...) on the inner core.State and
 // runs withLock while holding the lock.
 func (c ExecutorCoreUpdater) UpscaleRequested(resources api.MoreResources, withLock func()) {
-	c.core.update(func(state *core.State) {
+	c.core.update(func(state *coreState) {
 		state.Monitor().UpscaleRequested(time.Now(), resources)
 		withLock()
 	})
@@ -208,7 +214,7 @@ func (c ExecutorCoreUpdater) UpscaleRequested(resources api.MoreResources, withL
 // MonitorActive calls (*core.State).Monitor().Active(...) on the inner core.State and runs withLock
 // while holding the lock.
 func (c ExecutorCoreUpdater) MonitorActive(active bool, withLock func()) {
-	c.core.update(func(state *core.State) {
+	c.core.update(func(state *coreState) {
 		state.Monitor().Active(active)
 		withLock()
 	})
