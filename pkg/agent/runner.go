@@ -201,6 +201,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		Core: core.Config{
 			ComputeUnit:                        r.global.config.Scaling.ComputeUnit,
 			DefaultScalingConfig:               r.global.config.Scaling.DefaultConfig,
+			AlgorithmFactory:                   func() core.Algorithm { return core.DefaultAlgorithm() },
 			NeonVMRetryWait:                    time.Second * time.Duration(r.global.config.NeonVM.RetryFailedRequestSeconds),
 			PluginRequestTick:                  time.Second*time.Duration(r.global.config.Scheduler.RequestAtLeastEverySeconds) - pluginRequestJitter,
 			PluginRetryWait:                    time.Second * time.Duration(r.global.config.Scheduler.RetryFailedRequestSeconds),
