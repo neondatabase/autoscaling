@@ -21,3 +21,7 @@ spec:
     rootDisk:
       image: vm-postgres:15-bullseye
       size: 1Gi
+    memoryProvider: VirtioMem
+  cpuScalingMode: sysfsScaling
+status:
+  memoryProvider: VirtioMem

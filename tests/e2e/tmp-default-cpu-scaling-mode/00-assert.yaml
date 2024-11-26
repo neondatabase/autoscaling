@@ -10,4 +10,8 @@ metadata:
 # field spec.cpuScalingMode should go to default value `qmp_scaling` if it is not set
 # TODO: delete once the https://github.com/neondatabase/autoscaling/issues/1082 went live
 spec:
-  cpuScalingMode: QmpScaling
+  cpuScalingMode: SysfsScaling
+  guest:
+    memoryProvider: VirtioMem
+status:
+  memoryProvider: VirtioMem

@@ -5,7 +5,7 @@ commands:
   - script: |
       set -eux
       pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
-      
+
       # Run repquota in CSV format and capture the output
       csv_output=$(kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm /neonvm/bin/repquota -a -P -O csv)
 
