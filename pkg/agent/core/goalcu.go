@@ -70,6 +70,8 @@ func calculateCPUGoalCU(
 	mixedThreshold := stableThreshold + *cfg.CPUMixedZoneRatio*systemMetrics.LoadAverage5Min
 
 	diff := math.Abs(systemMetrics.LoadAverage1Min - systemMetrics.LoadAverage5Min)
+	// load1Weight is 0 when diff < stableThreshold, and 1 when diff > mixedThreshold.
+	// If diff is between the thresholds, it'll be between 0 and 1.
 	load1Weight := blendingFactor(diff, stableThreshold, mixedThreshold)
 
 	blendedLoadAverage := load1Weight*systemMetrics.LoadAverage1Min + (1-load1Weight)*systemMetrics.LoadAverage5Min
