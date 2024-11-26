@@ -1245,8 +1245,10 @@ func getQemuBinaryName(architecture string) string {
 func getMachineType(architecture string) string {
 	switch architecture {
 	case architectureArm64:
+		// virt is the most up to date and generic ARM machine architecture
 		return "virt"
 	case architectureAmd64:
+		// q35 is the most up to date and generic x86_64 machine architecture
 		return "q35"
 	default:
 		panic(fmt.Errorf("unknown architecture %s", architecture))
