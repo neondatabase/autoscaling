@@ -19,3 +19,7 @@ status:
     revision:
       value: 123
       flags: 456
+spec:
+  cpuScalingMode: sysfsScaling
+  guest:
+    memoryProvider: VirtioMem
