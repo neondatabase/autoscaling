@@ -9,7 +9,6 @@ import (
 )
 
 func TestHasArchitectureAffinity(t *testing.T) {
-
 	cases := []struct {
 		name   string
 		result bool
@@ -140,5 +139,4 @@ func TestSourceNodeHasNoArchitecture(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error when source node has no architecture")
 	}
-
 }

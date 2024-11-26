@@ -254,7 +254,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
 			enableSSH := *vm.Spec.EnableSSH
 			var sshSecret *corev1.Secret
-
 			if enableSSH {
 				// We require the SSH secret to exist because we cannot unmount and
 				// mount the new secret into the VM after the live migration. If a
