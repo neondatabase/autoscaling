@@ -21,10 +21,14 @@ spec:
     rootDisk:
       image: vm-postgres:15-bullseye
       size: 1Gi
+    memoryProvider: VirtioMem
   disks:
-  - emptyDisk:
-      discard: true
-      size: 2Gi
-      enableQuotas: true
-    mountPath: /var/db/postgres/compute
-    name: pgdata
+    - emptyDisk:
+        discard: true
+        size: 2Gi
+        enableQuotas: true
+      mountPath: /var/db/postgres/compute
+      name: pgdata
+  cpuScalingMode: sysfsScaling
+status:
+  memoryProvider: VirtioMem
