@@ -8,7 +8,7 @@ commands:
       export AWS_SECRET_ACCESS_KEY=minio123
       kubectl set env daemonset autoscaler-agent -n kube-system AWS_ACCESS_KEY_ID=minio
       kubectl set env daemonset autoscaler-agent -n kube-system AWS_SECRET_ACCESS_KEY=minio123
-      
+
       ../.venv/bin/python3 utils.py step2_init
 
       # The reason we put the assert here as well is that a separate
@@ -18,4 +18,3 @@ commands:
       #     until it succeeds or the test times out
       ../.venv/bin/python3 utils.py step2_assert
       ../.venv/bin/python3 utils.py restore
-      
