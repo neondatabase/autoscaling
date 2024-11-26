@@ -922,7 +922,6 @@ func buildQEMUCmd(
 		"-only-migratable",
 		"-audiodev", "none,id=noaudio",
 		"-serial", "pty",
-		"-serial", "stdio",
 		"-msg", "timestamp=on",
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMPManual),
@@ -954,7 +953,16 @@ func buildQEMUCmd(
 	}
 
 	if cfg.architecture == architectureArm64 {
+		// add custom firmware to have ACPI working
 		qemuCmd = append(qemuCmd, "-bios", "/vm/QEMU_EFI_ARM.fd")
+		// arm virt has only one UART, setup virtio-serial to add more /dev/hvcX
+		qemuCmd = append(qemuCmd,
+			"-chardev", "stdio,id=virtio-console",
+			"-device", "virtconsole,chardev=virtio-console",
+		)
+	} else {
+		// on amd we have multiple UART ports so we can just use serial stdio
+		qemuCmd = append(qemuCmd, "-serial", "stdio")
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -1076,7 +1084,7 @@ func buildQEMUCmd(
 }
 
 const (
-	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init console=ttyS1 loglevel=7 root=/dev/vda rw"
+	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=7 root=/dev/vda rw"
 	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable"
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
@@ -1113,6 +1121,10 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 	if cfg.architecture == architectureArm64 {
 		// explicitly enable acpi if we run on arm
 		cmdlineParts = append(cmdlineParts, "acpi=on")
+		// use virtio-serial device kernel console
+		cmdlineParts = append(cmdlineParts, "console=hvc0")
+	} else {
+		cmdlineParts = append(cmdlineParts, "console=ttyS1")
 	}
 
 	return strings.Join(cmdlineParts, " ")
