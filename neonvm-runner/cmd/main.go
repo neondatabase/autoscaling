@@ -893,8 +893,8 @@ func buildQEMUCmd(
 
 	switch cfg.cpuScalingMode {
 	case vmv1.CpuScalingModeSysfs:
+		// Boot with all CPUs plugged, we will online them on-demand
 		qemuCmd = append(qemuCmd, "-smp", fmt.Sprintf(
-			// Boot with all CPUs plugged, we will online them on-demand
 			"cpus=%d,maxcpus=%d,sockets=1,cores=%d,threads=1",
 			maxCPUs,
 			maxCPUs,
