@@ -82,13 +82,14 @@ func calculateCPUGoalCU(
 }
 
 func blendingFactor[T constraints.Float](value, t1, t2 T) T {
-	if value < t1 {
+	if value <= t1 {
 		return 0
-	} else if value >= t2 {
-		return 1
-	} else {
-		return (value - t1) / (t2 - t1 + 1e-6)
 	}
+	if value >= t2 {
+		return 1
+	}
+	// 1e-6 is just a precaution, if t1==t2, we'd return earlier.
+	return (value - t1) / (t2 - t1 + 1e-6)
 }
 
 // For Mem:
