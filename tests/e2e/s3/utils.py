@@ -75,8 +75,6 @@ def agent_add_s3():
     update_agent_biling_config(
         {
             "cpuMetricName": "effective_compute_seconds",
-            "ingressBytesMetricName": "ingress_bytes",
-            "egressBytesMetricName": "egress_bytes",
             "activeTimeMetricName": "active_time_seconds",
             "collectEverySeconds": 5,
             "accumulateEverySeconds": 5,
@@ -103,8 +101,6 @@ def agent_remove_s3():
             "collectEverySeconds": 5,
             "accumulateEverySeconds": 5,
             "clients": {},
-            "ingressBytesMetricName": "ingress_bytes",
-            "egressBytesMetricName": "egress_bytes"
         }
     )
 

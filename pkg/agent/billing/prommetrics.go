@@ -16,8 +16,6 @@ type PromMetrics struct {
 
 	vmsProcessedTotal *prometheus.CounterVec
 	vmsCurrent        *prometheus.GaugeVec
-	// TODO(myrrc) this should be in EventSinkMetrics
-	fetchNetworkUsageErrorsTotal *prometheus.CounterVec
 }
 
 func NewPromMetrics() PromMetrics {
@@ -38,13 +36,6 @@ func NewPromMetrics() PromMetrics {
 			},
 			[]string{"is_endpoint", "autoscaling_enabled", "phase"},
 		),
-		fetchNetworkUsageErrorsTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "autoscaling_agent_billing_fetch_network_usage_errors_total",
-				Help: "Total errors from attempting to fetch network usage",
-			},
-			[]string{"cause"},
-		),
 	}
 }
 
@@ -52,7 +43,6 @@ func (m PromMetrics) MustRegister(reg *prometheus.Registry) {
 	m.reporting.MustRegister(reg)
 	reg.MustRegister(m.vmsProcessedTotal)
 	reg.MustRegister(m.vmsCurrent)
-	reg.MustRegister(m.fetchNetworkUsageErrorsTotal)
 }
 
 type batchMetrics struct {
