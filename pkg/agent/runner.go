@@ -398,12 +398,12 @@ func (rl *desiredScalingReportLimiter) report(
 	closeEnough := func(x *float64, y *float64) bool {
 		if (x != nil) != (y != nil) {
 			return false
-		} else if x == nil /* && y == nil */ {
-			return true
-		} else {
-			// true iff x and y are within the threshold of each other
-			return math.Abs(*x-*y) < 0.25
 		}
+		if x == nil /* && y == nil */ {
+			return true
+		}
+		// true iff x and y are within the threshold of each other
+		return math.Abs(*x-*y) < 0.25
 	}
 
 	// Check if we should skip this time.
