@@ -10,7 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -222,12 +222,12 @@ func (c *Config) ignoredNamespace(namespace string) bool {
 	return slices.Contains(c.IgnoreNamespaces, namespace)
 }
 
-func (c *nodeConfig) vCpuLimits(total *resource.Quantity) nodeResourceState[vmapi.MilliCPU] {
+func (c *nodeConfig) vCpuLimits(total *resource.Quantity) nodeResourceState[vmv1.MilliCPU] {
 	totalMilli := total.MilliValue()
 
-	return nodeResourceState[vmapi.MilliCPU]{
-		Total:                vmapi.MilliCPU(totalMilli),
-		Watermark:            vmapi.MilliCPU(c.Cpu.Watermark * float32(totalMilli)),
+	return nodeResourceState[vmv1.MilliCPU]{
+		Total:                vmv1.MilliCPU(totalMilli),
+		Watermark:            vmv1.MilliCPU(c.Cpu.Watermark * float32(totalMilli)),
 		Reserved:             0,
 		Buffer:               0,
 		CapacityPressure:     0,

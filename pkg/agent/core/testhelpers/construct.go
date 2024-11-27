@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
@@ -70,9 +70,9 @@ func CreateVmInfo(config InitialVmInfoConfig, opts ...VmInfoOpt) api.VmInfo {
 		Name:      "test",
 		Namespace: "test",
 		Cpu: api.VmCpuInfo{
-			Min: vmapi.MilliCPU(config.MinCU) * config.ComputeUnit.VCPU,
-			Use: vmapi.MilliCPU(config.MinCU) * config.ComputeUnit.VCPU,
-			Max: vmapi.MilliCPU(config.MaxCU) * config.ComputeUnit.VCPU,
+			Min: vmv1.MilliCPU(config.MinCU) * config.ComputeUnit.VCPU,
+			Use: vmv1.MilliCPU(config.MinCU) * config.ComputeUnit.VCPU,
+			Max: vmv1.MilliCPU(config.MaxCU) * config.ComputeUnit.VCPU,
 		},
 		Mem: api.VmMemInfo{
 			SlotSize: config.MemorySlotSize,
@@ -164,7 +164,7 @@ func WithCurrentCU(cu uint16) VmInfoOpt {
 	})
 }
 
-func WithCurrentRevision(rev vmapi.RevisionWithTime) VmInfoOpt {
+func WithCurrentRevision(rev vmv1.RevisionWithTime) VmInfoOpt {
 	return vmInfoModifier(func(c InitialVmInfoConfig, vm *api.VmInfo) {
 		vm.CurrentRevision = &rev
 	})

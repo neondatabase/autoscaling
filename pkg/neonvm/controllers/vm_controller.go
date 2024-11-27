@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -25,8 +24,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"reflect"
 	"strconv"
@@ -165,6 +162,17 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
+	// examine cpuScalingMode and set it to the default value if it is not set
+	if vm.Spec.CpuScalingMode == nil {
+		log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
+		vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
+		if err := r.tryUpdateVM(ctx, &vm); err != nil {
+			log.Error(err, "Failed to set default CPU scaling mode")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	statusBefore := vm.Status.DeepCopy()
 	if err := r.doReconcile(ctx, &vm); err != nil {
 		r.Recorder.Eventf(&vm, corev1.EventTypeWarning, "Failed",
@@ -263,18 +271,18 @@ func (r *VMReconciler) updateVMStatusCPU(
 	ctx context.Context,
 	vm *vmv1.VirtualMachine,
 	vmRunner *corev1.Pod,
-	qmpPluggedCPUs uint32,
+	activeCPUs uint32,
 	cgroupUsage *api.VCPUCgroup,
 ) {
 	log := log.FromContext(ctx)
 
 	// We expect:
 	// - vm.Status.CPUs = cgroupUsage.VCPUs
-	// - vm.Status.CPUs.RoundUp() == qmpPluggedCPUs
+	// - vm.Status.CPUs.RoundUp() == activeCPUs
 	// Otherwise, we update the status.
 	var currentCPUUsage vmv1.MilliCPU
 	if cgroupUsage != nil {
-		if cgroupUsage.VCPUs.RoundedUp() != qmpPluggedCPUs {
+		if cgroupUsage.VCPUs.RoundedUp() != activeCPUs {
 			// This is not expected but it's fine. We only report the
 			// mismatch here and will resolve it in the next reconcile
 			// iteration loops by comparing these values to spec CPU use
@@ -282,12 +290,12 @@ func (r *VMReconciler) updateVMStatusCPU(
 			log.Error(nil, "Mismatch in the number of VM's plugged CPUs and runner pod's cgroup vCPUs",
 				"VirtualMachine", vm.Name,
 				"Runner Pod", vmRunner.Name,
-				"plugged CPUs", qmpPluggedCPUs,
+				"plugged CPUs", activeCPUs,
 				"cgroup vCPUs", cgroupUsage.VCPUs)
 		}
-		currentCPUUsage = min(cgroupUsage.VCPUs, vmv1.MilliCPU(1000*qmpPluggedCPUs))
+		currentCPUUsage = min(cgroupUsage.VCPUs, vmv1.MilliCPU(1000*activeCPUs))
 	} else {
-		currentCPUUsage = vmv1.MilliCPU(1000 * qmpPluggedCPUs)
+		currentCPUUsage = vmv1.MilliCPU(1000 * activeCPUs)
 	}
 	if vm.Status.CPUs == nil || *vm.Status.CPUs != currentCPUUsage {
 		vm.Status.CPUs = &currentCPUUsage
@@ -309,6 +317,42 @@ func (r *VMReconciler) updateVMStatusMemory(
 				vm.Name,
 				vm.Status.MemorySize))
 	}
+}
+
+func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMachine) error {
+	if vm.Spec.ExtraNetwork == nil || !vm.Spec.ExtraNetwork.Enable || len(vm.Status.ExtraNetIP) != 0 {
+		// If the VM has extra network disabled or already has an IP, do nothing.
+		return nil
+	}
+
+	log := log.FromContext(ctx)
+
+	// Create IPAM object
+	nadName, err := nadIpamName()
+	if err != nil {
+		return err
+	}
+	nadNamespace, err := nadIpamNamespace()
+	if err != nil {
+		return err
+	}
+	ipam, err := ipam.New(ctx, nadName, nadNamespace)
+	if err != nil {
+		log.Error(err, "failed to create IPAM")
+		return err
+	}
+	defer ipam.Close()
+	ip, err := ipam.AcquireIP(ctx, vm.Name, vm.Namespace)
+	if err != nil {
+		log.Error(err, "fail to acquire IP")
+		return err
+	}
+	message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
+	log.Info(message)
+	vm.Status.ExtraNetIP = ip.IP.String()
+	vm.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
+	r.Recorder.Event(vm, "Normal", "OverlayNet", message)
+	return nil
 }
 
 func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine) error {
@@ -342,35 +386,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	switch vm.Status.Phase {
 
 	case "":
-		// Acquire overlay IP address
-		if vm.Spec.ExtraNetwork != nil &&
-			vm.Spec.ExtraNetwork.Enable &&
-			len(vm.Status.ExtraNetIP) == 0 {
-			// Create IPAM object
-			nadName, err := nadIpamName()
-			if err != nil {
-				return err
-			}
-			nadNamespace, err := nadIpamNamespace()
-			if err != nil {
-				return err
-			}
-			ipam, err := ipam.New(ctx, nadName, nadNamespace)
-			if err != nil {
-				log.Error(err, "failed to create IPAM")
-				return err
-			}
-			defer ipam.Close()
-			ip, err := ipam.AcquireIP(ctx, vm.Name, vm.Namespace)
-			if err != nil {
-				log.Error(err, "fail to acquire IP")
-				return err
-			}
-			message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
-			log.Info(message)
-			vm.Status.ExtraNetIP = ip.IP.String()
-			vm.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
-			r.Recorder.Event(vm, "Normal", "OverlayNet", message)
+		if err := r.acquireOverlayIP(ctx, vm); err != nil {
+			return err
 		}
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
@@ -492,15 +509,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
 				})
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
-				})
 		default:
 			// do nothing
 		}
@@ -553,18 +561,33 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				return err
 			}
 
-			// get CPU details from QEMU
-			cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
-			if err != nil {
-				log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
-				return err
-			}
-			pluggedCPU := uint32(len(cpuSlotsPlugged))
-
 			// get cgroups CPU details from runner pod
-			cgroupUsage, err := getRunnerCgroup(ctx, vm)
+			cgroupUsage, err := getRunnerCPULimits(ctx, vm)
 			if err != nil {
 				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
+				return err
+			}
+			var pluggedCPU uint32
+
+			if vm.Spec.CpuScalingMode == nil { // should not happen
+				err := fmt.Errorf("CPU scaling mode is not set")
+				log.Error(err, "Unknown CPU scaling mode", "VirtualMachine", vm.Name)
+				return err
+			}
+
+			switch *vm.Spec.CpuScalingMode {
+			case vmv1.CpuScalingModeSysfs:
+				pluggedCPU = cgroupUsage.VCPUs.RoundedUp()
+			case vmv1.CpuScalingModeQMP:
+				cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
+				if err != nil {
+					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
+					return err
+				}
+				pluggedCPU = uint32(len(cpuSlotsPlugged))
+			default:
+				err := fmt.Errorf("unsupported CPU scaling mode: %s", *vm.Spec.CpuScalingMode)
+				log.Error(err, "Unknown CPU scaling mode", "VirtualMachine", vm.Name, "CPU scaling mode", *vm.Spec.CpuScalingMode)
 				return err
 			}
 
@@ -620,15 +643,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Reason:  "Reconciling",
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
 				})
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
-				})
 		default:
 			// do nothing
 		}
@@ -683,16 +697,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) failed", vm.Status.PodName, vm.Name),
 				})
 			return nil
-		case runnerUnknown:
-			vm.Status.Phase = vmv1.VmPending
-			meta.SetStatusCondition(&vm.Status.Conditions,
-				metav1.Condition{
-					Type:    typeAvailableVirtualMachine,
-					Status:  metav1.ConditionUnknown,
-					Reason:  "Reconciling",
-					Message: fmt.Sprintf("Pod (%s) for VirtualMachine (%s) in Unknown phase", vm.Status.PodName, vm.Name),
-				})
-			return nil
 		default:
 			// do nothing
 		}
@@ -708,62 +712,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return err
 		}
 
-		cpuScaled := false
+		cpuScaled, err := r.handleCPUScaling(ctx, vm, vmRunner)
+		if err != nil {
+			log.Error(err, "failed to handle CPU scaling")
+			return err
+		}
 		ramScaled := false
-
-		// do hotplug/unplug CPU
-		// firstly get current state from QEMU
-		cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
-		if err != nil {
-			log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
-			return err
-		}
-		specCPU := vm.Spec.Guest.CPUs.Use
-		pluggedCPU := uint32(len(cpuSlotsPlugged))
-
-		cgroupUsage, err := getRunnerCgroup(ctx, vm)
-		if err != nil {
-			log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
-			return err
-		}
-
-		// compare guest spec to count of plugged and runner pod cgroups
-		if specCPU.RoundedUp() > pluggedCPU {
-			// going to plug one CPU
-			log.Info("Plug one more CPU into VM")
-			if err := QmpPlugCpu(QmpAddr(vm)); err != nil {
-				return err
-			}
-			r.Recorder.Event(vm, "Normal", "ScaleUp",
-				fmt.Sprintf("One more CPU was plugged into VM %s",
-					vm.Name))
-		} else if specCPU.RoundedUp() < pluggedCPU {
-			// going to unplug one CPU
-			log.Info("Unplug one CPU from VM")
-			if err := QmpUnplugCpu(QmpAddr(vm)); err != nil {
-				return err
-			}
-			r.Recorder.Event(vm, "Normal", "ScaleDown",
-				fmt.Sprintf("One CPU was unplugged from VM %s",
-					vm.Name))
-		} else if specCPU != cgroupUsage.VCPUs {
-			log.Info("Update runner pod cgroups", "runner", cgroupUsage.VCPUs, "spec", specCPU)
-			if err := setRunnerCgroup(ctx, vm, specCPU); err != nil {
-				return err
-			}
-			reason := "ScaleDown"
-			if specCPU > cgroupUsage.VCPUs {
-				reason = "ScaleUp"
-			}
-			r.Recorder.Event(vm, "Normal", reason,
-				fmt.Sprintf("Runner pod cgroups was updated on VM %s",
-					vm.Name))
-		} else {
-			// seems already plugged correctly
-			cpuScaled = true
-		}
-		// update status by CPUs used in the VM
-		r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 		// do hotplug/unplug Memory
 		switch *vm.Status.MemoryProvider {
@@ -950,7 +904,6 @@ func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualM
 type runnerStatusKind string
 
 const (
-	runnerUnknown   runnerStatusKind = "Unknown"
 	runnerPending   runnerStatusKind = "Pending"
 	runnerRunning   runnerStatusKind = "Running"
 	runnerFailed    runnerStatusKind = "Failed"
@@ -977,8 +930,6 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 		return runnerSucceeded
 	case corev1.PodFailed:
 		return runnerFailed
-	case corev1.PodUnknown:
-		return runnerUnknown
 	case corev1.PodRunning:
 		return runnerRunning
 	default:
@@ -1285,72 +1236,6 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	return a
 }
 
-func setRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.MilliCPU) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
-
-	update := api.VCPUChange{VCPUs: cpu}
-
-	data, err := json.Marshal(update)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("unexpected status %s", resp.Status)
-	}
-	return nil
-}
-
-func getRunnerCgroup(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPUCgroup, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	url := fmt.Sprintf("http://%s:%d/cpu_current", vm.Status.PodIP, vm.Spec.RunnerPort)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected status %s", resp.Status)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	defer resp.Body.Close()
-	if err != nil {
-		return nil, err
-	}
-
-	var result api.VCPUCgroup
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		return nil, err
-	}
-
-	return &result, nil
-}
-
 // imageForVirtualMachine gets the Operand image which is managed by this controller
 // from the VM_RUNNER_IMAGE environment variable defined in the config/manager/manager.yaml
 func imageForVmRunner() (string, error) {
@@ -1475,9 +1360,6 @@ func podSpec(
 						cmd := []string{"runner"}
 						if config.DisableRunnerCgroup {
 							cmd = append(cmd, "-skip-cgroup-management")
-							// cgroup management disabled, but we still need something to provide
-							// the server, so the runner will just provide a dummy implementation.
-							cmd = append(cmd, "-enable-dummy-cpu-server")
 						}
 						cmd = append(
 							cmd,
@@ -1494,6 +1376,9 @@ func podSpec(
 							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
 							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
 						)
+						// NB: We don't need to check if the value is nil because the default value
+						// was set in Reconcile
+						cmd = append(cmd, "-cpu-scaling-mode", string(*vm.Spec.CpuScalingMode))
 						return cmd
 					}(),
 					Env: []corev1.EnvVar{{

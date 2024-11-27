@@ -16,7 +16,9 @@ data:
           "enableLFCMetrics": false,
           "lfcToMemoryRatio": 0.75,
           "lfcWindowSizeMinutes": 5,
-          "lfcMinWaitBeforeDownscaleMinutes": 5
+          "lfcMinWaitBeforeDownscaleMinutes": 5,
+          "cpuStableZoneRatio": 0,
+          "cpuMixedZoneRatio": 0
         }
       },
       "billing": {

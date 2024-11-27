@@ -1,0 +1,13 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 90
+---
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+# temporary added this check to validate that defaulting cpuScalingMode works as expected
+# field spec.cpuScalingMode should go to default value `qmp_scaling` if it is not set
+# TODO: delete once the https://github.com/neondatabase/autoscaling/issues/1082 went live
+spec:
+  cpuScalingMode: QmpScaling

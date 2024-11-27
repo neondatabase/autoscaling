@@ -13,7 +13,7 @@ import (
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -24,8 +24,6 @@ const (
 )
 
 // The scheduler plugin currently supports v3.0 to v5.0 of the agent<->scheduler plugin protocol.
-//
-// If you update either of these values, make sure to also update VERSIONING.md.
 const (
 	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
 	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
@@ -292,7 +290,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	}
 	memFactor := cu.Mem
 
-	var lastCPUPermit *vmapi.MilliCPU
+	var lastCPUPermit *vmv1.MilliCPU
 	var lastMemPermit *api.Bytes
 	if lastPermit != nil {
 		lastCPUPermit = &lastPermit.VCPU

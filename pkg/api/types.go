@@ -10,7 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -24,8 +24,6 @@ import (
 // repository containing this code. Names follow semver, although this does not necessarily
 // guarantee support - for example, the plugin may only support a single version, even though others
 // may appear to be semver-compatible.
-//
-// Version compatibility is documented in the neighboring file VERSIONING.md.
 type PluginProtoVersion uint32
 
 const (
@@ -174,7 +172,8 @@ func (v PluginProtoVersion) IncludesExtendedMetrics() bool {
 	return v < PluginProtoV5_0
 }
 
-// AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin
+// AgentRequest is the type of message sent from an autoscaler-agent to the scheduler plugin on
+// behalf of a Pod on the agent's node.
 //
 // All AgentRequests expect a PluginResponse.
 type AgentRequest struct {
@@ -182,7 +181,8 @@ type AgentRequest struct {
 	//
 	// If the scheduler does not support this version, then it will respond with a 400 status.
 	ProtoVersion PluginProtoVersion `json:"protoVersion"`
-	// Pod is the namespaced name of the pod making the request
+	// Pod is the namespaced name of the Pod that the autoscaler-agent is making the request on
+	// behalf of.
 	Pod util.NamespacedName `json:"pod"`
 	// ComputeUnit gives the value of the agent's configured compute unit to use for the VM.
 	//
@@ -295,7 +295,7 @@ func (b Bytes) Format(state fmt.State, verb rune) {
 //
 // In all cases, each resource type is considered separately from the others.
 type Resources struct {
-	VCPU vmapi.MilliCPU `json:"vCPUs"`
+	VCPU vmv1.MilliCPU `json:"vCPUs"`
 	// Mem gives the number of bytes of memory requested
 	Mem Bytes `json:"mem"`
 }
@@ -376,7 +376,7 @@ func (r Resources) SaturatingSub(other Resources) Resources {
 // Mul returns the result of multiplying each resource by factor
 func (r Resources) Mul(factor uint16) Resources {
 	return Resources{
-		VCPU: vmapi.MilliCPU(factor) * r.VCPU,
+		VCPU: vmv1.MilliCPU(factor) * r.VCPU,
 		Mem:  Bytes(factor) * r.Mem,
 	}
 }
@@ -478,13 +478,13 @@ func (m MoreResources) And(cmp MoreResources) MoreResources {
 // VCPUChange is used to notify runner that it had some changes in its CPUs
 // runner uses this info to adjust qemu cgroup
 type VCPUChange struct {
-	VCPUs vmapi.MilliCPU
+	VCPUs vmv1.MilliCPU
 }
 
 // VCPUCgroup is used in runner to reply to controller
 // it represents the vCPU usage as controlled by cgroup
 type VCPUCgroup struct {
-	VCPUs vmapi.MilliCPU
+	VCPUs vmv1.MilliCPU
 }
 
 // this a similar version type for controller <-> runner communications
@@ -612,8 +612,6 @@ func SerializeMonitorMessage(content any, id uint64) ([]byte, error) {
 // Each version of the agent<->monitor protocol is named independently from releases of the
 // repository containing this code. Names follow semver, although this does not necessarily
 // guarantee support - for example, the monitor may only support versions above v1.1.
-//
-// Version compatibility is documented in the neighboring file VERSIONING.md.
 type MonitorProtoVersion uint32
 
 const (

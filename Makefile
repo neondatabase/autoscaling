@@ -17,7 +17,7 @@ PG16_DISK_TEST_IMG ?= pg16-disk-test:dev
 GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
 
-# The target architecture for linux kernel. Possible values: amd64 or arm64. 
+# The target architecture for linux kernel. Possible values: amd64 or arm64.
 # Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile.kernel-builder
 KERNEL_TARGET_ARCH ?= amd64
 
@@ -135,13 +135,16 @@ test: vet envtest ## Run tests.
 
 .PHONY: build
 build: vet bin/vm-builder ## Build all neonvm binaries.
-	GOOS=linux go build -o bin/controller       neonvm/main.go
-	GOOS=linux go build -o bin/vxlan-controller neonvm/tools/vxlan/controller/main.go
-	GOOS=linux go build -o bin/runner           neonvm/runner/*.go
+	GOOS=linux go build -o bin/controller         neonvm-controller/cmd/main.go
+	GOOS=linux go build -o bin/vxlan-controller   neonvm-vxlan-controller/cmd/main.go
+	GOOS=linux go build -o bin/runner             neonvm-runner/cmd/main.go
+	GOOS=linux go build -o bin/daemon             neonvm-daemon/cmd/main.go
+	GOOS=linux go build -o bin/autoscaler-agent   autoscaler-agent/cmd/main.go
+	GOOS=linux go build -o bin/scheduler          autoscale-scheduler/cmd/main.go
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go 
+	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go
 .PHONY: run
 run: vet ## Run a controller from your host.
 	go run ./neonvm/main.go
