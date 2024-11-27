@@ -1,0 +1,23 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+unitTest: false
+---
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+spec:
+  schedulerName: autoscale-scheduler
+  guest:
+    cpus:
+      min: 0.25
+      use: 0.25
+      max: 0.25
+    memorySlotSize: 1Gi
+    memorySlots:
+      min: 1
+      use: 1
+      max: 1
+    rootDisk:
+      image: vm-postgres:15-bullseye
+      size: 1Gi
