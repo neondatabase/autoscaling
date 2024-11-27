@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -14,12 +15,15 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/billing"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type Config struct {
 	Clients                ClientsConfig `json:"clients"`
 	CPUMetricName          string        `json:"cpuMetricName"`
 	ActiveTimeMetricName   string        `json:"activeTimeMetricName"`
+	IngressBytesMetricName string        `json:"ingressBytesMetricName"`
+	EgressBytesMetricName  string        `json:"egressBytesMetricName"`
 	CollectEverySeconds    uint          `json:"collectEverySeconds"`
 	AccumulateEverySeconds uint          `json:"accumulateEverySeconds"`
 }
@@ -37,8 +41,10 @@ type metricsKey struct {
 }
 
 type vmMetricsHistory struct {
-	lastSlice *metricsTimeSlice
-	total     vmMetricsSeconds
+	lastSlice         *metricsTimeSlice
+	total             vmMetricsSeconds
+	totalIngressBytes vmv1.NetworkBytes
+	totalEgressBytes  vmv1.NetworkBytes
 }
 
 type metricsTimeSlice struct {
@@ -52,6 +58,10 @@ func (m *metricsTimeSlice) Duration() time.Duration { return m.endTime.Sub(m.sta
 type vmMetricsInstant struct {
 	// cpu stores the cpu allocation at a particular instant.
 	cpu vmv1.MilliCPU
+	// number of bytes received by the VM from the open internet since the last time slice
+	ingressBytes vmv1.NetworkBytes
+	// number of bytes sent by the VM to the open internet since the last time slice
+	egressBytes vmv1.NetworkBytes
 }
 
 // vmMetricsSeconds is like vmMetrics, but the values cover the allocation over time
@@ -112,7 +122,7 @@ func (mc *MetricsCollector) Run(
 		pushWindowStart: time.Now(),
 	}
 
-	state.collect(logger, store, mc.metrics)
+	state.collect(ctx, logger, store, mc.metrics)
 
 	for {
 		select {
@@ -123,7 +133,7 @@ func (mc *MetricsCollector) Run(
 				logger.Panic("Validation check failed", zap.Error(err))
 				return err
 			}
-			state.collect(logger, store, mc.metrics)
+			state.collect(ctx, logger, store, mc.metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
 			state.drainEnqueue(logger, mc.conf, billing.GetHostname(), mc.sink)
@@ -133,7 +143,59 @@ func (mc *MetricsCollector) Run(
 	}
 }
 
-func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics PromMetrics) {
+type vmMetricsKV struct {
+	key   metricsKey
+	value vmMetricsInstant
+}
+
+func collectMetricsForVM(
+	ctx context.Context,
+	logger *zap.Logger,
+	vm *vmv1.VirtualMachine,
+	metricsChan chan vmMetricsKV,
+	promMetrics *PromMetrics,
+) {
+	byteCounts := &vmv1.VirtualMachineNetworkUsage{
+		IngressBytes: 0,
+		EgressBytes:  0,
+	}
+	if vm.Spec.EnableNetworkMonitoring != nil && *vm.Spec.EnableNetworkMonitoring {
+		bc, err := vm.GetNetworkUsage(ctx, 500*time.Millisecond)
+		if err != nil {
+			logger.Error("Failed to collect network usage", util.VMNameFields(vm), zap.Error(err))
+
+			var rootErr string
+			switch e := err.(type) { //nolint:errorlint // we want to know the type
+			case vmv1.NetworkUsageJSONError:
+				rootErr = "JSON unmarshaling"
+			case vmv1.NetworkUsageStatusCodeError:
+				rootErr = fmt.Sprintf("HTTP code %d", e.StatusCode)
+			default:
+				rootErr = util.RootError(err).Error()
+			}
+			promMetrics.fetchNetworkUsageErrorsTotal.WithLabelValues(rootErr).Inc()
+		} else {
+			byteCounts = bc
+		}
+	}
+	endpointID := vm.Annotations[api.AnnotationBillingEndpointID]
+	metricsChan <- vmMetricsKV{
+		key: metricsKey{
+			uid:        vm.UID,
+			endpointID: endpointID,
+		},
+		// Note: Usually, vmMetricInstant stores deltas for the byte counts. But the API
+		// returns totals, which get recorded here. They will get subtracted off from the previous
+		// instant in the second half of the collection loop.
+		value: vmMetricsInstant{
+			cpu:          *vm.Status.CPUs,
+			ingressBytes: byteCounts.IngressBytes,
+			egressBytes:  byteCounts.EgressBytes,
+		},
+	}
+}
+
+func (s *metricsState) collect(ctx context.Context, logger *zap.Logger, store VMStoreForNode, metrics PromMetrics) {
 	now := time.Now()
 
 	metricsBatch := metrics.forBatch()
@@ -149,8 +211,10 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 			return i.List()
 		})
 	}
+	metricsChan := make(chan vmMetricsKV, len(vmsOnThisNode))
+	metricsToCollect := 0
 	for _, vm := range vmsOnThisNode {
-		endpointID, isEndpoint := vm.Annotations[api.AnnotationBillingEndpointID]
+		_, isEndpoint := vm.Annotations[api.AnnotationBillingEndpointID]
 		metricsBatch.inc(isEndpointFlag(isEndpoint), autoscalingEnabledFlag(api.HasAutoscalingEnabled(vm)), vm.Status.Phase)
 		if !isEndpoint {
 			// we're only reporting metrics for VMs with endpoint IDs, and this VM doesn't have one
@@ -161,38 +225,47 @@ func (s *metricsState) collect(logger *zap.Logger, store VMStoreForNode, metrics
 			continue
 		}
 
-		key := metricsKey{
-			uid:        vm.UID,
-			endpointID: endpointID,
-		}
-		presentMetrics := vmMetricsInstant{
-			cpu: *vm.Status.CPUs,
-		}
-		if oldMetrics, ok := old[key]; ok {
-			// The VM was present from s.lastTime to now. Add a time slice to its metrics history.
-			timeSlice := metricsTimeSlice{
-				metrics: vmMetricsInstant{
-					// strategically under-bill by assigning the minimum to the entire time slice.
-					cpu: min(oldMetrics.cpu, presentMetrics.cpu),
-				},
-				// note: we know s.lastTime != nil because otherwise old would be empty.
-				startTime: *s.lastCollectTime,
-				endTime:   now,
-			}
+		go collectMetricsForVM(ctx, logger, vm, metricsChan, &metrics)
+		metricsToCollect += 1
+	}
 
-			vmHistory, ok := s.historical[key]
-			if !ok {
-				vmHistory = vmMetricsHistory{
-					lastSlice: nil,
-					total:     vmMetricsSeconds{cpu: 0, activeTime: time.Duration(0)},
+	for i := 0; i < metricsToCollect; i++ {
+		select {
+		case <-ctx.Done():
+			logger.Error("Timed out collecting metrics", zap.Error(ctx.Err()))
+			break
+		case kv := <-metricsChan:
+			key, presentMetrics := kv.key, kv.value
+
+			if oldMetrics, ok := old[key]; ok {
+				// The VM was present from s.lastTime to now. Add a time slice to its metrics history.
+				timeSlice := metricsTimeSlice{
+					metrics: vmMetricsInstant{
+						// strategically under-bill by assigning the minimum to the entire time slice.
+						cpu:          min(oldMetrics.cpu, presentMetrics.cpu),
+						ingressBytes: presentMetrics.ingressBytes - oldMetrics.ingressBytes,
+						egressBytes:  presentMetrics.egressBytes - oldMetrics.egressBytes,
+					},
+					// note: we know s.lastTime != nil because otherwise old would be empty.
+					startTime: *s.lastCollectTime,
+					endTime:   now,
 				}
-			}
-			// append the slice, merging with the previous if the resource usage was the same
-			vmHistory.appendSlice(timeSlice)
-			s.historical[key] = vmHistory
-		}
 
-		s.present[key] = presentMetrics
+				vmHistory, ok := s.historical[key]
+				if !ok {
+					vmHistory = vmMetricsHistory{
+						lastSlice:         nil,
+						total:             vmMetricsSeconds{cpu: 0, activeTime: time.Duration(0)},
+						totalIngressBytes: 0,
+						totalEgressBytes:  0,
+					}
+				}
+				// append the slice, merging with the previous if the resource usage was the same
+				vmHistory.appendSlice(timeSlice)
+				s.historical[key] = vmHistory
+			}
+			s.present[key] = presentMetrics
+		}
 	}
 
 	s.lastCollectTime = &now
@@ -231,6 +304,8 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 	}
 	h.total.cpu += metricsSeconds.cpu
 	h.total.activeTime += metricsSeconds.activeTime
+	h.totalIngressBytes += h.lastSlice.metrics.ingressBytes
+	h.totalEgressBytes += h.lastSlice.metrics.egressBytes
 
 	h.lastSlice = nil
 }
@@ -272,9 +347,14 @@ func (s *metricsState) drainEnqueue(
 
 	enqueue := sink.Enqueue
 
-	for key, history := range s.historical {
+	for _, history := range s.historical {
 		history.finalizeCurrentTimeSlice()
+		if history.totalIngressBytes != 0 || history.totalEgressBytes != 0 {
+			batchSize += 2
+		}
+	}
 
+	for key, history := range s.historical {
 		countInBatch += 1
 		enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
@@ -297,6 +377,28 @@ func (s *metricsState) drainEnqueue(
 			StopTime:       now,
 			Value:          int(math.Round(history.total.activeTime.Seconds())),
 		})))
+		if history.totalIngressBytes != 0 || history.totalEgressBytes != 0 {
+			countInBatch += 1
+			enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+				MetricName:     conf.IngressBytesMetricName,
+				Type:           "", // set by billing.Enrich
+				IdempotencyKey: "", // set by billing.Enrich
+				EndpointID:     key.endpointID,
+				StartTime:      s.pushWindowStart,
+				StopTime:       now,
+				Value:          int(history.totalIngressBytes),
+			})))
+			countInBatch += 1
+			enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+				MetricName:     conf.EgressBytesMetricName,
+				Type:           "", // set by billing.Enrich
+				IdempotencyKey: "", // set by billing.Enrich
+				EndpointID:     key.endpointID,
+				StartTime:      s.pushWindowStart,
+				StopTime:       now,
+				Value:          int(history.totalEgressBytes),
+			})))
+		}
 	}
 
 	s.pushWindowStart = now

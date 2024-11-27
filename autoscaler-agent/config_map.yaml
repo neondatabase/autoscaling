@@ -26,7 +26,9 @@ data:
         "activeTimeMetricName": "active_time_seconds",
         "collectEverySeconds": 4,
         "accumulateEverySeconds": 24,
-        "clients": {}
+        "clients": {},
+        "ingressBytesMetricName": "ingress_bytes",
+        "egressBytesMetricName": "egress_bytes"
       },
       "monitor": {
           "serverPort": 10301,

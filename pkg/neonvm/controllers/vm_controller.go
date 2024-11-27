@@ -1369,6 +1369,9 @@ func podSpec(
 						if memoryProvider == vmv1.MemoryProviderVirtioMem {
 							cmd = append(cmd, "-memhp-auto-movable-ratio", config.MemhpAutoMovableRatio)
 						}
+						if vm.Spec.EnableNetworkMonitoring != nil && *vm.Spec.EnableNetworkMonitoring {
+							cmd = append(cmd, "-enable-network-monitoring")
+						}
 						// put these last, so that the earlier args are easier to see (because these
 						// can get quite large)
 						cmd = append(

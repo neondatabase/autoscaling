@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup1"
 	"github.com/containerd/cgroups/v3/cgroup2"
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/digitalocean/go-qemu/qmp"
 	"github.com/docker/libnetwork/types"
 	"github.com/jpillora/backoff"
@@ -606,28 +607,30 @@ func runInitScript(logger *zap.Logger, script string) error {
 }
 
 type Config struct {
-	vmSpecDump           string
-	vmStatusDump         string
-	kernelPath           string
-	appendKernelCmdline  string
-	skipCgroupManagement bool
-	diskCacheSettings    string
-	memoryProvider       vmv1.MemoryProvider
-	autoMovableRatio     string
-	cpuScalingMode       vmv1.CpuScalingMode
+	vmSpecDump              string
+	vmStatusDump            string
+	kernelPath              string
+	appendKernelCmdline     string
+	skipCgroupManagement    bool
+	enableNetworkMonitoring bool
+	diskCacheSettings       string
+	memoryProvider          vmv1.MemoryProvider
+	autoMovableRatio        string
+	cpuScalingMode          vmv1.CpuScalingMode
 }
 
 func newConfig(logger *zap.Logger) *Config {
 	cfg := &Config{
-		vmSpecDump:           "",
-		vmStatusDump:         "",
-		kernelPath:           defaultKernelPath,
-		appendKernelCmdline:  "",
-		skipCgroupManagement: false,
-		diskCacheSettings:    "cache=none",
-		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
-		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
-		cpuScalingMode:       "", // Require that this is explicitly set. We'll check later.
+		vmSpecDump:              "",
+		vmStatusDump:            "",
+		kernelPath:              defaultKernelPath,
+		appendKernelCmdline:     "",
+		skipCgroupManagement:    false,
+		enableNetworkMonitoring: false,
+		diskCacheSettings:       "cache=none",
+		memoryProvider:          "", // Require that this is explicitly set. We'll check later.
+		autoMovableRatio:        "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
+		cpuScalingMode:          "", // Require that this is explicitly set. We'll check later.
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -640,6 +643,8 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.BoolVar(&cfg.skipCgroupManagement, "skip-cgroup-management",
 		cfg.skipCgroupManagement,
 		"Don't try to manage CPU")
+	flag.BoolVar(&cfg.enableNetworkMonitoring, "enable-network-monitoring",
+		cfg.enableNetworkMonitoring, "Enable in/out traffic measuring with iptables")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
@@ -1077,7 +1082,7 @@ func runQEMU(
 	}
 
 	wg.Add(1)
-	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, callbacks, &wg)
+	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, callbacks, &wg, cfg.enableNetworkMonitoring)
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 
@@ -1179,12 +1184,13 @@ type cpuServerCallbacks struct {
 	set func(*zap.Logger, vmv1.MilliCPU) error
 }
 
-func listenForCPUChanges(
+func listenForHTTPRequests(
 	ctx context.Context,
 	logger *zap.Logger,
 	port int32,
 	callbacks cpuServerCallbacks,
 	wg *sync.WaitGroup,
+	networkUsageRoute bool,
 ) {
 	defer wg.Done()
 	mux := http.NewServeMux()
@@ -1197,6 +1203,13 @@ func listenForCPUChanges(
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUCurrent(cpuCurrentLogger, w, r, callbacks.get)
 	})
+	if networkUsageRoute {
+		networkUsageLogger := loggerHandlers.Named("network_usage")
+		logger.Info("Listening for network_usage")
+		mux.HandleFunc("/network_usage", func(w http.ResponseWriter, r *http.Request) {
+			handleGetNetworkUsage(networkUsageLogger, w, r)
+		})
+	}
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
 		Handler:           mux,
@@ -1211,14 +1224,76 @@ func listenForCPUChanges(
 	select {
 	case err := <-errChan:
 		if errors.Is(err, http.ErrServerClosed) {
-			logger.Info("cpu_change server closed")
+			logger.Info("http server closed")
 		} else if err != nil {
-			logger.Fatal("cpu_change exited with error", zap.Error(err))
+			logger.Fatal("http server exited with error", zap.Error(err))
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
-		logger.Info("shut down cpu_change server", zap.Error(err))
+		logger.Info("shut down http server", zap.Error(err))
 	}
+}
+
+func incNetBytesCounter(iptables *iptables.IPTables, chain string) (vmv1.NetworkBytes, error) {
+	cnt := vmv1.NetworkBytes(0)
+	rules, err := iptables.Stats("filter", chain)
+	if err != nil {
+		return cnt, err
+	}
+	for _, rawStat := range rules {
+		stat, err := iptables.ParseStat(rawStat)
+		if err != nil {
+			return cnt, err
+		}
+		if stat.Protocol == "6" { // tcp
+			cnt += vmv1.NetworkBytes(stat.Bytes)
+		}
+	}
+	return cnt, nil
+}
+
+func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		logger.Error("unexpected method", zap.String("method", r.Method))
+		w.WriteHeader(400)
+		return
+	}
+
+	counts := vmv1.VirtualMachineNetworkUsage{IngressBytes: 0, EgressBytes: 0}
+	// Rules configured at github.com/neondatabase/cloud/blob/main/compute-init/compute-init.sh#L98
+	iptables, err := iptables.New()
+	if err != nil {
+		logger.Error("error initializing iptables", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+
+	if ingress, err := incNetBytesCounter(iptables, "INPUT"); err != nil {
+		logger.Error("error reading ingress byte counts", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	} else {
+		counts.IngressBytes += ingress
+	}
+
+	if egress, err := incNetBytesCounter(iptables, "OUTPUT"); err != nil {
+		logger.Error("error reading egress byte counts", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	} else {
+		counts.EgressBytes += egress
+	}
+
+	body, err := json.Marshal(counts)
+	if err != nil {
+		logger.Error("could not marshal byte counts", zap.Error(err))
+		w.WriteHeader(500)
+		return
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	w.Write(body) //nolint:errcheck // Not much to do with the error here
+	logger.Info("Responded with byte counts", zap.String("byte_counts", string(body)))
 }
 
 func printWithNewline(slice []byte) error {
