@@ -150,6 +150,11 @@ type VirtualMachineSpec struct {
 	// propagated to the VM.
 	// +optional
 	TargetRevision *RevisionWithTime `json:"targetRevision,omitempty"`
+
+	// Controls how CPU scaling is performed, either hotplug new CPUs with QMP, or enable them in sysfs.
+	// +kubebuilder:default:=QmpScaling
+	// +optional
+	CpuScalingMode *CpuScalingMode `json:"cpuScalingMode,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -159,6 +164,34 @@ func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
 		MemorySlotSize: spec.Guest.MemorySlotSize,
 	}
 }
+
+// +kubebuilder:validation:Enum=QmpScaling;SysfsScaling
+type CpuScalingMode string
+
+// FlagFunc is a parsing function to be used with flag.Func
+func (p *CpuScalingMode) FlagFunc(value string) error {
+	possibleValues := []string{
+		string(CpuScalingModeQMP),
+		string(CpuScalingModeSysfs),
+	}
+
+	if !slices.Contains(possibleValues, value) {
+		return fmt.Errorf("Unknown CpuScalingMode %q, must be one of %v", value, possibleValues)
+	}
+
+	*p = CpuScalingMode(value)
+	return nil
+}
+
+const (
+	// CpuScalingModeQMP is the value of the VirtualMachineSpec.CpuScalingMode field that indicates
+	// that the VM should use QMP to scale CPUs.
+	CpuScalingModeQMP CpuScalingMode = "QmpScaling"
+
+	// CpuScalingModeSysfs is the value of the VirtualMachineSpec.CpuScalingMode field that
+	// indicates that the VM should use the CPU sysfs state interface to scale CPUs.
+	CpuScalingModeSysfs CpuScalingMode = "SysfsScaling"
+)
 
 // +kubebuilder:validation:Enum=Always;OnFailure;Never
 type RestartPolicy string
@@ -605,6 +638,7 @@ func (p VmPhase) IsAlive() bool {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Node",type=string,priority=1,JSONPath=`.status.node`
 // +kubebuilder:printcolumn:name="Image",type=string,priority=1,JSONPath=`.spec.guest.rootDisk.image`
+// +kubebuilder:printcolumn:name="CPUScalingMode",type=string,priority=1,JSONPath=`.spec.cpuScalingMode`
 type VirtualMachine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

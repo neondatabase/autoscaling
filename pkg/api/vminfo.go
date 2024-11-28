@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -49,25 +49,25 @@ func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
 	return hasTrueLabel(obj, LabelTestingOnlyAlwaysMigrate)
 }
 
-// VmInfo is the subset of vmapi.VirtualMachineSpec that the scheduler plugin and autoscaler agent
+// VmInfo is the subset of vmv1.VirtualMachineSpec that the scheduler plugin and autoscaler agent
 // care about. It takes various labels and annotations into account, so certain fields might be
 // different from what's strictly in the VirtualMachine object.
 type VmInfo struct {
-	Name            string                  `json:"name"`
-	Namespace       string                  `json:"namespace"`
-	Cpu             VmCpuInfo               `json:"cpu"`
-	Mem             VmMemInfo               `json:"mem"`
-	Config          VmConfig                `json:"config"`
-	CurrentRevision *vmapi.RevisionWithTime `json:"currentRevision,omitempty"`
+	Name            string                 `json:"name"`
+	Namespace       string                 `json:"namespace"`
+	Cpu             VmCpuInfo              `json:"cpu"`
+	Mem             VmMemInfo              `json:"mem"`
+	Config          VmConfig               `json:"config"`
+	CurrentRevision *vmv1.RevisionWithTime `json:"currentRevision,omitempty"`
 }
 
 type VmCpuInfo struct {
-	Min vmapi.MilliCPU `json:"min"`
-	Max vmapi.MilliCPU `json:"max"`
-	Use vmapi.MilliCPU `json:"use"`
+	Min vmv1.MilliCPU `json:"min"`
+	Max vmv1.MilliCPU `json:"max"`
+	Use vmv1.MilliCPU `json:"use"`
 }
 
-func NewVmCpuInfo(cpus vmapi.CPUs) VmCpuInfo {
+func NewVmCpuInfo(cpus vmv1.CPUs) VmCpuInfo {
 	return VmCpuInfo{
 		Min: cpus.Min,
 		Max: cpus.Max,
@@ -86,7 +86,7 @@ type VmMemInfo struct {
 	SlotSize Bytes `json:"slotSize"`
 }
 
-func NewVmMemInfo(memSlots vmapi.MemorySlots, memSlotSize resource.Quantity) VmMemInfo {
+func NewVmMemInfo(memSlots vmv1.MemorySlots, memSlotSize resource.Quantity) VmMemInfo {
 	return VmMemInfo{
 		Min:      uint16(memSlots.Min),
 		Max:      uint16(memSlots.Max),
@@ -148,7 +148,7 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 	return util.NamespacedName{Namespace: vm.Namespace, Name: vm.Name}
 }
 
-func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error) {
+func ExtractVmInfo(logger *zap.Logger, vm *vmv1.VirtualMachine) (*VmInfo, error) {
 	logger = logger.With(util.VMNameFields(vm))
 	info, err := extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
 	if err != nil {
@@ -161,15 +161,15 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmapi.VirtualMachine) (*VmInfo, error
 
 func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
 	logger = logger.With(util.PodNameFields(pod))
-	resourcesJSON := pod.Annotations[vmapi.VirtualMachineResourcesAnnotation]
+	resourcesJSON := pod.Annotations[vmv1.VirtualMachineResourcesAnnotation]
 
-	var resources vmapi.VirtualMachineResources
+	var resources vmv1.VirtualMachineResources
 	if err := json.Unmarshal([]byte(resourcesJSON), &resources); err != nil {
 		return nil, fmt.Errorf("Error unmarshaling %q: %w",
-			vmapi.VirtualMachineResourcesAnnotation, err)
+			vmv1.VirtualMachineResourcesAnnotation, err)
 	}
 
-	vmName := pod.Labels[vmapi.VirtualMachineNameLabel]
+	vmName := pod.Labels[vmv1.VirtualMachineNameLabel]
 	return extractVmInfoGeneric(logger, vmName, pod, resources)
 }
 
@@ -177,7 +177,7 @@ func extractVmInfoGeneric(
 	logger *zap.Logger,
 	vmName string,
 	obj metav1.ObjectMetaAccessor,
-	resources vmapi.VirtualMachineResources,
+	resources vmv1.VirtualMachineResources,
 ) (*VmInfo, error) {
 	cpuInfo := NewVmCpuInfo(resources.CPUs)
 	memInfo := NewVmMemInfo(resources.MemorySlots, resources.MemorySlotSize)
@@ -264,8 +264,8 @@ func (vm VmInfo) EqualScalingBounds(cmp VmInfo) bool {
 }
 
 func (vm *VmInfo) applyBounds(b ScalingBounds) {
-	vm.Cpu.Min = vmapi.MilliCPUFromResourceQuantity(b.Min.CPU)
-	vm.Cpu.Max = vmapi.MilliCPUFromResourceQuantity(b.Max.CPU)
+	vm.Cpu.Min = vmv1.MilliCPUFromResourceQuantity(b.Min.CPU)
+	vm.Cpu.Max = vmv1.MilliCPUFromResourceQuantity(b.Max.CPU)
 
 	// FIXME: this will be incorrect if b.{Min,Max}.Mem.Value() is greater than
 	// (2^16-1) * info.Mem.SlotSize.Value().
@@ -368,6 +368,16 @@ type ScalingConfig struct {
 	// LFCWindowSizeMinutes dictates the minimum duration we must use during internal calculations
 	// of the rate of increase in LFC working set size.
 	LFCWindowSizeMinutes *int `json:"lfcWindowSizeMinutes,omitempty"`
+
+	// CPUStableZoneRatio is the ratio of the stable load zone size relative to load5.
+	// For example, a value of 0.25 means that stable zone will be load5±25%.
+	CPUStableZoneRatio *float64 `json:"cpuStableZoneRatio,omitempty"`
+
+	// CPUMixedZoneRatio is the ratio of the mixed load zone size relative to load5.
+	// Since mixed zone starts after stable zone, values CPUStableZoneRatio=0.25 and CPUMixedZoneRatio=0.15
+	// means that stable zone will be from 0.75*load5 to 1.25*load5, and mixed zone will be
+	// from 0.6*load5 to 0.75*load5, and from 1.25*load5 to 1.4*load5.
+	CPUMixedZoneRatio *float64 `json:"cpuMixedZoneRatio,omitempty"`
 }
 
 // WithOverrides returns a new copy of defaults, where fields set in overrides replace the ones in
@@ -399,6 +409,13 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 	}
 	if overrides.LFCMinWaitBeforeDownscaleMinutes != nil {
 		defaults.LFCMinWaitBeforeDownscaleMinutes = lo.ToPtr(*overrides.LFCMinWaitBeforeDownscaleMinutes)
+	}
+
+	if overrides.CPUStableZoneRatio != nil {
+		defaults.CPUStableZoneRatio = lo.ToPtr(*overrides.CPUStableZoneRatio)
+	}
+	if overrides.CPUMixedZoneRatio != nil {
+		defaults.CPUMixedZoneRatio = lo.ToPtr(*overrides.CPUMixedZoneRatio)
 	}
 
 	return defaults
@@ -453,6 +470,8 @@ func (c *ScalingConfig) validate(requireAll bool) error {
 		erc.Whenf(ec, c.LFCToMemoryRatio == nil, "%s is a required field", ".lfcToMemoryRatio")
 		erc.Whenf(ec, c.LFCWindowSizeMinutes == nil, "%s is a required field", ".lfcWindowSizeMinutes")
 		erc.Whenf(ec, c.LFCMinWaitBeforeDownscaleMinutes == nil, "%s is a required field", ".lfcMinWaitBeforeDownscaleMinutes")
+		erc.Whenf(ec, c.CPUStableZoneRatio == nil, "%s is a required field", ".cpuStableZoneRatio")
+		erc.Whenf(ec, c.CPUMixedZoneRatio == nil, "%s is a required field", ".cpuMixedZoneRatio")
 	}
 
 	// heads-up! some functions elsewhere depend on the concrete return type of this function.

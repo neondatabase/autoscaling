@@ -13,7 +13,7 @@ import (
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/pkg/agent"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -46,7 +46,7 @@ func main() {
 	if err != nil {
 		logger.Panic("Failed to make K8S client", zap.Error(err))
 	}
-	if err = vmapi.AddToScheme(scheme.Scheme); err != nil {
+	if err = vmv1.AddToScheme(scheme.Scheme); err != nil {
 		logger.Panic("Failed to add NeonVM scheme", zap.Error(err))
 	}
 

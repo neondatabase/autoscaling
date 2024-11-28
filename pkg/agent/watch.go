@@ -16,7 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -67,7 +67,7 @@ func startVMWatcher(
 	perVMMetrics PerVMMetrics,
 	nodeName string,
 	submitEvent func(vmEvent),
-) (*watch.Store[vmapi.VirtualMachine], error) {
+) (*watch.Store[vmv1.VirtualMachine], error) {
 	logger := parentLogger.Named("vm-watch")
 
 	return watch.Watch(
@@ -84,13 +84,13 @@ func startVMWatcher(
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 500, 1000),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 500, 1000),
 		},
-		watch.Accessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
-			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
+		watch.Accessors[*vmv1.VirtualMachineList, vmv1.VirtualMachine]{
+			Items: func(list *vmv1.VirtualMachineList) []vmv1.VirtualMachine { return list.Items },
 		},
 		watch.InitModeDefer,
 		metav1.ListOptions{},
-		watch.HandlerFuncs[*vmapi.VirtualMachine]{
-			AddFunc: func(vm *vmapi.VirtualMachine, preexisting bool) {
+		watch.HandlerFuncs[*vmv1.VirtualMachine]{
+			AddFunc: func(vm *vmv1.VirtualMachine, preexisting bool) {
 				setVMMetrics(&perVMMetrics, vm, nodeName)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
@@ -105,7 +105,7 @@ func startVMWatcher(
 					submitEvent(event)
 				}
 			},
-			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
+			UpdateFunc: func(oldVM, newVM *vmv1.VirtualMachine) {
 				updateVMMetrics(&perVMMetrics, oldVM, newVM, nodeName)
 
 				oldIsOurs := vmIsOurResponsibility(oldVM, config, nodeName)
@@ -114,7 +114,7 @@ func startVMWatcher(
 					return
 				}
 
-				var vmForEvent *vmapi.VirtualMachine
+				var vmForEvent *vmv1.VirtualMachine
 				var eventKind vmEventKind
 
 				if !oldIsOurs && newIsOurs {
@@ -139,7 +139,7 @@ func startVMWatcher(
 
 				submitEvent(event)
 			},
-			DeleteFunc: func(vm *vmapi.VirtualMachine, maybeStale bool) {
+			DeleteFunc: func(vm *vmv1.VirtualMachine, maybeStale bool) {
 				deleteVMMetrics(&perVMMetrics, vm, nodeName)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
@@ -158,7 +158,7 @@ func startVMWatcher(
 	)
 }
 
-func makeVMEvent(logger *zap.Logger, vm *vmapi.VirtualMachine, kind vmEventKind) (vmEvent, error) {
+func makeVMEvent(logger *zap.Logger, vm *vmv1.VirtualMachine, kind vmEventKind) (vmEvent, error) {
 	info, err := api.ExtractVmInfo(logger, vm)
 	if err != nil {
 		return vmEvent{}, fmt.Errorf("Error extracting VM info: %w", err)
@@ -184,7 +184,7 @@ func makeVMEvent(logger *zap.Logger, vm *vmapi.VirtualMachine, kind vmEventKind)
 // We're not reusing api.ExtractVmInfo even though it also looks at the bounds
 // annotation, because its data is less precise - CPU and memory values might
 // come from the VM spec without us knowing.
-func extractAutoscalingBounds(vm *vmapi.VirtualMachine) *api.ScalingBounds {
+func extractAutoscalingBounds(vm *vmv1.VirtualMachine) *api.ScalingBounds {
 	boundsJSON, ok := vm.Annotations[api.AnnotationAutoscalingBounds]
 	if !ok {
 		return nil
@@ -201,7 +201,7 @@ type pair[T1 any, T2 any] struct {
 	second T2
 }
 
-func makeVMMetric(vm *vmapi.VirtualMachine, valType vmResourceValueType, val float64) vmMetric {
+func makeVMMetric(vm *vmv1.VirtualMachine, valType vmResourceValueType, val float64) vmMetric {
 	endpointID := vm.Labels[endpointLabel]
 	projectID := vm.Labels[projectLabel]
 	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, endpointID, projectID, valType)
@@ -211,11 +211,11 @@ func makeVMMetric(vm *vmapi.VirtualMachine, valType vmResourceValueType, val flo
 	}
 }
 
-func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
+func makeVMCPUMetrics(vm *vmv1.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
 	// metrics from spec
-	specPairs := []pair[vmResourceValueType, vmapi.MilliCPU]{
+	specPairs := []pair[vmResourceValueType, vmv1.MilliCPU]{
 		{vmResourceValueSpecMin, vm.Spec.Guest.CPUs.Min},
 		{vmResourceValueSpecMax, vm.Spec.Guest.CPUs.Max},
 		{vmResourceValueSpecUse, vm.Spec.Guest.CPUs.Use},
@@ -239,7 +239,7 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 		}
 		for _, p := range boundPairs {
 			// avoid using resource.Quantity.AsApproximateFloat64() since it's quite inaccurate
-			m := makeVMMetric(vm, p.first, vmapi.MilliCPUFromResourceQuantity(p.second).AsFloat64())
+			m := makeVMMetric(vm, p.first, vmv1.MilliCPUFromResourceQuantity(p.second).AsFloat64())
 			metrics = append(metrics, m)
 		}
 	}
@@ -247,7 +247,7 @@ func makeVMCPUMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	return metrics
 }
 
-func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
+func makeVMMemMetrics(vm *vmv1.VirtualMachine) []vmMetric {
 	var metrics []vmMetric
 
 	memorySlotsToBytes := func(m int32) int64 {
@@ -288,7 +288,7 @@ func makeVMMemMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 
 // makeVMRestartMetrics makes metrics related to VM restarts. Currently, it
 // only includes one metrics, which is restartCount.
-func makeVMRestartMetrics(vm *vmapi.VirtualMachine) []vmMetric {
+func makeVMRestartMetrics(vm *vmv1.VirtualMachine) []vmMetric {
 	endpointID := vm.Labels[endpointLabel]
 	projectID := vm.Labels[projectLabel]
 	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, endpointID, projectID, "")
@@ -300,7 +300,7 @@ func makeVMRestartMetrics(vm *vmapi.VirtualMachine) []vmMetric {
 	}
 }
 
-func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName string) {
+func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeName string) {
 	if vm.Status.Node != nodeName {
 		return
 	}
@@ -321,7 +321,7 @@ func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName
 	}
 }
 
-func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmapi.VirtualMachine, nodeName string) {
+func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmv1.VirtualMachine, nodeName string) {
 	if newVM.Status.Node != nodeName || oldVM.Status.Node != nodeName {
 		// this case we don't need an in-place metric update. Either we just have
 		// to add the new metrics, or delete the old ones, or nothing!
@@ -359,7 +359,7 @@ func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmapi.VirtualMach
 	updateMetrics(perVMMetrics.restartCount, oldRestartCountMetrics, newRestartCountMetrics)
 }
 
-func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmapi.VirtualMachine, nodeName string) {
+func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeName string) {
 	if vm.Status.Node != nodeName {
 		return
 	}
