@@ -37,6 +37,8 @@ import (
 	"github.com/jpillora/backoff"
 	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samber/lo"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
@@ -45,6 +47,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
@@ -607,30 +610,28 @@ func runInitScript(logger *zap.Logger, script string) error {
 }
 
 type Config struct {
-	vmSpecDump              string
-	vmStatusDump            string
-	kernelPath              string
-	appendKernelCmdline     string
-	skipCgroupManagement    bool
-	enableNetworkMonitoring bool
-	diskCacheSettings       string
-	memoryProvider          vmv1.MemoryProvider
-	autoMovableRatio        string
-	cpuScalingMode          vmv1.CpuScalingMode
+	vmSpecDump           string
+	vmStatusDump         string
+	kernelPath           string
+	appendKernelCmdline  string
+	skipCgroupManagement bool
+	diskCacheSettings    string
+	memoryProvider       vmv1.MemoryProvider
+	autoMovableRatio     string
+	cpuScalingMode       vmv1.CpuScalingMode
 }
 
 func newConfig(logger *zap.Logger) *Config {
 	cfg := &Config{
-		vmSpecDump:              "",
-		vmStatusDump:            "",
-		kernelPath:              defaultKernelPath,
-		appendKernelCmdline:     "",
-		skipCgroupManagement:    false,
-		enableNetworkMonitoring: false,
-		diskCacheSettings:       "cache=none",
-		memoryProvider:          "", // Require that this is explicitly set. We'll check later.
-		autoMovableRatio:        "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
-		cpuScalingMode:          "", // Require that this is explicitly set. We'll check later.
+		vmSpecDump:           "",
+		vmStatusDump:         "",
+		kernelPath:           defaultKernelPath,
+		appendKernelCmdline:  "",
+		skipCgroupManagement: false,
+		diskCacheSettings:    "cache=none",
+		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
+		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
+		cpuScalingMode:       "", // Require that this is explicitly set. We'll check later.
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -643,8 +644,6 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.BoolVar(&cfg.skipCgroupManagement, "skip-cgroup-management",
 		cfg.skipCgroupManagement,
 		"Don't try to manage CPU")
-	flag.BoolVar(&cfg.enableNetworkMonitoring, "enable-network-monitoring",
-		cfg.enableNetworkMonitoring, "Enable in/out traffic measuring with iptables")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
 	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
@@ -671,6 +670,85 @@ func main() {
 
 	if err := run(logger); err != nil {
 		logger.Fatal("Failed to run", zap.Error(err))
+	}
+}
+
+type NetworkMonitoringMetrics struct {
+	IngressBytes, EgressBytes       prometheus.Counter
+	Errors                          *prometheus.CounterVec
+	IngressBytesRaw, EgressBytesRaw uint64 // Absolute values to calc increments for Counters
+}
+
+func NewMonitoringMetrics(reg *prometheus.Registry) *NetworkMonitoringMetrics {
+	m := &NetworkMonitoringMetrics{
+		IngressBytes: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "runner_vm_ingress_bytes",
+				Help: "Number of bytes received by the VM from the open internet",
+			},
+		),
+		EgressBytes: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "runner_vm_egress_bytes",
+				Help: "Number of bytes sent by the VM to the open internet",
+			},
+		),
+		IngressBytesRaw: 0,
+		EgressBytesRaw:  0,
+		Errors: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "runner_vm_network_fetch_errors_total",
+				Help: "Number of errors while fetching network monitoring data",
+			},
+			[]string{"cause"},
+		),
+	}
+	reg.MustRegister(m.IngressBytes)
+	reg.MustRegister(m.EgressBytes)
+	reg.MustRegister(m.Errors)
+	return m
+}
+
+func getNetworkBytesCounter(iptables *iptables.IPTables, chain string) (uint64, error) {
+	cnt := uint64(0)
+	rules, err := iptables.Stats("filter", chain)
+	if err != nil {
+		return cnt, err
+	}
+	for _, rawStat := range rules {
+		stat, err := iptables.ParseStat(rawStat)
+		if err != nil {
+			return cnt, err
+		}
+		if stat.Protocol == "6" { // tcp
+			cnt += stat.Bytes
+		}
+	}
+	return cnt, nil
+}
+
+func (m *NetworkMonitoringMetrics) increment() {
+	// Rules configured at github.com/neondatabase/cloud/blob/main/compute-init/compute-init.sh#L98
+	iptables, err := iptables.New()
+	if err != nil {
+		m.Errors.WithLabelValues(util.RootError(err).Error()).Inc()
+		return
+	}
+
+	if ingress, err := getNetworkBytesCounter(iptables, "INPUT"); err != nil {
+		m.Errors.WithLabelValues(util.RootError(err).Error()).Inc()
+		return
+	} else {
+		m.IngressBytes.Add(float64(ingress - m.IngressBytesRaw))
+		m.IngressBytesRaw = ingress
+	}
+
+	if egress, err := getNetworkBytesCounter(iptables, "OUTPUT"); err != nil {
+		m.Errors.WithLabelValues(util.RootError(err).Error()).Inc()
+		return
+	} else {
+		m.EgressBytes.Add(float64(egress - m.EgressBytesRaw))
+		m.EgressBytesRaw = egress
 	}
 }
 
@@ -1082,7 +1160,7 @@ func runQEMU(
 	}
 
 	wg.Add(1)
-	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, callbacks, &wg, cfg.enableNetworkMonitoring)
+	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, callbacks, &wg, vmSpec.EnableNetworkMonitoring)
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 
@@ -1190,7 +1268,7 @@ func listenForHTTPRequests(
 	port int32,
 	callbacks cpuServerCallbacks,
 	wg *sync.WaitGroup,
-	networkUsageRoute bool,
+	networkMonitoring *bool,
 ) {
 	defer wg.Done()
 	mux := http.NewServeMux()
@@ -1203,11 +1281,13 @@ func listenForHTTPRequests(
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUCurrent(cpuCurrentLogger, w, r, callbacks.get)
 	})
-	if networkUsageRoute {
-		networkUsageLogger := loggerHandlers.Named("network_usage")
-		logger.Info("Listening for network_usage")
-		mux.HandleFunc("/network_usage", func(w http.ResponseWriter, r *http.Request) {
-			handleGetNetworkUsage(networkUsageLogger, w, r)
+	if networkMonitoring != nil && *networkMonitoring {
+		reg := prometheus.NewRegistry()
+		metrics := NewMonitoringMetrics(reg)
+		mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+			metrics.increment()
+			h := promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})
+			h.ServeHTTP(w, r)
 		})
 	}
 	server := http.Server{
@@ -1232,68 +1312,6 @@ func listenForHTTPRequests(
 		err := server.Shutdown(context.Background())
 		logger.Info("shut down http server", zap.Error(err))
 	}
-}
-
-func incNetBytesCounter(iptables *iptables.IPTables, chain string) (vmv1.NetworkBytes, error) {
-	cnt := vmv1.NetworkBytes(0)
-	rules, err := iptables.Stats("filter", chain)
-	if err != nil {
-		return cnt, err
-	}
-	for _, rawStat := range rules {
-		stat, err := iptables.ParseStat(rawStat)
-		if err != nil {
-			return cnt, err
-		}
-		if stat.Protocol == "6" { // tcp
-			cnt += vmv1.NetworkBytes(stat.Bytes)
-		}
-	}
-	return cnt, nil
-}
-
-func handleGetNetworkUsage(logger *zap.Logger, w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		logger.Error("unexpected method", zap.String("method", r.Method))
-		w.WriteHeader(400)
-		return
-	}
-
-	counts := vmv1.VirtualMachineNetworkUsage{IngressBytes: 0, EgressBytes: 0}
-	// Rules configured at github.com/neondatabase/cloud/blob/main/compute-init/compute-init.sh#L98
-	iptables, err := iptables.New()
-	if err != nil {
-		logger.Error("error initializing iptables", zap.Error(err))
-		w.WriteHeader(500)
-		return
-	}
-
-	if ingress, err := incNetBytesCounter(iptables, "INPUT"); err != nil {
-		logger.Error("error reading ingress byte counts", zap.Error(err))
-		w.WriteHeader(500)
-		return
-	} else {
-		counts.IngressBytes += ingress
-	}
-
-	if egress, err := incNetBytesCounter(iptables, "OUTPUT"); err != nil {
-		logger.Error("error reading egress byte counts", zap.Error(err))
-		w.WriteHeader(500)
-		return
-	} else {
-		counts.EgressBytes += egress
-	}
-
-	body, err := json.Marshal(counts)
-	if err != nil {
-		logger.Error("could not marshal byte counts", zap.Error(err))
-		w.WriteHeader(500)
-		return
-	}
-
-	w.Header().Add("Content-Type", "application/json")
-	w.Write(body) //nolint:errcheck // Not much to do with the error here
-	logger.Info("Responded with byte counts", zap.String("byte_counts", string(body)))
 }
 
 func printWithNewline(slice []byte) error {

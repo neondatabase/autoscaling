@@ -17,11 +17,8 @@ limitations under the License.
 package v1
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"slices"
 	"time"
 
@@ -69,16 +66,6 @@ type VirtualMachineResources struct {
 	CPUs           CPUs              `json:"cpus"`
 	MemorySlots    MemorySlots       `json:"memorySlots"`
 	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
-}
-
-type NetworkBytes uint64
-
-// VirtualMachineNetworkUsage provides information about VM's incoming and outgound traffic
-type VirtualMachineNetworkUsage struct {
-	// Number of bytes received by the VM from the open internet
-	IngressBytes NetworkBytes `json:"ingress_bytes"`
-	// Number of bytes sent by the VM to the open internet
-	EgressBytes NetworkBytes `json:"egress_bytes"`
 }
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -641,41 +628,6 @@ func (p VmPhase) IsAlive() bool {
 	}
 }
 
-// +kubebuilder:object:generate=false
-type NetworkUsageJSONError struct {
-	Err error
-}
-
-func (e NetworkUsageJSONError) Error() string {
-	return fmt.Sprintf("Error unmarshaling network usage: %s", e.Err.Error())
-}
-
-func (e NetworkUsageJSONError) Unwrap() error {
-	return e.Err
-}
-
-// +kubebuilder:object:generate=false
-type NetworkUsageRequestError struct {
-	Err error
-}
-
-func (e NetworkUsageRequestError) Error() string {
-	return fmt.Sprintf("Error fetching network usage: %s", e.Err.Error())
-}
-
-func (e NetworkUsageRequestError) Unwrap() error {
-	return e.Err
-}
-
-// +kubebuilder:object:generate=false
-type NetworkUsageStatusCodeError struct {
-	StatusCode int
-}
-
-func (e NetworkUsageStatusCodeError) Error() string {
-	return fmt.Sprintf("Unexpected HTTP status code when fetching network usage: %d", e.StatusCode)
-}
-
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
@@ -698,37 +650,6 @@ type VirtualMachine struct {
 
 	Spec   VirtualMachineSpec   `json:"spec,omitempty"`
 	Status VirtualMachineStatus `json:"status,omitempty"`
-}
-
-func (vm *VirtualMachine) GetNetworkUsage(ctx context.Context, timeout time.Duration) (*VirtualMachineNetworkUsage, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	url := fmt.Sprintf("http://%s:%d/network_usage", vm.Status.PodIP, vm.Spec.RunnerPort)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error initializing http request to fetch network usage: %w", err)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, NetworkUsageRequestError{Err: err}
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, NetworkUsageStatusCodeError{StatusCode: resp.StatusCode}
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error reading http response body: %w", err)
-	}
-
-	var result VirtualMachineNetworkUsage
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, NetworkUsageJSONError{Err: err}
-	}
-
-	return &result, nil
 }
 
 func (vm *VirtualMachine) Cleanup() {
