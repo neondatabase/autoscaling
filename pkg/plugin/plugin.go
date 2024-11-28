@@ -15,7 +15,7 @@ import (
 	rest "k8s.io/client-go/rest"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -43,7 +43,7 @@ type AutoscaleEnforcer struct {
 
 // abbreviations, because these types are pretty verbose
 type (
-	IndexedVMStore   = watch.IndexedStore[vmapi.VirtualMachine, *watch.NameIndex[vmapi.VirtualMachine]]
+	IndexedVMStore   = watch.IndexedStore[vmv1.VirtualMachine, *watch.NameIndex[vmv1.VirtualMachine]]
 	IndexedNodeStore = watch.IndexedStore[corev1.Node, *watch.FlatNameIndex[corev1.Node]]
 )
 
@@ -76,7 +76,7 @@ func makeAutoscaleEnforcerPlugin(
 	logger.Info("Initializing plugin")
 
 	// create the NeonVM client
-	if err := vmapi.AddToScheme(scheme.Scheme); err != nil {
+	if err := vmv1.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
 	vmConfig := rest.CopyConfig(h.KubeConfig())
@@ -189,7 +189,7 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 	mwc := migrationWatchCallbacks{
-		submitMigrationFinished: func(vmm *vmapi.VirtualMachineMigration) {
+		submitMigrationFinished: func(vmm *vmv1.VirtualMachineMigration) {
 			// When cleaning up migrations, we don't want to process those events synchronously.
 			// So instead, we'll spawn a goroutine to delete the completed migration.
 			go p.cleanupMigration(hlogger, vmm)

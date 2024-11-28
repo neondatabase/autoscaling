@@ -14,7 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
@@ -219,7 +219,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 	metrics watch.Metrics,
 	callbacks vmWatchCallbacks,
 	podIndex watch.IndexedStore[corev1.Pod, *watch.NameIndex[corev1.Pod]],
-) (*watch.Store[vmapi.VirtualMachine], error) {
+) (*watch.Store[vmv1.VirtualMachine], error) {
 	logger := parentLogger.Named("vm-watch")
 
 	return watch.Watch(
@@ -236,13 +236,13 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 250, 750),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 250, 750),
 		},
-		watch.Accessors[*vmapi.VirtualMachineList, vmapi.VirtualMachine]{
-			Items: func(list *vmapi.VirtualMachineList) []vmapi.VirtualMachine { return list.Items },
+		watch.Accessors[*vmv1.VirtualMachineList, vmv1.VirtualMachine]{
+			Items: func(list *vmv1.VirtualMachineList) []vmv1.VirtualMachine { return list.Items },
 		},
 		watch.InitModeSync, // Doesn't matter because AddFunc is nil, and vmStore is only used for events.
 		metav1.ListOptions{},
-		watch.HandlerFuncs[*vmapi.VirtualMachine]{
-			UpdateFunc: func(oldVM, newVM *vmapi.VirtualMachine) {
+		watch.HandlerFuncs[*vmv1.VirtualMachine]{
+			UpdateFunc: func(oldVM, newVM *vmv1.VirtualMachine) {
 				if e.state.conf.ignoredNamespace(newVM.Namespace) {
 					logger.Info("Received update event for ignored VM", util.VMNameFields(newVM))
 					return
@@ -321,7 +321,7 @@ func (e *AutoscaleEnforcer) watchVMEvents(
 }
 
 type migrationWatchCallbacks struct {
-	submitMigrationFinished func(*vmapi.VirtualMachineMigration)
+	submitMigrationFinished func(*vmv1.VirtualMachineMigration)
 }
 
 // watchMigrationEvents *only* looks at migrations that were created by the scheduler plugin (or a
@@ -338,7 +338,7 @@ func (e *AutoscaleEnforcer) watchMigrationEvents(
 	parentLogger *zap.Logger,
 	metrics watch.Metrics,
 	callbacks migrationWatchCallbacks,
-) (*watch.Store[vmapi.VirtualMachineMigration], error) {
+) (*watch.Store[vmv1.VirtualMachineMigration], error) {
 	logger := parentLogger.Named("vmm-watch")
 
 	return watch.Watch(
@@ -355,8 +355,8 @@ func (e *AutoscaleEnforcer) watchMigrationEvents(
 			RetryRelistAfter: util.NewTimeRange(time.Second, 3, 5),
 			RetryWatchAfter:  util.NewTimeRange(time.Second, 3, 5),
 		},
-		watch.Accessors[*vmapi.VirtualMachineMigrationList, vmapi.VirtualMachineMigration]{
-			Items: func(list *vmapi.VirtualMachineMigrationList) []vmapi.VirtualMachineMigration { return list.Items },
+		watch.Accessors[*vmv1.VirtualMachineMigrationList, vmv1.VirtualMachineMigration]{
+			Items: func(list *vmv1.VirtualMachineMigrationList) []vmv1.VirtualMachineMigration { return list.Items },
 		},
 		watch.InitModeSync,
 		metav1.ListOptions{
@@ -367,8 +367,8 @@ func (e *AutoscaleEnforcer) watchMigrationEvents(
 			// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement
 			LabelSelector: LabelPluginCreatedMigration,
 		},
-		watch.HandlerFuncs[*vmapi.VirtualMachineMigration]{
-			UpdateFunc: func(oldObj, newObj *vmapi.VirtualMachineMigration) {
+		watch.HandlerFuncs[*vmv1.VirtualMachineMigration]{
+			UpdateFunc: func(oldObj, newObj *vmv1.VirtualMachineMigration) {
 				if e.state.conf.ignoredNamespace(newObj.Namespace) {
 					logger.Info(
 						"Received update event for ignored VM Migration",
@@ -378,7 +378,7 @@ func (e *AutoscaleEnforcer) watchMigrationEvents(
 				}
 
 				shouldDelete := newObj.Status.Phase != oldObj.Status.Phase &&
-					(newObj.Status.Phase == vmapi.VmmSucceeded || newObj.Status.Phase == vmapi.VmmFailed)
+					(newObj.Status.Phase == vmv1.VmmSucceeded || newObj.Status.Phase == vmv1.VmmFailed)
 
 				if shouldDelete {
 					callbacks.submitMigrationFinished(newObj)

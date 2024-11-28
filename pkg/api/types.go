@@ -10,7 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -295,7 +295,7 @@ func (b Bytes) Format(state fmt.State, verb rune) {
 //
 // In all cases, each resource type is considered separately from the others.
 type Resources struct {
-	VCPU vmapi.MilliCPU `json:"vCPUs"`
+	VCPU vmv1.MilliCPU `json:"vCPUs"`
 	// Mem gives the number of bytes of memory requested
 	Mem Bytes `json:"mem"`
 }
@@ -376,7 +376,7 @@ func (r Resources) SaturatingSub(other Resources) Resources {
 // Mul returns the result of multiplying each resource by factor
 func (r Resources) Mul(factor uint16) Resources {
 	return Resources{
-		VCPU: vmapi.MilliCPU(factor) * r.VCPU,
+		VCPU: vmv1.MilliCPU(factor) * r.VCPU,
 		Mem:  Bytes(factor) * r.Mem,
 	}
 }
@@ -461,13 +461,13 @@ func (m MoreResources) And(cmp MoreResources) MoreResources {
 // VCPUChange is used to notify runner that it had some changes in its CPUs
 // runner uses this info to adjust qemu cgroup
 type VCPUChange struct {
-	VCPUs vmapi.MilliCPU
+	VCPUs vmv1.MilliCPU
 }
 
 // VCPUCgroup is used in runner to reply to controller
 // it represents the vCPU usage as controlled by cgroup
 type VCPUCgroup struct {
-	VCPUs vmapi.MilliCPU
+	VCPUs vmv1.MilliCPU
 }
 
 // this a similar version type for controller <-> runner communications

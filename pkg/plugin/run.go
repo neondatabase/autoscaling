@@ -13,7 +13,7 @@ import (
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
 
-	vmapi "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -290,7 +290,7 @@ func (e *AutoscaleEnforcer) handleResources(
 	}
 	memFactor := cu.Mem
 
-	var lastCPUPermit *vmapi.MilliCPU
+	var lastCPUPermit *vmv1.MilliCPU
 	var lastMemPermit *api.Bytes
 	if lastPermit != nil {
 		lastCPUPermit = &lastPermit.VCPU
