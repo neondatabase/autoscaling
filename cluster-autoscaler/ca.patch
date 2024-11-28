@@ -1,5 +1,5 @@
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
-index b9be94b6e..df9dc08a9 100644
+index b9be94b6e..2586bbd50 100644
 --- a/cluster-autoscaler/utils/kubernetes/listers.go
 +++ b/cluster-autoscaler/utils/kubernetes/listers.go
 @@ -17,10 +17,12 @@ limitations under the License.
@@ -53,7 +53,7 @@ index b9be94b6e..df9dc08a9 100644
  // List returns all scheduled pods.
  func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
  	var pods []*apiv1.Pod
-@@ -229,9 +255,12 @@ func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
+@@ -229,9 +255,13 @@ func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
  	if err != nil {
  		return pods, err
  	}
@@ -61,6 +61,7 @@ index b9be94b6e..df9dc08a9 100644
  	for _, p := range allPods {
  		if p.Status.Phase != apiv1.PodSucceeded && p.Status.Phase != apiv1.PodFailed {
 -			pods = append(pods, p)
++			// We need to make a copy of the pod to avoid modifying the original pod, since *p is a pointer to the object in the informer cache.
 +			podCopy := p.DeepCopy()
 +			updatePodRequestsFromNeonVMAnnotation(podCopy)
 +			pods = append(pods, podCopy)
