@@ -17,7 +17,7 @@ PG16_DISK_TEST_IMG ?= pg16-disk-test:dev
 GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
 
-# The target architecture for linux kernel. Possible values: amd64 or arm64. 
+# The target architecture for linux kernel. Possible values: amd64 or arm64.
 # Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile.kernel-builder
 KERNEL_TARGET_ARCH ?= amd64
 TARGET_ARCH ?= amd64
@@ -140,7 +140,7 @@ build: fmt vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go 
+	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
 	go run ./neonvm/main.go
@@ -201,6 +201,7 @@ docker-build-vxlan-controller: docker-build-go-base ## Build docker image for Ne
 	docker build \
 		--tag $(IMG_VXLAN_CONTROLLER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
 		--file neonvm-vxlan-controller/Dockerfile \
 		.
 
@@ -315,10 +316,12 @@ render-manifests: $(RENDERED) kustomize
 	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT) && $(KUSTOMIZE) edit add annotation buildtime:$(BUILDTS) --force
 	# Build:
-	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-amd64 > $(RENDERED)/whereabouts-amd64.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-arm64 > $(RENDERED)/whereabouts-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-amd64 > $(RENDERED)/multus-amd64.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-arm64 > $(RENDERED)/multus-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
 	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
@@ -340,10 +343,12 @@ render-release: $(RENDERED) kustomize
 	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=$(IMG_SCHEDULER)
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=$(IMG_AUTOSCALER_AGENT)
 	# Build:
-	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-amd64 > $(RENDERED)/whereabouts-amd64.yaml
+	$(KUSTOMIZE) build neonvm/config/whereabouts-arm64 > $(RENDERED)/whereabouts-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-amd64 > $(RENDERED)/multus-amd64.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-arm64 > $(RENDERED)/multus-arm64.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
 	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
@@ -359,9 +364,9 @@ render-release: $(RENDERED) kustomize
 
 .PHONY: deploy
 deploy: check-local-context docker-build load-images render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
+	$(KUBECTL) apply -f $(RENDERED)/multus-$(TARGET_ARCH).yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
-	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
+	$(KUBECTL) apply -f $(RENDERED)/whereabouts-$(TARGET_ARCH).yaml
 	$(KUBECTL) -n kube-system rollout status daemonset whereabouts
 	$(KUBECTL) apply -f $(RENDERED)/neonvm-runner-image-loader.yaml
 	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-runner-image-loader
@@ -392,7 +397,7 @@ example-vms: docker-build-examples load-example-vms ## Build and push the testin
 
 .PHONY: example-vms-arm64
 example-vms-arm64: TARGET_ARCH=arm64
-example-vms-arm64: example-vms 
+example-vms-arm64: example-vms
 
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.
@@ -431,6 +436,14 @@ e2e-tools: k3d kind kubectl kuttl python-init ## Donwnload tools for e2e tests l
 e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
+
+
+# arm doesn't support cpu hot plug and memory hot plug and CI runners are based on qemu so no kvm acceleration as well
+arm_patch_e2e: yq
+	@find tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.cpuScalingMode = "sysfsScaling") // .' -i {}
+	@find tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.enableAcceleration = false) // .' -i {}
+	@find tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .status.memoryProvider = "VirtioMem") // .' -i {}
+	@find tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.guest.memoryProvider = "VirtioMem") // .' -i {}
 
 ##@ Local kind cluster
 
@@ -500,6 +513,10 @@ else ifeq ($(GOARCH), amd64)
 else
     $(error Unsupported architecture: $(GOARCH))
 endif
+
+YQ_ARCH ?= $(GOARCH)
+YQ ?= $(LOCALBIN)/yq
+
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.28.12
 
@@ -537,6 +554,16 @@ $(KIND): $(LOCALBIN)
 kubectl: $(KUBECTL) ## Download kubectl locally if necessary.
 $(KUBECTL): $(LOCALBIN)
 	@test -s $(LOCALBIN)/kubectl || { curl -sfSLo $(KUBECTL) https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(GOOS)/$(GOARCH)/kubectl && chmod +x $(KUBECTL); }
+
+
+
+.PHONY: check
+check: $(YQ)
+
+.PHONY: yq
+yq: $(YQ)
+$(YQ):
+	@test -s $(YQ)  || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64 && chmod +x $(YQ); }
 
 .PHONY: kuttl
 kuttl: $(KUTTL) ## Download kuttl locally if necessary.

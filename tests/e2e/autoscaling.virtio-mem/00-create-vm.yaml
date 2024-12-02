@@ -8,10 +8,10 @@ metadata:
   name: example
 spec:
   ports:
-  - name: postgres
-    port: 5432
-    protocol: TCP
-    targetPort: postgres
+    - name: postgres
+      port: 5432
+      protocol: TCP
+      targetPort: postgres
   type: NodePort
   selector:
     vm.neon.tech/name: example
@@ -55,7 +55,7 @@ spec:
       - name: monitor
         port: 10301
   extraNetwork:
-      enable: true
+    enable: true
   disks:
     - name: pgdata
       mountPath: /var/lib/postgresql
@@ -72,7 +72,9 @@ spec:
       mountPath: /neonvm/cache
       tmpfs:
         size: 1Gi
-
+  cpuScalingMode: sysfsScaling
+status:
+  memoryProvider: VirtioMem
 ---
 apiVersion: v1
 kind: ConfigMap
