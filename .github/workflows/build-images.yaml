@@ -64,6 +64,8 @@ env:
   # Otherwise, if we just try to use a local image, it fails trying to pull it from dockerhub.
   # See https://github.com/moby/buildkit/issues/2343 for more information.
   GO_BASE_IMG: "localhost:5000/neondatabase/autoscaling-go-base:dev"
+  # Default architecture to build. In future it would be changed to multi-arch build or separate builds for each arch
+  TARGET_ARCH: "amd64"
 
 defaults:
   run:
@@ -268,6 +270,7 @@ jobs:
           tags: ${{ needs.tags.outputs.vxlan-controller }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+            TARGET_ARCH=${{ env.TARGET_ARCH }}
 
       - name: Build and push autoscale-scheduler image
         uses: docker/build-push-action@v6

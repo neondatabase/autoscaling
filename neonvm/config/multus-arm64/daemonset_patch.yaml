@@ -1,0 +1,112 @@
+---
+# Source: multus-cni/templates/daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-multus-ds
+  namespace: kube-system
+  labels:
+    tier: node
+    app: multus
+    name: multus
+spec:
+  selector:
+    matchLabels:
+      app: multus
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+    spec:
+      
+      hostNetwork: true
+      serviceAccountName: multus
+      securityContext:
+        fsGroup: 0
+      affinity:
+        podAffinity:
+         
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                - linux 
+      priorityClassName: ""
+      initContainers:
+        - name: install-multus-binary
+          image: docker.io/bitnami/multus-cni:3.9.3
+          command:
+            - cp
+            - "/usr/src/multus-cni/bin/multus"
+            - "/bitnami/multus-cni/host/opt/cni/bin"
+          securityContext:
+            privileged: true
+            runAsNonRoot: false
+            runAsUser: 0
+          volumeMounts:
+            - name: cni-bin-dir
+              mountPath: /bitnami/multus-cni/host/opt/cni/bin
+              mountPropagation: Bidirectional
+        - name: generate-kubeconfig
+          image: docker.io/bitnami/multus-cni:3.9.3
+          command:
+            - generate-kubeconfig
+          args:
+            - "-k8s-service-host=$(KUBERNETES_SERVICE_HOST)"
+            - "-k8s-service-port=$(KUBERNETES_SERVICE_PORT)"
+            - "-cni-config-dir=/bitnami/multus-cni/host/etc/cni/net.d"
+          securityContext:
+            privileged: true
+            runAsNonRoot: false
+            runAsUser: 0
+          volumeMounts:
+            - name: cni-net-dir
+              mountPath: /bitnami/multus-cni/host/etc/cni/net.d
+              mountPropagation: Bidirectional
+      containers:
+        - name: kube-multus
+          image: docker.io/bitnami/multus-cni:3.9.3
+          imagePullPolicy: "IfNotPresent"
+          command:
+            - multus-daemon
+          args:
+            - "-cni-version=0.3.0"
+            - "-cni-config-dir=/bitnami/multus-cni/host/etc/cni/net.d"
+            - "-multus-autoconfig-dir=/bitnami/multus-cni/host/etc/cni/net.d"
+            - "-multus-log-to-stderr=true"
+            - "-multus-log-level=verbose"
+          securityContext:
+            privileged: true
+            runAsNonRoot: false
+            runAsUser: 0
+          env:
+            - name: BITNAMI_DEBUG
+              value: "false"
+          envFrom:
+          livenessProbe:
+            exec:
+              command:
+                - pgrep
+                - multus-daemon
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 5
+          resources:
+            limits: {}
+            requests: {}
+          volumeMounts:
+            - name: cni-net-dir
+              mountPath: /bitnami/multus-cni/host/etc/cni/net.d
+      volumes:
+        - name: cni-bin-dir
+          hostPath:
+            path: /opt/cni/bin
+        - name: cni-net-dir
+          hostPath:
+            path: /etc/cni/net.d
