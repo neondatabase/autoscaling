@@ -25,6 +25,7 @@ import (
 func main() {
 	logConfig := zap.NewProductionConfig()
 	logConfig.Sampling = nil // Disable sampling, which the production config enables by default.
+	logConfig.DisableStacktrace = true
 	logger := zap.Must(logConfig.Build()).Named("autoscale-scheduler")
 
 	if err := runProgram(logger); err != nil {
@@ -66,7 +67,7 @@ func runProgram(logger *zap.Logger) (err error) {
 	redirectKlog(logger.Named("klog"))
 
 	constructor := plugin.NewAutoscaleEnforcerPlugin(ctx, logger, conf)
-	command := app.NewSchedulerCommand(app.WithPlugin(plugin.Name, constructor))
+	command := app.NewSchedulerCommand(app.WithPlugin(plugin.PluginName, constructor))
 	// Don't output the full usage whenever any error occurs (otherwise, startup errors get drowned
 	// out by many pages of scheduler command flags)
 	command.SilenceUsage = true
