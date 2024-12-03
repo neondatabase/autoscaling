@@ -3,7 +3,12 @@ package util
 // Kubernetes-specific utility functions
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
@@ -94,4 +99,23 @@ func TryPodOwnerVirtualMachineMigration(pod *corev1.Pod) *NamespacedName {
 	}
 
 	return &NamespacedName{Namespace: pod.Namespace, Name: ref.Name}
+}
+
+// LookupGVKForType determines the GroupVersionKind for the type by checking against pre-registered
+// types in the client-go scheme.
+//
+// This internally requires some reflection, so it's advisable to pre-calculate this if possible.
+func LookupGVKForType(sampleObj runtime.Object) (schema.GroupVersionKind, error) {
+	var empty schema.GroupVersionKind
+
+	gvks, _, err := scheme.Scheme.ObjectKinds(sampleObj)
+	if err != nil {
+		return empty, fmt.Errorf("could not get GVKs for object type %T: %w", sampleObj, err)
+	}
+	if len(gvks) == 0 {
+		return empty, fmt.Errorf("no GVKs found for object type %T", sampleObj)
+	} else if len(gvks) > 1 {
+		return empty, fmt.Errorf("more than one GVK found for object type %T", sampleObj)
+	}
+	return gvks[0], nil
 }
