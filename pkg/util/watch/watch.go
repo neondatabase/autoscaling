@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -184,6 +185,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	store := Store[T]{
 		mutex:         sync.Mutex{},
 		objects:       make(map[types.UID]*T),
+		listeners:     make(map[types.UID]*util.Broadcaster),
 		handlers:      actualHandlers,
 		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
@@ -462,6 +464,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					// at any time that handlers are called.
 					for uid := range deleted {
 						obj := store.objects[uid]
+						if broadcaster, ok := store.listeners[uid]; ok {
+							broadcaster.Broadcast()
+							delete(store.listeners, uid)
+						}
 						delete(store.objects, uid)
 						for _, index := range store.indexes {
 							index.Delete(obj)
@@ -478,6 +484,9 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						oldObj, hasObj := oldObjects[uid]
 
 						if hasObj {
+							if broadcaster, ok := store.listeners[uid]; ok {
+								broadcaster.Broadcast()
+							}
 							for _, index := range store.indexes {
 								index.Update(oldObj, obj)
 							}
@@ -574,6 +583,12 @@ func (store *Store[T]) handleEvent(
 		if !ok {
 			return errors.New("received delete event for object that's not present")
 		}
+		// If there is a listener, *do* notify them, and then delete the listeners just like we're
+		// deleting the object from the map.
+		if broadcaster, ok := store.listeners[uid]; ok {
+			broadcaster.Broadcast()
+			delete(store.listeners, uid)
+		}
 		// Update:
 		for _, index := range store.indexes {
 			index.Update(old, obj)
@@ -591,6 +606,9 @@ func (store *Store[T]) handleEvent(
 			return errors.New("received update event for object that's not present")
 		}
 		store.objects[uid] = obj
+		if broadcaster, ok := store.listeners[uid]; ok {
+			broadcaster.Broadcast()
+		}
 		for _, index := range store.indexes {
 			index.Update(old, obj)
 		}
@@ -609,8 +627,9 @@ func (store *Store[T]) handleEvent(
 // Store provides an interface for getting information about a list of Ts using the event
 // listener from a previous call to Watch
 type Store[T any] struct {
-	objects map[types.UID]*T
-	mutex   sync.Mutex
+	mutex     sync.Mutex
+	objects   map[types.UID]*T
+	listeners map[types.UID]*util.Broadcaster
 
 	handlers HandlerFuncs[*T]
 
@@ -676,6 +695,27 @@ func (w *Store[T]) NopUpdate(uid types.UID) (ok bool) {
 	copied := w.deepCopy(obj)
 	w.handlers.UpdateFunc(copied, obj)
 	return true
+}
+
+// Listen returns a util.BroadcastReceiver that will be updated whenever the object is modified or
+// eventually deleted.
+//
+// This method returns false if the object with the given UID does not exist.
+func (w *Store[T]) Listen(uid types.UID) (_ util.BroadcastReceiver, ok bool) {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	if _, ok := w.objects[uid]; !ok {
+		return lo.Empty[util.BroadcastReceiver](), false
+	}
+
+	if b, ok := w.listeners[uid]; ok {
+		return b.NewReceiver(), true
+	} else {
+		b := util.NewBroadcaster()
+		w.listeners[uid] = b
+		return b.NewReceiver(), true
+	}
 }
 
 func (w *Store[T]) Stop() {
