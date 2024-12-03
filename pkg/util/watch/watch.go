@@ -182,6 +182,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		stopSignal:    sendStop,
 		stopped:       atomic.Bool{},
 		failing:       atomic.Bool{},
+
+		deepCopy: func(t *T) *T {
+			return (*T)(P(t).DeepCopyObject().(P))
+		},
 	}
 
 	items := accessors.Items(initialList)
@@ -596,6 +600,12 @@ type Store[T any] struct {
 
 	handlers HandlerFuncs[*T]
 
+	// helper function, created in Watch() using knowledge that *T (or, something based on it) is a
+	// runtime.Object.
+	// This is required for the implementation of (*Store[T]).NopUpdate() in order to produce a
+	// second object without having any guarantees about T.
+	deepCopy func(*T) *T
+
 	// triggerRelist has capacity=1 and *if* the channel contains an item, then relisting has been
 	// requested by some call to (*Store[T]).Relist().
 	triggerRelist chan struct{}
@@ -629,6 +639,29 @@ func (w *Store[T]) Relist() <-chan struct{} {
 	// closed, the relevant List call *must* have happened after any attempted send on
 	// w.triggerRelist.
 	return w.relisted
+}
+
+// NopUpdate runs the update handler for the object with the given UID, blocking until completion.
+//
+// This method returns false if there is no object with the given UID.
+//
+// Why does this exist? Well, watch events are often going to be handled by adding the object to a
+// queue. And sometimes you want to re-inject something into the queue. But it's tricky for that to
+// be synchronized unless it's guaranteed to agree with the ongoing watch -- so this method allows
+// one to re-inject something into the queue if and only if the watch still belives it exists in
+// kubernetes.
+func (w *Store[T]) NopUpdate(uid types.UID) (ok bool) {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	obj, ok := w.objects[uid]
+	if !ok {
+		return false
+	}
+
+	copied := w.deepCopy(obj)
+	w.handlers.UpdateFunc(copied, obj)
+	return true
 }
 
 func (w *Store[T]) Stop() {
