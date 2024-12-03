@@ -681,31 +681,28 @@ type NetworkMonitoringMetrics struct {
 
 func NewMonitoringMetrics(reg *prometheus.Registry) *NetworkMonitoringMetrics {
 	m := &NetworkMonitoringMetrics{
-		IngressBytes: prometheus.NewCounter(
+		IngressBytes: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "runner_vm_ingress_bytes",
 				Help: "Number of bytes received by the VM from the open internet",
 			},
-		),
-		EgressBytes: prometheus.NewCounter(
+		)),
+		EgressBytes: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "runner_vm_egress_bytes",
 				Help: "Number of bytes sent by the VM to the open internet",
 			},
-		),
+		)),
 		IngressBytesRaw: 0,
 		EgressBytesRaw:  0,
-		Errors: prometheus.NewCounterVec(
+		Errors: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "runner_vm_network_fetch_errors_total",
 				Help: "Number of errors while fetching network monitoring data",
 			},
 			[]string{"cause"},
-		),
+		)),
 	}
-	reg.MustRegister(m.IngressBytes)
-	reg.MustRegister(m.EgressBytes)
-	reg.MustRegister(m.Errors)
 	return m
 }
 
@@ -735,21 +732,21 @@ func (m *NetworkMonitoringMetrics) increment() {
 		return
 	}
 
-	if ingress, err := getNetworkBytesCounter(iptables, "INPUT"); err != nil {
+	ingress, err := getNetworkBytesCounter(iptables, "INPUT")
+	if err != nil {
 		m.Errors.WithLabelValues(util.RootError(err).Error()).Inc()
 		return
-	} else {
-		m.IngressBytes.Add(float64(ingress - m.IngressBytesRaw))
-		m.IngressBytesRaw = ingress
 	}
+	m.IngressBytes.Add(float64(ingress - m.IngressBytesRaw))
+	m.IngressBytesRaw = ingress
 
-	if egress, err := getNetworkBytesCounter(iptables, "OUTPUT"); err != nil {
+	egress, err := getNetworkBytesCounter(iptables, "OUTPUT")
+	if err != nil {
 		m.Errors.WithLabelValues(util.RootError(err).Error()).Inc()
 		return
-	} else {
-		m.EgressBytes.Add(float64(egress - m.EgressBytesRaw))
-		m.EgressBytesRaw = egress
 	}
+	m.EgressBytes.Add(float64(egress - m.EgressBytesRaw))
+	m.EgressBytesRaw = egress
 }
 
 func run(logger *zap.Logger) error {
