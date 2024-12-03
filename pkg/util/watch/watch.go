@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -120,6 +121,22 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		panic(errors.New("accessors.Items == nil"))
 	}
 
+	// Workaround for https://github.com/kubernetes/kubernetes/issues/98925 :
+	//
+	// Pre-calculate the GVK for the object types, because List() operations only set the
+	// Kind+APIVersion on the List type, and not the individual elements.
+	sampleObj := P(new(T))
+	gvks, _, err := scheme.Scheme.ObjectKinds(sampleObj)
+	if err != nil {
+		return nil, fmt.Errorf("could not get GVKs for object type %T: %w", sampleObj, err)
+	}
+	if len(gvks) == 0 {
+		return nil, fmt.Errorf("no GVKs found for object type %T", sampleObj)
+	} else if len(gvks) > 1 {
+		return nil, fmt.Errorf("more than one GVK found for object type %T", sampleObj)
+	}
+	gvk := gvks[0]
+
 	// do the conversion from P -> *T. We wanted the handlers to be provided with P so that the
 	// caller doesn't need to manually specify the generics, but in order to store the callbacks
 	// inside the watch store, we need to convert them so we're not carrying around more generic
@@ -197,6 +214,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	} else {
 		for i := range items {
 			obj := &items[i]
+			P(obj).GetObjectKind().SetGroupVersionKind(gvk)
 			uid := P(obj).GetObjectMeta().GetUID()
 			store.objects[uid] = obj
 			store.handlers.AddFunc(obj, true)
@@ -252,6 +270,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		// deal with possible racy operations (including adding an index).
 		for i := range deferredAdds {
 			obj := &deferredAdds[i]
+			P(obj).GetObjectKind().SetGroupVersionKind(gvk)
 			uid := P(obj).GetObjectMeta().GetUID()
 			store.objects[uid] = obj
 			store.handlers.AddFunc(obj, true)
@@ -315,6 +334,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						)
 						continue
 					}
+					P(obj).GetObjectKind().SetGroupVersionKind(gvk)
 
 					meta := obj.GetObjectMeta()
 					// Update ResourceVersion so subsequent calls to client.Watch won't include this
@@ -459,6 +479,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					for i := range relistItems {
 						obj := &relistItems[i]
 						uid := P(obj).GetObjectMeta().GetUID()
+						P(obj).GetObjectKind().SetGroupVersionKind(gvk)
 
 						store.objects[uid] = obj
 						oldObj, hasObj := oldObjects[uid]
