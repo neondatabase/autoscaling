@@ -13,8 +13,14 @@ import (
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/plugin/state"
+	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/patch"
 )
 
 const (
@@ -23,21 +29,26 @@ const (
 	ContentTypeError string = "text/plain"
 )
 
-// The scheduler plugin currently supports v3.0 to v5.0 of the agent<->scheduler plugin protocol.
 const (
-	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV3_0
+	MinPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
 	MaxPluginProtocolVersion api.PluginProtoVersion = api.PluginProtoV5_0
 )
 
 // startPermitHandler runs the server for handling each resourceRequest from a pod
-func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.Logger) error {
+func (s *PluginState) startPermitHandler(
+	ctx context.Context,
+	logger *zap.Logger,
+	getPod func(util.NamespacedName) (*corev1.Pod, bool),
+	listenerForPod func(types.UID) (util.BroadcastReceiver, bool),
+) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		logger := logger // copy locally, so that we can add fields and refer to it in defers
 
 		var finalStatus int
+
 		defer func() {
-			e.metrics.resourceRequests.WithLabelValues(strconv.Itoa(finalStatus)).Inc()
+			s.metrics.ResourceRequests.WithLabelValues(strconv.Itoa(finalStatus)).Inc()
 		}()
 
 		// Catch any potential panics and report them as 500s
@@ -70,13 +81,9 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.
 			return
 		}
 
-		logger = logger.With(
-			zap.Object("pod", req.Pod),
-			zap.String("client", r.RemoteAddr),
-			zap.Any("request", req),
-		)
+		logger = logger.With(zap.Object("pod", req.Pod), zap.Any("request", req))
 
-		resp, statusCode, err := e.handleAgentRequest(logger, req)
+		resp, statusCode, err := s.handleAgentRequest(logger, req, getPod, listenerForPod)
 		finalStatus = statusCode
 
 		if err != nil {
@@ -122,15 +129,17 @@ func (e *AutoscaleEnforcer) startPermitHandler(ctx context.Context, logger *zap.
 }
 
 // Returns body (if successful), status code, error (if unsuccessful)
-func (e *AutoscaleEnforcer) handleAgentRequest(
+func (s *PluginState) handleAgentRequest(
 	logger *zap.Logger,
 	req api.AgentRequest,
+	getPod func(util.NamespacedName) (*corev1.Pod, bool),
+	listenerForPod func(types.UID) (util.BroadcastReceiver, bool),
 ) (_ *api.PluginResponse, status int, _ error) {
 	nodeName := "<none>" // override this later if we have a node name
+
 	defer func() {
-		hasMetrics := req.Metrics != nil
-		e.metrics.validResourceRequests.
-			WithLabelValues(strconv.Itoa(status), nodeName, strconv.FormatBool(hasMetrics)).
+		s.metrics.ValidResourceRequests.
+			WithLabelValues(strconv.Itoa(status), nodeName).
 			Inc()
 	}()
 
@@ -150,211 +159,205 @@ func (e *AutoscaleEnforcer) handleAgentRequest(
 		)
 	}
 
-	// if req.Metrics is nil, check that the protocol version allows that.
-	if req.Metrics == nil && !req.ProtoVersion.AllowsNilMetrics() {
-		return nil, 400, fmt.Errorf("nil metrics not supported for protocol version %v", req.ProtoVersion)
-	}
-
 	// check that req.ComputeUnit has no zeros
 	if err := req.ComputeUnit.ValidateNonZero(); err != nil {
 		return nil, 400, fmt.Errorf("computeUnit fields must be non-zero: %w", err)
 	}
-	// check that nil-ness of req.Metrics.{LoadAverage5Min,MemoryUsageBytes} match what's expected
-	// for the protocol version.
-	if req.Metrics != nil {
-		if (req.Metrics.LoadAverage5Min != nil) != (req.Metrics.MemoryUsageBytes != nil) {
-			return nil, 400, fmt.Errorf("presence of metrics.loadAvg5M must match presence of metrics.memoryUsageBytes")
-		} else if req.Metrics.LoadAverage5Min == nil && req.ProtoVersion.IncludesExtendedMetrics() {
-			return nil, 400, fmt.Errorf("nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
-		} else if req.Metrics.LoadAverage5Min != nil && !req.ProtoVersion.IncludesExtendedMetrics() {
-			return nil, 400, fmt.Errorf("non-nil metrics.{loadAvg5M,memoryUsageBytes} not supported for protocol version %v", req.ProtoVersion)
-		}
-	}
 
-	e.state.lock.Lock()
-	defer e.state.lock.Unlock()
-
-	pod, ok := e.state.pods[req.Pod]
+	podObj, ok := getPod(req.Pod)
 	if !ok {
 		logger.Warn("Received request for Pod we don't know") // pod already in the logger's context
 		return nil, 404, errors.New("pod not found")
+	} else if podObj.Spec.NodeName == "" {
+		logger.Warn("Received request for Pod we don't know where it was scheduled")
+		return nil, 404, errors.New("pod's node is unknown")
 	}
-	if pod.vm == nil {
+
+	nodeName = podObj.Spec.NodeName // set nodeName for deferred metrics
+
+	vmRef, ok := vmv1.VirtualMachineOwnerForPod(podObj)
+	if !ok {
 		logger.Error("Received request for non-VM Pod")
 		return nil, 400, errors.New("pod is not associated with a VM")
 	}
-
-	// Check that req.ComputeUnit.Mem is divisible by the VM's memory slot size
-	if req.ComputeUnit.Mem%pod.vm.MemSlotSize != 0 {
-		return nil, 400, fmt.Errorf(
-			"computeUnit is not divisible by VM memory slot size: %v not divisible by %v",
-			req.ComputeUnit,
-			pod.vm.MemSlotSize,
-		)
+	vmName := util.NamespacedName{
+		Namespace: podObj.Namespace,
+		Name:      vmRef.Name,
 	}
 
-	// If the request was actually sending a quantity of *memory slots*, rather than bytes, then
-	// multiply memory resources to make it match the
-	if !req.ProtoVersion.RepresentsMemoryAsBytes() {
-		req.Resources.Mem *= pod.vm.MemSlotSize
-	}
-
-	node := pod.node
-	nodeName = node.name // set nodeName for deferred metrics
-
-	// Also, now that we know which VM this refers to (and which node it's on), add that to the logger for later.
-	logger = logger.With(zap.Object("virtualmachine", pod.vm.Name), zap.String("node", nodeName))
-
-	mustMigrate := pod.vm.MigrationState == nil &&
-		// Check whether the pod *will* migrate, then update its resources, and THEN start its
-		// migration, using the possibly-changed resources.
-		e.updateMetricsAndCheckMustMigrate(logger, pod.vm, node, req.Metrics)
-
-	supportsFractionalCPU := req.ProtoVersion.SupportsFractionalCPU()
-
-	verdict, permit, status, err := e.handleResources(
-		pod,
-		node,
-		req.ComputeUnit,
-		req.Resources,
-		req.LastPermit,
-		mustMigrate,
-		supportsFractionalCPU,
-	)
-	if err != nil {
-		return nil, status, err
-	}
-
-	var migrateDecision *api.MigrateResponse
-	if mustMigrate {
-		created, err := e.startMigration(context.Background(), logger, pod)
-		if err != nil {
-			return nil, 500, fmt.Errorf("Error starting migration for pod %v: %w", pod.name, err)
-		}
-
-		// We should only signal to the autoscaler-agent that we've started migrating if we actually
-		// *created* the migration. We're not *supposed* to receive requests for a VM that's already
-		// migrating, so receiving one means that *something*'s gone wrong. If that's on us, we
-		// should try to avoid
-		if created {
-			migrateDecision = &api.MigrateResponse{}
-		}
-	}
-
-	status = 200
-	resp := api.PluginResponse{
-		Permit:  permit,
-		Migrate: migrateDecision,
-	}
-
-	logger.Info(
-		"Handled agent request",
-		zap.Object("verdict", verdict),
-		zap.Int("status", status),
-		zap.Any("response", resp),
-	)
-
-	return &resp, status, nil
-}
-
-func (e *AutoscaleEnforcer) handleResources(
-	pod *podState,
-	node *nodeState,
-	cu api.Resources,
-	req api.Resources,
-	lastPermit *api.Resources,
-	startingMigration bool,
-	supportsFractionalCPU bool,
-) (verdictSet, api.Resources, int, error) {
-	if !supportsFractionalCPU && req.VCPU%1000 != 0 {
-		err := errors.New("agent requested fractional CPU with protocol version that does not support it")
-		return verdictSet{}, api.Resources{}, 400, err
-	}
-
-	// Check that we aren't being asked to do something during migration:
-	if pod.vm.currentlyMigrating() {
-		// The agent shouldn't have asked for a change after already receiving notice that it's
-		// migrating.
-		if req.VCPU != pod.cpu.Reserved || req.Mem != pod.mem.Reserved {
-			err := errors.New("cannot change resources: agent has already been informed that pod is migrating")
-			return verdictSet{}, api.Resources{}, 400, err
-		}
-		message := "No change because pod is migrating"
-		verdict := verdictSet{cpu: message, mem: message}
-		return verdict, api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}, 200, nil
-	}
-
-	cpuFactor := cu.VCPU
-	if !supportsFractionalCPU {
-		cpuFactor = 1000
-	}
-	memFactor := cu.Mem
-
-	var lastCPUPermit *vmv1.MilliCPU
-	var lastMemPermit *api.Bytes
-	if lastPermit != nil {
-		lastCPUPermit = &lastPermit.VCPU
-		lastMemPermit = &lastPermit.Mem
-	}
-
-	cpuVerdict := makeResourceTransitioner(&node.cpu, &pod.cpu).
-		handleRequested(req.VCPU, lastCPUPermit, startingMigration, cpuFactor)
-	memVerdict := makeResourceTransitioner(&node.mem, &pod.mem).
-		handleRequested(req.Mem, lastMemPermit, startingMigration, memFactor)
-
-	verdict := verdictSet{cpu: cpuVerdict, mem: memVerdict}
-	permit := api.Resources{VCPU: pod.cpu.Reserved, Mem: pod.mem.Reserved}
-
-	return verdict, permit, 200, nil
-}
-
-func (e *AutoscaleEnforcer) updateMetricsAndCheckMustMigrate(
-	logger *zap.Logger,
-	vm *vmPodState,
-	node *nodeState,
-	metrics *api.Metrics,
-) bool {
-	// This pod should migrate if (a) it's allowed to migrate, (b) node resource usage is high
-	// enough that we should migrate *something*, and (c) it's next up in the priority queue.
-	// We will give it a chance later to veto if the metrics have changed too much.
+	// From this point, we'll:
 	//
-	// Alternatively, "the pod is marked to always migrate" causes it to migrate even if none of
-	// the above conditions are met, so long as it has *previously* provided metrics.
-	canMigrate := vm.Config.AutoMigrationEnabled && e.state.conf.migrationEnabled()
-	shouldMigrate := node.mq.isNextInQueue(vm) && node.tooMuchPressure(logger)
-	forcedMigrate := vm.Config.AlwaysMigrate && vm.Metrics != nil
+	// 1. Update the annotations on the VirtualMachine object, if this request should change them;
+	//    and
+	//
+	// 2. Wait for the annotations on the Pod object to change so that the approved resources are
+	//    increased towards what was requested -- only if the amount requested was greater than what
+	//    was last approved.
 
-	logger.Info("Updating pod metrics", zap.Any("metrics", metrics))
-	oldMetrics := vm.Metrics
-	vm.Metrics = metrics
-	if vm.currentlyMigrating() {
-		return false // don't do anything else; it's already migrating.
+	patches, changed := vmPatchForAgentRequest(podObj, req)
+
+	// Start listening *before* we update the VM.
+	updateReceiver, podExists := listenerForPod(podObj.UID)
+
+	// Only patch the VM object if it changed:
+	if changed {
+		if err := s.patchVM(vmName, patches); err != nil {
+			logger.Error("Failed to patch VM object", zap.Error(err))
+			return nil, 500, errors.New("failed to patch VM object")
+		}
+		logger.Info("Patched VirtualMachine for agent request", zap.Any("patches", patches))
 	}
 
-	node.mq.addOrUpdate(vm)
-
-	// nb: forcedMigrate takes priority over canMigrate
-	if (!canMigrate || !shouldMigrate) && !forcedMigrate {
-		return false
+	// If we should be able to instantly approve the request, don't bother waiting to observe it.
+	if req.LastPermit != nil && !req.Resources.HasFieldGreaterThan(*req.LastPermit) {
+		resp := api.PluginResponse{
+			Permit:  req.Resources,
+			Migrate: nil,
+		}
+		status = 200
+		logger.Info("Handled agent request", zap.Int("status", status), zap.Any("response", resp))
+		return &resp, status, nil
 	}
 
-	// Give the pod a chance to veto migration if its metrics have significantly changed...
-	var veto error
-	if oldMetrics != nil && !forcedMigrate {
-		veto = vm.checkOkToMigrate(*oldMetrics)
+	// We want to wait for updates on the pod, but if it no longer exists, we should just return.
+	if !podExists {
+		logger.Warn("Pod for request no longer exists")
+		return nil, 404, errors.New("pod not found")
 	}
 
-	// ... but override the veto if it's still the best candidate anyways.
-	stillFirst := node.mq.isNextInQueue(vm)
+	// FIXME: make the timeout configurable.
+	updateTimeout := time.NewTimer(time.Second)
+	defer updateTimeout.Stop()
 
-	if forcedMigrate || stillFirst || veto == nil {
-		if veto != nil {
-			logger.Info("Pod attempted veto of self migration, still highest priority", zap.NamedError("veto", veto))
+	for {
+		timedOut := false
+
+		// Only listen for updates if we need to wait.
+		needToWait := req.LastPermit == nil || req.LastPermit.HasFieldLessThan(req.Resources)
+		if needToWait {
+			select {
+			case <-updateTimeout.C:
+				timedOut = true
+			case <-updateReceiver.Wait():
+				updateReceiver.Awake()
+			}
 		}
 
-		return true
-	} else {
-		logger.Warn("Pod vetoed self migration", zap.NamedError("veto", veto))
-		return false
+		podObj, ok := getPod(req.Pod)
+		if !ok {
+			logger.Warn("Pod for request on longer exists")
+			return nil, 404, errors.New("pod not found")
+		}
+
+		podState, err := state.PodStateFromK8sObj(podObj)
+		if err != nil {
+			logger.Error("Failed to extract Pod state from Pod object for agent request")
+			return nil, 500, errors.New("failed to extract state from pod")
+		}
+
+		// Reminder: We're only listening for updates if the requested resources are greater than
+		// what was last approved.
+		//
+		// So, we should keep waiting until the approved resources have increased from the
+		// LastPermit in the request.
+
+		approved := api.Resources{
+			VCPU: podState.CPU.Reserved,
+			Mem:  podState.Mem.Reserved,
+		}
+		requested := api.Resources{
+			VCPU: podState.CPU.Requested,
+			Mem:  podState.Mem.Requested,
+		}
+
+		canReturn := requested == req.Resources
+		var shouldReturn bool
+		if req.LastPermit == nil {
+			_, hasApproved := podObj.Annotations[api.InternalAnnotationResourcesApproved]
+			shouldReturn = canReturn && hasApproved
+		} else {
+			shouldReturn = canReturn && approved.HasFieldGreaterThan(*req.LastPermit)
+		}
+
+		// Return if we have results, or if we've timed out and it's good enough.
+		if shouldReturn || (timedOut && canReturn) {
+			if timedOut {
+				logger.Warn("Timed out while waiting for updates to respond to agent request")
+			}
+			resp := api.PluginResponse{
+				Permit:  approved,
+				Migrate: nil,
+			}
+			status = 200
+			logger.Info("Handled agent request", zap.Int("status", status), zap.Any("response", resp))
+			return &resp, status, nil
+		}
+
+		// ... otherwise, if we timed out and our updates to the VM *haven't* yet been reflected on
+		// the pod, we don't have anything we can return, so we should return an error.
+		if timedOut {
+			logger.Error("Timed out while waiting for updates without suitable response to agent request")
+			return nil, 500, errors.New("timed out waiting for updates to be processed")
+		}
+
+		// ... other-otherwise, we'll wait for more updates.
+		continue
 	}
+}
+
+func vmPatchForAgentRequest(pod *corev1.Pod, req api.AgentRequest) (_ []patch.Operation, changed bool) {
+	marshalJSON := func(value any) string {
+		bs, err := json.Marshal(value)
+		if err != nil {
+			panic(fmt.Sprintf("failed to marshal value: %s", err))
+		}
+		return string(bs)
+	}
+
+	var patches []patch.Operation
+
+	computeUnitJSON := marshalJSON(req.ComputeUnit)
+	if computeUnitJSON != pod.Annotations[api.AnnotationAutoscalingUnit] {
+		changed = true
+	}
+	// Always include the patch, even if it's the same as current. We'll only execute it if
+	// there's differences from what's there currently.
+	patches = append(patches, patch.Operation{
+		Op: patch.OpReplace,
+		Path: fmt.Sprintf(
+			"/metadata/annotations/%s",
+			patch.PathEscape(api.AnnotationAutoscalingUnit),
+		),
+		Value: computeUnitJSON,
+	})
+
+	requestedJSON := marshalJSON(req.Resources)
+	if requestedJSON != pod.Annotations[api.InternalAnnotationResourcesRequested] {
+		changed = true
+	}
+	patches = append(patches, patch.Operation{
+		Op: patch.OpReplace,
+		Path: fmt.Sprintf(
+			"/metadata/annotations/%s",
+			patch.PathEscape(api.InternalAnnotationResourcesRequested),
+		),
+		Value: requestedJSON,
+	})
+
+	if req.LastPermit != nil {
+		approvedJSON := marshalJSON(*req.LastPermit)
+		if approvedJSON != pod.Annotations[api.InternalAnnotationResourcesApproved] {
+			changed = true
+		}
+		patches = append(patches, patch.Operation{
+			Op: patch.OpReplace,
+			Path: fmt.Sprintf(
+				"/metadata/annotations/%s",
+				patch.PathEscape(api.InternalAnnotationResourcesApproved),
+			),
+			Value: approvedJSON,
+		})
+	}
+
+	return patches, changed
 }
