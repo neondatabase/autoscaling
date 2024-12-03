@@ -1,4 +1,5 @@
-FROM golang:1.23-alpine AS builder
+ARG GO_BASE_IMG=autoscaling-go-base:dev
+FROM $GO_BASE_IMG AS builder
 
 # Build the Go binary
 COPY . .
