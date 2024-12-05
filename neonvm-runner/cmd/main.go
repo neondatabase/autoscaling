@@ -712,14 +712,23 @@ func getNetworkBytesCounter(iptables *iptables.IPTables, chain string) (uint64, 
 	if err != nil {
 		return cnt, err
 	}
+
+	// We need to measure only external traffic to/from vm, so we filter internal traffic
 	for _, rawStat := range rules {
 		stat, err := iptables.ParseStat(rawStat)
 		if err != nil {
 			return cnt, err
 		}
-		if stat.Protocol == "6" { // tcp
-			cnt += stat.Bytes
+		if stat.Protocol != "6" { // count tcp only
+			continue
 		}
+		src, dest := stat.Source.IP, stat.Destination.IP
+		if src.IsUnspecified() || dest.IsUnspecified() ||
+			src.IsLoopback() || dest.IsLoopback() ||
+			src.IsPrivate() || dest.IsPrivate() {
+			continue
+		}
+		cnt += stat.Bytes
 	}
 	return cnt, nil
 }
