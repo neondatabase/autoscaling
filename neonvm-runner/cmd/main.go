@@ -674,9 +674,8 @@ func main() {
 }
 
 type NetworkMonitoringMetrics struct {
-	IngressBytes, EgressBytes       prometheus.Counter
-	Errors                          *prometheus.CounterVec
-	IngressBytesRaw, EgressBytesRaw uint64 // Absolute values to calc increments for Counters
+	IngressBytes, EgressBytes, Errors prometheus.Counter
+	IngressBytesRaw, EgressBytesRaw   uint64 // Absolute values to calc increments for Counters
 }
 
 func NewMonitoringMetrics(reg *prometheus.Registry) *NetworkMonitoringMetrics {
@@ -695,15 +694,20 @@ func NewMonitoringMetrics(reg *prometheus.Registry) *NetworkMonitoringMetrics {
 		)),
 		IngressBytesRaw: 0,
 		EgressBytesRaw:  0,
-		Errors: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		Errors: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "runner_vm_network_fetch_errors_total",
 				Help: "Number of errors while fetching network monitoring data",
 			},
-			[]string{"cause"},
 		)),
 	}
 	return m
+}
+
+func shouldBeIgnored(ip net.IP) bool {
+	return ip.IsUnspecified() ||
+		ip.IsLoopback() ||
+		ip.IsPrivate()
 }
 
 func getNetworkBytesCounter(iptables *iptables.IPTables, chain string) (uint64, error) {
@@ -723,9 +727,7 @@ func getNetworkBytesCounter(iptables *iptables.IPTables, chain string) (uint64, 
 			continue
 		}
 		src, dest := stat.Source.IP, stat.Destination.IP
-		if src.IsUnspecified() || dest.IsUnspecified() ||
-			src.IsLoopback() || dest.IsLoopback() ||
-			src.IsPrivate() || dest.IsPrivate() {
+		if shouldBeIgnored(src) || shouldBeIgnored(dest) {
 			continue
 		}
 		cnt += stat.Bytes
@@ -737,13 +739,13 @@ func (m *NetworkMonitoringMetrics) increment() {
 	// Rules configured at github.com/neondatabase/cloud/blob/main/compute-init/compute-init.sh#L98
 	iptables, err := iptables.New()
 	if err != nil {
-		m.Errors.WithLabelValues(util.RootError(err).Error()).Inc()
+		m.Errors.Inc()
 		return
 	}
 
 	ingress, err := getNetworkBytesCounter(iptables, "INPUT")
 	if err != nil {
-		m.Errors.WithLabelValues(util.RootError(err).Error()).Inc()
+		m.Errors.Inc()
 		return
 	}
 	m.IngressBytes.Add(float64(ingress - m.IngressBytesRaw))
@@ -751,7 +753,7 @@ func (m *NetworkMonitoringMetrics) increment() {
 
 	egress, err := getNetworkBytesCounter(iptables, "OUTPUT")
 	if err != nil {
-		m.Errors.WithLabelValues(util.RootError(err).Error()).Inc()
+		m.Errors.Inc()
 		return
 	}
 	m.EgressBytes.Add(float64(egress - m.EgressBytesRaw))
