@@ -95,6 +95,8 @@ const (
 	//
 	// See also: https://neondb.slack.com/archives/C03TN5G758R/p1693462680623239
 	cpuLimitOvercommitFactor = 4
+
+	protocolTCP string = "6"
 )
 
 var (
@@ -705,9 +707,9 @@ func NewMonitoringMetrics(reg *prometheus.Registry) *NetworkMonitoringMetrics {
 }
 
 func shouldBeIgnored(ip net.IP) bool {
-	return ip.IsUnspecified() ||
-		ip.IsLoopback() ||
-		ip.IsPrivate()
+	// We need to measure only external traffic to/from vm, so we filter internal traffic
+	// Don't filter on isUnspecified as it's an iptables rule, not a real ip
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 func getNetworkBytesCounter(iptables *iptables.IPTables, chain string) (uint64, error) {
@@ -717,34 +719,31 @@ func getNetworkBytesCounter(iptables *iptables.IPTables, chain string) (uint64, 
 		return cnt, err
 	}
 
-	// We need to measure only external traffic to/from vm, so we filter internal traffic
 	for _, rawStat := range rules {
 		stat, err := iptables.ParseStat(rawStat)
 		if err != nil {
 			return cnt, err
 		}
-		if stat.Protocol != "6" { // count tcp only
-			continue
-		}
 		src, dest := stat.Source.IP, stat.Destination.IP
-		if shouldBeIgnored(src) || shouldBeIgnored(dest) {
-			continue
+		if stat.Protocol == protocolTCP && !shouldBeIgnored(src) && !shouldBeIgnored(dest) {
+			cnt += stat.Bytes
 		}
-		cnt += stat.Bytes
 	}
 	return cnt, nil
 }
 
-func (m *NetworkMonitoringMetrics) increment() {
+func (m *NetworkMonitoringMetrics) update(logger *zap.Logger) {
 	// Rules configured at github.com/neondatabase/cloud/blob/main/compute-init/compute-init.sh#L98
 	iptables, err := iptables.New()
 	if err != nil {
+		logger.Error("initializing iptables failed", zap.Error(err))
 		m.Errors.Inc()
 		return
 	}
 
 	ingress, err := getNetworkBytesCounter(iptables, "INPUT")
 	if err != nil {
+		logger.Error("getting iptables input counter failed", zap.Error(err))
 		m.Errors.Inc()
 		return
 	}
@@ -753,6 +752,7 @@ func (m *NetworkMonitoringMetrics) increment() {
 
 	egress, err := getNetworkBytesCounter(iptables, "OUTPUT")
 	if err != nil {
+		logger.Error("getting iptables output counter failed", zap.Error(err))
 		m.Errors.Inc()
 		return
 	}
@@ -1168,7 +1168,8 @@ func runQEMU(
 	}
 
 	wg.Add(1)
-	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, callbacks, &wg, vmSpec.EnableNetworkMonitoring)
+	monitoring := vmSpec.EnableNetworkMonitoring != nil && *vmSpec.EnableNetworkMonitoring
+	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, callbacks, &wg, monitoring)
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 
@@ -1276,7 +1277,7 @@ func listenForHTTPRequests(
 	port int32,
 	callbacks cpuServerCallbacks,
 	wg *sync.WaitGroup,
-	networkMonitoring *bool,
+	networkMonitoring bool,
 ) {
 	defer wg.Done()
 	mux := http.NewServeMux()
@@ -1289,11 +1290,11 @@ func listenForHTTPRequests(
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUCurrent(cpuCurrentLogger, w, r, callbacks.get)
 	})
-	if networkMonitoring != nil && *networkMonitoring {
+	if networkMonitoring {
 		reg := prometheus.NewRegistry()
 		metrics := NewMonitoringMetrics(reg)
 		mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-			metrics.increment()
+			metrics.update(logger)
 			h := promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})
 			h.ServeHTTP(w, r)
 		})
