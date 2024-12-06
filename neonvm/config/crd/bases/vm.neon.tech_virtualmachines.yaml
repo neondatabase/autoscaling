@@ -2585,6 +2585,8 @@ spec:
                   kernelImage:
                     type: string
                   memoryProvider:
+                    description: 'Deprecated: MemoryProvider is ignored and always
+                      interpreted as equal to VirtioMem.'
                     enum:
                     - DIMMSlots
                     - VirtioMem
@@ -3000,6 +3002,8 @@ spec:
               extraNetMask:
                 type: string
               memoryProvider:
+                description: 'Deprecated: MemoryProvider is ignored and always interpreted
+                  as equal to VirtioMem.'
                 enum:
                 - DIMMSlots
                 - VirtioMem
