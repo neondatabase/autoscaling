@@ -18,6 +18,8 @@ in use, although this can be overridden on an individual VM basis using the
 Assuming a plain upgrade (i.e. no additional features to enable), upgrading the kernel can be done
 with the following sequence of actions:
 
+### On amd64 (x64)
+
 1. On the host, run:
    ```sh
    cd neonvm-kernel # this directory
@@ -27,28 +29,54 @@ with the following sequence of actions:
 2. Then, inside the container, run:
    ```sh
    cd linux-$NEW_VERSION
-   cp /host/linux-config-6.1.92 .config # Copy current config in
+   cp /host/linux-config-amd64-6.6.63 .config # Copy current config in
    make menuconfig
    # do nothing; just save and exit, overwriting .config
-   cp .config /host/linux-config-$NEW_VERSION # NOTE: Different from existing!
+   cp .config /host/linux-config-amd64-$NEW_VERSION # NOTE: Different from existing!
    ```
 3. Back on the host, finish with:
    ```sh
    # compare the two versions
-   diff linux-config-6.1.92 linux-config-$NEW_VERSION
+   diff linux-config-amd64-6.6.63 linux-config-amd64-$NEW_VERSION
    # If all looks good, delete the old version. This is required so auto-selection works.
-   rm linux-config-6.1.92
+   rm linux-config-amd64-6.6.63
    ```
 
 Afterwards, it's probably also good to do a search-and-replace repo-wide to update all places that
 mention the old kernel version.
+
+### On arm64 (aarch64 ARM)
+
+Note: you need to run this on ARM64 machine. It worked on my MacBook M2, but didn't on x64.
+
+1. On the host, run:
+   ```sh
+   cd neonvm-kernel # this directory
+   docker build --build-arg KERNEL_VERSION=$NEW_VERSION --platform linux/arm64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder .
+   docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
+   ```
+2. Then, inside the container, run:
+   ```sh
+   cd linux-$NEW_VERSION
+   cp /host/linux-config-aarch64-6.6.63 .config # Copy current config in
+   make menuconfig
+   # do nothing; just save and exit, overwriting .config
+   cp .config /host/linux-config-aarch64-$NEW_VERSION # NOTE: Different from existing!
+   ```
+3. Back on the host, finish with:
+   ```sh
+   # compare the two versions
+   diff linux-config-aarch64-6.6.63 linux-config-aarch64-$NEW_VERSION
+   # If all looks good, delete the old version. This is required so auto-selection works.
+   rm linux-config-aarch64-6.6.63
+   ```
 
 ## Adjusting the config
 
 To adjust the kernel config, try the following from this directory:
 
 ```sh
-docker build --build-arg KERNEL_VERSION=6.1.92 --platform linux/x86_64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder .
+docker build --build-arg KERNEL_VERSION=6.6.63 --platform linux/x64_64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder .
 docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
 # inside that bash shell, do the menuconfig, then copy-out the config to /host
 ```
