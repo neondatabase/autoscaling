@@ -39,7 +39,7 @@ func (n NamespacedName) Format(state fmt.State, verb rune) {
 		// Go syntax representation, e.g. `util.NamespacedName{Namespace:"foo", Name:"bar"}`
 		_, _ = state.Write([]byte(fmt.Sprintf("util.NamespacedName{Namespace:%q, Name:%q}", n.Namespace, n.Name)))
 	default:
-		// Pretty-printed representation, e.g. `foo:bar`
+		// Pretty-printed representation, e.g. `foo/bar`
 		_, _ = state.Write([]byte(n.Namespace))
 		_, _ = state.Write([]byte(string(Separator)))
 		_, _ = state.Write([]byte(n.Name))
