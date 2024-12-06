@@ -2600,17 +2600,17 @@ spec:
                     properties:
                       max:
                         format: int32
-                        maximum: 128
+                        maximum: 512
                         minimum: 1
                         type: integer
                       min:
                         format: int32
-                        maximum: 128
+                        maximum: 512
                         minimum: 1
                         type: integer
                       use:
                         format: int32
-                        maximum: 128
+                        maximum: 512
                         minimum: 1
                         type: integer
                     required:
