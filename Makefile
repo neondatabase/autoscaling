@@ -193,7 +193,7 @@ docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runne
 		.
 
 .PHONY: docker-build-daemon
-docker-build-daemon: ## Build docker image for NeonVM daemon.
+docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemon.
 	docker build \
 		--tag $(IMG_DAEMON) \
 		--file neonvm-daemon/Dockerfile \
