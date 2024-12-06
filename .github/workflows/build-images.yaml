@@ -331,7 +331,6 @@ jobs:
             neonvm-controller \
             neonvm-vxlan-controller \
             neonvm-runner \
-            neonvm-daemon \
             vm-kernel \
             autoscale-scheduler \
             autoscaler-agent \
