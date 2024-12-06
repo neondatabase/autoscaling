@@ -12,7 +12,7 @@ import (
 )
 
 type PluginInterface interface {
-	Request(_ context.Context, _ *zap.Logger, lastPermit *api.Resources, target api.Resources, _ *api.Metrics) (*api.PluginResponse, error)
+	Request(_ context.Context, _ *zap.Logger, lastPermit *api.Resources, target api.Resources) (*api.PluginResponse, error)
 }
 
 func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *zap.Logger) {
@@ -46,7 +46,7 @@ func (c *ExecutorCoreWithClients) DoPluginRequests(ctx context.Context, logger *
 			continue // state has changed, retry.
 		}
 
-		resp, err := c.clients.Plugin.Request(ctx, ifaceLogger, action.LastPermit, action.Target, action.Metrics)
+		resp, err := c.clients.Plugin.Request(ctx, ifaceLogger, action.LastPermit, action.Target)
 		endTime := time.Now()
 
 		c.update(func(state *core.State) {

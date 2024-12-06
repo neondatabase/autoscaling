@@ -85,8 +85,17 @@ const (
 	//
 	// * Removed AgentRequest.metrics fields loadAvg5M and memoryUsageBytes
 	//
-	// Currently the latest version.
+	// Last used in release version v0.36.2.
 	PluginProtoV5_0
+
+	// PluginProtoV6_0 represents v6.0 of the agent<->scheduler plugin protocol.
+	//
+	// Changes from v5.0:
+	//
+	// * Removed AgentRequest.metrics
+	//
+	// Currently the latest version.
+	PluginProtoV6_0
 
 	// latestPluginProtoVersion represents the latest version of the agent<->scheduler plugin
 	// protocol
@@ -117,6 +126,8 @@ func (v PluginProtoVersion) String() string {
 		return "v4.0"
 	case PluginProtoV5_0:
 		return "v5.0"
+	case PluginProtoV6_0:
+		return "v6.0"
 	default:
 		diff := v - latestPluginProtoVersion
 		return fmt.Sprintf("<unknown = %v + %d>", latestPluginProtoVersion, diff)
@@ -202,21 +213,6 @@ type AgentRequest struct {
 	// In case of a failure, the new running scheduler uses LastPermit to recover the previous state.
 	// LastPermit may be nil.
 	LastPermit *Resources `json:"lastPermit"`
-	// Metrics provides information about the VM's current load, so that the scheduler may
-	// prioritize which pods to migrate
-	//
-	// In some protocol versions, this field may be nil.
-	Metrics *Metrics `json:"metrics"`
-}
-
-// Metrics gives the information pulled from vector.dev that the scheduler may use to prioritize
-// which pods it should migrate.
-type Metrics struct {
-	LoadAverage1Min float32 `json:"loadAvg1M"`
-	// DEPRECATED. Will be removed in an upcoming release.
-	LoadAverage5Min *float32 `json:"loadAvg5M,omitempty"`
-	// DEPRECATED. Will be removed in an upcoming release.
-	MemoryUsageBytes *float32 `json:"memoryUsageBytes,omitempty"`
 }
 
 // ProtocolRange returns a VersionRange exactly equal to r.ProtoVersion

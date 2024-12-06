@@ -70,7 +70,7 @@ func (p *AutoscaleEnforcer) makePrometheusRegistry() *prometheus.Registry {
 				Name: "autoscaling_plugin_resource_requests_results_total",
 				Help: "Number of resource requests to the scheduler plugin with various results",
 			},
-			[]string{"code", "node", "has_metrics"},
+			[]string{"code", "node"},
 		)),
 		nodeCPUResources: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
