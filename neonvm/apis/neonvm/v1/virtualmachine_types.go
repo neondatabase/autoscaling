@@ -155,6 +155,11 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=QmpScaling
 	// +optional
 	CpuScalingMode *CpuScalingMode `json:"cpuScalingMode,omitempty"`
+
+	// Enable network monitoring on the VM
+	// +kubebuilder:default:=false
+	// +optional
+	EnableNetworkMonitoring *bool `json:"enableNetworkMonitoring,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {

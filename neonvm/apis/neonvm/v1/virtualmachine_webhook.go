@@ -137,6 +137,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) (admission.Warnings,
 		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},
 		{".spec.enableSSH", func(v *VirtualMachine) any { return v.Spec.EnableSSH }},
 		{".spec.initScript", func(v *VirtualMachine) any { return v.Spec.InitScript }},
+		{".spec.enableNetworkMonitoring", func(v *VirtualMachine) any { return v.Spec.EnableNetworkMonitoring }},
 	}
 
 	for _, info := range immutableFields {
