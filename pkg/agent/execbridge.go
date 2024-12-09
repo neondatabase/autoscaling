@@ -50,13 +50,12 @@ func (iface *execPluginInterface) Request(
 	logger *zap.Logger,
 	lastPermit *api.Resources,
 	target api.Resources,
-	metrics *api.Metrics,
 ) (*api.PluginResponse, error) {
 	if lastPermit != nil {
 		iface.runner.recordResourceChange(*lastPermit, target, iface.runner.global.metrics.schedulerRequestedChange)
 	}
 
-	resp, err := iface.runner.DoSchedulerRequest(ctx, logger, target, lastPermit, metrics)
+	resp, err := iface.runner.DoSchedulerRequest(ctx, logger, target, lastPermit)
 
 	if err == nil && lastPermit != nil {
 		iface.runner.recordResourceChange(*lastPermit, resp.Permit, iface.runner.global.metrics.schedulerApprovedChange)
