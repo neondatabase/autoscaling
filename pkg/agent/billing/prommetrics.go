@@ -59,8 +59,6 @@ type batchMetricsLabels struct {
 }
 
 func (m PromMetrics) forBatch() batchMetrics {
-	m.vmsCurrent.Reset()
-
 	return batchMetrics{
 		total: make(map[batchMetricsLabels]int),
 
@@ -88,6 +86,8 @@ func (b batchMetrics) inc(isEndpoint isEndpointFlag, autoscalingEnabled autoscal
 }
 
 func (b batchMetrics) finish() {
+	b.vmsCurrent.Reset()
+
 	for key, count := range b.total {
 		b.vmsCurrent.WithLabelValues(key.isEndpoint, key.autoscalingEnabled, key.phase).Set(float64(count))
 	}
