@@ -44,19 +44,17 @@ with the following sequence of actions:
 
 ### On arm64 (aarch64 ARM)
 
-Note: you need to run this on ARM64 machine. It worked on my MacBook M2, but didn't on x64.
-
 1. On the host, run:
    ```sh
    cd neonvm-kernel # this directory
-   docker build --build-arg KERNEL_VERSION=$NEW_VERSION --platform linux/arm64 --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder .
+   docker build --build-arg KERNEL_VERSION=$NEW_VERSION --target build-deps -t kernel-build-deps -f Dockerfile.kernel-builder .
    docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
    ```
 2. Then, inside the container, run:
    ```sh
    cd linux-$NEW_VERSION
    cp /host/linux-config-aarch64-6.1.92 .config # Copy current config in
-   make menuconfig
+   make menuconfig ARCH=arm64
    # do nothing; just save and exit, overwriting .config
    cp .config /host/linux-config-aarch64-$NEW_VERSION # NOTE: Different from existing!
    ```
