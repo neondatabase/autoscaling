@@ -3,6 +3,7 @@ name: Bug template
 about: Template that will help you to submit a visible and actionable bug report.
 title: 'Bug: '
 labels: t/bug
+type: Bug
 assignees: ''
 
 ---
