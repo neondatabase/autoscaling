@@ -12,6 +12,7 @@ metadata:
     autoscaling.neon.tech/testing-only-always-migrate: "false"
 spec:
   schedulerName: autoscale-scheduler
+  enableNetworkMonitoring: true
   enableSSH: true
   guest:
     cpus: { min: 0.25, use: 0.25, max: 1.25 }
