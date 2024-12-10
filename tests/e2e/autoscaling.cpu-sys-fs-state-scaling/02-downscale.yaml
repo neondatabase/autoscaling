@@ -1,7 +1,7 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 delete:
-- apiVersion: v1
-  kind: Pod
-  name: workload
+  - apiVersion: v1
+    kind: Pod
+    name: workload
 unitTest: false
