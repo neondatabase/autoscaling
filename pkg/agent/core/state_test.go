@@ -366,11 +366,11 @@ func doInitialPluginRequest(
 	state *core.State,
 	clock *helpers.FakeClock,
 	requestTime time.Duration,
-	metrics *api.Metrics,
+	withoutMetrics bool,
 	resources api.Resources,
 ) {
 	nextActionsAssert := a
-	if metrics == nil {
+	if withoutMetrics {
 		nextActionsAssert = nextActionsAssert.WithWarnings("Making scaling decision without all required metrics available")
 	}
 
@@ -379,7 +379,6 @@ func doInitialPluginRequest(
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     nil,
 			Target:         resources,
-			Metrics:        metrics,
 			TargetRevision: rev,
 		},
 	})
@@ -454,7 +453,7 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), true, resForCU(1))
 
 	// Set metrics
 	clockTick().AssertEquals(duration("0.2s"))
@@ -479,7 +478,6 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(1)),
 			Target:         resForCU(2),
-			Metrics:        lo.ToPtr(lastMetrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -621,7 +619,6 @@ func TestBasicScaleUpAndDownFlow(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(2)),
 			Target:         resForCU(1),
-			Metrics:        lo.ToPtr(lastMetrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 		// shouldn't have anything to say to the other components
@@ -680,7 +677,7 @@ func TestPeriodicPluginRequest(t *testing.T) {
 	reqEvery := DefaultInitialStateConfig.Core.PluginRequestTick
 	endTime := duration("20s")
 
-	doInitialPluginRequest(a, state, clock, clockTick, lo.ToPtr(metrics.ToAPI()), resources)
+	doInitialPluginRequest(a, state, clock, clockTick, false, resources)
 
 	for clock.Elapsed().Duration < endTime {
 		timeSinceScheduledRequest := (clock.Elapsed().Duration - base) % reqEvery
@@ -697,7 +694,6 @@ func TestPeriodicPluginRequest(t *testing.T) {
 				PluginRequest: &core.ActionPluginRequest{
 					LastPermit:     &resources,
 					Target:         resources,
-					Metrics:        lo.ToPtr(metrics.ToAPI()),
 					TargetRevision: target,
 				},
 			})
@@ -749,7 +745,7 @@ func TestPartialUpscaleThenFull(t *testing.T) {
 
 	state.Monitor().Active(true)
 
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), true, resForCU(1))
 
 	// Set metrics
 	clockTick()
@@ -773,7 +769,6 @@ func TestPartialUpscaleThenFull(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(1)),
 			Target:         resForCU(4),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: targetRevision,
 		},
 	})
@@ -826,7 +821,6 @@ func TestPartialUpscaleThenFull(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(3)),
 			Target:         resForCU(4),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -894,7 +888,7 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 
 	state.Monitor().Active(true)
 
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(6))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), true, resForCU(6))
 
 	// Set metrics
 	clockTick()
@@ -1009,7 +1003,6 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(6)),
 			Target:         resForCU(3),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1054,7 +1047,6 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(3)),
 			Target:         resForCU(3),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1124,7 +1116,6 @@ func TestDeniedDownscalingIncreaseAndRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(3)),
 			Target:         resForCU(1),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1171,7 +1162,7 @@ func TestRequestedUpscale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), true, resForCU(1))
 
 	// Set metrics
 	clockTick()
@@ -1200,7 +1191,6 @@ func TestRequestedUpscale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(1)),
 			Target:         resForCU(2),
-			Metrics:        lo.ToPtr(lastMetrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1262,7 +1252,6 @@ func TestRequestedUpscale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(2)),
 			Target:         resForCU(2),
-			Metrics:        lo.ToPtr(lastMetrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1435,7 +1424,6 @@ func TestDownscalePivotBack(t *testing.T) {
 					PluginRequest: &core.ActionPluginRequest{
 						LastPermit:     lo.ToPtr(resForCU(2)),
 						Target:         resForCU(1),
-						Metrics:        lo.ToPtr(initialMetrics.ToAPI()),
 						TargetRevision: expectedRevision.WithTime(),
 					},
 				})
@@ -1456,7 +1444,6 @@ func TestDownscalePivotBack(t *testing.T) {
 					PluginRequest: &core.ActionPluginRequest{
 						LastPermit:     lo.ToPtr(resForCU(1)),
 						Target:         resForCU(2),
-						Metrics:        lo.ToPtr(newMetrics.ToAPI()),
 						TargetRevision: expectedRevision.WithTime(),
 					},
 				})
@@ -1490,7 +1477,7 @@ func TestDownscalePivotBack(t *testing.T) {
 
 		state.Monitor().Active(true)
 
-		doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
+		doInitialPluginRequest(a, state, clock, duration("0.1s"), true, resForCU(2))
 
 		clockTick().AssertEquals(duration("0.2s"))
 		pluginWait := duration("4.8s")
@@ -1558,7 +1545,7 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), true, resForCU(2))
 
 	clockTick()
 
@@ -1622,7 +1609,6 @@ func TestBoundsChangeRequiresDownsale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(2)),
 			Target:         resForCU(1),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1674,7 +1660,7 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request:
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(2))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), true, resForCU(2))
 
 	clockTick()
 
@@ -1708,7 +1694,6 @@ func TestBoundsChangeRequiresUpscale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(2)),
 			Target:         resForCU(3),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1776,7 +1761,7 @@ func TestFailedRequestRetry(t *testing.T) {
 	state.Monitor().Active(true)
 
 	// Send initial scheduler request
-	doInitialPluginRequest(a, state, clock, duration("0.1s"), nil, resForCU(1))
+	doInitialPluginRequest(a, state, clock, duration("0.1s"), true, resForCU(1))
 
 	// Set metrics so that we should be trying to upscale
 	clockTick()
@@ -1793,7 +1778,6 @@ func TestFailedRequestRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(1)),
 			Target:         resForCU(2),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1813,7 +1797,6 @@ func TestFailedRequestRetry(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(1)),
 			Target:         resForCU(2),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
@@ -1905,7 +1888,6 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 			PluginRequest: &core.ActionPluginRequest{
 				LastPermit:     nil,
 				Target:         resForCU(3),
-				Metrics:        nil,
 				TargetRevision: expectedRevision.WithTime(),
 			},
 		})
@@ -2000,7 +1982,6 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 			PluginRequest: &core.ActionPluginRequest{
 				LastPermit:     lo.ToPtr(resForCU(3)),
 				Target:         resForCU(2),
-				Metrics:        lo.ToPtr(metrics.ToAPI()),
 				TargetRevision: expectedRevision.WithTime(),
 			},
 			NeonVMRequest: &core.ActionNeonVMRequest{
@@ -2032,7 +2013,6 @@ func TestMetricsConcurrentUpdatedDuringDownscale(t *testing.T) {
 		PluginRequest: &core.ActionPluginRequest{
 			LastPermit:     lo.ToPtr(resForCU(2)),
 			Target:         resForCU(1),
-			Metrics:        lo.ToPtr(metrics.ToAPI()),
 			TargetRevision: expectedRevision.WithTime(),
 		},
 	})
