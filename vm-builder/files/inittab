@@ -12,5 +12,5 @@
 {{ range .InittabCommands }}
 ::{{.SysvInitAction}}:su -p {{.CommandUser}} -c {{.ShellEscapedCommand}}
 {{ end }}
-ttyS0::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 ttyS0 linux
+{{ .AgettyTTY }}::respawn:/neonvm/bin/agetty --8bits --local-line --noissue --noclear --noreset --host console --login-program /neonvm/bin/login --login-pause --autologin root 115200 {{ .AgettyTTY }} linux
 ::shutdown:/neonvm/bin/vmshutdown
