@@ -84,6 +84,7 @@ func NewDispatcher(
 	logger *zap.Logger,
 	addr string,
 	runner *Runner,
+	sendScaleRequested func(request api.Allocation, withLock func()),
 	sendUpscaleRequested func(request api.MoreResources, withLock func()),
 ) (_finalDispatcher *Dispatcher, _ error) {
 	// Create a new root-level context for this Dispatcher so that we can cancel if need be
@@ -153,7 +154,7 @@ func NewDispatcher(
 
 	msgHandlerLogger := logger.Named("message-handler")
 	runner.spawnBackgroundWorker(ctx, msgHandlerLogger, "vm-monitor message handler", func(c context.Context, l *zap.Logger) {
-		disp.run(c, l, sendUpscaleRequested)
+		disp.run(c, l, sendScaleRequested, sendUpscaleRequested)
 	})
 	runner.spawnBackgroundWorker(ctx, logger.Named("health-checks"), "vm-monitor health checks", func(ctx context.Context, logger *zap.Logger) {
 		timeout := time.Second * time.Duration(runner.global.config.Monitor.ResponseTimeoutSeconds)
@@ -413,11 +414,14 @@ func extractField[T any](data map[string]interface{}, key string) (*T, error) {
 }
 
 type messageHandlerFuncs struct {
+	handleScaleRequest func(api.ScaleRequest)
+
 	handleUpscaleRequest      func(api.UpscaleRequest)
 	handleUpscaleConfirmation func(api.UpscaleConfirmation, uint64) error
 	handleDownscaleResult     func(api.DownscaleResult, uint64) error
-	handleMonitorError        func(api.InternalError, uint64) error
-	handleHealthCheck         func(api.HealthCheck, uint64) error
+
+	handleMonitorError func(api.InternalError, uint64) error
+	handleHealthCheck  func(api.HealthCheck, uint64) error
 }
 
 // Handle messages from the monitor. Make sure that all message types the monitor
@@ -516,6 +520,14 @@ func (disp *Dispatcher) HandleMessage(
 	}
 
 	switch *typeStr {
+	case "ScaleRequest":
+		var req api.ScaleRequest
+		if err := unmarshal(&req); err != nil {
+			return err
+		}
+		handlers.handleScaleRequest(req)
+		return nil
+
 	case "UpscaleRequest":
 		var req api.UpscaleRequest
 		if err := unmarshal(&req); err != nil {
@@ -535,6 +547,7 @@ func (disp *Dispatcher) HandleMessage(
 			return err
 		}
 		return handlers.handleDownscaleResult(res, id)
+
 	case "InternalError":
 		var monitorErr api.InternalError
 		if err := unmarshal(&monitorErr); err != nil {
@@ -566,7 +579,10 @@ func (disp *Dispatcher) HandleMessage(
 }
 
 // Long running function that orchestrates all requests/responses.
-func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequester func(_ api.MoreResources, withLock func())) {
+func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger,
+	scaleRequester func(_ api.Allocation, withLock func()),
+	upscaleRequester func(_ api.MoreResources, withLock func()),
+) {
 	logger.Info("Starting message handler")
 
 	// Utility for logging + returning an error when we get a message with an
@@ -581,6 +597,17 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 	// Does not take a message id because we don't know when the agent will
 	// upscale. The monitor will get the result back as a NotifyUpscale message
 	// from us, with a new id.
+	handleScaleRequest := func(req api.ScaleRequest) {
+		// TODO: it shouldn't be this function's responsibility to update metrics.
+		defer func() {
+			disp.runner.global.metrics.monitorRequestsInbound.WithLabelValues("ScaleRequest", "ok").Inc()
+		}()
+
+		scaleRequester(req.Target, func() {
+			logger.Info("Updating requested scale", zap.Any("target", req))
+		})
+	}
+
 	handleUpscaleRequest := func(req api.UpscaleRequest) {
 		// TODO: it shouldn't be this function's responsibility to update metrics.
 		defer func() {
@@ -688,6 +715,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 	}
 
 	handlers := messageHandlerFuncs{
+		handleScaleRequest:        handleScaleRequest,
 		handleUpscaleRequest:      handleUpscaleRequest,
 		handleUpscaleConfirmation: handleUpscaleConfirmation,
 		handleDownscaleResult:     handleDownscaleResult,
