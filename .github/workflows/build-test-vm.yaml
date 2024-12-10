@@ -22,10 +22,21 @@ on:
         type: boolean
         required: false
         default: false
+      arch:
+        description: 'Architecture to build for'
+        type: string
+        required: false
+        default: 'amd64'
+      matrix-step-name:
+        required: false
+        type: string
+      matrix-key:
+        required: false
+        type: string
     outputs:
       vm-postgres-16-bullseye:
         description: 'image name for postgres:16-bullseye, VM-ified'
-        value: ${{ jobs.tags.outputs.vm-postgres-16-bullseye }}
+        value: ${{ jobs.build.outputs.vm-postgres-16-bullseye }}
 
 env:
   IMG_POSTGRES_16_BULLSEYE: "neondatabase/vm-postgres-16-bullseye"
@@ -38,25 +49,19 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
-  tags:
-    outputs:
-      vm-postgres-16-bullseye: ${{ steps.show-tags.outputs.vm-postgres-16-bullseye }}
-      daemon: ${{ steps.show-tags.outputs.daemon }}
-    runs-on: ubuntu-latest
-    steps:
-      - id: show-tags
-        run: |
-          echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
-    needs: tags
-    runs-on: [ self-hosted, gen3, large ]
-    env:
-      IMG_DAEMON: ${{ needs.tags.outputs.daemon }}
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', inputs.arch == 'arm64' && 'large-arm64' || 'large')) }}
+    outputs:
+      vm-postgres-16-bullseye: ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
+      daemon: ${{ steps.tags.outputs.daemon }}
     steps:
+      # tags converted to be a step and moved here to be in the same strategy contextt
+      - id: tags
+        run: |
+          echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -65,15 +70,34 @@ jobs:
           cache: false
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
         timeout-minutes: 10
-      - run: make docker-build-daemon
+      - name: Build daemon image
+        run: make docker-build-daemon
+        env:
+          IMG_DAEMON: ${{ steps.tags.outputs.daemon }}
+      # - name: Build daemon image
+      #   uses: docker/build-push-action@v6
+      #   env:
+      #     GO_BASE_IMG: ${{ format('localhost:5000/neondatabase/autoscaling-go-base-{0}:dev', inputs.arch) }}
+      #   with:
+      #     context: .
+      #     push: false
+      #     platforms: linux/${{ inputs.arch }}
+      #     file: neonvm-daemon/Dockerfile
+      #     cache-from: type=registry,ref=cache.neon.build/neonvm-daemon:cache
+      #     cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-daemon:cache,mode=max' || '' }}
+      #     tags: ${{ steps.tags.outputs.daemon }}
+      #     build-args: |
+      #       GO_BASE_IMG=${{ env.GO_BASE_IMG }}
       - run: make bin/vm-builder
+        env:
+          IMG_DAEMON: ${{ steps.tags.outputs.daemon }}
 
       - name: upload vm-builder
         if: ${{ format('{0}', inputs.upload-vm-builder) == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: vm-builder
-          path: bin/vm-builder
+          path: ${{format('bin/vm-builder-{0}', inputs.arch)}}
           if-no-files-found: error
           retention-days: 2
 
@@ -86,9 +110,28 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: build ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
+      - name: build ${{ steps.tags.outputs.vm-postgres-16-bullseye  }}
         run: |
-          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-16-bullseye }} -daemon-image ${{ needs.tags.outputs.daemon }} -target-arch linux/${TARGET_ARCH}
-      - name: docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
+          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ steps.tags.outputs.vm-postgres-16-bullseye  }} -daemon-image ${{ steps.tags.outputs.daemon }} -target-arch linux/${{ inputs.arch }}
+      - name: docker push ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
         run: |
-          docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
+          docker push ${{ steps.tags.outputs.vm-postgres-16-bullseye  }}
+
+
+  save-matrix-results:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      ## Write for matrix outputs workaround
+      - uses: cloudposse/github-action-matrix-outputs-write@v1
+        id: out
+        with:
+          matrix-step-name: ${{ inputs.matrix-step-name }}
+          matrix-key: ${{ inputs.matrix-key }}
+          outputs: |-
+              vm-postgres-16-bullseye:         ${{ needs.build.outputs.vm-postgres-16-bullseye }}
+              daemon:   ${{ needs.build.outputs.daemon }}
+
+    outputs:
+      vm-postgres-16-bullseye: ${{ steps.out.outputs.vm-postgres-16-bullseye }}
+      daemon: ${{ steps.out.outputs.daemon }}
