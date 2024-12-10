@@ -512,6 +512,9 @@ endif
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.30.7
 
+ETCD ?= $(LOCALBIN)/etcd
+ETCD_VERSION ?= v3.5.10
+
 KIND ?= $(LOCALBIN)/kind
 KIND_VERSION ?= v0.24.0
 
@@ -564,3 +567,18 @@ cert-manager: check-local-context kubectl ## install cert-manager to cluster
 python-init:
 	python3 -m venv tests/e2e/.venv
 	tests/e2e/.venv/bin/pip install -r requirements.txt
+
+.PHONY: etcd
+etcd: $(ETCD)
+$(ETCD): $(LOCALBIN)
+	@test -s $(LOCALBIN)/etcd || { \
+		if [ "$(GOOS)" = "darwin" ]; then \
+			curl -sfSLo $(ETCD) https://github.com/etcd-io/etcd/releases/download/$(ETCD_VERSION)/etcd-$(ETCD_VERSION)-$(GOOS)-$(GOARCH).zip && \
+			unzip -j $(ETCD) "*/etcd" "*/etcdctl" -d $(LOCALBIN) && \
+			rm $(ETCD); \
+		else \
+			curl -sfSLo $(ETCD) https://github.com/etcd-io/etcd/releases/download/$(ETCD_VERSION)/etcd-$(ETCD_VERSION)-$(GOOS)-$(GOARCH).tar.gz && \
+			tar -xvf $(ETCD) -C $(LOCALBIN) --strip-components=1 && \
+			rm $(ETCD); \
+		fi \
+	}
