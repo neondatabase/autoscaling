@@ -497,7 +497,7 @@ CODE_GENERATOR_VERSION ?= v0.28.12
 
 KUTTL ?= $(LOCALBIN)/kuttl
 # k8s deps @ 1.28.3
-KUTTL_VERSION ?= v0.19.0
+KUTTL_VERSION ?= v0.16.0
 ifeq ($(GOARCH), arm64)
     KUTTL_ARCH = arm64
 else ifeq ($(GOARCH), amd64)

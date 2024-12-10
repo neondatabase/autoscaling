@@ -38,10 +38,6 @@ var (
 	scriptVmStart string
 	//go:embed files/inittab
 	scriptInitTab string
-	//go:embed files/agetty-init-amd64
-	scriptAgettyInitAmd64 string
-	//go:embed files/agetty-init-arm64
-	scriptAgettyInitArm64 string
 	//go:embed files/vmacpi
 	scriptVmAcpi string
 	//go:embed files/vmshutdown
@@ -126,7 +122,7 @@ type TemplatesContext struct {
 	SpecBuild       string
 	SpecMerge       string
 	InittabCommands []inittabCommand
-	AgettyInitLine  string
+	AgettyTTY       string
 	ShutdownHook    string
 }
 
@@ -312,7 +308,7 @@ func main() {
 		SpecMerge:       "",  // overridden below if spec != nil
 		InittabCommands: nil, // overridden below if spec != nil
 		ShutdownHook:    "",  // overridden below if spec != nil
-		AgettyInitLine:  getAgettyInitLine(*targetArch),
+		AgettyTTY:       getAgettyTTY(*targetArch),
 	}
 
 	if len(imageSpec.Config.User) != 0 {
@@ -565,12 +561,13 @@ func (f file) validate() []error {
 	return errs
 }
 
-func getAgettyInitLine(targetArch string) string {
+// getAgettyTTY returns the tty device name for agetty based on the target architecture.
+func getAgettyTTY(targetArch string) string {
 	switch targetArch {
 	case targetArchLinuxAmd64:
-		return scriptAgettyInitAmd64
+		return "ttyS0"
 	case targetArchLinuxArm64:
-		return scriptAgettyInitArm64
+		return "ttyAMA0"
 	default:
 		log.Fatalf("Unsupported target architecture: %q", targetArch)
 		return ""
