@@ -485,7 +485,7 @@ KUSTOMIZE_VERSION ?= v5.0.4
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.30.7
+ENVTEST_K8S_VERSION = 1.30.0
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 # We went ahead of k8s 1.28 with controller-tools v0.14.0 (which depends on k8s 1.29) to unblock go 1.22 upgrade.
