@@ -480,7 +480,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 
 # https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44
 # same as used in kubectl v1.30.x; https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44
-KUSTOMIZE_VERSION ?= v5.0.4
+KUSTOMIZE_VERSION ?= v5.1.1
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
