@@ -6,9 +6,6 @@ set -eu -o pipefail
 
 CODEGEN_PATH="$GOPATH/src/k8s.io/code-generator/kube_codegen.sh"
 
-# apply a small patch to allow kube_codegen.sh to work with our file structure.
-patch "$CODEGEN_PATH" neonvm/hack/kube_codegen.patch
-
 source "$CODEGEN_PATH"
 
 # Required to allow git worktrees with non-root ownership on the host to work.
