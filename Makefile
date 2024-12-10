@@ -40,6 +40,8 @@ GOFUMPT_VERSION ?= v0.7.0
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+GIT_INFO := $(shell git describe --long --dirty)
+
 # in CI environment use 'neonvm' as cluster name
 # in other cases add $USER as cluster name suffix
 # or fallback to 'neonvm' if $USER variable absent
