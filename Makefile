@@ -573,12 +573,12 @@ etcd: $(ETCD)
 $(ETCD): $(LOCALBIN)
 	@test -s $(LOCALBIN)/etcd || { \
 		if [ "$(GOOS)" = "darwin" ]; then \
-			curl -sfSLo $(ETCD) https://github.com/etcd-io/etcd/releases/download/$(ETCD_VERSION)/etcd-$(ETCD_VERSION)-$(GOOS)-$(GOARCH).zip && \
-			unzip -j $(ETCD) "*/etcd" "*/etcdctl" -d $(LOCALBIN) && \
-			rm $(ETCD); \
+			curl -sfSLo etcd-temp https://github.com/etcd-io/etcd/releases/download/$(ETCD_VERSION)/etcd-$(ETCD_VERSION)-$(GOOS)-$(GOARCH).zip && \
+			unzip -j etcd-temp "*/etcd" "*/etcdctl" -d $(LOCALBIN) && \
+			rm etcd-temp; \
 		else \
-			curl -sfSLo $(ETCD) https://github.com/etcd-io/etcd/releases/download/$(ETCD_VERSION)/etcd-$(ETCD_VERSION)-$(GOOS)-$(GOARCH).tar.gz && \
-			tar -xvf $(ETCD) -C $(LOCALBIN) --strip-components=1 && \
-			rm $(ETCD); \
+			curl -sfSLo etcd-temp https://github.com/etcd-io/etcd/releases/download/$(ETCD_VERSION)/etcd-$(ETCD_VERSION)-$(GOOS)-$(GOARCH).tar.gz && \
+			tar -xvf etcd-temp -C $(LOCALBIN) --strip-components=1 && \
+			rm etcd-temp; \
 		fi \
 	}
