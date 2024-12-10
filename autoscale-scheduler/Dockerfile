@@ -1,8 +1,6 @@
 ARG GO_BASE_IMG=autoscaling-go-base:dev
 FROM $GO_BASE_IMG AS builder
 
-ARG GIT_INFO
-
 COPY . .
 # NOTE: Build flags here must be the same as in the base image, otherwise we'll rebuild
 # dependencies. See /Dockerfile.go-base for detail on the "why".
