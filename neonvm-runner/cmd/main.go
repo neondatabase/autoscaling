@@ -951,8 +951,8 @@ func buildQEMUCmd(
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
 	}
-
-	if cfg.architecture == architectureArm64 {
+	switch cfg.architecture {
+	case architectureArm64:
 		// add custom firmware to have ACPI working
 		qemuCmd = append(qemuCmd, "-bios", "/vm/QEMU_EFI_ARM.fd")
 		// arm virt has only one UART, setup virtio-serial to add more /dev/hvcX
@@ -960,9 +960,11 @@ func buildQEMUCmd(
 			"-chardev", "stdio,id=virtio-console",
 			"-device", "virtconsole,chardev=virtio-console",
 		)
-	} else {
+	case architectureAmd64:
 		// on amd we have multiple UART ports so we can just use serial stdio
 		qemuCmd = append(qemuCmd, "-serial", "stdio")
+	default:
+		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -1080,7 +1082,7 @@ func buildQEMUCmd(
 	qemuCmd = append(
 		qemuCmd,
 		"-kernel", cfg.kernelPath,
-		"-append", makeKernelCmdline(cfg, vmSpec, vmStatus, hostname),
+		"-append", makeKernelCmdline(cfg, logger, vmSpec, vmStatus, hostname),
 	)
 
 	// should runner receive migration ?
@@ -1097,7 +1099,7 @@ const (
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
-func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
+func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
 	cmdlineParts := []string{baseKernelCmdline}
 
 	switch cfg.memoryProvider {
@@ -1126,13 +1128,16 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 		cmdlineParts = append(cmdlineParts, fmt.Sprintf("maxcpus=%d", vmSpec.Guest.CPUs.Min.RoundedUp()))
 	}
 
-	if cfg.architecture == architectureArm64 {
+	switch cfg.architecture {
+	case architectureArm64:
 		// explicitly enable acpi if we run on arm
 		cmdlineParts = append(cmdlineParts, "acpi=on")
 		// use virtio-serial device kernel console
 		cmdlineParts = append(cmdlineParts, "console=hvc0")
-	} else {
+	case architectureAmd64:
 		cmdlineParts = append(cmdlineParts, "console=ttyS1")
+	default:
+		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
 
 	return strings.Join(cmdlineParts, " ")
