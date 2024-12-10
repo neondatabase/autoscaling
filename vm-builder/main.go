@@ -58,6 +58,11 @@ var (
 	configSshd string
 )
 
+const (
+	targetArchLinuxAmd64 = "linux/amd64"
+	targetArchLinuxArm64 = "linux/arm64"
+)
+
 var (
 	Version           string
 	NeonvmDaemonImage string
@@ -72,6 +77,7 @@ var (
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 
 	daemonImageFlag = flag.String("daemon-image", "", `Specify the neonvm-daemon image: --daemon-image=neonvm-daemon:dev`)
+	targetArch      = flag.String("target-arch", "", fmt.Sprintf("Target architecture: --arch %s | %s", targetArchLinuxAmd64, targetArchLinuxArm64))
 )
 
 func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
@@ -84,7 +90,6 @@ func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplSt
 	if err = tmpl.Execute(&buf, tmplArgs); err != nil {
 		return fmt.Errorf("failed to execute template for %q: %w", filename, err)
 	}
-
 	return addFileToTar(tw, filename, buf.Bytes())
 }
 
@@ -117,6 +122,7 @@ type TemplatesContext struct {
 	SpecBuild       string
 	SpecMerge       string
 	InittabCommands []inittabCommand
+	AgettyTTY       string
 	ShutdownHook    string
 }
 
@@ -129,16 +135,26 @@ type inittabCommand struct {
 func main() {
 	flag.Parse()
 	var dstIm string
-
 	if *version {
 		fmt.Println(Version)
 		os.Exit(0)
 	}
-
 	if len(*daemonImageFlag) == 0 && len(NeonvmDaemonImage) == 0 {
 		log.Println("neonvm-daemon image not set, needs to be explicitly passed in, or compiled with -ldflags '-X main.NeonvmDaemonImage=...'")
 		flag.PrintDefaults()
 		os.Exit(1)
+	}
+
+	if targetArch == nil || *targetArch == "" {
+		log.Println("Target architecture not set, see usage info:")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	if *targetArch != targetArchLinuxAmd64 && *targetArch != targetArchLinuxArm64 {
+		log.Fatalf("Unsupported target architecture: %q", *targetArch)
+		flag.PrintDefaults()
+		return
 	}
 
 	neonvmDaemonImage := NeonvmDaemonImage
@@ -292,6 +308,7 @@ func main() {
 		SpecMerge:       "",  // overridden below if spec != nil
 		InittabCommands: nil, // overridden below if spec != nil
 		ShutdownHook:    "",  // overridden below if spec != nil
+		AgettyTTY:       getAgettyTTY(*targetArch),
 	}
 
 	if len(imageSpec.Config.User) != 0 {
@@ -366,6 +383,7 @@ func main() {
 
 	buildArgs := make(map[string]*string)
 	buildArgs["DISK_SIZE"] = size
+	buildArgs["TARGET_ARCH"] = targetArch
 	opt := types.ImageBuildOptions{
 		AuthConfigs:    authConfigs,
 		Tags:           []string{dstIm},
@@ -376,6 +394,7 @@ func main() {
 		Dockerfile:     "Dockerfile",
 		Remove:         true,
 		ForceRemove:    true,
+		Platform:       *targetArch,
 	}
 	buildResp, err := cli.ImageBuild(ctx, tarBuffer, opt)
 	if err != nil {
@@ -540,4 +559,17 @@ func (f file) validate() []error {
 	}
 
 	return errs
+}
+
+// getAgettyTTY returns the tty device name for agetty based on the target architecture.
+func getAgettyTTY(targetArch string) string {
+	switch targetArch {
+	case targetArchLinuxAmd64:
+		return "ttyS0"
+	case targetArchLinuxArm64:
+		return "ttyAMA0"
+	default:
+		log.Fatalf("Unsupported target architecture: %q", targetArch)
+		return ""
+	}
 }
