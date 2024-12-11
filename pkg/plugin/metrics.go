@@ -36,6 +36,8 @@ type pluginMetrics struct {
 
 	resourceRequests      *prometheus.CounterVec
 	validResourceRequests *prometheus.CounterVec
+
+	k8sOps *prometheus.CounterVec
 }
 
 func BuildPluginMetrics(config Config, reg prometheus.Registerer) pluginMetrics {
@@ -60,6 +62,14 @@ func BuildPluginMetrics(config Config, reg prometheus.Registerer) pluginMetrics 
 				Help: "Number of resource requests to the scheduler plugin with various results",
 			},
 			[]string{"code", "node"},
+		)),
+
+		k8sOps: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_k8s_ops_total",
+				Help: "Number of k8s API requests and their outcome",
+			},
+			[]string{"op", "kind", "outcome"},
 		)),
 	}
 }
@@ -159,28 +169,56 @@ func (m nodeMetrics) remove(node *state.Node) {
 }
 
 type reconcileMetrics struct {
-	waitDurations    *prometheus.HistogramVec
+	waitDurations    prometheus.Histogram
 	processDurations *prometheus.HistogramVec
+	failing          *prometheus.GaugeVec
+	panics           *prometheus.CounterVec
 }
 
 func buildReconcileMetrics(reg prometheus.Registerer) reconcileMetrics {
-	// FIXME: actually use these.
 	return reconcileMetrics{
-		waitDurations: util.RegisterMetric(reg, prometheus.NewHistogramVec(
+		waitDurations: util.RegisterMetric(reg, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
-				Name:    "autoscaling_plugin_reconcile_queue_wait_durations",
-				Help:    "Duration that items in the reconcile queue are waiting to be picked up",
-				Buckets: []float64{},
+				Name: "autoscaling_plugin_reconcile_queue_wait_durations",
+				Help: "Duration that items in the reconcile queue are waiting to be picked up",
+				Buckets: []float64{
+					// 10µs, 100µs,
+					0.00001, 0.0001,
+					// 1ms, 5ms, 10ms, 50ms, 100ms, 250ms, 500ms, 750ms
+					0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75,
+					// 1s, 2.5s, 5s, 10s, 20s, 45s
+					1.0, 2.5, 5, 10, 20, 45,
+				},
 			},
-			[]string{"kind"},
 		)),
 		processDurations: util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "autoscaling_plugin_reconcile_duration",
-				Help:    "Duration that items take to be reconciled",
-				Buckets: []float64{},
+				Name: "autoscaling_plugin_reconcile_duration_seconds",
+				Help: "Duration that items take to be reconciled",
+				Buckets: []float64{
+					// 10µs, 100µs,
+					0.00001, 0.0001,
+					// 1ms, 5ms, 10ms, 50ms, 100ms, 250ms, 500ms, 750ms
+					0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75,
+					// 1s, 2.5s, 5s, 10s, 20s, 45s
+					1.0, 2.5, 5, 10, 20, 45,
+				},
 			},
-			[]string{"kind", "node", "outcome"},
+			[]string{"kind", "outcome"},
+		)),
+		failing: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_reconcile_failing_objects",
+				Help: "Number of objects currently failing to be reconciled",
+			},
+			[]string{"kind"},
+		)),
+		panics: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_reconcile_panics_count",
+				Help: "Number of times reconcile operations have panicked",
+			},
+			[]string{"kind"},
 		)),
 	}
 }

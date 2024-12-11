@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,6 +89,8 @@ func NewPluginState(
 
 	indexedNodeStore := watch.NewIndexedStore(nodeWatchStore, watch.NewFlatNameIndex[corev1.Node]())
 
+	metrics := BuildPluginMetrics(config, reg)
+
 	return &PluginState{
 		mu: sync.Mutex{},
 
@@ -103,7 +106,7 @@ func NewPluginState(
 		maxNodeCPU: 0,
 		maxNodeMem: 0,
 
-		metrics: BuildPluginMetrics(config, reg),
+		metrics: metrics,
 		requeuePod: func(uid types.UID) error {
 			ok := podWatchStore.NopUpdate(uid)
 			if !ok {
@@ -130,6 +133,7 @@ func NewPluginState(
 
 			_, err := vmClient.NeonvmV1().VirtualMachineMigrations(vmm.Namespace).
 				Create(ctx, vmm, metav1.CreateOptions{})
+			recordK8sOp(metrics, "Create", "VirtualMachineMigration", vmm.Name, err)
 			if err != nil && apierrors.IsAlreadyExists(err) {
 				logger.Warn("Migration already exists for this pod")
 				return nil
@@ -151,6 +155,7 @@ func NewPluginState(
 
 			err := vmClient.NeonvmV1().VirtualMachineMigrations(vmm.Namespace).
 				Delete(ctx, vmm.Name, opts)
+			recordK8sOp(metrics, "Delete", "VirtualMachineMigration", vmm.Name, err)
 			return err
 		},
 		patchVM: func(vm util.NamespacedName, patches []patch.Operation) error {
@@ -164,7 +169,25 @@ func NewPluginState(
 
 			_, err = vmClient.NeonvmV1().VirtualMachines(vm.Namespace).
 				Patch(ctx, vm.Name, types.JSONPatchType, patchPayload, metav1.PatchOptions{})
+			recordK8sOp(metrics, "Patch", "VirtualMachine", vm.Name, err)
 			return err
 		},
 	}
+}
+
+func recordK8sOp(metrics pluginMetrics, opKind string, objKind string, objName string, err error) {
+	if err == nil {
+		metrics.k8sOps.WithLabelValues(opKind, objKind, "success").Inc()
+		return
+	}
+
+	// error is non-nil; let's prepare it to be a metric label.
+	errMsg := util.RootError(err).Error()
+	// Some error messages contain the object name. We could try to filter them all out, but
+	// it's probably more maintainable to just keep them as-is and remove the name.
+	errMsg = strings.ReplaceAll(errMsg, objName, "<name>")
+
+	outcome := fmt.Sprintf("error: %s", errMsg)
+
+	metrics.k8sOps.WithLabelValues(opKind, objKind, outcome).Inc()
 }

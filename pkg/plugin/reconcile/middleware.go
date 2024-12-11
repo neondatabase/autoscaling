@@ -3,7 +3,6 @@ package reconcile
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -72,25 +71,34 @@ func applyMiddleware(middleware []Middleware, handler HandlerFunc) HandlerFunc {
 
 func defaultMiddleware(
 	types []schema.GroupVersionKind,
-	errorCallback ErrorCallback,
+	resultCallback ResultCallback,
+	errorCallback ErrorStatsCallback,
 	panicCallback PanicCallback,
 ) []Middleware {
 	return []Middleware{
-		NewLogMiddleware(),
+		NewLogMiddleware(resultCallback),
 		NewErrorBackoffMiddleware(types, errorCallback),
 		NewCatchPanicMiddleware(panicCallback),
 	}
 }
+
+// ResultCallback represents the signature of the optional callback that may be registered with the
+// LogMiddleware to update metrics or similar based on the result of each reconcile operation.
+type ResultCallback = func(params MiddlewareParams, duration time.Duration, err error)
 
 // LogMiddleware is middleware for the reconcile queue that augments the logger with fields
 // describing the object being reconciled, as well as logging the results of each reconcile
 // operation.
 //
 // This middleware is always included. It's public to provide additional documentation.
-type LogMiddleware struct{}
+type LogMiddleware struct {
+	resultCallback ResultCallback
+}
 
-func NewLogMiddleware() *LogMiddleware {
-	return &LogMiddleware{}
+func NewLogMiddleware(callback ResultCallback) *LogMiddleware {
+	return &LogMiddleware{
+		resultCallback: callback,
+	}
 }
 
 // ObjectMetaLogField returns a zap.Field for an object, in the same format that the default logging
@@ -124,6 +132,9 @@ func (m *LogMiddleware) Call(
 	started := time.Now()
 	result, err := handler(logger, params)
 	duration := time.Since(started)
+	if m.resultCallback != nil {
+		m.resultCallback(params, duration, err)
+	}
 	if err != nil {
 		logger.Error(
 			fmt.Sprintf("Failed to reconcile %s %s", params.EventKind, params.GVK.Kind),
@@ -185,14 +196,14 @@ func (m *CatchPanicMiddleware) Call(
 	return handler(logger, params)
 }
 
-// ErrorCallback represents the signature of the optional callback that may be registered with the
-// ErrorBackoffMiddleware.
-type ErrorCallback = func(ErrorStats, MiddlewareParams)
+// ErrorStatsCallback represents the signature of the optional callback that may be registered with
+// the ErrorBackoffMiddleware.
+type ErrorStatsCallback = func(MiddlewareParams, ErrorStats)
 
 // ErrorStats are the values provided to the callback for ErrorBackoffMiddleware.
 type ErrorStats struct {
 	// GlobalCount is the total number of objects currently failing to be reconciled.
-	GlobalCount int64
+	GlobalCount int
 	// TypedCount is the number of objects of this type that are failing to be reconciled.
 	TypedCount int
 	// SuccessiveFailures gives the number of times in a row that this object has failed to be
@@ -202,9 +213,12 @@ type ErrorStats struct {
 }
 
 type ErrorBackoffMiddleware struct {
-	globalFailing atomic.Int64
-	byType        map[schema.GroupVersionKind]*typedTimingSet
-	callback      ErrorCallback
+	globalCounterMu sync.Mutex
+	globalFailing   int
+
+	byType map[schema.GroupVersionKind]*typedTimingSet
+
+	callback ErrorStatsCallback
 }
 
 type typedTimingSet struct {
@@ -223,7 +237,7 @@ const (
 	maxErrorWait     = time.Minute
 )
 
-func NewErrorBackoffMiddleware(typs []schema.GroupVersionKind, callback ErrorCallback) *ErrorBackoffMiddleware {
+func NewErrorBackoffMiddleware(typs []schema.GroupVersionKind, callback ErrorStatsCallback) *ErrorBackoffMiddleware {
 	byType := make(map[schema.GroupVersionKind]*typedTimingSet)
 
 	for _, gvk := range typs {
@@ -234,9 +248,10 @@ func NewErrorBackoffMiddleware(typs []schema.GroupVersionKind, callback ErrorCal
 	}
 
 	return &ErrorBackoffMiddleware{
-		globalFailing: atomic.Int64{},
-		byType:        byType,
-		callback:      callback,
+		globalCounterMu: sync.Mutex{},
+		globalFailing:   0,
+		byType:          byType,
+		callback:        callback,
 	}
 }
 
@@ -258,6 +273,8 @@ func (m *ErrorBackoffMiddleware) Call(
 	failed := err != nil
 	b, wasFailing := typed.byUID[params.UID]
 
+	var change int
+
 	if failed {
 		b.successiveFailures += 1
 		if wasFailing {
@@ -277,7 +294,7 @@ func (m *ErrorBackoffMiddleware) Call(
 
 		typed.byUID[params.UID] = b
 		if !wasFailing {
-			m.globalFailing.Add(1)
+			change = 1 // +1 item failing
 		}
 	} else /* !failed */ {
 		// reset the counters, for below
@@ -286,17 +303,23 @@ func (m *ErrorBackoffMiddleware) Call(
 		// remove the tracking for this value, if it was present - it's not failing
 		delete(typed.byUID, params.UID)
 		if wasFailing {
-			m.globalFailing.Add(-1)
+			change = -1 // -1 item failing
 		}
 	}
 
-	if m.callback != nil {
-		stats := ErrorStats{
-			GlobalCount:        m.globalFailing.Load(),
-			TypedCount:         len(typed.byUID),
-			SuccessiveFailures: b.successiveFailures,
+	if change != 0 {
+		m.globalCounterMu.Lock()
+		defer m.globalCounterMu.Unlock()
+
+		m.globalFailing += change
+
+		if m.callback != nil {
+			m.callback(params, ErrorStats{
+				GlobalCount:        m.globalFailing,
+				TypedCount:         len(typed.byUID),
+				SuccessiveFailures: b.successiveFailures,
+			})
 		}
-		m.callback(stats, params)
 	}
 
 	return result, err

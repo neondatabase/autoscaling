@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"time"
 )
 
 // QueueOption customizes the behavior of NewQueue.
@@ -12,18 +13,22 @@ type QueueOption struct {
 // queueSettings is the internal, temporary structure that we use to hold the results of applying
 // the various QueueOptions
 type queueSettings struct {
-	baseContext   context.Context
-	middleware    []Middleware
-	errorCallback ErrorCallback
-	panicCallback PanicCallback
+	baseContext    context.Context
+	middleware     []Middleware
+	waitCallback   QueueWaitDurationCallback
+	resultCallback ResultCallback
+	errorCallback  ErrorStatsCallback
+	panicCallback  PanicCallback
 }
 
 func defaultQueueSettings() *queueSettings {
 	return &queueSettings{
-		baseContext:   context.Background(),
-		middleware:    []Middleware{},
-		errorCallback: nil,
-		panicCallback: nil,
+		baseContext:    context.Background(),
+		middleware:     []Middleware{},
+		waitCallback:   nil,
+		resultCallback: nil,
+		errorCallback:  nil,
+		panicCallback:  nil,
 	}
 }
 
@@ -49,14 +54,39 @@ func WithMiddleware(mw Middleware) QueueOption {
 	}
 }
 
-// WithErrorCallback sets the callback to provide to the ErrorBackoffMiddleware.
+// QueueWaitDurationCallback represents the signature of the callback that may be provided to add
+// observability for how long items are waiting in the queue before being reconciled.
+type QueueWaitDurationCallback = func(time.Duration)
+
+// WithQueueWaitDurationCallback sets the QueueWaitDurationCallback that will be called with the
+// wait time from the desired reconcile time whenever a reconcile operation starts.
+func WithQueueWaitDurationCallback(cb QueueWaitDurationCallback) QueueOption {
+	return QueueOption{
+		apply: func(s *queueSettings) {
+			s.waitCallback = cb
+		},
+	}
+}
+
+// WithResultCallback sets the ResultCallback to provide to the LogMiddleware.
 //
-// It will be called both on successful and failed reconcile operations, with the relevant error
-// statistics.
+// It will be called after every reconcile operation completes with the relevant information about
+// the operation and its execution.
+func WithResultCallback(cb ResultCallback) QueueOption {
+	return QueueOption{
+		apply: func(s *queueSettings) {
+			s.resultCallback = cb
+		},
+	}
+}
+
+// WithErrorStatsCallback sets the callback to provide to the ErrorBackoffMiddleware.
+//
+// It will be called whenever the error statistics change.
 //
 // Determining whether the reconcile operation failed is possible by checking
 // ErrorStats.SuccessiveFailures -- if it's zero, the operation was successful.
-func WithErrorCallback(cb ErrorCallback) QueueOption {
+func WithErrorStatsCallback(cb ErrorStatsCallback) QueueOption {
 	return QueueOption{
 		apply: func(s *queueSettings) {
 			s.errorCallback = cb

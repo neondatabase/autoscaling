@@ -53,6 +53,9 @@ type Queue struct {
 
 	// NOTE: This field is immutable.
 	handlers map[schema.GroupVersionKind]HandlerFunc
+
+	// if not nil, a callback that records how long each item was waiting to be reconciled
+	queueWaitCallback QueueWaitDurationCallback
 }
 
 type kv struct {
@@ -91,7 +94,7 @@ type Result struct {
 
 // NewQueue builds and returns a new Queue with the provided middleware and handlers for various
 // types.
-func NewQueue(logger *zap.Logger, opts []QueueOption, handlers map[Object]HandlerFunc) (*Queue, error) {
+func NewQueue(handlers map[Object]HandlerFunc, opts ...QueueOption) (*Queue, error) {
 	settings := defaultQueueSettings()
 
 	for _, o := range opts {
@@ -124,7 +127,7 @@ func NewQueue(logger *zap.Logger, opts []QueueOption, handlers map[Object]Handle
 		types = append(types, gvk)
 	}
 
-	middleware := defaultMiddleware(types, settings.errorCallback, settings.panicCallback)
+	middleware := defaultMiddleware(types, settings.resultCallback, settings.errorCallback, settings.panicCallback)
 	middleware = append(middleware, settings.middleware...)
 
 	// Apply middleware to all handlers
@@ -155,6 +158,8 @@ func NewQueue(logger *zap.Logger, opts []QueueOption, handlers map[Object]Handle
 		notifyEnqueued:           enqueuedSndr.Broadcast,
 
 		handlers: enrichedHandlers,
+
+		queueWaitCallback: settings.waitCallback,
 	}
 
 	go q.handleNotifications(ctx, next, enqueuedRcvr)
@@ -338,6 +343,11 @@ func (q *Queue) Next() (_ ReconcileCallback, ok bool) {
 // It calls the outermost middleware, which in turn calls the next, and so forth, until the original
 // handler is run.
 func (q *Queue) reconcile(logger *zap.Logger, k Key, v value) {
+	if q.queueWaitCallback != nil {
+		wait := time.Since(v.reconcileAt)
+		q.queueWaitCallback(wait)
+	}
+
 	// Noteworthy functionality that we don't need to worry about here:
 	//
 	// - Catching panics is already handled by CatchPanicMiddleware.

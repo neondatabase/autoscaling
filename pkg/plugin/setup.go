@@ -46,38 +46,40 @@ func startPlugin(
 
 	initEvents := initevents.NewInitEventsMiddleware()
 
-	// FIXME: metrics for queue wait times, reconcile durations, failure rate, panics rate, number failing.
-	queueOpts := []reconcile.QueueOption{
+	reconcileQueue, err := reconcile.NewQueue(
+		map[reconcile.Object]reconcile.HandlerFunc{
+			&corev1.Node{}: func(logger *zap.Logger, k reconcile.EventKind, obj reconcile.Object) (reconcile.Result, error) {
+				return lo.Empty[reconcile.Result](), pluginState.HandleNodeEvent(logger, k, obj.(*corev1.Node))
+			},
+
+			&corev1.Pod{}: func(logger *zap.Logger, k reconcile.EventKind, obj reconcile.Object) (reconcile.Result, error) {
+				result, err := pluginState.HandlePodEvent(logger, k, obj.(*corev1.Pod))
+				return lo.FromPtr(result), err
+			},
+
+			&vmv1.VirtualMachineMigration{}: func(logger *zap.Logger, k reconcile.EventKind, obj reconcile.Object) (reconcile.Result, error) {
+				vmm := obj.(*vmv1.VirtualMachineMigration)
+				return lo.Empty[reconcile.Result](), pluginState.HandleMigrationEvent(logger, k, vmm)
+			},
+		},
 		reconcile.WithBaseContext(ctx),
 		reconcile.WithMiddleware(initEvents),
-	}
-	reconcileQueue, err := reconcile.NewQueue(logger, queueOpts, map[reconcile.Object]reconcile.HandlerFunc{
-		&corev1.Node{}: func(
-			logger *zap.Logger,
-			k reconcile.EventKind,
-			obj reconcile.Object,
-		) (reconcile.Result, error) {
-			return lo.Empty[reconcile.Result](), pluginState.HandleNodeEvent(logger, k, obj.(*corev1.Node))
-		},
-
-		&corev1.Pod{}: func(
-			logger *zap.Logger,
-			k reconcile.EventKind,
-			obj reconcile.Object,
-		) (reconcile.Result, error) {
-			result, err := pluginState.HandlePodEvent(logger, k, obj.(*corev1.Pod))
-			return lo.FromPtr(result), err
-		},
-
-		&vmv1.VirtualMachineMigration{}: func(
-			logger *zap.Logger,
-			k reconcile.EventKind,
-			obj reconcile.Object,
-		) (reconcile.Result, error) {
-			vmm := obj.(*vmv1.VirtualMachineMigration)
-			return lo.Empty[reconcile.Result](), pluginState.HandleMigrationEvent(logger, k, vmm)
-		},
-	})
+		// Note: we need one layer of indirection for callbacks referencing pluginState, because
+		// it's initialized later, so directly referencing the methods at this point will use the
+		// nil pluginState and panic on use.
+		reconcile.WithQueueWaitDurationCallback(func(duration time.Duration) {
+			pluginState.reconcileQueueWaitCallback(duration)
+		}),
+		reconcile.WithResultCallback(func(params reconcile.MiddlewareParams, duration time.Duration, err error) {
+			pluginState.reconcileResultCallback(params, duration, err)
+		}),
+		reconcile.WithErrorStatsCallback(func(params reconcile.MiddlewareParams, stats reconcile.ErrorStats) {
+			pluginState.reconcileErrorStatsCallback(logger, params, stats)
+		}),
+		reconcile.WithPanicCallback(func(params reconcile.MiddlewareParams) {
+			pluginState.reconcilePanicCallback(params)
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("could not setup reconcile queue: %w", err)
 	}
@@ -85,7 +87,10 @@ func startPlugin(
 	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
 	watchMetrics.MustRegister(promReg)
 
-	// Fetch the nodes first, so that
+	// Fetch the nodes first, so that they'll *tend* to be added to the state before we try to
+	// handle the pods that are on them.
+	// It's not guaranteed, because parallel workers acquiring the same lock ends up with *some*
+	// reordered handling, but it helps dramatically reduce the number of warnings in practice.
 	nodeHandlers := watchHandlers[*corev1.Node](reconcileQueue, initEvents)
 	nodeStore, err := watchNodeEvents(ctx, logger, k8sClient, watchMetrics, nodeHandlers)
 	if err != nil {
@@ -164,6 +169,41 @@ func startPlugin(
 	clear(pluginState.requeueAfterStartup)
 
 	return pluginState, nil
+}
+
+func (s *PluginState) reconcileQueueWaitCallback(duration time.Duration) {
+	s.metrics.reconcile.waitDurations.Observe(duration.Seconds())
+}
+
+func (s *PluginState) reconcileResultCallback(params reconcile.MiddlewareParams, duration time.Duration, err error) {
+	outcome := "success"
+	if err != nil {
+		outcome = "failure"
+	}
+	s.metrics.reconcile.processDurations.
+		WithLabelValues(params.GVK.Kind, outcome).
+		Observe(duration.Seconds())
+}
+
+func (s *PluginState) reconcileErrorStatsCallback(logger *zap.Logger, params reconcile.MiddlewareParams, stats reconcile.ErrorStats) {
+	// update count of current failing objects
+	s.metrics.reconcile.failing.
+		WithLabelValues(params.GVK.Kind).
+		Set(float64(stats.TypedCount))
+
+	// Make sure that repeatedly failing objects are sufficiently noisy
+	if stats.SuccessiveFailures >= s.config.LogSuccessiveFailuresThreshold {
+		logger.Warn(
+			fmt.Sprintf("%s has failed to reconcile >%d times in a row", params.GVK.Kind, s.config.LogSuccessiveFailuresThreshold),
+			zap.Int("SuccessiveFailures", stats.SuccessiveFailures),
+			zap.String("EventKind", string(params.EventKind)),
+			reconcile.ObjectMetaLogField(params.GVK.Kind, params.Obj),
+		)
+	}
+}
+
+func (s *PluginState) reconcilePanicCallback(params reconcile.MiddlewareParams) {
+	s.metrics.reconcile.panics.WithLabelValues(params.GVK.Kind).Inc()
 }
 
 func reconcileWorker(ctx context.Context, logger *zap.Logger, queue *reconcile.Queue) {
