@@ -1027,13 +1027,21 @@ func buildQEMUCmd(
 		}
 	}
 
+	// Create network tap devices.
+	//
+	// It is important to enable multiqueue support for virtio-net-pci devices as we seen them choking on
+	// traffic and dropping packets. Set queues=4 and vectors=10 as a reasonable default. `vectors` should
+	// be to 2*queues + 2 as per https://www.linux-kvm.org/page/Multiqueue. We also enable multiqueue support
+	// for all VM sizes, even to a small ones. As of time of writing, it seems to not worth a trouble to
+	// dynamically adjust number of queues based on VM size.
+
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to set up default network: %w", err)
 	}
-	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,script=no,downscript=no,vhost=on", defaultNetworkTapName))
-	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
+	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,queues=4,script=no,downscript=no,vhost=on", defaultNetworkTapName))
+	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,mq=on,vectors=10,netdev=default,mac=%s", macDefault.String()))
 
 	// overlay (multus) net details
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
@@ -1041,8 +1049,8 @@ func buildQEMUCmd(
 		if err != nil {
 			return nil, fmt.Errorf("Failed to set up overlay network: %w", err)
 		}
-		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
-		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
+		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,queues=4,script=no,downscript=no,vhost=on", overlayNetworkTapName))
+		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,mq=on,vectors=10,netdev=overlay,mac=%s", macOverlay.String()))
 	}
 
 	// kernel details
@@ -1717,7 +1725,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			Name: defaultNetworkTapName,
 		},
 		Mode:  netlink.TUNTAP_MODE_TAP,
-		Flags: netlink.TUNTAP_DEFAULTS,
+		Flags: netlink.TUNTAP_MULTI_QUEUE_DEFAULTS,
 	}
 	if err := netlink.LinkAdd(tap); err != nil {
 		logger.Error("could not add tap device", zap.Error(err))
@@ -1868,7 +1876,7 @@ func overlayNetwork(iface string) (mac.MAC, error) {
 			Name: overlayNetworkTapName,
 		},
 		Mode:  netlink.TUNTAP_MODE_TAP,
-		Flags: netlink.TUNTAP_DEFAULTS,
+		Flags: netlink.TUNTAP_MULTI_QUEUE_DEFAULTS,
 	}
 	if err := netlink.LinkAdd(tap); err != nil {
 		return nil, err
