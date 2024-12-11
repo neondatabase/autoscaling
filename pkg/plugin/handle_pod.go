@@ -74,11 +74,6 @@ func (s *PluginState) updatePod(
 
 	s.mu.Lock()
 	var unlocked bool
-	defer func() {
-		if !unlocked {
-			s.mu.Unlock()
-		}
-	}()
 	unlock := func() {
 		if ns != nil {
 			s.updateNodeMetricsAndRequeue(logger, ns)
@@ -86,6 +81,11 @@ func (s *PluginState) updatePod(
 		s.mu.Unlock()
 		unlocked = true
 	}
+	defer func() {
+		if !unlocked {
+			unlock()
+		}
+	}()
 
 	tentativeNode, scheduled := s.tentativelyScheduled[pod.UID]
 	if scheduled {
