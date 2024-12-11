@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -127,16 +126,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	// Pre-calculate the GVK for the object types, because List() operations only set the
 	// Kind+APIVersion on the List type, and not the individual elements.
 	sampleObj := P(new(T))
-	gvks, _, err := scheme.Scheme.ObjectKinds(sampleObj)
+	gvk, err := util.LookupGVKForType(sampleObj)
 	if err != nil {
-		return nil, fmt.Errorf("could not get GVKs for object type %T: %w", sampleObj, err)
+		return nil, err
 	}
-	if len(gvks) == 0 {
-		return nil, fmt.Errorf("no GVKs found for object type %T", sampleObj)
-	} else if len(gvks) > 1 {
-		return nil, fmt.Errorf("more than one GVK found for object type %T", sampleObj)
-	}
-	gvk := gvks[0]
 
 	// do the conversion from P -> *T. We wanted the handlers to be provided with P so that the
 	// caller doesn't need to manually specify the generics, but in order to store the callbacks
