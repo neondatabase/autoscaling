@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/queue"
@@ -105,18 +104,10 @@ func NewQueue(handlers map[Object]HandlerFunc, opts ...QueueOption) (*Queue, err
 	handlersByType := make(map[schema.GroupVersionKind]HandlerFunc)
 	for obj, handler := range handlers {
 		// nb: second arg is whether the object is unversioned. That doesn't matter to us.
-		gvks, _, err := scheme.Scheme.ObjectKinds(obj)
+		gvk, err := util.LookupGVKForType(obj)
 		if err != nil {
-			return nil, fmt.Errorf("could not get GVKs for object type %T: %w", obj, err)
+			return nil, err
 		}
-
-		if len(gvks) == 0 {
-			return nil, fmt.Errorf("no GVKs found for object type %T", obj)
-		} else if len(gvks) > 1 {
-			return nil, fmt.Errorf("more than one GVK found for object type %T", obj)
-		}
-
-		gvk := gvks[0]
 
 		// Check that this isn't a duplicate
 		if _, ok := handlersByType[gvk]; ok {

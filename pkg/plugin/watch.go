@@ -50,7 +50,12 @@ func onlyErr[T any](_ T, err error) error {
 }
 
 func watchConfig[T any](metrics watch.Metrics) watch.Config {
-	kind := any(new(T)).(runtime.Object).GetObjectKind().GroupVersionKind().Kind
+	sampleObj := any(new(T)).(runtime.Object)
+	gvk, err := util.LookupGVKForType(sampleObj)
+	if err != nil {
+		panic(err)
+	}
+	kind := gvk.Kind
 
 	return watch.Config{
 		ObjectNameLogField: kind,
