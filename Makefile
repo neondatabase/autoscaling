@@ -374,6 +374,7 @@ deploy: check-local-context docker-build load-images render-manifests kubectl ##
 	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-device-plugin
 	$(KUBECTL) apply -f $(RENDERED)/neonvm-controller.yaml
 	$(KUBECTL) -n neonvm-system rollout status deployment neonvm-controller
+	$(KUBECTL) -n neonvm-system set env deployment/neonvm-controller K3D_HACK=true
 	$(KUBECTL) apply -f $(RENDERED)/neonvm-vxlan-controller.yaml
 	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-vxlan-controller
 	# NB: typical upgrade path requires updated scheduler before autoscaler-agents.
