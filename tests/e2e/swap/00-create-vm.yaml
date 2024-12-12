@@ -24,7 +24,3 @@ spec:
     settings:
       # use old format
       swap: 1Gi
-    memoryProvider: VirtioMem
-  cpuScalingMode: sysfsScaling
-status:
-  memoryProvider: VirtioMem

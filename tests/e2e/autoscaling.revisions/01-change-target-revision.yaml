@@ -2,6 +2,7 @@ apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 unitTest: false
 ---
+
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
@@ -14,8 +15,3 @@ spec:
       value: 1
       flags: 123
     updatedAt: 2020-01-02T15:04:05Z
-  cpuScalingMode: sysfsScaling
-  guest:
-    memoryProvider: VirtioMem
-status:
-  memoryProvider: VirtioMem

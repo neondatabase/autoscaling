@@ -19,11 +19,6 @@ status:
   conditions:
     - type: Available
       status: "True"
-  memoryProvider: VirtioMem
-spec:
-  cpuScalingMode: sysfsScaling
-  guest:
-    memoryProvider: VirtioMem
 ---
 apiVersion: v1
 kind: pod

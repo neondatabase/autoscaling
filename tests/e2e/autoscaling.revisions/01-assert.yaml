@@ -11,8 +11,3 @@ status:
     revision:
       value: 1
       flags: 123
-  memoryProvider: VirtioMem
-spec:
-  cpuScalingMode: sysfsScaling
-  guest:
-    memoryProvider: VirtioMem

@@ -11,9 +11,6 @@ spec:
     revision:
       value: 124 # we had 123 as the initial revision
       flags: 1 # 1 for Upscale
-  cpuScalingMode: sysfsScaling
-  guest:
-    memoryProvider: VirtioMem
 status:
   phase: Running
   restartCount: 0
@@ -26,7 +23,6 @@ status:
     revision:
       value: 124
       flags: 1
-  memoryProvider: VirtioMem
 ---
 apiVersion: v1
 kind: pod

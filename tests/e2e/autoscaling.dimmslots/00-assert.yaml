@@ -14,8 +14,4 @@ status:
       status: "True"
   cpus: 250m
   memorySize: 1Gi
-  memoryProvider: VirtioMem
-spec:
-  cpuScalingMode: sysfsScaling
-  guest:
-    memoryProvider: VirtioMem
+  memoryProvider: DIMMSlots

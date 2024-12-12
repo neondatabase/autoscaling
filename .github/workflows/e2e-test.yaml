@@ -233,8 +233,8 @@ jobs:
           docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
           make load-example-vms
 
-      - run: make arm_patch_e2e e2e
-        timeout-minutes: 30
+      - run: make e2e
+        timeout-minutes: 15
 
       - name: Get k8s logs and events
         if: always()

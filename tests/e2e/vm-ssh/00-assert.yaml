@@ -30,11 +30,6 @@ status:
   cpus: 250m
   memorySize: 1Gi
   sshSecretName: ssh-neonvm-example
-  memoryProvider: VirtioMem
-spec:
-  cpuScalingMode: sysfsScaling
-  guest:
-    memoryProvider: VirtioMem
 ---
 apiVersion: v1
 kind: Secret
@@ -43,8 +38,8 @@ immutable: true
 metadata:
   name: ssh-neonvm-example
   ownerReferences:
-    - apiVersion: vm.neon.tech/v1
-      blockOwnerDeletion: true
-      controller: true
-      kind: VirtualMachine
-      name: example
+  - apiVersion: vm.neon.tech/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: VirtualMachine
+    name: example

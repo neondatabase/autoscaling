@@ -17,6 +17,7 @@ commands:
     user: nobody
     sysvInitAction: respawn
     shell: 'DATA_SOURCE_NAME="user=cloud_admin sslmode=disable dbname=postgres" /bin/postgres_exporter'
+
 files:
   - filename: cgconfig.conf
     content: |
@@ -47,6 +48,7 @@ files:
       max_client_conn=10000
       default_pool_size=16
       max_prepared_statements=0
+
 build: |
   # Build vm-monitor
   FROM rust:1.83-alpine AS monitor-builder
@@ -124,6 +126,7 @@ build: |
       && LDFLAGS=-static ./configure --prefix=/usr/local/pgbouncer --without-openssl \
       && make -j $(nproc) \
       && make install
+
 merge: |
   RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "monitor user" --shell /bin/false vm-monitor
 

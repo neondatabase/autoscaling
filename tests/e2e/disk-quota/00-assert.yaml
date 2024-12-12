@@ -5,7 +5,7 @@ commands:
   - script: |
       set -eux
       pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
-
+      
       # Run repquota to display enabled project quotas
       full_quota_report=$(kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm /neonvm/bin/repquota -P -a)
 
@@ -20,10 +20,10 @@ metadata:
     app.kubernetes.io/name: NeonVM
     vm.neon.tech/name: example
   ownerReferences:
-    - apiVersion: vm.neon.tech/v1
-      blockOwnerDeletion: true
-      controller: true
-      kind: VirtualMachine
-      name: example
+  - apiVersion: vm.neon.tech/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: VirtualMachine
+    name: example
 status:
   phase: Running

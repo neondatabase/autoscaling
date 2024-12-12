@@ -15,10 +15,6 @@ status:
   cpus: 1
   memorySize: 4Gi
   memoryProvider: VirtioMem
-spec:
-  cpuScalingMode: sysfsScaling
-  guest:
-    memoryProvider: VirtioMem
 ---
 apiVersion: v1
 kind: pod

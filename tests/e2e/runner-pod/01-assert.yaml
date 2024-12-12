@@ -16,11 +16,6 @@ status:
   cpus: 250m
   memorySize: 1Gi
   restartCount: 1
-  memoryProvider: VirtioMem
-spec:
-  cpuScalingMode: sysfsScaling
-  guest:
-    memoryProvider: VirtioMem
 ---
 apiVersion: v1
 kind: Pod
@@ -29,10 +24,10 @@ metadata:
     app.kubernetes.io/name: NeonVM
     vm.neon.tech/name: example
   ownerReferences:
-    - apiVersion: vm.neon.tech/v1
-      blockOwnerDeletion: true
-      controller: true
-      kind: VirtualMachine
-      name: example
+  - apiVersion: vm.neon.tech/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: VirtualMachine
+    name: example
 status:
   phase: Running

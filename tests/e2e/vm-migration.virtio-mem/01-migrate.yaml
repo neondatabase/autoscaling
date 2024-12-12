@@ -1,5 +1,5 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 apply:
-  - ../../../neonvm/samples/vm-example-migration.yaml
+- ../../../neonvm/samples/vm-example-migration.yaml
 unitTest: false
