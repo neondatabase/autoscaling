@@ -1678,6 +1678,7 @@ func (r *VMReconciler) tryUpdateVM(ctx context.Context, vm *vmv1.VirtualMachine)
 func isK3D() bool {
 	switch strings.ToLower(os.Getenv("K3D_HACK")) {
 	case "true", "1", "y", "yes", "on", "enable", "enabled":
+		fmt.Println("K3D_HACK is enabled, enabling privileged mode for the runner pod")
 		return true
 	default:
 		return false
