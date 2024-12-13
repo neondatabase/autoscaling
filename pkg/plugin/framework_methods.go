@@ -96,7 +96,8 @@ func (m frameworkMetrics) incMethodCall(method string, pod *corev1.Pod, ignored 
 }
 
 func (m frameworkMetrics) incFailIfnotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
-	if status.IsSuccess() {
+	// it's normal for Filter to return Unschedulable, because that's its way of filtering out pods.
+	if status.IsSuccess() || (method == "Filter" && status.Code() == framework.Unschedulable) {
 		return
 	}
 
