@@ -374,8 +374,6 @@ deploy: check-local-context docker-build load-images render-manifests kubectl ##
 	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-device-plugin
 	$(KUBECTL) apply -f $(RENDERED)/neonvm-controller.yaml
 	$(KUBECTL) -n neonvm-system rollout status deployment neonvm-controller
-	$(KUBECTL) -n neonvm-system set env deployment/neonvm-controller K3D_HACK=true
-	$(KUBECTL) -n neonvm-system rollout status deployment neonvm-controller
 	$(KUBECTL) apply -f $(RENDERED)/neonvm-vxlan-controller.yaml
 	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-vxlan-controller
 	# NB: typical upgrade path requires updated scheduler before autoscaler-agents.
@@ -399,7 +397,7 @@ example-vms: docker-build-examples load-example-vms ## Build and push the testin
 
 .PHONY: example-vms-arm64
 example-vms-arm64: TARGET_ARCH=arm64
-example-vms-arm64: example-vms 
+example-vms-arm64: example-vms
 
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.
@@ -434,8 +432,13 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 .PHONE: e2e-tools
 e2e-tools: k3d kind kubectl kuttl python-init ## Donwnload tools for e2e tests locally if necessary.
 
+.PHONE: k3d-hack
+k3d-hack: ## Apply k3d hack to the k3d cluster
+	$(KUBECTL) -n neonvm-system set env deployment/neonvm-controller K3D_HACK=true
+	$(KUBECTL) -n neonvm-system rollout status deployment neonvm-controller
+
 .PHONE: e2e
-e2e: check-local-context e2e-tools ## Run e2e kuttl tests
+e2e: check-local-context e2e-tools k3d-hack ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
 
