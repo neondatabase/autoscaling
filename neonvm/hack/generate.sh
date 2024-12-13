@@ -18,17 +18,17 @@ git config --global --add safe.directory "$GOPATH/src/github.com/neondatabase/au
 
 echo "Running gen_helpers ..."
 kube::codegen::gen_helpers \
-    --output-base "/go/src" \
-    --input-pkg-root  github.com/neondatabase/autoscaling/neonvm/apis \
-    --boilerplate neonvm/hack/boilerplate.go.txt
+    --boilerplate neonvm/hack/boilerplate.go.txt \
+    github.com/neondatabase/autoscaling/neonvm/apis
+
 
 echo "Running gen_client ..."
 kube::codegen::gen_client \
-    --output-base "/go/src" \
-    --input-pkg-root  github.com/neondatabase/autoscaling/neonvm/apis \
-    --output-pkg-root github.com/neondatabase/autoscaling/neonvm/client \
+    --output-dir "/go/src" \
+    --output-pkg github.com/neondatabase/autoscaling/neonvm/client \
     --with-watch \
-    --boilerplate neonvm/hack/boilerplate.go.txt
+    --boilerplate neonvm/hack/boilerplate.go.txt \
+    neonvm/apis
 
 controller-gen object:headerFile="neonvm/hack/boilerplate.go.txt" paths="./neonvm/apis/..."
 
