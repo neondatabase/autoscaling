@@ -26,6 +26,7 @@ func main() {
 	logConfig := zap.NewProductionConfig()
 	logConfig.Sampling = nil // Disable sampling, which the production config enables by default.
 	logConfig.DisableStacktrace = true
+	logConfig.Level.SetLevel(zap.DebugLevel)
 	logger := zap.Must(logConfig.Build()).Named("autoscale-scheduler")
 
 	if err := runProgram(logger); err != nil {

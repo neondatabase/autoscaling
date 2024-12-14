@@ -46,7 +46,9 @@ func startPlugin(
 
 	initEvents := initevents.NewInitEventsMiddleware()
 
+	reconcileLogger := logger.Named("reconcile")
 	reconcileQueue, err := reconcile.NewQueue(
+		reconcileLogger,
 		map[reconcile.Object]reconcile.HandlerFunc{
 			&corev1.Node{}: func(logger *zap.Logger, k reconcile.EventKind, obj reconcile.Object) (reconcile.Result, error) {
 				return lo.Empty[reconcile.Result](), pluginState.HandleNodeEvent(logger, k, obj.(*corev1.Node))
@@ -68,6 +70,7 @@ func startPlugin(
 		// it's initialized later, so directly referencing the methods at this point will use the
 		// nil pluginState and panic on use.
 		reconcile.WithQueueWaitDurationCallback(func(duration time.Duration) {
+			reconcileLogger.Debug("Reconcile waited", zap.Duration("duration", duration))
 			pluginState.reconcileQueueWaitCallback(duration)
 		}),
 		reconcile.WithResultCallback(func(params reconcile.MiddlewareParams, duration time.Duration, err error) {
@@ -114,7 +117,6 @@ func startPlugin(
 
 	// Start the workers for the queue. We can't do these earlier because our handlers depend on the
 	// PluginState that only exists now.
-	reconcileLogger := logger.Named("reconcile")
 	for i := 0; i < config.ReconcileWorkers; i++ {
 		go reconcileWorker(ctx, reconcileLogger, reconcileQueue)
 	}
