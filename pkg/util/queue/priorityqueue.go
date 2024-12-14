@@ -80,17 +80,20 @@ func (q PriorityQueue[T]) Pop() (_ T, ok bool) {
 }
 
 // Value returns the value associated with the item
-func (it ItemHandle[T]) Value() *T {
-	return &it.item.v
+//
+// NOTE: Any updates to the value here will not be reflected by changing its position in the queue.
+// For that, you must use (ItemHandle[T]).Update().
+func (it ItemHandle[T]) Value() T {
+	return it.item.v
 }
 
 // Update sets the value of this item, updating its position in the queue accordingly
-func (it ItemHandle[T]) Update(newValue T) {
+func (it ItemHandle[T]) Update(update func(value *T)) {
 	if it.item.index == -1 {
 		panic("item has since been removed from the queue")
 	}
 
-	it.item.v = newValue
+	update(&it.item.v)
 	heap.Fix(it.queue, it.item.index)
 }
 

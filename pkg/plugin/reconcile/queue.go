@@ -404,8 +404,9 @@ func (q *Queue) enqueuePendingChange(k Key, v value) {
 func (q *Queue) enqueueInactive(k Key, v value) {
 	// if there's already something in the queue, just merge with that:
 	if queuedHandle, ok := q.queued[k]; ok {
-		queuedValue := &queuedHandle.Value().v
-		*queuedValue = queuedValue.mergeWithNewer(v)
+		queuedHandle.Update(func(queuedValue *kv) {
+			queuedValue.v = queuedValue.v.mergeWithNewer(v)
+		})
 		return
 	}
 
