@@ -22,8 +22,6 @@ import (
 type Queue struct {
 	mu sync.Mutex
 
-	logger *zap.Logger
-
 	// queue is the changes that are due to be processed but have not yet been picked up by any
 	// workers.
 	queue queue.PriorityQueue[kv]
@@ -95,7 +93,7 @@ type Result struct {
 
 // NewQueue builds and returns a new Queue with the provided middleware and handlers for various
 // types.
-func NewQueue(logger *zap.Logger, handlers map[Object]HandlerFunc, opts ...QueueOption) (*Queue, error) {
+func NewQueue(handlers map[Object]HandlerFunc, opts ...QueueOption) (*Queue, error) {
 	settings := defaultQueueSettings()
 
 	for _, o := range opts {
@@ -136,8 +134,7 @@ func NewQueue(logger *zap.Logger, handlers map[Object]HandlerFunc, opts ...Queue
 	enqueuedRcvr := enqueuedSndr.NewReceiver()
 
 	q := &Queue{
-		mu:     sync.Mutex{},
-		logger: logger,
+		mu: sync.Mutex{},
 		queue: queue.New(func(x, y kv) bool {
 			return x.v.isHigherPriority(y.v)
 		}),
@@ -324,7 +321,6 @@ func (q *Queue) Next() (_ ReconcileCallback, ok bool) {
 
 	// mark the item as ongoing, and then return it:
 	q.ongoing[kv.k] = struct{}{}
-	q.logger.Debug("(*Queue).Next()", zap.Int("ongoing", len(q.ongoing)))
 
 	callback := func(logger *zap.Logger) {
 		q.reconcile(logger, kv.k, kv.v)
@@ -426,7 +422,6 @@ func (q *Queue) enqueueInactive(k Key, v value) {
 func (q *Queue) finishAndMaybeRequeue(k Key, v value, requeue bool) {
 	// First, mark the item as no longer in progress:
 	delete(q.ongoing, k)
-	q.logger.Debug("(*Queue).finishAndMaybeRequeue()", zap.Int("ongoing", len(q.ongoing)))
 
 	// Then, merge with anything pending, if we should requeue
 	// Note that if there IS something pending, then it's actually newer than this value, so we
