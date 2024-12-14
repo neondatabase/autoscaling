@@ -210,26 +210,23 @@ func (n *Node) Update(newState *Node) (changed bool) {
 	changed = newState.CPU.Total != n.CPU.Total || newState.Mem.Total != n.Mem.Total ||
 		newState.CPU.Watermark != n.CPU.Watermark || newState.Mem.Watermark != n.Mem.Watermark
 
-	// check if the labels changed:
-	if !changed {
-		tmpNewLabels := newState.Labels.NewTransaction()
-		n.Labels.Iter(func(lc LoopControl, label string, value string) LoopControlFlow {
-			v, ok := tmpNewLabels.Get(label)
-			if !ok || v != value {
-				changed = true
-				return lc.Break()
-			}
-
-			// remove from tmpNewLabels so it should be empty after if all the labels match
-			tmpNewLabels.Delete(label)
-			return lc.Continue()
-		})
-		tmpNewLabels.Iter(func(lc LoopControl, label string, value string) LoopControlFlow {
-			// there's at least one label in the new node state that doesn't exist in the old one.
+	// Propagate changes to labels:
+	newState.Labels.Iter(func(lc LoopControl, label string, value string) LoopControlFlow {
+		v, ok := n.Labels.Get(label)
+		if !ok || v != value {
+			n.Labels.Set(label, value)
 			changed = true
-			return lc.Break()
-		})
-	}
+		}
+		return lc.Continue()
+	})
+	n.Labels.Iter(func(lc LoopControl, label string, value string) LoopControlFlow {
+		// remove labels that no longer exist
+		if _, ok := newState.Labels.Get(label); !ok {
+			n.Labels.Delete(label)
+			changed = true
+		}
+		return lc.Continue()
+	})
 
 	if !changed {
 		return
@@ -237,7 +234,7 @@ func (n *Node) Update(newState *Node) (changed bool) {
 
 	*n = Node{
 		Name:           n.Name,
-		Labels:         newState.Labels,
+		Labels:         n.Labels,
 		pods:           n.pods,
 		migratablePods: n.migratablePods,
 		CPU: NodeResources[vmv1.MilliCPU]{
