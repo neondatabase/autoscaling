@@ -407,6 +407,9 @@ func (q *Queue) enqueueInactive(k Key, v value) {
 		queuedHandle.Update(func(queuedValue *kv) {
 			queuedValue.v = queuedValue.v.mergeWithNewer(v)
 		})
+		// the value of reconcileAt for the item may have changed; we should notify just in case, so
+		// it's not waiting.
+		q.notifyEnqueued()
 		return
 	}
 
