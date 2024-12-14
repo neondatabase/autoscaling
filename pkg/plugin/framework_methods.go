@@ -319,7 +319,7 @@ func (e *AutoscaleEnforcer) filterCheck(
 		return lc.Continue()
 	})
 
-	// all that remains in otherPods is the pods that were not removed from iteratig through
+	// all that remains in otherPods is the pods that were not removed from iterating through
 	// tmpNode's pods.
 	var proposedNotInLocalState []podInfo
 	for _, p := range otherPods {
