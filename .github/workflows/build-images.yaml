@@ -123,8 +123,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # fetch all, so that we also include tags
 
       - uses: actions/setup-go@v5
         with:
