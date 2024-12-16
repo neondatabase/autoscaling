@@ -196,7 +196,7 @@ jobs:
           make load-example-vms
 
       - run: make e2e
-        timeout-minutes: 60
+        timeout-minutes: 15
 
       - name: Get k8s logs and events
         if: always()
