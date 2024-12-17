@@ -478,7 +478,8 @@ $(LOCALBIN):
 ## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 # https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44
-# same as used in kubectl v1.30.x; https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44
+# _should_ be the same version kubectl v1.30.x uses (https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44) however
+# there is apparently no 5.0.4 binary release
 KUSTOMIZE_VERSION ?= v5.1.1
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
@@ -500,7 +501,6 @@ CODE_GENERATOR_VERSION ?= v0.30.7
 KUTTL ?= $(LOCALBIN)/kuttl
 # k8s deps @ 1.30.7
 KUTTL_VERSION ?= v0.18.0
-
 ifeq ($(GOARCH), arm64)
     KUTTL_ARCH = arm64
 else ifeq ($(GOARCH), amd64)
@@ -508,7 +508,6 @@ else ifeq ($(GOARCH), amd64)
 else
     $(error Unsupported architecture: $(GOARCH))
 endif
-
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.30.7
 
@@ -520,7 +519,6 @@ ETCD_VERSION ?= v3.5.15
 
 KIND ?= $(LOCALBIN)/kind
 # https://github.com/kubernetes-sigs/kind/releases/tag/v0.24.0, supports k8s up to 1.31
-
 KIND_VERSION ?= v0.24.0
 
 K3D ?= $(LOCALBIN)/k3d
