@@ -477,7 +477,6 @@ $(LOCALBIN):
 
 ## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-
 # https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44
 # same as used in kubectl v1.30.x; https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44
 KUSTOMIZE_VERSION ?= v5.1.1
@@ -495,10 +494,11 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 # k8s deps @ 1.29.0 https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
 CONTROLLER_TOOLS_VERSION ?= v0.15.0
 
-# Should match the kubeernetes minor vesion
+# Should match the kubernetes minor vesion
 CODE_GENERATOR_VERSION ?= v0.30.7
 
 KUTTL ?= $(LOCALBIN)/kuttl
+# k8s deps @ 1.30.7
 KUTTL_VERSION ?= v0.18.0
 
 ifeq ($(GOARCH), arm64)
@@ -513,13 +513,18 @@ KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.30.7
 
 ETCD ?= $(LOCALBIN)/etcd
-ETCD_VERSION ?= v3.5.10
+
+# Use the same version kuberentes is tested against, see
+# https://github.com/kubernetes/kubernetes/blob/release-1.30/build/dependencies.yaml#L65-L67 for example
+ETCD_VERSION ?= v3.5.15
 
 KIND ?= $(LOCALBIN)/kind
+# https://github.com/kubernetes-sigs/kind/releases/tag/v0.24.0, supports k8s up to 1.31
+
 KIND_VERSION ?= v0.24.0
 
 K3D ?= $(LOCALBIN)/k3d
-
+# k8s deps in go.mod @ 1.30.7
 K3D_VERSION ?= v5.7.5
 
 ## Install tools
