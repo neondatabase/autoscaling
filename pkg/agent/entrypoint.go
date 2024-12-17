@@ -11,6 +11,7 @@ import (
 
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/pkg/agent/billing"
+	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
@@ -51,7 +52,13 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	}
 	defer schedTracker.Stop()
 
-	globalState, globalPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, schedTracker)
+	scalingEventsMetrics := scalingevents.NewPromMetrics()
+	scalingReporter, err := scalingevents.NewReporter(ctx, logger, &r.Config.ScalingEvents, scalingEventsMetrics)
+	if err != nil {
+		return fmt.Errorf("Error creating scaling events reporter: %w", err)
+	}
+
+	globalState, globalPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, schedTracker, scalingReporter)
 	watchMetrics.MustRegister(globalPromReg)
 
 	logger.Info("Starting billing metrics collector")
