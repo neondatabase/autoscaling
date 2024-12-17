@@ -477,8 +477,7 @@ $(LOCALBIN):
 
 ## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-# https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44
-# _should_ be the same version kubectl v1.30.x uses (https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44) however
+# _should_ be the same version kubectl v1.30.x uses (IE https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44) however
 # there is apparently no 5.0.4 binary release
 KUSTOMIZE_VERSION ?= v5.1.1
 
@@ -488,11 +487,8 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 ENVTEST_K8S_VERSION = 1.30.0
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-# We went ahead of k8s 1.28 with controller-tools v0.14.0 (which depends on k8s 1.29) to unblock go 1.22 upgrade.
-# It should be *relatively* safe as the only changes from this controller-tools version are description in CRD.
-# Once we upgrade to k8s 1.29, there's no need to change CONTROLLER_TOOLS_VERSION, and this 3 lines can be removed.
-#
-# k8s deps @ 1.29.0 https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
+
+# k8s deps @ 1.30.7 https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
 CONTROLLER_TOOLS_VERSION ?= v0.15.0
 
 # Should match the kubernetes minor vesion

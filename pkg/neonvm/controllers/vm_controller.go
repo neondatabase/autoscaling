@@ -1163,7 +1163,7 @@ func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 			"ssh-privatekey": privateKey,
 		},
 	}
-	
+
 	return secret, nil
 }
 
