@@ -83,6 +83,7 @@ help: ## Display this help.
 generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	# Use uid and gid of current user to avoid mismatched permissions
 	set -e ; \
+	rm -rf neonvm/client neonvm/apis/neonvm/v1/zz_generated.deepcopy.go
 	iidfile=$$(mktemp /tmp/iid-XXXXXX) ; \
 	docker build \
 		--build-arg USER_ID=$(shell id -u $(USER)) \
