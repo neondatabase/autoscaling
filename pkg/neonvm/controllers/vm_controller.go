@@ -27,7 +27,6 @@ import (
 	"os"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -1340,7 +1339,7 @@ func podSpec(
 					// Ensure restrictive context for the container
 					// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: lo.ToPtr(isK3D()),
+						Privileged: lo.ToPtr(false),
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
 								"NET_ADMIN",
@@ -1671,18 +1670,6 @@ func DeepEqual(v1, v2 interface{}) bool {
 // TODO: reimplement to r.Patch()
 func (r *VMReconciler) tryUpdateVM(ctx context.Context, vm *vmv1.VirtualMachine) error {
 	return r.Update(ctx, vm)
-}
-
-// K3D has a problem where we can't configure TUN on 1.30, so if the hack is enabled, we enable
-// privileged mode for the runner pod.
-func isK3D() bool {
-	switch strings.ToLower(os.Getenv("K3D_HACK")) {
-	case "true", "1", "y", "yes", "on", "enable", "enabled":
-		fmt.Println("K3D_HACK is enabled, enabling privileged mode for the runner pod")
-		return true
-	default:
-		return false
-	}
 }
 
 // return Network Attachment Definition name with IPAM settings

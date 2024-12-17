@@ -432,13 +432,8 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 .PHONE: e2e-tools
 e2e-tools: k3d kind kubectl kuttl python-init ## Donwnload tools for e2e tests locally if necessary.
 
-.PHONE: k3d-hack
-k3d-hack: ## Apply k3d hack to the k3d cluster
-	$(KUBECTL) -n neonvm-system set env deployment/neonvm-controller K3D_HACK=true
-	$(KUBECTL) -n neonvm-system rollout status deployment neonvm-controller
-
 .PHONE: e2e
-e2e: check-local-context e2e-tools k3d-hack ## Run e2e kuttl tests
+e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
 
