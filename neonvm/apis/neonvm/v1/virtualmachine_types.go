@@ -157,7 +157,7 @@ type VirtualMachineSpec struct {
 	CpuScalingMode *CpuScalingMode `json:"cpuScalingMode,omitempty"`
 
 	// Enable network monitoring on the VM
-	// +kubebuilder:default:=false
+	// +kubebuilder:default:=true
 	// +optional
 	EnableNetworkMonitoring *bool `json:"enableNetworkMonitoring,omitempty"`
 }

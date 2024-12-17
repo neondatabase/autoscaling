@@ -1158,7 +1158,7 @@ spec:
                 description: Use KVM acceleation
                 type: boolean
               enableNetworkMonitoring:
-                default: false
+                default: true
                 description: Enable network monitoring on the VM
                 type: boolean
               enableSSH:
