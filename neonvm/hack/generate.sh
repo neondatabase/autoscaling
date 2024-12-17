@@ -11,11 +11,6 @@ source "$CODEGEN_PATH"
 # Required to allow git worktrees with non-root ownership on the host to work.
 git config --global --add safe.directory "$GOPATH/src/github.com/neondatabase/autoscaling"
 
-# note: generation requires that "${output_base}/${input_pkg_root}" is valid, and *generally* the
-# way to do that is that it's the same directory.
-# The only way for that to be true is if $output_base is equal to "$GOPATH/src", which we make
-# possible by the way we mount the repo from the host.
-
 echo "Running gen_helpers ..."
 kube::codegen::gen_helpers \
     --boilerplate neonvm/hack/boilerplate.go.txt \
