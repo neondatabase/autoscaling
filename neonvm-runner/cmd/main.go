@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,8 +53,12 @@ import (
 )
 
 const (
-	QEMU_BIN          = "qemu-system-x86_64"
-	QEMU_IMG_BIN      = "qemu-img"
+	qemuBinArm64 = "qemu-system-aarch64"
+	qemuBinX8664 = "qemu-system-x86_64"
+	qemuImgBin   = "qemu-img"
+
+	architectureArm64 = "arm64"
+	architectureAmd64 = "amd64"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
 
 	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
@@ -403,14 +408,14 @@ func calcDirUsage(dirPath string) (int64, error) {
 func createSwap(diskPath string, swapSize *resource.Quantity) error {
 	tmpRawFile := "swap.raw"
 
-	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", swapSize.Value())); err != nil {
+	if err := execFg(qemuImgBin, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", swapSize.Value())); err != nil {
 		return err
 	}
 	if err := execFg("mkswap", "-L", swapName, tmpRawFile); err != nil {
 		return err
 	}
 
-	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", tmpRawFile, diskPath); err != nil {
+	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", tmpRawFile, diskPath); err != nil {
 		return err
 	}
 
@@ -466,7 +471,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		return err
 	}
 
-	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
+	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
 		return err
 	}
 
@@ -618,9 +623,14 @@ type Config struct {
 	appendKernelCmdline  string
 	skipCgroupManagement bool
 	diskCacheSettings    string
-	memoryProvider       vmv1.MemoryProvider
-	autoMovableRatio     string
-	cpuScalingMode       vmv1.CpuScalingMode
+	// memoryProvider is a memory provider to use. Validated in newConfig.
+	memoryProvider vmv1.MemoryProvider
+	// autoMovableRatio value for VirtioMem provider. Validated in newConfig.
+	autoMovableRatio string
+	// cpuScalingMode is a mode to use for CPU scaling. Validated in newConfig.
+	cpuScalingMode vmv1.CpuScalingMode
+	// System CPU architecture. Set automatically equal to runtime.GOARCH.
+	architecture string
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -631,9 +641,10 @@ func newConfig(logger *zap.Logger) *Config {
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
-		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
-		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
-		cpuScalingMode:       "", // Require that this is explicitly set. We'll check later.
+		memoryProvider:       "",
+		autoMovableRatio:     "",
+		cpuScalingMode:       "",
+		architecture:         runtime.GOARCH,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -868,7 +879,7 @@ func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
 		VirtualSize int64 `json:"virtual-size"`
 	}
 	// get current disk size by qemu-img info command
-	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
+	qemuImgOut, err := exec.Command(qemuImgBin, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
 		return fmt.Errorf("could not get root image size: %w", err)
 	}
@@ -882,7 +893,7 @@ func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
 	if !vmSpec.Guest.RootDisk.Size.IsZero() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
 			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
-			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
+			if err := execFg(qemuImgBin, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
 				return fmt.Errorf("failed to resize rootDisk: %w", err)
 			}
 		} else {
@@ -904,14 +915,13 @@ func buildQEMUCmd(
 	// prepare qemu command line
 	qemuCmd := []string{
 		"-runas", "qemu",
-		"-machine", "q35",
+		"-machine", getMachineType(cfg.architecture),
 		"-nographic",
 		"-no-reboot",
 		"-nodefaults",
 		"-only-migratable",
 		"-audiodev", "none,id=noaudio",
 		"-serial", "pty",
-		"-serial", "stdio",
 		"-msg", "timestamp=on",
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMPManual),
@@ -940,6 +950,21 @@ func buildQEMUCmd(
 			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
+	}
+	switch cfg.architecture {
+	case architectureArm64:
+		// add custom firmware to have ACPI working
+		qemuCmd = append(qemuCmd, "-bios", "/vm/QEMU_EFI_ARM.fd")
+		// arm virt has only one UART, setup virtio-serial to add more /dev/hvcX
+		qemuCmd = append(qemuCmd,
+			"-chardev", "stdio,id=virtio-console",
+			"-device", "virtconsole,chardev=virtio-console",
+		)
+	case architectureAmd64:
+		// on amd we have multiple UART ports so we can just use serial stdio
+		qemuCmd = append(qemuCmd, "-serial", "stdio")
+	default:
+		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -1057,7 +1082,7 @@ func buildQEMUCmd(
 	qemuCmd = append(
 		qemuCmd,
 		"-kernel", cfg.kernelPath,
-		"-append", makeKernelCmdline(cfg, vmSpec, vmStatus, hostname),
+		"-append", makeKernelCmdline(cfg, logger, vmSpec, vmStatus, hostname),
 	)
 
 	// should runner receive migration ?
@@ -1069,12 +1094,12 @@ func buildQEMUCmd(
 }
 
 const (
-	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init console=ttyS1 loglevel=7 root=/dev/vda rw"
+	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=7 root=/dev/vda rw"
 	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable"
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
-func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
+func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
 	cmdlineParts := []string{baseKernelCmdline}
 
 	switch cfg.memoryProvider {
@@ -1101,6 +1126,18 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 	if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
 		// Limit the number of online CPUs kernel boots with. More CPUs will be enabled on upscaling
 		cmdlineParts = append(cmdlineParts, fmt.Sprintf("maxcpus=%d", vmSpec.Guest.CPUs.Min.RoundedUp()))
+	}
+
+	switch cfg.architecture {
+	case architectureArm64:
+		// explicitly enable acpi if we run on arm
+		cmdlineParts = append(cmdlineParts, "acpi=on")
+		// use virtio-serial device kernel console
+		cmdlineParts = append(cmdlineParts, "console=hvc0")
+	case architectureAmd64:
+		cmdlineParts = append(cmdlineParts, "console=ttyS1")
+	default:
+		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
 
 	return strings.Join(cmdlineParts, " ")
@@ -1149,7 +1186,6 @@ func runQEMU(
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-
 	var callbacks cpuServerCallbacks
 	// lastValue is used to store last fractional CPU request
 	// we need to store the value as is because we can't convert it back from MilliCPU
@@ -1181,13 +1217,14 @@ func runQEMU(
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 
+	qemuBin := getQemuBinaryName(cfg.architecture)
 	var bin string
 	var cmd []string
 	if !cfg.skipCgroupManagement {
 		bin = "cgexec"
-		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
+		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), qemuBin}, qemuCmd...)
 	} else {
-		bin = QEMU_BIN
+		bin = qemuBin
 		cmd = qemuCmd
 	}
 
@@ -1205,6 +1242,30 @@ func runQEMU(
 	wg.Wait()
 
 	return err
+}
+
+func getQemuBinaryName(architecture string) string {
+	switch architecture {
+	case architectureArm64:
+		return qemuBinArm64
+	case architectureAmd64:
+		return qemuBinX8664
+	default:
+		panic(fmt.Errorf("unknown architecture %s", architecture))
+	}
+}
+
+func getMachineType(architecture string) string {
+	switch architecture {
+	case architectureArm64:
+		// virt is the most up to date and generic ARM machine architecture
+		return "virt"
+	case architectureAmd64:
+		// q35 is the most up to date and generic x86_64 machine architecture
+		return "q35"
+	default:
+		panic(fmt.Errorf("unknown architecture %s", architecture))
+	}
 }
 
 func handleCPUChange(
