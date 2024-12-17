@@ -25,21 +25,19 @@ metadata:
 data:
   autoscale-enforcer-config.json: |
     {
-      "nodeConfig": {
-        "cpu": { "watermark": 0.9 },
-        "memory": { "watermark": 0.9 },
+      "watermark": 0.9,
+      "scoring": {
         "minUsageScore": 0.5,
         "maxUsageScore": 0,
-        "scorePeak": 0.8
+        "scorePeak": 0.8,
+        "randomize": false
       },
       "schedulerName": "autoscale-scheduler",
-      "eventQueueWorkers": 64,
+      "reconcileWorkers": 16,
+      "logSuccessiveFailuresThreshold": 10,
       "startupEventHandlingTimeoutSeconds": 15,
-      "dumpState": {
-        "port": 10298,
-        "timeoutSeconds": 5
-      },
-      "migrationDeletionRetrySeconds": 5,
-      "doMigration": true,
-      "randomizeScores": true
+      "patchRetryWaitSeconds": 1,
+      "k8sCRUDTimeoutSeconds": 1,
+      "nodeMetricLabels": {},
+      "ignoredNamespaces": []
     }

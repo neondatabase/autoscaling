@@ -469,6 +469,13 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			log.Error(err, "Failed to get vm-runner Pod")
 			return err
 		}
+
+		// Update the metadata (including "usage" annotation) before anything else, so that it
+		// will be correctly set even if the rest of the reconcile operation fails.
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, vm, vmRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", vm.Name)
+		}
+
 		// runner pod found, check phase
 		switch runnerStatus(vmRunner) {
 		case runnerRunning:
