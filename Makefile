@@ -579,3 +579,9 @@ $(ETCD): $(LOCALBIN)
 			rm $(LOCALBIN)/etcd-temp; \
 		fi \
 	}
+# arm doesn't support cpu hot plug and memory hot plug and CI runners are based on qemu so no kvm acceleration as well
+arm_patch_e2e:
+	@find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.cpuScalingMode = "SysfsScaling") // .' -i {}
+	# @find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.enableAcceleration = false) // .' -i {}
+	@find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .status.memoryProvider = "VirtioMem") // .' -i {}
+	@find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.guest.memoryProvider = "VirtioMem") // .' -i {}
