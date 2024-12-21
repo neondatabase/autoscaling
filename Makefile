@@ -136,12 +136,12 @@ test: vet envtest ## Run tests.
 
 .PHONY: build
 build: vet bin/vm-builder ## Build all neonvm binaries.
-	GOOS=linux go build -o bin/controller         neonvm-controller/cmd/main.go
-	GOOS=linux go build -o bin/vxlan-controller   neonvm-vxlan-controller/cmd/main.go
-	GOOS=linux go build -o bin/runner             neonvm-runner/cmd/main.go
-	GOOS=linux go build -o bin/daemon             neonvm-daemon/cmd/main.go
-	GOOS=linux go build -o bin/autoscaler-agent   autoscaler-agent/cmd/main.go
-	GOOS=linux go build -o bin/scheduler          autoscale-scheduler/cmd/main.go
+	GOOS=linux go build -o bin/controller         neonvm-controller/cmd/*.go
+	GOOS=linux go build -o bin/vxlan-controller   neonvm-vxlan-controller/cmd/*.go
+	GOOS=linux go build -o bin/runner             neonvm-runner/cmd/*.go
+	GOOS=linux go build -o bin/daemon             neonvm-daemon/cmd/*.go
+	GOOS=linux go build -o bin/autoscaler-agent   autoscaler-agent/cmd/*.go
+	GOOS=linux go build -o bin/scheduler          autoscale-scheduler/cmd/*.go
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
