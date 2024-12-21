@@ -1,19 +1,14 @@
 package main
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"net"
 	"os"
-	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/cilium/cilium/pkg/mac"
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/docker/docker/libnetwork/resolvconf"
 	"github.com/docker/libnetwork/types"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/vishvananda/netlink"
@@ -32,24 +27,6 @@ const (
 	overlayNetworkTapName    = "tap-overlay"
 
 	protocolTCP string = "6"
-
-	// defaultPath is the default path to the resolv.conf that contains information to resolve DNS. See Path().
-	resolveDefaultPath = "/etc/resolv.conf"
-	// alternatePath is a path different from defaultPath, that may be used to resolve DNS. See Path().
-	resolveAlternatePath = "/run/systemd/resolve/resolv.conf"
-)
-
-var (
-	ipv4NumBlock      = `(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)`
-	ipv4Address       = `(` + ipv4NumBlock + `\.){3}` + ipv4NumBlock
-	ipv6Address       = `([0-9A-Fa-f]{0,4}:){2,7}([0-9A-Fa-f]{0,4})(%\w+)?`
-	nsRegexp          = regexp.MustCompile(`^\s*nameserver\s*((` + ipv4Address + `)|(` + ipv6Address + `))\s*$`)
-	nsIPv4Regexpmatch = regexp.MustCompile(`^\s*nameserver\s*((` + ipv4Address + `))\s*$`)
-	nsIPv6Regexpmatch = regexp.MustCompile(`^\s*nameserver\s*((` + ipv6Address + `))\s*$`)
-	searchRegexp      = regexp.MustCompile(`^\s*search\s*(([^\s]+\s*)*)$`)
-
-	detectSystemdResolvConfOnce sync.Once
-	pathAfterSystemdDetection   = resolveDefaultPath
 )
 
 // setupVMNetworks creates the networks for the VM and returns the appropriate QMEU args
@@ -231,13 +208,13 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	}
 
 	// get dns details from /etc/resolv.conf
-	resolvConf, err := getResolvConf()
+	resolvConf, err := resolvconf.Get()
 	if err != nil {
 		logger.Error("could not get DNS details", zap.Error(err))
 		return nil, err
 	}
-	dns := getNameservers(resolvConf.Content, types.IP)[0]
-	dnsSearch := strings.Join(getSearchDomains(resolvConf.Content), ",")
+	dns := resolvconf.GetNameservers(resolvConf.Content, types.IP)[0]
+	dnsSearch := strings.Join(resolvconf.GetSearchDomains(resolvConf.Content), ",")
 
 	// prepare dnsmask command line (instead of config file)
 	logger.Info("run dnsmasq for interface", zap.String("name", defaultNetworkBridgeName))
@@ -433,102 +410,4 @@ func (m *NetworkMonitoringMetrics) update(logger *zap.Logger) {
 	}
 	m.EgressBytes.Add(float64(egress - m.EgressBytesRaw))
 	m.EgressBytesRaw = egress
-}
-
-// File contains the resolv.conf content and its hash
-type resolveFile struct {
-	Content []byte
-	Hash    string
-}
-
-// Get returns the contents of /etc/resolv.conf and its hash
-func getResolvConf() (*resolveFile, error) {
-	return getSpecific(resolvePath())
-}
-
-// hashData returns the sha256 sum of src.
-// from https://github.com/moby/moby/blob/v20.10.24/pkg/ioutils/readers.go#L52-L59
-func hashData(src io.Reader) (string, error) {
-	h := sha256.New()
-	if _, err := io.Copy(h, src); err != nil {
-		return "", err
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// GetSpecific returns the contents of the user specified resolv.conf file and its hash
-func getSpecific(path string) (*resolveFile, error) {
-	resolv, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	hash, err := hashData(bytes.NewReader(resolv))
-	if err != nil {
-		return nil, err
-	}
-	return &resolveFile{Content: resolv, Hash: hash}, nil
-}
-
-// GetNameservers returns nameservers (if any) listed in /etc/resolv.conf
-func getNameservers(resolvConf []byte, kind int) []string {
-	nameservers := []string{}
-	for _, line := range getLines(resolvConf, []byte("#")) {
-		var ns [][]byte
-		if kind == types.IP {
-			ns = nsRegexp.FindSubmatch(line)
-		} else if kind == types.IPv4 {
-			ns = nsIPv4Regexpmatch.FindSubmatch(line)
-		} else if kind == types.IPv6 {
-			ns = nsIPv6Regexpmatch.FindSubmatch(line)
-		}
-		if len(ns) > 0 {
-			nameservers = append(nameservers, string(ns[1]))
-		}
-	}
-	return nameservers
-}
-
-// GetSearchDomains returns search domains (if any) listed in /etc/resolv.conf
-// If more than one search line is encountered, only the contents of the last
-// one is returned.
-func getSearchDomains(resolvConf []byte) []string {
-	domains := []string{}
-	for _, line := range getLines(resolvConf, []byte("#")) {
-		match := searchRegexp.FindSubmatch(line)
-		if match == nil {
-			continue
-		}
-		domains = strings.Fields(string(match[1]))
-	}
-	return domains
-}
-
-// getLines parses input into lines and strips away comments.
-func getLines(input []byte, commentMarker []byte) [][]byte {
-	lines := bytes.Split(input, []byte("\n"))
-	var output [][]byte
-	for _, currentLine := range lines {
-		commentIndex := bytes.Index(currentLine, commentMarker)
-		if commentIndex == -1 {
-			output = append(output, currentLine)
-		} else {
-			output = append(output, currentLine[:commentIndex])
-		}
-	}
-	return output
-}
-
-func resolvePath() string {
-	detectSystemdResolvConfOnce.Do(func() {
-		candidateResolvConf, err := os.ReadFile(resolveDefaultPath)
-		if err != nil {
-			// silencing error as it will resurface at next calls trying to read defaultPath
-			return
-		}
-		ns := getNameservers(candidateResolvConf, types.IP)
-		if len(ns) == 1 && ns[0] == "127.0.0.53" {
-			pathAfterSystemdDetection = resolveAlternatePath
-		}
-	})
-	return pathAfterSystemdDetection
 }
