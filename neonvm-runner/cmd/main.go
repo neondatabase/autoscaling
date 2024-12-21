@@ -4,22 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -27,28 +22,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alessio/shellescape"
-	"github.com/cilium/cilium/pkg/mac"
 	"github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup1"
 	"github.com/containerd/cgroups/v3/cgroup2"
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/digitalocean/go-qemu/qmp"
-	"github.com/docker/libnetwork/types"
 	"github.com/jpillora/backoff"
-	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samber/lo"
-	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
@@ -61,29 +49,9 @@ const (
 	architectureAmd64 = "amd64"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
 
-	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
-	runtimeDiskPath                = "/vm/images/runtime.iso"
-	mountedDiskPath                = "/vm/images"
 	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
 	logSerialSocket                = "/vm/log.sock"
 	bufferedReaderSize             = 4096
-
-	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
-	sshAuthorizedKeysMountPoint = "/vm/ssh"
-
-	swapName = "swapdisk"
-
-	defaultNetworkBridgeName = "br-def"
-	defaultNetworkTapName    = "tap-def"
-	defaultNetworkCIDR       = "169.254.254.252/30"
-
-	overlayNetworkBridgeName = "br-overlay"
-	overlayNetworkTapName    = "tap-overlay"
-
-	// defaultPath is the default path to the resolv.conf that contains information to resolve DNS. See Path().
-	resolveDefaultPath = "/etc/resolv.conf"
-	// alternatePath is a path different from defaultPath, that may be used to resolve DNS. See Path().
-	resolveAlternatePath = "/run/systemd/resolve/resolv.conf"
 
 	// cgroupPeriod is the period for evaluating cgroup quota
 	// in microseconds. Min 1000 microseconds, max 1 second
@@ -100,472 +68,7 @@ const (
 	//
 	// See also: https://neondb.slack.com/archives/C03TN5G758R/p1693462680623239
 	cpuLimitOvercommitFactor = 4
-
-	protocolTCP string = "6"
 )
-
-var (
-	ipv4NumBlock      = `(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)`
-	ipv4Address       = `(` + ipv4NumBlock + `\.){3}` + ipv4NumBlock
-	ipv6Address       = `([0-9A-Fa-f]{0,4}:){2,7}([0-9A-Fa-f]{0,4})(%\w+)?`
-	nsRegexp          = regexp.MustCompile(`^\s*nameserver\s*((` + ipv4Address + `)|(` + ipv6Address + `))\s*$`)
-	nsIPv4Regexpmatch = regexp.MustCompile(`^\s*nameserver\s*((` + ipv4Address + `))\s*$`)
-	nsIPv6Regexpmatch = regexp.MustCompile(`^\s*nameserver\s*((` + ipv6Address + `))\s*$`)
-	searchRegexp      = regexp.MustCompile(`^\s*search\s*(([^\s]+\s*)*)$`)
-
-	detectSystemdResolvConfOnce sync.Once
-	pathAfterSystemdDetection   = resolveDefaultPath
-)
-
-// File contains the resolv.conf content and its hash
-type resolveFile struct {
-	Content []byte
-	Hash    string
-}
-
-// Get returns the contents of /etc/resolv.conf and its hash
-func getResolvConf() (*resolveFile, error) {
-	return getSpecific(resolvePath())
-}
-
-// hashData returns the sha256 sum of src.
-// from https://github.com/moby/moby/blob/v20.10.24/pkg/ioutils/readers.go#L52-L59
-func hashData(src io.Reader) (string, error) {
-	h := sha256.New()
-	if _, err := io.Copy(h, src); err != nil {
-		return "", err
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// GetSpecific returns the contents of the user specified resolv.conf file and its hash
-func getSpecific(path string) (*resolveFile, error) {
-	resolv, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	hash, err := hashData(bytes.NewReader(resolv))
-	if err != nil {
-		return nil, err
-	}
-	return &resolveFile{Content: resolv, Hash: hash}, nil
-}
-
-// GetNameservers returns nameservers (if any) listed in /etc/resolv.conf
-func getNameservers(resolvConf []byte, kind int) []string {
-	nameservers := []string{}
-	for _, line := range getLines(resolvConf, []byte("#")) {
-		var ns [][]byte
-		if kind == types.IP {
-			ns = nsRegexp.FindSubmatch(line)
-		} else if kind == types.IPv4 {
-			ns = nsIPv4Regexpmatch.FindSubmatch(line)
-		} else if kind == types.IPv6 {
-			ns = nsIPv6Regexpmatch.FindSubmatch(line)
-		}
-		if len(ns) > 0 {
-			nameservers = append(nameservers, string(ns[1]))
-		}
-	}
-	return nameservers
-}
-
-// GetSearchDomains returns search domains (if any) listed in /etc/resolv.conf
-// If more than one search line is encountered, only the contents of the last
-// one is returned.
-func getSearchDomains(resolvConf []byte) []string {
-	domains := []string{}
-	for _, line := range getLines(resolvConf, []byte("#")) {
-		match := searchRegexp.FindSubmatch(line)
-		if match == nil {
-			continue
-		}
-		domains = strings.Fields(string(match[1]))
-	}
-	return domains
-}
-
-// getLines parses input into lines and strips away comments.
-func getLines(input []byte, commentMarker []byte) [][]byte {
-	lines := bytes.Split(input, []byte("\n"))
-	var output [][]byte
-	for _, currentLine := range lines {
-		commentIndex := bytes.Index(currentLine, commentMarker)
-		if commentIndex == -1 {
-			output = append(output, currentLine)
-		} else {
-			output = append(output, currentLine[:commentIndex])
-		}
-	}
-	return output
-}
-
-func resolvePath() string {
-	detectSystemdResolvConfOnce.Do(func() {
-		candidateResolvConf, err := os.ReadFile(resolveDefaultPath)
-		if err != nil {
-			// silencing error as it will resurface at next calls trying to read defaultPath
-			return
-		}
-		ns := getNameservers(candidateResolvConf, types.IP)
-		if len(ns) == 1 && ns[0] == "127.0.0.53" {
-			pathAfterSystemdDetection = resolveAlternatePath
-		}
-	})
-	return pathAfterSystemdDetection
-}
-
-func createISO9660runtime(
-	diskPath string,
-	command []string,
-	args []string,
-	sysctl []string,
-	env []vmv1.EnvVar,
-	disks []vmv1.Disk,
-	enableSSH bool,
-	swapSize *resource.Quantity,
-	shmsize *resource.Quantity,
-) error {
-	writer, err := iso9660.NewWriter()
-	if err != nil {
-		return err
-	}
-	defer writer.Cleanup() //nolint:errcheck // Nothing to do with the error, maybe log it ? TODO
-
-	if len(sysctl) != 0 {
-		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(sysctl, "\n"))), "sysctl.conf")
-		if err != nil {
-			return err
-		}
-	}
-
-	if len(command) != 0 {
-		err = writer.AddFile(bytes.NewReader([]byte(shellescape.QuoteCommand(command))), "command.sh")
-		if err != nil {
-			return err
-		}
-	}
-
-	if len(args) != 0 {
-		err = writer.AddFile(bytes.NewReader([]byte(shellescape.QuoteCommand(args))), "args.sh")
-		if err != nil {
-			return err
-		}
-	}
-
-	if len(env) != 0 {
-		envstring := []string{}
-		for _, e := range env {
-			envstring = append(envstring, fmt.Sprintf(`export %s=%s`, e.Name, shellescape.Quote(e.Value)))
-		}
-		envstring = append(envstring, "")
-		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(envstring, "\n"))), "env.sh")
-		if err != nil {
-			return err
-		}
-	}
-
-	mounts := []string{
-		"set -euxo pipefail",
-	}
-	if enableSSH {
-		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
-		mounts = append(mounts, "/neonvm/bin/mount  -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
-	}
-
-	if swapSize != nil {
-		mounts = append(mounts, fmt.Sprintf("/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh %d", swapSize.Value()))
-	}
-
-	if len(disks) != 0 {
-		for _, disk := range disks {
-			if disk.MountPath != "" {
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
-			}
-			switch {
-			case disk.EmptyDisk != nil:
-				opts := ""
-				if disk.EmptyDisk.Discard {
-					opts = "-o discard"
-				}
-
-				if disk.EmptyDisk.EnableQuotas {
-					mounts = append(mounts, fmt.Sprintf(`tune2fs -Q prjquota $(/neonvm/bin/blkid -L %s)`, disk.Name))
-					mounts = append(mounts, fmt.Sprintf(`tune2fs -E mount_opts=prjquota $(/neonvm/bin/blkid -L %s)`, disk.Name))
-				}
-
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
-				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
-			case disk.ConfigMap != nil || disk.Secret != nil:
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
-			case disk.Tmpfs != nil:
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -t tmpfs -o size=%d %s %s`, disk.Tmpfs.Size.Value(), disk.Name, disk.MountPath))
-			default:
-				// do nothing
-			}
-		}
-	}
-
-	if shmsize != nil {
-		mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -o remount,size=%d /dev/shm`, shmsize.Value()))
-	}
-
-	mounts = append(mounts, "")
-	err = writer.AddFile(bytes.NewReader([]byte(strings.Join(mounts, "\n"))), "mounts.sh")
-	if err != nil {
-		return err
-	}
-
-	if swapSize != nil {
-		lines := []string{
-			`#!/neonvm/bin/sh`,
-			`set -euxo pipefail`,
-			// this script may be run as root, so we should avoid potentially-malicious path
-			// injection
-			`export PATH="/neonvm/bin"`,
-			fmt.Sprintf(`swapdisk="$(/neonvm/bin/blkid -L %s)"`, swapName),
-			// disable swap. Allow it to fail if it's already disabled.
-			`swapoff "$swapdisk" || true`,
-			// if the requested size is zero, then... just exit. There's nothing we need to do.
-			`new_size="$1"`,
-			`if [ "$new_size" = '0' ]; then exit 0; fi`,
-			// re-make the swap.
-			// mkswap expects the size to be given in KiB, so divide the new size by 1K
-			fmt.Sprintf(`mkswap -L %s "$swapdisk" $(( new_size / 1024 ))`, swapName),
-			// ... and then re-enable the swap
-			//
-			// nb: busybox swapon only supports '-d', not its long form '--discard'.
-			`swapon -d "$swapdisk"`,
-		}
-		err = writer.AddFile(bytes.NewReader([]byte(strings.Join(lines, "\n"))), "resize-swap-internal.sh")
-		if err != nil {
-			return err
-		}
-	}
-
-	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-
-	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
-	err = outputFile.Chown(36, 34)
-	if err != nil {
-		return err
-	}
-
-	err = writer.WriteTo(outputFile, "vmruntime")
-	if err != nil {
-		return err
-	}
-
-	err = outputFile.Close()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func calcDirUsage(dirPath string) (int64, error) {
-	stat, err := os.Lstat(dirPath)
-	if err != nil {
-		return 0, err
-	}
-
-	size := stat.Size()
-
-	if !stat.IsDir() {
-		return size, nil
-	}
-
-	dir, err := os.Open(dirPath)
-	if err != nil {
-		return size, err
-	}
-	defer dir.Close()
-
-	files, err := dir.Readdir(-1)
-	if err != nil {
-		return size, err
-	}
-
-	for _, file := range files {
-		if file.Name() == "." || file.Name() == ".." {
-			continue
-		}
-		s, err := calcDirUsage(dirPath + "/" + file.Name())
-		if err != nil {
-			return size, err
-		}
-		size += s
-	}
-	return size, nil
-}
-
-func createSwap(diskPath string, swapSize *resource.Quantity) error {
-	tmpRawFile := "swap.raw"
-
-	if err := execFg(qemuImgBin, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", swapSize.Value())); err != nil {
-		return err
-	}
-	if err := execFg("mkswap", "-L", swapName, tmpRawFile); err != nil {
-		return err
-	}
-
-	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", tmpRawFile, diskPath); err != nil {
-		return err
-	}
-
-	if err := execFg("rm", "-f", tmpRawFile); err != nil {
-		return err
-	}
-
-	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
-	if err := execFg("chown", "36:34", diskPath); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, contentPath *string) error {
-	ext4blocksMin := int64(64)
-	ext4blockSize := int64(4096)
-	ext4blockCount := int64(0)
-
-	if diskSize != nil {
-		ext4blockCount = diskSize.Value() / ext4blockSize
-	} else if contentPath != nil {
-		dirSize, err := calcDirUsage(*contentPath)
-		if err != nil {
-			return err
-		}
-		ext4blockCount = int64(math.Ceil(float64(ext4blocksMin) + float64((dirSize / ext4blockSize))))
-	} else {
-		return errors.New("diskSize or contentPath should be specified")
-	}
-
-	mkfsArgs := []string{
-		"-q", // quiet
-		"-L", // volume-label
-		diskName,
-	}
-
-	if contentPath != nil {
-		// [ -d root-directory|tarball ]
-		mkfsArgs = append(mkfsArgs, "-d", *contentPath)
-	}
-
-	mkfsArgs = append(
-		mkfsArgs,
-		"-b", // block-size
-		fmt.Sprintf("%d", ext4blockSize),
-		"ext4.raw",                        // device
-		fmt.Sprintf("%d", ext4blockCount), // fs-size
-	)
-
-	if err := execFg("mkfs.ext4", mkfsArgs...); err != nil {
-		return err
-	}
-
-	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
-		return err
-	}
-
-	if err := execFg("rm", "-f", "ext4.raw"); err != nil {
-		return err
-	}
-
-	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
-	if err := execFg("chown", "36:34", diskPath); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string, contentPath string) error {
-	writer, err := iso9660.NewWriter()
-	if err != nil {
-		return err
-	}
-	defer writer.Cleanup() //nolint:errcheck // Nothing to do with the error, maybe log it ? TODO
-
-	dir, err := os.Open(contentPath)
-	if err != nil {
-		return err
-	}
-	dirEntrys, err := dir.ReadDir(0)
-	if err != nil {
-		return err
-	}
-
-	for _, file := range dirEntrys {
-		fileName := fmt.Sprintf("%s/%s", contentPath, file.Name())
-		outputPath := file.Name()
-
-		if file.IsDir() {
-			continue
-		}
-		// try to resolve symlink and check resolved file IsDir
-		resolved, err := filepath.EvalSymlinks(fileName)
-		if err != nil {
-			return err
-		}
-		resolvedOpen, err := os.Open(resolved)
-		if err != nil {
-			return err
-		}
-		resolvedStat, err := resolvedOpen.Stat()
-		if err != nil {
-			return err
-		}
-		if resolvedStat.IsDir() {
-			continue
-		}
-
-		// run the file handling logic in a closure, so the defers happen within the loop body,
-		// rather than the outer function.
-		err = func() error {
-			logger.Info("adding file to ISO9660 disk", zap.String("path", outputPath))
-			fileToAdd, err := os.Open(fileName)
-			if err != nil {
-				return err
-			}
-			defer fileToAdd.Close()
-
-			return writer.AddFile(fileToAdd, outputPath)
-		}()
-		if err != nil {
-			return err
-		}
-	}
-
-	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
-	err = outputFile.Chown(36, 34)
-	if err != nil {
-		return err
-	}
-
-	err = writer.WriteTo(outputFile, diskName)
-	if err != nil {
-		return err
-	}
-
-	err = outputFile.Close()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
 
 func checkKVM() bool {
 	info, err := os.Stat("/dev/kvm")
@@ -686,91 +189,6 @@ func main() {
 	}
 }
 
-type NetworkMonitoringMetrics struct {
-	IngressBytes, EgressBytes, Errors prometheus.Counter
-	IngressBytesRaw, EgressBytesRaw   uint64 // Absolute values to calc increments for Counters
-}
-
-func NewMonitoringMetrics(reg *prometheus.Registry) *NetworkMonitoringMetrics {
-	m := &NetworkMonitoringMetrics{
-		IngressBytes: util.RegisterMetric(reg, prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "runner_vm_ingress_bytes",
-				Help: "Number of bytes received by the VM from the open internet",
-			},
-		)),
-		EgressBytes: util.RegisterMetric(reg, prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "runner_vm_egress_bytes",
-				Help: "Number of bytes sent by the VM to the open internet",
-			},
-		)),
-		IngressBytesRaw: 0,
-		EgressBytesRaw:  0,
-		Errors: util.RegisterMetric(reg, prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "runner_vm_network_fetch_errors_total",
-				Help: "Number of errors while fetching network monitoring data",
-			},
-		)),
-	}
-	return m
-}
-
-func shouldBeIgnored(ip net.IP) bool {
-	// We need to measure only external traffic to/from vm, so we filter internal traffic
-	// Don't filter on isUnspecified as it's an iptables rule, not a real ip
-	return ip.IsLoopback() || ip.IsPrivate()
-}
-
-func getNetworkBytesCounter(iptables *iptables.IPTables, chain string) (uint64, error) {
-	cnt := uint64(0)
-	rules, err := iptables.Stats("filter", chain)
-	if err != nil {
-		return cnt, err
-	}
-
-	for _, rawStat := range rules {
-		stat, err := iptables.ParseStat(rawStat)
-		if err != nil {
-			return cnt, err
-		}
-		src, dest := stat.Source.IP, stat.Destination.IP
-		if stat.Protocol == protocolTCP && !shouldBeIgnored(src) && !shouldBeIgnored(dest) {
-			cnt += stat.Bytes
-		}
-	}
-	return cnt, nil
-}
-
-func (m *NetworkMonitoringMetrics) update(logger *zap.Logger) {
-	// Rules configured at github.com/neondatabase/cloud/blob/main/compute-init/compute-init.sh#L98
-	iptables, err := iptables.New()
-	if err != nil {
-		logger.Error("initializing iptables failed", zap.Error(err))
-		m.Errors.Inc()
-		return
-	}
-
-	ingress, err := getNetworkBytesCounter(iptables, "INPUT")
-	if err != nil {
-		logger.Error("getting iptables input counter failed", zap.Error(err))
-		m.Errors.Inc()
-		return
-	}
-	m.IngressBytes.Add(float64(ingress - m.IngressBytesRaw))
-	m.IngressBytesRaw = ingress
-
-	egress, err := getNetworkBytesCounter(iptables, "OUTPUT")
-	if err != nil {
-		logger.Error("getting iptables output counter failed", zap.Error(err))
-		m.Errors.Inc()
-		return
-	}
-	m.EgressBytes.Add(float64(egress - m.EgressBytesRaw))
-	m.EgressBytesRaw = egress
-}
-
 func run(logger *zap.Logger) error {
 	cfg := newConfig(logger)
 
@@ -873,36 +291,6 @@ func run(logger *zap.Logger) error {
 	return nil
 }
 
-func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
-	// resize rootDisk image of size specified and new size more than current
-	type QemuImgOutputPartial struct {
-		VirtualSize int64 `json:"virtual-size"`
-	}
-	// get current disk size by qemu-img info command
-	qemuImgOut, err := exec.Command(qemuImgBin, "info", "--output=json", rootDiskPath).Output()
-	if err != nil {
-		return fmt.Errorf("could not get root image size: %w", err)
-	}
-	var imageSize QemuImgOutputPartial
-	if err := json.Unmarshal(qemuImgOut, &imageSize); err != nil {
-		return fmt.Errorf("failed to unmarshal QEMU image size: %w", err)
-	}
-	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
-
-	// going to resize
-	if !vmSpec.Guest.RootDisk.Size.IsZero() {
-		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
-			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
-			if err := execFg(qemuImgBin, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
-				return fmt.Errorf("failed to resize rootDisk: %w", err)
-			}
-		} else {
-			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
-		}
-	}
-	return nil
-}
-
 func buildQEMUCmd(
 	cfg *Config,
 	logger *zap.Logger,
@@ -931,26 +319,12 @@ func buildQEMUCmd(
 		"-device", "virtserialport,chardev=log,name=tech.neon.log.0",
 	}
 
-	// disk details
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, cfg.diskCacheSettings))
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
-
-	if enableSSH {
-		name := "ssh-authorized-keys"
-		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
-			return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
-		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
+	qemuDiskArgs, err := setupVMDisks(logger, cfg.diskCacheSettings, enableSSH, swapSize, vmSpec.Disks)
+	if err != nil {
+		return nil, err
 	}
+	qemuCmd = append(qemuCmd, qemuDiskArgs...)
 
-	if swapSize != nil {
-		dPath := fmt.Sprintf("%s/swapdisk.qcow2", mountedDiskPath)
-		logger.Info("creating QCOW2 image for swap", zap.String("diskPath", dPath))
-		if err := createSwap(dPath, swapSize); err != nil {
-			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
-		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
-	}
 	switch cfg.architecture {
 	case architectureArm64:
 		// add custom firmware to have ACPI working
@@ -965,32 +339,6 @@ func buildQEMUCmd(
 		qemuCmd = append(qemuCmd, "-serial", "stdio")
 	default:
 		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
-	}
-
-	for _, disk := range vmSpec.Disks {
-		switch {
-		case disk.EmptyDisk != nil:
-			logger.Info("creating QCOW2 image with empty ext4 filesystem", zap.String("diskName", disk.Name))
-			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
-			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
-				return nil, fmt.Errorf("Failed to create QCOW2 image: %w", err)
-			}
-			discard := ""
-			if disk.EmptyDisk.Discard {
-				discard = ",discard=unmap"
-			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, cfg.diskCacheSettings, discard))
-		case disk.ConfigMap != nil || disk.Secret != nil:
-			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
-			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
-			logger.Info("creating iso9660 image", zap.String("diskPath", dPath), zap.String("diskName", disk.Name), zap.String("mountPath", mnt))
-			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
-				return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
-			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
-		default:
-			// do nothing
-		}
 	}
 
 	// cpu details
@@ -1052,31 +400,11 @@ func buildQEMUCmd(
 		}
 	}
 
-	// Create network tap devices.
-	//
-	// It is important to enable multiqueue support for virtio-net-pci devices as we seen them choking on
-	// traffic and dropping packets. Set queues=4 and vectors=10 as a reasonable default. `vectors` should
-	// be to 2*queues + 2 as per https://www.linux-kvm.org/page/Multiqueue. We also enable multiqueue support
-	// for all VM sizes, even to a small ones. As of time of writing, it seems to not worth a trouble to
-	// dynamically adjust number of queues based on VM size.
-
-	// default (pod) net details
-	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
+	qemuNetArgs, err := setupVMNetworks(logger, vmSpec.Guest.Ports, vmSpec.ExtraNetwork)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to set up default network: %w", err)
+		return nil, err
 	}
-	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,queues=4,script=no,downscript=no,vhost=on", defaultNetworkTapName))
-	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,mq=on,vectors=10,netdev=default,mac=%s", macDefault.String()))
-
-	// overlay (multus) net details
-	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
-		macOverlay, err := overlayNetwork(vmSpec.ExtraNetwork.Interface)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to set up overlay network: %w", err)
-		}
-		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,queues=4,script=no,downscript=no,vhost=on", overlayNetworkTapName))
-		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,mq=on,vectors=10,netdev=overlay,mac=%s", macOverlay.String()))
-	}
+	qemuCmd = append(qemuCmd, qemuNetArgs...)
 
 	// kernel details
 	qemuCmd = append(
@@ -1689,23 +1017,6 @@ func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.Wa
 	logger.Info("system_powerdown command sent to QEMU")
 }
 
-func calcIPs(cidr string) (net.IP, net.IP, net.IPMask, error) {
-	_, ipv4Net, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	ip0 := ipv4Net.IP.To4()
-	mask := ipv4Net.Mask
-
-	ip1 := append(net.IP{}, ip0...)
-	ip1[3]++
-	ip2 := append(net.IP{}, ip1...)
-	ip2[3]++
-
-	return ip1, ip2, mask, nil
-}
-
 //lint:ignore U1000 the function is not in use right now, but it's good to have for the future
 func execBg(name string, arg ...string) error {
 	cmd := exec.Command(name, arg...)
@@ -1725,254 +1036,6 @@ func execFg(name string, arg ...string) error {
 		return err
 	}
 	return nil
-}
-
-func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC, error) {
-	// gerenare random MAC for default Guest interface
-	mac, err := mac.GenerateRandMAC()
-	if err != nil {
-		logger.Fatal("could not generate random MAC", zap.Error(err))
-		return nil, err
-	}
-
-	// create an configure linux bridge
-	logger.Info("setup bridge interface", zap.String("name", defaultNetworkBridgeName))
-	bridge := &netlink.Bridge{
-		LinkAttrs: netlink.LinkAttrs{
-			Name: defaultNetworkBridgeName,
-		},
-	}
-	if err := netlink.LinkAdd(bridge); err != nil {
-		logger.Fatal("could not create bridge interface", zap.Error(err))
-		return nil, err
-	}
-	ipPod, ipVm, mask, err := calcIPs(cidr)
-	if err != nil {
-		logger.Fatal("could not parse IP", zap.Error(err))
-		return nil, err
-	}
-	bridgeAddr := &netlink.Addr{
-		IPNet: &net.IPNet{
-			IP:   ipPod,
-			Mask: mask,
-		},
-	}
-	if err := netlink.AddrAdd(bridge, bridgeAddr); err != nil {
-		logger.Fatal("could not parse IP", zap.Error(err))
-		return nil, err
-	}
-	if err := netlink.LinkSetUp(bridge); err != nil {
-		logger.Fatal("could not set up bridge", zap.Error(err))
-		return nil, err
-	}
-
-	// create an configure TAP interface
-	if !checkDevTun() {
-		logger.Info("create /dev/net/tun")
-		if err := execFg("mkdir", "-p", "/dev/net"); err != nil {
-			return nil, err
-		}
-		if err := execFg("mknod", "/dev/net/tun", "c", "10", "200"); err != nil {
-			return nil, err
-		}
-		if err := execFg("chown", "qemu:kvm", "/dev/net/tun"); err != nil {
-			return nil, err
-		}
-	}
-
-	logger.Info("setup tap interface", zap.String("name", defaultNetworkTapName))
-	tap := &netlink.Tuntap{
-		LinkAttrs: netlink.LinkAttrs{
-			Name: defaultNetworkTapName,
-		},
-		Mode:  netlink.TUNTAP_MODE_TAP,
-		Flags: netlink.TUNTAP_MULTI_QUEUE_DEFAULTS,
-	}
-	if err := netlink.LinkAdd(tap); err != nil {
-		logger.Error("could not add tap device", zap.Error(err))
-		return nil, err
-	}
-	if err := netlink.LinkSetMaster(tap, bridge); err != nil {
-		logger.Error("could not set up tap as master", zap.Error(err))
-		return nil, err
-	}
-	if err := netlink.LinkSetUp(tap); err != nil {
-		logger.Error("could not set up tap device", zap.Error(err))
-		return nil, err
-	}
-
-	// setup masquerading outgoing (from VM) traffic
-	logger.Info("setup masquerading for outgoing traffic")
-	if err := execFg("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
-		logger.Error("could not setup masquerading for outgoing traffic", zap.Error(err))
-		return nil, err
-	}
-
-	// pass incoming traffic to .Guest.Spec.Ports into VM
-	var iptablesArgs []string
-	for _, port := range ports {
-		logger.Info(fmt.Sprintf("setup DNAT rule for incoming traffic to port %d", port.Port))
-		iptablesArgs = []string{
-			"-t", "nat", "-A", "PREROUTING",
-			"-i", "eth0", "-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
-			"-j", "DNAT", "--to", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
-		}
-		if err := execFg("iptables", iptablesArgs...); err != nil {
-			logger.Error("could not set up DNAT rule for incoming traffic", zap.Error(err))
-			return nil, err
-		}
-		logger.Info(fmt.Sprintf("setup DNAT rule for traffic originating from localhost to port %d", port.Port))
-		iptablesArgs = []string{
-			"-t", "nat", "-A", "OUTPUT",
-			"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "LOCAL",
-			"-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
-			"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ipVm.String(), port.Port),
-		}
-		if err := execFg("iptables", iptablesArgs...); err != nil {
-			logger.Error("could not set up DNAT rule for traffic from localhost", zap.Error(err))
-			return nil, err
-		}
-		logger.Info(fmt.Sprintf("setup ACCEPT rule for traffic originating from localhost to port %d", port.Port))
-		iptablesArgs = []string{
-			"-A", "OUTPUT",
-			"-s", "127.0.0.1", "-d", ipVm.String(),
-			"-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
-			"-j", "ACCEPT",
-		}
-		if err := execFg("iptables", iptablesArgs...); err != nil {
-			logger.Error("could not set up ACCEPT rule for traffic from localhost", zap.Error(err))
-			return nil, err
-		}
-	}
-	logger.Info("setup MASQUERADE rule for traffic originating from localhost")
-	iptablesArgs = []string{
-		"-t", "nat", "-A", "POSTROUTING",
-		"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "UNICAST",
-		"-j", "MASQUERADE",
-	}
-	if err := execFg("iptables", iptablesArgs...); err != nil {
-		logger.Error("could not set up MASQUERADE rule for traffic from localhost", zap.Error(err))
-		return nil, err
-	}
-
-	// get dns details from /etc/resolv.conf
-	resolvConf, err := getResolvConf()
-	if err != nil {
-		logger.Error("could not get DNS details", zap.Error(err))
-		return nil, err
-	}
-	dns := getNameservers(resolvConf.Content, types.IP)[0]
-	dnsSearch := strings.Join(getSearchDomains(resolvConf.Content), ",")
-
-	// prepare dnsmask command line (instead of config file)
-	logger.Info("run dnsmasq for interface", zap.String("name", defaultNetworkBridgeName))
-	dnsMaskCmd := []string{
-		// No DNS, DHCP only
-		"--port=0",
-
-		// Because we don't provide DNS, no need to load resolv.conf. This helps to
-		// avoid "dnsmasq: failed to create inotify: No file descriptors available"
-		// errors.
-		"--no-resolv",
-
-		"--bind-interfaces",
-		"--dhcp-authoritative",
-		fmt.Sprintf("--interface=%s", defaultNetworkBridgeName),
-		fmt.Sprintf("--dhcp-range=%s,static,%d.%d.%d.%d", ipVm.String(), mask[0], mask[1], mask[2], mask[3]),
-		fmt.Sprintf("--dhcp-host=%s,%s,infinite", mac.String(), ipVm.String()),
-		fmt.Sprintf("--dhcp-option=option:router,%s", ipPod.String()),
-		fmt.Sprintf("--dhcp-option=option:dns-server,%s", dns),
-		fmt.Sprintf("--dhcp-option=option:domain-search,%s", dnsSearch),
-		fmt.Sprintf("--shared-network=%s,%s", defaultNetworkBridgeName, ipVm.String()),
-	}
-
-	// run dnsmasq for default Guest interface
-	if err := execFg("dnsmasq", dnsMaskCmd...); err != nil {
-		logger.Error("could not run dnsmasq", zap.Error(err))
-		return nil, err
-	}
-
-	// Adding VM's IP address to the /etc/hosts, so we can access it easily from
-	// the pod. This is particularly useful for ssh into the VM from the runner
-	// pod.
-	f, err := os.OpenFile("/etc/hosts", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	record := fmt.Sprintf("%v guest-vm\n", ipVm)
-	if _, err := f.WriteString(record); err != nil {
-		return nil, err
-	}
-
-	return mac, nil
-}
-
-func overlayNetwork(iface string) (mac.MAC, error) {
-	// gerenare random MAC for overlay Guest interface
-	mac, err := mac.GenerateRandMAC()
-	if err != nil {
-		return nil, err
-	}
-
-	// create and configure linux bridge
-	bridge := &netlink.Bridge{
-		LinkAttrs: netlink.LinkAttrs{
-			Name: overlayNetworkBridgeName,
-			Protinfo: &netlink.Protinfo{
-				Learning: false,
-			},
-		},
-	}
-	if err := netlink.LinkAdd(bridge); err != nil {
-		return nil, err
-	}
-	if err := netlink.LinkSetUp(bridge); err != nil {
-		return nil, err
-	}
-
-	// create an configure TAP interface
-	tap := &netlink.Tuntap{
-		LinkAttrs: netlink.LinkAttrs{
-			Name: overlayNetworkTapName,
-		},
-		Mode:  netlink.TUNTAP_MODE_TAP,
-		Flags: netlink.TUNTAP_MULTI_QUEUE_DEFAULTS,
-	}
-	if err := netlink.LinkAdd(tap); err != nil {
-		return nil, err
-	}
-	if err := netlink.LinkSetMaster(tap, bridge); err != nil {
-		return nil, err
-	}
-	if err := netlink.LinkSetUp(tap); err != nil {
-		return nil, err
-	}
-
-	// add overlay interface to bridge as well
-	overlayLink, err := netlink.LinkByName(iface)
-	if err != nil {
-		return nil, err
-	}
-	// firsly delete IP address(es) (it it exist) from overlay interface
-	overlayAddrs, err := netlink.AddrList(overlayLink, netlink.FAMILY_V4)
-	if err != nil {
-		return nil, err
-	}
-	for _, a := range overlayAddrs {
-		ip := a.IPNet
-		if ip != nil {
-			if err := netlink.AddrDel(overlayLink, &a); err != nil {
-				return nil, err
-			}
-		}
-	}
-	// and now add overlay link to bridge
-	if err := netlink.LinkSetMaster(overlayLink, bridge); err != nil {
-		return nil, err
-	}
-
-	return mac, nil
 }
 
 func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
