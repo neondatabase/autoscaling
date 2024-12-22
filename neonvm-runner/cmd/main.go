@@ -808,7 +808,6 @@ func run(logger *zap.Logger) error {
 		hostname = fmt.Sprintf("vm-%s", hostname)
 	}
 
-	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	sysctl := []string{
 		"kernel.core_pattern=core",
 		"kernel.core_uses_pid=1",
@@ -835,6 +834,7 @@ func run(logger *zap.Logger) error {
 		return runInitScript(logger, vmSpec.InitScript)
 	})
 
+	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	tg.Go("iso9660-runtime", func(logger *zap.Logger) error {
 		return createISO9660runtime(
 			runtimeDiskPath,
