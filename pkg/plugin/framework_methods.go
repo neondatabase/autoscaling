@@ -11,14 +11,9 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
-	rest "k8s.io/client-go/rest"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
-	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/pkg/plugin/reconcile"
 	"github.com/neondatabase/autoscaling/pkg/plugin/state"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -42,43 +37,6 @@ var (
 	_ framework.ScorePlugin      = (*AutoscaleEnforcer)(nil)
 	_ framework.ReservePlugin    = (*AutoscaleEnforcer)(nil)
 )
-
-func NewAutoscaleEnforcerPlugin(ctx context.Context, logger *zap.Logger, config *Config) func(context.Context, runtime.Object, framework.Handle) (framework.Plugin, error) {
-	return func(_ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
-		return makeAutoscaleEnforcerPlugin(ctx, logger, h, config)
-	}
-}
-
-func makeAutoscaleEnforcerPlugin(
-	ctx context.Context,
-	logger *zap.Logger,
-	handle framework.Handle,
-	config *Config,
-) (*AutoscaleEnforcer, error) {
-	// create the NeonVM client
-	if err := vmv1.AddToScheme(scheme.Scheme); err != nil {
-		return nil, err
-	}
-	vmConfig := rest.CopyConfig(handle.KubeConfig())
-	// The handler's ContentType is not the default "application/json" (it's protobuf), so we need
-	// to set it back to JSON because NeonVM doesn't support protobuf.
-	vmConfig.ContentType = "application/json"
-	vmClient, err := vmclient.NewForConfig(vmConfig)
-	if err != nil {
-		return nil, fmt.Errorf("Error creating NeonVM client: %w", err)
-	}
-
-	pluginState, err := startPlugin(ctx, logger, config, handle.ClientSet(), vmClient)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start plugin: %w", err)
-	}
-
-	return &AutoscaleEnforcer{
-		logger: logger.Named("plugin"),
-		handle: handle,
-		state:  pluginState,
-	}, nil
-}
 
 type frameworkMetrics struct {
 	// inheritedNodeLabels are the labels on the node that are directly included in the metrics,
