@@ -16,12 +16,12 @@ func RegisterDefaultCollectors(reg prometheus.Registerer) {
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 
-type PluginMetrics struct {
+type Plugin struct {
 	nodeLabels nodeLabeling
 
-	Framework frameworkMetrics
-	Nodes     nodeMetrics
-	Reconcile reconcileMetrics
+	Framework Framework
+	Nodes     Node
+	Reconcile Reconcile
 
 	ResourceRequests      *prometheus.CounterVec
 	ValidResourceRequests *prometheus.CounterVec
@@ -29,10 +29,10 @@ type PluginMetrics struct {
 	K8sOps *prometheus.CounterVec
 }
 
-func BuildPluginMetrics(nodeMetricLabels map[string]string, reg prometheus.Registerer) PluginMetrics {
+func BuildPluginMetrics(nodeMetricLabels map[string]string, reg prometheus.Registerer) Plugin {
 	nodeLabels := buildNodeLabels(nodeMetricLabels)
 
-	return PluginMetrics{
+	return Plugin{
 		nodeLabels: nodeLabels,
 		Framework:  buildSchedFrameworkMetrics(nodeLabels, reg),
 		Nodes:      buildNodeMetrics(nodeLabels, reg),
@@ -63,7 +63,7 @@ func BuildPluginMetrics(nodeMetricLabels map[string]string, reg prometheus.Regis
 	}
 }
 
-func (m *PluginMetrics) RecordK8sOp(opKind string, objKind string, objName string, err error) {
+func (m *Plugin) RecordK8sOp(opKind string, objKind string, objName string, err error) {
 	if err == nil {
 		m.K8sOps.WithLabelValues(opKind, objKind, "success").Inc()
 		return

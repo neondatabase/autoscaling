@@ -53,7 +53,7 @@ type PluginState struct {
 	// We use this when scoring pod placements.
 	maxNodeMem api.Bytes
 
-	metrics metrics.PluginMetrics
+	metrics metrics.Plugin
 
 	requeuePod      func(uid types.UID) error
 	requeueNode     func(nodeName string) error

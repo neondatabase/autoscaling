@@ -10,7 +10,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
-type frameworkMetrics struct {
+type Framework struct {
 	// inheritedNodeLabels are the labels on the node that are directly included in the metrics,
 	// given in the order that they appear in the metric labels.
 	inheritedNodeLabels []string
@@ -20,12 +20,12 @@ type frameworkMetrics struct {
 	reserveOverBudget *prometheus.CounterVec
 }
 
-func (m *frameworkMetrics) IncMethodCall(method string, pod *corev1.Pod, ignored bool) {
+func (m *Framework) IncMethodCall(method string, pod *corev1.Pod, ignored bool) {
 	az := util.PodPreferredAZIfPresent(pod)
 	m.methodCalls.WithLabelValues(method, az, strconv.FormatBool(ignored)).Inc()
 }
 
-func (m *frameworkMetrics) IncFailIfnotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
+func (m *Framework) IncFailIfnotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
 	// it's normal for Filter to return Unschedulable, because that's its way of filtering out pods.
 	if status.IsSuccess() || (method == "Filter" && status.Code() == framework.Unschedulable) {
 		return
@@ -37,7 +37,7 @@ func (m *frameworkMetrics) IncFailIfnotSuccess(method string, pod *corev1.Pod, i
 		Inc()
 }
 
-func (m *frameworkMetrics) IncReserveOverBudget(ignored bool, node *state.Node) {
+func (m *Framework) IncReserveOverBudget(ignored bool, node *state.Node) {
 	labelValues := []string{node.Name}
 	for _, label := range m.inheritedNodeLabels {
 		value, _ := node.Labels.Get(label)
@@ -48,12 +48,12 @@ func (m *frameworkMetrics) IncReserveOverBudget(ignored bool, node *state.Node) 
 	m.reserveOverBudget.WithLabelValues(labelValues...).Inc()
 }
 
-func buildSchedFrameworkMetrics(labels nodeLabeling, reg prometheus.Registerer) frameworkMetrics {
+func buildSchedFrameworkMetrics(labels nodeLabeling, reg prometheus.Registerer) Framework {
 	reserveLabels := []string{"node"}
 	reserveLabels = append(reserveLabels, labels.metricLabelNames...)
 	reserveLabels = append(reserveLabels, "ignored_namespace")
 
-	return frameworkMetrics{
+	return Framework{
 		inheritedNodeLabels: labels.k8sLabelNames,
 
 		methodCalls: util.RegisterMetric(reg, prometheus.NewCounterVec(

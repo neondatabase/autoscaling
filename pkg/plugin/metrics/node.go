@@ -6,7 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-type nodeMetrics struct {
+type Node struct {
 	// InheritedLabels are the labels on the node that are directly used as part of the metrics
 	InheritedLabels []string
 
@@ -14,12 +14,12 @@ type nodeMetrics struct {
 	mem *prometheus.GaugeVec
 }
 
-func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) nodeMetrics {
+func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) Node {
 	finalMetricLabels := []string{"node"}
 	finalMetricLabels = append(finalMetricLabels, labels.metricLabelNames...)
 	finalMetricLabels = append(finalMetricLabels, "field")
 
-	return nodeMetrics{
+	return Node{
 		InheritedLabels: labels.k8sLabelNames,
 
 		cpu: util.RegisterMetric(reg, prometheus.NewGaugeVec(
@@ -39,7 +39,7 @@ func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) nodeMetric
 	}
 }
 
-func (m *nodeMetrics) Update(node *state.Node) {
+func (m *Node) Update(node *state.Node) {
 	commonLabels := []string{node.Name}
 	for _, label := range m.InheritedLabels {
 		value, _ := node.Labels.Get(label)
@@ -62,7 +62,7 @@ func (m *nodeMetrics) Update(node *state.Node) {
 	}
 }
 
-func (m *nodeMetrics) Remove(node *state.Node) {
+func (m *Node) Remove(node *state.Node) {
 	baseMatch := prometheus.Labels{"node": node.Name}
 	m.cpu.DeletePartialMatch(baseMatch)
 	m.mem.DeletePartialMatch(baseMatch)

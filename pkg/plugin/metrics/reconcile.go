@@ -5,15 +5,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-type reconcileMetrics struct {
+type Reconcile struct {
 	WaitDurations    prometheus.Histogram
 	ProcessDurations *prometheus.HistogramVec
 	Failing          *prometheus.GaugeVec
 	Panics           *prometheus.CounterVec
 }
 
-func buildReconcileMetrics(reg prometheus.Registerer) reconcileMetrics {
-	return reconcileMetrics{
+func buildReconcileMetrics(reg prometheus.Registerer) Reconcile {
+	return Reconcile{
 		WaitDurations: util.RegisterMetric(reg, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Name: "autoscaling_plugin_reconcile_queue_wait_durations",
