@@ -21,7 +21,7 @@ import (
 )
 
 func NewAutoscaleEnforcerPlugin(
-	ctx context.Context,
+	baseCtx context.Context,
 	logger *zap.Logger,
 	handle framework.Handle,
 	config *Config,
@@ -40,7 +40,7 @@ func NewAutoscaleEnforcerPlugin(
 	}
 
 	// set up a new context to cancel the background tasks if we bail early.
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(baseCtx)
 	defer func() {
 		if finalError != nil {
 			cancel()
