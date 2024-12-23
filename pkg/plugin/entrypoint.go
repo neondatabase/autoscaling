@@ -180,8 +180,8 @@ func NewAutoscaleEnforcerPlugin(
 	clear(pluginState.requeueAfterStartup)
 
 	return &AutoscaleEnforcer{
-		logger: logger.Named("plugin"),
-		handle: handle,
-		state:  pluginState,
+		logger:  logger.Named("plugin"),
+		state:   pluginState,
+		metrics: &pluginState.metrics.Framework,
 	}, nil
 }

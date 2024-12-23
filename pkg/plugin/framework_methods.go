@@ -12,18 +12,22 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
+	"github.com/neondatabase/autoscaling/pkg/plugin/metrics"
 	"github.com/neondatabase/autoscaling/pkg/plugin/reconcile"
 	"github.com/neondatabase/autoscaling/pkg/plugin/state"
 )
 
 const PluginName = "AutoscaleEnforcer"
 
+// AutoscaleEnforcer implements Kubernetes scheduling plugins to account for available autoscaling
+// resources during scheduling.
+//
+// For more info on k8s scheduling plugins, see:
+// https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/
 type AutoscaleEnforcer struct {
-	logger *zap.Logger
-
-	handle framework.Handle
-
-	state *PluginState
+	logger  *zap.Logger
+	state   *PluginState
+	metrics *metrics.Framework
 }
 
 // Compile-time checks that AutoscaleEnforcer actually implements the interfaces we want it to
@@ -80,9 +84,9 @@ func (e *AutoscaleEnforcer) PostFilter(
 ) (_ *framework.PostFilterResult, status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.Framework.IncMethodCall("PostFilter", pod, ignored)
+	e.metrics.IncMethodCall("PostFilter", pod, ignored)
 	defer func() {
-		e.state.metrics.Framework.IncFailIfnotSuccess("PostFilter", pod, ignored, status)
+		e.metrics.IncFailIfnotSuccess("PostFilter", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(
@@ -105,9 +109,9 @@ func (e *AutoscaleEnforcer) Filter(
 ) (status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.Framework.IncMethodCall("Filter", pod, ignored)
+	e.metrics.IncMethodCall("Filter", pod, ignored)
 	defer func() {
-		e.state.metrics.Framework.IncFailIfnotSuccess("Filter", pod, ignored, status)
+		e.metrics.IncFailIfnotSuccess("Filter", pod, ignored, status)
 	}()
 
 	nodeName := nodeInfo.Node().Name
@@ -281,9 +285,9 @@ func (e *AutoscaleEnforcer) Score(
 ) (_ int64, status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.Framework.IncMethodCall("NormalizeScore", pod, ignored)
+	e.metrics.IncMethodCall("NormalizeScore", pod, ignored)
 	defer func() {
-		e.state.metrics.Framework.IncFailIfnotSuccess("NormalizeScore", pod, ignored, status)
+		e.metrics.IncFailIfnotSuccess("NormalizeScore", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(
@@ -395,9 +399,9 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 ) (status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.Framework.IncMethodCall("NormalizeScore", pod, ignored)
+	e.metrics.IncMethodCall("NormalizeScore", pod, ignored)
 	defer func() {
-		e.state.metrics.Framework.IncFailIfnotSuccess("NormalizeScore", pod, ignored, status)
+		e.metrics.IncFailIfnotSuccess("NormalizeScore", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(
@@ -469,9 +473,9 @@ func (e *AutoscaleEnforcer) Reserve(
 ) (status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.Framework.IncMethodCall("Reserve", pod, ignored)
+	e.metrics.IncMethodCall("Reserve", pod, ignored)
 	defer func() {
-		e.state.metrics.Framework.IncFailIfnotSuccess("Reserve", pod, ignored, status)
+		e.metrics.IncFailIfnotSuccess("Reserve", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(
@@ -536,7 +540,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	})
 
 	if ns.node.OverBudget() {
-		e.state.metrics.Framework.IncReserveOverBudget(ignored, ns.node)
+		e.metrics.IncReserveOverBudget(ignored, ns.node)
 	}
 
 	return nil
@@ -557,7 +561,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 ) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.Framework.IncMethodCall("Unreserve", pod, ignored)
+	e.metrics.IncMethodCall("Unreserve", pod, ignored)
 
 	logger := e.logger.With(
 		zap.String("method", "Unreserve"),
