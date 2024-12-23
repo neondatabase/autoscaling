@@ -9,6 +9,7 @@ import (
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/scheme"
 	"github.com/neondatabase/autoscaling/pkg/plugin/initevents"
+	"github.com/neondatabase/autoscaling/pkg/plugin/metrics"
 	"github.com/neondatabase/autoscaling/pkg/plugin/reconcile"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
@@ -48,7 +49,7 @@ func NewAutoscaleEnforcerPlugin(
 	}()
 
 	promReg := prometheus.NewRegistry()
-	RegisterDefaultCollectors(promReg)
+	metrics.RegisterDefaultCollectors(promReg)
 
 	// pre-define this so that we can reference it in the handlers, knowing that it won't be used
 	// until we start the workers (which we do *after* we've set this value).

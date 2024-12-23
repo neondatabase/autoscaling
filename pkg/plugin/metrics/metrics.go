@@ -1,4 +1,4 @@
-package plugin
+package metrics
 
 import (
 	"fmt"
@@ -46,8 +46,8 @@ type PluginMetrics struct {
 	K8sOps *prometheus.CounterVec
 }
 
-func BuildPluginMetrics(config Config, reg prometheus.Registerer) PluginMetrics {
-	nodeLabels := buildNodeLabels(config)
+func BuildPluginMetrics(nodeMetricLabels map[string]string, reg prometheus.Registerer) PluginMetrics {
+	nodeLabels := buildNodeLabels(nodeMetricLabels)
 
 	return PluginMetrics{
 		nodeLabels: nodeLabels,
@@ -80,13 +80,13 @@ func BuildPluginMetrics(config Config, reg prometheus.Registerer) PluginMetrics 
 	}
 }
 
-func buildNodeLabels(config Config) nodeLabeling {
+func buildNodeLabels(nodeMetricLabels map[string]string) nodeLabeling {
 	type labelPair struct {
 		metricLabel string
 		k8sLabel    string
 	}
 	labels := []labelPair{}
-	for metricLabel, k8sLabel := range config.NodeMetricLabels {
+	for metricLabel, k8sLabel := range nodeMetricLabels {
 		labels = append(labels, labelPair{
 			metricLabel: metricLabel,
 			k8sLabel:    k8sLabel,

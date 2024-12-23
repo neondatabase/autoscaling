@@ -21,6 +21,7 @@ import (
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/plugin/metrics"
 	"github.com/neondatabase/autoscaling/pkg/plugin/state"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
@@ -52,7 +53,7 @@ type PluginState struct {
 	// We use this when scoring pod placements.
 	maxNodeMem api.Bytes
 
-	metrics PluginMetrics
+	metrics metrics.PluginMetrics
 
 	requeuePod      func(uid types.UID) error
 	requeueNode     func(nodeName string) error
@@ -88,7 +89,7 @@ func NewPluginState(
 
 	indexedNodeStore := watch.NewIndexedStore(nodeWatchStore, watch.NewFlatNameIndex[corev1.Node]())
 
-	metrics := BuildPluginMetrics(config, reg)
+	metrics := metrics.BuildPluginMetrics(config.NodeMetricLabels, reg)
 
 	return &PluginState{
 		mu: sync.Mutex{},
