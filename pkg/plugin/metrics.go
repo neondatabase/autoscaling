@@ -1,9 +1,15 @@
 package plugin
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"golang.org/x/exp/slices"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	"github.com/neondatabase/autoscaling/pkg/plugin/state"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -221,4 +227,91 @@ func buildReconcileMetrics(reg prometheus.Registerer) reconcileMetrics {
 			[]string{"kind"},
 		)),
 	}
+}
+
+type frameworkMetrics struct {
+	// inheritedNodeLabels are the labels on the node that are directly included in the metrics,
+	// given in the order that they appear in the metric labels.
+	inheritedNodeLabels []string
+
+	methodCalls       *prometheus.CounterVec
+	methodCallFails   *prometheus.CounterVec
+	reserveOverBudget *prometheus.CounterVec
+}
+
+func (m frameworkMetrics) incMethodCall(method string, pod *corev1.Pod, ignored bool) {
+	az := util.PodPreferredAZIfPresent(pod)
+	m.methodCalls.WithLabelValues(method, az, strconv.FormatBool(ignored)).Inc()
+}
+
+func (m frameworkMetrics) incFailIfnotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
+	// it's normal for Filter to return Unschedulable, because that's its way of filtering out pods.
+	if status.IsSuccess() || (method == "Filter" && status.Code() == framework.Unschedulable) {
+		return
+	}
+
+	az := util.PodPreferredAZIfPresent(pod)
+	m.methodCallFails.
+		WithLabelValues(method, az, strconv.FormatBool(ignored), status.Code().String()).
+		Inc()
+}
+
+func (m frameworkMetrics) incReserveOverBudget(ignored bool, node *state.Node) {
+	labelValues := []string{node.Name}
+	for _, label := range m.inheritedNodeLabels {
+		value, _ := node.Labels.Get(label)
+		labelValues = append(labelValues, value)
+	}
+	labelValues = append(labelValues, strconv.FormatBool(ignored))
+
+	m.reserveOverBudget.WithLabelValues(labelValues...).Inc()
+}
+
+func buildSchedFrameworkMetrics(labels nodeLabeling, reg prometheus.Registerer) frameworkMetrics {
+	reserveLabels := []string{"node"}
+	reserveLabels = append(reserveLabels, labels.metricLabelNames...)
+	reserveLabels = append(reserveLabels, "ignored_namespace")
+
+	return frameworkMetrics{
+		inheritedNodeLabels: labels.k8sLabelNames,
+
+		methodCalls: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_extension_calls_total",
+				Help: "Number of calls to scheduler plugin extension points",
+			},
+			[]string{"method", "desired_availability_zone", "ignored_namespace"},
+		)),
+		methodCallFails: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_extension_call_fails_total",
+				Help: "Number of unsuccessful calls to scheduler plugin extension points",
+			},
+			[]string{"method", "desired_availability_zone", "ignored_namespace", "status"},
+		)),
+		reserveOverBudget: util.RegisterMetric(reg, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "autoscaling_plugin_reserve_should_deny_total",
+				Help: "Number of times the plugin should deny a reservation",
+			},
+			reserveLabels,
+		)),
+	}
+}
+
+func recordK8sOp(metrics pluginMetrics, opKind string, objKind string, objName string, err error) {
+	if err == nil {
+		metrics.k8sOps.WithLabelValues(opKind, objKind, "success").Inc()
+		return
+	}
+
+	// error is non-nil; let's prepare it to be a metric label.
+	errMsg := util.RootError(err).Error()
+	// Some error messages contain the object name. We could try to filter them all out, but
+	// it's probably more maintainable to just keep them as-is and remove the name.
+	errMsg = strings.ReplaceAll(errMsg, objName, "<name>")
+
+	outcome := fmt.Sprintf("error: %s", errMsg)
+
+	metrics.k8sOps.WithLabelValues(opKind, objKind, outcome).Inc()
 }

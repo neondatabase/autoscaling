@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -173,21 +172,4 @@ func NewPluginState(
 			return err
 		},
 	}
-}
-
-func recordK8sOp(metrics pluginMetrics, opKind string, objKind string, objName string, err error) {
-	if err == nil {
-		metrics.k8sOps.WithLabelValues(opKind, objKind, "success").Inc()
-		return
-	}
-
-	// error is non-nil; let's prepare it to be a metric label.
-	errMsg := util.RootError(err).Error()
-	// Some error messages contain the object name. We could try to filter them all out, but
-	// it's probably more maintainable to just keep them as-is and remove the name.
-	errMsg = strings.ReplaceAll(errMsg, objName, "<name>")
-
-	outcome := fmt.Sprintf("error: %s", errMsg)
-
-	metrics.k8sOps.WithLabelValues(opKind, objKind, outcome).Inc()
 }
