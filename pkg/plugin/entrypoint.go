@@ -117,7 +117,7 @@ func NewAutoscaleEnforcerPlugin(
 	// on the migration objects being handled.
 	vmmHandlers := watchHandlers[*vmv1.VirtualMachineMigration](reconcileQueue, nil)
 	if err := watchMigrationEvents(ctx, logger, vmClient, watchMetrics, vmmHandlers); err != nil {
-		return nil, fmt.Errorf("could not start watch on Pod events: %w", err)
+		return nil, fmt.Errorf("could not start watch on VirtualMachineMigration events: %w", err)
 	}
 
 	pluginState = NewPluginState(*config, vmClient, promReg, podStore, nodeStore)
