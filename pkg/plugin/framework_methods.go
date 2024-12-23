@@ -80,9 +80,9 @@ func (e *AutoscaleEnforcer) PostFilter(
 ) (_ *framework.PostFilterResult, status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.framework.incMethodCall("PostFilter", pod, ignored)
+	e.state.metrics.Framework.IncMethodCall("PostFilter", pod, ignored)
 	defer func() {
-		e.state.metrics.framework.incFailIfnotSuccess("PostFilter", pod, ignored, status)
+		e.state.metrics.Framework.IncFailIfnotSuccess("PostFilter", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(
@@ -105,9 +105,9 @@ func (e *AutoscaleEnforcer) Filter(
 ) (status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.framework.incMethodCall("Filter", pod, ignored)
+	e.state.metrics.Framework.IncMethodCall("Filter", pod, ignored)
 	defer func() {
-		e.state.metrics.framework.incFailIfnotSuccess("Filter", pod, ignored, status)
+		e.state.metrics.Framework.IncFailIfnotSuccess("Filter", pod, ignored, status)
 	}()
 
 	nodeName := nodeInfo.Node().Name
@@ -281,9 +281,9 @@ func (e *AutoscaleEnforcer) Score(
 ) (_ int64, status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.framework.incMethodCall("NormalizeScore", pod, ignored)
+	e.state.metrics.Framework.IncMethodCall("NormalizeScore", pod, ignored)
 	defer func() {
-		e.state.metrics.framework.incFailIfnotSuccess("NormalizeScore", pod, ignored, status)
+		e.state.metrics.Framework.IncFailIfnotSuccess("NormalizeScore", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(
@@ -395,9 +395,9 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 ) (status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.framework.incMethodCall("NormalizeScore", pod, ignored)
+	e.state.metrics.Framework.IncMethodCall("NormalizeScore", pod, ignored)
 	defer func() {
-		e.state.metrics.framework.incFailIfnotSuccess("NormalizeScore", pod, ignored, status)
+		e.state.metrics.Framework.IncFailIfnotSuccess("NormalizeScore", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(
@@ -469,9 +469,9 @@ func (e *AutoscaleEnforcer) Reserve(
 ) (status *framework.Status) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.framework.incMethodCall("Reserve", pod, ignored)
+	e.state.metrics.Framework.IncMethodCall("Reserve", pod, ignored)
 	defer func() {
-		e.state.metrics.framework.incFailIfnotSuccess("Reserve", pod, ignored, status)
+		e.state.metrics.Framework.IncFailIfnotSuccess("Reserve", pod, ignored, status)
 	}()
 
 	logger := e.logger.With(
@@ -536,7 +536,7 @@ func (e *AutoscaleEnforcer) Reserve(
 	})
 
 	if ns.node.OverBudget() {
-		e.state.metrics.framework.incReserveOverBudget(ignored, ns.node)
+		e.state.metrics.Framework.IncReserveOverBudget(ignored, ns.node)
 	}
 
 	return nil
@@ -557,7 +557,7 @@ func (e *AutoscaleEnforcer) Unreserve(
 ) {
 	ignored := e.state.config.ignoredNamespace(pod.Namespace)
 
-	e.state.metrics.framework.incMethodCall("Unreserve", pod, ignored)
+	e.state.metrics.Framework.IncMethodCall("Unreserve", pod, ignored)
 
 	logger := e.logger.With(
 		zap.String("method", "Unreserve"),

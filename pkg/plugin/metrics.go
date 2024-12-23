@@ -15,7 +15,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
-func registerDefaultCollectors(reg prometheus.Registerer) {
+func RegisterDefaultCollectors(reg prometheus.Registerer) {
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
@@ -33,36 +33,36 @@ type nodeLabeling struct {
 	metricLabelNames []string
 }
 
-type pluginMetrics struct {
+type PluginMetrics struct {
 	nodeLabels nodeLabeling
 
-	framework frameworkMetrics
-	nodes     nodeMetrics
-	reconcile reconcileMetrics
+	Framework frameworkMetrics
+	Nodes     nodeMetrics
+	Reconcile reconcileMetrics
 
-	resourceRequests      *prometheus.CounterVec
-	validResourceRequests *prometheus.CounterVec
+	ResourceRequests      *prometheus.CounterVec
+	ValidResourceRequests *prometheus.CounterVec
 
-	k8sOps *prometheus.CounterVec
+	K8sOps *prometheus.CounterVec
 }
 
-func BuildPluginMetrics(config Config, reg prometheus.Registerer) pluginMetrics {
+func BuildPluginMetrics(config Config, reg prometheus.Registerer) PluginMetrics {
 	nodeLabels := buildNodeLabels(config)
 
-	return pluginMetrics{
+	return PluginMetrics{
 		nodeLabels: nodeLabels,
-		framework:  buildSchedFrameworkMetrics(nodeLabels, reg),
-		nodes:      buildNodeMetrics(nodeLabels, reg),
-		reconcile:  buildReconcileMetrics(reg),
+		Framework:  buildSchedFrameworkMetrics(nodeLabels, reg),
+		Nodes:      buildNodeMetrics(nodeLabels, reg),
+		Reconcile:  buildReconcileMetrics(reg),
 
-		resourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		ResourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_resource_requests_total",
 				Help: "Number of resource requests received by the scheduler plugin",
 			},
 			[]string{"code"},
 		)),
-		validResourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		ValidResourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_resource_requests_results_total",
 				Help: "Number of resource requests to the scheduler plugin with various results",
@@ -70,7 +70,7 @@ func BuildPluginMetrics(config Config, reg prometheus.Registerer) pluginMetrics 
 			[]string{"code", "node"},
 		)),
 
-		k8sOps: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		K8sOps: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_k8s_ops_total",
 				Help: "Number of k8s API requests and their outcome",
@@ -113,8 +113,8 @@ func buildNodeLabels(config Config) nodeLabeling {
 }
 
 type nodeMetrics struct {
-	// inheritedLabels are the labels on the node that are directly used as part of the metrics
-	inheritedLabels []string
+	// InheritedLabels are the labels on the node that are directly used as part of the metrics
+	InheritedLabels []string
 
 	cpu *prometheus.GaugeVec
 	mem *prometheus.GaugeVec
@@ -126,7 +126,7 @@ func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) nodeMetric
 	finalMetricLabels = append(finalMetricLabels, "field")
 
 	return nodeMetrics{
-		inheritedLabels: labels.k8sLabelNames,
+		InheritedLabels: labels.k8sLabelNames,
 
 		cpu: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -145,16 +145,16 @@ func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) nodeMetric
 	}
 }
 
-func (m nodeMetrics) update(node *state.Node) {
+func (m nodeMetrics) Update(node *state.Node) {
 	commonLabels := []string{node.Name}
-	for _, label := range m.inheritedLabels {
+	for _, label := range m.InheritedLabels {
 		value, _ := node.Labels.Get(label)
 		commonLabels = append(commonLabels, value)
 	}
 
 	// Remove old metrics before setting the new ones, because otherwise we may end up with
 	// un-updated metrics if node labels change.
-	m.remove(node)
+	m.Remove(node)
 
 	for _, f := range node.CPU.Fields() {
 		//nolint:gocritic // assigning append value to a different slice is intentional here
@@ -168,22 +168,22 @@ func (m nodeMetrics) update(node *state.Node) {
 	}
 }
 
-func (m nodeMetrics) remove(node *state.Node) {
+func (m nodeMetrics) Remove(node *state.Node) {
 	baseMatch := prometheus.Labels{"node": node.Name}
 	m.cpu.DeletePartialMatch(baseMatch)
 	m.mem.DeletePartialMatch(baseMatch)
 }
 
 type reconcileMetrics struct {
-	waitDurations    prometheus.Histogram
-	processDurations *prometheus.HistogramVec
-	failing          *prometheus.GaugeVec
-	panics           *prometheus.CounterVec
+	WaitDurations    prometheus.Histogram
+	ProcessDurations *prometheus.HistogramVec
+	Failing          *prometheus.GaugeVec
+	Panics           *prometheus.CounterVec
 }
 
 func buildReconcileMetrics(reg prometheus.Registerer) reconcileMetrics {
 	return reconcileMetrics{
-		waitDurations: util.RegisterMetric(reg, prometheus.NewHistogram(
+		WaitDurations: util.RegisterMetric(reg, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Name: "autoscaling_plugin_reconcile_queue_wait_durations",
 				Help: "Duration that items in the reconcile queue are waiting to be picked up",
@@ -197,7 +197,7 @@ func buildReconcileMetrics(reg prometheus.Registerer) reconcileMetrics {
 				},
 			},
 		)),
-		processDurations: util.RegisterMetric(reg, prometheus.NewHistogramVec(
+		ProcessDurations: util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name: "autoscaling_plugin_reconcile_duration_seconds",
 				Help: "Duration that items take to be reconciled",
@@ -212,14 +212,14 @@ func buildReconcileMetrics(reg prometheus.Registerer) reconcileMetrics {
 			},
 			[]string{"kind", "outcome"},
 		)),
-		failing: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+		Failing: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_plugin_reconcile_failing_objects",
 				Help: "Number of objects currently failing to be reconciled",
 			},
 			[]string{"kind"},
 		)),
-		panics: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		Panics: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_reconcile_panics_count",
 				Help: "Number of times reconcile operations have panicked",
@@ -239,12 +239,12 @@ type frameworkMetrics struct {
 	reserveOverBudget *prometheus.CounterVec
 }
 
-func (m frameworkMetrics) incMethodCall(method string, pod *corev1.Pod, ignored bool) {
+func (m frameworkMetrics) IncMethodCall(method string, pod *corev1.Pod, ignored bool) {
 	az := util.PodPreferredAZIfPresent(pod)
 	m.methodCalls.WithLabelValues(method, az, strconv.FormatBool(ignored)).Inc()
 }
 
-func (m frameworkMetrics) incFailIfnotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
+func (m frameworkMetrics) IncFailIfnotSuccess(method string, pod *corev1.Pod, ignored bool, status *framework.Status) {
 	// it's normal for Filter to return Unschedulable, because that's its way of filtering out pods.
 	if status.IsSuccess() || (method == "Filter" && status.Code() == framework.Unschedulable) {
 		return
@@ -256,7 +256,7 @@ func (m frameworkMetrics) incFailIfnotSuccess(method string, pod *corev1.Pod, ig
 		Inc()
 }
 
-func (m frameworkMetrics) incReserveOverBudget(ignored bool, node *state.Node) {
+func (m frameworkMetrics) IncReserveOverBudget(ignored bool, node *state.Node) {
 	labelValues := []string{node.Name}
 	for _, label := range m.inheritedNodeLabels {
 		value, _ := node.Labels.Get(label)
@@ -299,9 +299,9 @@ func buildSchedFrameworkMetrics(labels nodeLabeling, reg prometheus.Registerer) 
 	}
 }
 
-func recordK8sOp(metrics pluginMetrics, opKind string, objKind string, objName string, err error) {
+func (m *PluginMetrics) RecordK8sOp(opKind string, objKind string, objName string, err error) {
 	if err == nil {
-		metrics.k8sOps.WithLabelValues(opKind, objKind, "success").Inc()
+		m.K8sOps.WithLabelValues(opKind, objKind, "success").Inc()
 		return
 	}
 
@@ -313,5 +313,5 @@ func recordK8sOp(metrics pluginMetrics, opKind string, objKind string, objName s
 
 	outcome := fmt.Sprintf("error: %s", errMsg)
 
-	metrics.k8sOps.WithLabelValues(opKind, objKind, outcome).Inc()
+	m.K8sOps.WithLabelValues(opKind, objKind, outcome).Inc()
 }

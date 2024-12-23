@@ -48,7 +48,7 @@ func (s *PluginState) startPermitHandler(
 		var finalStatus int
 
 		defer func() {
-			s.metrics.resourceRequests.WithLabelValues(strconv.Itoa(finalStatus)).Inc()
+			s.metrics.ResourceRequests.WithLabelValues(strconv.Itoa(finalStatus)).Inc()
 		}()
 
 		// Catch any potential panics and report them as 500s
@@ -138,7 +138,7 @@ func (s *PluginState) handleAgentRequest(
 	nodeName := "<none>" // override this later if we have a node name
 
 	defer func() {
-		s.metrics.validResourceRequests.
+		s.metrics.ValidResourceRequests.
 			WithLabelValues(strconv.Itoa(status), nodeName).
 			Inc()
 	}()

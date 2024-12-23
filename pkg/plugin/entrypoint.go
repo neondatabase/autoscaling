@@ -48,7 +48,7 @@ func NewAutoscaleEnforcerPlugin(
 	}()
 
 	promReg := prometheus.NewRegistry()
-	registerDefaultCollectors(promReg)
+	RegisterDefaultCollectors(promReg)
 
 	// pre-define this so that we can reference it in the handlers, knowing that it won't be used
 	// until we start the workers (which we do *after* we've set this value).

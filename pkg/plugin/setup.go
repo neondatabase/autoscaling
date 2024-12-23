@@ -13,7 +13,7 @@ import (
 )
 
 func (s *PluginState) reconcileQueueWaitCallback(duration time.Duration) {
-	s.metrics.reconcile.waitDurations.Observe(duration.Seconds())
+	s.metrics.Reconcile.WaitDurations.Observe(duration.Seconds())
 }
 
 func (s *PluginState) reconcileResultCallback(params reconcile.MiddlewareParams, duration time.Duration, err error) {
@@ -21,14 +21,14 @@ func (s *PluginState) reconcileResultCallback(params reconcile.MiddlewareParams,
 	if err != nil {
 		outcome = "failure"
 	}
-	s.metrics.reconcile.processDurations.
+	s.metrics.Reconcile.ProcessDurations.
 		WithLabelValues(params.GVK.Kind, outcome).
 		Observe(duration.Seconds())
 }
 
 func (s *PluginState) reconcileErrorStatsCallback(logger *zap.Logger, params reconcile.MiddlewareParams, stats reconcile.ErrorStats) {
 	// update count of current failing objects
-	s.metrics.reconcile.failing.
+	s.metrics.Reconcile.Failing.
 		WithLabelValues(params.GVK.Kind).
 		Set(float64(stats.TypedCount))
 
@@ -44,7 +44,7 @@ func (s *PluginState) reconcileErrorStatsCallback(logger *zap.Logger, params rec
 }
 
 func (s *PluginState) reconcilePanicCallback(params reconcile.MiddlewareParams) {
-	s.metrics.reconcile.panics.WithLabelValues(params.GVK.Kind).Inc()
+	s.metrics.Reconcile.Panics.WithLabelValues(params.GVK.Kind).Inc()
 }
 
 func reconcileWorker(ctx context.Context, logger *zap.Logger, queue *reconcile.Queue) {

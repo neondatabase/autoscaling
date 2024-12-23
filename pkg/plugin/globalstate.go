@@ -52,7 +52,7 @@ type PluginState struct {
 	// We use this when scoring pod placements.
 	maxNodeMem api.Bytes
 
-	metrics pluginMetrics
+	metrics PluginMetrics
 
 	requeuePod      func(uid types.UID) error
 	requeueNode     func(nodeName string) error
@@ -132,7 +132,7 @@ func NewPluginState(
 
 			_, err := vmClient.NeonvmV1().VirtualMachineMigrations(vmm.Namespace).
 				Create(ctx, vmm, metav1.CreateOptions{})
-			recordK8sOp(metrics, "Create", "VirtualMachineMigration", vmm.Name, err)
+			metrics.RecordK8sOp("Create", "VirtualMachineMigration", vmm.Name, err)
 			if err != nil && apierrors.IsAlreadyExists(err) {
 				logger.Warn("Migration already exists for this pod")
 				return nil
@@ -154,7 +154,7 @@ func NewPluginState(
 
 			err := vmClient.NeonvmV1().VirtualMachineMigrations(vmm.Namespace).
 				Delete(ctx, vmm.Name, opts)
-			recordK8sOp(metrics, "Delete", "VirtualMachineMigration", vmm.Name, err)
+			metrics.RecordK8sOp("Delete", "VirtualMachineMigration", vmm.Name, err)
 			return err
 		},
 		patchVM: func(vm util.NamespacedName, patches []patch.Operation) error {
@@ -168,7 +168,7 @@ func NewPluginState(
 
 			_, err = vmClient.NeonvmV1().VirtualMachines(vm.Namespace).
 				Patch(ctx, vm.Name, types.JSONPatchType, patchPayload, metav1.PatchOptions{})
-			recordK8sOp(metrics, "Patch", "VirtualMachine", vm.Name, err)
+			metrics.RecordK8sOp("Patch", "VirtualMachine", vm.Name, err)
 			return err
 		},
 	}

@@ -29,7 +29,7 @@ func (s *PluginState) HandleNodeEvent(logger *zap.Logger, kind reconcile.EventKi
 }
 
 func (s *PluginState) updateNode(logger *zap.Logger, node *corev1.Node, expectExists bool) error {
-	newNode, err := state.NodeStateFromK8sObj(node, s.config.Watermark, s.metrics.nodes.inheritedLabels)
+	newNode, err := state.NodeStateFromK8sObj(node, s.config.Watermark, s.metrics.Nodes.InheritedLabels)
 	if err != nil {
 		return fmt.Errorf("could not get state from Node object: %w", err)
 	}
@@ -103,7 +103,7 @@ func (s *PluginState) deleteNode(logger *zap.Logger, node *corev1.Node, expectEx
 //
 // NOTE: this function expects that the caller has acquired s.mu.
 func (s *PluginState) reconcileNode(logger *zap.Logger, ns *nodeState) error {
-	defer s.metrics.nodes.update(ns.node)
+	defer s.metrics.Nodes.Update(ns.node)
 
 	err := s.balanceNode(logger, ns)
 	if err != nil {
@@ -121,7 +121,7 @@ func (s *PluginState) updateNodeMetricsAndRequeue(logger *zap.Logger, ns *nodeSt
 	if err := s.requeueNode(ns.node.Name); err != nil {
 		logger.Error("Failed to requeue Node", zap.Error(err))
 	}
-	s.metrics.nodes.update(ns.node)
+	s.metrics.Nodes.Update(ns.node)
 }
 
 func (s *PluginState) balanceNode(logger *zap.Logger, ns *nodeState) error {
@@ -162,7 +162,7 @@ func (s *PluginState) cleanupNode(logger *zap.Logger, ns *nodeState) {
 		}
 	}
 
-	s.metrics.nodes.remove(ns.node)
+	s.metrics.Nodes.Remove(ns.node)
 	delete(s.nodes, ns.node.Name)
 
 	logger.Info("Removed node", zap.Object("Node", ns.node))
