@@ -17,6 +17,7 @@ rules:
     verbs:
       - get
       - update
+      - delete
   - apiGroups:
       - ""
       - events.k8s.io

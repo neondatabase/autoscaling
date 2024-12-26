@@ -25,4 +25,21 @@ patches:
         - "--multus-master-cni-file-name=10-azure.conflist"
         - "--multus-log-level=error"
         - "--multus-log-file=/var/log/neon-multus.log"
-
+    - op: add
+      path: /spec/template/spec/containers/-
+      value:
+        name: self-restart
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+        image: bitnami/kubectl:1.28
+        command:
+          - "/bin/sh"
+          - "-c"
+          - sleep 3540 && kubectl delete pod -n $(POD_NAMESPACE) $(POD_NAME)
