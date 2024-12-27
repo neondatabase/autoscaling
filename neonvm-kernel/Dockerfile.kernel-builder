@@ -1,5 +1,5 @@
 # Force initial check that KERNEL_VERSION is set appropriately
-FROM ubuntu:23.10 AS check-arg
+FROM ubuntu:24.04 AS check-arg
 ARG KERNEL_VERSION
 WORKDIR /build
 
@@ -8,7 +8,7 @@ RUN set -e \
     && test -n "${KERNEL_VERSION}" \
     && echo "force this as a requirement for build-deps" > /build/arg-check-succeeded
 
-FROM ubuntu:23.10 AS build-deps
+FROM ubuntu:24.04 AS build-deps
 WORKDIR /build
 
 RUN apt-get update && apt-get -y install \
@@ -64,7 +64,7 @@ FROM --platform=linux/amd64 alpine:3.19 AS kernel_amd64
 ARG KERNEL_VERSION
 COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
 
-# Build the kernel on amd64
+# Build the kernel on arm64
 FROM build-deps AS build_arm64
 ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config

@@ -46,7 +46,10 @@ on:
       autoscaler-agent:
         description: 'autoscaler-agent image'
         value: ${{ jobs.tags.outputs.autoscaler-agent }}
-
+      daemon:
+        description: 'neonvm-daemon image'
+        value: ${{ jobs.tags.outputs.daemon }}
+        
 env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
   IMG_VXLAN_CONTROLLER:   "neondatabase/neonvm-vxlan-controller"
@@ -54,6 +57,7 @@ env:
   IMG_KERNEL:             "neondatabase/vm-kernel"
   IMG_SCHEDULER:          "neondatabase/autoscale-scheduler"
   IMG_AUTOSCALER_AGENT:   "neondatabase/autoscaler-agent"
+  IMG_DAEMON:             "neondatabase/neonvm-daemon"
   IMG_CLUSTER_AUTOSCALER: "neondatabase/cluster-autoscaler-neonvm"
   ECR_DEV:                "369495373322.dkr.ecr.eu-central-1.amazonaws.com"
   ECR_PROD:               "093970136003.dkr.ecr.eu-central-1.amazonaws.com"
@@ -64,6 +68,8 @@ env:
   # Otherwise, if we just try to use a local image, it fails trying to pull it from dockerhub.
   # See https://github.com/moby/buildkit/issues/2343 for more information.
   GO_BASE_IMG: "localhost:5000/neondatabase/autoscaling-go-base:dev"
+  # Default architecture to build. In future it would be changed to multi-arch build or separate builds for each arch
+  TARGET_ARCH: "amd64"
 
 defaults:
   run:
@@ -78,6 +84,7 @@ jobs:
       scheduler:          ${{ steps.show-tags.outputs.scheduler }}
       autoscaler-agent:   ${{ steps.show-tags.outputs.autoscaler-agent }}
       cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
+      daemon:             ${{ steps.show-tags.outputs.daemon }}
     runs-on: ubuntu-latest
     steps:
       - id: show-tags
@@ -88,6 +95,7 @@ jobs:
           echo "scheduler=${{ env.IMG_SCHEDULER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "autoscaler-agent=${{ env.IMG_AUTOSCALER_AGENT }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "cluster-autoscaler=${{ env.IMG_CLUSTER_AUTOSCALER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   vm-kernel:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
@@ -115,8 +123,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # fetch all, so that we also include tags
 
       - uses: actions/setup-go@v5
         with:
@@ -262,6 +268,7 @@ jobs:
           tags: ${{ needs.tags.outputs.vxlan-controller }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+            TARGET_ARCH=${{ env.TARGET_ARCH }}
 
       - name: Build and push autoscale-scheduler image
         uses: docker/build-push-action@v6
@@ -290,6 +297,19 @@ jobs:
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}
+
+      - name: Build and push neonvm-daemon image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          file: neonvm-daemon/Dockerfile
+          cache-from: type=registry,ref=cache.neon.build/neonvm-daemon:cache
+          cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-daemon:cache,mode=max' || '' }}
+          tags: ${{ needs.tags.outputs.daemon }}
+          build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}            
 
       - name: Build and push cluster-autoscaler image
         uses: docker/build-push-action@v6

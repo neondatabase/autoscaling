@@ -20,7 +20,7 @@ GOOS ?= $(shell go env GOOS)
 # The target architecture for linux kernel. Possible values: amd64 or arm64.
 # Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile.kernel-builder
 KERNEL_TARGET_ARCH ?= amd64
-
+TARGET_ARCH ?= amd64
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
@@ -193,9 +193,10 @@ docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runne
 		.
 
 .PHONY: docker-build-daemon
-docker-build-daemon: ## Build docker image for NeonVM daemon.
+docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemon.
 	docker build \
 		--tag $(IMG_DAEMON) \
+		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
 		--file neonvm-daemon/Dockerfile \
 		.
 
@@ -204,6 +205,7 @@ docker-build-vxlan-controller: docker-build-go-base ## Build docker image for Ne
 	docker build \
 		--tag $(IMG_VXLAN_CONTROLLER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
 		--file neonvm-vxlan-controller/Dockerfile \
 		.
 
@@ -227,11 +229,11 @@ docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscal
 
 .PHONY: docker-build-examples
 docker-build-examples: bin/vm-builder ## Build docker images for testing VMs
-	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml
+	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
 
 .PHONY: docker-build-pg16-disk-test
 docker-build-pg16-disk-test: bin/vm-builder ## Build a VM image for testing
-	./bin/vm-builder -src alpine:3.19 -dst $(PG16_DISK_TEST_IMG) -spec vm-examples/pg16-disk-test/image-spec.yaml
+	./bin/vm-builder -src alpine:3.19 -dst $(PG16_DISK_TEST_IMG) -spec vm-examples/pg16-disk-test/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
@@ -393,6 +395,10 @@ load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM im
 .PHONY: example-vms
 example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
 
+.PHONY: example-vms-arm64
+example-vms-arm64: TARGET_ARCH=arm64
+example-vms-arm64: example-vms 
+
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG16_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
@@ -492,9 +498,15 @@ CODE_GENERATOR_VERSION ?= v0.28.12
 KUTTL ?= $(LOCALBIN)/kuttl
 # k8s deps @ 1.28.3
 KUTTL_VERSION ?= v0.16.0
-
+ifeq ($(GOARCH), arm64)
+    KUTTL_ARCH = arm64
+else ifeq ($(GOARCH), amd64)
+    KUTTL_ARCH = x86_64
+else
+    $(error Unsupported architecture: $(GOARCH))
+endif
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.28.12
+KUBECTL_VERSION ?= v1.29.10
 
 KIND ?= $(LOCALBIN)/kind
 # https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0, supports k8s up to 1.30
@@ -502,7 +514,7 @@ KIND_VERSION ?= v0.23.0
 
 K3D ?= $(LOCALBIN)/k3d
 # k8s deps in go.mod @ v1.29.4 (nb: binary, separate from images)
-K3D_VERSION ?= v5.6.3
+K3D_VERSION ?= v5.7.4
 
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
@@ -534,7 +546,7 @@ $(KUBECTL): $(LOCALBIN)
 .PHONY: kuttl
 kuttl: $(KUTTL) ## Download kuttl locally if necessary.
 $(KUTTL): $(LOCALBIN)
-	@test -s $(LOCALBIN)/kuttl || { curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/$(KUTTL_VERSION)/kubectl-kuttl_$(subst v,,$(KUTTL_VERSION))_$(GOOS)_$(shell uname -m) && chmod +x $(KUTTL); }
+	test -s $(LOCALBIN)/kuttl || { curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/$(KUTTL_VERSION)/kubectl-kuttl_$(subst v,,$(KUTTL_VERSION))_$(GOOS)_$(KUTTL_ARCH) && chmod +x $(KUTTL); }
 
 .PHONY: k3d
 k3d: $(K3D) ## Download k3d locally if necessary.

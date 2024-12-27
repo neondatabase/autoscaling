@@ -2,7 +2,7 @@ apiVersion: k3d.io/v1alpha5
 kind: Simple
 servers: 1
 agents:  2
-image: rancher/k3s:v1.27.14-k3s1
+image: rancher/k3s:v1.29.10-k3s1
 
 options:
   k3d: # k3d runtime settings

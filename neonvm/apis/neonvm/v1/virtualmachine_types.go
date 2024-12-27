@@ -155,6 +155,11 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=QmpScaling
 	// +optional
 	CpuScalingMode *CpuScalingMode `json:"cpuScalingMode,omitempty"`
+
+	// Enable network monitoring on the VM
+	// +kubebuilder:default:=false
+	// +optional
+	EnableNetworkMonitoring *bool `json:"enableNetworkMonitoring,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -408,15 +413,15 @@ func (m MilliCPU) Format(state fmt.State, verb rune) {
 
 type MemorySlots struct {
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=128
+	// +kubebuilder:validation:Maximum=512
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	Min int32 `json:"min"`
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=128
+	// +kubebuilder:validation:Maximum=512
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	Max int32 `json:"max"`
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=128
+	// +kubebuilder:validation:Maximum=512
 	// +kubebuilder:validation:ExclusiveMaximum=false
 	Use int32 `json:"use"`
 }

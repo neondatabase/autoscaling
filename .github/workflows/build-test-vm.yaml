@@ -30,7 +30,8 @@ on:
 env:
   IMG_POSTGRES_16_BULLSEYE: "neondatabase/vm-postgres-16-bullseye"
   # using image built in the same workflow
-  IMG_DAEMON: "daemon:dev"
+  IMG_DAEMON: "neondatabase/neonvm-daemon"
+  TARGET_ARCH: "amd64"
 
 defaults:
   run:
@@ -46,13 +47,15 @@ jobs:
       - id: show-tags
         run: |
           echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${{ env.IMG_DAEMON }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
     needs: tags
     runs-on: [ self-hosted, gen3, large ]
+    env:
+      IMG_DAEMON: ${{ needs.tags.outputs.daemon }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -85,7 +88,7 @@ jobs:
 
       - name: build ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
         run: |
-          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-16-bullseye }} -daemon-image ${{ needs.tags.outputs.daemon }}
+          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-16-bullseye }} -daemon-image ${{ needs.tags.outputs.daemon }} -target-arch linux/${TARGET_ARCH}
       - name: docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
         run: |
           docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}

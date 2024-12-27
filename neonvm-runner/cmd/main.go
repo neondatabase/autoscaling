@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,11 +32,14 @@ import (
 	"github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup1"
 	"github.com/containerd/cgroups/v3/cgroup2"
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/digitalocean/go-qemu/qmp"
 	"github.com/docker/libnetwork/types"
 	"github.com/jpillora/backoff"
 	"github.com/kdomanski/iso9660"
 	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samber/lo"
 	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
@@ -44,12 +48,17 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 const (
-	QEMU_BIN          = "qemu-system-x86_64"
-	QEMU_IMG_BIN      = "qemu-img"
+	qemuBinArm64 = "qemu-system-aarch64"
+	qemuBinX8664 = "qemu-system-x86_64"
+	qemuImgBin   = "qemu-img"
+
+	architectureArm64 = "arm64"
+	architectureAmd64 = "amd64"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
 
 	rootDiskPath                   = "/vm/images/rootdisk.qcow2"
@@ -91,6 +100,8 @@ const (
 	//
 	// See also: https://neondb.slack.com/archives/C03TN5G758R/p1693462680623239
 	cpuLimitOvercommitFactor = 4
+
+	protocolTCP string = "6"
 )
 
 var (
@@ -397,14 +408,14 @@ func calcDirUsage(dirPath string) (int64, error) {
 func createSwap(diskPath string, swapSize *resource.Quantity) error {
 	tmpRawFile := "swap.raw"
 
-	if err := execFg(QEMU_IMG_BIN, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", swapSize.Value())); err != nil {
+	if err := execFg(qemuImgBin, "create", "-q", "-f", "raw", tmpRawFile, fmt.Sprintf("%d", swapSize.Value())); err != nil {
 		return err
 	}
 	if err := execFg("mkswap", "-L", swapName, tmpRawFile); err != nil {
 		return err
 	}
 
-	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", tmpRawFile, diskPath); err != nil {
+	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", tmpRawFile, diskPath); err != nil {
 		return err
 	}
 
@@ -460,7 +471,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 		return err
 	}
 
-	if err := execFg(QEMU_IMG_BIN, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
+	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
 		return err
 	}
 
@@ -612,9 +623,14 @@ type Config struct {
 	appendKernelCmdline  string
 	skipCgroupManagement bool
 	diskCacheSettings    string
-	memoryProvider       vmv1.MemoryProvider
-	autoMovableRatio     string
-	cpuScalingMode       vmv1.CpuScalingMode
+	// memoryProvider is a memory provider to use. Validated in newConfig.
+	memoryProvider vmv1.MemoryProvider
+	// autoMovableRatio value for VirtioMem provider. Validated in newConfig.
+	autoMovableRatio string
+	// cpuScalingMode is a mode to use for CPU scaling. Validated in newConfig.
+	cpuScalingMode vmv1.CpuScalingMode
+	// System CPU architecture. Set automatically equal to runtime.GOARCH.
+	architecture string
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -625,9 +641,10 @@ func newConfig(logger *zap.Logger) *Config {
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
-		memoryProvider:       "", // Require that this is explicitly set. We'll check later.
-		autoMovableRatio:     "", // Require that this is explicitly set IFF memoryProvider is VirtioMem. We'll check later.
-		cpuScalingMode:       "", // Require that this is explicitly set. We'll check later.
+		memoryProvider:       "",
+		autoMovableRatio:     "",
+		cpuScalingMode:       "",
+		architecture:         runtime.GOARCH,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 encoded VirtualMachine json specification")
@@ -667,6 +684,91 @@ func main() {
 	if err := run(logger); err != nil {
 		logger.Fatal("Failed to run", zap.Error(err))
 	}
+}
+
+type NetworkMonitoringMetrics struct {
+	IngressBytes, EgressBytes, Errors prometheus.Counter
+	IngressBytesRaw, EgressBytesRaw   uint64 // Absolute values to calc increments for Counters
+}
+
+func NewMonitoringMetrics(reg *prometheus.Registry) *NetworkMonitoringMetrics {
+	m := &NetworkMonitoringMetrics{
+		IngressBytes: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "runner_vm_ingress_bytes",
+				Help: "Number of bytes received by the VM from the open internet",
+			},
+		)),
+		EgressBytes: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "runner_vm_egress_bytes",
+				Help: "Number of bytes sent by the VM to the open internet",
+			},
+		)),
+		IngressBytesRaw: 0,
+		EgressBytesRaw:  0,
+		Errors: util.RegisterMetric(reg, prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "runner_vm_network_fetch_errors_total",
+				Help: "Number of errors while fetching network monitoring data",
+			},
+		)),
+	}
+	return m
+}
+
+func shouldBeIgnored(ip net.IP) bool {
+	// We need to measure only external traffic to/from vm, so we filter internal traffic
+	// Don't filter on isUnspecified as it's an iptables rule, not a real ip
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+func getNetworkBytesCounter(iptables *iptables.IPTables, chain string) (uint64, error) {
+	cnt := uint64(0)
+	rules, err := iptables.Stats("filter", chain)
+	if err != nil {
+		return cnt, err
+	}
+
+	for _, rawStat := range rules {
+		stat, err := iptables.ParseStat(rawStat)
+		if err != nil {
+			return cnt, err
+		}
+		src, dest := stat.Source.IP, stat.Destination.IP
+		if stat.Protocol == protocolTCP && !shouldBeIgnored(src) && !shouldBeIgnored(dest) {
+			cnt += stat.Bytes
+		}
+	}
+	return cnt, nil
+}
+
+func (m *NetworkMonitoringMetrics) update(logger *zap.Logger) {
+	// Rules configured at github.com/neondatabase/cloud/blob/main/compute-init/compute-init.sh#L98
+	iptables, err := iptables.New()
+	if err != nil {
+		logger.Error("initializing iptables failed", zap.Error(err))
+		m.Errors.Inc()
+		return
+	}
+
+	ingress, err := getNetworkBytesCounter(iptables, "INPUT")
+	if err != nil {
+		logger.Error("getting iptables input counter failed", zap.Error(err))
+		m.Errors.Inc()
+		return
+	}
+	m.IngressBytes.Add(float64(ingress - m.IngressBytesRaw))
+	m.IngressBytesRaw = ingress
+
+	egress, err := getNetworkBytesCounter(iptables, "OUTPUT")
+	if err != nil {
+		logger.Error("getting iptables output counter failed", zap.Error(err))
+		m.Errors.Inc()
+		return
+	}
+	m.EgressBytes.Add(float64(egress - m.EgressBytesRaw))
+	m.EgressBytesRaw = egress
 }
 
 func run(logger *zap.Logger) error {
@@ -777,7 +879,7 @@ func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
 		VirtualSize int64 `json:"virtual-size"`
 	}
 	// get current disk size by qemu-img info command
-	qemuImgOut, err := exec.Command(QEMU_IMG_BIN, "info", "--output=json", rootDiskPath).Output()
+	qemuImgOut, err := exec.Command(qemuImgBin, "info", "--output=json", rootDiskPath).Output()
 	if err != nil {
 		return fmt.Errorf("could not get root image size: %w", err)
 	}
@@ -791,7 +893,7 @@ func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
 	if !vmSpec.Guest.RootDisk.Size.IsZero() {
 		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
 			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
-			if err := execFg(QEMU_IMG_BIN, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
+			if err := execFg(qemuImgBin, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
 				return fmt.Errorf("failed to resize rootDisk: %w", err)
 			}
 		} else {
@@ -813,14 +915,13 @@ func buildQEMUCmd(
 	// prepare qemu command line
 	qemuCmd := []string{
 		"-runas", "qemu",
-		"-machine", "q35",
+		"-machine", getMachineType(cfg.architecture),
 		"-nographic",
 		"-no-reboot",
 		"-nodefaults",
 		"-only-migratable",
 		"-audiodev", "none,id=noaudio",
 		"-serial", "pty",
-		"-serial", "stdio",
 		"-msg", "timestamp=on",
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMP),
 		"-qmp", fmt.Sprintf("tcp:0.0.0.0:%d,server,wait=off", vmSpec.QMPManual),
@@ -849,6 +950,21 @@ func buildQEMUCmd(
 			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
+	}
+	switch cfg.architecture {
+	case architectureArm64:
+		// add custom firmware to have ACPI working
+		qemuCmd = append(qemuCmd, "-bios", "/vm/QEMU_EFI_ARM.fd")
+		// arm virt has only one UART, setup virtio-serial to add more /dev/hvcX
+		qemuCmd = append(qemuCmd,
+			"-chardev", "stdio,id=virtio-console",
+			"-device", "virtconsole,chardev=virtio-console",
+		)
+	case architectureAmd64:
+		// on amd we have multiple UART ports so we can just use serial stdio
+		qemuCmd = append(qemuCmd, "-serial", "stdio")
+	default:
+		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
 
 	for _, disk := range vmSpec.Disks {
@@ -936,13 +1052,21 @@ func buildQEMUCmd(
 		}
 	}
 
+	// Create network tap devices.
+	//
+	// It is important to enable multiqueue support for virtio-net-pci devices as we seen them choking on
+	// traffic and dropping packets. Set queues=4 and vectors=10 as a reasonable default. `vectors` should
+	// be to 2*queues + 2 as per https://www.linux-kvm.org/page/Multiqueue. We also enable multiqueue support
+	// for all VM sizes, even to a small ones. As of time of writing, it seems to not worth a trouble to
+	// dynamically adjust number of queues based on VM size.
+
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, vmSpec.Guest.Ports)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to set up default network: %w", err)
 	}
-	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,script=no,downscript=no,vhost=on", defaultNetworkTapName))
-	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=default,mac=%s", macDefault.String()))
+	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,queues=4,script=no,downscript=no,vhost=on", defaultNetworkTapName))
+	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,mq=on,vectors=10,netdev=default,mac=%s", macDefault.String()))
 
 	// overlay (multus) net details
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
@@ -950,15 +1074,15 @@ func buildQEMUCmd(
 		if err != nil {
 			return nil, fmt.Errorf("Failed to set up overlay network: %w", err)
 		}
-		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,script=no,downscript=no,vhost=on", overlayNetworkTapName))
-		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,netdev=overlay,mac=%s", macOverlay.String()))
+		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,queues=4,script=no,downscript=no,vhost=on", overlayNetworkTapName))
+		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,mq=on,vectors=10,netdev=overlay,mac=%s", macOverlay.String()))
 	}
 
 	// kernel details
 	qemuCmd = append(
 		qemuCmd,
 		"-kernel", cfg.kernelPath,
-		"-append", makeKernelCmdline(cfg, vmSpec, vmStatus, hostname),
+		"-append", makeKernelCmdline(cfg, logger, vmSpec, vmStatus, hostname),
 	)
 
 	// should runner receive migration ?
@@ -970,12 +1094,12 @@ func buildQEMUCmd(
 }
 
 const (
-	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init console=ttyS1 loglevel=7 root=/dev/vda rw"
+	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=7 root=/dev/vda rw"
 	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable"
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
-func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
+func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
 	cmdlineParts := []string{baseKernelCmdline}
 
 	switch cfg.memoryProvider {
@@ -1002,6 +1126,18 @@ func makeKernelCmdline(cfg *Config, vmSpec *vmv1.VirtualMachineSpec, vmStatus *v
 	if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
 		// Limit the number of online CPUs kernel boots with. More CPUs will be enabled on upscaling
 		cmdlineParts = append(cmdlineParts, fmt.Sprintf("maxcpus=%d", vmSpec.Guest.CPUs.Min.RoundedUp()))
+	}
+
+	switch cfg.architecture {
+	case architectureArm64:
+		// explicitly enable acpi if we run on arm
+		cmdlineParts = append(cmdlineParts, "acpi=on")
+		// use virtio-serial device kernel console
+		cmdlineParts = append(cmdlineParts, "console=hvc0")
+	case architectureAmd64:
+		cmdlineParts = append(cmdlineParts, "console=ttyS1")
+	default:
+		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
 
 	return strings.Join(cmdlineParts, " ")
@@ -1050,7 +1186,6 @@ func runQEMU(
 
 	wg.Add(1)
 	go terminateQemuOnSigterm(ctx, logger, &wg)
-
 	var callbacks cpuServerCallbacks
 	// lastValue is used to store last fractional CPU request
 	// we need to store the value as is because we can't convert it back from MilliCPU
@@ -1077,17 +1212,19 @@ func runQEMU(
 	}
 
 	wg.Add(1)
-	go listenForCPUChanges(ctx, logger, vmSpec.RunnerPort, callbacks, &wg)
+	monitoring := vmSpec.EnableNetworkMonitoring != nil && *vmSpec.EnableNetworkMonitoring
+	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, callbacks, &wg, monitoring)
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 
+	qemuBin := getQemuBinaryName(cfg.architecture)
 	var bin string
 	var cmd []string
 	if !cfg.skipCgroupManagement {
 		bin = "cgexec"
-		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), QEMU_BIN}, qemuCmd...)
+		cmd = append([]string{"-g", fmt.Sprintf("cpu:%s", cgroupPath), qemuBin}, qemuCmd...)
 	} else {
-		bin = QEMU_BIN
+		bin = qemuBin
 		cmd = qemuCmd
 	}
 
@@ -1105,6 +1242,30 @@ func runQEMU(
 	wg.Wait()
 
 	return err
+}
+
+func getQemuBinaryName(architecture string) string {
+	switch architecture {
+	case architectureArm64:
+		return qemuBinArm64
+	case architectureAmd64:
+		return qemuBinX8664
+	default:
+		panic(fmt.Errorf("unknown architecture %s", architecture))
+	}
+}
+
+func getMachineType(architecture string) string {
+	switch architecture {
+	case architectureArm64:
+		// virt is the most up to date and generic ARM machine architecture
+		return "virt"
+	case architectureAmd64:
+		// q35 is the most up to date and generic x86_64 machine architecture
+		return "q35"
+	default:
+		panic(fmt.Errorf("unknown architecture %s", architecture))
+	}
 }
 
 func handleCPUChange(
@@ -1179,12 +1340,13 @@ type cpuServerCallbacks struct {
 	set func(*zap.Logger, vmv1.MilliCPU) error
 }
 
-func listenForCPUChanges(
+func listenForHTTPRequests(
 	ctx context.Context,
 	logger *zap.Logger,
 	port int32,
 	callbacks cpuServerCallbacks,
 	wg *sync.WaitGroup,
+	networkMonitoring bool,
 ) {
 	defer wg.Done()
 	mux := http.NewServeMux()
@@ -1197,6 +1359,15 @@ func listenForCPUChanges(
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUCurrent(cpuCurrentLogger, w, r, callbacks.get)
 	})
+	if networkMonitoring {
+		reg := prometheus.NewRegistry()
+		metrics := NewMonitoringMetrics(reg)
+		mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+			metrics.update(logger)
+			h := promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})
+			h.ServeHTTP(w, r)
+		})
+	}
 	server := http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
 		Handler:           mux,
@@ -1211,13 +1382,13 @@ func listenForCPUChanges(
 	select {
 	case err := <-errChan:
 		if errors.Is(err, http.ErrServerClosed) {
-			logger.Info("cpu_change server closed")
+			logger.Info("http server closed")
 		} else if err != nil {
-			logger.Fatal("cpu_change exited with error", zap.Error(err))
+			logger.Fatal("http server exited with error", zap.Error(err))
 		}
 	case <-ctx.Done():
 		err := server.Shutdown(context.Background())
-		logger.Info("shut down cpu_change server", zap.Error(err))
+		logger.Info("shut down http server", zap.Error(err))
 	}
 }
 
@@ -1615,7 +1786,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			Name: defaultNetworkTapName,
 		},
 		Mode:  netlink.TUNTAP_MODE_TAP,
-		Flags: netlink.TUNTAP_DEFAULTS,
+		Flags: netlink.TUNTAP_MULTI_QUEUE_DEFAULTS,
 	}
 	if err := netlink.LinkAdd(tap); err != nil {
 		logger.Error("could not add tap device", zap.Error(err))
@@ -1766,7 +1937,7 @@ func overlayNetwork(iface string) (mac.MAC, error) {
 			Name: overlayNetworkTapName,
 		},
 		Mode:  netlink.TUNTAP_MODE_TAP,
-		Flags: netlink.TUNTAP_DEFAULTS,
+		Flags: netlink.TUNTAP_MULTI_QUEUE_DEFAULTS,
 	}
 	if err := netlink.LinkAdd(tap); err != nil {
 		return nil, err
