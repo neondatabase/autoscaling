@@ -23,8 +23,10 @@ type Config struct {
 	// re-report the desired scaling.
 	RereportThreshold float64 `json:"rereportThreshold"`
 
+	// ClusterName is the name of the cluster that the reporting autoscaler-agent is in.
 	ClusterName string `json:"clusterName"`
-	RegionName  string `json:"regionName"`
+	// RegionName is the name of the region that the reporting autoscaler-agent is in.
+	RegionName string `json:"regionName"`
 
 	Clients ClientsConfig `json:"clients"`
 }
