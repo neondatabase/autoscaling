@@ -177,9 +177,8 @@ func (c *Config) validate() error {
 		erc.Whenf(ec, cfg.MaxBatchSize == 0, zeroTmpl, fmt.Sprintf("%s.maxBatchSize", key))
 	}
 	validateS3ReportingConfig := func(cfg *reporting.S3ClientConfig, key string) {
-		erc.Whenf(ec, c.Billing.Clients.S3.Bucket == "", emptyTmpl, ".%s.bucket")
-		erc.Whenf(ec, c.Billing.Clients.S3.Region == "", emptyTmpl, ".%s.region")
-		erc.Whenf(ec, c.Billing.Clients.S3.PrefixInBucket == "", emptyTmpl, ".%s.prefixInBucket")
+		erc.Whenf(ec, cfg.Bucket == "", emptyTmpl, fmt.Sprintf(".%s.bucket", key))
+		erc.Whenf(ec, cfg.Region == "", emptyTmpl, fmt.Sprintf(".%s.region", key))
 	}
 
 	erc.Whenf(ec, c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
@@ -198,6 +197,7 @@ func (c *Config) validate() error {
 	if c.Billing.Clients.S3 != nil {
 		validateBaseReportingConfig(&c.Billing.Clients.S3.BaseClientConfig, "billing.clients.s3")
 		validateS3ReportingConfig(&c.Billing.Clients.S3.S3ClientConfig, ".billing.clients.s3")
+		erc.Whenf(ec, c.Billing.Clients.S3.PrefixInBucket == "", emptyTmpl, ".billing.clients.s3.prefixInBucket")
 	}
 
 	erc.Whenf(ec, c.ScalingEvents.CUMultiplier == 0, zeroTmpl, ".scalingEvents.cuMultiplier")
@@ -207,6 +207,7 @@ func (c *Config) validate() error {
 	if c.ScalingEvents.Clients.S3 != nil {
 		validateBaseReportingConfig(&c.ScalingEvents.Clients.S3.BaseClientConfig, "scalingEvents.clients.s3")
 		validateS3ReportingConfig(&c.ScalingEvents.Clients.S3.S3ClientConfig, ".scalingEvents.clients.s3")
+		erc.Whenf(ec, c.ScalingEvents.Clients.S3.PrefixInBucket == "", emptyTmpl, ".scalingEvents.clients.s3.prefixInBucket")
 	}
 
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
