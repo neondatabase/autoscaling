@@ -76,6 +76,7 @@ func StartSchedulerWatcher(
 			// FIXME: make these configurable.
 			RetryRelistAfter: util.NewTimeRange(time.Second, 4, 5),
 			RetryWatchAfter:  util.NewTimeRange(time.Second, 4, 5),
+			RelistRateLimit:  nil,
 		},
 		watch.Accessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
