@@ -1201,6 +1201,19 @@ func runQEMU(
 			lastValue.Store(uint32(cpu))
 			return nil
 		},
+		ready: func(logger *zap.Logger) bool {
+			// if we are in sysfs mode, we need to check if the NeonVM Daemon is ready
+			if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
+				err := checkNeonvmDaemonCPU()
+				if err != nil {
+					logger.Warn("neonvm-daemon ready probe failed", zap.Error(err))
+					return false
+				}
+				return true
+			}
+			// do nothing for QMP mode
+			return true
+		},
 	}
 
 	wg.Add(1)
@@ -1328,8 +1341,9 @@ func handleCPUCurrent(
 }
 
 type cpuServerCallbacks struct {
-	get func(*zap.Logger) (*vmv1.MilliCPU, error)
-	set func(*zap.Logger, vmv1.MilliCPU) error
+	get   func(*zap.Logger) (*vmv1.MilliCPU, error)
+	set   func(*zap.Logger, vmv1.MilliCPU) error
+	ready func(*zap.Logger) bool
 }
 
 func listenForHTTPRequests(
@@ -1350,6 +1364,13 @@ func listenForHTTPRequests(
 	cpuCurrentLogger := loggerHandlers.Named("cpu_current")
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUCurrent(cpuCurrentLogger, w, r, callbacks.get)
+	})
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		if callbacks.ready(logger) {
+			w.WriteHeader(200)
+		} else {
+			w.WriteHeader(500)
+		}
 	})
 	if networkMonitoring {
 		reg := prometheus.NewRegistry()
@@ -1980,6 +2001,36 @@ func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
 	body := bytes.NewReader([]byte(fmt.Sprintf("%d", uint32(cpu))))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+	if err != nil {
+		return fmt.Errorf("could not build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// checkNeonvmDaemonCPU sends a GET request to the NeonVM Daemon to get the current CPU limit for the sake of readiness probe.
+func checkNeonvmDaemonCPU() error {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:25183/cpu", vmIP)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("could not build request: %w", err)
 	}
