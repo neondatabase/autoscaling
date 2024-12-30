@@ -19,8 +19,9 @@ import (
 )
 
 type cpuServerCallbacks struct {
-	get func(*zap.Logger) (*vmv1.MilliCPU, error)
-	set func(*zap.Logger, vmv1.MilliCPU) error
+	get   func(*zap.Logger) (*vmv1.MilliCPU, error)
+	set   func(*zap.Logger, vmv1.MilliCPU) error
+	ready func(*zap.Logger) bool
 }
 
 func listenForHTTPRequests(
@@ -41,6 +42,13 @@ func listenForHTTPRequests(
 	cpuCurrentLogger := loggerHandlers.Named("cpu_current")
 	mux.HandleFunc("/cpu_current", func(w http.ResponseWriter, r *http.Request) {
 		handleCPUCurrent(cpuCurrentLogger, w, r, callbacks.get)
+	})
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		if callbacks.ready(logger) {
+			w.WriteHeader(200)
+		} else {
+			w.WriteHeader(500)
+		}
 	})
 	if networkMonitoring {
 		reg := prometheus.NewRegistry()
