@@ -14,9 +14,12 @@ patches:
     kind: DaemonSet
     name: kube-multus-ds
   patch: |-
+    - op: add
+      path: /spec/template/spec/priorityClassName
+      value: system-node-critical
     - op: replace
       path: /spec/template/spec/containers/0/command
-      value: ["/entrypoint.sh"]
+      value: ["timeout", "3600", "/entrypoint.sh"]
     - op: replace
       path: /spec/template/spec/containers/0/args
       value:
@@ -25,4 +28,3 @@ patches:
         - "--multus-master-cni-file-name=10-azure.conflist"
         - "--multus-log-level=error"
         - "--multus-log-file=/var/log/neon-multus.log"
-
