@@ -713,7 +713,7 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	// change the memory provider, this is low enough risk that it's ok to leave to a follow-up.
 	memoryProvider := *vm.Status.MemoryProvider
 
-	pod, err := podSpec(vm, memoryProvider, sshSecret, r.Config)
+	pod, err := podSpec(vm, memoryProvider, sshSecret, r.Config, false)
 	if err != nil {
 		return nil, err
 	}
