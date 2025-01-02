@@ -3,7 +3,7 @@ kind: Kustomization
 
 bases:
 - ../multus-common
-
+- ../multus-common/resources_patch.yaml
 patches:
 - target:
     kind: DaemonSet
