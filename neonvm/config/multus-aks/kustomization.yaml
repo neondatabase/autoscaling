@@ -4,25 +4,20 @@ kind: Kustomization
 bases:
 - ../multus-common
 
-images:
-- name: multus-cni
-  newName: ghcr.io/k8snetworkplumbingwg/multus-cni
-  newTag: v3.9.2
-
 patches:
 - target:
     kind: DaemonSet
     name: kube-multus-ds
   patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/command
-      value: ["/entrypoint.sh"]
-    - op: replace
-      path: /spec/template/spec/containers/0/args
-      value:
-        - "--multus-conf-file=auto"
-        - "--cni-version=0.3.1"
-        - "--multus-master-cni-file-name=10-azure.conflist"
-        - "--multus-log-level=error"
-        - "--multus-log-file=/var/log/neon-multus.log"
+    - op: add
+      path: /spec/template/spec/priorityClassName
+      value: system-node-critical
 
+configMapGenerator:
+  - name: multus-daemon-config
+    namespace: kube-system
+    # using merge to keep the default labels the configmap has,
+    # but in practice the only field is the config that we're replacing, so `replace` would work too
+    behavior: merge
+    files:
+      - daemon-config.json

@@ -1,7 +1,55 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
 resources:
-- nad-crd.yaml
-- rbac.yaml
-- daemonset.yaml
+  - multus-daemonset-thick.yml
+
+images:
+  - name: ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick
+    # Essentially it's 4.1.5-thick, but as of writing it's not released yet
+    # The snapshot has a few additonal fixes that look useful, and its the version that was tested
+    # since it's deployed by default when using the multus install script.
+    digest: sha256:15c58fef59fe3066b7c9e8e14318ebab069f48497aa6a27d103e17147285a9d7
+
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: DaemonSet
+      name: kube-multus-ds
+    patch: |-
+      # On a busy cluster the multus uses a bunch of memory, and the default limits are too low
+      # Ideally it'd be burstable, and not crash if it hits the memory limit, however we'd like to get it in the `Guaranteed` QoS class
+      # So the limits are intentially set to worse case (values observed when the cluster had 250 pods coming up at once)
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+      - op: replace
+        path: /spec/template/spec/initContainers/0/command
+        value:
+          - bash
+          - -c
+          - |
+            # Rewrite of the original script to copy the multus binary
+            # The original has a bug? where the multus-daemon can't start if any pods are using the `multus-shim` binary which happens when pods are initializing.
+            # On linux however, renaming the binary doesn't change its file descriptor, so pods that are still initializing
+            # can finish while the binary is replaced.
+            # That said, we can skip the copy if the binary didn't change (if its the same version) to save time and complexity
+            SHIM_HOST_PATH="/host/opt/cni/bin/multus-shim"
+            SHIM_CTR_PATH="/usr/src/multus-cni/bin/multus-shim"
+
+            if [ -f "$SHIM_HOST_PATH" ]; then
+              echo "$SHIM_HOST_PATH exists already"
+              if cmp -s "$SHIM_CTR_PATH" "$SHIM_HOST_PATH"; then
+                echo "Files are identical, no need to copy."
+                exit 0
+              else
+                echo "Files are different, replacing"
+                mv $SHIM_HOST_PATH $(mktemp -p /host/opt/cni/bin)
+              fi
+            fi
+
+            cp $SHIM_CTR_PATH $SHIM_HOST_PATH
