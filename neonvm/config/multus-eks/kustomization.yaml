@@ -3,28 +3,3 @@ kind: Kustomization
 
 bases:
 - ../multus-common
-
-images:
-- name: multus-cni
-  newName: public.ecr.aws/eks/multus-cni
-  newTag: v3.9.2-eksbuild.1
-
-patchesStrategicMerge:
-- daemonset_patch.yaml
-
-patches:
-- target:
-    kind: DaemonSet
-    name: kube-multus-ds
-  patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/command
-      value: ["/entrypoint.sh"]
-    - op: replace
-      path: /spec/template/spec/containers/0/args
-      value:
-        - "--multus-conf-file=auto"
-        - "--cni-version=0.4.0"
-        - "--multus-master-cni-file-name=10-aws.conflist"
-        - "--multus-log-level=error"
-        - "--multus-log-file=/var/log/aws-routed-eni/multus.log"

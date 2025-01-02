@@ -3,7 +3,7 @@ kind: Kustomization
 
 bases:
 - ../multus-common
-- ../multus-common/resources_patch.yaml
+
 patches:
 - target:
     kind: DaemonSet
@@ -12,6 +12,19 @@ patches:
     - op: add
       path: /spec/template/spec/priorityClassName
       value: system-node-critical
+    # On a busy cluster the multus uses a bunch of memory, and the default limits are too low
+    # Ideally it'd be burstable, and not crash if it hits the memory limit, however we'd like to get it in the `Guaranteed` QoS class
+    # So the limits are intentially set to worse case (values observed when the cluster had 250 pods coming up at once)
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+        requests:
+          cpu: 1000m
+          memory: 2Gi
+
 
 configMapGenerator:
   - name: multus-daemon-config
