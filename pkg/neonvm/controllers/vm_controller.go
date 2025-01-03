@@ -1321,7 +1321,7 @@ func podSpec(
 					}},
 					Command: []string{
 						"sh", "-c",
-						"cp /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
+						"mv /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
 							/* uid=36(qemu) gid=34(kvm) groups=34(kvm) */
 							"chown 36:34 /vm/images/rootdisk.qcow2 && " +
 							"sysctl -w net.ipv4.ip_forward=1",
