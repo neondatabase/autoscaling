@@ -13,11 +13,11 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-func setRunnerCPULimits(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.MilliCPU) error {
+func setRunnerCPULimits(ctx context.Context, vm *vmv1.VirtualMachine, targetPodIP string, cpu vmv1.MilliCPU) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("http://%s:%d/cpu_change", vm.Status.PodIP, vm.Spec.RunnerPort)
+	url := fmt.Sprintf("http://%s:%d/cpu_change", targetPodIP, vm.Spec.RunnerPort)
 
 	update := api.VCPUChange{VCPUs: cpu}
 
