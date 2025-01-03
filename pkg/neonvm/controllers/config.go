@@ -31,10 +31,6 @@ type ReconcilerConfig struct {
 	// used in setting up the VM disks via QEMU's `-drive` flag.
 	QEMUDiskCacheSettings string
 
-	// DefaultMemoryProvider is the memory provider (dimm slots or virtio-mem) that will be used for
-	// new VMs (or, when old ones restart) if nothing is explicitly set.
-	DefaultMemoryProvider vmv1.MemoryProvider
-
 	// MemhpAutoMovableRatio specifies the value that new neonvm-runners will set as the
 	// kernel's 'memory_hotplug.auto_movable_ratio', iff the memory provider is virtio-mem.
 	//

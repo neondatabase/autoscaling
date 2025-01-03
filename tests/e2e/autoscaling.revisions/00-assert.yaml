@@ -14,7 +14,6 @@ status:
       status: "True"
   cpus: 250m
   memorySize: 1Gi
-  memoryProvider: VirtioMem
   currentRevision:
     revision:
       value: 123
