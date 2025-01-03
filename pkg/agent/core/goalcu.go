@@ -140,7 +140,7 @@ func calculateLFCGoalCU(
 		return 0, nil, nil
 	} else {
 		var estimateWss float64
-		if *cfg.UseSimpleLFCScaling {
+		if *cfg.LFCUseLargestWindow {
 			estimateWss = wssValues[len(wssValues)-1]
 		} else {
 			estimateWss = EstimateTrueWorkingSetSize(wssValues, WssEstimatorConfig{
