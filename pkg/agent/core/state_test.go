@@ -228,6 +228,8 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					AlwaysMigrate:        false,
 					ScalingEnabled:       true,
 					ScalingConfig:        nil,
+					ReportScalingEvents:  false,
+					ReportDesiredScaling: false,
 				},
 				CurrentRevision: nil,
 			}
@@ -265,6 +267,8 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					PluginLatency:  nil,
 					MonitorLatency: nil,
 					NeonVMLatency:  nil,
+					ScalingEvent:   nil,
+					DesiredScaling: nil,
 				},
 			}
 		}
@@ -352,6 +356,8 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 			PluginLatency:  nil,
 			MonitorLatency: nil,
 			NeonVMLatency:  nil,
+			ScalingEvent:   nil,
+			DesiredScaling: nil,
 		},
 	},
 }
