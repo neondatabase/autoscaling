@@ -353,6 +353,13 @@ type ScalingConfig struct {
 	// default.
 	EnableLFCMetrics *bool `json:"enableLFCMetrics,omitempty"`
 
+	// LFCUseLargestWindow, if true, calculates goal LFC size only based on the largest available
+	// working set size window, instead of trying to allow downscaling at earlier opportunities.
+	//
+	// This is not fit for general use. It's meant as a temproary escape hatch to let us assess the
+	// upper bound of potential improvements to our LFC goal size heuristics.
+	LFCUseLargestWindow *bool `json:"lfcUseLargestWindow,omitempty"`
+
 	// LFCToMemoryRatio dictates the amount of memory in any given Compute Unit that will be
 	// allocated to the LFC. For example, if the LFC is sized at 75% of memory, then this value
 	// would be 0.75.
@@ -400,6 +407,9 @@ func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingCon
 	}
 	if overrides.EnableLFCMetrics != nil {
 		defaults.EnableLFCMetrics = lo.ToPtr(*overrides.EnableLFCMetrics)
+	}
+	if overrides.LFCUseLargestWindow != nil {
+		defaults.LFCUseLargestWindow = lo.ToPtr(*overrides.LFCUseLargestWindow)
 	}
 	if overrides.LFCToMemoryRatio != nil {
 		defaults.LFCToMemoryRatio = lo.ToPtr(*overrides.LFCToMemoryRatio)
