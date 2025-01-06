@@ -451,7 +451,12 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				return ctrl.Result{}, err
 			}
 
-			// Redefine ownerRef for the target Pod
+			// Redefine owner references for the source and target pod:
+			//
+			// For the source, we change it from "VM object controlling + migration owning" to
+			// just "VM object owning + migration owning" (and nothing controlling).
+			//
+			// For the target, we change it from "migration controlling" to "VM object controlling".
 			targetRunner.OwnerReferences = []metav1.OwnerReference{}
 			if err := ctrl.SetControllerReference(vm, targetRunner, r.Scheme); err != nil {
 				return ctrl.Result{}, err
@@ -460,13 +465,15 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				log.Error(err, "Failed to update ownerRef for target runner pod")
 				return ctrl.Result{}, err
 			}
-
-			// Redefine ownerRef for the source Pod
+			// ... and change the source runner:
 			sourceRunner := &corev1.Pod{}
 			err = r.Get(ctx, types.NamespacedName{Name: migration.Status.SourcePodName, Namespace: migration.Namespace}, sourceRunner)
 			if err == nil {
 				sourceRunner.OwnerReferences = []metav1.OwnerReference{}
-				if err := ctrl.SetControllerReference(migration, sourceRunner, r.Scheme); err != nil {
+				if err := controllerutil.SetOwnerReference(migration, sourceRunner, r.Scheme); err != nil {
+					return ctrl.Result{}, err
+				}
+				if err := controllerutil.SetOwnerReference(vm, sourceRunner, r.Scheme); err != nil {
 					return ctrl.Result{}, err
 				}
 				if err := r.Update(ctx, sourceRunner); err != nil {
@@ -747,6 +754,9 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 
 	// Set the ownerRef for the Pod
 	if err := ctrl.SetControllerReference(migration, pod, r.Scheme); err != nil {
+		return nil, err
+	}
+	if err := controllerutil.SetOwnerReference(vm, pod, r.Scheme); err != nil {
 		return nil, err
 	}
 

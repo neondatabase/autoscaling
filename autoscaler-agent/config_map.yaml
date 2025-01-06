@@ -14,6 +14,7 @@ data:
           "memoryUsageFractionTarget": 0.75,
           "memoryTotalFractionTarget": 0.9,
           "enableLFCMetrics": false,
+          "lfcUseLargestWindow": false,
           "lfcToMemoryRatio": 0.75,
           "lfcWindowSizeMinutes": 5,
           "lfcMinWaitBeforeDownscaleMinutes": 5,
