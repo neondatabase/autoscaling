@@ -1,0 +1,11 @@
+{
+  "chrootDir": "/hostroot",
+  "cniVersion": "0.4.0",
+  "logLevel": "error",
+  "logToStderr": false,
+  "logFile": "/var/log/neon-multus.log",
+  "cniConfigDir": "/host/etc/cni/net.d",
+  "multusAutoconfigDir": "/host/etc/cni/net.d",
+  "multusConfigFile": "auto",
+  "socketDir": "/host/run/multus/"
+}

@@ -3,28 +3,3 @@ kind: Kustomization
 
 bases:
 - ../multus-common
-
-images:
-- name: multus-cni
-  newName: ghcr.io/k8snetworkplumbingwg/multus-cni
-  newTag: v3.9.2-thick-amd64
-
-patchesStrategicMerge:
-- daemonset_patch.yaml
-
-patches:
-- target:
-    kind: DaemonSet
-    name: kube-multus-ds
-  patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/command
-      value: ["/usr/src/multus-cni/bin/multus-daemon"]
-    - op: replace
-      path: /spec/template/spec/containers/0/args
-      value:
-        - "-cni-version=0.3.1"
-        - "-cni-config-dir=/host/etc/cni/net.d"
-        - "-multus-autoconfig-dir=/host/etc/cni/net.d"
-        - "-multus-log-to-stderr=true"
-        - "-multus-log-level=verbose"
