@@ -13,13 +13,13 @@ FROM busybox:1.35.0-musl AS busybox-loader
 
 FROM alpine:3.19 AS vm-runtime
 ARG TARGET_ARCH
-RUN set -e && mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config 
+RUN set -e && mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config
 # add busybox
 COPY --from=busybox-loader /bin/busybox /neonvm/bin/busybox
 
 RUN set -e \
     chmod +x /neonvm/bin/busybox \
-    && /neonvm/bin/busybox --install -s /neonvm/bin 
+    && /neonvm/bin/busybox --install -s /neonvm/bin
 
 COPY helper.move-bins.sh /helper.move-bins.sh
 

@@ -30,26 +30,39 @@ on:
         description: 'Should images be uploaded to neon ECR'
         type: boolean
         required: false
+      arch:
+        description: 'Architecture to build for'
+        type: string
+        required: false
+        default: 'amd64'
+      matrix-step-name:
+        required: false
+        type: string
+      matrix-key:
+        required: false
+        type: string
+
     outputs:
+
       controller:
         description: 'neonvm-controller image'
-        value: ${{ jobs.tags.outputs.controller }}
+        value: ${{ jobs.save-matrix-results.outputs.controller }}
       vxlan-controller:
         description: 'neonvm-vxlan-controller image'
-        value: ${{ jobs.tags.outputs.vxlan-controller }}
+        value: ${{ jobs.save-matrix-results.outputs.vxlan-controller}}
       runner:
         description: 'neonvm-runner image'
-        value: ${{ jobs.tags.outputs.runner }}
+        value: ${{ jobs.save-matrix-results.outputs.runner}}
       scheduler:
         description: 'autoscale-scheduler image'
-        value: ${{ jobs.tags.outputs.scheduler }}
+        value: ${{ jobs.save-matrix-results.outputs.scheduler}}
       autoscaler-agent:
         description: 'autoscaler-agent image'
         value: ${{ jobs.tags.outputs.autoscaler-agent }}
       daemon:
         description: 'neonvm-daemon image'
         value: ${{ jobs.tags.outputs.daemon }}
-        
+
 env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
   IMG_VXLAN_CONTROLLER:   "neondatabase/neonvm-vxlan-controller"
@@ -61,15 +74,6 @@ env:
   IMG_CLUSTER_AUTOSCALER: "neondatabase/cluster-autoscaler-neonvm"
   ECR_DEV:                "369495373322.dkr.ecr.eu-central-1.amazonaws.com"
   ECR_PROD:               "093970136003.dkr.ecr.eu-central-1.amazonaws.com"
-
-  # Why localhost? We use a local registry so that when docker/build-push-action tries to pull the
-  # image we built locally, it'll actually have a place to pull from.
-  #
-  # Otherwise, if we just try to use a local image, it fails trying to pull it from dockerhub.
-  # See https://github.com/moby/buildkit/issues/2343 for more information.
-  GO_BASE_IMG: "localhost:5000/neondatabase/autoscaling-go-base:dev"
-  # Default architecture to build. In future it would be changed to multi-arch build or separate builds for each arch
-  TARGET_ARCH: "amd64"
 
 defaults:
   run:
@@ -104,16 +108,32 @@ jobs:
     with:
       tag: ${{ inputs.kernel-image || inputs.tag }}
       return-image-for-tag: ${{ inputs.kernel-image }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
-    needs: [ tags, vm-kernel ]
-    runs-on: [ self-hosted, large ]
+    needs: [ vm-kernel ]
+    outputs:
+      controller:         ${{ steps.tags.outputs.controller }}
+      vxlan-controller:   ${{ steps.tags.outputs.vxlan-controller }}
+      runner:             ${{ steps.tags.outputs.runner }}
+      scheduler:          ${{ steps.tags.outputs.scheduler }}
+      autoscaler-agent:   ${{ steps.tags.outputs.autoscaler-agent }}
+      cluster-autoscaler: ${{ steps.tags.outputs.cluster-autoscaler }}
+    env:
+      # Why localhost? We use a local registry so that when docker/build-push-action tries to pull the
+      # image we built locally, it'll actually have a place to pull from.
+      #
+      # Otherwise, if we just try to use a local image, it fails trying to pull it from dockerhub.
+      # See https://github.com/moby/buildkit/issues/2343 for more information.
+      GO_BASE_IMG: ${{ format('localhost:5000/neondatabase/autoscaling-go-base-{0}:dev', inputs.arch) }}
     permissions:
       contents: read  # This is required for actions/checkout
       id-token: write # This is required for aws-actions/configure-aws-credentials
+
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', inputs.arch == 'arm64' && 'large-arm64' || 'large')) }}
 
     services:
       registry:
@@ -122,6 +142,18 @@ jobs:
           - 5000:5000
 
     steps:
+      # tags converted to be a step and moved here to be in the same strategy context
+
+      - id: tags
+        run: |
+          echo "controller=${{ env.IMG_CONTROLLER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${{ env.IMG_VXLAN_CONTROLLER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${{ env.IMG_RUNNER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${{ env.IMG_SCHEDULER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${{ env.IMG_AUTOSCALER_AGENT }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${{ env.IMG_CLUSTER_AUTOSCALER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
@@ -162,7 +194,6 @@ jobs:
           registry: cache.neon.build
           username: ${{ secrets.NEON_CI_DOCKERCACHE_USERNAME }}
           password: ${{ secrets.NEON_CI_DOCKERCACHE_PASSWORD }}
-
       - name: Configure dev AWS credentials
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
@@ -210,7 +241,7 @@ jobs:
         id: build-go-dependencies-image
         with:
           context: .
-          platforms: linux/amd64
+
           push: true
           file: Dockerfile.go-base
           cache-from: type=registry,ref=cache.neon.build/autoscaling-go-base:cache
@@ -221,12 +252,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
           push: true
+          platforms: linux/${{ inputs.arch }}
           file: neonvm-runner/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-runner:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-runner:cache,mode=max' || '' }}
-          tags: ${{ needs.tags.outputs.runner }}
+          tags: ${{ steps.tags.outputs.runner }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
@@ -245,41 +276,41 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ inputs.arch }}
           push: true
           file: neonvm-controller/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-controller:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-controller:cache,mode=max' || '' }}
-          tags: ${{ needs.tags.outputs.controller }}
+          tags: ${{ steps.tags.outputs.controller }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-            VM_RUNNER_IMAGE=${{ needs.tags.outputs.runner }}
+            VM_RUNNER_IMAGE=${{ steps.tags.outputs.runner }}
             BUILDTAGS=${{ steps.controller-build-tags.outputs.buildtags }}
 
       - name: Build and push neonvm-vxlan-controller image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ inputs.arch }}
           push: true
           file: neonvm-vxlan-controller/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache,mode=max' || '' }}
-          tags: ${{ needs.tags.outputs.vxlan-controller }}
+          tags: ${{ steps.tags.outputs.vxlan-controller }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-            TARGET_ARCH=${{ env.TARGET_ARCH }}
+            TARGET_ARCH=${{ inputs.arch }}
 
       - name: Build and push autoscale-scheduler image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ inputs.arch }}
           push: true
           file: autoscale-scheduler/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/autoscale-scheduler:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscale-scheduler:cache,mode=max' || '' }}
-          tags: ${{ needs.tags.outputs.scheduler }}
+          tags: ${{ steps.tags.outputs.scheduler}}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
@@ -288,12 +319,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ inputs.arch }}
           push: true
           file: autoscaler-agent/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/autoscaler-agent:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaler-agent:cache,mode=max' || '' }}
-          tags: ${{ needs.tags.outputs.autoscaler-agent }}
+          tags: ${{ steps.tags.outputs.autoscaler-agent}}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}
@@ -302,23 +333,24 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ inputs.arch }}
           push: true
           file: neonvm-daemon/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-daemon:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-daemon:cache,mode=max' || '' }}
-          tags: ${{ needs.tags.outputs.daemon }}
+          tags: ${{ steps.tags.outputs.daemon }}
           build-args: |
-            GO_BASE_IMG=${{ env.GO_BASE_IMG }}            
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
       - name: Build and push cluster-autoscaler image
         uses: docker/build-push-action@v6
         if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
         with:
           context: cluster-autoscaler
-          platforms: linux/amd64
+          platforms: linux/${{ inputs.arch }}
           push: true
-          tags: ${{ needs.tags.outputs.cluster-autoscaler }}
+          target: ${{format('cluster_autoscaler_{0}', inputs.arch)}}
+          tags: ${{ steps.tags.outputs.cluster-autoscaler}}
           cache-from: type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache,mode=max' || '' }}
 
@@ -341,3 +373,29 @@ jobs:
             docker buildx imagetools create -t ${{ env.ECR_PROD }}/${image}:${{ inputs.tag }} \
                                                neondatabase/${image}:${{ inputs.tag }}
           done
+
+  save-matrix-results:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      ## Write for matrix outputs workaround
+      - uses: cloudposse/github-action-matrix-outputs-write@v1
+        id: out
+        with:
+          matrix-step-name: ${{ inputs.matrix-step-name }}
+          matrix-key: ${{ inputs.matrix-key }}
+          outputs: |-
+              controller:         ${{ needs.build.outputs.controller }}
+              vxlan-controller:   ${{ needs.build.outputs.vxlan-controller }}
+              runner:             ${{ needs.build.outputs.runner }}
+              scheduler:          ${{ needs.build.outputs.scheduler }}
+              autoscaler-agent:   ${{ needs.build.outputs.autoscaler-agent }}
+              cluster-autoscaler: ${{ needs.build.outputs.cluster-autoscaler }}
+
+    outputs:
+      controller: ${{ steps.out.outputs.controller }}
+      vxlan-controller: ${{ steps.out.outputs.vxlan-controller }}
+      runner: ${{ steps.out.outputs.runner }}
+      scheduler: ${{ steps.out.outputs.scheduler }}
+      autoscaler-agent: ${{ steps.out.outputs.autoscaler-agent }}
+      cluster-autoscaler: ${{ steps.out.outputs.cluster-autoscaler }}

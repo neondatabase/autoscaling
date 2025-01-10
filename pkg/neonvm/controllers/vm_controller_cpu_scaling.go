@@ -112,7 +112,7 @@ func (r *VMReconciler) handleCPUScalingSysfs(ctx context.Context, vm *vmv1.Virtu
 
 func (r *VMReconciler) handleCgroupCPUUpdate(ctx context.Context, vm *vmv1.VirtualMachine, cgroupUsage *api.VCPUCgroup) (bool, error) {
 	specCPU := vm.Spec.Guest.CPUs.Use
-	if err := setRunnerCPULimits(ctx, vm, specCPU); err != nil {
+	if err := setRunnerCPULimits(ctx, vm, vm.Status.PodIP, specCPU); err != nil {
 		return false, err
 	}
 	reason := "ScaleDown"

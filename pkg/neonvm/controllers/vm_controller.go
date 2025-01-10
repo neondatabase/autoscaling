@@ -46,6 +46,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/tools/record"
 
@@ -939,10 +940,24 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	case corev1.PodFailed:
 		return runnerFailed
 	case corev1.PodRunning:
-		return runnerRunning
+		return isRunnerPodReady(pod)
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
+}
+
+// isRunnerPodReady returns whether the runner pod is ready respecting the readiness probe of its containers.
+func isRunnerPodReady(pod *corev1.Pod) runnerStatusKind {
+	if pod.Status.ContainerStatuses == nil {
+		return runnerPending
+	}
+	for _, c := range pod.Status.ContainerStatuses {
+		// we only care about the neonvm-runner container
+		if c.Name == "neonvm-runner" && !c.Ready {
+			return runnerPending
+		}
+	}
+	return runnerRunning
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
@@ -1124,7 +1139,7 @@ func (r *VMReconciler) podForVirtualMachine(
 	memoryProvider vmv1.MemoryProvider,
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
-	pod, err := podSpec(vm, memoryProvider, sshSecret, r.Config)
+	pod, err := podSpec(vm, memoryProvider, sshSecret, r.Config, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1254,11 +1269,16 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
+// podSpec returns a VirtualMachine Pod object
+// withReadinessProbe - if true, adds a readiness probe to the container
+// we don't need readiness probe for the VM runner pod if it is a target pod
+// for migration because VM is not started until migration is complete
 func podSpec(
 	vm *vmv1.VirtualMachine,
 	memoryProvider vmv1.MemoryProvider,
 	sshSecret *corev1.Secret,
 	config *ReconcilerConfig,
+	withReadinessProbe bool,
 ) (*corev1.Pod, error) {
 	runnerVersion := api.RunnerProtoV1
 	labels := labelsForVirtualMachine(vm, &runnerVersion)
@@ -1448,6 +1468,21 @@ func podSpec(
 				}
 			}(),
 		},
+	}
+
+	if withReadinessProbe {
+		pod.Spec.Containers[0].ReadinessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path:   "/ready",
+					Port:   intstr.FromInt32(vm.Spec.RunnerPort),
+					Scheme: corev1.URISchemeHTTP,
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       5,
+			FailureThreshold:    3,
+		}
 	}
 
 	if sshSecret != nil {

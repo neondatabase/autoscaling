@@ -30,7 +30,15 @@ RUN cd autoscaler/cluster-autoscaler \
 # This is adapted from CA's Dockerfile.amd64, here:
 # https://github.com/kubernetes/autoscaler/blob/cluster-autoscaler-1.24.1/cluster-autoscaler/Dockerfile.amd64
 
-FROM gcr.io/distroless/static:nonroot-amd64
+
+# NB: two build stages, one for each architecture, because I wasn't able to use variable substitution in FROM statements
+FROM gcr.io/distroless/static:nonroot-amd64 AS cluster_autoscaler_amd64
+
+WORKDIR /
+COPY --from=builder /workspace/cluster-autoscaler .
+CMD ["/cluster-autoscaler"]
+
+FROM gcr.io/distroless/static:nonroot-arm64 AS cluster_autoscaler_arm64
 
 WORKDIR /
 COPY --from=builder /workspace/cluster-autoscaler .
