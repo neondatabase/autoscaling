@@ -1,8 +1,6 @@
 ARG GO_BASE_IMG=autoscaling-go-base:dev
 FROM $GO_BASE_IMG AS builder
 
-ARG GIT_INFO
-
 COPY . .
 # NOTE: Build env vars here must be the same as in the base image, otherwise we'll rebuild
 # dependencies.

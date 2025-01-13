@@ -4,6 +4,9 @@ kind: Kustomization
 bases:
 - ../multus-common
 
+resources:
+  - secret.yaml
+
 images:
 - name: multus-cni
   newName: ghcr.io/k8snetworkplumbingwg/multus-cni
@@ -25,4 +28,23 @@ patches:
         - "--multus-master-cni-file-name=10-azure.conflist"
         - "--multus-log-level=error"
         - "--multus-log-file=/var/log/neon-multus.log"
-
+- target:
+    kind: DaemonSet
+    name: kube-multus-ds
+  patch: |-
+    - op: remove
+      path: /spec/template/spec/serviceAccountName
+    - op: add
+      path: /spec/template/spec/automountServiceAccountToken
+      value: false
+    - op: add
+      path: /spec/template/spec/volumes/-
+      value:
+        name: secret
+        secret:
+          secretName: multus-long-lived
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/-
+      value:
+        name: secret
+        mountPath: /var/run/secrets/kubernetes.io/serviceaccount/

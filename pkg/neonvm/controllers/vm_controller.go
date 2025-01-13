@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	sysruntime "runtime"
 	"strconv"
 	"time"
 
@@ -468,6 +469,13 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			log.Error(err, "Failed to get vm-runner Pod")
 			return err
 		}
+
+		// Update the metadata (including "usage" annotation) before anything else, so that it
+		// will be correctly set even if the rest of the reconcile operation fails.
+		if err := updatePodMetadataIfNecessary(ctx, r.Client, vm, vmRunner); err != nil {
+			log.Error(err, "Failed to sync pod labels and annotations", "VirtualMachine", vm.Name)
+		}
+
 		// runner pod found, check phase
 		switch runnerStatus(vmRunner) {
 		case runnerRunning:
@@ -1213,7 +1221,6 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
-
 	// if NodeSelectorTerms list is empty - add default values (arch==amd64 or os==linux)
 	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
@@ -1223,7 +1230,7 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 					{
 						Key:      "kubernetes.io/arch",
 						Operator: "In",
-						Values:   []string{"amd64"},
+						Values:   []string{sysruntime.GOARCH},
 					},
 					{
 						Key:      "kubernetes.io/os",
@@ -1321,7 +1328,7 @@ func podSpec(
 					}},
 					Command: []string{
 						"sh", "-c",
-						"cp /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
+						"mv /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
 							/* uid=36(qemu) gid=34(kvm) groups=34(kvm) */
 							"chown 36:34 /vm/images/rootdisk.qcow2 && " +
 							"sysctl -w net.ipv4.ip_forward=1",

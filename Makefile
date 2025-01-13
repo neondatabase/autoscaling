@@ -19,7 +19,14 @@ GOOS ?= $(shell go env GOOS)
 
 # The target architecture for linux kernel. Possible values: amd64 or arm64.
 # Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile.kernel-builder
-KERNEL_TARGET_ARCH ?= amd64
+UNAME_ARCH := $(shell uname -m)
+ifeq ($(UNAME_ARCH),x86_64)
+    TARGET_ARCH ?= amd64
+else ifeq ($(UNAME_ARCH),aarch64)
+    TARGET_ARCH ?= arm64
+else
+    $(error Unsupported architecture: $(UNAME_ARCH))
+endif
 
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
@@ -83,6 +90,7 @@ help: ## Display this help.
 generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	# Use uid and gid of current user to avoid mismatched permissions
 	set -e ; \
+	rm -rf neonvm/client neonvm/apis/neonvm/v1/zz_generated.deepcopy.go
 	iidfile=$$(mktemp /tmp/iid-XXXXXX) ; \
 	docker build \
 		--build-arg USER_ID=$(shell id -u $(USER)) \
@@ -135,12 +143,12 @@ test: vet envtest ## Run tests.
 
 .PHONY: build
 build: vet bin/vm-builder ## Build all neonvm binaries.
-	GOOS=linux go build -o bin/controller         neonvm-controller/cmd/main.go
-	GOOS=linux go build -o bin/vxlan-controller   neonvm-vxlan-controller/cmd/main.go
-	GOOS=linux go build -o bin/runner             neonvm-runner/cmd/main.go
-	GOOS=linux go build -o bin/daemon             neonvm-daemon/cmd/main.go
-	GOOS=linux go build -o bin/autoscaler-agent   autoscaler-agent/cmd/main.go
-	GOOS=linux go build -o bin/scheduler          autoscale-scheduler/cmd/main.go
+	GOOS=linux go build -o bin/controller         neonvm-controller/cmd/*.go
+	GOOS=linux go build -o bin/vxlan-controller   neonvm-vxlan-controller/cmd/*.go
+	GOOS=linux go build -o bin/runner             neonvm-runner/cmd/*.go
+	GOOS=linux go build -o bin/daemon             neonvm-daemon/cmd/*.go
+	GOOS=linux go build -o bin/autoscaler-agent   autoscaler-agent/cmd/*.go
+	GOOS=linux go build -o bin/scheduler          autoscale-scheduler/cmd/*.go
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
@@ -193,9 +201,10 @@ docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runne
 		.
 
 .PHONY: docker-build-daemon
-docker-build-daemon: ## Build docker image for NeonVM daemon.
+docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemon.
 	docker build \
 		--tag $(IMG_DAEMON) \
+		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
 		--file neonvm-daemon/Dockerfile \
 		.
 
@@ -204,6 +213,7 @@ docker-build-vxlan-controller: docker-build-go-base ## Build docker image for Ne
 	docker build \
 		--tag $(IMG_VXLAN_CONTROLLER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
 		--file neonvm-vxlan-controller/Dockerfile \
 		.
 
@@ -227,11 +237,11 @@ docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscal
 
 .PHONY: docker-build-examples
 docker-build-examples: bin/vm-builder ## Build docker images for testing VMs
-	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml
+	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
 
 .PHONY: docker-build-pg16-disk-test
 docker-build-pg16-disk-test: bin/vm-builder ## Build a VM image for testing
-	./bin/vm-builder -src alpine:3.19 -dst $(PG16_DISK_TEST_IMG) -spec vm-examples/pg16-disk-test/image-spec.yaml
+	./bin/vm-builder -src alpine:3.19 -dst $(PG16_DISK_TEST_IMG) -spec vm-examples/pg16-disk-test/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
@@ -261,19 +271,9 @@ ifndef ignore-not-found
   ignore-not-found = false
 endif
 
-# Build the kernel for the amd64 architecture. Uses generic target.
-.PHONY: kernel_amd64
-kernel_amd64: KERNEL_TARGET_ARCH=amd64
-kernel_amd64: kernel
-
-# Build the kernel for the arm64 architecture. Uses generic target.
-.PHONY: kernel_arm64
-kernel_arm64: KERNEL_TARGET_ARCH=arm64
-kernel_arm64: kernel
-
 # Build the kernel for the target architecture.
 # The builder image platform is not specified because the kernel is built for the target architecture using crosscompilation.
-# Target is generic and can be used for any supported architecture by specifying the KERNEL_TARGET_ARCH variable.
+# Target is generic and can be used for any supported architecture by specifying the TARGET_ARCH variable.
 .PHONY: kernel
 kernel: ## Build linux kernel.
 	rm -f neonvm-kernel/vmlinuz; \
@@ -283,7 +283,7 @@ kernel: ## Build linux kernel.
 	trap "rm $$iidfile" EXIT; \
 	docker buildx build \
 	    --build-arg KERNEL_VERSION=$$kernel_version \
-		--target "kernel_${KERNEL_TARGET_ARCH}" \
+		--target "kernel_${TARGET_ARCH}" \
 		--pull \
 		--load \
 		--iidfile $$iidfile \
@@ -391,6 +391,7 @@ load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM im
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name $(CLUSTER_NAME); fi
 
 .PHONY: example-vms
+example-vms: TARGET_ARCH=$(TARGET_ARCH)
 example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
 
 .PHONY: load-pg16-disk-test
@@ -492,7 +493,13 @@ CODE_GENERATOR_VERSION ?= v0.28.12
 KUTTL ?= $(LOCALBIN)/kuttl
 # k8s deps @ 1.28.3
 KUTTL_VERSION ?= v0.16.0
-
+ifeq ($(GOARCH), arm64)
+    KUTTL_ARCH = arm64
+else ifeq ($(GOARCH), amd64)
+    KUTTL_ARCH = x86_64
+else
+    $(error Unsupported architecture: $(GOARCH))
+endif
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.29.10
 
@@ -534,7 +541,7 @@ $(KUBECTL): $(LOCALBIN)
 .PHONY: kuttl
 kuttl: $(KUTTL) ## Download kuttl locally if necessary.
 $(KUTTL): $(LOCALBIN)
-	@test -s $(LOCALBIN)/kuttl || { curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/$(KUTTL_VERSION)/kubectl-kuttl_$(subst v,,$(KUTTL_VERSION))_$(GOOS)_$(shell uname -m) && chmod +x $(KUTTL); }
+	test -s $(LOCALBIN)/kuttl || { curl -sfSLo $(KUTTL) https://github.com/kudobuilder/kuttl/releases/download/$(KUTTL_VERSION)/kubectl-kuttl_$(subst v,,$(KUTTL_VERSION))_$(GOOS)_$(KUTTL_ARCH) && chmod +x $(KUTTL); }
 
 .PHONY: k3d
 k3d: $(K3D) ## Download k3d locally if necessary.

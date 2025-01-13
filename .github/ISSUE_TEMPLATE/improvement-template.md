@@ -3,6 +3,7 @@ name: Improvement template
 about: Template that will help you to submit the idea for an improvement to the code base.
 title: ''
 labels: t/improvement
+type: Improvement
 assignees: ''
 
 ---
