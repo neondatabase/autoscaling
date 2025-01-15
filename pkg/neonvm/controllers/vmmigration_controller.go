@@ -309,11 +309,16 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			migration.Status.SourcePodIP = vm.Status.PodIP
 			migration.Status.TargetPodIP = targetRunner.Status.PodIP
 
-			// do hotplugCPU in targetRunner before migration
+			// do cpu hot plug in targetRunner before migration
+			// in case of QMP mode, we need to sync CPUs before migration
+			// in case of Sysfs mode, we need to sync CPUs during migration
 			log.Info("Syncing CPUs in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
-			if err := QmpSyncCpuToTarget(vm, migration); err != nil {
-				return ctrl.Result{}, err
+			if *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeQMP {
+				if err := QmpSyncCpuToTarget(vm, migration); err != nil {
+					return ctrl.Result{}, err
+				}
 			}
+
 			log.Info("CPUs in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 
 			// do hotplug Memory in targetRunner -- only needed for dimm slots; virtio-mem Just Works™
@@ -334,8 +339,8 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				panic(fmt.Errorf("unexpected vm.status.memoryProvider %q", *vm.Status.MemoryProvider))
 			}
 
-			// Migrate only running VMs to target with plugged devices
-			if vm.Status.Phase == vmv1.VmPreMigrating {
+			switch vm.Status.Phase {
+			case vmv1.VmPreMigrating:
 				// update VM status
 				vm.Status.Phase = vmv1.VmMigrating
 				if err := r.Status().Update(ctx, vm); err != nil {
@@ -357,10 +362,22 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 						Reason:  "Reconciling",
 						Message: message,
 					})
-				// finally update migration phase to Running
+				return r.updateMigrationStatus(ctx, migration)
+			case vmv1.VmMigrating:
+				// migration is in progress so we can scale CPU using sysfs
+				if *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeSysfs {
+					if err := setRunnerCPULimits(ctx,
+						vm,
+						targetRunner.Status.PodIP,
+						vm.Spec.Guest.CPUs.Use); err != nil {
+						return ctrl.Result{}, err
+					}
+				}
+				// if cpu scaling is not sysfs based we just update VM status to Running, since migration is done at the moment
 				migration.Status.Phase = vmv1.VmmRunning
 				return r.updateMigrationStatus(ctx, migration)
 			}
+
 		case runnerSucceeded:
 			// target runner pod finished without error? but it shouldn't finish
 			message := fmt.Sprintf("Target Pod (%s) completed suddenly", targetRunner.Name)
