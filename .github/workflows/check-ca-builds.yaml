@@ -19,6 +19,11 @@ jobs:
   build-ca:
     runs-on: [ self-hosted, gen3, small ]
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
 
       - name: set custom docker config directory

@@ -23,6 +23,11 @@ jobs:
     permissions:
       actions: read
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Export GH Workflow Stats
         uses: neondatabase/gh-workflow-stats-action@v0.1.4
         with:

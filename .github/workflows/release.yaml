@@ -17,6 +17,11 @@ jobs:
       dry-run: ${{ steps.get-tag.outputs.dry-run }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: get tag
         id: get-tag
         env:
@@ -62,6 +67,11 @@ jobs:
     needs: [ get-tag, e2e ]
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
 
       - name: download vm-builder

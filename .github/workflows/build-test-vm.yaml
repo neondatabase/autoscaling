@@ -44,6 +44,11 @@ jobs:
       daemon: ${{ steps.show-tags.outputs.daemon }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - id: show-tags
         run: |
           echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
@@ -57,6 +62,11 @@ jobs:
     env:
       IMG_DAEMON: ${{ needs.tags.outputs.daemon }}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
