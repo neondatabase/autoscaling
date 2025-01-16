@@ -83,6 +83,7 @@ func startVMWatcher(
 			// We want to be relatively snappy; don't wait for too long before retrying.
 			RetryRelistAfter: util.NewTimeRange(time.Millisecond, 500, 1000),
 			RetryWatchAfter:  util.NewTimeRange(time.Millisecond, 500, 1000),
+			RelistRateLimit:  nil,
 		},
 		watch.Accessors[*vmv1.VirtualMachineList, vmv1.VirtualMachine]{
 			Items: func(list *vmv1.VirtualMachineList) []vmv1.VirtualMachine { return list.Items },
