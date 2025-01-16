@@ -41,6 +41,11 @@ jobs:
       tag: ${{ inputs.tag || steps.get-tag.outputs.tag }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: get tag
         if: ${{ inputs.tag == '' }}
         id: get-tag
@@ -81,6 +86,11 @@ jobs:
           - ${{ inputs.cluster || 'k3d' }}
     runs-on: [ self-hosted, gen3, large ]
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch all, so that we also include tags
