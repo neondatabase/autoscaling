@@ -198,10 +198,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 		initialRevision = vmInfo.CurrentRevision.Value
 	}
 	// "dsrl" stands for "desired scaling report limiter" -- helper to avoid spamming events.
-	dsrl := &desiredScalingReportLimiter{
-		lastTarget: nil,
-		lastParts:  nil,
-	}
+	dsrl := &desiredScalingReportLimiter{lastEvent: nil}
 	revisionSource := revsource.NewRevisionSource(initialRevision, WrapHistogramVec(&r.global.metrics.scalingLatency))
 	executorCore := executor.NewExecutorCore(coreExecLogger, vmInfo, executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
@@ -361,21 +358,22 @@ func (r *Runner) reportDesiredScaling(
 	// TODO: Use this opportunity to report the desired scaling in the per-VM
 	// metrics.
 
-	rl.report(r.global.scalingReporter, timestamp, endpointID, currentCU, targetCU, parts)
+	rl.report(r.global.scalingReporter, r.global.scalingReporter.NewHypotheticalEvent(
+		timestamp,
+		endpointID,
+		currentCU,
+		targetCU,
+		parts,
+	))
 }
 
 type desiredScalingReportLimiter struct {
-	lastTarget *uint32
-	lastParts  *scalingevents.GoalCUComponents
+	lastEvent *scalingevents.ScalingEvent
 }
 
 func (rl *desiredScalingReportLimiter) report(
 	reporter *scalingevents.Reporter,
-	timestamp time.Time,
-	endpointID string,
-	currentCU uint32,
-	targetCU uint32,
-	parts scalingevents.GoalCUComponents,
+	event scalingevents.ScalingEvent,
 ) {
 	closeEnough := func(x *float64, y *float64) bool {
 		if (x != nil) != (y != nil) {
@@ -389,26 +387,19 @@ func (rl *desiredScalingReportLimiter) report(
 	}
 
 	// Check if we should skip this time.
-	if rl.lastTarget != nil && rl.lastParts != nil {
-		skip := *rl.lastTarget == targetCU &&
-			closeEnough(rl.lastParts.CPU, parts.CPU) &&
-			closeEnough(rl.lastParts.Mem, parts.Mem) &&
-			closeEnough(rl.lastParts.LFC, parts.LFC)
+	if rl.lastEvent != nil {
+		skip := rl.lastEvent.TargetMilliCU == event.TargetMilliCU &&
+			closeEnough(rl.lastEvent.GoalComponents.CPU, event.GoalComponents.CPU) &&
+			closeEnough(rl.lastEvent.GoalComponents.Mem, event.GoalComponents.Mem) &&
+			closeEnough(rl.lastEvent.GoalComponents.LFC, event.GoalComponents.LFC)
 		if skip {
 			return
 		}
 	}
 
 	// Not skipping.
-	rl.lastTarget = &targetCU
-	rl.lastParts = &parts
-	reporter.Submit(reporter.NewHypotheticalEvent(
-		timestamp,
-		endpointID,
-		currentCU,
-		targetCU,
-		parts,
-	))
+	rl.lastEvent = &event
+	reporter.Submit(event)
 }
 
 //////////////////////
