@@ -34,7 +34,7 @@ spec:
   guest:
     args:
     - -c
-    - /usr/local/bin/many-small-files -d /var/db/postgres/compute/pgdata/manysnaps -f 1500000 2>&1
+    - /usr/local/bin/many-small-files -s 5 -d /var/db/postgres/compute/pgdata/manysnaps -f 1500000 2>&1
     command:
     - /bin/sh
     cpus:

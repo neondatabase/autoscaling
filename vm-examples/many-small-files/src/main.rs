@@ -6,6 +6,8 @@ use rand::Rng;
 use std::{
     fs::{self, OpenOptions},
     path::PathBuf,
+    thread,
+    time::Duration,
 };
 use std::io::Write;
 
@@ -19,6 +21,10 @@ struct Args {
     /// Directory where to create files
     #[arg(short, long)]
     directory: PathBuf,
+
+    /// Sleep duration in seconds before starting
+    #[arg(short, long, default_value = "5")]
+    sleep_duration: u64,
 }
 
 struct FileCreator;
@@ -68,6 +74,10 @@ fn main() -> Result<()> {
     env_logger::init();
     
     let args = Args::parse();
+    
+    info!("Sleeping for {} seconds before starting...", args.sleep_duration);
+    thread::sleep(Duration::from_secs(args.sleep_duration));
+    
     let creator = FileCreator;
     creator.create_many_files(&args.directory, args.files)?;
     
