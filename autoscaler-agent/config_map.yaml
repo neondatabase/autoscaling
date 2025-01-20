@@ -32,7 +32,6 @@ data:
       "scalingEvents": {
         "cuMultiplier": 0.25,
         "rereportThreshold": 0.25,
-        "clusterName": "replaceme",
         "regionName": "replaceme",
         "clients": {}
       },
