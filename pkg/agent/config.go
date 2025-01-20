@@ -202,7 +202,6 @@ func (c *Config) validate() error {
 
 	erc.Whenf(ec, c.ScalingEvents.CUMultiplier == 0, zeroTmpl, ".scalingEvents.cuMultiplier")
 	erc.Whenf(ec, c.ScalingEvents.RereportThreshold == 0, zeroTmpl, ".scalingEvents.rereportThreshold")
-	erc.Whenf(ec, c.ScalingEvents.ClusterName == "", emptyTmpl, ".scalingEvents.clusterName")
 	erc.Whenf(ec, c.ScalingEvents.RegionName == "", emptyTmpl, ".scalingEvents.regionName")
 	if c.ScalingEvents.Clients.S3 != nil {
 		validateBaseReportingConfig(&c.ScalingEvents.Clients.S3.BaseClientConfig, "scalingEvents.clients.s3")

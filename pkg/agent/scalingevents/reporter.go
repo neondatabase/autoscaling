@@ -23,8 +23,6 @@ type Config struct {
 	// re-report the desired scaling.
 	RereportThreshold float64 `json:"rereportThreshold"`
 
-	// ClusterName is the name of the cluster that the reporting autoscaler-agent is in.
-	ClusterName string `json:"clusterName"`
 	// RegionName is the name of the region that the reporting autoscaler-agent is in.
 	RegionName string `json:"regionName"`
 
@@ -40,7 +38,6 @@ type Reporter struct {
 type ScalingEvent struct {
 	Timestamp      time.Time         `json:"timestamp"`
 	Region         string            `json:"region"`
-	Cluster        string            `json:"cluster"`
 	EndpointID     string            `json:"endpoint_id"`
 	Kind           scalingEventKind  `json:"kind"`
 	CurrentMilliCU uint32            `json:"current_cu"`
@@ -106,7 +103,6 @@ func (r *Reporter) NewActualEvent(
 	return ScalingEvent{
 		Timestamp:      timestamp,
 		Region:         r.conf.RegionName,
-		Cluster:        r.conf.ClusterName,
 		EndpointID:     endpointID,
 		Kind:           scalingEventActual,
 		CurrentMilliCU: convertToMilliCU(currentCU, r.conf.CUMultiplier),
@@ -132,7 +128,6 @@ func (r *Reporter) NewHypotheticalEvent(
 	return ScalingEvent{
 		Timestamp:      timestamp,
 		Region:         r.conf.RegionName,
-		Cluster:        r.conf.ClusterName,
 		EndpointID:     endpointID,
 		Kind:           scalingEventHypothetical,
 		CurrentMilliCU: convertToMilliCU(currentCU, r.conf.CUMultiplier),
