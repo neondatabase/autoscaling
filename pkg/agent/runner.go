@@ -348,7 +348,7 @@ func (r *Runner) reportScalingEvent(timestamp time.Time, currentCU, targetCU uin
 	}
 
 	reporter := r.global.scalingReporter
-	reporter.Submit(reporter.NewRealEvent(
+	reporter.Submit(reporter.NewActualEvent(
 		timestamp,
 		endpointID,
 		currentCU,

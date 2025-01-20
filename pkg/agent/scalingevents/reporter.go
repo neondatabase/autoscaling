@@ -42,7 +42,7 @@ type ScalingEvent struct {
 	Region         string            `json:"region"`
 	Cluster        string            `json:"cluster"`
 	EndpointID     string            `json:"endpoint_id"`
-	Type           scalingEventType  `json:"type"`
+	Kind           scalingEventKind  `json:"kind"`
 	CurrentMilliCU uint32            `json:"current_cu"`
 	TargetMilliCU  uint32            `json:"target_cu"`
 	GoalComponents *GoalCUComponents `json:"goalComponents,omitempty"`
@@ -54,10 +54,10 @@ type GoalCUComponents struct {
 	LFC *float64 `json:"lfc,omitempty"`
 }
 
-type scalingEventType string
+type scalingEventKind string
 
 const (
-	scalingEventReal         = "real"
+	scalingEventActual       = "actual"
 	scalingEventHypothetical = "hypothetical"
 )
 
@@ -85,6 +85,7 @@ func NewReporter(
 
 // Submit adds the ScalingEvent to the sender queue(s), returning without waiting for it to be sent.
 func (r *Reporter) Submit(event ScalingEvent) {
+	r.metrics.recordSubmitted(event)
 	r.sink.Enqueue(event)
 }
 
@@ -92,10 +93,11 @@ func convertToMilliCU(cu uint32, multiplier float64) uint32 {
 	return uint32(math.Round(1000 * float64(cu) * multiplier))
 }
 
-// NewRealEvent is a helper function to create a ScalingEvent for actual scaling that has occurred.
+// NewActualEvent is a helper function to create a ScalingEvent for actual scaling that has
+// occurred.
 //
 // This method also handles compute unit translation.
-func (r *Reporter) NewRealEvent(
+func (r *Reporter) NewActualEvent(
 	timestamp time.Time,
 	endpointID string,
 	currentCU uint32,
@@ -106,7 +108,7 @@ func (r *Reporter) NewRealEvent(
 		Region:         r.conf.RegionName,
 		Cluster:        r.conf.ClusterName,
 		EndpointID:     endpointID,
-		Type:           scalingEventReal,
+		Kind:           scalingEventActual,
 		CurrentMilliCU: convertToMilliCU(currentCU, r.conf.CUMultiplier),
 		TargetMilliCU:  convertToMilliCU(targetCU, r.conf.CUMultiplier),
 		GoalComponents: nil,
@@ -132,7 +134,7 @@ func (r *Reporter) NewHypotheticalEvent(
 		Region:         r.conf.RegionName,
 		Cluster:        r.conf.ClusterName,
 		EndpointID:     endpointID,
-		Type:           scalingEventHypothetical,
+		Kind:           scalingEventHypothetical,
 		CurrentMilliCU: convertToMilliCU(currentCU, r.conf.CUMultiplier),
 		TargetMilliCU:  convertToMilliCU(targetCU, r.conf.CUMultiplier),
 		GoalComponents: &GoalCUComponents{
