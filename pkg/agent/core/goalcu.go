@@ -152,11 +152,16 @@ func calculateLFCGoalCU(
 		warn("not enough working set size values to make scaling determination")
 		return 0, nil, nil
 	} else {
-		estimateWss := EstimateTrueWorkingSetSize(wssValues, WssEstimatorConfig{
-			MaxAllowedIncreaseFactor: 3.0, // hard-code this for now.
-			InitialOffset:            offsetIndex,
-			WindowSize:               windowSize,
-		})
+		var estimateWss float64
+		if *cfg.LFCUseLargestWindow {
+			estimateWss = wssValues[len(wssValues)-1]
+		} else {
+			estimateWss = EstimateTrueWorkingSetSize(wssValues, WssEstimatorConfig{
+				MaxAllowedIncreaseFactor: 3.0, // hard-code this for now.
+				InitialOffset:            offsetIndex,
+				WindowSize:               windowSize,
+			})
+		}
 		projectSliceEnd := offsetIndex // start at offsetIndex to avoid panics if not monotonically non-decreasing
 		for ; projectSliceEnd < len(wssValues) && wssValues[projectSliceEnd] <= estimateWss; projectSliceEnd++ {
 		}

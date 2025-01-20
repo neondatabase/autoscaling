@@ -19,8 +19,15 @@ GOOS ?= $(shell go env GOOS)
 
 # The target architecture for linux kernel. Possible values: amd64 or arm64.
 # Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile.kernel-builder
-KERNEL_TARGET_ARCH ?= amd64
-TARGET_ARCH ?= amd64
+UNAME_ARCH := $(shell uname -m)
+ifeq ($(UNAME_ARCH),x86_64)
+    TARGET_ARCH ?= amd64
+else ifeq ($(UNAME_ARCH),aarch64)
+    TARGET_ARCH ?= arm64
+else
+    $(error Unsupported architecture: $(UNAME_ARCH))
+endif
+
 # Get the currently used golang base path
 GOPATH=$(shell go env GOPATH)
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
@@ -83,6 +90,7 @@ help: ## Display this help.
 generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	# Use uid and gid of current user to avoid mismatched permissions
 	set -e ; \
+	rm -rf neonvm/client neonvm/apis/neonvm/v1/zz_generated.deepcopy.go
 	iidfile=$$(mktemp /tmp/iid-XXXXXX) ; \
 	docker build \
 		--build-arg USER_ID=$(shell id -u $(USER)) \
@@ -135,12 +143,12 @@ test: vet envtest ## Run tests.
 
 .PHONY: build
 build: vet bin/vm-builder ## Build all neonvm binaries.
-	GOOS=linux go build -o bin/controller         neonvm-controller/cmd/main.go
-	GOOS=linux go build -o bin/vxlan-controller   neonvm-vxlan-controller/cmd/main.go
-	GOOS=linux go build -o bin/runner             neonvm-runner/cmd/main.go
-	GOOS=linux go build -o bin/daemon             neonvm-daemon/cmd/main.go
-	GOOS=linux go build -o bin/autoscaler-agent   autoscaler-agent/cmd/main.go
-	GOOS=linux go build -o bin/scheduler          autoscale-scheduler/cmd/main.go
+	GOOS=linux go build -o bin/controller         neonvm-controller/cmd/*.go
+	GOOS=linux go build -o bin/vxlan-controller   neonvm-vxlan-controller/cmd/*.go
+	GOOS=linux go build -o bin/runner             neonvm-runner/cmd/*.go
+	GOOS=linux go build -o bin/daemon             neonvm-daemon/cmd/*.go
+	GOOS=linux go build -o bin/autoscaler-agent   autoscaler-agent/cmd/*.go
+	GOOS=linux go build -o bin/scheduler          autoscale-scheduler/cmd/*.go
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
@@ -263,19 +271,9 @@ ifndef ignore-not-found
   ignore-not-found = false
 endif
 
-# Build the kernel for the amd64 architecture. Uses generic target.
-.PHONY: kernel_amd64
-kernel_amd64: KERNEL_TARGET_ARCH=amd64
-kernel_amd64: kernel
-
-# Build the kernel for the arm64 architecture. Uses generic target.
-.PHONY: kernel_arm64
-kernel_arm64: KERNEL_TARGET_ARCH=arm64
-kernel_arm64: kernel
-
 # Build the kernel for the target architecture.
 # The builder image platform is not specified because the kernel is built for the target architecture using crosscompilation.
-# Target is generic and can be used for any supported architecture by specifying the KERNEL_TARGET_ARCH variable.
+# Target is generic and can be used for any supported architecture by specifying the TARGET_ARCH variable.
 .PHONY: kernel
 kernel: ## Build linux kernel.
 	rm -f neonvm-kernel/vmlinuz; \
@@ -285,7 +283,7 @@ kernel: ## Build linux kernel.
 	trap "rm $$iidfile" EXIT; \
 	docker buildx build \
 	    --build-arg KERNEL_VERSION=$$kernel_version \
-		--target "kernel_${KERNEL_TARGET_ARCH}" \
+		--target "kernel_${TARGET_ARCH}" \
 		--pull \
 		--load \
 		--iidfile $$iidfile \
@@ -393,11 +391,8 @@ load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM im
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name $(CLUSTER_NAME); fi
 
 .PHONY: example-vms
+example-vms: TARGET_ARCH=$(TARGET_ARCH)
 example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
-
-.PHONY: example-vms-arm64
-example-vms-arm64: TARGET_ARCH=arm64
-example-vms-arm64: example-vms 
 
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.

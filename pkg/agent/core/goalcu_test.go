@@ -19,6 +19,7 @@ func Test_calculateGoalCU(t *testing.T) {
 		MemoryUsageFractionTarget:        lo.ToPtr(0.5),
 		MemoryTotalFractionTarget:        lo.ToPtr(0.9),
 		EnableLFCMetrics:                 lo.ToPtr(true),
+		LFCUseLargestWindow:              lo.ToPtr(false),
 		LFCToMemoryRatio:                 lo.ToPtr(0.75),
 		LFCWindowSizeMinutes:             lo.ToPtr(5),
 		LFCMinWaitBeforeDownscaleMinutes: lo.ToPtr(5),
