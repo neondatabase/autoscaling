@@ -10,68 +10,69 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/constraints"
 
-	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
-type scalingGoal struct {
-	hasAllMetrics bool
-	goalCU        uint32
+type ScalingGoal struct {
+	HasAllMetrics bool
+	Parts         ScalingGoalParts
+}
+
+type ScalingGoalParts struct {
+	CPU *float64
+	Mem *float64
+	LFC *float64
+}
+
+func (g *ScalingGoal) GoalCU() uint32 {
+	return uint32(math.Ceil(max(
+		math.Round(lo.FromPtr(g.Parts.CPU)), // for historical compatibility, use round() instead of ceil()
+		lo.FromPtr(g.Parts.Mem),
+		lo.FromPtr(g.Parts.LFC),
+	)))
 }
 
 func calculateGoalCU(
 	warn func(string),
-	report func(goalCU uint32, parts scalingevents.GoalCUComponents),
 	cfg api.ScalingConfig,
 	computeUnit api.Resources,
 	systemMetrics *SystemMetrics,
 	lfcMetrics *LFCMetrics,
-) (scalingGoal, []zap.Field) {
+) (ScalingGoal, []zap.Field) {
 	hasAllMetrics := systemMetrics != nil && (!*cfg.EnableLFCMetrics || lfcMetrics != nil)
 	if !hasAllMetrics {
 		warn("Making scaling decision without all required metrics available")
 	}
 
-	var lfcGoalCU, cpuGoalCU, memGoalCU, memTotalGoalCU float64
 	var logFields []zap.Field
-	var reportedGoals scalingevents.GoalCUComponents
+	var parts ScalingGoalParts
 
 	var wss *api.Bytes // estimated working set size
 
 	if lfcMetrics != nil {
 		var lfcLogFunc func(zapcore.ObjectEncoder) error
+		var lfcGoalCU float64
 		lfcGoalCU, wss, lfcLogFunc = calculateLFCGoalCU(warn, cfg, computeUnit, *lfcMetrics)
-		reportedGoals.LFC = lo.ToPtr(lfcGoalCU)
+		parts.LFC = lo.ToPtr(lfcGoalCU)
 		if lfcLogFunc != nil {
 			logFields = append(logFields, zap.Object("lfc", zapcore.ObjectMarshalerFunc(lfcLogFunc)))
 		}
 	}
 
 	if systemMetrics != nil {
-		cpuGoalCU = calculateCPUGoalCU(cfg, computeUnit, *systemMetrics)
-		reportedGoals.CPU = lo.ToPtr(cpuGoalCU)
+		cpuGoalCU := calculateCPUGoalCU(cfg, computeUnit, *systemMetrics)
+		parts.CPU = lo.ToPtr(cpuGoalCU)
 
-		memGoalCU = calculateMemGoalCU(cfg, computeUnit, *systemMetrics)
-		reportedGoals.Mem = lo.ToPtr(memGoalCU)
+		memGoalCU := calculateMemGoalCU(cfg, computeUnit, *systemMetrics)
+		parts.Mem = lo.ToPtr(memGoalCU)
 	}
 
 	if systemMetrics != nil && wss != nil {
-		memTotalGoalCU = calculateMemTotalGoalCU(cfg, computeUnit, *systemMetrics, *wss)
-		reportedGoals.Mem = lo.ToPtr(max(*reportedGoals.Mem, memTotalGoalCU))
+		memTotalGoalCU := calculateMemTotalGoalCU(cfg, computeUnit, *systemMetrics, *wss)
+		parts.Mem = lo.ToPtr(max(*parts.Mem, memTotalGoalCU))
 	}
 
-	goalCU := uint32(math.Ceil(max(
-		math.Round(cpuGoalCU), // for historical compatibility, use round() instead of ceil()
-		memGoalCU,
-		memTotalGoalCU,
-		lfcGoalCU,
-	)))
-	if hasAllMetrics {
-		// Report this information, for scaling metrics.
-		report(goalCU, reportedGoals)
-	}
-
-	return scalingGoal{hasAllMetrics: hasAllMetrics, goalCU: goalCU}, logFields
+	return ScalingGoal{HasAllMetrics: hasAllMetrics, Parts: parts}, logFields
 }
 
 // For CPU:

@@ -31,7 +31,6 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
-	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -46,7 +45,7 @@ type ObservabilityCallbacks struct {
 
 type (
 	ReportScalingEventCallback   func(timestamp time.Time, current uint32, target uint32)
-	ReportDesiredScalingCallback func(timestamp time.Time, current uint32, target uint32, parts scalingevents.GoalCUComponents)
+	ReportDesiredScalingCallback func(timestamp time.Time, current uint32, target uint32, parts ScalingGoalParts)
 )
 
 type RevisionSource interface {
@@ -736,7 +735,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
-	reportGoals := func(goalCU uint32, parts scalingevents.GoalCUComponents) {
+	reportGoals := func(goalCU uint32, parts ScalingGoalParts) {
 		currentCU, ok := s.VM.Using().DivResources(s.Config.ComputeUnit)
 		if !ok {
 			return // skip reporting if the current CU is not right.
@@ -749,16 +748,19 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 
 	sg, goalCULogFields := calculateGoalCU(
 		s.warn,
-		reportGoals,
 		s.scalingConfig(),
 		s.Config.ComputeUnit,
 		s.Metrics,
 		s.LFCMetrics,
 	)
-	goalCU := sg.goalCU
+	goalCU := sg.GoalCU()
 	// If we don't have all the metrics we need, we'll later prevent downscaling to avoid flushing
 	// the VM's cache on autoscaler-agent restart if we have SystemMetrics but not LFCMetrics.
-	hasAllMetrics := sg.hasAllMetrics
+	hasAllMetrics := sg.HasAllMetrics
+
+	if hasAllMetrics {
+		reportGoals(goalCU, sg.Parts)
+	}
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
 	// requested upscaling or denied downscaling affected the outcome.

@@ -222,8 +222,12 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 				MonitorLatency: WrapHistogramVec(&r.global.metrics.monitorLatency),
 				NeonVMLatency:  WrapHistogramVec(&r.global.metrics.neonvmLatency),
 				ScalingEvent:   r.reportScalingEvent,
-				DesiredScaling: func(ts time.Time, current, target uint32, parts scalingevents.GoalCUComponents) {
-					r.reportDesiredScaling(dsrl, ts, current, target, parts)
+				DesiredScaling: func(ts time.Time, current, target uint32, parts core.ScalingGoalParts) {
+					r.reportDesiredScaling(dsrl, ts, current, target, scalingevents.GoalCUComponents{
+						CPU: parts.CPU,
+						Mem: parts.Mem,
+						LFC: parts.LFC,
+					})
 				},
 			},
 		},
