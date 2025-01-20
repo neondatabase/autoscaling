@@ -334,18 +334,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 }
 
 func (r *Runner) reportScalingEvent(timestamp time.Time, currentCU, targetCU uint32) {
-	var endpointID string
-
-	enabled := func() bool {
-		r.status.mu.Lock()
-		defer r.status.mu.Unlock()
-
-		endpointID = r.status.endpointID
-		return endpointID != "" && r.status.vmInfo.Config.ReportScalingEvents
+	endpointID := func() string {
+		return r.status.endpointID
 	}()
-	if !enabled {
-		return
-	}
 
 	reporter := r.global.scalingReporter
 	reporter.Submit(reporter.NewActualEvent(
@@ -363,18 +354,9 @@ func (r *Runner) reportDesiredScaling(
 	targetCU uint32,
 	parts scalingevents.GoalCUComponents,
 ) {
-	var endpointID string
-
-	enabled := func() bool {
-		r.status.mu.Lock()
-		defer r.status.mu.Unlock()
-
-		endpointID = r.status.endpointID
-		return endpointID != "" && r.status.vmInfo.Config.ReportDesiredScaling
+	endpointID := func() string {
+		return r.status.endpointID
 	}()
-	if !enabled {
-		return
-	}
 
 	// TODO: Use this opportunity to report the desired scaling in the per-VM
 	// metrics.

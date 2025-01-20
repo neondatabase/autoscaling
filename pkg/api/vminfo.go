@@ -26,10 +26,6 @@ const (
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
 	AnnotationAutoscalingConfig   = "autoscaling.neon.tech/config"
 	AnnotationBillingEndpointID   = "autoscaling.neon.tech/billing-endpoint-id"
-
-	// ref cloud#15939; to be removed after rollout is complete.
-	LabelReportScalingEvents  = "autoscaling.neon.tech/report-scaling-events"
-	LabelReportDesiredScaling = "autoscaling.neon.tech/report-desired-scaling"
 )
 
 func hasTrueLabel(obj metav1.ObjectMetaAccessor, labelName string) bool {
@@ -51,14 +47,6 @@ func HasAutoMigrationEnabled(obj metav1.ObjectMetaAccessor) bool {
 
 func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
 	return hasTrueLabel(obj, LabelTestingOnlyAlwaysMigrate)
-}
-
-func HasReportScalingEventsLabel(obj metav1.ObjectMetaAccessor) bool {
-	return hasTrueLabel(obj, LabelReportScalingEvents)
-}
-
-func HasReportDesiredScalingLabel(obj metav1.ObjectMetaAccessor) bool {
-	return hasTrueLabel(obj, LabelReportDesiredScaling)
 }
 
 // VmInfo is the subset of vmv1.VirtualMachineSpec that the scheduler plugin and autoscaler agent
@@ -124,9 +112,6 @@ type VmConfig struct {
 	AlwaysMigrate  bool           `json:"alwaysMigrate"`
 	ScalingEnabled bool           `json:"scalingEnabled"`
 	ScalingConfig  *ScalingConfig `json:"scalingConfig,omitempty"`
-
-	ReportScalingEvents  bool `json:"reportScalingEvents"`
-	ReportDesiredScaling bool `json:"reportDesiredScaling"`
 }
 
 // Using returns the Resources that this VmInfo says the VM is using
@@ -200,8 +185,6 @@ func extractVmInfoGeneric(
 	autoMigrationEnabled := HasAutoMigrationEnabled(obj)
 	scalingEnabled := HasAutoscalingEnabled(obj)
 	alwaysMigrate := HasAlwaysMigrateLabel(obj)
-	reportScalingEvents := HasReportScalingEventsLabel(obj)
-	reportDesiredScaling := HasReportDesiredScalingLabel(obj)
 
 	info := VmInfo{
 		Name:      vmName,
@@ -213,9 +196,6 @@ func extractVmInfoGeneric(
 			AlwaysMigrate:        alwaysMigrate,
 			ScalingEnabled:       scalingEnabled,
 			ScalingConfig:        nil, // set below, maybe
-
-			ReportScalingEvents:  reportScalingEvents,
-			ReportDesiredScaling: reportDesiredScaling,
 		},
 		CurrentRevision: nil, // set later, maybe
 	}

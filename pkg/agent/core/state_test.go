@@ -228,8 +228,6 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 					AlwaysMigrate:        false,
 					ScalingEnabled:       true,
 					ScalingConfig:        nil,
-					ReportScalingEvents:  false,
-					ReportDesiredScaling: false,
 				},
 				CurrentRevision: nil,
 			}
