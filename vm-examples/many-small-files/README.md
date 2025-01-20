@@ -6,6 +6,7 @@ There is a small rust app in this dir that creates 1mln+ of 144 bytes with rando
 
 ## Building a VM
 
+From this directory:
 ```
 docker build -t many-small-files . && \
 ../../bin/vm-builder \
@@ -17,7 +18,9 @@ docker build -t many-small-files . && \
 ../../bin/kind load docker-image vm-neon-msf:latest --name $(../../bin/kind get clusters)
 ```
 
-To start a compute node:
+## Cheatsheet
+
+To start a VM:
 ```
 kubectl apply -f ./spec.yml
 ```
@@ -33,3 +36,7 @@ kubectl logs -f $(kubectl get pods -o jsonpath='{.items[0].metadata.name}')
 
 kubectl exec -t -i $(kubectl get pods -o jsonpath='{.items[0].metadata.name}') -- ssh guest-vm
 ```
+
+## How to reproduce the issue
+
+Start the VM and watch the logs. Usually oom-killer engages at 1e6 created files.
