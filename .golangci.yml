@@ -84,6 +84,8 @@ linters-settings:
       - '^github\.com/neondatabase/autoscaling/pkg/agent/core\.ActionSet$'
       - '^github\.com/neondatabase/autoscaling/pkg/util/patch\.Operation$'
       - '^github\.com/neondatabase/autoscaling/pkg/util/watch\.HandlerFuncs$'
+      # certv1.{Certificate,CertificateSpec,CertificateRequest,CertificateRequestSpec}
+      - '^github\.com/cert-manager/cert-manager/pkg/apis/certmanager/v1\.Certificate(Request)?(Spec)?$'
 
   # see: <https://golangci-lint.run/usage/linters/#gci>
   gci:

@@ -507,7 +507,7 @@ func runQEMU(
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 	wg.Add(1)
-	go monitorFiles(ctx, logger, &wg, vmSpec.Disks)
+	go monitorFiles(ctx, logger, &wg, vmSpec)
 
 	qemuBin := getQemuBinaryName(cfg.architecture)
 	var bin string
@@ -670,12 +670,12 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 }
 
 // monitorFiles watches a specific set of files and copied them into the guest VM via neonvm-daemon.
-func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, disks []vmv1.Disk) {
+func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, vmSpec *vmv1.VirtualMachineSpec) {
 	defer wg.Done()
 
 	secrets := make(map[string]string)
 	secretsOrd := []string{}
-	for _, disk := range disks {
+	for _, disk := range vmSpec.Disks {
 		if disk.Watch != nil && *disk.Watch {
 			// secrets/configmaps are mounted using the atomicwriter utility,
 			// which loads the directory into `..data`.
@@ -683,6 +683,11 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 			secrets[dataDir] = disk.MountPath
 			secretsOrd = append(secretsOrd, dataDir)
 		}
+	}
+
+	if vmSpec.TLS != nil {
+		secrets["/vm/mounts/var/tls/..data"] = "/var/tls"
+		secretsOrd = append(secretsOrd, "/vm/mounts/var/tls/..data")
 	}
 
 	if len(secretsOrd) == 0 {
