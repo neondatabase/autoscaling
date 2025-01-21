@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -96,6 +97,7 @@ func newTestParams(t *testing.T) *testParams {
 	scheme := runtime.NewScheme()
 	scheme.AddKnownTypes(vmv1.SchemeGroupVersion, &vmv1.VirtualMachine{})
 	scheme.AddKnownTypes(corev1.SchemeGroupVersion, &corev1.Pod{})
+	scheme.AddKnownTypes(certv1.SchemeGroupVersion, &certv1.Certificate{})
 
 	params := &testParams{
 		t:   t,

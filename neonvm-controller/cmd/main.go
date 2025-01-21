@@ -42,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -195,6 +196,9 @@ func main() {
 		FailingRefreshInterval:  failingRefreshInterval,
 		AtMostOnePod:            atMostOnePod,
 		DefaultCPUScalingMode:   defaultCpuScalingMode,
+		CertificateIssuer:       "neon-ca-issuer",
+		CertificateDuration:     86400 * time.Second,
+		CertificateRenewal:      3600 * time.Second,
 	}
 
 	vmReconciler := &controllers.VMReconciler{

@@ -31,6 +31,8 @@ import (
 	"strconv"
 	"time"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/samber/lo"
 	"golang.org/x/crypto/ssh"
@@ -403,9 +405,38 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			}
 		}
 
+		// Check if the TLS certificate already exists, if not create a new one
+		certificate := &certv1.Certificate{}
+		err := r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, certificate)
+		if err != nil && apierrors.IsNotFound(err) {
+			// Define a new pod
+			certificate, err := r.certForVirtualMachine(vm)
+			if err != nil {
+				log.Error(err, "Failed to define new Certificate resource for VirtualMachine")
+				return err
+			}
+
+			log.Info("Creating a new Certificate", "Certificate.Namespace", certificate.Namespace, "Certificate.Name", certificate.Name)
+			if err = r.Create(ctx, certificate); err != nil {
+				log.Error(err, "Failed to create new Certificate", "Certificate.Namespace", certificate.Namespace, "Certificate.Name", certificate.Name)
+				return err
+			}
+			log.Info("Runner Certificate was created", "Certificate.Namespace", certificate.Namespace, "Certificate.Name", certificate.Name)
+
+			msg := fmt.Sprintf("VirtualMachine %s created, Certificate %s", vm.Name, certificate.Name)
+			r.Recorder.Event(vm, "Normal", "Created", msg)
+			if !vm.HasRestarted() {
+				d := certificate.CreationTimestamp.Time.Sub(vm.CreationTimestamp.Time)
+				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
+			}
+		} else if err != nil {
+			log.Error(err, "Failed to get vm-runner Certificate")
+			return err
+		}
+
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
-		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
+		err = r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			var sshSecret *corev1.Secret
 			if enableSSH {
@@ -1099,6 +1130,24 @@ func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 	return secret, nil
 }
 
+// podForVirtualMachine returns a VirtualMachine Pod object
+func (r *VMReconciler) certForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+) (*certv1.Certificate, error) {
+	cert, err := certSpec(vm, r.Config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, cert, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return cert, nil
+}
+
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
 func labelsForVirtualMachine(vm *vmv1.VirtualMachine, runnerVersion *api.RunnerProtoVersion) map[string]string {
@@ -1559,6 +1608,52 @@ func podSpec(
 	}
 
 	return pod, nil
+}
+
+func certSpec(
+	vm *vmv1.VirtualMachine,
+	config *ReconcilerConfig,
+) (*certv1.Certificate, error) {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+
+	commonName := fmt.Sprintf("%s.%s.svc.cluster.local", vm.Name, vm.Namespace)
+
+	issuer := cmmeta.ObjectReference{
+		Name: config.CertificateIssuer,
+		Kind: "ClusterIssuer",
+	}
+
+	secretName := fmt.Sprintf("tls-%s", vm.Name)
+
+	certSpec := certv1.CertificateSpec{
+		CommonName: commonName,
+		DNSNames:   []string{commonName},
+		IssuerRef:  issuer,
+		SecretName: secretName,
+		PrivateKey: &certv1.CertificatePrivateKey{
+			// todo: can we support Ed25519?
+			Algorithm:      certv1.ECDSAKeyAlgorithm,
+			Encoding:       certv1.PKCS8,
+			RotationPolicy: certv1.RotationPolicyAlways,
+		},
+		Usages: []certv1.KeyUsage{
+			certv1.UsageServerAuth,
+		},
+		Duration:    &metav1.Duration{Duration: config.CertificateDuration},
+		RenewBefore: &metav1.Duration{Duration: config.CertificateRenewal},
+	}
+
+	return &certv1.Certificate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        vm.Name,
+			Namespace:   vm.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Spec: certSpec,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
