@@ -126,6 +126,9 @@ func newTestParams(t *testing.T) *testParams {
 			FailingRefreshInterval:  time.Minute,
 			AtMostOnePod:            false,
 			DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
+			CertificateIssuer:       "neon-ca-issuer",
+			CertificateDuration:     86400 * time.Second,
+			CertificateRenewal:      3600 * time.Second,
 		},
 		Metrics: reconcilerMetrics,
 	}

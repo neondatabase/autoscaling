@@ -583,8 +583,6 @@ type VirtualMachineStatus struct {
 	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
-	// +optional
-	CertificateName string `json:"certificateName,omitempty"`
 
 	// CurrentRevision is updated with Spec.TargetRevision's value once
 	// the changes are propagated to the VM.

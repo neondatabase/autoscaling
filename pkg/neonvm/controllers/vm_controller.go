@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cert-manager/cert-manager/pkg/apis/certmanager"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -1134,10 +1135,7 @@ func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 func (r *VMReconciler) certForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 ) (*certv1.Certificate, error) {
-	cert, err := certSpec(vm, r.Config)
-	if err != nil {
-		return nil, err
-	}
+	cert := certSpec(vm, r.Config)
 
 	// Set the ownerRef for the Certificate
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
@@ -1613,7 +1611,7 @@ func podSpec(
 func certSpec(
 	vm *vmv1.VirtualMachine,
 	config *ReconcilerConfig,
-) (*certv1.Certificate, error) {
+) *certv1.Certificate {
 	runnerVersion := api.RunnerProtoV1
 	labels := labelsForVirtualMachine(vm, &runnerVersion)
 	annotations := annotationsForVirtualMachine(vm)
@@ -1621,8 +1619,9 @@ func certSpec(
 	commonName := fmt.Sprintf("%s.%s.svc.cluster.local", vm.Name, vm.Namespace)
 
 	issuer := cmmeta.ObjectReference{
-		Name: config.CertificateIssuer,
-		Kind: "ClusterIssuer",
+		Name:  config.CertificateIssuer,
+		Kind:  "ClusterIssuer",
+		Group: certmanager.GroupName,
 	}
 
 	secretName := fmt.Sprintf("tls-%s", vm.Name)
@@ -1637,10 +1636,10 @@ func certSpec(
 			Algorithm:      certv1.ECDSAKeyAlgorithm,
 			Encoding:       certv1.PKCS8,
 			RotationPolicy: certv1.RotationPolicyAlways,
+			Size:           256,
 		},
-		Usages: []certv1.KeyUsage{
-			certv1.UsageServerAuth,
-		},
+		Usages:      []certv1.KeyUsage{certv1.UsageServerAuth},
+		IsCA:        false,
 		Duration:    &metav1.Duration{Duration: config.CertificateDuration},
 		RenewBefore: &metav1.Duration{Duration: config.CertificateRenewal},
 	}
@@ -1653,7 +1652,7 @@ func certSpec(
 			Annotations: annotations,
 		},
 		Spec: certSpec,
-	}, nil
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
