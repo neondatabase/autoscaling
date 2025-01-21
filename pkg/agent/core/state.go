@@ -39,13 +39,13 @@ type ObservabilityCallbacks struct {
 	MonitorLatency revsource.ObserveCallback
 	NeonVMLatency  revsource.ObserveCallback
 
-	ScalingEvent   ReportScalingEventCallback
-	DesiredScaling ReportDesiredScalingCallback
+	ActualScaling       ReportActualScalingEventCallback
+	HypotheticalScaling ReportHypotheticalScalingEventCallback
 }
 
 type (
-	ReportScalingEventCallback   func(timestamp time.Time, current uint32, target uint32)
-	ReportDesiredScalingCallback func(timestamp time.Time, current uint32, target uint32, parts ScalingGoalParts)
+	ReportActualScalingEventCallback       func(timestamp time.Time, current uint32, target uint32)
+	ReportHypotheticalScalingEventCallback func(timestamp time.Time, current uint32, target uint32, parts ScalingGoalParts)
 )
 
 type RevisionSource interface {
@@ -741,7 +741,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 			return // skip reporting if the current CU is not right.
 		}
 
-		if report := s.Config.ObservabilityCallbacks.DesiredScaling; report != nil {
+		if report := s.Config.ObservabilityCallbacks.HypotheticalScaling; report != nil {
 			report(now, uint32(currentCU), goalCU, parts)
 		}
 	}
@@ -1243,7 +1243,7 @@ func (s *State) NeonVM() NeonVMHandle {
 }
 
 func (h NeonVMHandle) StartingRequest(now time.Time, resources api.Resources) {
-	if report := h.s.Config.ObservabilityCallbacks.ScalingEvent; report != nil {
+	if report := h.s.Config.ObservabilityCallbacks.ActualScaling; report != nil {
 		currentCU, currentOk := h.s.VM.Using().DivResources(h.s.Config.ComputeUnit)
 		targetCU, targetOk := resources.DivResources(h.s.Config.ComputeUnit)
 
