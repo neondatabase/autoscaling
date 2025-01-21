@@ -48,6 +48,9 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 // Returns a function to generate keys for the placement of scaling events data into blob storage.
 //
 // Example: prefix/2024/10/31/23/events_{uuid}.ndjson.gz (11pm on halloween, UTC)
+//
+// NOTE: This key format is different from the one we use for billing, but similar to the one proxy
+// uses for its reporting.
 func newBlobStorageKeyGenerator(prefix string) func() string {
 	return func() string {
 		now := time.Now().UTC()
