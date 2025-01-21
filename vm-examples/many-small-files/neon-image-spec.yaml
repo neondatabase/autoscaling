@@ -35,6 +35,10 @@ commands:
     user: nobody
     sysvInitAction: respawn
     shell: '/bin/sql_exporter -config.file=/etc/sql_exporter_autoscaling.yml -web.listen-address=:9499'
+  - name: mempy
+    user: root
+    sysvInitAction: respawn
+    shell: 'python3 /root/mem.py -d 500 >> /root/mem.log'
 shutdownHook: |
   su -p postgres --session-command '/usr/local/bin/pg_ctl stop -D /var/db/postgres/compute/pgdata -m fast --wait -t 10'
 files:

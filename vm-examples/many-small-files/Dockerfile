@@ -16,6 +16,7 @@ USER root
 RUN apt update && apt install --no-install-recommends -y smem htop lsof
 
 COPY --from=builder /usr/src/app/target/release/many-small-files /usr/local/bin/
+COPY ./mem.py /root/mem.py
 
 ENV RUST_LOG=info
 USER postgres
