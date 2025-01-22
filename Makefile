@@ -393,6 +393,10 @@ load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM im
 .PHONY: example-vms
 example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
 
+.PHONY: example-vms-arm64
+example-vms-arm64: TARGET_ARCH=arm64
+example-vms-arm64: example-vms
+
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG16_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
@@ -471,27 +475,26 @@ $(LOCALBIN):
 
 ## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-# same as used in kubectl v1.28.x ; see https://github.com/kubernetes-sigs/kustomize/tree/master?tab=readme-ov-file#kubectl-integration
+# _should_ be the same version kubectl v1.30.x uses (IE https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44) however
+# there is apparently no 5.0.4 binary release
 KUSTOMIZE_VERSION ?= v5.1.1
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.28.3
+ENVTEST_K8S_VERSION = 1.30.0
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-# We went ahead of k8s 1.28 with controller-tools v0.14.0 (which depends on k8s 1.29) to unblock go 1.22 upgrade.
-# It should be *relatively* safe as the only changes from this controller-tools version are description in CRD.
-# Once we upgrade to k8s 1.29, there's no need to change CONTROLLER_TOOLS_VERSION, and this 3 lines can be removed.
-#
-# k8s deps @ 1.29.0 https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
-CONTROLLER_TOOLS_VERSION ?= v0.14.0
 
-CODE_GENERATOR_VERSION ?= v0.28.12
+# k8s deps @ 1.30.7 https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
+CONTROLLER_TOOLS_VERSION ?= v0.15.0
+
+# Should match the kubernetes minor vesion
+CODE_GENERATOR_VERSION ?= v0.30.7
 
 KUTTL ?= $(LOCALBIN)/kuttl
-# k8s deps @ 1.28.3
-KUTTL_VERSION ?= v0.16.0
+# k8s deps @ 1.30.7
+KUTTL_VERSION ?= v0.18.0
 ifeq ($(GOARCH), arm64)
     KUTTL_ARCH = arm64
 else ifeq ($(GOARCH), amd64)
@@ -500,15 +503,21 @@ else
     $(error Unsupported architecture: $(GOARCH))
 endif
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.29.10
+KUBECTL_VERSION ?= v1.30.7
+
+ETCD ?= $(LOCALBIN)/etcd
+
+# Use the same version kuberentes is tested against, see
+# https://github.com/kubernetes/kubernetes/blob/release-1.30/build/dependencies.yaml#L65-L67 for example
+ETCD_VERSION ?= v3.5.15
 
 KIND ?= $(LOCALBIN)/kind
-# https://github.com/kubernetes-sigs/kind/releases/tag/v0.23.0, supports k8s up to 1.30
-KIND_VERSION ?= v0.23.0
+# https://github.com/kubernetes-sigs/kind/releases/tag/v0.24.0, supports k8s up to 1.31
+KIND_VERSION ?= v0.24.0
 
 K3D ?= $(LOCALBIN)/k3d
-# k8s deps in go.mod @ v1.29.4 (nb: binary, separate from images)
-K3D_VERSION ?= v5.7.4
+# k8s deps in go.mod @ 1.30.7
+K3D_VERSION ?= v5.7.5
 
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
@@ -555,3 +564,18 @@ cert-manager: check-local-context kubectl ## install cert-manager to cluster
 python-init:
 	python3 -m venv tests/e2e/.venv
 	tests/e2e/.venv/bin/pip install -r requirements.txt
+
+.PHONY: etcd
+etcd: $(ETCD)
+$(ETCD): $(LOCALBIN)
+	@test -s $(LOCALBIN)/etcd || { \
+		if [ "$(GOOS)" = "darwin" ]; then \
+			curl -sfSL -o $(LOCALBIN)/etcd-temp https://github.com/etcd-io/etcd/releases/download/$(ETCD_VERSION)/etcd-$(ETCD_VERSION)-$(GOOS)-$(GOARCH).zip && \
+			unzip -j $(LOCALBIN)/etcd-temp "*/etcd" "*/etcdctl" -d $(LOCALBIN) && \
+			rm $(LOCALBIN)/etcd-temp; \
+		else \
+			curl -sfSL -o $(LOCALBIN)/etcd-temp https://github.com/etcd-io/etcd/releases/download/$(ETCD_VERSION)/etcd-$(ETCD_VERSION)-$(GOOS)-$(GOARCH).tar.gz && \
+			tar -xvf $(LOCALBIN)/etcd-temp -C $(LOCALBIN) --strip-components=1 && \
+			rm $(LOCALBIN)/etcd-temp; \
+		fi \
+	}
