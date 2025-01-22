@@ -59,6 +59,8 @@ else ifdef USER
 else
   CLUSTER_NAME = neonvm
 endif
+CLUSTER_NAME=neon-local
+
 
 .PHONY: all
 all: build lint
@@ -420,7 +422,7 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 		$(IMG_VXLAN_CONTROLLER) \
 		$(IMG_SCHEDULER) \
 		$(IMG_AUTOSCALER_AGENT) \
-		--cluster $(CLUSTER_NAME) --mode direct
+		--cluster $(CLUSTER_NAME)
 
 ##@ End-to-End tests
 

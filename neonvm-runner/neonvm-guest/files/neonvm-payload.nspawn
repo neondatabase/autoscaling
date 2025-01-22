@@ -1,0 +1,7 @@
+[Exec]
+# XXX: This isn't really necessary, Boot=true is the default when the machine
+# is launched as a service
+Boot=true
+
+[Files]
+BindReadOnly=/neonvm/runtime

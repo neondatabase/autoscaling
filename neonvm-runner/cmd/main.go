@@ -111,6 +111,10 @@ type Config struct {
 	cpuScalingMode vmv1.CpuScalingMode
 	// System CPU architecture. Set automatically equal to runtime.GOARCH.
 	architecture string
+
+	// Use neonvm-guest to launch the payload? This is derived from whether
+	// neonvm-payload.qcow2 is present.
+	useNeonVMGuest bool
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -192,6 +196,11 @@ func run(logger *zap.Logger) error {
 		enableSSH = true
 	}
 
+	cfg.useNeonVMGuest, err = shouldUseNeonVMGuest(logger)
+	if err != nil {
+		return fmt.Errorf("failed to check the existence of neonvm-payload.qcow2: %w", err)
+	}
+
 	// Set hostname, with "vm-" prefix to distinguish it from the pod name
 	//
 	// This is just to reduce the risk of mixing things up when ssh'ing to different
@@ -246,7 +255,7 @@ func run(logger *zap.Logger) error {
 
 	tg.Go("rootDisk", func(logger *zap.Logger) error {
 		// resize rootDisk image of size specified and new size more than current
-		return resizeRootDisk(logger, vmSpec)
+		return resizeRootDisk(logger, cfg.useNeonVMGuest, vmSpec)
 	})
 	var qemuCmd []string
 
@@ -296,7 +305,7 @@ func buildQEMUCmd(
 		"-device", "virtserialport,chardev=log,name=tech.neon.log.0",
 	}
 
-	qemuDiskArgs, err := setupVMDisks(logger, cfg.diskCacheSettings, enableSSH, swapSize, vmSpec.Disks)
+	qemuDiskArgs, err := setupVMDisks(logger, cfg.useNeonVMGuest, cfg.diskCacheSettings, enableSSH, swapSize, vmSpec.Disks)
 	if err != nil {
 		return nil, err
 	}
@@ -399,13 +408,17 @@ func buildQEMUCmd(
 }
 
 const (
-	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=7 root=/dev/vda rw"
+	baseKernelCmdline          = "panic=-1 loglevel=7 root=/dev/vda rw"
 	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable"
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
 func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
 	cmdlineParts := []string{baseKernelCmdline}
+
+	if !cfg.useNeonVMGuest {
+		cmdlineParts = append(cmdlineParts, "init=/neonvm/bin/init")
+	}
 
 	switch cfg.memoryProvider {
 	case vmv1.MemoryProviderDIMMSlots:
@@ -423,6 +436,7 @@ func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMach
 
 	if len(hostname) != 0 {
 		cmdlineParts = append(cmdlineParts, fmt.Sprintf("hostname=%s", hostname))
+		cmdlineParts = append(cmdlineParts, fmt.Sprintf("systemd.hostname=%s", hostname))
 	}
 
 	if cfg.appendKernelCmdline != "" {
@@ -444,6 +458,7 @@ func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMach
 	default:
 		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
+	cmdlineParts = append(cmdlineParts, "systemd.getty_auto=no")
 
 	return strings.Join(cmdlineParts, " ")
 }
