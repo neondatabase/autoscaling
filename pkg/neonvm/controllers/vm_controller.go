@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -373,15 +374,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
 	}
 
-	// Forwards compatibility: Set virtio-mem memory provider for VMs that don't have it in the
-	// status.
-	// We need to do this so that when we switch to no longer setting memoryProvider, we won't
-	// regress and try to set it to dimm slots.
-	// See #1060 for the relevant tracking issue.
-	if vm.Status.PodName != "" && vm.Status.MemoryProvider == nil {
-		newMemProvider := vmv1.MemoryProviderVirtioMem
-		log.Error(nil, "Setting default MemoryProvider for VM", "MemoryProvider", newMemProvider)
-		vm.Status.MemoryProvider = lo.ToPtr(newMemProvider)
+	// DIMMSlots memory provider is deprecated, and assumed to never be used.
+	//nolint:staticcheck // We know it's deprecated. That's why we're checking it.
+	if vm.Status.MemoryProvider != nil && *vm.Status.MemoryProvider == vmv1.MemoryProviderDIMMSlots {
+		return errors.New("DIMMSlots memory provider is deprecated and disabled")
 	}
 
 	switch vm.Status.Phase {
@@ -394,21 +390,18 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
 		// Generate runner pod name and set desired memory provider.
-		// Together with Status.MemoryProvider set for PodName != "" above,
-		// It is now guaranteed to have Status.MemoryProvider != nil
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
-			if vm.Status.MemoryProvider == nil {
-				vm.Status.MemoryProvider = lo.ToPtr(pickMemoryProvider(r.Config, vm))
+			if err := vm.Spec.Guest.ValidateMemorySize(); err != nil {
+				return fmt.Errorf("Failed to set memoryProvider for VM: %w", err)
 			}
+
 			// Update the .Status on API Server to avoid creating multiple pods for a single VM
 			// See https://github.com/neondatabase/autoscaling/issues/794 for the context
 			if err := r.Status().Update(ctx, vm); err != nil {
 				return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
 			}
 		}
-
-		memoryProvider := *vm.Status.MemoryProvider
 
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
@@ -443,7 +436,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			}
 
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(vm, memoryProvider, sshSecret)
+			pod, err := r.podForVirtualMachine(vm, sshSecret)
 			if err != nil {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
@@ -728,19 +721,9 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		ramScaled := false
 
 		// do hotplug/unplug Memory
-		switch *vm.Status.MemoryProvider {
-		case vmv1.MemoryProviderVirtioMem:
-			ramScaled, err = r.doVirtioMemScaling(vm)
-			if err != nil {
-				return err
-			}
-		case vmv1.MemoryProviderDIMMSlots:
-			ramScaled, err = r.doDIMMSlotsScaling(ctx, vm)
-			if err != nil {
-				return err
-			}
-		default:
-			panic(fmt.Errorf("unexpected vm.status.memoryProvider %q", *vm.Status.MemoryProvider))
+		ramScaled, err = r.doVirtioMemScaling(vm)
+		if err != nil {
+			return err
 		}
 
 		// set VM phase to running if everything scaled
@@ -815,23 +798,6 @@ func propagateRevision(vm *vmv1.VirtualMachine) {
 	vm.Status.CurrentRevision = &rev
 }
 
-func pickMemoryProvider(config *ReconcilerConfig, vm *vmv1.VirtualMachine) vmv1.MemoryProvider {
-	if p := vm.Spec.Guest.MemoryProvider; p != nil {
-		return *p
-	}
-	if p := vm.Status.MemoryProvider; p != nil {
-		return *p
-	}
-
-	// Not all configurations are valid for virtio-mem. Only switch to the default as long as it
-	// won't be invalid:
-	if err := vm.Spec.Guest.ValidateForMemoryProvider(config.DefaultMemoryProvider); err != nil {
-		return vmv1.MemoryProviderDIMMSlots
-	}
-
-	return config.DefaultMemoryProvider
-}
-
 func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _ error) {
 	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - vm.Spec.Guest.MemorySlots.Min)
 
@@ -865,47 +831,6 @@ func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _
 
 	done = currentTotalSize.Value() == goalTotalSize.Value()
 	r.updateVMStatusMemory(vm, currentTotalSize)
-	return done, nil
-}
-
-func (r *VMReconciler) doDIMMSlotsScaling(ctx context.Context, vm *vmv1.VirtualMachine) (done bool, _ error) {
-	log := log.FromContext(ctx)
-
-	memSlotsMin := vm.Spec.Guest.MemorySlots.Min
-	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - memSlotsMin)
-
-	realSlots, err := QmpSetMemorySlots(ctx, vm, targetSlotCount, r.Recorder)
-	if realSlots < 0 {
-		return false, err
-	}
-
-	if realSlots != int(targetSlotCount) {
-		log.Info("Couldn't achieve desired memory slot count, will modify .spec.guest.memorySlots.use instead", "details", err)
-		// firstly re-fetch VM
-		if err := r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, vm); err != nil {
-			log.Error(err, "Unable to re-fetch VirtualMachine")
-			return false, err
-		}
-		memorySlotsUseInSpec := vm.Spec.Guest.MemorySlots.Use
-		memoryPluggedSlots := memSlotsMin + int32(realSlots)
-		vm.Spec.Guest.MemorySlots.Use = memoryPluggedSlots
-		if err := r.tryUpdateVM(ctx, vm); err != nil {
-			log.Error(err, "Failed to update .spec.guest.memorySlots.use",
-				"old value", memorySlotsUseInSpec,
-				"new value", memoryPluggedSlots)
-			return false, err
-		}
-	} else {
-		done = true
-	}
-	// get Memory details from hypervisor and update VM status
-	memorySize, err := QmpGetMemorySize(QmpAddr(vm))
-	if err != nil {
-		log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
-		return false, err
-	}
-	// update status by memory sizes used in the VM
-	r.updateVMStatusMemory(vm, memorySize)
 	return done, nil
 }
 
@@ -1121,10 +1046,9 @@ func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
 // podForVirtualMachine returns a VirtualMachine Pod object
 func (r *VMReconciler) podForVirtualMachine(
 	vm *vmv1.VirtualMachine,
-	memoryProvider vmv1.MemoryProvider,
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
-	pod, err := podSpec(vm, memoryProvider, sshSecret, r.Config)
+	pod, err := podSpec(vm, sshSecret, r.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -1256,7 +1180,6 @@ func imageForVmRunner() (string, error) {
 
 func podSpec(
 	vm *vmv1.VirtualMachine,
-	memoryProvider vmv1.MemoryProvider,
 	sshSecret *corev1.Secret,
 	config *ReconcilerConfig,
 ) (*corev1.Pod, error) {
@@ -1371,11 +1294,9 @@ func podSpec(
 						cmd = append(
 							cmd,
 							"-qemu-disk-cache-settings", config.QEMUDiskCacheSettings,
-							"-memory-provider", string(memoryProvider),
+							"-memory-provider", string(vmv1.MemoryProviderVirtioMem),
+							"-memhp-auto-movable-ratio", config.MemhpAutoMovableRatio,
 						)
-						if memoryProvider == vmv1.MemoryProviderVirtioMem {
-							cmd = append(cmd, "-memhp-auto-movable-ratio", config.MemhpAutoMovableRatio)
-						}
 						// put these last, so that the earlier args are easier to see (because these
 						// can get quite large)
 						cmd = append(

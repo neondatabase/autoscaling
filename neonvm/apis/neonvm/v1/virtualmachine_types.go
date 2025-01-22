@@ -221,6 +221,7 @@ type Guest struct {
 	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
 	// +optional
 	MemorySlots MemorySlots `json:"memorySlots"`
+	// Deprecated: MemoryProvider is ignored and always interpreted as equal to VirtioMem.
 	// +optional
 	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
@@ -248,18 +249,11 @@ type Guest struct {
 
 const virtioMemBlockSizeBytes = 8 * 1024 * 1024 // 8 MiB
 
-// ValidateForMemoryProvider returns an error iff the guest memory settings are invalid for the
-// MemoryProvider.
-//
-// This is used in two places. First, to validate VirtualMachine object creation. Second, to handle
-// the defaulting behavior for VirtualMachines that would be switching from DIMMSlots to VirtioMem
-// on restart. We place more restrictions on VirtioMem because we use 8MiB block sizes, so changing
-// to a new default can only happen if the memory slot size is a multiple of 8MiB.
-func (g Guest) ValidateForMemoryProvider(p MemoryProvider) error {
-	if p == MemoryProviderVirtioMem {
-		if g.MemorySlotSize.Value()%virtioMemBlockSizeBytes != 0 {
-			return fmt.Errorf("memorySlotSize invalid for memoryProvider VirtioMem: must be a multiple of 8Mi")
-		}
+// ValidateMemorySize returns an error iff the memory settings are invalid for use with virtio-mem
+// (the backing memory provider that we use)
+func (g Guest) ValidateMemorySize() error {
+	if g.MemorySlotSize.Value()%virtioMemBlockSizeBytes != 0 {
+		return fmt.Errorf("memorySlotSize invalid for use with virtio-mem: must be a multiple of 8Mi")
 	}
 	return nil
 }
@@ -584,6 +578,7 @@ type VirtualMachineStatus struct {
 	CPUs *MilliCPU `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
+	// Deprecated: MemoryProvider is ignored and always interpreted as equal to VirtioMem.
 	// +optional
 	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional

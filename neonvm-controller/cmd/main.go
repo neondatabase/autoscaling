@@ -97,7 +97,6 @@ func main() {
 	var disableRunnerCgroup bool
 	var defaultCpuScalingMode vmv1.CpuScalingMode
 	var qemuDiskCacheSettings string
-	var defaultMemoryProvider vmv1.MemoryProvider
 	var memhpAutoMovableRatio string
 	var failurePendingPeriod time.Duration
 	var failingRefreshInterval time.Duration
@@ -137,7 +136,6 @@ func main() {
 	flag.Func("default-cpu-scaling-mode", "Set default cpu scaling mode to use for new VMs", defaultCpuScalingMode.FlagFunc)
 	flag.BoolVar(&disableRunnerCgroup, "disable-runner-cgroup", false, "Disable creation of a cgroup in neonvm-runner for fractional CPU limiting")
 	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
-	flag.Func("default-memory-provider", "Set default memory provider to use for new VMs", defaultMemoryProvider.FlagFunc)
 	flag.StringVar(&memhpAutoMovableRatio, "memhp-auto-movable-ratio", "301", "For virtio-mem, set VM kernel's memory_hotplug.auto_movable_ratio")
 	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
 		"the period for the propagation of reconciliation failures to the observability instruments")
@@ -147,11 +145,6 @@ func main() {
 		"If true, the controller will ensure that at most one pod is running at a time. "+
 			"Otherwise, the outdated pod might be left to terminate, while the new one is already running.")
 	flag.Parse()
-
-	if defaultMemoryProvider == "" {
-		fmt.Fprintln(os.Stderr, "missing required flag '-default-memory-provider'")
-		os.Exit(1)
-	}
 
 	logConfig := zap.NewProductionConfig()
 	logConfig.Sampling = nil // Disabling sampling; it's enabled by default for zap's production configs.
@@ -197,7 +190,6 @@ func main() {
 		MaxConcurrentReconciles: concurrencyLimit,
 		SkipUpdateValidationFor: skipUpdateValidationFor,
 		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
-		DefaultMemoryProvider:   defaultMemoryProvider,
 		MemhpAutoMovableRatio:   memhpAutoMovableRatio,
 		FailurePendingPeriod:    failurePendingPeriod,
 		FailingRefreshInterval:  failingRefreshInterval,
