@@ -1,0 +1,11 @@
+[Unit]
+Description=neonvm configuration files
+
+[Mount]
+What=LABEL=vmruntime
+Where=/neonvm/runtime
+Options=rw,defaults
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=systemd-nspawn@neonvm-payload.service

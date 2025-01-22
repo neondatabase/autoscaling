@@ -58,6 +58,22 @@ kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') 
 
 #### Pseudoterminal
 
+The VM has two serials:
+
+amd64:
+/dev/ttyS0 : for console login, we run getty on it
+/dev/ttyS1 : for log output, goes to QEMU stdout, and on to the kubernetes log in the host
+
+console=/dev/ttyS1 is passed on the command line
+
+arm64:
+/dev/ttyAMA0 : for console login
+/dev/hvc0 : for log output, goes to QEMU stdout, and on to the kubernetes log in the host
+
+console=/dev/hvc0 is passed on the command line
+
+
+
 ```console
 kubectl exec -it $(kubectl get neonvm vm-debian -ojsonpath='{.status.podName}') -- screen /dev/pts/0
 

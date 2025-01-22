@@ -1,0 +1,11 @@
+[Unit]
+Description=ssh authorized_keys from host
+
+[Mount]
+What=LABEL=ssh-authorized-keys
+Where=/mnt/ssh
+#Type=iso9660
+Options=ro,defaults
+
+[Install]
+WantedBy=multi-user.target

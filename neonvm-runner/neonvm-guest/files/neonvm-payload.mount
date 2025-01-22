@@ -1,0 +1,10 @@
+[Unit]
+Description=neonvm payload disk
+
+[Mount]
+What=LABEL=neonvm-payload
+Where=/neonvm/payload
+Options=rw,defaults
+
+[Install]
+WantedBy=systemd-nspawn@neonvm-payload.service
