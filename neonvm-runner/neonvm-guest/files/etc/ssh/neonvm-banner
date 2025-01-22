@@ -1,0 +1,6 @@
+This is neonvm-guest, the VM image that runs inside a NeonVM virtual machine.
+PostgreSQL or other payload runs in a container inside this VM. Use systemd
+machinectl to access it.
+
+    machinectl shell neonvm-payload
+

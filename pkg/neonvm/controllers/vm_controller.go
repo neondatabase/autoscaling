@@ -1240,27 +1240,8 @@ func podSpec(
 			ServiceAccountName:            vm.Spec.ServiceAccountName,
 			SchedulerName:                 vm.Spec.SchedulerName,
 			Affinity:                      affinity,
-			InitContainers: []corev1.Container{
-				{
-					Image:           vm.Spec.Guest.RootDisk.Image,
-					Name:            "init",
-					ImagePullPolicy: vm.Spec.Guest.RootDisk.ImagePullPolicy,
-					VolumeMounts: []corev1.VolumeMount{{
-						Name:      "virtualmachineimages",
-						MountPath: "/vm/images",
-					}},
-					Command: []string{
-						"sh", "-c",
-						"mv /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
-							/* uid=36(qemu) gid=34(kvm) groups=34(kvm) */
-							"chown 36:34 /vm/images/rootdisk.qcow2 && " +
-							"sysctl -w net.ipv4.ip_forward=1",
-					},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged: lo.ToPtr(true),
-					},
-				},
-			},
+			// will be added to later
+			InitContainers: []corev1.Container{},
 			// generate containers as an inline function so the context isn't isolated
 			Containers: func() []corev1.Container {
 				runner := corev1.Container{
@@ -1377,6 +1358,29 @@ func podSpec(
 			}(),
 		},
 	}
+
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
+		Image:           vm.Spec.Guest.RootDisk.Image,
+		Name:            "init",
+		ImagePullPolicy: vm.Spec.Guest.RootDisk.ImagePullPolicy,
+		VolumeMounts: []corev1.VolumeMount{{
+			Name:      "virtualmachineimages",
+			MountPath: "/vm/images",
+		}},
+		Command: []string{
+			"sh", "-c",
+			/* In the legacy VM images, the VM docker image contains disk.qcow2, and neonvm-runner expects rootdisk.qcow2.
+			 * In the new system, neonvm-runner expects neonvm-payload.qcow2 */
+			"if [ -f /disk.qcow2 ]; then SRC=/disk.qcow2 DST=/vm/images/rootdisk.qcow2; else SRC=/neonvm-payload.qcow2 DST=/vm/images/neonvm-payload.qcow2; fi && " +
+				"mv $SRC $DST && " +
+				/* uid=36(qemu) gid=34(kvm) groups=34(kvm) */
+				"chown 36:34 $DST && " +
+				"sysctl -w net.ipv4.ip_forward=1",
+		},
+		SecurityContext: &corev1.SecurityContext{
+			Privileged: lo.ToPtr(true),
+		},
+	})
 
 	if sshSecret != nil {
 		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts,
