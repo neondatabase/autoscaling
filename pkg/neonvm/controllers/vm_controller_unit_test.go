@@ -119,7 +119,6 @@ func newTestParams(t *testing.T) *testParams {
 			MaxConcurrentReconciles: 10,
 			SkipUpdateValidationFor: nil,
 			QEMUDiskCacheSettings:   "",
-			DefaultMemoryProvider:   vmv1.MemoryProviderDIMMSlots,
 			MemhpAutoMovableRatio:   "301",
 			FailurePendingPeriod:    time.Minute,
 			FailingRefreshInterval:  time.Minute,
