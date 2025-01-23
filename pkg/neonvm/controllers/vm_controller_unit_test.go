@@ -97,7 +97,8 @@ func newTestParams(t *testing.T) *testParams {
 	scheme := runtime.NewScheme()
 	scheme.AddKnownTypes(vmv1.SchemeGroupVersion, &vmv1.VirtualMachine{})
 	scheme.AddKnownTypes(corev1.SchemeGroupVersion, &corev1.Pod{})
-	scheme.AddKnownTypes(certv1.SchemeGroupVersion, &certv1.Certificate{})
+	scheme.AddKnownTypes(corev1.SchemeGroupVersion, &corev1.Secret{})
+	scheme.AddKnownTypes(certv1.SchemeGroupVersion, &certv1.CertificateRequest{})
 
 	params := &testParams{
 		t:   t,

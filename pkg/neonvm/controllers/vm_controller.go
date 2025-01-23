@@ -463,28 +463,25 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return err
 		}
 
-		if certificateReq.Status.Certificate == nil {
-			// do nothing
-			return nil
-		}
+		if certificateReq.Status.Certificate != nil {
+			// we have a certificate and the corresponding private key
+			// create the proper certificate secret and delete the tmp secret
+			certSecret, err := r.certSecretForVirtualMachine(vm, key, certificateReq.Status.Certificate)
+			if err != nil {
+				log.Error(err, "Failed to define new certificate Secret resource for VirtualMachine")
+				return err
+			}
 
-		// we have a certificate and the corresponding private key
-		// create the proper certificate secret and delete the tmp secret
-		certSecret, err := r.certSecretForVirtualMachine(vm, key, certificateReq.Status.Certificate)
-		if err != nil {
-			log.Error(err, "Failed to define new certificate Secret resource for VirtualMachine")
-			return err
-		}
+			if err = r.Create(ctx, certSecret); err != nil {
+				log.Error(err, "Failed to create new Secret", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+				return err
+			}
+			log.Info("Virtual Machine Secret was created", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
 
-		if err = r.Create(ctx, certSecret); err != nil {
-			log.Error(err, "Failed to create new Secret", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
-			return err
-		}
-		log.Info("Virtual Machine Secret was created", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
-
-		err = r.Delete(ctx, tmpKeySecret)
-		if err != nil {
-			log.Info("Virtual Machine temporary certificate secret could not be deleted", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+			err = r.Delete(ctx, tmpKeySecret)
+			if err != nil {
+				log.Info("Virtual Machine temporary certificate secret could not be deleted", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+			}
 		}
 
 		// Generate runner pod name and set desired memory provider.
@@ -1197,21 +1194,6 @@ func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 	return secret, nil
 }
 
-// certForVirtualMachine returns a VirtualMachine Certificate object
-func (r *VMReconciler) certForVirtualMachine(
-	vm *vmv1.VirtualMachine,
-) (*certv1.Certificate, error) {
-	cert := certSpec(vm, r.Config)
-
-	// Set the ownerRef for the Certificate
-	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
-	if err := ctrl.SetControllerReference(vm, cert, r.Scheme); err != nil {
-		return nil, err
-	}
-
-	return cert, nil
-}
-
 // certReqForVirtualMachine returns a VirtualMachine CertificateRequest object
 func (r *VMReconciler) certReqForVirtualMachine(
 	vm *vmv1.VirtualMachine,
@@ -1236,7 +1218,7 @@ func (r *VMReconciler) tmpKeySecretForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 	key crypto.Signer,
 ) (*corev1.Secret, error) {
-	secret, err := tmpKeySecretSpec(vm, r.Config, key)
+	secret, err := tmpKeySecretSpec(vm, key)
 	if err != nil {
 		return nil, err
 	}
@@ -1710,6 +1692,21 @@ func podSpec(
 		}
 	}
 
+	// Add TLS secret
+	mnt := corev1.VolumeMount{
+		Name:      "tls",
+		MountPath: fmt.Sprintf("/vm/mounts%s", "/var/tls"),
+	}
+	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: "tls",
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: fmt.Sprintf("tls-%s", vm.Name),
+			},
+		},
+	})
+
 	// use multus network to add extra network interface
 	if vm.Spec.ExtraNetwork != nil && vm.Spec.ExtraNetwork.Enable {
 		var nadNetwork string
@@ -1785,7 +1782,6 @@ func certSpec(
 
 func tmpKeySecretSpec(
 	vm *vmv1.VirtualMachine,
-	config *ReconcilerConfig,
 	key crypto.PrivateKey,
 ) (*corev1.Secret, error) {
 	runnerVersion := api.RunnerProtoV1
@@ -1865,6 +1861,9 @@ func certReqSpec(
 	}
 
 	csr, err := x509.CreateCertificateRequest(rand.Reader, cr, key)
+	if err != nil {
+		return nil, err
+	}
 
 	certSpec := certv1.CertificateRequestSpec{
 		Duration:  &metav1.Duration{Duration: config.CertificateDuration},
