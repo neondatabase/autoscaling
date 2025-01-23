@@ -18,8 +18,12 @@ package controllers
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -34,6 +38,7 @@ import (
 	"github.com/cert-manager/cert-manager/pkg/apis/certmanager"
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	"github.com/cert-manager/cert-manager/pkg/util/pki"
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/samber/lo"
 	"golang.org/x/crypto/ssh"
@@ -101,6 +106,7 @@ type VMReconciler struct {
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools/finalizers,verbs=update
 //+kubebuilder:rbac:groups=k8s.cni.cncf.io,resources=network-attachment-definitions,verbs=get;list;watch
+//+kubebuilder:rbac:groups=cert-manager.io,resources=certificaterequests,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -392,6 +398,95 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
+		// Check if the TLS private key temporary secret exists, if not create a new one
+		var key crypto.Signer
+		tmpKeySecret := &corev1.Secret{}
+		err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("tls-%s-tmp", vm.Name), Namespace: vm.Namespace}, tmpKeySecret)
+		if err != nil && apierrors.IsNotFound(err) {
+			// create a new key for this VM
+			key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			if err != nil {
+				log.Error(err, "Failed to generate private key for VirtualMachine")
+				return err
+			}
+
+			// Define the secret
+			tmpKeySecret, err = r.tmpKeySecretForVirtualMachine(vm, key)
+			if err != nil {
+				log.Error(err, "Failed to define new Secret resource for VirtualMachine")
+				return err
+			}
+
+			if err = r.Create(ctx, tmpKeySecret); err != nil {
+				log.Error(err, "Failed to create new temporary Secret", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+				return err
+			}
+			log.Info("Virtual Machine temporary Secret was created", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+
+		} else if err != nil {
+			log.Error(err, "Failed to get vm-runner Secret")
+			return err
+		} else {
+			key, err = pki.DecodePrivateKeyBytes(tmpKeySecret.Data[corev1.TLSPrivateKeyKey])
+			if err != nil {
+				log.Error(err, "Failed to decode private key")
+			}
+		}
+
+		// Check if the TLS certificate already exists, if not create a new one
+		certificateReq := &certv1.CertificateRequest{}
+		err = r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, certificateReq)
+		if err != nil && apierrors.IsNotFound(err) {
+
+			// Define a new cert req
+			certificateReq, err = r.certReqForVirtualMachine(vm, key)
+			if err != nil {
+				log.Error(err, "Failed to define new Certificate resource for VirtualMachine")
+				return err
+			}
+
+			log.Info("Creating a new CertificateRequest", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
+			if err = r.Create(ctx, certificateReq); err != nil {
+				log.Error(err, "Failed to create new Certificate", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
+				return err
+			}
+			log.Info("Runner CertificateRequest was created", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
+
+			msg := fmt.Sprintf("VirtualMachine %s created, CertificateRequest %s", vm.Name, certificateReq.Name)
+			r.Recorder.Event(vm, "Normal", "Created", msg)
+			if !vm.HasRestarted() {
+				d := certificateReq.CreationTimestamp.Time.Sub(vm.CreationTimestamp.Time)
+				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
+			}
+		} else if err != nil {
+			log.Error(err, "Failed to get vm-runner CertificateRequest")
+			return err
+		}
+
+		if certificateReq.Status.Certificate == nil {
+			// do nothing
+			return nil
+		}
+
+		// we have a certificate and the corresponding private key
+		// create the proper certificate secret and delete the tmp secret
+		certSecret, err := r.certSecretForVirtualMachine(vm, key, certificateReq.Status.Certificate)
+		if err != nil {
+			log.Error(err, "Failed to define new certificate Secret resource for VirtualMachine")
+			return err
+		}
+
+		if err = r.Create(ctx, certSecret); err != nil {
+			log.Error(err, "Failed to create new Secret", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+			return err
+		}
+		log.Info("Virtual Machine Secret was created", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+
+		err = r.Delete(ctx, tmpKeySecret)
+		if err != nil {
+			log.Info("Virtual Machine temporary certificate secret could not be deleted", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+		}
+
 		// Generate runner pod name and set desired memory provider.
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
@@ -404,35 +499,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			if err := r.Status().Update(ctx, vm); err != nil {
 				return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
 			}
-		}
-
-		// Check if the TLS certificate already exists, if not create a new one
-		certificate := &certv1.Certificate{}
-		err := r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, certificate)
-		if err != nil && apierrors.IsNotFound(err) {
-			// Define a new pod
-			certificate, err := r.certForVirtualMachine(vm)
-			if err != nil {
-				log.Error(err, "Failed to define new Certificate resource for VirtualMachine")
-				return err
-			}
-
-			log.Info("Creating a new Certificate", "Certificate.Namespace", certificate.Namespace, "Certificate.Name", certificate.Name)
-			if err = r.Create(ctx, certificate); err != nil {
-				log.Error(err, "Failed to create new Certificate", "Certificate.Namespace", certificate.Namespace, "Certificate.Name", certificate.Name)
-				return err
-			}
-			log.Info("Runner Certificate was created", "Certificate.Namespace", certificate.Namespace, "Certificate.Name", certificate.Name)
-
-			msg := fmt.Sprintf("VirtualMachine %s created, Certificate %s", vm.Name, certificate.Name)
-			r.Recorder.Event(vm, "Normal", "Created", msg)
-			if !vm.HasRestarted() {
-				d := certificate.CreationTimestamp.Time.Sub(vm.CreationTimestamp.Time)
-				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
-			}
-		} else if err != nil {
-			log.Error(err, "Failed to get vm-runner Certificate")
-			return err
 		}
 
 		// Check if the runner pod already exists, if not create a new one
@@ -1131,7 +1197,7 @@ func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 	return secret, nil
 }
 
-// podForVirtualMachine returns a VirtualMachine Pod object
+// certForVirtualMachine returns a VirtualMachine Certificate object
 func (r *VMReconciler) certForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 ) (*certv1.Certificate, error) {
@@ -1144,6 +1210,64 @@ func (r *VMReconciler) certForVirtualMachine(
 	}
 
 	return cert, nil
+}
+
+// certReqForVirtualMachine returns a VirtualMachine CertificateRequest object
+func (r *VMReconciler) certReqForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+) (*certv1.CertificateRequest, error) {
+	cert, err := certReqSpec(vm, r.Config, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, cert, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return cert, nil
+}
+
+// tmpKeySecretForVirtualMachine returns a VirtualMachine Secret object for temporarily storing the key
+func (r *VMReconciler) tmpKeySecretForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+) (*corev1.Secret, error) {
+	secret, err := tmpKeySecretSpec(vm, r.Config, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, secret, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return secret, nil
+}
+
+// certSecretForVirtualMachine returns a VirtualMachine Secret object for storing the key+cert
+func (r *VMReconciler) certSecretForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+	cert []byte,
+) (*corev1.Secret, error) {
+	secret, err := certSecretSpec(vm, key, cert)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, secret, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return secret, nil
 }
 
 // labelsForVirtualMachine returns the labels for selecting the resources
@@ -1634,14 +1758,18 @@ func certSpec(
 		PrivateKey: &certv1.CertificatePrivateKey{
 			// todo: can we support Ed25519?
 			Algorithm:      certv1.ECDSAKeyAlgorithm,
-			Encoding:       certv1.PKCS8,
+			Encoding:       certv1.PKCS1,
 			RotationPolicy: certv1.RotationPolicyAlways,
 			Size:           256,
 		},
-		Usages:      []certv1.KeyUsage{certv1.UsageServerAuth},
+		Usages:      certv1.DefaultKeyUsages(),
 		IsCA:        false,
 		Duration:    &metav1.Duration{Duration: config.CertificateDuration},
 		RenewBefore: &metav1.Duration{Duration: config.CertificateRenewal},
+		SecretTemplate: &certv1.CertificateSecretTemplate{
+			Labels:      labels,
+			Annotations: annotations,
+		},
 	}
 
 	return &certv1.Certificate{
@@ -1653,6 +1781,108 @@ func certSpec(
 		},
 		Spec: certSpec,
 	}
+}
+
+func tmpKeySecretSpec(
+	vm *vmv1.VirtualMachine,
+	config *ReconcilerConfig,
+	key crypto.PrivateKey,
+) (*corev1.Secret, error) {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+
+	encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
+	if err != nil {
+		return nil, err
+	}
+
+	name := fmt.Sprintf("tls-%s-tmp", vm.Name)
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   vm.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Data: map[string][]byte{
+			corev1.TLSPrivateKeyKey: encodedKey,
+		},
+		Type: corev1.SecretTypeTLS,
+	}, nil
+}
+
+func certSecretSpec(
+	vm *vmv1.VirtualMachine,
+	key crypto.PrivateKey,
+	cert []byte,
+) (*corev1.Secret, error) {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+
+	encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
+	if err != nil {
+		return nil, err
+	}
+
+	name := fmt.Sprintf("tls-%s", vm.Name)
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   vm.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Data: map[string][]byte{
+			corev1.TLSPrivateKeyKey: encodedKey,
+			corev1.TLSCertKey:       cert,
+		},
+		Type: corev1.SecretTypeTLS,
+	}, nil
+}
+
+func certReqSpec(
+	vm *vmv1.VirtualMachine,
+	config *ReconcilerConfig,
+	key crypto.Signer,
+) (*certv1.CertificateRequest, error) {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+
+	issuer := cmmeta.ObjectReference{
+		Name:  config.CertificateIssuer,
+		Kind:  "ClusterIssuer",
+		Group: certmanager.GroupName,
+	}
+
+	cr, err := pki.GenerateCSR(certSpec(vm, config))
+	if err != nil {
+		return nil, err
+	}
+
+	csr, err := x509.CreateCertificateRequest(rand.Reader, cr, key)
+
+	certSpec := certv1.CertificateRequestSpec{
+		Duration:  &metav1.Duration{Duration: config.CertificateDuration},
+		IssuerRef: issuer,
+		Request:   csr,
+		IsCA:      false,
+		Usages:    certv1.DefaultKeyUsages(),
+	}
+
+	return &certv1.CertificateRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        vm.Name,
+			Namespace:   vm.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Spec: certSpec,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -1669,6 +1899,8 @@ func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics
 	)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
+		Owns(&certv1.CertificateRequest{}).
+		Owns(&corev1.Secret{}).
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
