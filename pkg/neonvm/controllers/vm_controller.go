@@ -1805,7 +1805,6 @@ func tmpKeySecretSpec(
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: encodedKey,
 		},
-		Type: corev1.SecretTypeTLS,
 	}, nil
 }
 
