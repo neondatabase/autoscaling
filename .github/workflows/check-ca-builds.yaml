@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: [ amd64, arm64 ]
-    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'large-arm64' || 'large')) }}
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
     steps:
       - uses: actions/checkout@v4
 
