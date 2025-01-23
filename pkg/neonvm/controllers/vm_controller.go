@@ -430,6 +430,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
+		if certSecret.Data == nil {
+			return nil
+		}
+
 		// Generate runner pod name and set desired memory provider.
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
@@ -855,6 +859,8 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		}
 		log.Info("Virtual Machine temporary Secret was created", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
 
+		msg := fmt.Sprintf("VirtualMachine %s created temporary Secret %s", vm.Name, tmpKeySecret.Name)
+		r.Recorder.Event(vm, "Normal", "Created", msg)
 	} else if err != nil {
 		log.Error(err, "Failed to get vm-runner Secret")
 		return err
@@ -884,7 +890,7 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		}
 		log.Info("Runner CertificateRequest was created", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
 
-		msg := fmt.Sprintf("VirtualMachine %s created, CertificateRequest %s", vm.Name, certificateReq.Name)
+		msg := fmt.Sprintf("VirtualMachine %s created CertificateRequest %s", vm.Name, certificateReq.Name)
 		r.Recorder.Event(vm, "Normal", "Created", msg)
 	} else if err != nil {
 		log.Error(err, "Failed to get vm-runner CertificateRequest")
@@ -906,6 +912,9 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 				return err
 			}
 			log.Info("Virtual Machine Secret was created", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+
+			msg := fmt.Sprintf("VirtualMachine %s created certificate Secret %s", vm.Name, certSecret.Name)
+			r.Recorder.Event(vm, "Normal", "Created", msg)
 		} else if !reflect.DeepEqual(certificateReq.Status.Certificate, certSecret.Data[corev1.TLSCertKey]) {
 			encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
 			if err != nil {
@@ -919,6 +928,9 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 				return err
 			}
 			log.Info("Virtual Machine Secret was updated", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+
+			msg := fmt.Sprintf("VirtualMachine %s updated certificate Secret %s", vm.Name, certSecret.Name)
+			r.Recorder.Event(vm, "Normal", "Updated", msg)
 		}
 
 		err = r.Delete(ctx, tmpKeySecret)
