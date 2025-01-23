@@ -17,6 +17,7 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -1859,7 +1860,13 @@ func certReqSpec(
 		return nil, err
 	}
 
-	csr, err := x509.CreateCertificateRequest(rand.Reader, cr, key)
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, cr, key)
+	if err != nil {
+		return nil, err
+	}
+
+	csrPEM := bytes.NewBuffer([]byte{})
+	err = pem.Encode(csrPEM, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 	if err != nil {
 		return nil, err
 	}
@@ -1867,7 +1874,7 @@ func certReqSpec(
 	certSpec := certv1.CertificateRequestSpec{
 		Duration:  &metav1.Duration{Duration: config.CertificateDuration},
 		IssuerRef: issuer,
-		Request:   csr,
+		Request:   csrPEM.Bytes(),
 		IsCA:      false,
 		Usages:    certv1.DefaultKeyUsages(),
 	}
