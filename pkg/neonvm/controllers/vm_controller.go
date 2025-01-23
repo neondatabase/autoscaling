@@ -405,19 +405,19 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	} else if err != nil {
 		log.Error(err, "Failed to get vm-runner certificate Secret")
 		return err
-	}
-
-	// parse the certificate and see if it's close to expiration.
-	certs, err := pki.DecodeX509CertificateChainBytes(certSecret.Data[corev1.TLSCertKey])
-	if err != nil {
-		log.Error(err, "Failed to parse VM certificate")
-		return err
-	}
-
-	// if the certificate is close to expiry, update it
-	if time.Now().Before(certs[0].NotAfter.Add(r.Config.CertificateRenewal)) {
-		if err := r.doReconcileCertificateSecret(ctx, vm, certSecret); err != nil {
+	} else {
+		// parse the certificate and see if it's close to expiration.
+		certs, err := pki.DecodeX509CertificateChainBytes(certSecret.Data[corev1.TLSCertKey])
+		if err != nil {
+			log.Error(err, "Failed to parse VM certificate")
 			return err
+		}
+
+		// if the certificate is close to expiry, update it
+		if time.Now().Before(certs[0].NotAfter.Add(r.Config.CertificateRenewal)) {
+			if err := r.doReconcileCertificateSecret(ctx, vm, certSecret); err != nil {
+				return err
+			}
 		}
 	}
 

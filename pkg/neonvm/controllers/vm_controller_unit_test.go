@@ -179,6 +179,8 @@ func TestReconcile(t *testing.T) {
 	assert.Equal(t, true, res.Requeue)
 
 	// Round 2
+	params.mockRecorder.On("Event", mock.Anything, "Normal", "Created",
+		mock.Anything)
 	res, err = params.r.Reconcile(params.ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, false, res.Requeue)
