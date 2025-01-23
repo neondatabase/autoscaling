@@ -23,7 +23,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -372,12 +371,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	// Generate ssh secret name
 	if enableSSH && len(vm.Status.SSHSecretName) == 0 {
 		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
-	}
-
-	// DIMMSlots memory provider is deprecated, and assumed to never be used.
-	//nolint:staticcheck // We know it's deprecated. That's why we're checking it.
-	if vm.Status.MemoryProvider != nil && *vm.Status.MemoryProvider == vmv1.MemoryProviderDIMMSlots {
-		return errors.New("DIMMSlots memory provider is deprecated and disabled")
 	}
 
 	switch vm.Status.Phase {
@@ -1294,7 +1287,6 @@ func podSpec(
 						cmd = append(
 							cmd,
 							"-qemu-disk-cache-settings", config.QEMUDiskCacheSettings,
-							"-memory-provider", string(vmv1.MemoryProviderVirtioMem),
 							"-memhp-auto-movable-ratio", config.MemhpAutoMovableRatio,
 						)
 						// put these last, so that the earlier args are easier to see (because these
