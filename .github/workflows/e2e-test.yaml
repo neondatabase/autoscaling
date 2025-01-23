@@ -233,6 +233,9 @@ jobs:
           docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
           make load-example-vms
 
+      - run: make arm_patch_e2e
+        if: matrix.arch == 'arm64'
+
       - run: make e2e
         timeout-minutes: 15
 
