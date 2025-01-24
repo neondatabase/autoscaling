@@ -417,7 +417,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		}
 
 		// if the certificate is close to expiry, update it
-		if time.Now().Before(certs[0].NotAfter.Add(r.Config.CertificateRenewal)) {
+		if time.Now().Add(r.Config.CertificateRenewal).After(certs[0].NotAfter) {
 			msg := fmt.Sprintf("VirtualMachine %s certificate secret %s close to expiration %v", vm.Name, vm.Status.TLSSecretName, certs[0].NotAfter)
 			r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
 			certSecret, err = r.doReconcileCertificateSecret(ctx, vm, certSecret)
@@ -943,11 +943,15 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		if err != nil {
 			log.Info("Virtual Machine temporary certificate secret could not be deleted", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
 		}
+		msg := fmt.Sprintf("VirtualMachine %s tmp private key Secret %s was deleted", vm.Name, tmpKeySecret.Name)
+		r.Recorder.Event(vm, "Normal", "Deleted", msg)
 
 		err = r.Delete(ctx, certificateReq)
 		if err != nil {
 			log.Info("Virtual Machine CertificateRequest could not be deleted", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
 		}
+		msg = fmt.Sprintf("VirtualMachine %s CertificateRequest %s was deleted", vm.Name, certificateReq.Name)
+		r.Recorder.Event(vm, "Normal", "Deleted", msg)
 	}
 
 	return certSecret, nil
