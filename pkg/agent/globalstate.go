@@ -17,6 +17,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
+	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -40,12 +41,15 @@ type agentState struct {
 	vmClient     *vmclient.Clientset
 	schedTracker *schedwatch.SchedulerTracker
 	metrics      GlobalMetrics
+
+	scalingReporter *scalingevents.Reporter
 }
 
 func (r MainRunner) newAgentState(
 	baseLogger *zap.Logger,
 	podIP string,
 	schedTracker *schedwatch.SchedulerTracker,
+	scalingReporter *scalingevents.Reporter,
 ) (*agentState, *prometheus.Registry) {
 	metrics, promReg := makeGlobalMetrics()
 
@@ -59,6 +63,8 @@ func (r MainRunner) newAgentState(
 		podIP:        podIP,
 		schedTracker: schedTracker,
 		metrics:      metrics,
+
+		scalingReporter: scalingReporter,
 	}
 
 	return state, promReg

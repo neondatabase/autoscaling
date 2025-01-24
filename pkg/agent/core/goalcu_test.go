@@ -33,16 +33,20 @@ func Test_calculateGoalCU(t *testing.T) {
 		cfgUpdater func(*api.ScalingConfig)
 		sys        *SystemMetrics
 		lfc        *LFCMetrics
-		want       scalingGoal
+		want       ScalingGoal
 	}{
 		{
 			name:       "basic",
 			cfgUpdater: nil,
 			sys:        nil,
 			lfc:        nil,
-			want: scalingGoal{
-				goalCU:        0,
-				hasAllMetrics: false,
+			want: ScalingGoal{
+				HasAllMetrics: false,
+				Parts: ScalingGoalParts{
+					CPU: nil,
+					Mem: nil,
+					LFC: nil,
+				},
 			},
 		},
 		{
@@ -53,9 +57,13 @@ func Test_calculateGoalCU(t *testing.T) {
 				LoadAverage1Min: 0.2,
 			},
 			lfc: nil,
-			want: scalingGoal{
-				goalCU:        1,
-				hasAllMetrics: false,
+			want: ScalingGoal{
+				HasAllMetrics: false,
+				Parts: ScalingGoalParts{
+					CPU: lo.ToPtr(0.8),
+					Mem: lo.ToPtr(0.0),
+					LFC: nil,
+				},
 			},
 		},
 		{
@@ -66,9 +74,13 @@ func Test_calculateGoalCU(t *testing.T) {
 				LoadAverage1Min: 1,
 			},
 			lfc: nil,
-			want: scalingGoal{
-				goalCU:        4,
-				hasAllMetrics: false,
+			want: ScalingGoal{
+				HasAllMetrics: false,
+				Parts: ScalingGoalParts{
+					CPU: lo.ToPtr(4.0),
+					Mem: lo.ToPtr(0.0),
+					LFC: nil,
+				},
 			},
 		},
 		{
@@ -82,9 +94,13 @@ func Test_calculateGoalCU(t *testing.T) {
 				LoadAverage5Min: 0.0,
 			},
 			lfc: nil,
-			want: scalingGoal{
-				goalCU:        3,
-				hasAllMetrics: false,
+			want: ScalingGoal{
+				HasAllMetrics: false,
+				Parts: ScalingGoalParts{
+					CPU: lo.ToPtr(2.8),
+					Mem: lo.ToPtr(0.0),
+					LFC: nil,
+				},
 			},
 		},
 		{
@@ -99,9 +115,13 @@ func Test_calculateGoalCU(t *testing.T) {
 				MemoryCachedBytes: 0,
 			},
 			lfc: nil,
-			want: scalingGoal{
-				goalCU:        3,
-				hasAllMetrics: false,
+			want: ScalingGoal{
+				HasAllMetrics: false,
+				Parts: ScalingGoalParts{
+					CPU: lo.ToPtr(2.8),
+					Mem: lo.ToPtr(0.0),
+					LFC: nil,
+				},
 			},
 		},
 		{
@@ -117,9 +137,13 @@ func Test_calculateGoalCU(t *testing.T) {
 				MemoryCachedBytes: 0,
 			},
 			lfc: nil,
-			want: scalingGoal{
-				goalCU:        5, // Weighted average between 7 and 4 CUs
-				hasAllMetrics: false,
+			want: ScalingGoal{
+				HasAllMetrics: false,
+				Parts: ScalingGoalParts{
+					CPU: lo.ToPtr(5.499997000005999),
+					Mem: lo.ToPtr(0.0),
+					LFC: nil,
+				},
 			},
 		},
 	}
