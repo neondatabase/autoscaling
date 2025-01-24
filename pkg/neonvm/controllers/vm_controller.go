@@ -399,7 +399,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	certSecret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{Name: vm.Status.TLSSecretName, Namespace: vm.Namespace}, certSecret)
 	if err != nil && apierrors.IsNotFound(err) {
-		if err := r.doReconcileCertificateSecret(ctx, vm, nil); err != nil {
+		msg := fmt.Sprintf("VirtualMachine %s certificate secret %s not found", vm.Name, vm.Status.TLSSecretName)
+		r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
+		certSecret, err = r.doReconcileCertificateSecret(ctx, vm, nil)
+		if err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -415,7 +418,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 		// if the certificate is close to expiry, update it
 		if time.Now().Before(certs[0].NotAfter.Add(r.Config.CertificateRenewal)) {
-			if err := r.doReconcileCertificateSecret(ctx, vm, certSecret); err != nil {
+			msg := fmt.Sprintf("VirtualMachine %s certificate secret %s close to expiration %v", vm.Name, vm.Status.TLSSecretName, certs[0].NotAfter)
+			r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
+			certSecret, err = r.doReconcileCertificateSecret(ctx, vm, certSecret)
+			if err != nil {
 				return err
 			}
 		}
@@ -831,7 +837,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	return nil
 }
 
-func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv1.VirtualMachine, certSecret *corev1.Secret) error {
+func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv1.VirtualMachine, certSecret *corev1.Secret) (*corev1.Secret, error) {
 	log := log.FromContext(ctx)
 
 	// Check if the TLS private key temporary secret exists, if not create a new one
@@ -843,19 +849,19 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			log.Error(err, "Failed to generate private key for VirtualMachine")
-			return err
+			return nil, err
 		}
 
 		// Define the secret
 		tmpKeySecret, err = r.tmpKeySecretForVirtualMachine(vm, key)
 		if err != nil {
 			log.Error(err, "Failed to define new Secret resource for VirtualMachine")
-			return err
+			return nil, err
 		}
 
 		if err = r.Create(ctx, tmpKeySecret); err != nil {
 			log.Error(err, "Failed to create new temporary Secret", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
-			return err
+			return nil, err
 		}
 		log.Info("Virtual Machine temporary Secret was created", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
 
@@ -863,7 +869,7 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		r.Recorder.Event(vm, "Normal", "Created", msg)
 	} else if err != nil {
 		log.Error(err, "Failed to get vm-runner Secret")
-		return err
+		return nil, err
 	} else {
 		key, err = pki.DecodePrivateKeyBytes(tmpKeySecret.Data[corev1.TLSPrivateKeyKey])
 		if err != nil {
@@ -880,13 +886,13 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		certificateReq, err = r.certReqForVirtualMachine(vm, key)
 		if err != nil {
 			log.Error(err, "Failed to define new Certificate resource for VirtualMachine")
-			return err
+			return nil, err
 		}
 
 		log.Info("Creating a new CertificateRequest", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
 		if err = r.Create(ctx, certificateReq); err != nil {
 			log.Error(err, "Failed to create new Certificate", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
-			return err
+			return nil, err
 		}
 		log.Info("Runner CertificateRequest was created", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
 
@@ -894,22 +900,22 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		r.Recorder.Event(vm, "Normal", "Created", msg)
 	} else if err != nil {
 		log.Error(err, "Failed to get vm-runner CertificateRequest")
-		return err
+		return nil, err
 	}
 
-	if certificateReq.Status.Certificate != nil {
+	if len(certificateReq.Status.Certificate) != 0 {
 		if certSecret == nil {
 			// we have a certificate and the corresponding private key
 			// create the proper certificate secret and delete the tmp secret
 			certSecret, err = r.certSecretForVirtualMachine(vm, key, certificateReq.Status.Certificate)
 			if err != nil {
 				log.Error(err, "Failed to define new certificate Secret resource for VirtualMachine")
-				return err
+				return nil, err
 			}
 
 			if err = r.Create(ctx, certSecret); err != nil {
 				log.Error(err, "Failed to create new Secret", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
-				return err
+				return nil, err
 			}
 			log.Info("Virtual Machine Secret was created", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
 
@@ -918,14 +924,14 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		} else if !reflect.DeepEqual(certificateReq.Status.Certificate, certSecret.Data[corev1.TLSCertKey]) {
 			encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			certSecret.Data[corev1.TLSPrivateKeyKey] = encodedKey
 			certSecret.Data[corev1.TLSCertKey] = certificateReq.Status.Certificate
 
 			if err = r.Update(ctx, certSecret); err != nil {
 				log.Error(err, "Failed to update new Secret", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
-				return err
+				return nil, err
 			}
 			log.Info("Virtual Machine Secret was updated", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
 
@@ -944,7 +950,7 @@ func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv
 		}
 	}
 
-	return nil
+	return certSecret, nil
 }
 
 func propagateRevision(vm *vmv1.VirtualMachine) {
