@@ -505,6 +505,8 @@ endif
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.30.7
 
+
+YQ ?= $(LOCALBIN)/yq
 ETCD ?= $(LOCALBIN)/etcd
 
 # Use the same version kuberentes is tested against, see
@@ -579,7 +581,13 @@ $(ETCD): $(LOCALBIN)
 			rm $(LOCALBIN)/etcd-temp; \
 		fi \
 	}
+
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): $(LOCALBIN)
+	test -s $(LOCALBIN)/yq || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_arm64 && chmod +x $(YQ); }
+
 # arm doesn't support cpu hot plug and memory hot plug and CI runners are based on qemu so no kvm acceleration as well
-arm_patch_e2e:
+arm_patch_e2e: yq
 	@find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.cpuScalingMode = "SysfsScaling") // .' -i {}
 	# @find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.enableAcceleration = false) // .' -i {}
