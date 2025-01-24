@@ -35,6 +35,8 @@ Logs and stuff:
 kubectl logs -f $(kubectl get pods -o jsonpath='{.items[0].metadata.name}')
 
 kubectl exec -t -i $(kubectl get pods -o jsonpath='{.items[0].metadata.name}') -- ssh guest-vm
+
+kubectl exec -t -i $(kubectl get pods -o jsonpath='{.items[0].metadata.name}') -- ssh guest-vm tail -f -n 1000000 mem.log
 ```
 
 ## How to reproduce the issue
