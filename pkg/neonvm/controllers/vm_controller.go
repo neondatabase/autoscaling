@@ -1279,13 +1279,20 @@ func podSpec(
 							},
 						},
 					},
-					Ports: []corev1.ContainerPort{{
-						ContainerPort: vm.Spec.QMP,
-						Name:          "qmp",
-					}, {
-						ContainerPort: vm.Spec.QMPManual,
-						Name:          "qmp-manual",
-					}},
+					Ports: []corev1.ContainerPort{
+						{
+							ContainerPort: vm.Spec.QMP,
+							Name:          "qmp",
+						},
+						{
+							ContainerPort: vm.Spec.QMPManual,
+							Name:          "qmp-manual",
+						},
+						{
+							ContainerPort: vm.Spec.RunnerPort,
+							Name:          "runner",
+						},
+					},
 					Command: func() []string {
 						cmd := []string{"runner"}
 						if config.DisableRunnerCgroup {

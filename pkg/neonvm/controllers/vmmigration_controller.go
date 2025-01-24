@@ -317,13 +317,14 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			migration.Status.SourcePodIP = vm.Status.PodIP
 			migration.Status.TargetPodIP = targetRunner.Status.PodIP
 
-			// do hotplugCPU in targetRunner before migration
-			log.Info("Syncing CPUs in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
-			if err := QmpSyncCpuToTarget(vm, migration); err != nil {
-				return ctrl.Result{}, err
+			if *vm.Spec.CpuScalingMode == vmv1.CpuScalingModeQMP {
+				// do hotplugCPU in targetRunner before migration
+				log.Info("Syncing CPUs in Target runner", "TargetPod.Name", migration.Status.TargetPodName)
+				if err := QmpSyncCpuToTarget(vm, migration); err != nil {
+					return ctrl.Result{}, err
+				}
+				log.Info("CPUs in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
 			}
-			log.Info("CPUs in Target runner synced", "TargetPod.Name", migration.Status.TargetPodName)
-
 			// Migrate only running VMs to target with plugged devices
 			if vm.Status.Phase == vmv1.VmPreMigrating {
 				// update VM status
