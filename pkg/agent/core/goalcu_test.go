@@ -6,7 +6,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
@@ -28,7 +27,6 @@ func Test_calculateGoalCU(t *testing.T) {
 	}
 
 	warn := func(msg string) {}
-	report := func(goalCU uint32, parts scalingevents.GoalCUComponents) {}
 
 	cases := []struct {
 		name       string
@@ -157,7 +155,7 @@ func Test_calculateGoalCU(t *testing.T) {
 				c.cfgUpdater(&scalingConfig)
 			}
 
-			got, _ := calculateGoalCU(warn, report, scalingConfig, cu, c.sys, c.lfc)
+			got, _ := calculateGoalCU(warn, scalingConfig, cu, c.sys, c.lfc)
 			assert.Equal(t, c.want, got)
 		})
 	}
