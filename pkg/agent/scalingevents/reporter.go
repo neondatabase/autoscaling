@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 type Config struct {
@@ -61,6 +62,7 @@ const (
 func NewReporter(
 	ctx context.Context,
 	parentLogger *zap.Logger,
+	tg taskgroup.Group,
 	conf *Config,
 	metrics PromMetrics,
 ) (*Reporter, error) {
@@ -71,7 +73,7 @@ func NewReporter(
 		return nil, err
 	}
 
-	sink := reporting.NewEventSink(logger, metrics.reporting, clients...)
+	sink := reporting.NewEventSink(ctx, logger, tg, metrics.reporting, clients...)
 
 	return &Reporter{
 		conf:    conf,

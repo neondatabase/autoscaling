@@ -14,6 +14,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/billing"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 type Config struct {
@@ -72,6 +73,7 @@ type MetricsCollector struct {
 func NewMetricsCollector(
 	ctx context.Context,
 	parentLogger *zap.Logger,
+	tg taskgroup.Group,
 	conf *Config,
 	metrics PromMetrics,
 ) (*MetricsCollector, error) {
@@ -82,7 +84,10 @@ func NewMetricsCollector(
 		return nil, err
 	}
 
-	sink := reporting.NewEventSink(logger, metrics.reporting, clients...)
+	// Note: we pass context.TODO() because we want to manually shut down the event senders only
+	// once we've had a chance to run a final collection of remaining billing events.
+	// So instead, we defer a call to sink.Finish() in (*MetricsCollector).Run()
+	sink := reporting.NewEventSink(context.TODO(), logger, tg, metrics.reporting, clients...)
 
 	return &MetricsCollector{
 		conf:    conf,
@@ -104,6 +109,8 @@ func (mc *MetricsCollector) Run(
 	time.Sleep(500 * time.Millisecond)
 	accumulateTicker := time.NewTicker(time.Second * time.Duration(mc.conf.AccumulateEverySeconds))
 	defer accumulateTicker.Stop()
+
+	defer mc.sink.Finish()
 
 	state := metricsState{
 		historical:      make(map[metricsKey]vmMetricsHistory),
