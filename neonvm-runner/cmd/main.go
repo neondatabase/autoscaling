@@ -712,9 +712,15 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 		}
 	}
 
-	for k := range synchronisedFiles {
+	for k, _ := range synchronisedFiles {
 		if err := notify.Add(k); err != nil {
 			logger.Error("failed to add file to inotify instance", zap.Error(err))
+		}
+	}
+
+	for hostpath, guestpath := range synchronisedFiles {
+		if err := sendFileToNeonvmDaemon(hostpath, guestpath); err != nil {
+			logger.Error("failed to upload file to vm guest", zap.Error(err))
 		}
 	}
 
