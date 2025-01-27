@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/cpuscaling"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 func main() {
@@ -33,9 +35,10 @@ func main() {
 
 	logger.Info("Starting neonvm-daemon", zap.String("addr", *addr))
 	srv := cpuServer{
-		cpuOperationsMutex: &sync.Mutex{},
-		cpuScaler:          cpuscaling.NewCPUScaler(),
-		logger:             logger.Named("cpu-srv"),
+		cpuOperationsMutex:  &sync.Mutex{},
+		cpuScaler:           cpuscaling.NewCPUScaler(),
+		fileOperationsMutex: &sync.Mutex{},
+		logger:              logger.Named("cpu-srv"),
 	}
 	srv.run(*addr)
 }
@@ -43,9 +46,10 @@ func main() {
 type cpuServer struct {
 	// Protects CPU operations from concurrent access to prevent multiple ensureOnlineCPUs calls from running concurrently
 	// and ensure that status response is always actual
-	cpuOperationsMutex *sync.Mutex
-	cpuScaler          *cpuscaling.CPUScaler
-	logger             *zap.Logger
+	cpuOperationsMutex  *sync.Mutex
+	cpuScaler           *cpuscaling.CPUScaler
+	fileOperationsMutex *sync.Mutex
+	logger              *zap.Logger
 }
 
 func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
@@ -94,6 +98,108 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *cpuServer) getFile(path string) (string, error) {
+	if !filepath.IsLocal(path) {
+		return "", fmt.Errorf("\"%s\" is not a local path", path)
+	}
+	path = filepath.Clean(filepath.Join("var", "sync", path))
+	return path, nil
+}
+
+func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, r *http.Request) {
+	s.fileOperationsMutex.Lock()
+	defer s.fileOperationsMutex.Unlock()
+
+	path, err := s.getFile(r.PathValue("path"))
+	if err != nil {
+		s.logger.Error("invalid file path", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	checksum, err := util.ChecksumFile(path)
+	if err != nil {
+		s.logger.Error("could not checksum file", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write([]byte(checksum)); err != nil {
+		s.logger.Error("could not write response", zap.Error(err))
+	}
+}
+
+func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request) {
+	s.fileOperationsMutex.Lock()
+	defer s.fileOperationsMutex.Unlock()
+
+	path, err := s.getFile(r.PathValue("path"))
+	if err != nil {
+		s.logger.Error("invalid file path", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		s.logger.Error("could not create directory", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	file, err := os.CreateTemp("", "")
+	if err != nil {
+		s.logger.Error("could not create file", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+	defer os.Remove(file.Name())
+
+	if _, err := io.Copy(file, r.Body); err != nil {
+		s.logger.Error("could not read request body", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// rename is an atomic operation on unix.
+	// this ensures that the file is either not updated at all,
+	// or is updated entirely.
+	//
+	// this ensures that other processes reading the file will never
+	// have any inconsistencies. they will either read the old contents
+	// or the new contents. Any open files will still point to the old inode
+	// and thus still read the old contents.
+	if err := os.Rename(file.Name(), path); err != nil {
+		s.logger.Error("could not rename file", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *cpuServer) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
+	s.fileOperationsMutex.Lock()
+	defer s.fileOperationsMutex.Unlock()
+
+	path, err := s.getFile(r.PathValue("path"))
+	if err != nil {
+		s.logger.Error("invalid file path", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		s.logger.Error("could not delete file", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *cpuServer) run(addr string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cpu", func(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +208,21 @@ func (s *cpuServer) run(addr string) {
 			return
 		} else if r.Method == http.MethodPut {
 			s.handleSetCPUStatus(w, r)
+			return
+		} else {
+			// unknown method
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	mux.HandleFunc("/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.handleGetFileChecksum(w, r)
+			return
+		} else if r.Method == http.MethodPut {
+			s.handleUploadFile(w, r)
+			return
+		} else if r.Method == http.MethodDelete {
+			s.handleDeleteFile(w, r)
 			return
 		} else {
 			// unknown method
