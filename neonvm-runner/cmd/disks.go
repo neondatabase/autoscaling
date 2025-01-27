@@ -202,7 +202,7 @@ func createISO9660runtime(
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
 				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
-			case disk.ConfigMap != nil || disk.Secret != nil:
+			case disk.ConfigMap != nil || (disk.Secret != nil && !secretNeedsSynchronisation(disk.MountPath)):
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
 			case disk.Tmpfs != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
@@ -272,6 +272,14 @@ func createISO9660runtime(
 	}
 
 	return nil
+}
+
+func secretNeedsSynchronisation(path string) bool {
+	rel, err := filepath.Rel("/var/sync", path)
+	if err != nil {
+		return false
+	}
+	return filepath.IsLocal(rel)
 }
 
 func calcDirUsage(dirPath string) (int64, error) {
