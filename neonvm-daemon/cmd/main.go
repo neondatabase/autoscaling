@@ -125,11 +125,10 @@ func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte(checksum)); err != nil {
 		s.logger.Error("could not write response", zap.Error(err))
 	}
-
-	w.WriteHeader(http.StatusOK)
 }
 
 func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request) {
