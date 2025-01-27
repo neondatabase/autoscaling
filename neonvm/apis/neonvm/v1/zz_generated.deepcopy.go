@@ -159,11 +159,6 @@ func (in *Guest) DeepCopyInto(out *Guest) {
 	out.CPUs = in.CPUs
 	out.MemorySlotSize = in.MemorySlotSize.DeepCopy()
 	out.MemorySlots = in.MemorySlots
-	if in.MemoryProvider != nil {
-		in, out := &in.MemoryProvider, &out.MemoryProvider
-		*out = new(MemoryProvider)
-		**out = **in
-	}
 	in.RootDisk.DeepCopyInto(&out.RootDisk)
 	if in.Command != nil {
 		in, out := &in.Command, &out.Command
@@ -774,11 +769,6 @@ func (in *VirtualMachineStatus) DeepCopyInto(out *VirtualMachineStatus) {
 		in, out := &in.MemorySize, &out.MemorySize
 		x := (*in).DeepCopy()
 		*out = &x
-	}
-	if in.MemoryProvider != nil {
-		in, out := &in.MemoryProvider, &out.MemoryProvider
-		*out = new(MemoryProvider)
-		**out = **in
 	}
 	if in.CurrentRevision != nil {
 		in, out := &in.CurrentRevision, &out.CurrentRevision

@@ -199,14 +199,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return r.updateMigrationStatus(ctx, migration)
 	}
 
-	// DIMMSlots memory provider is deprecated, and assumed to never be used.
-	//nolint:staticcheck // We know it's deprecated. That's why we're checking it.
-	if vm.Status.MemoryProvider != nil && *vm.Status.MemoryProvider == vmv1.MemoryProviderDIMMSlots {
-		err := errors.New("DIMMSlots memory provider is deprecated and disabled")
-		log.Error(err, "Cannot reconcile the migration")
-		return ctrl.Result{}, err
-	}
-
 	switch migration.Status.Phase {
 
 	case "":
