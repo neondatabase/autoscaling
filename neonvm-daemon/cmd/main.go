@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -43,9 +44,10 @@ func main() {
 type cpuServer struct {
 	// Protects CPU operations from concurrent access to prevent multiple ensureOnlineCPUs calls from running concurrently
 	// and ensure that status response is always actual
-	cpuOperationsMutex *sync.Mutex
-	cpuScaler          *cpuscaling.CPUScaler
-	logger             *zap.Logger
+	cpuOperationsMutex  *sync.Mutex
+	cpuScaler           *cpuscaling.CPUScaler
+	fileOperationsMutex *sync.Mutex
+	logger              *zap.Logger
 }
 
 func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
@@ -94,6 +96,78 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request) {
+	s.fileOperationsMutex.Lock()
+	defer s.fileOperationsMutex.Unlock()
+
+	path := r.PathValue("path")
+	if !filepath.IsLocal(path) {
+		s.logger.Error("path is not local")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	path = filepath.Clean(filepath.Join("/var/sync", path))
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		s.logger.Error("could not create directory", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	file, err := os.CreateTemp("", "")
+	if err != nil {
+		s.logger.Error("could not create file", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+	defer os.Remove(file.Name())
+
+	if _, err := io.Copy(file, r.Body); err != nil {
+		s.logger.Error("could not read request body", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// rename is an atomic operation on unix.
+	// this ensures that the file is either not updated at all,
+	// or is updated entirely.
+	//
+	// this ensures that other processes reading the file will never
+	// have any inconsistencies. they will either read the old contents
+	// or the new contents. Any open files will still point to the old inode
+	// and thus still read the old contents.
+	if err := os.Rename(file.Name(), path); err != nil {
+		s.logger.Error("could not rename file", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *cpuServer) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
+	s.fileOperationsMutex.Lock()
+	defer s.fileOperationsMutex.Unlock()
+
+	path := r.PathValue("path")
+	if !filepath.IsLocal(path) {
+		s.logger.Error("path is not local")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	path = filepath.Clean(filepath.Join("/var/sync", path))
+
+	if err := os.Remove(path); err != nil {
+		s.logger.Error("could not delete file", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *cpuServer) run(addr string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cpu", func(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +176,18 @@ func (s *cpuServer) run(addr string) {
 			return
 		} else if r.Method == http.MethodPut {
 			s.handleSetCPUStatus(w, r)
+			return
+		} else {
+			// unknown method
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	mux.HandleFunc("/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			s.handleUploadFile(w, r)
+			return
+		} else if r.Method == http.MethodDelete {
+			s.handleDeleteFile(w, r)
 			return
 		} else {
 			// unknown method
