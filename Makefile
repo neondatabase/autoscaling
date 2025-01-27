@@ -321,7 +321,7 @@ render-manifests: $(RENDERED) kustomize
 	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-dev > $(RENDERED)/multus-dev.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
 	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
@@ -346,7 +346,7 @@ render-release: $(RENDERED) kustomize
 	$(KUSTOMIZE) build neonvm/config/whereabouts > $(RENDERED)/whereabouts.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-aks > $(RENDERED)/multus-aks.yaml
 	$(KUSTOMIZE) build neonvm/config/multus-eks > $(RENDERED)/multus-eks.yaml
-	$(KUSTOMIZE) build neonvm/config/multus > $(RENDERED)/multus.yaml
+	$(KUSTOMIZE) build neonvm/config/multus-dev > $(RENDERED)/multus-dev.yaml
 	$(KUSTOMIZE) build neonvm/config > $(RENDERED)/neonvm.yaml
 	$(KUSTOMIZE) build neonvm-controller > $(RENDERED)/neonvm-controller.yaml
 	$(KUSTOMIZE) build neonvm-vxlan-controller > $(RENDERED)/neonvm-vxlan-controller.yaml
@@ -362,7 +362,7 @@ render-release: $(RENDERED) kustomize
 
 .PHONY: deploy
 deploy: check-local-context docker-build load-images render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	$(KUBECTL) apply -f $(RENDERED)/multus.yaml
+	$(KUBECTL) apply -f $(RENDERED)/multus-dev.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
 	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset whereabouts
@@ -505,6 +505,8 @@ endif
 KUBECTL ?= $(LOCALBIN)/kubectl
 KUBECTL_VERSION ?= v1.30.7
 
+
+YQ ?= $(LOCALBIN)/yq
 ETCD ?= $(LOCALBIN)/etcd
 
 # Use the same version kuberentes is tested against, see
@@ -579,3 +581,13 @@ $(ETCD): $(LOCALBIN)
 			rm $(LOCALBIN)/etcd-temp; \
 		fi \
 	}
+
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): $(LOCALBIN)
+	test -s $(LOCALBIN)/yq || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_arm64 && chmod +x $(YQ); }
+
+# arm doesn't support cpu hot plug and memory hot plug and CI runners are based on qemu so no kvm acceleration as well
+arm_patch_e2e: yq
+	@find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.cpuScalingMode = "SysfsScaling") // .' -i {}
+	# @find neonvm/samples/*yaml tests/e2e -name "*.yaml" | xargs -I{} ./bin/yq eval '(select(.kind == "VirtualMachine") | .spec.enableAcceleration = false) // .' -i {}
