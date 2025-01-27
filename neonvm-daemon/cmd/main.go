@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,10 +13,10 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"golang.org/x/crypto/blake2b"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/cpuscaling"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 func main() {
@@ -37,9 +36,10 @@ func main() {
 
 	logger.Info("Starting neonvm-daemon", zap.String("addr", *addr))
 	srv := cpuServer{
-		cpuOperationsMutex: &sync.Mutex{},
-		cpuScaler:          cpuscaling.NewCPUScaler(),
-		logger:             logger.Named("cpu-srv"),
+		cpuOperationsMutex:  &sync.Mutex{},
+		cpuScaler:           cpuscaling.NewCPUScaler(),
+		fileOperationsMutex: &sync.Mutex{},
+		logger:              logger.Named("cpu-srv"),
 	}
 	srv.run(*addr)
 }
@@ -103,7 +103,7 @@ func (s *cpuServer) getFile(path string) (string, error) {
 	if !filepath.IsLocal(path) {
 		return "", errors.New("non-local path")
 	}
-	path = filepath.Clean(filepath.Join("/var/sync", path))
+	path = filepath.Clean(filepath.Join("var", "sync", path))
 	return path, nil
 }
 
@@ -118,30 +118,14 @@ func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	file, err := os.Open(path)
+	checksum, err := util.ChecksumFile(path)
 	if err != nil {
-		s.logger.Error("could not open file", zap.Error(err))
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	hasher, err := blake2b.New256(nil)
-	if err != nil {
-		s.logger.Error("could not create hasher", zap.Error(err))
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	if _, err := io.Copy(hasher, file); err != nil {
-		s.logger.Error("could not read file", zap.Error(err))
+		s.logger.Error("could not checksum file", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	sum := hasher.Sum(nil)
-	sumBase64 := base64.RawStdEncoding.EncodeToString(sum)
-	if _, err := w.Write([]byte(sumBase64)); err != nil {
+	if _, err := w.Write([]byte(checksum)); err != nil {
 		s.logger.Error("could not write response", zap.Error(err))
 	}
 
@@ -209,7 +193,7 @@ func (s *cpuServer) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.Remove(path); err != nil {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		s.logger.Error("could not delete file", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
