@@ -51,4 +51,13 @@ type ReconcilerConfig struct {
 	AtMostOnePod bool
 	// DefaultCPUScalingMode is the default CPU scaling mode that will be used for VMs with empty spec.cpuScalingMode
 	DefaultCPUScalingMode vmv1.CpuScalingMode
+
+	// The name of the ClusterIssuer that will issue TLS certificates for the VM.
+	CertificateIssuer string
+
+	// Duration that certificates are valid for
+	CertificateDuration time.Duration
+
+	// How long before expiration should certificates be renewed.
+	CertificateRenewal time.Duration
 }
