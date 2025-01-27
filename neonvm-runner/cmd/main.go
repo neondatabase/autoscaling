@@ -712,10 +712,18 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 		}
 	}
 
-	for k, _ := range synchronisedFiles {
+	for k := range synchronisedFiles {
 		if err := notify.Add(k); err != nil {
 			logger.Error("failed to add file to inotify instance", zap.Error(err))
 		}
+	}
+
+	// Wait a bit to reduce the chance we attempt dialing before
+	// QEMU is started
+	select {
+	case <-time.After(200 * time.Millisecond):
+	case <-ctx.Done():
+		logger.Warn("QEMU shut down too soon to start forwarding logs")
 	}
 
 	for hostpath, guestpath := range synchronisedFiles {
