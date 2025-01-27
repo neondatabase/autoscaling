@@ -687,6 +687,8 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 		}
 	}
 
+	ticker := time.After(5 * time.Minute)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -701,7 +703,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 			if err := sendFileToNeonvmDaemon(event.Name, guestPath); err != nil {
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
 			}
-		case <-time.After(5 * time.Minute):
+		case <-ticker:
 			for hostpath, guestpath := range synchronisedFiles {
 				hostsum, err := util.ChecksumFile(hostpath)
 				if err != nil {
