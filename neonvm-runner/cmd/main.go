@@ -721,7 +721,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 	// Wait a bit to reduce the chance we attempt dialing before
 	// QEMU is started
 	select {
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		logger.Warn("QEMU shut down too soon to start forwarding logs")
 	}
