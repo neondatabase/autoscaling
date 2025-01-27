@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/crypto/blake2b"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/cpuscaling"
@@ -96,17 +99,65 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *cpuServer) getFile(path string) (string, error) {
+	if !filepath.IsLocal(path) {
+		return "", errors.New("non-local path")
+	}
+	path = filepath.Clean(filepath.Join("/var/sync", path))
+	return path, nil
+}
+
+func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, r *http.Request) {
+	s.fileOperationsMutex.Lock()
+	defer s.fileOperationsMutex.Unlock()
+
+	path, err := s.getFile(r.PathValue("path"))
+	if err != nil {
+		s.logger.Error("invalid file path", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		s.logger.Error("could not open file", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	hasher, err := blake2b.New256(nil)
+	if err != nil {
+		s.logger.Error("could not create hasher", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := io.Copy(hasher, file); err != nil {
+		s.logger.Error("could not read file", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	sum := hasher.Sum(nil)
+	sumBase64 := base64.RawStdEncoding.EncodeToString(sum)
+	if _, err := w.Write([]byte(sumBase64)); err != nil {
+		s.logger.Error("could not write response", zap.Error(err))
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
 
-	path := r.PathValue("path")
-	if !filepath.IsLocal(path) {
-		s.logger.Error("path is not local")
+	path, err := s.getFile(r.PathValue("path"))
+	if err != nil {
+		s.logger.Error("invalid file path", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	path = filepath.Clean(filepath.Join("/var/sync", path))
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		s.logger.Error("could not create directory", zap.Error(err))
@@ -151,13 +202,12 @@ func (s *cpuServer) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
 
-	path := r.PathValue("path")
-	if !filepath.IsLocal(path) {
-		s.logger.Error("path is not local")
+	path, err := s.getFile(r.PathValue("path"))
+	if err != nil {
+		s.logger.Error("invalid file path", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	path = filepath.Clean(filepath.Join("/var/sync", path))
 
 	if err := os.Remove(path); err != nil {
 		s.logger.Error("could not delete file", zap.Error(err))
@@ -183,7 +233,10 @@ func (s *cpuServer) run(addr string) {
 		}
 	})
 	mux.HandleFunc("/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPut {
+		if r.Method == http.MethodGet {
+			s.handleGetFileChecksum(w, r)
+			return
+		} else if r.Method == http.MethodPut {
 			s.handleUploadFile(w, r)
 			return
 		} else if r.Method == http.MethodDelete {
