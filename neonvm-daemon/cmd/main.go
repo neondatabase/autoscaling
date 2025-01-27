@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -101,7 +100,7 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *cpuServer) getFile(path string) (string, error) {
 	if !filepath.IsLocal(path) {
-		return "", errors.New("non-local path")
+		return "", fmt.Errorf("\"%s\" is not a local path", path)
 	}
 	path = filepath.Clean(filepath.Join("var", "sync", path))
 	return path, nil
