@@ -1,0 +1,9 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 90
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      kubectl exec -n "$NAMESPACE" $pod -- scp guest-vm:/var/sync/example/foo testfile
+      grep -q "goodbye world" testfile
