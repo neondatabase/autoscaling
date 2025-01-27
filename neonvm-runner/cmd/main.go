@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -48,8 +49,6 @@ const (
 	logSerialSocket                = "/vm/log.sock"
 	bufferedReaderSize             = 4096
 )
-
-var synchronisedFiles = map[string]string{}
 
 func checkKVM() bool {
 	info, err := os.Stat("/dev/kvm")
@@ -528,7 +527,7 @@ func runQEMU(
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 	wg.Add(1)
-	go monitorFiles(ctx, logger, &wg)
+	go monitorFiles(ctx, logger, &wg, vmSpec.Disks)
 
 	qemuBin := getQemuBinaryName(cfg.architecture)
 	var bin string
@@ -691,13 +690,26 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 }
 
 // monitorFiles watches a specific set of files and copied them into the guest VM via neonvm-daemon.
-func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
+func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, disks []vmv1.Disk) {
 	defer wg.Done()
 
 	notify, err := fsnotify.NewBufferedWatcher(2)
 	if err != nil {
 		logger.Error("failed to create inotify instance", zap.Error(err))
 		return
+	}
+
+	synchronisedFiles := make(map[string]string)
+	for _, disk := range disks {
+		if disk.Secret != nil && secretNeedsSynchronisation(disk.MountPath) {
+			rel, _ := filepath.Rel("/var/sync", disk.MountPath)
+			root := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
+			for _, item := range disk.Secret.Items {
+				root := filepath.Join(root, item.Path)
+				rel := filepath.Join(rel, item.Path)
+				synchronisedFiles[root] = rel
+			}
+		}
 	}
 
 	for k := range synchronisedFiles {
