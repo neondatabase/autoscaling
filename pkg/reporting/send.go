@@ -12,7 +12,6 @@ type eventSender[E any] struct {
 
 	metrics *EventSinkMetrics
 	queue   eventQueuePuller[E]
-	done    <-chan struct{}
 
 	// lastSendDuration tracks the "real" last full duration of (eventSender).sendAllCurrentEvents().
 	//
@@ -37,7 +36,7 @@ type eventSender[E any] struct {
 	lastSendDuration time.Duration
 }
 
-func (s eventSender[E]) senderLoop(logger *zap.Logger) {
+func (s eventSender[E]) senderLoop(ctx context.Context, logger *zap.Logger) {
 	ticker := time.NewTicker(time.Second * time.Duration(s.client.BaseConfig.PushEverySeconds))
 	defer ticker.Stop()
 
@@ -45,7 +44,7 @@ func (s eventSender[E]) senderLoop(logger *zap.Logger) {
 		final := false
 
 		select {
-		case <-s.done:
+		case <-ctx.Done():
 			logger.Info("Received notification that events submission is done")
 			final = true
 		case <-ticker.C:

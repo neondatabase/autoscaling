@@ -3,11 +3,14 @@ package reporting
 // public API for event reporting
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 type EventSink[E any] struct {
@@ -15,9 +18,16 @@ type EventSink[E any] struct {
 	done         func()
 }
 
-func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients ...Client[E]) *EventSink[E] {
+func NewEventSink[E any](
+	ctx context.Context,
+	logger *zap.Logger,
+	tg taskgroup.Group,
+	metrics *EventSinkMetrics,
+	clients ...Client[E],
+) *EventSink[E] {
 	var queueWriters []eventQueuePusher[E]
-	signalDone := make(chan struct{})
+
+	senderCtx, cancelSenders := context.WithCancel(ctx)
 
 	for _, c := range clients {
 		qw, qr := newEventQueue[E](metrics.queueSizeCurrent.WithLabelValues(c.Name))
@@ -28,15 +38,18 @@ func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients 
 			client:           c,
 			metrics:          metrics,
 			queue:            qr,
-			done:             signalDone,
 			lastSendDuration: 0,
 		}
-		go sender.senderLoop(logger.Named(fmt.Sprintf("send-%s", c.Name)))
+		taskName := fmt.Sprintf("send-%s", c.Name)
+		tg.Go(taskName, func(_ *zap.Logger) error {
+			sender.senderLoop(senderCtx, logger.Named(taskName))
+			return nil
+		})
 	}
 
 	return &EventSink[E]{
 		queueWriters: queueWriters,
-		done:         sync.OnceFunc(func() { close(signalDone) }),
+		done:         sync.OnceFunc(cancelSenders),
 	}
 }
 
@@ -45,6 +58,12 @@ func (s *EventSink[E]) Enqueue(event E) {
 	for _, q := range s.queueWriters {
 		q.enqueue(event)
 	}
+}
+
+// Finish signals that the last events have been Enqueue'd, and so they should be sent off before
+// shutting down.
+func (s *EventSink[E]) Finish() {
+	s.done()
 }
 
 type EventSinkMetrics struct {

@@ -52,8 +52,10 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	}
 	defer schedTracker.Stop()
 
+	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
+
 	scalingEventsMetrics := scalingevents.NewPromMetrics()
-	scalingReporter, err := scalingevents.NewReporter(ctx, logger, &r.Config.ScalingEvents, scalingEventsMetrics)
+	scalingReporter, err := scalingevents.NewReporter(ctx, logger, tg, &r.Config.ScalingEvents, scalingEventsMetrics)
 	if err != nil {
 		return fmt.Errorf("Error creating scaling events reporter: %w", err)
 	}
@@ -82,12 +84,11 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 		}
 	}
 
-	mc, err := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing, metrics)
+	mc, err := billing.NewMetricsCollector(ctx, logger, tg, &r.Config.Billing, metrics)
 	if err != nil {
 		return fmt.Errorf("error creating billing metrics collector: %w", err)
 	}
 
-	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
 	tg.Go("billing", func(logger *zap.Logger) error {
 		return mc.Run(tg.Ctx(), logger, storeForNode)
 	})
