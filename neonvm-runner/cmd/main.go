@@ -751,6 +751,20 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 				// not tracking this file
 				continue
 			}
+			if event.Op == fsnotify.Chmod {
+				// not interesting.
+				continue
+			}
+
+			// kubernetes secrets are mounted as symbolic links.
+			// When the link changes, there's no event. We only see the deletion
+			// of the file the link used to point to.
+			// This doesn't mean the file was actually deleted though.
+			if event.Op == fsnotify.Remove {
+				if err := notify.Add(event.Name); err != nil {
+					logger.Error("failed to add file to inotify instance", zap.Error(err))
+				}
+			}
 
 			if err := sendFileToNeonvmDaemon(ctx, event.Name, guestpath); err != nil {
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
