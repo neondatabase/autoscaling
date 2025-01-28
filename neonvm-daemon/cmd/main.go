@@ -102,7 +102,8 @@ func (s *cpuServer) getFile(path string) (string, error) {
 	if !filepath.IsLocal(path) {
 		return "", fmt.Errorf("\"%s\" is not a local path", path)
 	}
-	path = filepath.Clean(filepath.Join("var", "sync", path))
+	//nolint:gocritic // filepathJoin lint wrongly complains about path separators
+	path = filepath.Clean(filepath.Join("/var/sync", path))
 	return path, nil
 }
 
