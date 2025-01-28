@@ -14,6 +14,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/billing"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 type Config struct {
@@ -96,14 +97,24 @@ func (mc *MetricsCollector) Run(
 	logger *zap.Logger,
 	store VMStoreForNode,
 ) error {
-	logger = logger.Named("collect")
-
 	collectTicker := time.NewTicker(time.Second * time.Duration(mc.conf.CollectEverySeconds))
 	defer collectTicker.Stop()
 	// Offset by half a second, so it's a bit more deterministic.
 	time.Sleep(500 * time.Millisecond)
 	accumulateTicker := time.NewTicker(time.Second * time.Duration(mc.conf.AccumulateEverySeconds))
 	defer accumulateTicker.Stop()
+
+	// Create a new taskgroup to manage mc.sink.Run() -- we want to run the event senders in the
+	// background and cancel them when we're done collecting, but wait for them to finish before
+	// returning.
+	sinkTg := taskgroup.NewGroup(logger)
+	sinkCtx, cancelSink := context.WithCancel(context.Background())
+	defer sinkTg.Wait() //nolint:errcheck // cannot fail, sink-run returns nil.
+	defer cancelSink()
+	sinkTg.Go("sink-run", func(logger *zap.Logger) error {
+		mc.sink.Run(sinkCtx)
+		return nil
+	})
 
 	state := metricsState{
 		historical:      make(map[metricsKey]vmMetricsHistory),
@@ -112,6 +123,7 @@ func (mc *MetricsCollector) Run(
 		pushWindowStart: time.Now(),
 	}
 
+	logger = logger.Named("collect")
 	state.collect(logger, store, mc.metrics)
 
 	for {

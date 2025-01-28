@@ -80,6 +80,14 @@ func NewReporter(
 	}, nil
 }
 
+// Run calls the underlying reporting.EventSink's Run() method, periodically pushing events to the
+// clients specified in Config until the context expires.
+//
+// Refer there for more information.
+func (r *Reporter) Run(ctx context.Context) {
+	r.sink.Run(ctx)
+}
+
 // Submit adds the ScalingEvent to the sender queue(s), returning without waiting for it to be sent.
 func (r *Reporter) Submit(event ScalingEvent) {
 	r.metrics.recordSubmitted(event)
