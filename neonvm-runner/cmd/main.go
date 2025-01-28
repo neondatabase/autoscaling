@@ -679,6 +679,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 		logger.Error("failed to create inotify instance", zap.Error(err))
 		return
 	}
+	defer notify.Close()
 
 	synchronisedFiles := make(map[string]string)
 	for _, disk := range disks {
@@ -686,9 +687,9 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 			rel, _ := filepath.Rel("/var/sync", disk.MountPath)
 			root := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 			for _, item := range disk.Secret.Items {
-				root := filepath.Join(root, item.Path)
-				rel := filepath.Join(rel, item.Path)
-				synchronisedFiles[root] = rel
+				hostpath := filepath.Join(root, item.Path)
+				guestpath := filepath.Join(rel, item.Path)
+				synchronisedFiles[hostpath] = guestpath
 			}
 		}
 	}
@@ -701,48 +702,54 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 
 	// Wait a bit to reduce the chance we attempt dialing before
 	// QEMU is started
-	select {
-	case <-time.After(1 * time.Second):
-	case <-ctx.Done():
-		logger.Warn("QEMU shut down too soon to start forwarding logs")
-	}
+	success := false
+	for !success {
+		success = true
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			logger.Warn("QEMU shut down too soon to start forwarding logs")
+		}
 
-	for hostpath, guestpath := range synchronisedFiles {
-		if err := sendFileToNeonvmDaemon(hostpath, guestpath); err != nil {
-			logger.Error("failed to upload file to vm guest", zap.Error(err))
+		for hostpath, guestpath := range synchronisedFiles {
+			if err := sendFileToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+				success = false
+				logger.Error("failed to upload file to vm guest", zap.Error(err))
+			}
 		}
 	}
 
-	ticker := time.After(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event := <-notify.Events:
-			guestPath, ok := synchronisedFiles[event.Name]
+			guestpath, ok := synchronisedFiles[event.Name]
 			if !ok {
 				// not tracking this file
 				continue
 			}
 
-			if err := sendFileToNeonvmDaemon(event.Name, guestPath); err != nil {
+			if err := sendFileToNeonvmDaemon(ctx, event.Name, guestpath); err != nil {
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
 			}
-		case <-ticker:
+		case <-ticker.C:
 			for hostpath, guestpath := range synchronisedFiles {
 				hostsum, err := util.ChecksumFile(hostpath)
 				if err != nil {
 					logger.Error("failed to get file checksum from host", zap.Error(err))
 				}
 
-				guestsum, err := getFileChecksumFromNeonvmDaemon(guestpath)
+				guestsum, err := getFileChecksumFromNeonvmDaemon(ctx, guestpath)
 				if err != nil {
 					logger.Error("failed to get file checksum from guest", zap.Error(err))
 				}
 
 				if guestsum != hostsum {
-					if err = sendFileToNeonvmDaemon(hostpath, guestsum); err != nil {
+					if err = sendFileToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
 						logger.Error("failed to upload file to vm guest", zap.Error(err))
 					}
 				}
@@ -841,7 +848,7 @@ func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
 	return nil
 }
 
-func sendFileToNeonvmDaemon(hostpath, guestpath string) error {
+func sendFileToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) error {
 	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
 	if err != nil {
 		return fmt.Errorf("could not calculate VM IP address: %w", err)
@@ -852,7 +859,7 @@ func sendFileToNeonvmDaemon(hostpath, guestpath string) error {
 		return fmt.Errorf("could not open file: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
 	url := fmt.Sprintf("http://%s:25183/files/%s", vmIP, guestpath)
@@ -881,13 +888,13 @@ func sendFileToNeonvmDaemon(hostpath, guestpath string) error {
 	return nil
 }
 
-func getFileChecksumFromNeonvmDaemon(guestpath string) (string, error) {
+func getFileChecksumFromNeonvmDaemon(ctx context.Context, guestpath string) (string, error) {
 	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
 	if err != nil {
 		return "", fmt.Errorf("could not calculate VM IP address: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
 	url := fmt.Sprintf("http://%s:25183/files/%s", vmIP, guestpath)
