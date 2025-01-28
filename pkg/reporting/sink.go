@@ -14,7 +14,7 @@ import (
 )
 
 type EventSink[E any] struct {
-	queueWriters []eventQueuePusher[E]
+	queueWriters []*eventBatcher[E]
 
 	runSenders func(context.Context) error
 }
@@ -24,19 +24,22 @@ type EventSink[E any] struct {
 // You MUST call (*EventSink[E]).Run() if you wish for any enqueued events to actually be sent via
 // the clients.
 func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients ...Client[E]) *EventSink[E] {
-	var queueWriters []eventQueuePusher[E]
-
+	var queueWriters []*eventBatcher[E]
 	var senders []eventSender[E]
 
 	for _, c := range clients {
-		qw, qr := newEventQueue[E](metrics.queueSizeCurrent.WithLabelValues(c.Name))
-		queueWriters = append(queueWriters, qw)
+		broadcaster := util.NewBroadcaster()
+		sizeGauge := metrics.queueSizeCurrent.WithLabelValues(c.Name)
+
+		batcher := newEventBatcher[E](int(c.BaseConfig.MaxBatchSize), broadcaster.Broadcast, sizeGauge)
+		queueWriters = append(queueWriters, batcher)
 
 		// Create the sender -- we'll save starting it for the call to Run()
 		senders = append(senders, eventSender[E]{
 			client:           c,
 			metrics:          metrics,
-			queue:            qr,
+			queue:            batcher,
+			batchComplete:    broadcaster.NewReceiver(),
 			lastSendDuration: 0,
 		})
 	}
