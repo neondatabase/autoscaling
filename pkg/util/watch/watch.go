@@ -49,6 +49,16 @@ type Config struct {
 	// RetryWatchAfter gives a retry interval when a non-initial watch fails. If left nil, then
 	// Watch will not retry.
 	RetryWatchAfter *util.TimeRange
+
+	// RelistRateLimit gives an interval used to determine the minimum duration to wait between
+	// re-list requests.
+	//
+	// For example, with a value of 4-5s, after one re-list request completes, the next one will not
+	// be allowed to start until a random duration between 4-5s later.
+	//
+	// If left nil, subsequent re-list requests will be allowed to proceed immediately after the
+	// previous one.
+	RelistRateLimit *util.TimeRange
 }
 
 // Accessors provides the "glue" functions for Watch to go from a list L (returned by the
@@ -249,10 +259,13 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 		logger.Info("All setup complete, entering event loop")
 
+		relistWait := (<-chan time.Time)(make(chan time.Time))
+		mustWaitForRelist := false
 		for {
 			// this is used exclusively for relisting, but must be defined up here so that our gotos
 			// don't jump over variables.
 			var signalRelistComplete []chan struct{}
+			relistRequested := false
 			for {
 				select {
 				case <-stopSignal.Recv():
@@ -263,7 +276,20 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					return
 				case <-store.triggerRelist:
 					config.Metrics.relistRequested()
-					goto relist
+					if !mustWaitForRelist {
+						goto relist
+					} else if !relistRequested {
+						// log a warning for the first request that's rate-limited, but only do this
+						// once, so we avid spamming under load.
+						logger.Warn("Relist request delayed due to rate limiting")
+					}
+					relistRequested = true
+				case <-relistWait:
+					mustWaitForRelist = false
+					if relistRequested {
+						logger.Info("Allowing relist after rate-limited delay")
+						goto relist
+					}
 				case event, ok := <-watcher.ResultChan():
 					if !ok {
 						logger.Info("Watcher ended gracefully, restarting")
@@ -456,6 +482,18 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						}
 					}
 				}()
+
+				// Now that relist is complete, update the minimum time we must wait before
+				// relisting again.
+				if config.RelistRateLimit != nil {
+					wait := config.RelistRateLimit.Random()
+					relistWait = time.After(wait)
+					mustWaitForRelist = true
+					logger.Debug(
+						"Relist complete, rate limit dictates min delay before next relist",
+						zap.Duration("delay", wait),
+					)
+				}
 
 				// Update ResourceVersion, recreate watcher.
 				watchOpts.ResourceVersion = relistList.GetListMeta().GetResourceVersion()
