@@ -37,7 +37,7 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 		generateKey := newBlobStorageKeyGenerator(c.PrefixInContainer)
 		client, err := reporting.NewAzureBlobStorageClient(c.AzureBlobStorageClientConfig, generateKey)
 		if err != nil {
-			return nil, fmt.Errorf("error creating S3 client: %w", err)
+			return nil, fmt.Errorf("error creating Azure Blob Storage client: %w", err)
 		}
 		logger.Info("Created Azure Blob Storage client for scaling events", zap.Any("config", c))
 
