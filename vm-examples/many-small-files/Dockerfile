@@ -13,7 +13,7 @@ RUN cargo build --release
 FROM neondatabase/compute-node-v16:latest
 USER root
 
-RUN apt update && apt install --no-install-recommends -y smem htop lsof
+RUN apt update && apt install --no-install-recommends -y smem htop lsof sysstat
 
 COPY --from=builder /usr/src/app/target/release/many-small-files /usr/local/bin/
 COPY ./mem.py /root/mem.py
