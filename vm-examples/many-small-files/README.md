@@ -20,6 +20,14 @@ docker build -t many-small-files . && \
 
 ## Cheatsheet
 
+Build a kernel:
+```
+make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- -j `nproc`
+cp ./arch/x86/boot/bzImage ../../autoscaling/neonvm-kernel/vmlinuz
+
+make docker-build-runner && make deploy
+```
+
 To start a VM:
 ```
 kubectl apply -f ./spec.yml
