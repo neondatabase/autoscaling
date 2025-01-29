@@ -58,6 +58,15 @@ func (s eventSender[E]) senderLoop(ctx context.Context, logger *zap.Logger) {
 		case <-s.batchComplete.Wait():
 			s.batchComplete.Awake() // consume this notification
 		case <-timer.C:
+			// Timer has expired without any notification of a completed batch. Let's explicitly ask
+			// for in-progress events to be wrapped up into a batch so we ship them fast enough and
+			// reset the timer.
+			//
+			// consume s.batchComplete on repeat if there were events; otherwise wait until the
+			// timer expires again.
+			s.queue.finishOngoing()
+			timer.Reset(heartbeat)
+			continue
 		}
 
 		// Make sure that if there are no more events within the next heartbeat duration, that we'll
