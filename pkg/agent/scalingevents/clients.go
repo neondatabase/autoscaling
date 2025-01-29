@@ -35,14 +35,20 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 		logger.Info("Created S3 client for scaling events", zap.Any("config", c))
 
 		clients = append(clients, eventsClient{
-			Name:           "s3",
-			Base:           client,
-			BaseConfig:     c.BaseClientConfig,
-			SerializeBatch: reporting.WrapSerialize[ScalingEvent](reporting.GZIPCompress, reporting.JSONLinesMarshalBatch),
+			Name:            "s3",
+			Base:            client,
+			BaseConfig:      c.BaseClientConfig,
+			NewBatchBuilder: jsonLinesBatch(reporting.NewGZIPBuffer),
 		})
 	}
 
 	return clients, nil
+}
+
+func jsonLinesBatch[B reporting.IOBuffer](buf func() B) func() reporting.BatchBuilder[ScalingEvent] {
+	return func() reporting.BatchBuilder[ScalingEvent] {
+		return reporting.NewJSONArrayBuilder[ScalingEvent](buf())
+	}
 }
 
 // Returns a function to generate keys for the placement of scaling events data into blob storage.

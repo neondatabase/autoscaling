@@ -129,7 +129,7 @@ func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
 
 		logger.Info(
 			"Pushing events batch",
-			zap.Int("count", len(batch.events)),
+			zap.Int("count", batch.count),
 			req.LogFields(),
 		)
 
@@ -141,12 +141,7 @@ func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
 			)
 			defer cancel()
 
-			payload, err := s.client.SerializeBatch(batch.events)
-			if err != nil {
-				return err
-			}
-
-			return req.Send(reqCtx, payload)
+			return req.Send(reqCtx, batch.serialized)
 		}()
 		reqDuration := time.Since(reqStart)
 
@@ -155,7 +150,7 @@ func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
 			// events.
 			logger.Error(
 				"Failed to push billing events",
-				zap.Int("count", len(batch.events)),
+				zap.Int("count", batch.count),
 				zap.Duration("after", reqDuration),
 				req.LogFields(),
 				zap.Int("totalEvents", totalEvents),
@@ -173,13 +168,13 @@ func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
 		}
 
 		s.queue.dropCompleted(1) // mark this batch as complete
-		totalEvents += len(batch.events)
+		totalEvents += batch.count
 		totalBatches += 1
 		currentTotalTime := time.Since(startTime)
 
 		logger.Info(
 			"Successfully pushed some events",
-			zap.Int("count", len(batch.events)),
+			zap.Int("count", batch.count),
 			zap.Duration("after", reqDuration),
 			req.LogFields(),
 			zap.Int("totalEvents", totalEvents),

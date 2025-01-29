@@ -101,7 +101,7 @@ func TestAzureClient_send(t *testing.T) {
 				)
 				b = b[0:read]
 				require.NoError(t, err)
-				b, err = bytesFromStorage(b)
+				b, err = gzipUncompress(b)
 				require.NoError(t, err)
 				require.Equal(t, b, []byte(expectedText))
 			},
@@ -139,7 +139,7 @@ func TestAzureClient_send(t *testing.T) {
 				Endpoint:  endpoint,
 				Container: "test-container",
 			}
-			payload, err := GZIPCompress([]byte("hello, billing data is here"))
+			payload, err := gzipCompress([]byte("hello, billing data is here"))
 			if err != nil {
 				panic(err)
 			}
@@ -168,14 +168,31 @@ func TestBytesForBilling(t *testing.T) {
 	// specific type than just 'error'.
 	var err error
 	var billing []byte
-	billing, err = GZIPCompress([]byte(expectedText))
+	billing, err = gzipCompress([]byte(expectedText))
 	require.NoError(t, err)
-	storage, err := bytesFromStorage(billing)
+	storage, err := gzipUncompress(billing)
 	require.NoError(t, err)
 	require.Equal(t, expectedText, string(storage))
 }
 
-func bytesFromStorage(i []byte) ([]byte, error) {
+func gzipCompress(i []byte) ([]byte, error) {
+	buf := bytes.Buffer{}
+
+	gzW := gzip.NewWriter(&buf)
+	_, err := gzW.Write(i)
+	if err != nil {
+		return nil, err
+	}
+
+	err = gzW.Close() // Have to close it before reading the buffer
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func gzipUncompress(i []byte) ([]byte, error) {
 	gzR, err := gzip.NewReader(bytes.NewBuffer(i))
 	if err != nil {
 		return nil, err
