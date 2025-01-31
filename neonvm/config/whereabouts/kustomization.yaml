@@ -12,4 +12,4 @@ patchesStrategicMerge:
 
 images:
 - name: ghcr.io/k8snetworkplumbingwg/whereabouts
-  newTag: v0.6.2-amd64
+  newTag: v0.6.2
