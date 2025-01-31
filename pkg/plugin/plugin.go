@@ -196,7 +196,7 @@ func makeAutoscaleEnforcerPlugin(
 		},
 	}
 
-	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers")
+	watchMetrics := watch.NewMetrics("autoscaling_plugin_watchers", promReg)
 
 	logger.Info("Starting node watcher")
 	nodeStore, err := p.watchNodeEvents(ctx, logger, watchMetrics, nwc)
@@ -224,8 +224,6 @@ func makeAutoscaleEnforcerPlugin(
 	if _, err := p.watchMigrationEvents(ctx, logger, watchMetrics, mwc); err != nil {
 		return nil, fmt.Errorf("Error starting VM Migration watcher: %w", err)
 	}
-
-	watchMetrics.MustRegister(promReg)
 
 	// Set up tracking the initial events, now that we know the count:
 	totalQueued := initEventsCount.Load()
