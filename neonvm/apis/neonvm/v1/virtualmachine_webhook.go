@@ -90,6 +90,7 @@ func (r *VirtualMachine) ValidateCreate() (admission.Warnings, error) {
 		"ssh-privatekey",
 		"ssh-publickey",
 		"ssh-authorized-keys",
+		"tls",
 	}
 	for _, disk := range r.Spec.Disks {
 		if slices.Contains(reservedDiskNames, disk.Name) {
