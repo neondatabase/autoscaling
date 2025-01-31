@@ -1,0 +1,10 @@
+[Unit]
+Description=neonvmd daemon
+
+[Service]
+ExecStart=/neonvm/bin/neonvmd --addr=0.0.0.0:25183
+Restart=always
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

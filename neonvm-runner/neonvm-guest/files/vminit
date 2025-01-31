@@ -1,0 +1,63 @@
+## FIXME: This is unused with neonvm-guest. It's here just to remind that some
+## of this functionality still needs to be moved to systemd unit files
+
+#!/neonvm/bin/sh
+
+export PATH=/neonvm/bin
+
+# set links to libs
+mkdir -p /lib
+for l in $(find /neonvm/lib -type f); do
+    lib="$(basename $l)"
+    [ ! -e "/lib/${lib}" -a ! -e "/usr/lib/${lib}" ] && ln -s "${l}" "/lib/${lib}"
+done
+
+# udev rule for auto-online hotplugged CPUs
+mkdir -p /lib/udev/rules.d
+# taken from 50-udev-default.rules
+echo 'SUBSYSTEM=="virtio-ports", KERNEL=="vport*", ATTR{name}=="?*", SYMLINK+="virtio-ports/$attr{name}"' > /lib/udev/rules.d/99-virtio-ports.rules
+
+echo 'ATTR{name}=="tech.neon.log.0" MODE="0666"' > /lib/udev/rules.d/99-neon-log-port.rules
+echo 'SUBSYSTEM=="cpu", ACTION=="add", TEST=="online", ATTR{online}=="0", ATTR{online}="1"' > /lib/udev/rules.d/99-hotplug-cpu.rules
+
+# system mounts
+mkdir -p /dev/pts /dev/shm
+chmod 0755 /dev/pts
+chmod 1777 /dev/shm
+mount -t proc  proc  /proc
+mount -t sysfs sysfs /sys
+mount -t cgroup2 cgroup2 /sys/fs/cgroup
+
+# Allow all users to move processes to/from the root cgroup.
+#
+# This is required in order to be able to 'cgexec' anything, if the entrypoint is not being run as
+# root, because moving tasks between one cgroup and another *requires write access to the
+# cgroup.procs file of the common ancestor*, and because the entrypoint isn't already in a cgroup,
+# any new tasks are automatically placed in the top-level cgroup.
+#
+# This *would* be bad for security, if we relied on cgroups for security; but instead because they
+# are just used for cooperative signaling, this should be mostly ok.
+chmod go+w /sys/fs/cgroup/cgroup.procs
+
+mount -t devpts -o noexec,nosuid       devpts    /dev/pts
+mount -t tmpfs  -o noexec,nosuid,nodev shm-tmpfs /dev/shm
+
+# neonvm runtime params mounted as iso9660 disk
+mount -t iso9660 -o ro,mode=0644 /dev/vdb /neonvm/runtime
+
+# mount virtual machine .spec.disks
+test -f /neonvm/runtime/mounts.sh && /neonvm/bin/sh /neonvm/runtime/mounts.sh
+
+# set any user-supplied sysctl settings
+test -f /neonvm/runtime/sysctl.conf && /neonvm/bin/sysctl -p /neonvm/runtime/sysctl.conf
+
+# try resize filesystem
+resize2fs /dev/vda
+
+# networking
+ip link set up dev lo
+ip link set up dev eth0
+
+# ssh
+# we use ed25519 keys and -N "" skips setting up a passphrase
+/neonvm/bin/ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""

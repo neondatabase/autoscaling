@@ -1,0 +1,2 @@
+# udev rule for auto-online hotplugged CPUs
+SUBSYSTEM=="cpu", ACTION=="add", TEST=="online", ATTR{online}=="0", ATTR{online}="1"
