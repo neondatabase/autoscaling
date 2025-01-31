@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"k8s.io/client-go/kubernetes"
@@ -50,10 +49,9 @@ func (r MainRunner) newAgentState(
 	podIP string,
 	schedTracker *schedwatch.SchedulerTracker,
 	scalingReporter *scalingevents.Reporter,
-) (*agentState, *prometheus.Registry) {
-	metrics, promReg := makeGlobalMetrics()
-
-	state := &agentState{
+	metrics GlobalMetrics,
+) *agentState {
+	return &agentState{
 		lock:         util.NewChanMutex(),
 		pods:         make(map[util.NamespacedName]*podState),
 		baseLogger:   baseLogger,
@@ -66,8 +64,6 @@ func (r MainRunner) newAgentState(
 
 		scalingReporter: scalingReporter,
 	}
-
-	return state, promReg
 }
 
 func vmIsOurResponsibility(vm *vmv1.VirtualMachine, config *Config, nodeName string) bool {
