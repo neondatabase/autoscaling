@@ -60,6 +60,7 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 
 	globalState, globalPromReg := r.newAgentState(logger, r.EnvArgs.K8sPodIP, schedTracker, scalingReporter)
 	watchMetrics.MustRegister(globalPromReg)
+	scalingEventsMetrics.MustRegister(globalPromReg)
 
 	logger.Info("Starting billing metrics collector")
 	storeForNode := watch.NewIndexedStore(vmWatchStore, billing.NewVMNodeIndex(r.EnvArgs.K8sNodeName))

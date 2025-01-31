@@ -15,7 +15,7 @@ type PromMetrics struct {
 
 func NewPromMetrics() PromMetrics {
 	return PromMetrics{
-		reporting: reporting.NewEventSinkMetrics("autoscaling_agent_events"),
+		reporting: reporting.NewEventSinkMetrics("autoscaling_agent_scalingevents"),
 		totalCount: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_agent_scaling_events_total",
