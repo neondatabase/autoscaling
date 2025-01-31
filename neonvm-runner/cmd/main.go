@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/digitalocean/go-qemu/qmp"
+	"github.com/fsnotify/fsnotify"
 	"github.com/jpillora/backoff"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -30,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
@@ -504,6 +507,8 @@ func runQEMU(
 	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, callbacks, &wg, monitoring)
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
+	wg.Add(1)
+	go monitorFiles(ctx, logger, &wg, vmSpec.Disks)
 
 	qemuBin := getQemuBinaryName(cfg.architecture)
 	var bin string
@@ -665,6 +670,109 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	}
 }
 
+// monitorFiles watches a specific set of files and copied them into the guest VM via neonvm-daemon.
+func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, disks []vmv1.Disk) {
+	defer wg.Done()
+
+	notify, err := fsnotify.NewBufferedWatcher(2)
+	if err != nil {
+		logger.Error("failed to create inotify instance", zap.Error(err))
+		return
+	}
+	defer notify.Close()
+
+	synchronisedFiles := make(map[string]string)
+	for _, disk := range disks {
+		if disk.Secret != nil && secretNeedsSynchronisation(disk.MountPath) {
+			rel, _ := filepath.Rel("/var/sync", disk.MountPath)
+			root := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
+			for _, item := range disk.Secret.Items {
+				hostpath := filepath.Join(root, item.Path)
+				guestpath := filepath.Join(rel, item.Path)
+				synchronisedFiles[hostpath] = guestpath
+			}
+		}
+	}
+
+	for k := range synchronisedFiles {
+		if err := notify.Add(k); err != nil {
+			logger.Error("failed to add file to inotify instance", zap.Error(err))
+		}
+	}
+
+	// Wait a bit to reduce the chance we attempt dialing before
+	// QEMU is started
+	success := false
+	for !success {
+		success = true
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			logger.Warn("QEMU shut down too soon to start forwarding logs")
+		}
+
+		for hostpath, guestpath := range synchronisedFiles {
+			if err := sendFileToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+				success = false
+				logger.Error("failed to upload file to vm guest", zap.Error(err))
+			}
+		}
+	}
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-notify.Events:
+			guestpath, ok := synchronisedFiles[event.Name]
+			if !ok {
+				// not tracking this file
+				continue
+			}
+			if event.Op == fsnotify.Chmod {
+				// not interesting.
+				continue
+			}
+
+			// kubernetes secrets are mounted as symbolic links.
+			// When the link changes, there's no event. We only see the deletion
+			// of the file the link used to point to.
+			// This doesn't mean the file was actually deleted though.
+			if event.Op == fsnotify.Remove {
+				if err := notify.Add(event.Name); err != nil {
+					logger.Error("failed to add file to inotify instance", zap.Error(err))
+				}
+			}
+
+			if err := sendFileToNeonvmDaemon(ctx, event.Name, guestpath); err != nil {
+				logger.Error("failed to upload file to vm guest", zap.Error(err))
+			}
+		case <-ticker.C:
+			for hostpath, guestpath := range synchronisedFiles {
+				hostsum, err := util.ChecksumFile(hostpath)
+				if err != nil {
+					logger.Error("failed to get file checksum from host", zap.Error(err))
+				}
+
+				guestsum, err := getFileChecksumFromNeonvmDaemon(ctx, guestpath)
+				if err != nil {
+					logger.Error("failed to get file checksum from guest", zap.Error(err))
+				}
+
+				if guestsum != hostsum {
+					if err = sendFileToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+						logger.Error("failed to upload file to vm guest", zap.Error(err))
+					}
+				}
+			}
+			continue
+		}
+	}
+}
+
 func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	logger = logger.Named("terminate-qemu-on-sigterm")
 
@@ -752,4 +860,78 @@ func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
 	}
 
 	return nil
+}
+
+func sendFileToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) error {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	file, err := os.Open(hostpath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("could not open file: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:25183/files/%s", vmIP, guestpath)
+
+	var req *http.Request
+	if err != nil && os.IsNotExist(err) {
+		req, err = http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
+	} else {
+		req, err = http.NewRequestWithContext(ctx, http.MethodPut, url, file)
+	}
+
+	if err != nil {
+		return fmt.Errorf("could not build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func getFileChecksumFromNeonvmDaemon(ctx context.Context, guestpath string) (string, error) {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return "", fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:25183/files/%s", vmIP, guestpath)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return "", fmt.Errorf("could not build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	checksum, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("could not read response: %w", err)
+	}
+
+	return string(checksum), nil
 }
