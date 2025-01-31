@@ -75,7 +75,10 @@ func NewGroup(logger *zap.Logger, opts ...GroupOption) Group {
 	return g
 }
 
-// Ctx returns a context that will be canceled when the group is Waited.
+// Ctx returns a context that will be canceled if any of the following happens:
+// 1. Any of the tasks in the group fail.
+// 2. All tasks in the group have completed.
+// 3. Parent context is canceled, if it was set.
 func (g *group) Ctx() context.Context {
 	return g.ctx
 }

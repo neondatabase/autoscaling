@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/multierr"
@@ -31,7 +32,7 @@ func ExampleGroup() {
 	// Output: Got 2 errors
 }
 
-func TestWithContext(t *testing.T) {
+func TestContextDoneAfterWait(t *testing.T) {
 	err1 := errors.New("error 1")
 	err2 := errors.New("error 2")
 	log := zap.NewNop()
@@ -53,6 +54,27 @@ func TestWithContext(t *testing.T) {
 	default:
 		t.Fatal("context should be done")
 	}
+}
+
+func TestPrematureFailure(t *testing.T) {
+	err1 := errors.New("error 1")
+	log := zap.NewNop()
+
+	g := taskgroup.NewGroup(log)
+	g.Go("fail", func(_ *zap.Logger) error {
+		return err1
+	})
+	g.Go("long-term", func(_ *zap.Logger) error {
+		select {
+		case <-g.Ctx().Done():
+			break
+		case <-time.After(1 * time.Second):
+			t.Fatal("context should be done")
+		}
+		return nil
+	})
+	err := g.Wait()
+	assert.ErrorIs(t, err, err1)
 }
 
 func TestParentContext(t *testing.T) {
