@@ -8,7 +8,7 @@ metadata:
   - vm.neon.tech/finalizer
   generation: 1
   labels:
-    autoscaling.neon.tech/enabled: "true"
+    autoscaling.neon.tech/enabled: "false"
     neon/component: compute-node
   name: compute-msf-unreal
   namespace: default
@@ -40,7 +40,7 @@ spec:
     cpus:
       max: 10
       min: 250m
-      use: 500m
+      use: 1
     env:
     - name: RUST_LOG
       value: info
@@ -52,7 +52,7 @@ spec:
     memorySlots:
       max: 40
       min: 1
-      use: 2
+      use: 4
     ports:
     - name: postgres
       port: 5432
