@@ -124,6 +124,7 @@ func newTestParams(t *testing.T) *testParams {
 			FailingRefreshInterval:  time.Minute,
 			AtMostOnePod:            false,
 			DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
+			ImageMapPath:            "",
 		},
 		Metrics: reconcilerMetrics,
 	}
