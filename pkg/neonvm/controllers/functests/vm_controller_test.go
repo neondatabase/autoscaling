@@ -115,6 +115,7 @@ var _ = Describe("VirtualMachine controller", func() {
 					FailingRefreshInterval:  1 * time.Minute,
 					AtMostOnePod:            false,
 					DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
+					ImageMapPath:            "",
 				},
 			}
 
