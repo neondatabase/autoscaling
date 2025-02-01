@@ -51,4 +51,9 @@ type ReconcilerConfig struct {
 	AtMostOnePod bool
 	// DefaultCPUScalingMode is the default CPU scaling mode that will be used for VMs with empty spec.cpuScalingMode
 	DefaultCPUScalingMode vmv1.CpuScalingMode
+
+	// Path to an image mappings file, for overriding images specified in an VirtualMachine spec.
+	// This is meant for local development, to allow rapidly changing images without changing the
+	// component that creates the VirtualMachine object.
+	ImageMapPath string
 }

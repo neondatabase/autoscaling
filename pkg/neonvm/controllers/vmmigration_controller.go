@@ -254,8 +254,10 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				}
 			}
 
+			imageMap := tryLoadImageMap(ctx, r.Config.ImageMapPath)
+
 			// Define a new target pod
-			tpod, err := r.targetPodForVirtualMachine(vm, migration, sshSecret)
+			tpod, err := r.targetPodForVirtualMachine(vm, migration, sshSecret, imageMap)
 			if err != nil {
 				log.Error(err, "Failed to generate Target Pod spec")
 				return ctrl.Result{}, err
@@ -699,12 +701,13 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 	migration *vmv1.VirtualMachineMigration,
 	sshSecret *corev1.Secret,
+	imageMap ImageMap,
 ) (*corev1.Pod, error) {
 	if err := vm.Spec.Guest.ValidateMemorySize(); err != nil {
 		return nil, fmt.Errorf("cannot create target pod because memory is invalid: %w", err)
 	}
 
-	pod, err := podSpec(vm, sshSecret, r.Config)
+	pod, err := podSpec(vm, sshSecret, r.Config, imageMap)
 	if err != nil {
 		return nil, err
 	}

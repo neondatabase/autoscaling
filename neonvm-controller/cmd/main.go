@@ -101,6 +101,7 @@ func main() {
 	var failurePendingPeriod time.Duration
 	var failingRefreshInterval time.Duration
 	var atMostOnePod bool
+	var imageMapPath string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -144,6 +145,7 @@ func main() {
 	flag.BoolVar(&atMostOnePod, "at-most-one-pod", false,
 		"If true, the controller will ensure that at most one pod is running at a time. "+
 			"Otherwise, the outdated pod might be left to terminate, while the new one is already running.")
+	flag.StringVar(&imageMapPath, "imagemap", "", "Path to an image mappings file, for overriding images specified in the VirtualMachine spec")
 	flag.Parse()
 
 	logConfig := zap.NewProductionConfig()
@@ -195,6 +197,7 @@ func main() {
 		FailingRefreshInterval:  failingRefreshInterval,
 		AtMostOnePod:            atMostOnePod,
 		DefaultCPUScalingMode:   defaultCpuScalingMode,
+		ImageMapPath:            imageMapPath,
 	}
 
 	vmReconciler := &controllers.VMReconciler{

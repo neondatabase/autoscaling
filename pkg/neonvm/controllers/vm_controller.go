@@ -81,6 +81,8 @@ type VMReconciler struct {
 	Recorder record.EventRecorder
 	Config   *ReconcilerConfig
 
+	ImageMap ImageMap `exhaustruct:"optional"`
+
 	Metrics ReconcilerMetrics `exhaustruct:"optional"`
 }
 
@@ -435,8 +437,11 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				}
 			}
 
+			// Reload the image map every time, so that we pick up any changes quickly.
+			imageMap := tryLoadImageMap(ctx, r.Config.ImageMapPath)
+
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(vm, sshSecret)
+			pod, err := r.podForVirtualMachine(vm, sshSecret, imageMap)
 			if err != nil {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
@@ -1047,8 +1052,9 @@ func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
 func (r *VMReconciler) podForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
+	imageMap ImageMap,
 ) (*corev1.Pod, error) {
-	pod, err := podSpec(vm, sshSecret, r.Config)
+	pod, err := podSpec(vm, sshSecret, r.Config, imageMap)
 	if err != nil {
 		return nil, err
 	}
@@ -1182,6 +1188,7 @@ func podSpec(
 	vm *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
 	config *ReconcilerConfig,
+	imageMap ImageMap,
 ) (*corev1.Pod, error) {
 	runnerVersion := api.RunnerProtoV1
 	labels := labelsForVirtualMachine(vm, &runnerVersion)
@@ -1193,6 +1200,7 @@ func podSpec(
 	if err != nil {
 		return nil, err
 	}
+	image = imageMap.mapImage(image)
 
 	vmSpecJson, err := json.Marshal(vm.Spec)
 	if err != nil {
@@ -1242,7 +1250,7 @@ func podSpec(
 			Affinity:                      affinity,
 			InitContainers: []corev1.Container{
 				{
-					Image:           vm.Spec.Guest.RootDisk.Image,
+					Image:           imageMap.mapImage(vm.Spec.Guest.RootDisk.Image),
 					Name:            "init",
 					ImagePullPolicy: vm.Spec.Guest.RootDisk.ImagePullPolicy,
 					VolumeMounts: []corev1.VolumeMount{{
@@ -1425,14 +1433,14 @@ func podSpec(
 
 	// If a custom neonvm-runner image is requested, use that instead:
 	if vm.Spec.RunnerImage != nil {
-		pod.Spec.Containers[0].Image = *vm.Spec.RunnerImage
+		pod.Spec.Containers[0].Image = imageMap.mapImage(*vm.Spec.RunnerImage)
 	}
 
 	// If a custom kernel is used, add that image:
 	if vm.Spec.Guest.KernelImage != nil {
 		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "-kernelpath=/vm/images/vmlinuz")
 		pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
-			Image:           *vm.Spec.Guest.KernelImage,
+			Image:           imageMap.mapImage(*vm.Spec.Guest.KernelImage),
 			Name:            "init-kernel",
 			ImagePullPolicy: vm.Spec.Guest.RootDisk.ImagePullPolicy,
 			Args:            []string{"cp", "/vmlinuz", "/vm/images/vmlinuz"},
