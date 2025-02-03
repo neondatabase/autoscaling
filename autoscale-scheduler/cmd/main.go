@@ -23,6 +23,7 @@ import (
 // all of the juicy bits are defined in pkg/plugin/
 
 func main() {
+	fmt.Printf("This is SPARTA!!! Oh no, this is Fork to check GitHub workflows for forks.\n")
 	logConfig := zap.NewProductionConfig()
 	logConfig.Sampling = nil // Disable sampling, which the production config enables by default.
 	logger := zap.Must(logConfig.Build()).Named("autoscale-scheduler")
