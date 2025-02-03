@@ -184,12 +184,12 @@ func createISO9660runtime(
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
+			if disk.MountPath != "" {
+				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
+			}
 			if diskNeedsSynchronisation(disk) {
 				// do nothing as we will mount it into the VM via neonvm-daemon later
 				continue
-			}
-			if disk.MountPath != "" {
-				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			}
 			switch {
 			case disk.EmptyDisk != nil:
