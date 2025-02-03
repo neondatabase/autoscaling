@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -702,16 +701,14 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 
 	secrets := make(map[string]string)
 	for _, disk := range disks {
-		if disk.Secret != nil && secretNeedsSynchronisation(disk.MountPath) {
-			rel, _ := filepath.Rel("/var/sync", disk.MountPath)
-
+		if diskNeedsSynchronisation(disk) {
 			// secrets are mounted using the atomicwriter utility, which loads the secret directory
 			// into `..data`.
 			dataDir := fmt.Sprintf("/vm/mounts%s/..data", disk.MountPath)
 			if err := notify.Add(dataDir); err != nil {
 				logger.Error("failed to add file to inotify instance", zap.Error(err))
 			}
-			secrets[dataDir] = rel
+			secrets[dataDir] = disk.MountPath
 		}
 	}
 
@@ -931,7 +928,8 @@ func sendFilesToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) er
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("http://%s:25183/files/%s", vmIP, guestpath)
+	// guestpath has a leading forward slash
+	url := fmt.Sprintf("http://%s:25183/files%s", vmIP, guestpath)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
 	if err != nil {
@@ -965,7 +963,8 @@ func getFileChecksumFromNeonvmDaemon(ctx context.Context, guestpath string) (str
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("http://%s:25183/files/%s", vmIP, guestpath)
+	// guestpath has a leading forward slash
+	url := fmt.Sprintf("http://%s:25183/files%s", vmIP, guestpath)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
