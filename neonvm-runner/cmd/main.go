@@ -34,7 +34,6 @@ import (
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
-	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -701,20 +700,18 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 	}
 	defer notify.Close()
 
-	secrets := make(map[string][]corev1.KeyToPath)
-	// watched := make(map[string]string)
-	watched2 := make(map[string]string)
+	secrets := make(map[string]string)
 	for _, disk := range disks {
 		if disk.Secret != nil && secretNeedsSynchronisation(disk.MountPath) {
 			rel, _ := filepath.Rel("/var/sync", disk.MountPath)
-			root := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 
-			if err := notify.Add(filepath.Join(root, "..data")); err != nil {
+			// secrets are mounted using the atomicwriter utility, which loads the secret directory
+			// into `..data`.
+			dataDir := fmt.Sprintf("/vm/mounts%s/..data", disk.MountPath)
+			if err := notify.Add(dataDir); err != nil {
 				logger.Error("failed to add file to inotify instance", zap.Error(err))
 			}
-			watched2[filepath.Join(root, "..data")] = rel
-
-			secrets[root] = disk.Secret.Items
+			secrets[dataDir] = rel
 		}
 	}
 
@@ -728,7 +725,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 		}
 
 		success := true
-		for hostpath, guestpath := range watched2 {
+		for hostpath, guestpath := range secrets {
 			if err := sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
 				success = false
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
@@ -747,9 +744,10 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 		case <-ctx.Done():
 			return
 		case event := <-notify.Events:
-			guestpath, ok := watched2[event.Name]
+			guestpath, ok := secrets[event.Name]
 			if !ok {
 				// not tracking this file
+				// this can occur due to recursive file tracking
 				continue
 			}
 
@@ -770,7 +768,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
 			}
 		case <-ticker.C:
-			for hostpath, guestpath := range watched2 {
+			for hostpath, guestpath := range secrets {
 				hostsum, err := util.ChecksumFlatDir(hostpath)
 				if err != nil {
 					logger.Error("failed to get file checksum from host", zap.Error(err))
