@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -36,6 +37,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
 	"github.com/neondatabase/autoscaling/pkg/agent/executor"
+	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/agent/schedwatch"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/util"
@@ -195,6 +197,8 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	if vmInfo.CurrentRevision != nil {
 		initialRevision = vmInfo.CurrentRevision.Value
 	}
+	// "dsrl" stands for "desired scaling report limiter" -- helper to avoid spamming events.
+	dsrl := &desiredScalingReportLimiter{lastEvent: nil}
 	revisionSource := revsource.NewRevisionSource(initialRevision, WrapHistogramVec(&r.global.metrics.scalingLatency))
 	executorCore := executor.NewExecutorCore(coreExecLogger, vmInfo, executor.Config{
 		OnNextActions: r.global.metrics.runnerNextActions.Inc,
@@ -217,6 +221,14 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 				PluginLatency:  WrapHistogramVec(&r.global.metrics.pluginLatency),
 				MonitorLatency: WrapHistogramVec(&r.global.metrics.monitorLatency),
 				NeonVMLatency:  WrapHistogramVec(&r.global.metrics.neonvmLatency),
+				ActualScaling:  r.reportScalingEvent,
+				HypotheticalScaling: func(ts time.Time, current, target uint32, parts core.ScalingGoalParts) {
+					r.reportDesiredScaling(dsrl, ts, current, target, scalingevents.GoalCUComponents{
+						CPU: parts.CPU,
+						Mem: parts.Mem,
+						LFC: parts.LFC,
+					})
+				},
 			},
 		},
 	})
@@ -320,6 +332,78 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	case err := <-r.backgroundPanic:
 		panic(err)
 	}
+}
+
+func (r *Runner) reportScalingEvent(timestamp time.Time, currentCU, targetCU uint32) {
+	endpointID := func() string {
+		return r.status.endpointID
+	}()
+
+	reporter := r.global.scalingReporter
+	reporter.Submit(reporter.NewActualEvent(
+		timestamp,
+		endpointID,
+		currentCU,
+		targetCU,
+	))
+}
+
+func (r *Runner) reportDesiredScaling(
+	rl *desiredScalingReportLimiter,
+	timestamp time.Time,
+	currentCU uint32,
+	targetCU uint32,
+	parts scalingevents.GoalCUComponents,
+) {
+	endpointID := func() string {
+		return r.status.endpointID
+	}()
+
+	// TODO: Use this opportunity to report the desired scaling in the per-VM
+	// metrics.
+
+	rl.report(r.global.scalingReporter, r.global.scalingReporter.NewHypotheticalEvent(
+		timestamp,
+		endpointID,
+		currentCU,
+		targetCU,
+		parts,
+	))
+}
+
+type desiredScalingReportLimiter struct {
+	lastEvent *scalingevents.ScalingEvent
+}
+
+func (rl *desiredScalingReportLimiter) report(
+	reporter *scalingevents.Reporter,
+	event scalingevents.ScalingEvent,
+) {
+	closeEnough := func(x *float64, y *float64) bool {
+		if (x != nil) != (y != nil) {
+			return false
+		}
+		if x == nil /* && y == nil */ {
+			return true
+		}
+		// true iff x and y are within the threshold of each other
+		return math.Abs(*x-*y) < 0.25
+	}
+
+	// Check if we should skip this time.
+	if rl.lastEvent != nil {
+		skip := rl.lastEvent.TargetMilliCU == event.TargetMilliCU &&
+			closeEnough(rl.lastEvent.GoalComponents.CPU, event.GoalComponents.CPU) &&
+			closeEnough(rl.lastEvent.GoalComponents.Mem, event.GoalComponents.Mem) &&
+			closeEnough(rl.lastEvent.GoalComponents.LFC, event.GoalComponents.LFC)
+		if skip {
+			return
+		}
+	}
+
+	// Not skipping.
+	rl.lastEvent = &event
+	reporter.Submit(event)
 }
 
 //////////////////////

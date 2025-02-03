@@ -381,6 +381,23 @@ func (r Resources) Mul(factor uint16) Resources {
 	}
 }
 
+// DivResources divides the resources by the smaller amount, returning the uint16 value such that
+// other.Mul(factor) is equal to the original resources.
+//
+// If r is not an integer multiple of other, then (0, false) will be returned.
+func (r Resources) DivResources(other Resources) (uint16, bool) {
+	cpuFactor := uint16(r.VCPU / other.VCPU)
+	cpuOk := r.VCPU%other.VCPU == 0
+	memFactor := uint16(r.Mem / other.Mem)
+	memOk := r.Mem%other.Mem == 0
+
+	if !cpuOk || !memOk || cpuFactor != memFactor {
+		return 0, false
+	}
+
+	return cpuFactor, true // already known equal to memFactor
+}
+
 // AbsDiff returns a new Resources with each field F as the absolute value of the difference between
 // r.F and cmp.F
 func (r Resources) AbsDiff(cmp Resources) Resources {

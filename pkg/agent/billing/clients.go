@@ -103,6 +103,9 @@ func jsonMarshalEvents(events []*billing.IncrementalEvent) ([]byte, reporting.Si
 // Returns a function to generate keys for the placement of billing events data into blob storage.
 //
 // Example: prefixInContainer/year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
+//
+// NOTE: This key format is different from the one we use for scaling events, but similar to the one
+// proxy/storage use.
 func newBlobStorageKeyGenerator(prefix string) func() string {
 	return func() string {
 		now := time.Now()

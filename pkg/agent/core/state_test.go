@@ -263,9 +263,11 @@ func Test_DesiredResourcesFromMetricsOrRequestedUpscaling(t *testing.T) {
 				},
 				RevisionSource: revsource.NewRevisionSource(0, nil),
 				ObservabilityCallbacks: core.ObservabilityCallbacks{
-					PluginLatency:  nil,
-					MonitorLatency: nil,
-					NeonVMLatency:  nil,
+					PluginLatency:       nil,
+					MonitorLatency:      nil,
+					NeonVMLatency:       nil,
+					ActualScaling:       nil,
+					HypotheticalScaling: nil,
 				},
 			}
 		}
@@ -351,9 +353,11 @@ var DefaultInitialStateConfig = helpers.InitialStateConfig{
 		},
 		RevisionSource: &helpers.NilRevisionSource{},
 		ObservabilityCallbacks: core.ObservabilityCallbacks{
-			PluginLatency:  nil,
-			MonitorLatency: nil,
-			NeonVMLatency:  nil,
+			PluginLatency:       nil,
+			MonitorLatency:      nil,
+			NeonVMLatency:       nil,
+			ActualScaling:       nil,
+			HypotheticalScaling: nil,
 		},
 	},
 }

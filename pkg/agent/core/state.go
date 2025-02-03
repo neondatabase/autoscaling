@@ -38,7 +38,15 @@ type ObservabilityCallbacks struct {
 	PluginLatency  revsource.ObserveCallback
 	MonitorLatency revsource.ObserveCallback
 	NeonVMLatency  revsource.ObserveCallback
+
+	ActualScaling       ReportActualScalingEventCallback
+	HypotheticalScaling ReportHypotheticalScalingEventCallback
 }
+
+type (
+	ReportActualScalingEventCallback       func(timestamp time.Time, current uint32, target uint32)
+	ReportHypotheticalScalingEventCallback func(timestamp time.Time, current uint32, target uint32, parts ScalingGoalParts)
+)
 
 type RevisionSource interface {
 	Next(ts time.Time, flags vmv1.Flag) vmv1.Revision
@@ -727,6 +735,17 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
 
+	reportGoals := func(goalCU uint32, parts ScalingGoalParts) {
+		currentCU, ok := s.VM.Using().DivResources(s.Config.ComputeUnit)
+		if !ok {
+			return // skip reporting if the current CU is not right.
+		}
+
+		if report := s.Config.ObservabilityCallbacks.HypotheticalScaling; report != nil {
+			report(now, uint32(currentCU), goalCU, parts)
+		}
+	}
+
 	sg, goalCULogFields := calculateGoalCU(
 		s.warn,
 		s.scalingConfig(),
@@ -734,10 +753,14 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		s.Metrics,
 		s.LFCMetrics,
 	)
-	goalCU := sg.goalCU
+	goalCU := sg.GoalCU()
 	// If we don't have all the metrics we need, we'll later prevent downscaling to avoid flushing
 	// the VM's cache on autoscaler-agent restart if we have SystemMetrics but not LFCMetrics.
-	hasAllMetrics := sg.hasAllMetrics
+	hasAllMetrics := sg.HasAllMetrics
+
+	if hasAllMetrics {
+		reportGoals(goalCU, sg.Parts)
+	}
 
 	// Copy the initial value of the goal CU so that we can accurately track whether either
 	// requested upscaling or denied downscaling affected the outcome.
@@ -1220,6 +1243,15 @@ func (s *State) NeonVM() NeonVMHandle {
 }
 
 func (h NeonVMHandle) StartingRequest(now time.Time, resources api.Resources) {
+	if report := h.s.Config.ObservabilityCallbacks.ActualScaling; report != nil {
+		currentCU, currentOk := h.s.VM.Using().DivResources(h.s.Config.ComputeUnit)
+		targetCU, targetOk := resources.DivResources(h.s.Config.ComputeUnit)
+
+		if currentOk && targetOk {
+			report(now, uint32(currentCU), uint32(targetCU))
+		}
+	}
+
 	// FIXME: add time to ongoing request info (or maybe only in RequestFailed?)
 	h.s.NeonVM.OngoingRequested = &resources
 }
