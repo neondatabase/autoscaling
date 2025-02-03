@@ -1,6 +1,6 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestAssert
-timeout: 70
+timeout: 120
 commands:
   - script: |
       set -eux

@@ -32,8 +32,5 @@ spec:
   disks:
   - secret:
       secretName: example-secret
-      items:
-      - key: foo
-        path: foo
     mountPath: /var/sync/example
     name: secret-foo
