@@ -24,6 +24,7 @@ import (
 
 func main() {
 	fmt.Printf("This is SPARTA!!! Oh no, this is Fork to check GitHub workflows for forks.\n")
+	fmt.Printf("FORK and PUSH!!!\n")
 	logConfig := zap.NewProductionConfig()
 	logConfig.Sampling = nil // Disable sampling, which the production config enables by default.
 	logger := zap.Must(logConfig.Build()).Named("autoscale-scheduler")
