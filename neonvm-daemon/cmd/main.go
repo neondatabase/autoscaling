@@ -102,20 +102,9 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *cpuServer) getMountDir(path string) (string, error) {
-	return fmt.Sprintf("/%s", path), nil
-}
-
 func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, path string) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
-
-	path, err := s.getMountDir(path)
-	if err != nil {
-		s.logger.Error("invalid file path", zap.Error(err))
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
 
 	dir := filepath.Join(path, "..data")
 	checksum, err := util.ChecksumFlatDir(dir)
@@ -139,13 +128,6 @@ type File struct {
 func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request, path string) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
-
-	path, err := s.getMountDir(path)
-	if err != nil {
-		s.logger.Error("invalid file path", zap.Error(err))
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
 
 	if r.Body == nil {
 		s.logger.Error("no body")
@@ -185,12 +167,6 @@ func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request, pat
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		s.logger.Error("could not create directory", zap.Error(err))
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
 	aw, err := k8sutil.NewAtomicWriter(path, "neonvm-daemon")
 	if err != nil {
 		s.logger.Error("could not create writer", zap.Error(err))
@@ -222,7 +198,7 @@ func (s *cpuServer) run(addr string) {
 		}
 	})
 	mux.HandleFunc("/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
-		path := r.PathValue("path")
+		path := fmt.Sprintf("/%s", r.PathValue("path"))
 		if r.Method == http.MethodGet {
 			s.handleGetFileChecksum(w, path)
 			return
