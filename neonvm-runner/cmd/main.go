@@ -34,6 +34,7 @@ import (
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -693,52 +694,52 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, disks []vmv1.Disk) {
 	defer wg.Done()
 
-	notify, err := fsnotify.NewBufferedWatcher(2)
+	notify, err := fsnotify.NewWatcher()
 	if err != nil {
 		logger.Error("failed to create inotify instance", zap.Error(err))
 		return
 	}
 	defer notify.Close()
 
-	synchronisedFiles := make(map[string]string)
+	secrets := make(map[string][]corev1.KeyToPath)
+	// watched := make(map[string]string)
+	watched2 := make(map[string]string)
 	for _, disk := range disks {
 		if disk.Secret != nil && secretNeedsSynchronisation(disk.MountPath) {
 			rel, _ := filepath.Rel("/var/sync", disk.MountPath)
 			root := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
-			for _, item := range disk.Secret.Items {
-				hostpath := filepath.Join(root, item.Path)
-				guestpath := filepath.Join(rel, item.Path)
-				synchronisedFiles[hostpath] = guestpath
-			}
-		}
-	}
 
-	for k := range synchronisedFiles {
-		if err := notify.Add(k); err != nil {
-			logger.Error("failed to add file to inotify instance", zap.Error(err))
+			if err := notify.Add(filepath.Join(root, "..data")); err != nil {
+				logger.Error("failed to add file to inotify instance", zap.Error(err))
+			}
+			watched2[filepath.Join(root, "..data")] = rel
+
+			secrets[root] = disk.Secret.Items
 		}
 	}
 
 	// Wait a bit to reduce the chance we attempt dialing before
 	// QEMU is started
-	success := false
-	for !success {
-		success = true
+	for {
 		select {
 		case <-time.After(1 * time.Second):
 		case <-ctx.Done():
 			logger.Warn("QEMU shut down too soon to start forwarding logs")
 		}
 
-		for hostpath, guestpath := range synchronisedFiles {
-			if err := sendFileToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+		success := true
+		for hostpath, guestpath := range watched2 {
+			if err := sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
 				success = false
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
 			}
 		}
+		if success {
+			break
+		}
 	}
 
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -746,13 +747,9 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 		case <-ctx.Done():
 			return
 		case event := <-notify.Events:
-			guestpath, ok := synchronisedFiles[event.Name]
+			guestpath, ok := watched2[event.Name]
 			if !ok {
 				// not tracking this file
-				continue
-			}
-			if event.Op == fsnotify.Chmod {
-				// not interesting.
 				continue
 			}
 
@@ -760,18 +757,21 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 			// When the link changes, there's no event. We only see the deletion
 			// of the file the link used to point to.
 			// This doesn't mean the file was actually deleted though.
-			if event.Op == fsnotify.Remove {
-				if err := notify.Add(event.Name); err != nil {
-					logger.Error("failed to add file to inotify instance", zap.Error(err))
-				}
+			if event.Op != fsnotify.Remove {
+				continue
 			}
 
-			if err := sendFileToNeonvmDaemon(ctx, event.Name, guestpath); err != nil {
+			logger.Info("mounted secrets changed", zap.String("secret_path", event.Name))
+			if err := notify.Add(event.Name); err != nil {
+				logger.Error("failed to add file to inotify instance", zap.Error(err))
+			}
+
+			if err := sendFilesToNeonvmDaemon(ctx, event.Name, guestpath); err != nil {
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
 			}
 		case <-ticker.C:
-			for hostpath, guestpath := range synchronisedFiles {
-				hostsum, err := util.ChecksumFile(hostpath)
+			for hostpath, guestpath := range watched2 {
+				hostsum, err := util.ChecksumFlatDir(hostpath)
 				if err != nil {
 					logger.Error("failed to get file checksum from host", zap.Error(err))
 				}
@@ -782,7 +782,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 				}
 
 				if guestsum != hostsum {
-					if err = sendFileToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+					if err = sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
 						logger.Error("failed to upload file to vm guest", zap.Error(err))
 					}
 				}
@@ -905,15 +905,29 @@ func checkNeonvmDaemonCPU() error {
 	return nil
 }
 
-func sendFileToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) error {
+type File struct {
+	// base64 encoded file contents
+	Data string `json:"data"`
+}
+
+func sendFilesToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) error {
 	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
 	if err != nil {
 		return fmt.Errorf("could not calculate VM IP address: %w", err)
 	}
 
-	file, err := os.Open(hostpath)
+	files, err := util.ReadAllFiles(hostpath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("could not open file: %w", err)
+	}
+
+	dto := make(map[string]File)
+	for k, v := range files {
+		dto[k] = File{Data: base64.StdEncoding.EncodeToString(v)}
+	}
+	body, err := json.Marshal(dto)
+	if err != nil {
+		return fmt.Errorf("could not encode files: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -921,18 +935,17 @@ func sendFileToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) err
 
 	url := fmt.Sprintf("http://%s:25183/files/%s", vmIP, guestpath)
 
-	var req *http.Request
-	if err != nil && os.IsNotExist(err) {
-		req, err = http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
-	} else {
-		req, err = http.NewRequestWithContext(ctx, http.MethodPut, url, file)
-	}
-
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("could not build request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("could not send request: %w", err)
 	}

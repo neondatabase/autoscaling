@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	k8sutil "k8s.io/kubernetes/pkg/volume/util"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/cpuscaling"
@@ -107,20 +110,21 @@ func (s *cpuServer) getFile(path string) (string, error) {
 	return path, nil
 }
 
-func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, r *http.Request) {
+func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, path string) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
 
-	path, err := s.getFile(r.PathValue("path"))
+	path, err := s.getFile(path)
 	if err != nil {
 		s.logger.Error("invalid file path", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	checksum, err := util.ChecksumFile(path)
+	dir := filepath.Join(path, "..data")
+	checksum, err := util.ChecksumFlatDir(dir)
 	if err != nil {
-		s.logger.Error("could not checksum file", zap.Error(err))
+		s.logger.Error("could not checksum dir", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -131,15 +135,58 @@ func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request) {
+type File struct {
+	// base64 encoded file contents
+	Data string `json:"data"`
+}
+
+func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request, path string) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
 
-	path, err := s.getFile(r.PathValue("path"))
+	path, err := s.getFile(path)
 	if err != nil {
 		s.logger.Error("invalid file path", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+
+	if r.Body == nil {
+		s.logger.Error("no body")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Error("could not ready body", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var files map[string]File
+	if err := json.Unmarshal(body, &files); err != nil {
+		s.logger.Error("could not ready body", zap.Error(err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	payload := make(map[string]k8sutil.FileProjection)
+	for k, v := range files {
+		data, err := base64.StdEncoding.DecodeString(v.Data)
+		if err != nil {
+			s.logger.Error("could not ready body", zap.Error(err))
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		payload[k] = k8sutil.FileProjection{
+			Data: data,
+			// read-write by root
+			// read-only otherwise
+			Mode:   0o644,
+			FsUser: nil,
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -148,52 +195,15 @@ func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := os.CreateTemp("", "")
+	aw, err := k8sutil.NewAtomicWriter(path, "neonvm-daemon")
 	if err != nil {
-		s.logger.Error("could not create file", zap.Error(err))
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	defer file.Close()
-	defer os.Remove(file.Name())
-
-	if _, err := io.Copy(file, r.Body); err != nil {
-		s.logger.Error("could not read request body", zap.Error(err))
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-
-	// rename is an atomic operation on unix.
-	// this ensures that the file is either not updated at all,
-	// or is updated entirely.
-	//
-	// this ensures that other processes reading the file will never
-	// have any inconsistencies. they will either read the old contents
-	// or the new contents. Any open files will still point to the old inode
-	// and thus still read the old contents.
-	if err := os.Rename(file.Name(), path); err != nil {
-		s.logger.Error("could not rename file", zap.Error(err))
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *cpuServer) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
-	s.fileOperationsMutex.Lock()
-	defer s.fileOperationsMutex.Unlock()
-
-	path, err := s.getFile(r.PathValue("path"))
-	if err != nil {
-		s.logger.Error("invalid file path", zap.Error(err))
+		s.logger.Error("could not create writer", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		s.logger.Error("could not delete file", zap.Error(err))
+	if err := aw.Write(payload, nil); err != nil {
+		s.logger.Error("could not create files", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -216,14 +226,12 @@ func (s *cpuServer) run(addr string) {
 		}
 	})
 	mux.HandleFunc("/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		path := r.PathValue("path")
 		if r.Method == http.MethodGet {
-			s.handleGetFileChecksum(w, r)
+			s.handleGetFileChecksum(w, path)
 			return
 		} else if r.Method == http.MethodPut {
-			s.handleUploadFile(w, r)
-			return
-		} else if r.Method == http.MethodDelete {
-			s.handleDeleteFile(w, r)
+			s.handleUploadFile(w, r, path)
 			return
 		} else {
 			// unknown method
