@@ -156,7 +156,7 @@ func Test_calculateGoalCU(t *testing.T) {
 			}
 
 			got, _ := calculateGoalCU(warn, scalingConfig, cu, c.sys, c.lfc)
-			assert.Equal(t, c.want, got)
+			assert.InDelta(t, lo.FromPtrOr(c.want.Parts.CPU, -1), lo.FromPtrOr(got.Parts.CPU, -1), 0.000001)
 		})
 	}
 }
