@@ -91,7 +91,7 @@ jobs:
             rendered_manifests/neonvm-controller.yaml
             rendered_manifests/neonvm-vxlan-controller.yaml
             rendered_manifests/neonvm-runner-image-loader.yaml
-            rendered_manifests/multus.yaml
+            rendered_manifests/multus-dev.yaml
             rendered_manifests/multus-aks.yaml
             rendered_manifests/multus-eks.yaml
             rendered_manifests/whereabouts.yaml

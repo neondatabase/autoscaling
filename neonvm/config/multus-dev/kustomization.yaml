@@ -6,8 +6,8 @@ bases:
 
 images:
 - name: multus-cni
-  newName: ghcr.io/k8snetworkplumbingwg/multus-cni
-  newTag: v3.9.2-thick-amd64
+  newName: docker.io/bitnami/multus-cni
+  newTag: 3.9.3
 
 patchesStrategicMerge:
 - daemonset_patch.yaml
@@ -28,3 +28,9 @@ patches:
         - "-multus-autoconfig-dir=/host/etc/cni/net.d"
         - "-multus-log-to-stderr=true"
         - "-multus-log-level=verbose"
+    - op: replace
+      path: /spec/template/spec/containers/0/securityContext/runAsNonRoot
+      value: false
+    - op: replace
+      path: /spec/template/spec/containers/0/securityContext/runAsUser
+      value: 0

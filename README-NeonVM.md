@@ -15,7 +15,7 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/do
 ### Install NeonVM with VXLAN-based overlay network
 
 ```console
-kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/multus.yaml
+kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/multus-dev.yaml
 kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/whereabouts.yaml
 kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm.yaml
 kubectl apply -f https://github.com/neondatabase/autoscaling/releases/latest/download/neonvm-vxlan-controller.yaml
