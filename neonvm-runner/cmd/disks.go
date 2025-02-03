@@ -184,6 +184,10 @@ func createISO9660runtime(
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
+			if diskNeedsSynchronisation(disk) {
+				// do nothing as we will mount it into the VM via neonvm-daemon later
+				continue
+			}
 			if disk.MountPath != "" {
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			}
@@ -202,7 +206,7 @@ func createISO9660runtime(
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
 				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
-			case disk.ConfigMap != nil || (disk.Secret != nil && !secretNeedsSynchronisation(disk.MountPath)):
+			case disk.ConfigMap != nil || disk.Secret != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
 			case disk.Tmpfs != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
@@ -274,11 +278,19 @@ func createISO9660runtime(
 	return nil
 }
 
-func secretNeedsSynchronisation(path string) bool {
-	rel, err := filepath.Rel("/var/sync", path)
+func diskNeedsSynchronisation(disk vmv1.Disk) bool {
+	if disk.DiskSource.Secret == nil {
+		// only supporting secrets at the moment
+		return false
+	}
+
+	// for now, `/var/sync` is our sentinal that this is synchronised.
+	// TODO: should we instead put a sync flag on the Disk object itself?
+	rel, err := filepath.Rel("/var/sync", disk.MountPath)
 	if err != nil {
 		return false
 	}
+
 	return filepath.IsLocal(rel)
 }
 

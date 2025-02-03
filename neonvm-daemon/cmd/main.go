@@ -102,20 +102,15 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *cpuServer) getFile(path string) (string, error) {
-	if !filepath.IsLocal(path) {
-		return "", fmt.Errorf("\"%s\" is not a local path", path)
-	}
-	//nolint:gocritic // filepathJoin lint wrongly complains about path separators
-	path = filepath.Clean(filepath.Join("/var/sync", path))
-	return path, nil
+func (s *cpuServer) getMountDir(path string) (string, error) {
+	return fmt.Sprintf("/%s", path), nil
 }
 
 func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, path string) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
 
-	path, err := s.getFile(path)
+	path, err := s.getMountDir(path)
 	if err != nil {
 		s.logger.Error("invalid file path", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
@@ -145,7 +140,7 @@ func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request, pat
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
 
-	path, err := s.getFile(path)
+	path, err := s.getMountDir(path)
 	if err != nil {
 		s.logger.Error("invalid file path", zap.Error(err))
 		w.WriteHeader(http.StatusBadRequest)
