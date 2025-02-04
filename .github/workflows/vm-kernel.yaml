@@ -137,7 +137,7 @@ jobs:
     env:
       VM_KERNEL_IMAGE: ${{ format('neondatabase/vm-kernel-{0}', inputs.arch) }}
 
-    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', inputs.arch == 'arm64' && 'large-arm64' || 'large')) }}
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', inputs.arch == 'arm64' && 'huge-arm64' || 'large')) }}
     steps:
       - name: git checkout
         uses: actions/checkout@v4

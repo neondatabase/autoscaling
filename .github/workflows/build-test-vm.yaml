@@ -52,7 +52,7 @@ jobs:
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
-    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', inputs.arch == 'arm64' && 'large-arm64' || 'large')) }}
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', inputs.arch == 'arm64' && 'huge-arm64' || 'large')) }}
     outputs:
       vm-postgres-16-bullseye: ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
       daemon: ${{ steps.tags.outputs.daemon }}
