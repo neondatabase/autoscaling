@@ -48,7 +48,7 @@ jobs:
       kernel-cache-tag: ${{ steps.get-kernel-cache-tag.outputs.kernel-cache-tag }}
     runs-on: ubuntu-latest
     env:
-      VM_KERNEL_IMAGE: ${{format('neondatabase/vm-kernel-{0}', inputs.arch)}}
+      VM_KERNEL_IMAGE: ${{ format('neondatabase/vm-kernel-{0}', inputs.arch) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -135,7 +135,7 @@ jobs:
       image: ${{ steps.get-tags.outputs.canonical }}@${{ steps.build-linux-kernel.outputs.digest }}
 
     env:
-      VM_KERNEL_IMAGE: ${{format('neondatabase/vm-kernel-{0}', inputs.arch)}}
+      VM_KERNEL_IMAGE: ${{ format('neondatabase/vm-kernel-{0}', inputs.arch) }}
 
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', inputs.arch == 'arm64' && 'large-arm64' || 'large')) }}
     steps:
@@ -190,15 +190,15 @@ jobs:
         with:
           build-args: KERNEL_VERSION=${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
           context: neonvm-kernel
-          platforms: ${{format('linux/{0}', inputs.arch)}}
+          platforms: ${{ format('linux/{0}', inputs.arch) }}
           # neonvm-kernel/Dockerfile.kernel-builder has different targets for different architectures
           # so we need to specify the target explicitly
-          target: ${{format('kernel_{0}', inputs.arch)}}
+          target: ${{ format('kernel_{0}', inputs.arch) }}
           # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
           push: true
           pull: true
           file: neonvm-kernel/Dockerfile.kernel-builder
-          cache-from: ${{format('type=registry,ref=cache.neon.build/vm-kernel:{0}cache', inputs.arch)}}
+          cache-from: ${{ format('type=registry,ref=cache.neon.build/vm-kernel:{0}cache', inputs.arch) }}
           # Cache the kernel image for future builds, temporary from all branches
           cache-to: ${{ format('type=registry,ref=cache.neon.build/vm-kernel:{0}cache,mode=max', inputs.arch) || '' }}
           tags: ${{ steps.get-tags.outputs.tags }}

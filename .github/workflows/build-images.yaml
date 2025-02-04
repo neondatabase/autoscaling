@@ -49,13 +49,13 @@ on:
         value: ${{ jobs.save-matrix-results.outputs.controller }}
       vxlan-controller:
         description: 'neonvm-vxlan-controller image'
-        value: ${{ jobs.save-matrix-results.outputs.vxlan-controller}}
+        value: ${{ jobs.save-matrix-results.outputs.vxlan-controller }}
       runner:
         description: 'neonvm-runner image'
-        value: ${{ jobs.save-matrix-results.outputs.runner}}
+        value: ${{ jobs.save-matrix-results.outputs.runner }}
       scheduler:
         description: 'autoscale-scheduler image'
-        value: ${{ jobs.save-matrix-results.outputs.scheduler}}
+        value: ${{ jobs.save-matrix-results.outputs.scheduler }}
       autoscaler-agent:
         description: 'autoscaler-agent image'
         value: ${{ jobs.tags.outputs.autoscaler-agent }}
@@ -146,13 +146,13 @@ jobs:
 
       - id: tags
         run: |
-          echo "controller=${{ env.IMG_CONTROLLER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "vxlan-controller=${{ env.IMG_VXLAN_CONTROLLER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "runner=${{ env.IMG_RUNNER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "scheduler=${{ env.IMG_SCHEDULER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "autoscaler-agent=${{ env.IMG_AUTOSCALER_AGENT }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "cluster-autoscaler=${{ env.IMG_CLUSTER_AUTOSCALER }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${{ env.IMG_DAEMON }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "controller=${{ env.IMG_CONTROLLER }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${{ env.IMG_VXLAN_CONTROLLER }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${{ env.IMG_RUNNER }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${{ env.IMG_SCHEDULER }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${{ env.IMG_AUTOSCALER_AGENT }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${{ env.IMG_CLUSTER_AUTOSCALER }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
       - uses: actions/checkout@v4
 
@@ -253,7 +253,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/${{ inputs.arch }}
+
           file: neonvm-runner/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-runner:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-runner:cache,mode=max' || '' }}
@@ -276,7 +276,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/${{ inputs.arch }}
+
           push: true
           file: neonvm-controller/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-controller:cache
@@ -291,7 +291,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/${{ inputs.arch }}
+
           push: true
           file: neonvm-vxlan-controller/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache
@@ -305,12 +305,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/${{ inputs.arch }}
+
           push: true
           file: autoscale-scheduler/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/autoscale-scheduler:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscale-scheduler:cache,mode=max' || '' }}
-          tags: ${{ steps.tags.outputs.scheduler}}
+          tags: ${{ steps.tags.outputs.scheduler }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
@@ -319,12 +319,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/${{ inputs.arch }}
+
           push: true
           file: autoscaler-agent/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/autoscaler-agent:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaler-agent:cache,mode=max' || '' }}
-          tags: ${{ steps.tags.outputs.autoscaler-agent}}
+          tags: ${{ steps.tags.outputs.autoscaler-agent }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}
@@ -333,7 +333,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/${{ inputs.arch }}
+
           push: true
           file: neonvm-daemon/Dockerfile
           cache-from: type=registry,ref=cache.neon.build/neonvm-daemon:cache
@@ -347,10 +347,10 @@ jobs:
         if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
         with:
           context: cluster-autoscaler
-          platforms: linux/${{ inputs.arch }}
+
           push: true
-          target: ${{format('cluster_autoscaler_{0}', inputs.arch)}}
-          tags: ${{ steps.tags.outputs.cluster-autoscaler}}
+          target: ${{ format('cluster_autoscaler_{0}', inputs.arch) }}
+          tags: ${{ steps.tags.outputs.cluster-autoscaler }}
           cache-from: type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache,mode=max' || '' }}
 

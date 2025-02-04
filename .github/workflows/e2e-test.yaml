@@ -149,13 +149,13 @@ jobs:
         env:
           IMG_CONTROLLER:       ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).controller[matrix.arch] }}
           IMG_VXLAN_CONTROLLER: ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).vxlan-controller[matrix.arch] }}
-          IMG_RUNNER:           ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).runner[matrix.arch]}}
-          IMG_SCHEDULER:        ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).scheduler[matrix.arch]}}
-          IMG_AUTOSCALER_AGENT: ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).autoscaler-agent[matrix.arch]}}
+          IMG_RUNNER:           ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).runner[matrix.arch] }}
+          IMG_SCHEDULER:        ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).scheduler[matrix.arch] }}
+          IMG_AUTOSCALER_AGENT: ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).autoscaler-agent[matrix.arch] }}
 
       - name: upload manifests
         # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
-        if: ${{ format('{0}', inputs.push-yamls) == 'true'}}
+        if: ${{ format('{0}', inputs.push-yamls) == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ format('rendered_manifests-{0}', matrix.arch) }}
@@ -224,7 +224,7 @@ jobs:
 
       - name: load e2e test vm image
         env:
-          TEST_IMAGE: ${{ fromJson(needs.get-build-test-vm-matrix-results.outputs.result).vm-postgres-16-bullseye[matrix.arch]}}
+          TEST_IMAGE: ${{ fromJson(needs.get-build-test-vm-matrix-results.outputs.result).vm-postgres-16-bullseye[matrix.arch] }}
         timeout-minutes: 2
         run: |
           # Pull the docker image so we can re-tag it, because using a consistent tag inside the

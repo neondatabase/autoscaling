@@ -60,8 +60,8 @@ jobs:
       # tags converted to be a step and moved here to be in the same strategy contextt
       - id: tags
         run: |
-          echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${{ env.IMG_DAEMON }}-${{inputs.arch}}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}-${{ inputs.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -74,20 +74,7 @@ jobs:
         run: make docker-build-daemon
         env:
           IMG_DAEMON: ${{ steps.tags.outputs.daemon }}
-      # - name: Build daemon image
-      #   uses: docker/build-push-action@v6
-      #   env:
-      #     GO_BASE_IMG: ${{ format('localhost:5000/neondatabase/autoscaling-go-base-{0}:dev', inputs.arch) }}
-      #   with:
-      #     context: .
-      #     push: false
-      #     platforms: linux/${{ inputs.arch }}
-      #     file: neonvm-daemon/Dockerfile
-      #     cache-from: type=registry,ref=cache.neon.build/neonvm-daemon:cache
-      #     cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-daemon:cache,mode=max' || '' }}
-      #     tags: ${{ steps.tags.outputs.daemon }}
-      #     build-args: |
-      #       GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+
       - run: make bin/vm-builder
         env:
           IMG_DAEMON: ${{ steps.tags.outputs.daemon }}
@@ -97,7 +84,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vm-builder
-          path: ${{format('bin/vm-builder-{0}', inputs.arch)}}
+          path: $ormat('bin/vm-builder-{0}', inputs.arch) }}
           if-no-files-found: error
           retention-days: 2
 
