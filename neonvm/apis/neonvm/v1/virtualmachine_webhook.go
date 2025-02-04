@@ -148,9 +148,20 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) (admission.Warnings,
 		}
 	}
 
-	// allow to change CPU scaling mode only if it's not set
-	if before.Spec.CpuScalingMode != nil && (r.Spec.CpuScalingMode == nil || *r.Spec.CpuScalingMode != *before.Spec.CpuScalingMode) {
-		return nil, fmt.Errorf(".spec.cpuScalingMode is not allowed to be changed once it's set")
+	fieldsAllowedToChangeFromNilOnly := []struct {
+		fieldName string
+		getter    func(*VirtualMachine) any
+	}{
+		{".spec.cpuScalingMode", func(v *VirtualMachine) any { return v.Spec.CpuScalingMode }},
+		{".spec.targetArchitecture", func(v *VirtualMachine) any { return v.Spec.TargetArchitecture }},
+	}
+
+	for _, info := range fieldsAllowedToChangeFromNilOnly {
+		beforeValue := info.getter(before)
+		newValue := info.getter(r)
+		if !reflect.ValueOf(beforeValue).IsNil() && (reflect.ValueOf(newValue).IsNil() || !reflect.DeepEqual(newValue, beforeValue)) {
+			return nil, fmt.Errorf("%s is not allowed to be changed once it's set", info.fieldName)
+		}
 	}
 
 	// validate .spec.guest.cpu.use

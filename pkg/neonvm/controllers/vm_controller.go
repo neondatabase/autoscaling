@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	sysruntime "runtime"
 	"strconv"
 	"time"
 
@@ -1145,23 +1144,29 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
-	// if NodeSelectorTerms list is empty - add default values (arch==amd64 or os==linux)
+
+	// if NodeSelectorTerms list is empty - add default values (arch==vm.Spec.Affinity or os==linux)
 	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
+		matches := []corev1.NodeSelectorRequirement{
+			{
+				Key:      "kubernetes.io/os",
+				Operator: "In",
+				Values:   []string{"linux"},
+			},
+		}
+
+		if vm.Spec.TargetArchitecture != nil {
+			matches = append(matches, corev1.NodeSelectorRequirement{
+				Key:      "kubernetes.io/arch",
+				Operator: "In",
+				Values:   []string{string(*vm.Spec.TargetArchitecture)},
+			})
+		}
+
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
 			a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
 			corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{
-					{
-						Key:      "kubernetes.io/arch",
-						Operator: "In",
-						Values:   []string{sysruntime.GOARCH},
-					},
-					{
-						Key:      "kubernetes.io/os",
-						Operator: "In",
-						Values:   []string{"linux"},
-					},
-				},
+				MatchExpressions: matches,
 			})
 	}
 	return a
