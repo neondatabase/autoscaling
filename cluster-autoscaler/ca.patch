@@ -1,3 +1,19 @@
+diff --git a/cluster-autoscaler/core/scaleup/orchestrator/orchestrator.go b/cluster-autoscaler/core/scaleup/orchestrator/orchestrator.go
+index 7fb533570..18e8adca9 100644
+--- a/cluster-autoscaler/core/scaleup/orchestrator/orchestrator.go
++++ b/cluster-autoscaler/core/scaleup/orchestrator/orchestrator.go
+@@ -604,7 +604,10 @@ func (o *ScaleUpOrchestrator) SchedulablePodGroups(
+ 	var schedulablePodGroups []estimator.PodEquivalenceGroup
+ 	for _, eg := range podEquivalenceGroups {
+ 		samplePod := eg.Pods[0]
+-		if err := o.autoscalingContext.PredicateChecker.CheckPredicates(o.autoscalingContext.ClusterSnapshot, samplePod, nodeInfo.Node().Name); err == nil {
++		err := o.autoscalingContext.PredicateChecker.CheckPredicates(o.autoscalingContext.ClusterSnapshot, samplePod, nodeInfo.Node().Name)
++		// Ignore inter-pod affinity since this is not usually a reason to fail the ASG
++		// (unless the anti-affinity conflict is with a DaemonSet pod, but there's no way to tell)
++		if err == nil || err.PredicateName() == "InterPodAffinity" {
+ 			// Add pods to option.
+ 			schedulablePodGroups = append(schedulablePodGroups, estimator.PodEquivalenceGroup{
+ 				Pods: eg.Pods,
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
 index b9be94b6e..5efb40df2 100644
 --- a/cluster-autoscaler/utils/kubernetes/listers.go
