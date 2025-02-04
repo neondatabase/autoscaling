@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/digitalocean/go-qemu/qmp"
-	"github.com/fsnotify/fsnotify"
 	"github.com/jpillora/backoff"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -692,35 +691,20 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, disks []vmv1.Disk) {
 	defer wg.Done()
 
-	notify, err := fsnotify.NewWatcher()
-	if err != nil {
-		logger.Error("failed to create inotify instance", zap.Error(err))
-		return
-	}
-	defer notify.Close()
-
 	secrets := make(map[string]string)
 	for _, disk := range disks {
 		if diskNeedsSynchronisation(disk) {
 			// secrets are mounted using the atomicwriter utility, which loads the secret directory
 			// into `..data`.
 			dataDir := fmt.Sprintf("/vm/mounts%s/..data", disk.MountPath)
-			if err := notify.Add(dataDir); err != nil {
-				logger.Error("failed to add file to inotify instance", zap.Error(err))
-			}
 			secrets[dataDir] = disk.MountPath
 		}
 	}
 
-	// Wait a bit to reduce the chance we attempt dialing before
-	// QEMU is started
+	// Faster loop for the initial upload.
+	// The VM might need the secrets in order for postgres to actually start up,
+	// so it's important we sync them as soon as the daemon is available.
 	for {
-		select {
-		case <-time.After(1 * time.Second):
-		case <-ctx.Done():
-			logger.Warn("QEMU shut down too soon to start forwarding logs")
-		}
-
 		success := true
 		for hostpath, guestpath := range secrets {
 			if err := sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
@@ -731,58 +715,45 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 		if success {
 			break
 		}
+
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			logger.Warn("QEMU shut down too soon to start forwarding logs")
+		}
 	}
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case event := <-notify.Events:
-			guestpath, ok := secrets[event.Name]
-			if !ok {
-				// not tracking this file
-				// this can occur due to recursive file tracking
-				continue
-			}
-
-			// kubernetes secrets are mounted as symbolic links.
-			// When the link changes, there's no event. We only see the deletion
-			// of the file the link used to point to.
-			// This doesn't mean the file was actually deleted though.
-			if event.Op != fsnotify.Remove {
-				continue
-			}
-
-			logger.Info("mounted secrets changed", zap.String("secret_path", event.Name))
-			if err := notify.Add(event.Name); err != nil {
-				logger.Error("failed to add file to inotify instance", zap.Error(err))
-			}
-
-			if err := sendFilesToNeonvmDaemon(ctx, event.Name, guestpath); err != nil {
-				logger.Error("failed to upload file to vm guest", zap.Error(err))
-			}
 		case <-ticker.C:
+			// for each secret we are tracking
 			for hostpath, guestpath := range secrets {
+				// get the checksum for the pod directory
 				hostsum, err := util.ChecksumFlatDir(hostpath)
 				if err != nil {
-					logger.Error("failed to get file checksum from host", zap.Error(err))
+					logger.Error("failed to get dir checksum from host", zap.Error(err), zap.String("dir", hostpath))
+					continue
 				}
 
+				// get the checksum for the VM directory
 				guestsum, err := getFileChecksumFromNeonvmDaemon(ctx, guestpath)
 				if err != nil {
-					logger.Error("failed to get file checksum from guest", zap.Error(err))
+					logger.Error("failed to get dir checksum from guest", zap.Error(err), zap.String("dir", guestpath))
+					continue
 				}
 
+				// if not equal, update the files inside the VM.
 				if guestsum != hostsum {
 					if err = sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
-						logger.Error("failed to upload file to vm guest", zap.Error(err))
+						logger.Error("failed to upload files to vm guest", zap.Error(err))
 					}
 				}
 			}
-			continue
 		}
 	}
 }
