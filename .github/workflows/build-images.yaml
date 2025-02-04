@@ -313,6 +313,7 @@ jobs:
           tags: ${{ steps.tags.outputs.scheduler }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+            ARCH=${{ inputs.arch }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
 
       - name: Build and push autoscaler-agent image
