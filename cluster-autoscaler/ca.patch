@@ -14,70 +14,87 @@ index 7fb533570..18e8adca9 100644
  			// Add pods to option.
  			schedulablePodGroups = append(schedulablePodGroups, estimator.PodEquivalenceGroup{
  				Pods: eg.Pods,
-diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
-index b9be94b6e..5efb40df2 100644
---- a/cluster-autoscaler/utils/kubernetes/listers.go
-+++ b/cluster-autoscaler/utils/kubernetes/listers.go
-@@ -17,10 +17,12 @@ limitations under the License.
- package kubernetes
+diff --git a/cluster-autoscaler/estimator/binpacking_estimator.go b/cluster-autoscaler/estimator/binpacking_estimator.go
+index 229a2e264..f145a218f 100644
+--- a/cluster-autoscaler/estimator/binpacking_estimator.go
++++ b/cluster-autoscaler/estimator/binpacking_estimator.go
+@@ -108,13 +108,18 @@ func (e *BinpackingNodeEstimator) Estimate(
+ 		var err error
+ 		var remainingPods []*apiv1.Pod
  
- import (
-+	"encoding/json"
- 	"time"
- 
- 	apiv1 "k8s.io/api/core/v1"
- 	policyv1 "k8s.io/api/policy/v1"
-+	"k8s.io/apimachinery/pkg/api/resource"
- 	"k8s.io/apimachinery/pkg/fields"
- 	"k8s.io/apimachinery/pkg/labels"
- 	"k8s.io/client-go/informers"
-@@ -46,6 +48,14 @@ type ListerRegistry interface {
- 	StatefulSetLister() v1appslister.StatefulSetLister
- }
- 
-+// copied from github.com/neondatabase/autoscaling, neonvm/apis/neonvm/v1/virtualmachine_types.go.
-+//
-+// this is duplicated so we're not *also* managing an additional dependency.
-+type virtualMachineUsage struct {
-+	CPU    resource.Quantity `json:"cpu"`
-+	Memory resource.Quantity `json:"memory"`
-+}
++		klog.V(4).Infof("trying to schedule %d pods on existing nodes", len(podsEquivalenceGroup.Pods))
+ 		remainingPods, err = e.tryToScheduleOnExistingNodes(estimationState, podsEquivalenceGroup.Pods)
 +
- type listerRegistryImpl struct {
- 	allNodeLister               NodeLister
- 	readyNodeLister             NodeLister
-@@ -221,6 +231,22 @@ type AllPodLister struct {
- 	podLister v1lister.PodLister
- }
++		klog.V(4).Infof("After attempt, there are %d pods that couldn't be scheduled", len(remainingPods))
+ 		if err != nil {
+ 			klog.Errorf(err.Error())
+ 			return 0, nil
+ 		}
  
-+func updatePodRequestsFromNeonVMAnnotation(pod *apiv1.Pod) {
-+	annotation, ok := pod.Annotations["vm.neon.tech/usage"]
-+	if !ok {
-+		return
-+	}
-+
-+	var usage virtualMachineUsage
-+	if err := json.Unmarshal([]byte(annotation), &usage); err != nil {
-+		return
-+	}
-+	pod.Spec.Containers[0].Resources.Requests = apiv1.ResourceList(map[apiv1.ResourceName]resource.Quantity{
-+		apiv1.ResourceCPU:    usage.CPU,
-+		apiv1.ResourceMemory: usage.Memory,
-+	})
-+}
-+
- // List returns all scheduled pods.
- func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
- 	var pods []*apiv1.Pod
-@@ -231,7 +257,10 @@ func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
- 	}
- 	for _, p := range allPods {
- 		if p.Status.Phase != apiv1.PodSucceeded && p.Status.Phase != apiv1.PodFailed {
--			pods = append(pods, p)
-+			// We need to make a copy of the pod to avoid modifying the original pod, since *p is a pointer to the object in the informer cache.
-+			podCopy := p.DeepCopy()
-+			updatePodRequestsFromNeonVMAnnotation(podCopy)
-+			pods = append(pods, podCopy)
++		klog.V(4).Infof("trying to schedule %d pods on new nodes", len(remainingPods))
+ 		err = e.tryToScheduleOnNewNodes(estimationState, nodeTemplate, remainingPods)
++		klog.V(4).Infof("After attempt, there are %d pods that couldn't be scheduled", len(remainingPods))
+ 		if err != nil {
+ 			klog.Errorf(err.Error())
+ 			return 0, nil
+@@ -137,6 +142,7 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnExistingNodes(
+ 
+ 		// Check schedulability on all nodes created during simulation
+ 		nodeName, err := e.predicateChecker.FitsAnyNodeMatching(e.clusterSnapshot, pod, func(nodeInfo *schedulerframework.NodeInfo) bool {
++			klog.V(4).Infof("checking if pod %s.%s with nodeSelector %v fits on node %s", pod.Namespace, pod.Name, pod.Spec.NodeSelector, nodeInfo.Node().Name)
+ 			return estimationState.newNodeNames[nodeInfo.Node().Name]
+ 		})
+ 		if err != nil {
+@@ -144,6 +150,7 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnExistingNodes(
+ 		}
+ 
+ 		if err := e.tryToAddNode(estimationState, pod, nodeName); err != nil {
++			klog.V(4).Infof("Error while adding pod %s.%s to node %s in ClusterSnapshot; %v", pod.Namespace, pod.Name, nodeName, err)
+ 			return nil, err
  		}
  	}
- 	return pods, nil
+@@ -183,6 +190,7 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnNewNodes(
+ 			// each call that returns true, one node gets added. Therefore this
+ 			// must be the last check right before really adding a node.
+ 			if !e.limiter.PermissionToAddNode() {
++				klog.V(4).Infof("Tried to add node, but couldn't due to hitting the limit")
+ 				break
+ 			}
+ 
+@@ -195,10 +203,12 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnNewNodes(
+ 			// Note that this may still fail (ex. if topology spreading with zonal topologyKey is used);
+ 			// in this case we can't help the pending pod. We keep the node in clusterSnapshot to avoid
+ 			// adding and removing node to snapshot for each such pod.
+-			if err := e.predicateChecker.CheckPredicates(e.clusterSnapshot, pod, estimationState.lastNodeName); err != nil {
++			err := e.predicateChecker.CheckPredicates(e.clusterSnapshot, pod, estimationState.lastNodeName)
++			if err != nil && err.PredicateName() != "InterPodAffinity" {
+ 				break
+ 			}
+ 			if err := e.tryToAddNode(estimationState, pod, estimationState.lastNodeName); err != nil {
++				klog.V(4).Infof("Error while adding pod %s.%s to node %s in ClusterSnapshot; %v", pod.Namespace, pod.Name, estimationState.lastNodeName, err)
+ 				return err
+ 			}
+ 		}
+@@ -211,6 +221,9 @@ func (e *BinpackingNodeEstimator) addNewNodeToSnapshot(
+ 	template *schedulerframework.NodeInfo,
+ ) error {
+ 	newNodeInfo := scheduler.DeepCopyTemplateNode(template, fmt.Sprintf("e-%d", estimationState.newNodeNameIndex))
++
++	klog.V(4).Infof("[Estimator] adding new node %s to ClusterSnapshot, with labels %v and taints %v", newNodeInfo.Node().Name, newNodeInfo.Node().Labels, newNodeInfo.Node().Spec.Taints)
++
+ 	var pods []*apiv1.Pod
+ 	for _, podInfo := range newNodeInfo.Pods {
+ 		pods = append(pods, podInfo.Pod)
+diff --git a/cluster-autoscaler/simulator/predicatechecker/schedulerbased.go b/cluster-autoscaler/simulator/predicatechecker/schedulerbased.go
+index 8a13ee2cf..77589f408 100644
+--- a/cluster-autoscaler/simulator/predicatechecker/schedulerbased.go
++++ b/cluster-autoscaler/simulator/predicatechecker/schedulerbased.go
+@@ -129,6 +129,8 @@ func (p *SchedulerBasedPredicateChecker) FitsAnyNodeMatching(clusterSnapshot clu
+ 		if filterStatus.IsSuccess() {
+ 			p.lastIndex = (p.lastIndex + i + 1) % len(nodeInfosList)
+ 			return nodeInfo.Node().Name, nil
++		} else {
++			klog.V(4).Infof("Pod %s cannot be placed on node %s because: %s", pod.Name, nodeInfo.Node().Name, filterStatus.Message())
+ 		}
+ 	}
+ 	return "", fmt.Errorf("cannot put pod %s on any node", pod.Name)
