@@ -175,9 +175,6 @@ jobs:
           # to the tagged commit.
           echo "info=$(git describe --tags --long --dirty)" >> $GITHUB_OUTPUT
 
-      - name: set custom docker config directory
-        uses: neondatabase/dev-actions/set-docker-config-dir@6094485bf440001c94a94a3f9e221e81ff6b6193
-
       - uses: docker/setup-buildx-action@v3
         with:
           driver-opts: network=host
@@ -313,7 +310,6 @@ jobs:
           tags: ${{ steps.tags.outputs.scheduler }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-            ARCH=${{ inputs.arch }}
             GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
 
       - name: Build and push autoscaler-agent image
@@ -349,7 +345,7 @@ jobs:
         with:
           context: cluster-autoscaler
           push: true
-          target: ${{ format('cluster_autoscaler_{0}', inputs.arch) }}
+          target: ${{ format('cluster_autoscaler_{0}', matrix.arch) }}
           tags: ${{ steps.tags.outputs.cluster-autoscaler }}
           #cache-from:  type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
           #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache,mode=max' || '' }}
@@ -413,14 +409,20 @@ jobs:
           ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
           TAG: ${{ needs.tags.outputs.tag }}
           BUILD_CLUSTER_AUTOSCALER: ${{ format('{0}', inputs.build-cluster-autoscaler) }}
+          UPLOAD_TO_ECR: ${{ format('{0}', inputs.upload-to-ecr) }}
         run: |
-          images=(${{ needs.tags.outputs.controller }} ${{ needs.tags.outputs.vxlan-controller }} ${{ needs.tags.outputs.runner }} ${{ needs.tags.outputs.scheduler }} ${{ needs.tags.outputs.autoscaler-agent }}  ${{ needs.tags.outputs.daemon }})
-          for image in ${images[@]}; do
+          images=("${{ needs.tags.outputs.controller }}" \
+          "${{ needs.tags.outputs.vxlan-controller }}" \
+          "${{ needs.tags.outputs.runner }}" \
+          "${{ needs.tags.outputs.scheduler }}" \
+          "${{ needs.tags.outputs.autoscaler-agent }}" \
+          "${{ needs.tags.outputs.daemon }}")
+
+          for image in "${images[@]}"; do
             tags=("-t" "$image:$TAG")
             for arch in ${ARCHS}; do
               tags+=("$image-$arch:$TAG")
             done
-            echo "tags: ${tags[@]}"
             docker buildx imagetools create "${tags[@]}"
           done
 

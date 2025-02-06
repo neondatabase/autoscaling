@@ -253,9 +253,6 @@ jobs:
       - name: git checkout
         uses: actions/checkout@v4
 
-      - name: set custom docker config directory
-        uses: neondatabase/dev-actions/set-docker-config-dir@6094485bf440001c94a94a3f9e221e81ff6b6193
-
       - name: docker - setup buildx
         uses: docker/setup-buildx-action@v3
 
