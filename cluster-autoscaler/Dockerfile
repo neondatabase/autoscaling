@@ -32,7 +32,7 @@ RUN cd autoscaler/cluster-autoscaler \
 # This is adapted from CA's Dockerfile.amd64, here:
 # https://github.com/kubernetes/autoscaler/blob/cluster-autoscaler-1.24.1/cluster-autoscaler/Dockerfile.amd64
 
-FROM gcr.io/distroless/static:nonroot-${ARCH}
+FROM gcr.io/distroless/static:nonroot
 
 WORKDIR /
 COPY --from=builder /workspace/cluster-autoscaler .
