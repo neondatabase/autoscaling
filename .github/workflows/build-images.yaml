@@ -241,8 +241,8 @@ jobs:
           context: .
           push: true
           file: Dockerfile.go-base
-          #cache-from:  type=registry,ref=cache.neon.build/autoscaling-go-base:cache
-          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaling-go-base:cache,mode=max' || '' }}
+          cache-from:  ${{ format('type=registry,ref=cache.neon.build/autoscaling-go-base-{0}:cache', matrix.arch) }}
+          cache-to:  ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/autoscaling-go-base-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ env.GO_BASE_IMG }}
 
       - name: Build and push neonvm-runner image
@@ -252,8 +252,8 @@ jobs:
           push: true
 
           file: neonvm-runner/Dockerfile
-          #cache-from:  type=registry,ref=cache.neon.build/neonvm-runner:cache
-          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-runner:cache,mode=max' || '' }}
+          cache-from:  ${{ format('type=registry,ref=cache.neon.build/neonvm-runner-{0}:cache', matrix.arch) }}
+          cache-to:  ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/neonvm-runner-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.runner }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
@@ -276,8 +276,8 @@ jobs:
 
           push: true
           file: neonvm-controller/Dockerfile
-          #cache-from:  type=registry,ref=cache.neon.build/neonvm-controller:cache
-          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-controller:cache,mode=max' || '' }}
+          cache-from:  ${{ format('type=registry,ref=cache.neon.build/neonvm-controller-{0}:cache', matrix.arch) }}
+          cache-to:  ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/neonvm-controller-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.controller }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
@@ -291,8 +291,8 @@ jobs:
 
           push: true
           file: neonvm-vxlan-controller/Dockerfile
-          #cache-from:  type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache
-          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache,mode=max' || '' }}
+          cache-from:  ${{ format('type=registry,ref=cache.neon.build/neonvm-vxlan-controller-{0}:cache', matrix.arch) }}
+          cache-to:  ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/neonvm-vxlan-controller-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.vxlan-controller }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
@@ -305,8 +305,8 @@ jobs:
 
           push: true
           file: autoscale-scheduler/Dockerfile
-          #cache-from:  type=registry,ref=cache.neon.build/autoscale-scheduler:cache
-          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscale-scheduler:cache,mode=max' || '' }}
+          cache-from:  ${{ format('type=registry,ref=cache.neon.build/autoscale-scheduler-{0}:cache', matrix.arch) }}
+          cache-to:  ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/autoscale-scheduler-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.scheduler }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
@@ -319,8 +319,8 @@ jobs:
 
           push: true
           file: autoscaler-agent/Dockerfile
-          #cache-from:  type=registry,ref=cache.neon.build/autoscaler-agent:cache
-          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaler-agent:cache,mode=max' || '' }}
+          cache-from:  ${{ format('type=registry,ref=cache.neon.build/autoscaler-agent-{0}:cache', matrix.arch) }}
+          cache-to:  ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/autoscaler-agent-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.autoscaler-agent }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
@@ -333,8 +333,8 @@ jobs:
 
           push: true
           file: neonvm-daemon/Dockerfile
-          #cache-from:  type=registry,ref=cache.neon.build/neonvm-daemon:cache
-          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-daemon:cache,mode=max' || '' }}
+          cache-from:  ${{ format('type=registry,ref=cache.neon.build/neonvm-daemon-{0}:cache', matrix.arch) }}
+          cache-to:  ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/neonvm-daemon-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.daemon }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
@@ -347,8 +347,8 @@ jobs:
           push: true
           target: ${{ format('cluster_autoscaler_{0}', matrix.arch) }}
           tags: ${{ steps.tags.outputs.cluster-autoscaler }}
-          #cache-from:  type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
-          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache,mode=max' || '' }}
+          cache-from:  ${{ format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache', matrix.arch) }}
+          cache-to:  ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache,mode=max', matrix.arch) || '' }}
 
       - name: Copy all images to ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
