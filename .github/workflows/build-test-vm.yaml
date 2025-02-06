@@ -59,12 +59,10 @@ jobs:
     outputs:
       vm-postgres-16-bullseye: ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
       daemon: ${{ steps.tags.outputs.daemon }}
-      vm-postgres-16-bullseye-image-name: ${{ steps.tags.outputs.vm-postgres-16-bullseye-image-name }}
     steps:
       # tags converted to be a step and moved here to be in the same strategy contextt
       - id: tags
         run: |
-          echo "vm-postgres-16-bullseye-image-name=${{ env.IMG_POSTGRES_16_BULLSEYE }}" | tee -a $GITHUB_OUTPUT
           echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "daemon=${{ env.IMG_DAEMON }}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
       - uses: actions/checkout@v4
@@ -121,7 +119,6 @@ jobs:
       vm-postgres-16-bullseye: ${{ steps.merge-vm-images.outputs.vm-postgres-16-bullseye }}
     env:
       ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
-      IMAGE: ${{ needs.build.outputs.vm-postgres-16-bullseye-image-name }}
       TAG: ${{ inputs.tag }}
     steps:
       - name: git checkout
@@ -142,14 +139,13 @@ jobs:
       - name: Merge vm images
         id: merge-vm-images
         run: |
-          result_image="${IMAGE}:${TAG}"
+          result_image="${{ env.IMG_POSTGRES_16_BULLSEYE }}:${TAG}"
 
           args=("-t" "${result_image}")
           for arch in ${ARCHS}; do
-            args+=("${IMAGE}-${arch}:${TAG}")
+            args+=("${{ env.IMG_POSTGRES_16_BULLSEYE }}-${arch}:${TAG}")
           done
 
-          echo "DEBUG", docker buildx imagetools create "${args[@]}"
           docker buildx imagetools create "${args[@]}"
 
           echo "vm-postgres-16-bullseye=${result_image}" >> $GITHUB_OUTPUT

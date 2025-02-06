@@ -1,5 +1,3 @@
-ARG ARCH
-
 # NOTE: This must match CA's builder/Dockerfile:
 # https://github.com/kubernetes/autoscaler/blob/<GIT_TAG>/builder/Dockerfile
 FROM golang:1.22.2 AS builder
