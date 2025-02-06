@@ -54,9 +54,6 @@ jobs:
   build-images:
     needs: get-tag
     uses: ./.github/workflows/build-images.yaml
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
     with:
       skip: ${{ inputs.tag != '' }}
       tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
@@ -65,49 +62,36 @@ jobs:
       # settings and used properly in the tests. But if skip (because inputs.tag != ''), then this
       # setting will have no effect and the release images will be normal.
       controller-preserve-runner-pods: true
-      matrix-step-name: build-images
-      matrix-key: ${{ matrix.arch }}
-      arch: ${{ matrix.arch }}
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
-  get-build-images-matrix-results:
-    runs-on: ubuntu-latest
-    needs: [build-images]
-    steps:
-      - uses: cloudposse/github-action-matrix-outputs-read@v1
-        id: read
-        with:
-          matrix-step-name: build-images
-    outputs:
-      result: "${{ steps.read.outputs.result }}"
+  # build-test-vm:
+  #   needs: get-tag
+  #   uses: ./.github/workflows/build-test-vm.yaml
+  #   strategy:
+  #     matrix:
+  #       arch: [amd64, arm64]
+  #   with:
+  #     skip: ${{ inputs.tag != '' }}
+  #     tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
+  #     matrix-step-name: build-test-vm
+  #     matrix-key: ${{ matrix.arch }}
+  #     arch: ${{ matrix.arch }}
+  #   secrets: inherit
 
-  build-test-vm:
-    needs: get-tag
-    uses: ./.github/workflows/build-test-vm.yaml
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
-    with:
-      skip: ${{ inputs.tag != '' }}
-      tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
-      matrix-step-name: build-test-vm
-      matrix-key: ${{ matrix.arch }}
-      arch: ${{ matrix.arch }}
-    secrets: inherit
-
-  get-build-test-vm-matrix-results:
-    runs-on: ubuntu-latest
-    needs: [build-test-vm]
-    steps:
-      - uses: cloudposse/github-action-matrix-outputs-read@v1
-        id: read
-        with:
-          matrix-step-name: build-test-vm
-    outputs:
-      result: "${{ steps.read.outputs.result }}"
+  # get-build-test-vm-matrix-results:
+  #   runs-on: ubuntu-latest
+  #   needs: [build-test-vm]
+  #   steps:
+  #     - uses: cloudposse/github-action-matrix-outputs-read@v1
+  #       id: read
+  #       with:
+  #         matrix-step-name: build-test-vm
+  #   outputs:
+  #     result: "${{ steps.read.outputs.result }}"
 
   e2e-tests:
-    needs: [ get-build-images-matrix-results, get-build-test-vm-matrix-results ]
+    needs: [ build-images ]
     strategy:
       fail-fast: false
       matrix:
@@ -224,7 +208,8 @@ jobs:
 
       - name: load e2e test vm image
         env:
-          TEST_IMAGE: ${{ fromJson(needs.get-build-test-vm-matrix-results.outputs.result).vm-postgres-16-bullseye[matrix.arch] }}
+          # TEST_IMAGE: ${{ fromJson(needs.get-build-test-vm-matrix-results.outputs.result).vm-postgres-16-bullseye[matrix.arch] }}
+          TEST_IMAGE: "testimage"
         timeout-minutes: 2
         run: |
           # Pull the docker image so we can re-tag it, because using a consistent tag inside the
