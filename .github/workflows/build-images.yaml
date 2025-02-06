@@ -163,7 +163,7 @@ jobs:
         timeout-minutes: 10
 
       - run: |
-          echo "inputs.tag: ${{ inputs.tag }}, arch: ${{ inputs.arch }}"
+          echo "inputs.tag: ${{ inputs.tag }}, arch: ${{ matrix.arch }}"
 
       # Use 'git describe' for embedding git information (duplicated from the Makefile)
       - name: get git info
@@ -244,8 +244,8 @@ jobs:
           context: .
           push: true
           file: Dockerfile.go-base
-          cache-from: type=registry,ref=cache.neon.build/autoscaling-go-base:cache
-          cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaling-go-base:cache,mode=max' || '' }}
+          #cache-from:  type=registry,ref=cache.neon.build/autoscaling-go-base:cache
+          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaling-go-base:cache,mode=max' || '' }}
           tags: ${{ env.GO_BASE_IMG }}
 
       - name: Build and push neonvm-runner image
@@ -255,8 +255,8 @@ jobs:
           push: true
 
           file: neonvm-runner/Dockerfile
-          cache-from: type=registry,ref=cache.neon.build/neonvm-runner:cache
-          cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-runner:cache,mode=max' || '' }}
+          #cache-from:  type=registry,ref=cache.neon.build/neonvm-runner:cache
+          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-runner:cache,mode=max' || '' }}
           tags: ${{ steps.tags.outputs.runner }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
@@ -279,101 +279,101 @@ jobs:
 
           push: true
           file: neonvm-controller/Dockerfile
-          cache-from: type=registry,ref=cache.neon.build/neonvm-controller:cache
-          cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-controller:cache,mode=max' || '' }}
+          #cache-from:  type=registry,ref=cache.neon.build/neonvm-controller:cache
+          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-controller:cache,mode=max' || '' }}
           tags: ${{ steps.tags.outputs.controller }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             VM_RUNNER_IMAGE=${{ steps.tags.outputs.runner }}
             BUILDTAGS=${{ steps.controller-build-tags.outputs.buildtags }}
 
-      # - name: Build and push neonvm-vxlan-controller image
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     context: .
+      - name: Build and push neonvm-vxlan-controller image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
 
-      #     push: true
-      #     file: neonvm-vxlan-controller/Dockerfile
-      #     cache-from: type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache
-      #     cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache,mode=max' || '' }}
-      #     tags: ${{ steps.tags.outputs.vxlan-controller }}
-      #     build-args: |
-      #       GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-      #       TARGET_ARCH=${{ inputs.arch }}
+          push: true
+          file: neonvm-vxlan-controller/Dockerfile
+          #cache-from:  type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache
+          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-vxlan-controller:cache,mode=max' || '' }}
+          tags: ${{ steps.tags.outputs.vxlan-controller }}
+          build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+            TARGET_ARCH=${{ matrix.arch }}
 
-      # - name: Build and push autoscale-scheduler image
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     context: .
+      - name: Build and push autoscale-scheduler image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
 
-      #     push: true
-      #     file: autoscale-scheduler/Dockerfile
-      #     cache-from: type=registry,ref=cache.neon.build/autoscale-scheduler:cache
-      #     cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscale-scheduler:cache,mode=max' || '' }}
-      #     tags: ${{ steps.tags.outputs.scheduler }}
-      #     build-args: |
-      #       GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-      #       ARCH=${{ inputs.arch }}
-      #       GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
+          push: true
+          file: autoscale-scheduler/Dockerfile
+          #cache-from:  type=registry,ref=cache.neon.build/autoscale-scheduler:cache
+          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscale-scheduler:cache,mode=max' || '' }}
+          tags: ${{ steps.tags.outputs.scheduler }}
+          build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+            ARCH=${{ inputs.arch }}
+            GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
 
-      # - name: Build and push autoscaler-agent image
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     context: .
+      - name: Build and push autoscaler-agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
 
-      #     push: true
-      #     file: autoscaler-agent/Dockerfile
-      #     cache-from: type=registry,ref=cache.neon.build/autoscaler-agent:cache
-      #     cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaler-agent:cache,mode=max' || '' }}
-      #     tags: ${{ steps.tags.outputs.autoscaler-agent }}
-      #     build-args: |
-      #       GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-      #       GIT_INFO=${{ steps.get-git-info.outputs.info }}
+          push: true
+          file: autoscaler-agent/Dockerfile
+          #cache-from:  type=registry,ref=cache.neon.build/autoscaler-agent:cache
+          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/autoscaler-agent:cache,mode=max' || '' }}
+          tags: ${{ steps.tags.outputs.autoscaler-agent }}
+          build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+            GIT_INFO=${{ steps.get-git-info.outputs.info }}
 
-      # - name: Build and push neonvm-daemon image
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     context: .
+      - name: Build and push neonvm-daemon image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
 
-      #     push: true
-      #     file: neonvm-daemon/Dockerfile
-      #     cache-from: type=registry,ref=cache.neon.build/neonvm-daemon:cache
-      #     cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-daemon:cache,mode=max' || '' }}
-      #     tags: ${{ steps.tags.outputs.daemon }}
-      #     build-args: |
-      #       GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+          push: true
+          file: neonvm-daemon/Dockerfile
+          #cache-from:  type=registry,ref=cache.neon.build/neonvm-daemon:cache
+          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/neonvm-daemon:cache,mode=max' || '' }}
+          tags: ${{ steps.tags.outputs.daemon }}
+          build-args: |
+            GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
-      # - name: Build and push cluster-autoscaler image
-      #   uses: docker/build-push-action@v6
-      #   if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
-      #   with:
-      #     context: cluster-autoscaler
+      - name: Build and push cluster-autoscaler image
+        uses: docker/build-push-action@v6
+        if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
+        with:
+          context: cluster-autoscaler
 
-      #     push: true
-      #     target: ${{ format('cluster_autoscaler_{0}', inputs.arch) }}
-      #     tags: ${{ steps.tags.outputs.cluster-autoscaler }}
-      #     cache-from: type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
-      #     cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache,mode=max' || '' }}
+          push: true
+          target: ${{ format('cluster_autoscaler_{0}', inputs.arch) }}
+          tags: ${{ steps.tags.outputs.cluster-autoscaler }}
+          #cache-from:  type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache
+          #cache-to:  ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm:cache,mode=max' || '' }}
 
-      # - name: Copy all images to ECR
-      #   if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
-      #   run: |
-      #     for image in \
-      #       neonvm-controller \
-      #       neonvm-vxlan-controller \
-      #       neonvm-runner \
-      #       vm-kernel \
-      #       autoscale-scheduler \
-      #       autoscaler-agent \
-      #       cluster-autoscaler-neonvm \
-      #       ; do
-      #       echo Copy ${image}:${{ inputs.tag }} to dev ECR
-      #       docker buildx imagetools create -t ${{ env.ECR_DEV }}/${image}:${{ inputs.tag }} \
-      #                                          neondatabase/${image}:${{ inputs.tag }}
-      #       echo Copy ${image}:${{ inputs.tag }} to prod ECR
-      #       docker buildx imagetools create -t ${{ env.ECR_PROD }}/${image}:${{ inputs.tag }} \
-      #                                          neondatabase/${image}:${{ inputs.tag }}
-      #     done
+      - name: Copy all images to ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        run: |
+          for image in \
+            neonvm-controller \
+            neonvm-vxlan-controller \
+            neonvm-runner \
+            vm-kernel \
+            autoscale-scheduler \
+            autoscaler-agent \
+            cluster-autoscaler-neonvm \
+            ; do
+            echo Copy ${image}:${{ inputs.tag }} to dev ECR
+            docker buildx imagetools create -t ${{ env.ECR_DEV }}/${image}:${{ inputs.tag }} \
+                                               neondatabase/${image}:${{ inputs.tag }}
+            echo Copy ${image}:${{ inputs.tag }} to prod ECR
+            docker buildx imagetools create -t ${{ env.ECR_PROD }}/${image}:${{ inputs.tag }} \
+                                               neondatabase/${image}:${{ inputs.tag }}
+          done
 
 
   merge-images:
