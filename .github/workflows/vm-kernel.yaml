@@ -238,8 +238,7 @@ jobs:
           pull: true
           file: neonvm-kernel/Dockerfile.kernel-builder
           cache-from: ${{ format('type=registry,ref=cache.neon.build/vm-kernel-{0}:cache', matrix.arch) }}
-          # Cache the kernel image for future builds, temporary from all branches
-          cache-to: ${{ format('type=registry,ref=cache.neon.build/vm-kernel-{0}:cache,mode=max', matrix.arch) || '' }}
+          cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/vm-kernel-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.generate-full-image-tags.outputs.tags }}
 
   merge-kernel-images:
