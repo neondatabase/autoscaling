@@ -32,7 +32,6 @@ on:
         description: 'Architectures to build for'
         type: string
         required: true
-        default: '["amd64","arm64"]'
 
     outputs:
       image:
@@ -244,7 +243,7 @@ jobs:
           tags: ${{ steps.generate-full-image-tags.outputs.tags }}
 
   merge-kernel-images:
-    needs: [build-vm-kernel-image, get-tags]
+    needs: [setup-build-vm-kernel-image, build-vm-kernel-image, get-tags]
     # onlye merge images build during this workflow invocation
     if: needs.setup-build-vm-kernel-image.outputs.image == ''
     runs-on: ubuntu-latest
