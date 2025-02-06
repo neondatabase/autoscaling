@@ -65,8 +65,17 @@ jobs:
       archs: '["amd64","arm64"]'
     secrets: inherit
 
+  build-test-vm:
+    needs: get-tag
+    uses: ./.github/workflows/build-test-vm.yaml
+    with:
+      skip: ${{ inputs.tag != '' }}
+      tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
+      archs: '["amd64","arm64"]'
+    secrets: inherit
+
   e2e-tests:
-    needs: [ build-images ]
+    needs: [ build-images, build-test-vm ]
     strategy:
       fail-fast: false
       matrix:
@@ -183,8 +192,7 @@ jobs:
 
       - name: load e2e test vm image
         env:
-          # TEST_IMAGE: ${{ fromJson(needs.get-build-test-vm-matrix-results.outputs.result).vm-postgres-16-bullseye[matrix.arch] }}
-          TEST_IMAGE: "testimage"
+          TEST_IMAGE: ${{ needs.build-test-vm.outputs.vm-postgres-16-bullseye }}
         timeout-minutes: 2
         run: |
           # Pull the docker image so we can re-tag it, because using a consistent tag inside the
