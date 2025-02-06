@@ -65,31 +65,6 @@ jobs:
       archs: '["amd64","arm64"]'
     secrets: inherit
 
-  # build-test-vm:
-  #   needs: get-tag
-  #   uses: ./.github/workflows/build-test-vm.yaml
-  #   strategy:
-  #     matrix:
-  #       arch: [amd64, arm64]
-  #   with:
-  #     skip: ${{ inputs.tag != '' }}
-  #     tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
-  #     matrix-step-name: build-test-vm
-  #     matrix-key: ${{ matrix.arch }}
-  #     arch: ${{ matrix.arch }}
-  #   secrets: inherit
-
-  # get-build-test-vm-matrix-results:
-  #   runs-on: ubuntu-latest
-  #   needs: [build-test-vm]
-  #   steps:
-  #     - uses: cloudposse/github-action-matrix-outputs-read@v1
-  #       id: read
-  #       with:
-  #         matrix-step-name: build-test-vm
-  #   outputs:
-  #     result: "${{ steps.read.outputs.result }}"
-
   e2e-tests:
     needs: [ build-images ]
     strategy:
@@ -131,11 +106,11 @@ jobs:
 
       - run: make render-release
         env:
-          IMG_CONTROLLER:       ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).controller[matrix.arch] }}
-          IMG_VXLAN_CONTROLLER: ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).vxlan-controller[matrix.arch] }}
-          IMG_RUNNER:           ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).runner[matrix.arch] }}
-          IMG_SCHEDULER:        ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).scheduler[matrix.arch] }}
-          IMG_AUTOSCALER_AGENT: ${{ fromJson(needs.get-build-images-matrix-results.outputs.result).autoscaler-agent[matrix.arch] }}
+          IMG_CONTROLLER:       ${{ needs.build-images.outputs.controller }}
+          IMG_VXLAN_CONTROLLER: ${{ needs.build-images.outputs.vxlan-controller }}
+          IMG_RUNNER:           ${{ needs.build-images.outputs.runner }}
+          IMG_SCHEDULER:        ${{ needs.build-images.outputs.scheduler }}
+          IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs.autoscaler-agent }}
 
       - name: upload manifests
         # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.

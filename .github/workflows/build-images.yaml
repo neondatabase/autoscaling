@@ -40,22 +40,22 @@ on:
 
       controller:
         description: 'neonvm-controller image'
-        value: ${{ jobs.save-matrix-results.outputs.controller }}
+        value: ${{ jobs.merge-images.outputs.controller }}
       vxlan-controller:
         description: 'neonvm-vxlan-controller image'
-        value: ${{ jobs.save-matrix-results.outputs.vxlan-controller }}
+        value: ${{ jobs.merge-images.outputs.vxlan-controller }}
       runner:
         description: 'neonvm-runner image'
-        value: ${{ jobs.save-matrix-results.outputs.runner }}
+        value: ${{ jobs.merge-images.outputs.runner }}
       scheduler:
         description: 'autoscale-scheduler image'
-        value: ${{ jobs.save-matrix-results.outputs.scheduler }}
+        value: ${{ jobs.merge-images.outputs.scheduler }}
       autoscaler-agent:
         description: 'autoscaler-agent image'
-        value: ${{ jobs.tags.outputs.autoscaler-agent }}
+        value: ${{ jobs.merge-images.outputs.autoscaler-agent }}
       daemon:
         description: 'neonvm-daemon image'
-        value: ${{ jobs.tags.outputs.daemon }}
+        value: ${{ jobs.merge-images.outputs.daemon }}
 
 env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
@@ -376,6 +376,14 @@ jobs:
 
 
   merge-images:
+    outputs:
+      controller: ${{ steps.tags.outputs.controller }}
+      vxlan-controller: ${{ steps.tags.outputs.vxlan-controller }}
+      runner: ${{ steps.tags.outputs.runner }}
+      scheduler: ${{ steps.tags.outputs.scheduler }}
+      autoscaler-agent: ${{ steps.tags.outputs.autoscaler-agent }}
+      daemon: ${{ steps.tags.outputs.daemon }}
+      cluster-autoscaler: ${{ steps.tags.outputs.cluster-autoscaler }}
     needs: [build, tags]
     runs-on: ubuntu-latest
     steps:
@@ -423,3 +431,13 @@ jobs:
             done
             docker buildx imagetools create "${tags[@]}"
           fi
+      - name: Store tags as outputs
+        id: tags
+        run: |
+          echo "controller=${{ env.IMG_CONTROLLER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${{ env.IMG_VXLAN_CONTROLLER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${{ env.IMG_RUNNER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${{ env.IMG_SCHEDULER }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${{ env.IMG_AUTOSCALER_AGENT }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          # why don't we store cluster-autoscaler tag?
