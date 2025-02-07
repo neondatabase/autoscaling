@@ -391,8 +391,7 @@ jobs:
         env:
           ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
           TAG: ${{ inputs.tag }}
-          BUILD_CLUSTER_AUTOSCALER: ${{ format('{0}', inputs.build-cluster-autoscaler) }}
-          UPLOAD_TO_ECR: ${{ format('{0}', inputs.upload-to-ecr) }}
+          BUILD_CLUSTER_AUTOSCALER: ${{ inputs.build-cluster-autoscaler }}
         run: |
           images=("${IMG_CONTROLLER}" \
           "${IMG_VXLAN_CONTROLLER}" \
