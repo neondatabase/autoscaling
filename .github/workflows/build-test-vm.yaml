@@ -27,12 +27,6 @@ on:
         type: string
         required: false
         default: '["amd64","arm64"]'
-      matrix-step-name:
-        required: false
-        type: string
-      matrix-key:
-        required: false
-        type: string
     outputs:
       vm-postgres-16-bullseye:
         description: 'image name for postgres:16-bullseye, VM-ified'
