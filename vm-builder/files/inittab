@@ -1,6 +1,5 @@
 ::sysinit:/neonvm/bin/vminit
 ::once:/neonvm/bin/touch /neonvm/vmstart.allowed
-::respawn:/neonvm/bin/neonvmd --addr=0.0.0.0:25183
 ::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 ::respawn:/neonvm/bin/udevd
 ::wait:/neonvm/bin/udev-init.sh
@@ -8,6 +7,7 @@
 ::respawn:/neonvm/bin/vector -c /neonvm/config/vector.yaml --config-dir /etc/vector --color never
 ::respawn:/neonvm/bin/chronyd -n -f /neonvm/config/chrony.conf -l /var/log/chrony/chrony.log
 ::respawn:/neonvm/bin/sshd -E /var/log/ssh.log -f /neonvm/config/sshd_config
+::respawn:/neonvm/bin/neonvmd --addr=0.0.0.0:25183
 ::respawn:/neonvm/bin/vmstart
 {{ range .InittabCommands }}
 ::{{.SysvInitAction}}:su -p {{.CommandUser}} -c {{.ShellEscapedCommand}}
