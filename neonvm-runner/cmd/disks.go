@@ -187,7 +187,7 @@ func createISO9660runtime(
 			if disk.MountPath != "" {
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
 			}
-			if diskNeedsSynchronisation(disk) {
+			if disk.Watch != nil && *disk.Watch {
 				// do nothing as we will mount it into the VM via neonvm-daemon later
 				continue
 			}
@@ -276,22 +276,6 @@ func createISO9660runtime(
 	}
 
 	return nil
-}
-
-func diskNeedsSynchronisation(disk vmv1.Disk) bool {
-	if disk.DiskSource.Secret == nil {
-		// only supporting secrets at the moment
-		return false
-	}
-
-	// for now, `/var/sync` is our sentinal that this is synchronised.
-	// TODO: should we instead put a sync flag on the Disk object itself?
-	rel, err := filepath.Rel("/var/sync", disk.MountPath)
-	if err != nil {
-		return false
-	}
-
-	return filepath.IsLocal(rel)
 }
 
 func calcDirUsage(dirPath string) (int64, error) {

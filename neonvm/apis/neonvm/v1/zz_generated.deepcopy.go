@@ -49,6 +49,11 @@ func (in *Disk) DeepCopyInto(out *Disk) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.Watch != nil {
+		in, out := &in.Watch, &out.Watch
+		*out = new(bool)
+		**out = **in
+	}
 	in.DiskSource.DeepCopyInto(&out.DiskSource)
 }
 
