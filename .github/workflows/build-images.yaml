@@ -34,7 +34,7 @@ on:
         description: 'Architectures to build for'
         type: string
         required: false
-        default: 'amd64,arm64'
+        default: '["amd64","arm64"]'
 
     outputs:
 
@@ -139,9 +139,6 @@ jobs:
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
         timeout-minutes: 10
 
-      - run: |
-          echo "inputs.tag: ${{ inputs.tag }}, arch: ${{ matrix.arch }}"
-
       # Use 'git describe' for embedding git information (duplicated from the Makefile)
       - name: get git info
         id: get-git-info
@@ -158,7 +155,6 @@ jobs:
       - uses: docker/setup-buildx-action@v3
         with:
           driver-opts: network=host
-
 
       - name: Login to Dockerhub
         uses: docker/login-action@v3
@@ -319,7 +315,6 @@ jobs:
         with:
           context: cluster-autoscaler
           push: true
-          target: ${{ format('cluster_autoscaler_{0}', matrix.arch) }}
           tags: ${{ steps.tags.outputs.cluster-autoscaler }}
           cache-from: ${{ format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache,mode=max', matrix.arch) || '' }}
@@ -358,12 +353,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
-      - name: set custom docker config directory
-        uses: neondatabase/dev-actions/set-docker-config-dir@6094485bf440001c94a94a3f9e221e81ff6b6193
-
       - uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: network=host
 
       - name: Login to Dockerhub
         uses: docker/login-action@v3
@@ -371,7 +361,7 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: Create multi-arch image
+      - name: Create multi-arch images
         env:
           ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
           TAG: ${{ inputs.tag }}
@@ -383,7 +373,9 @@ jobs:
           "${IMG_SCHEDULER}" \
           "${IMG_AUTOSCALER_AGENT}" \
           "${IMG_DAEMON}")
-
+          if [ "$BUILD_CLUSTER_AUTOSCALER" = 'true' ]; then
+            images+=("${IMG_CLUSTER_AUTOSCALER}")
+          fi
           for image in "${images[@]}"; do
             tags=("-t" "$image:$TAG")
             for arch in ${ARCHS}; do
@@ -391,14 +383,6 @@ jobs:
             done
             docker buildx imagetools create "${tags[@]}"
           done
-
-          if [ "$BUILD_CLUSTER_AUTOSCALER" = 'true' ]; then
-            echo "Building cluster-autoscaler image"
-            for arch in ${ARCHS}; do
-              tags+=("${{ env.CLUSTER_AUTO }}-${arch}:${TAG}")
-            done
-            docker buildx imagetools create "${tags[@]}"
-          fi
 
       # here we store final tagged names for merged images
       - name: Store tags as outputs

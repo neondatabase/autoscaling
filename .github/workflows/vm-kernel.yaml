@@ -31,7 +31,8 @@ on:
       archs:
         description: 'Architectures to build for'
         type: string
-        required: true
+        required: false
+        default: '["amd64","arm64"]'
 
     outputs:
       image:
@@ -135,10 +136,6 @@ jobs:
           docker tag ${CACHED_IMAGE} ${VM_KERNEL_IMAGE}:${NEW_TAG}
           docker push ${VM_KERNEL_IMAGE}:${NEW_TAG}
 
-      - name: debug output
-        run: |
-          echo "image: ${{ steps.get-kernel-image.outputs.image }}"
-          echo "kernel-cache-tag: ${{ steps.get-kernel-cache-tag.outputs.kernel-cache-tag }}"
   get-tags:
     needs: setup-build-vm-kernel-image
     outputs:

@@ -58,7 +58,7 @@ jobs:
         id: html-artifact
         env:
           COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request') }}
+        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request')}}
         run: |
           aws s3 cp cover.html "s3://${BUCKET}/${BUCKET_PATH}/${COMMIT_SHA}/index.html"
       - name: "Code coverage report"
@@ -70,7 +70,7 @@ jobs:
 
       - name: Create comment with html report
         uses: actions/github-script@v7
-        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request') }}
+        if: ${{ !cancelled() && (steps.changed-files.outputs.any_changed == 'true' && github.event_name == 'pull_request')}}
         env:
           COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         with:
