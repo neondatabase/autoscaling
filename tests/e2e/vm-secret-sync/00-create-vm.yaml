@@ -7,6 +7,7 @@ kind: Secret
 metadata:
   name: example-secret
 data:
+  # "hello world"
   foo: aGVsbG8gd29ybGQ=
 ---
 apiVersion: vm.neon.tech/v1
@@ -34,3 +35,4 @@ spec:
       secretName: example-secret
     mountPath: /var/sync/example
     name: secret-foo
+    watch: true
