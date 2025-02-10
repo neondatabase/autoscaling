@@ -8,6 +8,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type EventSink[E any] struct {
@@ -53,34 +55,28 @@ type EventSinkMetrics struct {
 	sendErrorsTotal  *prometheus.CounterVec
 }
 
-func NewEventSinkMetrics(prefix string) *EventSinkMetrics {
+func NewEventSinkMetrics(prefix string, reg prometheus.Registerer) *EventSinkMetrics {
 	return &EventSinkMetrics{
-		queueSizeCurrent: prometheus.NewGaugeVec(
+		queueSizeCurrent: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: fmt.Sprintf("%s_queue_size", prefix),
 				Help: "Size of the billing subsystem's queue of unsent events",
 			},
 			[]string{"client"},
-		),
-		lastSendDuration: prometheus.NewGaugeVec(
+		)),
+		lastSendDuration: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: fmt.Sprintf("%s_last_send_duration_seconds", prefix),
 				Help: "Duration, in seconds, that it took to send the latest set of billing events (or current time if ongoing)",
 			},
 			[]string{"client"},
-		),
-		sendErrorsTotal: prometheus.NewCounterVec(
+		)),
+		sendErrorsTotal: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: fmt.Sprintf("%s_send_errors_total", prefix),
 				Help: "Total errors from attempting to send billing events",
 			},
 			[]string{"client", "cause"},
-		),
+		)),
 	}
-}
-
-func (m *EventSinkMetrics) MustRegister(reg *prometheus.Registry) {
-	reg.MustRegister(m.queueSizeCurrent)
-	reg.MustRegister(m.lastSendDuration)
-	reg.MustRegister(m.sendErrorsTotal)
 }

@@ -34,9 +34,10 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 		}
 	}
 
-	watchMetrics := watch.NewMetrics("autoscaling_agent_watchers")
-
+	globalMetrics, globalPromReg := makeGlobalMetrics()
 	perVMMetrics, vmPromReg := makePerVMMetrics()
+
+	watchMetrics := watch.NewMetrics("autoscaling_agent_watchers", globalPromReg)
 
 	logger.Info("Starting VM watcher")
 	vmWatchStore, err := startVMWatcher(ctx, logger, r.Config, r.VMClient, watchMetrics, perVMMetrics, r.EnvArgs.K8sNodeName, pushToQueue)
@@ -52,26 +53,25 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	}
 	defer schedTracker.Stop()
 
-	scalingEventsMetrics := scalingevents.NewPromMetrics()
+	scalingEventsMetrics := scalingevents.NewPromMetrics(globalPromReg)
 	scalingReporter, err := scalingevents.NewReporter(ctx, logger, &r.Config.ScalingEvents, scalingEventsMetrics)
 	if err != nil {
 		return fmt.Errorf("Error creating scaling events reporter: %w", err)
 	}
 
-	globalState, globalPromReg := r.newAgentState(
+	globalState := r.newAgentState(
 		logger,
 		r.EnvArgs.K8sPodIP,
 		schedTracker,
-		perVMMetrics,
 		scalingReporter,
+		globalMetrics,
+		perVMMetrics,
 	)
-	watchMetrics.MustRegister(globalPromReg)
 
 	logger.Info("Starting billing metrics collector")
 	storeForNode := watch.NewIndexedStore(vmWatchStore, billing.NewVMNodeIndex(r.EnvArgs.K8sNodeName))
 
-	metrics := billing.NewPromMetrics()
-	metrics.MustRegister(globalPromReg)
+	billingMetrics := billing.NewPromMetrics(globalPromReg)
 
 	promLogger := logger.Named("prometheus")
 	if err := util.StartPrometheusMetricsServer(ctx, promLogger.Named("global"), 9100, globalPromReg); err != nil {
@@ -88,7 +88,7 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 		}
 	}
 
-	mc, err := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing, metrics)
+	mc, err := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing, billingMetrics)
 	if err != nil {
 		return fmt.Errorf("error creating billing metrics collector: %w", err)
 	}

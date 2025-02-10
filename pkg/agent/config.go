@@ -180,15 +180,19 @@ func (c *Config) validate() error {
 		erc.Whenf(ec, cfg.Bucket == "", emptyTmpl, fmt.Sprintf(".%s.bucket", key))
 		erc.Whenf(ec, cfg.Region == "", emptyTmpl, fmt.Sprintf(".%s.region", key))
 	}
+	validateAzureBlobReportingConfig := func(cfg *reporting.AzureBlobStorageClientConfig, key string) {
+		erc.Whenf(ec, cfg.Endpoint == "", emptyTmpl, fmt.Sprintf(".%s.endpoint", key))
+		erc.Whenf(ec, cfg.Container == "", emptyTmpl, fmt.Sprintf("%s.container", key))
+	}
 
 	erc.Whenf(ec, c.Billing.ActiveTimeMetricName == "", emptyTmpl, ".billing.activeTimeMetricName")
 	erc.Whenf(ec, c.Billing.CPUMetricName == "", emptyTmpl, ".billing.cpuMetricName")
 	erc.Whenf(ec, c.Billing.CollectEverySeconds == 0, zeroTmpl, ".billing.collectEverySeconds")
 	erc.Whenf(ec, c.Billing.AccumulateEverySeconds == 0, zeroTmpl, ".billing.accumulateEverySeconds")
 	if c.Billing.Clients.AzureBlob != nil {
-		validateBaseReportingConfig(&c.Billing.Clients.AzureBlob.BaseClientConfig, ".billing.clients.azure")
-		erc.Whenf(ec, c.Billing.Clients.AzureBlob.Endpoint == "", emptyTmpl, ".billing.clients.azure.endpoint")
-		erc.Whenf(ec, c.Billing.Clients.AzureBlob.Container == "", emptyTmpl, ".billing.clients.azure.container")
+		validateBaseReportingConfig(&c.Billing.Clients.AzureBlob.BaseClientConfig, ".billing.clients.azureBlob")
+		validateAzureBlobReportingConfig(&c.Billing.Clients.AzureBlob.AzureBlobStorageClientConfig, ".billing.clients.azureBlob")
+		erc.Whenf(ec, c.Billing.Clients.AzureBlob.PrefixInContainer == "", emptyTmpl, ".billing.clients.azureBlob.prefixInContainer")
 	}
 	if c.Billing.Clients.HTTP != nil {
 		validateBaseReportingConfig(&c.Billing.Clients.HTTP.BaseClientConfig, ".billing.clients.http")
@@ -203,6 +207,11 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.ScalingEvents.CUMultiplier == 0, zeroTmpl, ".scalingEvents.cuMultiplier")
 	erc.Whenf(ec, c.ScalingEvents.RereportThreshold == 0, zeroTmpl, ".scalingEvents.rereportThreshold")
 	erc.Whenf(ec, c.ScalingEvents.RegionName == "", emptyTmpl, ".scalingEvents.regionName")
+	if c.ScalingEvents.Clients.AzureBlob != nil {
+		validateBaseReportingConfig(&c.ScalingEvents.Clients.AzureBlob.BaseClientConfig, ".scalingEvents.clients.azureBlob")
+		validateAzureBlobReportingConfig(&c.ScalingEvents.Clients.AzureBlob.AzureBlobStorageClientConfig, ".scalingEvents.clients.azureBlob")
+		erc.Whenf(ec, c.ScalingEvents.Clients.AzureBlob.PrefixInContainer == "", emptyTmpl, ".scalingEvents.clients.azureBlob.prefixInContainer")
+	}
 	if c.ScalingEvents.Clients.S3 != nil {
 		validateBaseReportingConfig(&c.ScalingEvents.Clients.S3.BaseClientConfig, "scalingEvents.clients.s3")
 		validateS3ReportingConfig(&c.ScalingEvents.Clients.S3.S3ClientConfig, ".scalingEvents.clients.s3")
