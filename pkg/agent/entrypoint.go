@@ -94,6 +94,9 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	}
 
 	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
+	tg.Go("scalingevents-run", func(logger *zap.Logger) error {
+		return scalingReporter.Run(tg.Ctx())
+	})
 	tg.Go("billing", func(logger *zap.Logger) error {
 		return mc.Run(tg.Ctx(), logger, storeForNode)
 	})
