@@ -321,12 +321,7 @@ func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeName 
 	}
 
 	// Add the VM to the internal tracker:
-	perVMMetrics.activeMu.Lock()
-	defer perVMMetrics.activeMu.Unlock()
-	perVMMetrics.activeVMs[util.GetNamespacedName(vm)] = vmMetadata{
-		endpointID: vm.Labels[endpointLabel],
-		projectID:  vm.Labels[projectLabel],
-	}
+	perVMMetrics.updateActive(vm)
 }
 
 func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmv1.VirtualMachine, nodeName string) {
@@ -367,12 +362,7 @@ func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmv1.VirtualMachi
 	updateMetrics(perVMMetrics.restartCount, oldRestartCountMetrics, newRestartCountMetrics)
 
 	// Update the VM in the internal tracker:
-	perVMMetrics.activeMu.Lock()
-	defer perVMMetrics.activeMu.Unlock()
-	perVMMetrics.activeVMs[util.GetNamespacedName(newVM /* name can't change */)] = vmMetadata{
-		endpointID: newVM.Labels[endpointLabel],
-		projectID:  newVM.Labels[projectLabel],
-	}
+	perVMMetrics.updateActive(newVM) // note: don't need to clean up old one, because it's keyed by name
 }
 
 func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeName string) {
@@ -396,12 +386,5 @@ func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeNa
 	}
 
 	// Remove the VM from the internal tracker:
-	perVMMetrics.activeMu.Lock()
-	defer perVMMetrics.activeMu.Unlock()
-	delete(perVMMetrics.activeVMs, util.GetNamespacedName(vm))
-	// ... and any metrics that were associated with it:
-	perVMMetrics.desiredCU.DeletePartialMatch(prometheus.Labels{
-		"vm_namespace": vm.Namespace,
-		"vm_name":      vm.Name,
-	})
+	perVMMetrics.deleteActive(vm)
 }

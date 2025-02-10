@@ -452,6 +452,28 @@ func makePerVMMetricsLabels(namespace string, vmName string, endpointID string, 
 	return labels
 }
 
+func (m *PerVMMetrics) updateActive(vm *vmv1.VirtualMachine) {
+	m.activeMu.Lock()
+	defer m.activeMu.Unlock()
+
+	m.activeVMs[util.GetNamespacedName(vm)] = vmMetadata{
+		endpointID: vm.Labels[endpointLabel],
+		projectID:  vm.Labels[projectLabel],
+	}
+}
+
+func (m *PerVMMetrics) deleteActive(vm *vmv1.VirtualMachine) {
+	m.activeMu.Lock()
+	defer m.activeMu.Unlock()
+
+	delete(m.activeVMs, util.GetNamespacedName(vm))
+	// ... and any metrics that were associated with it:
+	m.desiredCU.DeletePartialMatch(prometheus.Labels{
+		"vm_namespace": vm.Namespace,
+		"vm_name":      vm.Name,
+	})
+}
+
 // vmMetric is a data object that represents a single metric
 // (either CPU or memory) for a VM.
 type vmMetric struct {
