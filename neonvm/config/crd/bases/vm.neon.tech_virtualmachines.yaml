@@ -48,6 +48,10 @@ spec:
       name: CPUScalingMode
       priority: 1
       type: string
+    - jsonPath: .spec.targetArchitecture
+      name: TargetArchitecture
+      priority: 1
+      type: string
     name: v1
     schema:
       openAPIV3Schema:
@@ -2941,6 +2945,12 @@ spec:
               service_links:
                 type: boolean
               serviceAccountName:
+                type: string
+              targetArchitecture:
+                default: amd64
+                enum:
+                - amd64
+                - arm64
                 type: string
               targetRevision:
                 description: |-
