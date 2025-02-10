@@ -55,6 +55,7 @@ RUN mkdir -p /neonvm/run
 
 RUN UID_MIN=900 GID_MIN=900 useradd vector
 COPY --from=vector-build /usr/local/bin/vector /usr/local/bin/
+
 COPY --from=neonvm-daemon-loader /neonvmd /usr/local/bin/neonvmd
 
 RUN systemctl enable \
@@ -64,6 +65,8 @@ RUN systemctl enable \
     ssh \
     vector \
     neonvmd.service \
+    neonvm-cache.mount \
+    neonvm-pgdata.mount \
     neonvm-payload.mount \
     systemd-nspawn@neonvm-payload
 
@@ -139,6 +142,7 @@ RUN apk add --no-cache \
     jq \
     busybox-extras \
     e2fsprogs \
+    e2fsprogs-extra \
     qemu-system-x86_64 \
     qemu-system-aarch64 \
     qemu-img \

@@ -98,7 +98,7 @@ func setupVMDisks(
 		case disk.EmptyDisk != nil:
 			logger.Info("creating QCOW2 image with empty ext4 filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
-			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
+			if err := createQCOW2(logger, disk.Name, dPath, &disk.EmptyDisk.Size, disk.EmptyDisk.EnableQuotas, nil); err != nil {
 				return nil, fmt.Errorf("Failed to create QCOW2 image: %w", err)
 			}
 			discard := ""
@@ -236,6 +236,7 @@ func createISO9660runtime(
 	}
 
 	if len(disks) != 0 {
+		// For legacy vm-builder based VMs
 		for _, disk := range disks {
 			if disk.MountPath != "" {
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
@@ -389,7 +390,7 @@ func createSwap(diskPath string, swapSize *resource.Quantity) error {
 	return nil
 }
 
-func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, contentPath *string) error {
+func createQCOW2(logger *zap.Logger, diskName string, diskPath string, diskSize *resource.Quantity, enableQuotas bool, contentPath *string) error {
 	ext4blocksMin := int64(64)
 	ext4blockSize := int64(4096)
 	ext4blockCount := int64(0)
@@ -427,6 +428,15 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 
 	if err := execFg("mkfs.ext4", mkfsArgs...); err != nil {
 		return err
+	}
+
+	if enableQuotas {
+		if err := execFg("tune2fs", "-Q", "prjquota", "ext4.raw"); err != nil {
+			return err
+		}
+		if err := execFg("tune2fs", "-E", "mount_opts=prjquota", "ext4.raw"); err != nil {
+			return err
+		}
 	}
 
 	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {
