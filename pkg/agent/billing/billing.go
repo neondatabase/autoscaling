@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -112,7 +113,10 @@ func (mc *MetricsCollector) Run(
 	defer sinkTg.Wait() //nolint:errcheck // cannot fail, sink-run returns nil.
 	defer cancelSink()
 	sinkTg.Go("sink-run", func(logger *zap.Logger) error {
-		mc.sink.Run(sinkCtx)
+		err := mc.sink.Run(sinkCtx)
+		if err != nil {
+			return fmt.Errorf("billing events sink failed: %w", err)
+		}
 		return nil
 	})
 

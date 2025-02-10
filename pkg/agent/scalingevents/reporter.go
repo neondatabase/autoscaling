@@ -2,6 +2,7 @@ package scalingevents
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -84,8 +85,11 @@ func NewReporter(
 // clients specified in Config until the context expires.
 //
 // Refer there for more information.
-func (r *Reporter) Run(ctx context.Context) {
-	r.sink.Run(ctx)
+func (r *Reporter) Run(ctx context.Context) error {
+	if err := r.sink.Run(ctx); err != nil {
+		return fmt.Errorf("scaling events sink failed: %w", err)
+	}
+	return nil
 }
 
 // Submit adds the ScalingEvent to the sender queue(s), returning without waiting for it to be sent.

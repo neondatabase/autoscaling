@@ -16,7 +16,7 @@ import (
 type EventSink[E any] struct {
 	queueWriters []eventQueuePusher[E]
 
-	runSenders func(context.Context)
+	runSenders func(context.Context) error
 }
 
 // NewEventSink creates a new EventSink with the given clients to dispatch events into.
@@ -41,9 +41,9 @@ func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients 
 		})
 	}
 
-	var runSenders func(context.Context)
+	var runSenders func(context.Context) error
 	if len(senders) > 0 {
-		runSenders = func(ctx context.Context) {
+		runSenders = func(ctx context.Context) error {
 			tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
 
 			for _, sender := range senders {
@@ -54,14 +54,15 @@ func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients 
 				})
 			}
 
-			_ = tg.Wait() // no need to check error, they all return nil.
+			return tg.Wait()
 		}
 	} else {
 		// Special case when there's no clients -- we want our run function to just wait until the
 		// context is complete, matching what the behavior *would* be if there were actually sender
 		// threads we were waiting on.
-		runSenders = func(ctx context.Context) {
+		runSenders = func(ctx context.Context) error {
 			<-ctx.Done()
+			return nil
 		}
 	}
 
@@ -78,8 +79,8 @@ func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients 
 // push any remaining events. Run() only completes after these final events have been pushed.
 //
 // Calling Run() more than once is unsound.
-func (s *EventSink[E]) Run(ctx context.Context) {
-	s.runSenders(ctx)
+func (s *EventSink[E]) Run(ctx context.Context) error {
+	return s.runSenders(ctx)
 }
 
 // Enqueue submits the event to the internal client sending queues, returning without blocking.
