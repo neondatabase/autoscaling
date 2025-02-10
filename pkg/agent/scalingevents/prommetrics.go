@@ -6,6 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type PromMetrics struct {
@@ -13,22 +14,17 @@ type PromMetrics struct {
 	totalCount *prometheus.GaugeVec
 }
 
-func NewPromMetrics() PromMetrics {
+func NewPromMetrics(reg prometheus.Registerer) PromMetrics {
 	return PromMetrics{
-		reporting: reporting.NewEventSinkMetrics("autoscaling_agent_events"),
-		totalCount: prometheus.NewGaugeVec(
+		reporting: reporting.NewEventSinkMetrics("autoscaling_agent_scalingevents", reg),
+		totalCount: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_agent_scaling_events_total",
 				Help: "Total number of scaling events generated",
 			},
 			[]string{"kind"},
-		),
+		)),
 	}
-}
-
-func (m PromMetrics) MustRegister(reg *prometheus.Registry) {
-	m.reporting.MustRegister(reg)
-	reg.MustRegister(m.totalCount)
 }
 
 func (m PromMetrics) recordSubmitted(event ScalingEvent) {

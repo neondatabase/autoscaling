@@ -12,7 +12,8 @@ import (
 )
 
 type ClientsConfig struct {
-	S3 *S3ClientConfig `json:"s3"`
+	AzureBlob *AzureBlobStorageClientConfig `json:"azureBlob"`
+	S3        *S3ClientConfig               `json:"s3"`
 }
 
 type S3ClientConfig struct {
@@ -21,11 +22,32 @@ type S3ClientConfig struct {
 	PrefixInBucket string `json:"prefixInBucket"`
 }
 
+type AzureBlobStorageClientConfig struct {
+	reporting.BaseClientConfig
+	reporting.AzureBlobStorageClientConfig
+	PrefixInContainer string `json:"prefixInContainer"`
+}
+
 type eventsClient = reporting.Client[ScalingEvent]
 
 func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) ([]eventsClient, error) {
 	var clients []eventsClient
 
+	if c := cfg.AzureBlob; c != nil {
+		generateKey := newBlobStorageKeyGenerator(c.PrefixInContainer)
+		client, err := reporting.NewAzureBlobStorageClient(c.AzureBlobStorageClientConfig, generateKey)
+		if err != nil {
+			return nil, fmt.Errorf("error creating Azure Blob Storage client: %w", err)
+		}
+		logger.Info("Created Azure Blob Storage client for scaling events", zap.Any("config", c))
+
+		clients = append(clients, eventsClient{
+			Name:           "azureblob",
+			Base:           client,
+			BaseConfig:     c.BaseClientConfig,
+			SerializeBatch: reporting.WrapSerialize[ScalingEvent](reporting.GZIPCompress, reporting.JSONLinesMarshalBatch),
+		})
+	}
 	if c := cfg.S3; c != nil {
 		generateKey := newBlobStorageKeyGenerator(c.PrefixInBucket)
 		client, err := reporting.NewS3Client(ctx, c.S3ClientConfig, generateKey)
