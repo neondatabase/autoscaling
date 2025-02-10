@@ -192,6 +192,8 @@ jobs:
           # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
           push: true
           pull: true
+          provenance: false
+          sbom: false
           file: neonvm-kernel/Dockerfile.kernel-builder
           cache-from: type=registry,ref=cache.neon.build/vm-kernel:cache
           cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/vm-kernel:cache,mode=max' || '' }}
