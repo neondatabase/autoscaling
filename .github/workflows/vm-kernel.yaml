@@ -28,13 +28,20 @@ on:
         type: boolean
         required: false
         default: false
+      archs:
+        description: 'Architectures to build for'
+        type: string
+        required: false
+        default: '["amd64","arm64"]'
+
     outputs:
       image:
         description: 'vm-kernel Docker image'
-        value: ${{ jobs.setup-build-vm-kernel-image.outputs.image || jobs.build-vm-kernel-image.outputs.image }}
+        value: ${{ jobs.merge-kernel-images.outputs.image || jobs.setup-build-vm-kernel-image.outputs.image }}
 
 env:
-  VM_KERNEL_IMAGE: "neondatabase/vm-kernel"
+  VM_KERNEL_IMAGE: neondatabase/vm-kernel
+
 
 defaults:
   run:
@@ -42,10 +49,12 @@ defaults:
 
 jobs:
   setup-build-vm-kernel-image:
+    strategy:
+      matrix:
+        arch: ${{ fromJson(inputs.archs) }}
     outputs:
       image: ${{ steps.get-kernel-image.outputs.image }}
       kernel-cache-tag: ${{ steps.get-kernel-cache-tag.outputs.kernel-cache-tag }}
-
     runs-on: ubuntu-latest
 
     steps:
@@ -68,12 +77,12 @@ jobs:
           CACHE_TAG: ${{ steps.get-kernel-cache-tag.outputs.kernel-cache-tag }}
         run: |
           if [ -n "${FORCED_TAG}" ]; then
-            DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}:${FORCED_TAG} -v | jq -r '.Descriptor.digest')
-            IMAGE="${VM_KERNEL_IMAGE}:${FORCED_TAG}@${DIGEST}"
+            DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${FORCED_TAG} -v | jq -r '.Descriptor.digest')
+            IMAGE="${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${FORCED_TAG}@${DIGEST}"
           elif [ "${FORCE_REBUILD}" == "false" ]; then
-            CACHE_TAG_DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}:${CACHE_TAG} -v | jq -r '.Descriptor.digest' || true)
+            CACHE_TAG_DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${CACHE_TAG} -v | jq -r '.Descriptor.digest' || true)
             if [ -n "${CACHE_TAG_DIGEST}" ]; then
-              IMAGE="${VM_KERNEL_IMAGE}:${CACHE_TAG}@${CACHE_TAG_DIGEST}"
+              IMAGE="${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${CACHE_TAG}@${CACHE_TAG_DIGEST}"
             else
               IMAGE=""
             fi
@@ -126,13 +135,52 @@ jobs:
           docker tag ${CACHED_IMAGE} ${VM_KERNEL_IMAGE}:${NEW_TAG}
           docker push ${VM_KERNEL_IMAGE}:${NEW_TAG}
 
-  build-vm-kernel-image:
+  get-tags:
     needs: setup-build-vm-kernel-image
+    outputs:
+      kernel_version_tag: ${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
+      tags: ${{ steps.get-tags.outputs.tags }}
+      canonical: ${{ steps.get-tags.outputs.canonical }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v4
+
+      - name: get kernel version
+        id: get-kernel-version
+        run: |
+          linux_config=$(ls neonvm-kernel/linux-config-*)  # returns something like "neonvm-kernel/linux-config-amd64-6.1.63"
+          kernel_version=${linux_config##*-}               # returns something like "amd64-6.1.63"
+
+          echo VM_KERNEL_VERSION=$kernel_version >> $GITHUB_OUTPUT
+
+      - name: get docker tags
+        id: get-tags
+        env:
+          KERNEL_VERSION_TAG: ${{ inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
+          CACHE_TAG: ${{ needs.setup-build-vm-kernel-image.outputs.kernel-cache-tag }}
+        run: |
+          # A comma-separated list of tags
+          TAGS="${KERNEL_VERSION_TAG}"
+          TAGS="${CACHE_TAG},${TAGS}"
+          TAGS="${GITHUB_RUN_ID},${TAGS}"
+          echo "Debug TAGS=${TAGS}"
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          # `docker/build-push-action@v6` returns all ${TAGS} in metadata ("image.name" field), so it can't be used a image name right away.
+          # Choose one of them as a "canonical" tag and use it to construct the job output (along with a digest provided by `docker/build-push-action@v6`).
+          echo "canonical=${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
+
+  build-vm-kernel-image:
+    needs: [setup-build-vm-kernel-image, get-tags]
     if: needs.setup-build-vm-kernel-image.outputs.image == ''
     outputs:
-      image: ${{ steps.get-tags.outputs.canonical }}@${{ steps.build-linux-kernel.outputs.digest }}
+      image: ${{ needs.get-tags.outputs.canonical }}@${{ steps.build-linux-kernel.outputs.digest }}
 
-    runs-on: [ self-hosted, gen3, large ]
+    strategy:
+      matrix:
+        arch: ${{ fromJson(inputs.archs) }}
+
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
     steps:
       - name: git checkout
         uses: actions/checkout@v4
@@ -154,47 +202,83 @@ jobs:
           username: ${{ secrets.NEON_CI_DOCKERCACHE_USERNAME }}
           password: ${{ secrets.NEON_CI_DOCKERCACHE_PASSWORD }}
 
-      - name: get kernel version
-        id: get-kernel-version
-        run: |
-          linux_config=$(ls neonvm-kernel/linux-config-*)  # returns something like "neonvm-kernel/linux-config-amd64-6.1.63"
-          kernel_version=${linux_config##*-}               # returns something like "amd64-6.1.63"
-
-          echo VM_KERNEL_VERSION=$kernel_version >> $GITHUB_OUTPUT
-
-      - name: get docker tags
-        id: get-tags
+      - name: Generate full image tags
+        id: generate-full-image-tags
         env:
-          KERNEL_VERSION_TAG: ${{ inputs.tag || steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
-          CACHE_TAG: ${{ needs.setup-build-vm-kernel-image.outputs.kernel-cache-tag }}
+          VM_KERNEL_IMAGE: neondatabase/vm-kernel
+          TAGS: "${{ join(fromJson(needs.get-tags.outputs.tags), ' ')}}"
         run: |
-          # A comma-separated list of tags
-          TAGS="${VM_KERNEL_IMAGE}:${KERNEL_VERSION_TAG}"
-          TAGS="${VM_KERNEL_IMAGE}:${CACHE_TAG},${TAGS}"
-          TAGS="${VM_KERNEL_IMAGE}:${GITHUB_RUN_ID},${TAGS}"
+          # build list of full qualified image names with all tags we have for this run
+          # list is used later to merge images
+          PROCESSED_TAGS=""
+          for tag in ${TAGS}; do
 
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+            # build full image tag like "neondatabase/vm-kernel-amd64:6.1.63"
+            full_image_tag="$VM_KERNEL_IMAGE-${{ matrix.arch }}:${tag}"
 
-          # `docker/build-push-action@v6` returns all ${TAGS} in metadata ("image.name" field), so it can't be used a image name right away.
-          # Choose one of them as a "canonical" tag and use it to construct the job output (along with a digest provided by `docker/build-push-action@v6`).
-          echo "canonical=${VM_KERNEL_IMAGE}:${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
+            # add or instantiate list of full qualified image names with all tags we have for this run
+            if [ -z "$PROCESSED_TAGS" ]; then
+              PROCESSED_TAGS="$full_image_tag"
+            else
+              PROCESSED_TAGS="$PROCESSED_TAGS,$full_image_tag"
+            fi
+          done
+
+          echo "tags=${PROCESSED_TAGS}" >> $GITHUB_OUTPUT
 
       - name: build linux kernel
         id: build-linux-kernel
         uses: docker/build-push-action@v6
         with:
-          build-args: KERNEL_VERSION=${{ steps.get-kernel-version.outputs.VM_KERNEL_VERSION }}
+          build-args: KERNEL_VERSION=${{ needs.get-tags.outputs.kernel_version_tag }}
           context: neonvm-kernel
-          platforms: linux/amd64
           # neonvm-kernel/Dockerfile.kernel-builder has different targets for different architectures
           # so we need to specify the target explicitly
-          target: kernel_amd64
+          target: ${{ format('kernel_{0}', matrix.arch) }}
           # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
           push: true
           pull: true
           provenance: false
           sbom: false
           file: neonvm-kernel/Dockerfile.kernel-builder
-          cache-from: type=registry,ref=cache.neon.build/vm-kernel:cache
-          cache-to: ${{ github.ref_name == 'main' && 'type=registry,ref=cache.neon.build/vm-kernel:cache,mode=max' || '' }}
-          tags: ${{ steps.get-tags.outputs.tags }}
+          cache-from: ${{ format('type=registry,ref=cache.neon.build/vm-kernel-{0}:cache', matrix.arch) }}
+          cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/vm-kernel-{0}:cache,mode=max', matrix.arch) || '' }}
+          tags: ${{ steps.generate-full-image-tags.outputs.tags }}
+
+  merge-kernel-images:
+    needs: [setup-build-vm-kernel-image, build-vm-kernel-image, get-tags]
+    # onlye merge images build during this workflow invocation
+    if: needs.setup-build-vm-kernel-image.outputs.image == ''
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.merge-kernel-images.outputs.image }}
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v4
+
+      - name: docker - setup buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: login to docker hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: merge kernel images
+        id: merge-kernel-images
+        env:
+          ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
+          # merge only canonical tag
+          TAG: ${{ needs.get-tags.outputs.canonical }}
+
+        run: |
+          result_image="${VM_KERNEL_IMAGE}:${TAG}"
+
+          args=("-t" "${result_image}")
+          for arch in ${ARCHS}; do
+            args+=("${VM_KERNEL_IMAGE}-${arch}:${TAG}")
+          done
+          docker buildx imagetools create "${args[@]}"
+
+          echo "image=${result_image}" >> $GITHUB_OUTPUT

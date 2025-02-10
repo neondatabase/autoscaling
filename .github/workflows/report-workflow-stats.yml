@@ -18,6 +18,7 @@ on:
 
 jobs:
   gh-workflow-stats:
+    if: false # drop me, reduce noise while experimenting
     name: Github Workflow Stats
     runs-on: ubuntu-22.04
     permissions:
