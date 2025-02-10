@@ -431,7 +431,7 @@ func makePerVMMetrics() (*PerVMMetrics, *prometheus.Registry) {
 				"vm_name",      // .metadata.name
 				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
 				"project_id",   // .metadata.labels["neon/project-id"]
-				"reason",       // desiredCUReason: total, cpu, mem, lfc
+				"component",    // desired CU component: total, cpu, mem, lfc
 			},
 		)),
 	}
@@ -477,8 +477,8 @@ func (m *PerVMMetrics) updateDesiredCU(
 	}
 
 	pairs := []struct {
-		key   string
-		value *float64
+		component string
+		value     *float64
 	}{
 		{"total", lo.ToPtr(float64(total))},
 		{"cpu", parts.CPU},
@@ -492,7 +492,7 @@ func (m *PerVMMetrics) updateDesiredCU(
 			"vm_name":      vm.Name,
 			"endpoint_id":  info.endpointID,
 			"project_id":   info.projectID,
-			"reason":       p.key,
+			"component":    p.component,
 		}
 		if p.value == nil {
 			m.desiredCU.Delete(labels)
