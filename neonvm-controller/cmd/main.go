@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/zapr"
 	"github.com/tychoish/fun/srv"
 	"go.uber.org/zap"
@@ -61,6 +62,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(vmv1.AddToScheme(scheme))
+	utilruntime.Must(certv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -195,6 +197,9 @@ func main() {
 		FailingRefreshInterval:  failingRefreshInterval,
 		AtMostOnePod:            atMostOnePod,
 		DefaultCPUScalingMode:   defaultCpuScalingMode,
+		CertificateIssuer:       "neon-ca-issuer",
+		CertificateDuration:     86400 * time.Second,
+		CertificateRenewal:      3600 * time.Second,
 	}
 
 	vmReconciler := &controllers.VMReconciler{

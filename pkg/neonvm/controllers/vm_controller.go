@@ -17,9 +17,14 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
+	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -31,6 +36,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cert-manager/cert-manager/pkg/apis/certmanager"
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	"github.com/cert-manager/cert-manager/pkg/util/pki"
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/samber/lo"
 	"golang.org/x/crypto/ssh"
@@ -98,6 +107,7 @@ type VMReconciler struct {
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools/finalizers,verbs=update
 //+kubebuilder:rbac:groups=k8s.cni.cncf.io,resources=network-attachment-definitions,verbs=get;list;watch
+//+kubebuilder:rbac:groups=cert-manager.io,resources=certificaterequests,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -380,6 +390,43 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		return errors.New("DIMMSlots memory provider is deprecated and disabled")
 	}
 
+	// Generate tls secret name
+	if len(vm.Status.TLSSecretName) == 0 {
+		vm.Status.TLSSecretName = fmt.Sprintf("tls-neonvm-%s", vm.Name)
+	}
+
+	// Check if the certificate Secret exists, if not start the creation routine.
+	certSecret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: vm.Status.TLSSecretName, Namespace: vm.Namespace}, certSecret)
+	if err != nil && apierrors.IsNotFound(err) {
+		msg := fmt.Sprintf("VirtualMachine %s certificate secret %s not found", vm.Name, vm.Status.TLSSecretName)
+		r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
+		certSecret, err = r.doReconcileCertificateSecret(ctx, vm, nil)
+		if err != nil {
+			return err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get vm-runner certificate Secret")
+		return err
+	} else {
+		// parse the certificate and see if it's close to expiration.
+		certs, err := pki.DecodeX509CertificateChainBytes(certSecret.Data[corev1.TLSCertKey])
+		if err != nil {
+			log.Error(err, "Failed to parse VM certificate")
+			return err
+		}
+
+		// if the certificate is close to expiry, update it
+		if time.Now().Add(r.Config.CertificateRenewal).After(certs[0].NotAfter) {
+			msg := fmt.Sprintf("VirtualMachine %s certificate secret %s close to expiration %v", vm.Name, vm.Status.TLSSecretName, certs[0].NotAfter)
+			r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
+			certSecret, err = r.doReconcileCertificateSecret(ctx, vm, certSecret)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	switch vm.Status.Phase {
 
 	case "":
@@ -389,6 +436,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
+		if certSecret.Data == nil {
+			return nil
+		}
+
 		// Generate runner pod name and set desired memory provider.
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
@@ -405,7 +456,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 		// Check if the runner pod already exists, if not create a new one
 		vmRunner := &corev1.Pod{}
-		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
+		err = r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			var sshSecret *corev1.Secret
 			if enableSSH {
@@ -786,6 +837,126 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	return nil
 }
 
+func (r *VMReconciler) doReconcileCertificateSecret(ctx context.Context, vm *vmv1.VirtualMachine, certSecret *corev1.Secret) (*corev1.Secret, error) {
+	log := log.FromContext(ctx)
+
+	// Check if the TLS private key temporary secret exists, if not create a new one
+	var key crypto.Signer
+	tmpKeySecret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-tmp", vm.Status.TLSSecretName), Namespace: vm.Namespace}, tmpKeySecret)
+	if err != nil && apierrors.IsNotFound(err) {
+		// create a new key for this VM
+		key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			log.Error(err, "Failed to generate private key for VirtualMachine")
+			return nil, err
+		}
+
+		// Define the secret
+		tmpKeySecret, err = r.tmpKeySecretForVirtualMachine(vm, key)
+		if err != nil {
+			log.Error(err, "Failed to define new Secret resource for VirtualMachine")
+			return nil, err
+		}
+
+		if err = r.Create(ctx, tmpKeySecret); err != nil {
+			log.Error(err, "Failed to create new temporary Secret", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+			return nil, err
+		}
+		log.Info("Virtual Machine temporary Secret was created", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+
+		msg := fmt.Sprintf("VirtualMachine %s created temporary Secret %s", vm.Name, tmpKeySecret.Name)
+		r.Recorder.Event(vm, "Normal", "Created", msg)
+	} else if err != nil {
+		log.Error(err, "Failed to get vm-runner Secret")
+		return nil, err
+	} else {
+		key, err = pki.DecodePrivateKeyBytes(tmpKeySecret.Data[corev1.TLSPrivateKeyKey])
+		if err != nil {
+			log.Error(err, "Failed to decode private key")
+		}
+	}
+
+	// Check if the TLS certificate already exists, if not create a new one
+	certificateReq := &certv1.CertificateRequest{}
+	err = r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, certificateReq)
+	if err != nil && apierrors.IsNotFound(err) {
+
+		// Define a new cert req
+		certificateReq, err = r.certReqForVirtualMachine(vm, key)
+		if err != nil {
+			log.Error(err, "Failed to define new Certificate resource for VirtualMachine")
+			return nil, err
+		}
+
+		log.Info("Creating a new CertificateRequest", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
+		if err = r.Create(ctx, certificateReq); err != nil {
+			log.Error(err, "Failed to create new Certificate", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
+			return nil, err
+		}
+		log.Info("Runner CertificateRequest was created", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
+
+		msg := fmt.Sprintf("VirtualMachine %s created CertificateRequest %s", vm.Name, certificateReq.Name)
+		r.Recorder.Event(vm, "Normal", "Created", msg)
+	} else if err != nil {
+		log.Error(err, "Failed to get vm-runner CertificateRequest")
+		return nil, err
+	}
+
+	if len(certificateReq.Status.Certificate) != 0 {
+		if certSecret == nil {
+			// we have a certificate and the corresponding private key
+			// create the proper certificate secret and delete the tmp secret
+			certSecret, err = r.certSecretForVirtualMachine(vm, key, certificateReq.Status.Certificate)
+			if err != nil {
+				log.Error(err, "Failed to define new certificate Secret resource for VirtualMachine")
+				return nil, err
+			}
+
+			if err = r.Create(ctx, certSecret); err != nil {
+				log.Error(err, "Failed to create new Secret", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+				return nil, err
+			}
+			log.Info("Virtual Machine Secret was created", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+
+			msg := fmt.Sprintf("VirtualMachine %s created certificate Secret %s", vm.Name, certSecret.Name)
+			r.Recorder.Event(vm, "Normal", "Created", msg)
+		} else if !reflect.DeepEqual(certificateReq.Status.Certificate, certSecret.Data[corev1.TLSCertKey]) {
+			encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
+			if err != nil {
+				return nil, err
+			}
+			certSecret.Data[corev1.TLSPrivateKeyKey] = encodedKey
+			certSecret.Data[corev1.TLSCertKey] = certificateReq.Status.Certificate
+
+			if err = r.Update(ctx, certSecret); err != nil {
+				log.Error(err, "Failed to update new Secret", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+				return nil, err
+			}
+			log.Info("Virtual Machine Secret was updated", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
+
+			msg := fmt.Sprintf("VirtualMachine %s updated certificate Secret %s", vm.Name, certSecret.Name)
+			r.Recorder.Event(vm, "Normal", "Updated", msg)
+		}
+
+		err = r.Delete(ctx, tmpKeySecret)
+		if err != nil {
+			log.Info("Virtual Machine temporary certificate secret could not be deleted", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+		}
+		msg := fmt.Sprintf("VirtualMachine %s tmp private key Secret %s was deleted", vm.Name, tmpKeySecret.Name)
+		r.Recorder.Event(vm, "Normal", "Deleted", msg)
+
+		err = r.Delete(ctx, certificateReq)
+		if err != nil {
+			log.Info("Virtual Machine CertificateRequest could not be deleted", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
+		}
+		msg = fmt.Sprintf("VirtualMachine %s CertificateRequest %s was deleted", vm.Name, certificateReq.Name)
+		r.Recorder.Event(vm, "Normal", "Deleted", msg)
+	}
+
+	return certSecret, nil
+}
+
 func propagateRevision(vm *vmv1.VirtualMachine) {
 	if vm.Spec.TargetRevision == nil {
 		return
@@ -1094,6 +1265,64 @@ func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 			"ssh-publickey":  publicKey,
 			"ssh-privatekey": privateKey,
 		},
+	}
+
+	return secret, nil
+}
+
+// certReqForVirtualMachine returns a VirtualMachine CertificateRequest object
+func (r *VMReconciler) certReqForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+) (*certv1.CertificateRequest, error) {
+	cert, err := certReqSpec(vm, r.Config, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, cert, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return cert, nil
+}
+
+// tmpKeySecretForVirtualMachine returns a VirtualMachine Secret object for temporarily storing the key
+func (r *VMReconciler) tmpKeySecretForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+) (*corev1.Secret, error) {
+	secret, err := tmpKeySecretSpec(vm, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, secret, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return secret, nil
+}
+
+// certSecretForVirtualMachine returns a VirtualMachine Secret object for storing the key+cert
+func (r *VMReconciler) certSecretForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+	cert []byte,
+) (*corev1.Secret, error) {
+	secret, err := certSecretSpec(vm, key, cert)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, secret, r.Scheme); err != nil {
+		return nil, err
 	}
 
 	return secret, nil
@@ -1546,6 +1775,21 @@ func podSpec(
 		}
 	}
 
+	// Add TLS secret
+	mnt := corev1.VolumeMount{
+		Name:      "tls",
+		MountPath: fmt.Sprintf("/vm/mounts%s", "/var/tls"),
+	}
+	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: "tls",
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: vm.Status.TLSSecretName,
+			},
+		},
+	})
+
 	// use multus network to add extra network interface
 	if vm.Spec.ExtraNetwork != nil && vm.Spec.ExtraNetwork.Enable {
 		var nadNetwork string
@@ -1568,6 +1812,162 @@ func podSpec(
 	return pod, nil
 }
 
+func certSpec(
+	vm *vmv1.VirtualMachine,
+	config *ReconcilerConfig,
+) *certv1.Certificate {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+
+	commonName := fmt.Sprintf("%s.%s.svc.cluster.local", vm.Name, vm.Namespace)
+
+	issuer := cmmeta.ObjectReference{
+		Name:  config.CertificateIssuer,
+		Kind:  "ClusterIssuer",
+		Group: certmanager.GroupName,
+	}
+
+	certSpec := certv1.CertificateSpec{
+		CommonName: commonName,
+		DNSNames:   []string{commonName},
+		IssuerRef:  issuer,
+		SecretName: vm.Status.TLSSecretName,
+		PrivateKey: &certv1.CertificatePrivateKey{
+			// todo: can we support Ed25519?
+			Algorithm:      certv1.ECDSAKeyAlgorithm,
+			Encoding:       certv1.PKCS1,
+			RotationPolicy: certv1.RotationPolicyAlways,
+			Size:           256,
+		},
+		Usages:      certv1.DefaultKeyUsages(),
+		IsCA:        false,
+		Duration:    &metav1.Duration{Duration: config.CertificateDuration},
+		RenewBefore: &metav1.Duration{Duration: config.CertificateRenewal},
+		SecretTemplate: &certv1.CertificateSecretTemplate{
+			Labels:      labels,
+			Annotations: annotations,
+		},
+	}
+
+	return &certv1.Certificate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        vm.Name,
+			Namespace:   vm.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Spec: certSpec,
+	}
+}
+
+func tmpKeySecretSpec(
+	vm *vmv1.VirtualMachine,
+	key crypto.PrivateKey,
+) (*corev1.Secret, error) {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+
+	encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
+	if err != nil {
+		return nil, err
+	}
+
+	name := fmt.Sprintf("%s-tmp", vm.Status.TLSSecretName)
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   vm.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Data: map[string][]byte{
+			corev1.TLSPrivateKeyKey: encodedKey,
+		},
+	}, nil
+}
+
+func certSecretSpec(
+	vm *vmv1.VirtualMachine,
+	key crypto.PrivateKey,
+	cert []byte,
+) (*corev1.Secret, error) {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+
+	encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
+	if err != nil {
+		return nil, err
+	}
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        vm.Status.TLSSecretName,
+			Namespace:   vm.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Data: map[string][]byte{
+			corev1.TLSPrivateKeyKey: encodedKey,
+			corev1.TLSCertKey:       cert,
+		},
+		Type: corev1.SecretTypeTLS,
+	}, nil
+}
+
+func certReqSpec(
+	vm *vmv1.VirtualMachine,
+	config *ReconcilerConfig,
+	key crypto.Signer,
+) (*certv1.CertificateRequest, error) {
+	runnerVersion := api.RunnerProtoV1
+	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	annotations := annotationsForVirtualMachine(vm)
+
+	issuer := cmmeta.ObjectReference{
+		Name:  config.CertificateIssuer,
+		Kind:  "ClusterIssuer",
+		Group: certmanager.GroupName,
+	}
+
+	cr, err := pki.GenerateCSR(certSpec(vm, config))
+	if err != nil {
+		return nil, err
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, cr, key)
+	if err != nil {
+		return nil, err
+	}
+
+	csrPEM := bytes.NewBuffer([]byte{})
+	err = pem.Encode(csrPEM, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER, Headers: map[string]string{}})
+	if err != nil {
+		return nil, err
+	}
+
+	certSpec := certv1.CertificateRequestSpec{
+		Duration:  &metav1.Duration{Duration: config.CertificateDuration},
+		IssuerRef: issuer,
+		Request:   csrPEM.Bytes(),
+		IsCA:      false,
+		Usages:    certv1.DefaultKeyUsages(),
+	}
+
+	return &certv1.CertificateRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        vm.Name,
+			Namespace:   vm.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Spec: certSpec,
+	}, nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
@@ -1582,6 +1982,8 @@ func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics
 	)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
+		Owns(&certv1.CertificateRequest{}).
+		Owns(&corev1.Secret{}).
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
