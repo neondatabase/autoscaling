@@ -692,13 +692,19 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 	defer wg.Done()
 
 	secrets := make(map[string]string)
+	secretsOrd := []string{}
 	for _, disk := range disks {
-		if diskNeedsSynchronisation(disk) {
-			// secrets are mounted using the atomicwriter utility, which loads the secret directory
-			// into `..data`.
+		if disk.Watch != nil && *disk.Watch {
+			// secrets/configmaps are mounted using the atomicwriter utility,
+			// which loads the directory into `..data`.
 			dataDir := fmt.Sprintf("/vm/mounts%s/..data", disk.MountPath)
 			secrets[dataDir] = disk.MountPath
+			secretsOrd = append(secretsOrd, dataDir)
 		}
+	}
+
+	if len(secretsOrd) == 0 {
+		return
 	}
 
 	// Faster loop for the initial upload.
@@ -706,7 +712,8 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 	// so it's important we sync them as soon as the daemon is available.
 	for {
 		success := true
-		for hostpath, guestpath := range secrets {
+		for _, hostpath := range secretsOrd {
+			guestpath := secrets[hostpath]
 			if err := sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
 				success = false
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
