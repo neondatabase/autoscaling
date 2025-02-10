@@ -24,6 +24,9 @@ func ChecksumFlatDir(path string) (string, error) {
 	}
 	sort.Strings(keys)
 
+	// note: any changes to the hash need to be sychronised between neonvm-runner and neonvm-daemon.
+	// Since they are updated independantly, this is not trivial.
+	// If in doubt, make a new function and don't touch this one.
 	hasher, err := blake2b.New256(nil)
 	if err != nil {
 		return "", err
@@ -31,13 +34,21 @@ func ChecksumFlatDir(path string) (string, error) {
 
 	for _, filename := range keys {
 		data := files[filename]
-		var length []byte
 
-		// hash as "{name}\0{len(data)}{data}"
-		// this prevents any possible hash confusion problems
+		// File hash with the following encoding: "{name}\0{len(data)}{data}".
+		//
+		// This format prevents any possible (even if unrealistic) hash confusion problems.
+		// If we only hashed filename and data, then there's no difference between:
+		// 	 name = "file1"
+		// 	 data = []
+		// and
+		//   name = "file"
+		//   data = [b'1']
+		//
+		// We are trusting that filenames on linux cannot have a nul character.
 		hasher.Write([]byte(filename))
 		hasher.Write([]byte{0})
-		hasher.Write(binary.LittleEndian.AppendUint64(length, uint64(len(data))))
+		hasher.Write(binary.LittleEndian.AppendUint64([]byte{}, uint64(len(data))))
 		hasher.Write(data)
 	}
 
