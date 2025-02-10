@@ -98,27 +98,39 @@ func (mc *MetricsCollector) Run(
 	logger *zap.Logger,
 	store VMStoreForNode,
 ) error {
+	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
+
+	// note: sink has its own context, so that it is canceled only after runCollector finishes.
+	sinkCtx, cancelSink := context.WithCancel(context.Background())
+	defer cancelSink() // make sure resources are cleaned up
+
+	tg.Go("collect", func(logger *zap.Logger) error {
+		defer cancelSink() // cancel event sending *only when we're done collecting*
+		return mc.runCollector(tg.Ctx(), logger, store)
+	})
+
+	tg.Go("sink-run", func(logger *zap.Logger) error {
+		err := mc.sink.Run(sinkCtx) // note: NOT tg.Ctx(); see more above.
+		if err != nil {
+			return fmt.Errorf("billing events sink failed: %w", err)
+		}
+		return nil
+	})
+
+	return tg.Wait()
+}
+
+func (mc *MetricsCollector) runCollector(
+	ctx context.Context,
+	logger *zap.Logger,
+	store VMStoreForNode,
+) error {
 	collectTicker := time.NewTicker(time.Second * time.Duration(mc.conf.CollectEverySeconds))
 	defer collectTicker.Stop()
 	// Offset by half a second, so it's a bit more deterministic.
 	time.Sleep(500 * time.Millisecond)
 	accumulateTicker := time.NewTicker(time.Second * time.Duration(mc.conf.AccumulateEverySeconds))
 	defer accumulateTicker.Stop()
-
-	// Create a new taskgroup to manage mc.sink.Run() -- we want to run the event senders in the
-	// background and cancel them when we're done collecting, but wait for them to finish before
-	// returning.
-	sinkTg := taskgroup.NewGroup(logger)
-	sinkCtx, cancelSink := context.WithCancel(context.Background())
-	defer sinkTg.Wait() //nolint:errcheck // cannot fail, sink-run returns nil.
-	defer cancelSink()
-	sinkTg.Go("sink-run", func(logger *zap.Logger) error {
-		err := mc.sink.Run(sinkCtx)
-		if err != nil {
-			return fmt.Errorf("billing events sink failed: %w", err)
-		}
-		return nil
-	})
 
 	state := metricsState{
 		historical:      make(map[metricsKey]vmMetricsHistory),
@@ -127,7 +139,6 @@ func (mc *MetricsCollector) Run(
 		pushWindowStart: time.Now(),
 	}
 
-	logger = logger.Named("collect")
 	state.collect(logger, store, mc.metrics)
 
 	for {
