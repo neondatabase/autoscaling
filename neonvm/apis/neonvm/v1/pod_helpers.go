@@ -1,6 +1,9 @@
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -59,4 +62,33 @@ func MigrationOwnerForPod(pod *corev1.Pod) (metav1.OwnerReference, MigrationRole
 
 	var emptyRef metav1.OwnerReference
 	return emptyRef, "", false
+}
+
+// VirtualMachineUsageFromPod returns the resources currently used by the virtual machine, as
+// described by the helper usage annotation on the pod.
+//
+// If the usage annotation is not present, this function returns (nil, nil).
+func VirtualMachineUsageFromPod(pod *corev1.Pod) (*VirtualMachineUsage, error) {
+	return extractFromAnnotation[VirtualMachineUsage](pod, VirtualMachineUsageAnnotation)
+}
+
+// VirtualMachineResourcesFromPod returns the information about resources allocated to the virtual
+// machine, as encoded by the helper annotation on the pod.
+//
+// If the annotation is not present, this function returns (nil, nil).
+func VirtualMachineResourcesFromPod(pod *corev1.Pod) (*VirtualMachineResources, error) {
+	return extractFromAnnotation[VirtualMachineResources](pod, VirtualMachineResourcesAnnotation)
+}
+
+func extractFromAnnotation[T any](pod *corev1.Pod, annotation string) (*T, error) {
+	jsonString, ok := pod.Annotations[annotation]
+	if !ok {
+		return nil, nil
+	}
+
+	var value T
+	if err := json.Unmarshal([]byte(jsonString), &value); err != nil {
+		return nil, fmt.Errorf("could not unmarshal %s annotation: %w", annotation, err)
+	}
+	return &value, nil
 }
