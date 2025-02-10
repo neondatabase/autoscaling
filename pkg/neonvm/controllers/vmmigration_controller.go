@@ -713,6 +713,7 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 	pod.Name = migration.Status.TargetPodName
 
 	// add env variable to turn on migration receiver
+	// TODO: make it false or empty after the migration is done to enable correct readiness probe
 	pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{Name: "RECEIVE_MIGRATION", Value: "true"})
 
 	// add podAntiAffinity to schedule target pod to another k8s node
