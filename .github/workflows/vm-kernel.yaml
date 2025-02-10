@@ -201,12 +201,22 @@ jobs:
           registry: cache.neon.build
           username: ${{ secrets.NEON_CI_DOCKERCACHE_USERNAME }}
           password: ${{ secrets.NEON_CI_DOCKERCACHE_PASSWORD }}
-      - name: Process kernel image tags
+
+      - name: Generate full image tags
         id: generate-full-image-tags
+        env:
+          VM_KERNEL_IMAGE: neondatabase/vm-kernel
+          TAGS: "${{ join(fromJson(needs.get-tags.outputs.tags), ' ')}}"
         run: |
+          # build list of full qualified image names with all tags we have for this run
+          # list is used later to merge images
           PROCESSED_TAGS=""
-          for tag in ${TAGS//,/ }; do
-            full_image_tag="$VM_KERNEL_IMAGE-${{ matrix.arch }}:$(echo "$tag" | xargs)"
+          for tag in ${TAGS}; do
+
+            # build full image tag like "neondatabase/vm-kernel-amd64:6.1.63"
+            full_image_tag="$VM_KERNEL_IMAGE-${{ matrix.arch }}:${tag}"
+
+            # add or instantiate list of full qualified image names with all tags we have for this run
             if [ -z "$PROCESSED_TAGS" ]; then
               PROCESSED_TAGS="$full_image_tag"
             else
@@ -215,10 +225,6 @@ jobs:
           done
 
           echo "tags=${PROCESSED_TAGS}" >> $GITHUB_OUTPUT
-        env:
-          VM_KERNEL_IMAGE: neondatabase/vm-kernel
-          TAGS: "${{ needs.get-tags.outputs.tags }}"
-
 
       - name: build linux kernel
         id: build-linux-kernel
