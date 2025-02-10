@@ -59,11 +59,6 @@ func (r *VirtualMachine) ValidateCreate() (admission.Warnings, error) {
 			r.Spec.Guest.CPUs.Max)
 	}
 
-	// DIMMSlots memory provider is deprecated, and assumed to never be used.
-	if r.Spec.Guest.MemoryProvider != nil && *r.Spec.Guest.MemoryProvider == MemoryProviderDIMMSlots {
-		return nil, errors.New("DIMMSlots memory provider is deprecated and disabled")
-	}
-
 	if err := r.Spec.Guest.ValidateMemorySize(); err != nil {
 		return nil, fmt.Errorf(".spec.guest: %w", err)
 	}
