@@ -461,7 +461,7 @@ type vmMetric struct {
 
 func (m *PerVMMetrics) updateDesiredCU(
 	vm util.NamespacedName,
-	conversionFactor float64,
+	cuMultiplier float64,
 	total uint32,
 	parts scalingevents.GoalCUComponents,
 ) {
@@ -497,7 +497,7 @@ func (m *PerVMMetrics) updateDesiredCU(
 		if p.value == nil {
 			m.desiredCU.Delete(labels)
 		} else {
-			m.desiredCU.With(labels).Set(*p.value * conversionFactor /* multiply to allow fractional CU in metrics */)
+			m.desiredCU.With(labels).Set(*p.value * cuMultiplier /* multiply to allow fractional CU in metrics */)
 		}
 	}
 }
