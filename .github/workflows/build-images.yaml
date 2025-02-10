@@ -209,6 +209,8 @@ jobs:
         uses: docker/build-push-action@v6
         id: build-go-dependencies-image
         with:
+          provenance: false
+          sbom: false
           context: .
           platforms: linux/amd64
           push: true
@@ -220,6 +222,8 @@ jobs:
       - name: Build and push neonvm-runner image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           platforms: linux/amd64
           push: true
@@ -244,6 +248,8 @@ jobs:
       - name: Build and push neonvm-controller image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           platforms: linux/amd64
           push: true
@@ -259,6 +265,8 @@ jobs:
       - name: Build and push neonvm-vxlan-controller image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           platforms: linux/amd64
           push: true
@@ -273,6 +281,8 @@ jobs:
       - name: Build and push autoscale-scheduler image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           platforms: linux/amd64
           push: true
@@ -287,6 +297,8 @@ jobs:
       - name: Build and push autoscaler-agent image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           platforms: linux/amd64
           push: true
@@ -301,6 +313,8 @@ jobs:
       - name: Build and push neonvm-daemon image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           platforms: linux/amd64
           push: true
@@ -315,6 +329,8 @@ jobs:
         uses: docker/build-push-action@v6
         if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
         with:
+          provenance: false
+          sbom: false
           context: cluster-autoscaler
           platforms: linux/amd64
           push: true
