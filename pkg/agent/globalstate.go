@@ -40,6 +40,7 @@ type agentState struct {
 	vmClient     *vmclient.Clientset
 	schedTracker *schedwatch.SchedulerTracker
 	metrics      GlobalMetrics
+	vmMetrics    *PerVMMetrics
 
 	scalingReporter *scalingevents.Reporter
 }
@@ -49,7 +50,8 @@ func (r MainRunner) newAgentState(
 	podIP string,
 	schedTracker *schedwatch.SchedulerTracker,
 	scalingReporter *scalingevents.Reporter,
-	metrics GlobalMetrics,
+	globalMetrics GlobalMetrics,
+	perVMMetrics *PerVMMetrics,
 ) *agentState {
 	return &agentState{
 		lock:         util.NewChanMutex(),
@@ -60,7 +62,8 @@ func (r MainRunner) newAgentState(
 		vmClient:     r.VMClient,
 		podIP:        podIP,
 		schedTracker: schedTracker,
-		metrics:      metrics,
+		metrics:      globalMetrics,
+		vmMetrics:    perVMMetrics,
 
 		scalingReporter: scalingReporter,
 	}
