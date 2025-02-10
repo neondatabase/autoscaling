@@ -102,9 +102,14 @@ func (s *cpuServer) handleSetCPUStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, path string) {
+func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, r *http.Request, path string) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
+
+	if err := r.Context().Err(); err != nil {
+		w.WriteHeader(http.StatusRequestTimeout)
+		return
+	}
 
 	dir := filepath.Join(path, "..data")
 	checksum, err := util.ChecksumFlatDir(dir)
@@ -128,6 +133,11 @@ type File struct {
 func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request, path string) {
 	s.fileOperationsMutex.Lock()
 	defer s.fileOperationsMutex.Unlock()
+
+	if err := r.Context().Err(); err != nil {
+		w.WriteHeader(http.StatusRequestTimeout)
+		return
+	}
 
 	if r.Body == nil {
 		s.logger.Error("no body")
@@ -200,7 +210,7 @@ func (s *cpuServer) run(addr string) {
 	mux.HandleFunc("/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		path := fmt.Sprintf("/%s", r.PathValue("path"))
 		if r.Method == http.MethodGet {
-			s.handleGetFileChecksum(w, path)
+			s.handleGetFileChecksum(w, r, path)
 			return
 		} else if r.Method == http.MethodPut {
 			s.handleUploadFile(w, r, path)
