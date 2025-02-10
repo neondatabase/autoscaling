@@ -84,7 +84,8 @@ jobs:
         with:
           fail_on_unmatched_files: true
           files: |
-            vm-builder/vm-builder
+            vm-builder/vm-builder-arm64
+            vm-builder/vm-builder-amd64
             rendered_manifests/autoscale-scheduler.yaml
             rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml
