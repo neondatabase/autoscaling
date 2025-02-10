@@ -18,13 +18,14 @@ spec:
                   operator: In
                   values:
                     - amd64
+                    - arm64
                 - key: kubernetes.io/os
                   operator: In
                   values:
                     - linux
       initContainers:
         - name: install-multus-binary
-          image: ghcr.io/k8snetworkplumbingwg/multus-cni:v3.9.2-thick-amd64
+          image: docker.io/bitnami/multus-cni:3.9.3
           command:
             - "cp"
             - "/usr/src/multus-cni/bin/multus"
@@ -35,12 +36,14 @@ spec:
               memory: "15Mi"
           securityContext:
             privileged: true
+            runAsNonRoot: false
+            runAsUser: 0
           volumeMounts:
             - name: cnibin
               mountPath: /host/opt/cni/bin
               mountPropagation: Bidirectional
         - name: generate-kubeconfig
-          image: ghcr.io/k8snetworkplumbingwg/multus-cni:v3.9.2-thick-amd64
+          image: docker.io/bitnami/multus-cni:3.9.3
           command:
             - "/usr/src/multus-cni/bin/generate-kubeconfig"
           args:
@@ -52,6 +55,8 @@ spec:
               memory: "15Mi"
           securityContext:
             privileged: true
+            runAsNonRoot: false
+            runAsUser: 0
           volumeMounts:
             - name: cni
               mountPath: /host/etc/cni/net.d
