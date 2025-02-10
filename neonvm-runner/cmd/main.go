@@ -725,11 +725,14 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 
 		select {
 		case <-time.After(1 * time.Second):
+			continue
 		case <-ctx.Done():
-			logger.Warn("QEMU shut down too soon to start forwarding logs")
+			return
 		}
 	}
 
+	// For the entire duration the VM is alive, periodically check whether any of the watched disks
+	// still match what's inside the VM, and if not, send the update.
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
