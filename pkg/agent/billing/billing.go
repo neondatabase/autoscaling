@@ -12,7 +12,6 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/billing"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
 )
 
@@ -65,7 +64,7 @@ type vmMetricsSeconds struct {
 
 type MetricsCollector struct {
 	conf    *Config
-	sink    *reporting.EventSink[*billing.IncrementalEvent]
+	sink    *reporting.EventSink[*reporting.IncrementalEvent]
 	metrics PromMetrics
 }
 
@@ -126,7 +125,7 @@ func (mc *MetricsCollector) Run(
 			state.collect(logger, store, mc.metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
-			state.drainEnqueue(logger, mc.conf, billing.GetHostname(), mc.sink)
+			state.drainEnqueue(logger, mc.conf, GetHostname(), mc.sink)
 		case <-ctx.Done():
 			return nil
 		}
@@ -247,7 +246,7 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
-func logAddedEvent(logger *zap.Logger, event *billing.IncrementalEvent) *billing.IncrementalEvent {
+func logAddedEvent(logger *zap.Logger, event *reporting.IncrementalEvent) *reporting.IncrementalEvent {
 	logger.Info(
 		"Adding event to batch",
 		zap.String("IdempotencyKey", event.IdempotencyKey),
@@ -263,7 +262,7 @@ func (s *metricsState) drainEnqueue(
 	logger *zap.Logger,
 	conf *Config,
 	hostname string,
-	sink *reporting.EventSink[*billing.IncrementalEvent],
+	sink *reporting.EventSink[*reporting.IncrementalEvent],
 ) {
 	now := time.Now()
 
@@ -276,10 +275,10 @@ func (s *metricsState) drainEnqueue(
 		history.finalizeCurrentTimeSlice()
 
 		countInBatch += 1
-		enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+		enqueue(logAddedEvent(logger, reporting.Enrich(now, hostname, countInBatch, batchSize, &reporting.IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
-			Type:           "", // set by billing.Enrich
-			IdempotencyKey: "", // set by billing.Enrich
+			Type:           "", // set by reporting.Enrich
+			IdempotencyKey: "", // set by reporting.Enrich
 			EndpointID:     key.endpointID,
 			// TODO: maybe we should store start/stop time in the vmMetricsHistory object itself?
 			// That way we can be aligned to collection, rather than pushing.
@@ -288,10 +287,10 @@ func (s *metricsState) drainEnqueue(
 			Value:     int(math.Round(history.total.cpu)),
 		})))
 		countInBatch += 1
-		enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+		enqueue(logAddedEvent(logger, reporting.Enrich(now, hostname, countInBatch, batchSize, &reporting.IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
-			Type:           "", // set by billing.Enrich
-			IdempotencyKey: "", // set by billing.Enrich
+			Type:           "", // set by reporting.Enrich
+			IdempotencyKey: "", // set by reporting.Enrich
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
