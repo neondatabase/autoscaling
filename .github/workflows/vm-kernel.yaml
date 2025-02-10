@@ -49,7 +49,6 @@ defaults:
 
 jobs:
   setup-build-vm-kernel-image:
-    # todo: looks redundant, check with manual combinations of inputs and delete strategy if it's not needed
     strategy:
       matrix:
         arch: ${{ fromJson(inputs.archs) }}
