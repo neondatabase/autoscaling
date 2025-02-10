@@ -47,6 +47,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - run: gh pr --repo "${GITHUB_REPOSITORY}" edit "${PR_NUMBER}" --remove-label "approved-for-ci-run"
 
   create-or-update-pr-for-ci-run:
@@ -63,6 +68,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - run: gh pr --repo "${GITHUB_REPOSITORY}" edit "${PR_NUMBER}" --remove-label "approved-for-ci-run"
 
       - uses: actions/checkout@v4
@@ -107,6 +117,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Close PR and delete `ci-run/pr-${{ env.PR_NUMBER }}` branch
         run: |
           CLOSED="$(gh pr --repo ${GITHUB_REPOSITORY} list --head ${BRANCH} --json 'closed' --jq '.[].closed')"

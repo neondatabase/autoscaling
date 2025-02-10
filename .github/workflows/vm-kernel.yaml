@@ -49,6 +49,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
 
       - name: set kernel cache tag
@@ -134,6 +139,11 @@ jobs:
 
     runs-on: [ self-hosted, gen3, large ]
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: git checkout
         uses: actions/checkout@v4
 
