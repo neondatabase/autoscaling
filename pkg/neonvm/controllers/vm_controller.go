@@ -1161,31 +1161,30 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
+	nodeSelectorTerms := a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 
-	// if NodeSelectorTerms list is empty - add default values (arch==vm.Spec.Affinity or os==linux)
-	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
-		matches := []corev1.NodeSelectorRequirement{
-			{
-				Key:      "kubernetes.io/os",
-				Operator: "In",
-				Values:   []string{"linux"},
+	// always add default values (arch==vm.Spec.Affinity or os==linux) even if there are already some values
+	nodeSelectorTerms = append(
+		nodeSelectorTerms,
+		corev1.NodeSelectorTerm{
+			MatchExpressions: []corev1.NodeSelectorRequirement{
+				{
+					Key:      "kubernetes.io/os",
+					Operator: "In",
+					Values:   []string{"linux"},
+				},
+				{
+					Key:      "kubernetes.io/arch",
+					Operator: "In",
+					// vm.Spec.TargetArchitecture is guaranteed to be set by reconciler loop
+					Values: []string{string(*vm.Spec.TargetArchitecture)},
+				},
 			},
-		}
+		},
+	)
 
-		if vm.Spec.TargetArchitecture != nil {
-			matches = append(matches, corev1.NodeSelectorRequirement{
-				Key:      "kubernetes.io/arch",
-				Operator: "In",
-				Values:   []string{string(*vm.Spec.TargetArchitecture)},
-			})
-		}
+	a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = nodeSelectorTerms
 
-		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
-			a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-			corev1.NodeSelectorTerm{
-				MatchExpressions: matches,
-			})
-	}
 	return a
 }
 
