@@ -9,6 +9,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type PromMetrics struct {
@@ -18,31 +19,25 @@ type PromMetrics struct {
 	vmsCurrent        *prometheus.GaugeVec
 }
 
-func NewPromMetrics() PromMetrics {
+func NewPromMetrics(reg prometheus.Registerer) PromMetrics {
 	return PromMetrics{
-		reporting: reporting.NewEventSinkMetrics("autoscaling_agent_billing"),
+		reporting: reporting.NewEventSinkMetrics("autoscaling_agent_billing", reg),
 
-		vmsProcessedTotal: prometheus.NewCounterVec(
+		vmsProcessedTotal: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_agent_billing_vms_processed_total",
 				Help: "Total number of times the autoscaler-agent's billing subsystem processes any VM",
 			},
 			[]string{"is_endpoint", "autoscaling_enabled", "phase"},
-		),
-		vmsCurrent: prometheus.NewGaugeVec(
+		)),
+		vmsCurrent: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_agent_billing_vms_current",
 				Help: "Total current VMs visible to the autoscaler-agent's billing subsystem, labeled by some bits of metadata",
 			},
 			[]string{"is_endpoint", "autoscaling_enabled", "phase"},
-		),
+		)),
 	}
-}
-
-func (m PromMetrics) MustRegister(reg *prometheus.Registry) {
-	m.reporting.MustRegister(reg)
-	reg.MustRegister(m.vmsProcessedTotal)
-	reg.MustRegister(m.vmsCurrent)
 }
 
 type batchMetrics struct {

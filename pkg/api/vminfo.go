@@ -25,7 +25,12 @@ const (
 	LabelEnableAutoscaling        = "autoscaling.neon.tech/enabled"
 	AnnotationAutoscalingBounds   = "autoscaling.neon.tech/bounds"
 	AnnotationAutoscalingConfig   = "autoscaling.neon.tech/config"
+	AnnotationAutoscalingUnit     = "autoscaling.neon.tech/scaling-unit"
 	AnnotationBillingEndpointID   = "autoscaling.neon.tech/billing-endpoint-id"
+
+	// For internal use only, between the autoscaler-agent and scheduler plugin:
+	InternalAnnotationResourcesRequested = "internal.autoscaling.neon.tech/resources-requested"
+	InternalAnnotationResourcesApproved  = "internal.autoscaling.neon.tech/resources-approved"
 )
 
 func hasTrueLabel(obj metav1.ObjectMetaAccessor, labelName string) bool {
@@ -47,6 +52,33 @@ func HasAutoMigrationEnabled(obj metav1.ObjectMetaAccessor) bool {
 
 func HasAlwaysMigrateLabel(obj metav1.ObjectMetaAccessor) bool {
 	return hasTrueLabel(obj, LabelTestingOnlyAlwaysMigrate)
+}
+
+func extractAnnotationJSON[T any](obj metav1.ObjectMetaAccessor, annotation string) (*T, error) {
+	jsonString, ok := obj.GetObjectMeta().GetAnnotations()[annotation]
+	if !ok {
+		return nil, nil
+	}
+
+	var value T
+	if err := json.Unmarshal([]byte(jsonString), &value); err != nil {
+		return nil, fmt.Errorf("could not unmarshal %s annotation: %w", annotation, err)
+	}
+	return &value, nil
+}
+
+// ExtractScalingUnit returns the configured scaling unit (aka the "compute unit") for the object,
+// based on the AnnotationAutoscalingUnit annotation.
+func ExtractScalingUnit(obj metav1.ObjectMetaAccessor) (*Resources, error) {
+	return extractAnnotationJSON[Resources](obj, AnnotationAutoscalingUnit)
+}
+
+func ExtractRequestedScaling(obj metav1.ObjectMetaAccessor) (*Resources, error) {
+	return extractAnnotationJSON[Resources](obj, InternalAnnotationResourcesRequested)
+}
+
+func ExtractApprovedScaling(obj metav1.ObjectMetaAccessor) (*Resources, error) {
+	return extractAnnotationJSON[Resources](obj, InternalAnnotationResourcesApproved)
 }
 
 // VmInfo is the subset of vmv1.VirtualMachineSpec that the scheduler plugin and autoscaler agent
@@ -161,16 +193,14 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmv1.VirtualMachine) (*VmInfo, error)
 
 func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
 	logger = logger.With(util.PodNameFields(pod))
-	resourcesJSON := pod.Annotations[vmv1.VirtualMachineResourcesAnnotation]
 
-	var resources vmv1.VirtualMachineResources
-	if err := json.Unmarshal([]byte(resourcesJSON), &resources); err != nil {
-		return nil, fmt.Errorf("Error unmarshaling %q: %w",
-			vmv1.VirtualMachineResourcesAnnotation, err)
+	resources, err := vmv1.VirtualMachineResourcesFromPod(pod)
+	if err != nil {
+		return nil, err
 	}
 
 	vmName := pod.Labels[vmv1.VirtualMachineNameLabel]
-	return extractVmInfoGeneric(logger, vmName, pod, resources)
+	return extractVmInfoGeneric(logger, vmName, pod, *resources)
 }
 
 func extractVmInfoGeneric(

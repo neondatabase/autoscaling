@@ -18,10 +18,6 @@ on:
         description: 'Kernel image for the VMs embedded in neonvm-runner. If not specified, a kernel will be built from source'
         type: string
         required: false
-      build-cluster-autoscaler:
-        description: 'Build the custom cluster-autoscaler image'
-        type: boolean
-        required: false
       controller-preserve-runner-pods:
         description: 'ONLY USE FOR E2E TESTS: Set neonvm-controller to never delete VM runner pods'
         type: boolean
@@ -214,6 +210,8 @@ jobs:
         uses: docker/build-push-action@v6
         id: build-go-dependencies-image
         with:
+          provenance: false
+          sbom: false
           context: .
           push: true
           file: Dockerfile.go-base
@@ -224,6 +222,8 @@ jobs:
       - name: Build and push neonvm-runner image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           push: true
           file: neonvm-runner/Dockerfile
@@ -247,6 +247,8 @@ jobs:
       - name: Build and push neonvm-controller image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           push: true
           file: neonvm-controller/Dockerfile
@@ -261,6 +263,8 @@ jobs:
       - name: Build and push neonvm-vxlan-controller image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           push: true
           file: neonvm-vxlan-controller/Dockerfile
@@ -274,6 +278,8 @@ jobs:
       - name: Build and push autoscale-scheduler image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           push: true
           file: autoscale-scheduler/Dockerfile
@@ -287,6 +293,8 @@ jobs:
       - name: Build and push autoscaler-agent image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           push: true
           file: autoscaler-agent/Dockerfile
@@ -300,6 +308,8 @@ jobs:
       - name: Build and push neonvm-daemon image
         uses: docker/build-push-action@v6
         with:
+          provenance: false
+          sbom: false
           context: .
           push: true
           file: neonvm-daemon/Dockerfile
@@ -311,8 +321,9 @@ jobs:
 
       - name: Build and push cluster-autoscaler image
         uses: docker/build-push-action@v6
-        if: ${{ format('{0}', inputs.build-cluster-autoscaler) == 'true' }}
         with:
+          provenance: false
+          sbom: false
           context: cluster-autoscaler
           push: true
           tags: ${{ steps.tags.outputs.cluster-autoscaler }}
