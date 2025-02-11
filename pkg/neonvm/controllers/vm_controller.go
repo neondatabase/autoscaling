@@ -163,15 +163,32 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
-	// examine cpuScalingMode and set it to the default value if it is not set
-	if vm.Spec.CpuScalingMode == nil {
-		log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
-		vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
-		if err := r.tryUpdateVM(ctx, &vm); err != nil {
-			log.Error(err, "Failed to set default CPU scaling mode")
-			return ctrl.Result{}, err
+	// examine for nil values that should be defaulted
+	// this part is done for values that we want eventually explicitly override in the kube-api storage
+	// to a default value.
+	{
+		changed := false
+		// examine targetArchitecture and set it to the default value if it is not set
+		if vm.Spec.TargetArchitecture == nil {
+			log.Info("Setting default target architecture", "default", vmv1.CPUArchitectureAMD64)
+			vm.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
+			changed = true
 		}
-		return ctrl.Result{Requeue: true}, nil
+
+		// examine cpuScalingMode and set it to the default value if it is not set
+		if vm.Spec.CpuScalingMode == nil {
+			log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
+			vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
+			changed = true
+		}
+
+		if changed {
+			if err := r.tryUpdateVM(ctx, &vm); err != nil {
+				log.Error(err, "Failed to set default values for VirtualMachine")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
 	}
 
 	statusBefore := vm.Status.DeepCopy()
