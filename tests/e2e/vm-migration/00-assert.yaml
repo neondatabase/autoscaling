@@ -1,6 +1,15 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestAssert
 timeout: 90
+commands:
+# it is not expected to have affinity set before the migration started
+- script: |
+    set -eux
+    affinity=$(kubectl -n  "$NAMESPACE" get virtualmachines example -ojsonpath="{.spec.affinity}")
+    if [ -n "$affinity" ]; then
+      echo "Affinity is set"
+      exit 1
+    fi
 ---
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
