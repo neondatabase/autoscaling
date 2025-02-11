@@ -626,7 +626,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					"Memory in spec", memorySizeFromSpec)
 				vm.Status.Phase = vmv1.VmScaling
 			}
-
 		case runnerSucceeded:
 			vm.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&vm.Status.Conditions,
@@ -848,6 +847,7 @@ const (
 //
 // This is *similar* to the value of pod.Status.Phase, but we'd like to retain our own abstraction
 // to have more control over the semantics.
+// We handle PodRunning phase differently during VM Migration phase.
 func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	// Add 5 seconds to account for clock skew and k8s lagging behind.
 	deadline := metav1.NewTime(metav1.Now().Add(-5 * time.Second))
@@ -875,47 +875,31 @@ const (
 	runnerContainerName = "neonvm-runner"
 )
 
-// runnerContainerStatus returns whether the runner container is ready.
+// runnerContainerStatus returns status of the runner container.
 func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
 	// if the pod has no container statuses, we consider it pending
 	if len(pod.Status.ContainerStatuses) == 0 {
 		return runnerPending
 	}
+	_, role, ownedByMigration := vmv1.MigrationOwnerForPod(pod)
 
-	// first we check if the pod is a target pod for the migration
-	// in that case we don't wait for the readiness probe
-	// from neonvm-daemon because qemu started
-	// in incoming migration mode
-	for _, containerSpec := range pod.Spec.Containers {
-		if isTargetPodForMigration(containerSpec) {
-			return runnerRunning
-		}
-
+	// if a target pod for a migration, we consider the pod running
+	// because the qemu is started in incoming migration mode
+	// and neonvm-daemon which is used in readiness probe is not available
+	if ownedByMigration && role == vmv1.MigrationRoleTarget {
+		return runnerRunning
 	}
 
-	// if the pod is not a target pod for the migration
-	// we check the neonvm-runner container
-	// for the readiness probe
+	// normal case scenario, pod is not owned by the migration
+	// and we check the neonvm-runner container for the readiness probe
 	for _, c := range pod.Status.ContainerStatuses {
 		// we only care about the neonvm-runner container
 		if c.Name == runnerContainerName && !c.Ready {
 			return runnerPending
 		}
 	}
-	return runnerRunning
-}
 
-// isTargetPodForMigration returns true if the container is a target pod for the migration.
-func isTargetPodForMigration(containerSpec corev1.Container) bool {
-	if containerSpec.Name != runnerContainerName {
-		return false
-	}
-	for _, env := range containerSpec.Env {
-		if env.Name == "RECEIVE_MIGRATION" && env.Value == "true" {
-			return true
-		}
-	}
-	return false
+	return runnerRunning
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
