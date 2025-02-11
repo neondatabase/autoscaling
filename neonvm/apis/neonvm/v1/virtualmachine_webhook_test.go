@@ -71,5 +71,4 @@ func TestFieldsAllowedToChangeFromNilOnly(t *testing.T) {
 			assert.Error(t, err)
 		}
 	})
-
 }
