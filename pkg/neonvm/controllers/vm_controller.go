@@ -865,14 +865,18 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	case corev1.PodFailed:
 		return runnerFailed
 	case corev1.PodRunning:
-		return isRunnerPodReady(pod)
+		return runnerContainerStatus(pod)
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
 }
 
-// isRunnerPodReady returns whether the runner pod is ready respecting the readiness probe of its containers.
-func isRunnerPodReady(pod *corev1.Pod) runnerStatusKind {
+const (
+	runnerContainerName = "neonvm-runner"
+)
+
+// runnerContainerStatus returns whether the runner container is ready.
+func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
 	// if the pod has no container statuses, we consider it pending
 	if len(pod.Status.ContainerStatuses) == 0 {
 		return runnerPending
@@ -883,13 +887,10 @@ func isRunnerPodReady(pod *corev1.Pod) runnerStatusKind {
 	// from neonvm-daemon because qemu started
 	// in incoming migration mode
 	for _, containerSpec := range pod.Spec.Containers {
-		if containerSpec.Name == "neonvm-runner" {
-			for _, env := range containerSpec.Env {
-				if env.Name == "RECEIVE_MIGRATION" && env.Value == "true" {
-					return runnerRunning
-				}
-			}
+		if isTargetPodForMigration(containerSpec) {
+			return runnerRunning
 		}
+
 	}
 
 	// if the pod is not a target pod for the migration
@@ -897,11 +898,24 @@ func isRunnerPodReady(pod *corev1.Pod) runnerStatusKind {
 	// for the readiness probe
 	for _, c := range pod.Status.ContainerStatuses {
 		// we only care about the neonvm-runner container
-		if c.Name == "neonvm-runner" && !c.Ready {
+		if c.Name == runnerContainerName && !c.Ready {
 			return runnerPending
 		}
 	}
 	return runnerRunning
+}
+
+// isTargetPodForMigration returns true if the container is a target pod for the migration.
+func isTargetPodForMigration(containerSpec corev1.Container) bool {
+	if containerSpec.Name != runnerContainerName {
+		return false
+	}
+	for _, env := range containerSpec.Env {
+		if env.Name == "RECEIVE_MIGRATION" && env.Value == "true" {
+			return true
+		}
+	}
+	return false
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
@@ -1212,10 +1226,6 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
-// podSpec returns a VirtualMachine Pod object
-// withReadinessProbe - if true, adds a readiness probe to the container
-// we don't need readiness probe for the VM runner pod if it is a target pod
-// for migration because VM is not started until migration is complete
 func podSpec(
 	vm *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
@@ -1387,6 +1397,18 @@ func podSpec(
 						}
 					}(),
 					Resources: vm.Spec.PodResources,
+					ReadinessProbe: &corev1.Probe{
+						ProbeHandler: corev1.ProbeHandler{
+							HTTPGet: &corev1.HTTPGetAction{
+								Path:   "/ready",
+								Port:   intstr.FromInt32(vm.Spec.RunnerPort),
+								Scheme: corev1.URISchemeHTTP,
+							},
+						},
+						InitialDelaySeconds: 5,
+						PeriodSeconds:       5,
+						FailureThreshold:    3,
+					},
 				}
 
 				return []corev1.Container{runner}
@@ -1414,19 +1436,6 @@ func podSpec(
 				}
 			}(),
 		},
-	}
-
-	pod.Spec.Containers[0].ReadinessProbe = &corev1.Probe{
-		ProbeHandler: corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{
-				Path:   "/ready",
-				Port:   intstr.FromInt32(vm.Spec.RunnerPort),
-				Scheme: corev1.URISchemeHTTP,
-			},
-		},
-		InitialDelaySeconds: 5,
-		PeriodSeconds:       5,
-		FailureThreshold:    3,
 	}
 
 	if sshSecret != nil {
