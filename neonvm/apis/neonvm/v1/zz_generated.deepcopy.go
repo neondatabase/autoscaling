@@ -688,6 +688,11 @@ func (in *VirtualMachineSpec) DeepCopyInto(out *VirtualMachineSpec) {
 		*out = make([]corev1.LocalObjectReference, len(*in))
 		copy(*out, *in)
 	}
+	if in.TargetArchitecture != nil {
+		in, out := &in.TargetArchitecture, &out.TargetArchitecture
+		*out = new(CPUArchitecture)
+		**out = **in
+	}
 	in.Guest.DeepCopyInto(&out.Guest)
 	if in.ExtraInitContainers != nil {
 		in, out := &in.ExtraInitContainers, &out.ExtraInitContainers

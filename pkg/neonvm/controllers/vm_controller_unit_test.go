@@ -190,11 +190,12 @@ func TestReconcile(t *testing.T) {
 	// We now have a pod
 	vm := params.getVM()
 	assert.NotEmpty(t, vm.Status.PodName)
-	// Spec is unchanged except cpuScalingMode
-	var origVMWithCPUScalingMode vmv1.VirtualMachine
-	origVM.DeepCopy().DeepCopyInto(&origVMWithCPUScalingMode)
-	origVMWithCPUScalingMode.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingModeQMP)
-	assert.Equal(t, vm.Spec, origVMWithCPUScalingMode.Spec)
+	// Spec is unchanged except cpuScalingMode and targetArchitecture
+	var origWithModifiedFields vmv1.VirtualMachine
+	origVM.DeepCopy().DeepCopyInto(&origWithModifiedFields)
+	origWithModifiedFields.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingModeQMP)
+	origWithModifiedFields.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
+	assert.Equal(t, vm.Spec, origWithModifiedFields.Spec)
 
 	// Round 4
 	res, err = params.r.Reconcile(params.ctx, req)
@@ -269,4 +270,40 @@ func TestRunningPod(t *testing.T) {
 	assert.Equal(t, vmv1.VmRunning, vm.Status.Phase)
 	assert.Len(t, vm.Status.Conditions, 1)
 	assert.Equal(t, vm.Status.Conditions[0].Type, typeAvailableVirtualMachine)
+}
+
+func TestNodeAffinity(t *testing.T) {
+	t.Run("no affinity", func(t *testing.T) {
+		origVM := defaultVm()
+		origVM.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
+		affinity := affinityForVirtualMachine(origVM)
+		prettyPrint(t, affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+		assert.Equal(t, 1, len(affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms))
+		assert.Equal(t, "linux", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values[0])
+		assert.Equal(t, "amd64", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[1].Values[0])
+	})
+
+	t.Run("affinity given without architecture", func(t *testing.T) {
+		origVM := defaultVm()
+		origVM.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
+		origVM.Spec.Affinity = &corev1.Affinity{
+			NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1.NodeSelectorRequirement{
+								{Key: "topology.kubernetes.io/zone", Operator: "In", Values: []string{"zoneid"}},
+							},
+						},
+					},
+				},
+			},
+		}
+		affinity := affinityForVirtualMachine(origVM)
+		prettyPrint(t, affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+		assert.Equal(t, 2, len(affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms))
+		assert.Equal(t, "zoneid", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values[0])
+		assert.Equal(t, "linux", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[1].MatchExpressions[0].Values[0])
+		assert.Equal(t, "amd64", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[1].MatchExpressions[1].Values[0])
+	})
 }
