@@ -39,6 +39,7 @@ jobs:
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
       upload-to-ecr: true
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
   build-test-vm:
@@ -47,6 +48,7 @@ jobs:
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
       upload-vm-builder: true
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
   e2e:
