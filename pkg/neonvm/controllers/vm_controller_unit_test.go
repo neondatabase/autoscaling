@@ -190,11 +190,12 @@ func TestReconcile(t *testing.T) {
 	// We now have a pod
 	vm := params.getVM()
 	assert.NotEmpty(t, vm.Status.PodName)
-	// Spec is unchanged except cpuScalingMode
-	var origVMWithCPUScalingMode vmv1.VirtualMachine
-	origVM.DeepCopy().DeepCopyInto(&origVMWithCPUScalingMode)
-	origVMWithCPUScalingMode.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingModeQMP)
-	assert.Equal(t, vm.Spec, origVMWithCPUScalingMode.Spec)
+	// Spec is unchanged except cpuScalingMode and targetArchitecture
+	var origWithModifiedFields vmv1.VirtualMachine
+	origVM.DeepCopy().DeepCopyInto(&origWithModifiedFields)
+	origWithModifiedFields.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingModeQMP)
+	origWithModifiedFields.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
+	assert.Equal(t, vm.Spec, origWithModifiedFields.Spec)
 
 	// Round 4
 	res, err = params.r.Reconcile(params.ctx, req)
