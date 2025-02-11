@@ -1161,11 +1161,11 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
-	nodeSelectorTerms := a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	nodeSelector := a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 
 	// always add default values (arch==vm.Spec.Affinity or os==linux) even if there are already some values
-	nodeSelectorTerms = append(
-		nodeSelectorTerms,
+	nodeSelector.NodeSelectorTerms = append(
+		nodeSelector.NodeSelectorTerms,
 		corev1.NodeSelectorTerm{
 			MatchExpressions: []corev1.NodeSelectorRequirement{
 				{
@@ -1182,8 +1182,6 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 			},
 		},
 	)
-
-	a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = nodeSelectorTerms
 
 	return a
 }
