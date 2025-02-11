@@ -376,17 +376,15 @@ jobs:
         env:
           ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
           TAG: ${{ inputs.tag }}
-          BUILD_CLUSTER_AUTOSCALER: ${{ inputs.build-cluster-autoscaler }}
         run: |
           images=("${IMG_CONTROLLER}" \
           "${IMG_VXLAN_CONTROLLER}" \
           "${IMG_RUNNER}" \
           "${IMG_SCHEDULER}" \
           "${IMG_AUTOSCALER_AGENT}" \
-          "${IMG_DAEMON}")
-          if [ "$BUILD_CLUSTER_AUTOSCALER" = 'true' ]; then
-            images+=("${IMG_CLUSTER_AUTOSCALER}")
-          fi
+          "${IMG_DAEMON}" \
+          "${IMG_CLUSTER_AUTOSCALER}"
+          )
           for image in "${images[@]}"; do
             tags=("-t" "$image:$TAG")
             for arch in ${ARCHS}; do
