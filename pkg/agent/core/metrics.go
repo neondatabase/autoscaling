@@ -8,6 +8,7 @@ import (
 	"io"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	promtypes "github.com/prometheus/client_model/go"
@@ -74,30 +75,33 @@ func extractFloatGauge(mf *promtypes.MetricFamily) (float64, error) {
 }
 
 // Helper function to return an error for a missing metric
-func missingMetric(name string) error {
-	return fmt.Errorf("missing expected metric %s", name)
+func missingMetric(names ...string) error {
+	return fmt.Errorf("missing expected metric [%s]", strings.Join(names, ", "))
 }
 
 // fromPrometheus implements FromPrometheus, so SystemMetrics can be used with ParseMetrics.
 func (m *SystemMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) error {
 	ec := &erc.Collector{}
 
-	getFloat := func(metricName string) float64 {
-		if mf := mfs[metricName]; mf != nil {
-			f, err := extractFloatGauge(mf)
-			ec.Add(err) // does nothing if err == nil
-			return f
-		} else {
-			ec.Add(missingMetric(metricName))
-			return 0
+	getFloat := func(metricNames ...string) float64 {
+		for _, name := range metricNames {
+			if mf := mfs[name]; mf != nil {
+				f, err := extractFloatGauge(mf)
+				ec.Add(err) // does nothing if err == nil
+				return f
+			}
 		}
+		ec.Add(missingMetric(metricNames...))
+		return 0
 	}
 
-	load1 := getFloat("host_load1")
-	load5 := getFloat("host_load5")
-	memTotal := getFloat("host_memory_total_bytes")
-	memAvailable := getFloat("host_memory_available_bytes")
-	memCached := getFloat("host_memory_cached_bytes")
+	// Accept metrics reported by either vector.dev (host_*) or
+	// prometheus-node-exporter (node_*)
+	load1 := getFloat("host_load1", "node_load1")
+	load5 := getFloat("host_load5", "node_load5")
+	memTotal := getFloat("host_memory_total_bytes", "node_memory_MemTotal_bytes")
+	memAvailable := getFloat("host_memory_available_bytes", "node_memory_MemAvailable_bytes")
+	memCached := getFloat("host_memory_cached_bytes", "node_memory_Cached_bytes")
 
 	tmp := SystemMetrics{
 		LoadAverage1Min: load1,
@@ -119,15 +123,16 @@ func (m *SystemMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) e
 func (m *LFCMetrics) fromPrometheus(mfs map[string]*promtypes.MetricFamily) error {
 	ec := &erc.Collector{}
 
-	getFloat := func(metricName string) float64 {
-		if mf := mfs[metricName]; mf != nil {
-			f, err := extractFloatGauge(mf)
-			ec.Add(err) // does nothing if err == nil
-			return f
-		} else {
-			ec.Add(missingMetric(metricName))
-			return 0
+	getFloat := func(metricNames ...string) float64 {
+		for _, name := range metricNames {
+			if mf := mfs[name]; mf != nil {
+				f, err := extractFloatGauge(mf)
+				ec.Add(err) // does nothing if err == nil
+				return f
+			}
 		}
+		ec.Add(missingMetric(metricNames...))
+		return 0
 	}
 
 	wssBuckets, err := extractWorkingSetSizeWindows(mfs)
