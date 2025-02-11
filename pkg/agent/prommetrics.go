@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/samber/lo"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core/revsource"
+	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -344,9 +347,22 @@ func WrapHistogramVec(hist *prometheus.HistogramVec) revsource.ObserveCallback {
 }
 
 type PerVMMetrics struct {
+	// activeMu and activeVMs exist to track the set of VMs currently represented in the metrics, so
+	// that when we set the desired CU from internal information, we can check whether the VM still
+	// exists.
+	// Otherwise it's not possible to prevent data races that would result in leaking metric labels.
+	activeMu  sync.Mutex
+	activeVMs map[util.NamespacedName]vmMetadata
+
 	cpu          *prometheus.GaugeVec
 	memory       *prometheus.GaugeVec
 	restartCount *prometheus.GaugeVec
+	desiredCU    *prometheus.GaugeVec
+}
+
+type vmMetadata struct {
+	endpointID string
+	projectID  string
 }
 
 type vmResourceValueType string
@@ -360,10 +376,13 @@ const (
 	vmResourceValueAutoscalingMax vmResourceValueType = "autoscaling_max"
 )
 
-func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
+func makePerVMMetrics() (*PerVMMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
 
-	metrics := PerVMMetrics{
+	metrics := &PerVMMetrics{
+		activeMu:  sync.Mutex{},
+		activeVMs: make(map[util.NamespacedName]vmMetadata),
+
 		cpu: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_vm_cpu_cores",
@@ -402,6 +421,19 @@ func makePerVMMetrics() (PerVMMetrics, *prometheus.Registry) {
 				"project_id",   // .metadata.labels["neon/project-id"]
 			},
 		)),
+		desiredCU: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_vm_desired_cu",
+				Help: "Amount of Compute Units desired for a VM: the total, and the components for cpu, memory, and LFC",
+			},
+			[]string{
+				"vm_namespace", // .metadata.namespace
+				"vm_name",      // .metadata.name
+				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
+				"project_id",   // .metadata.labels["neon/project-id"]
+				"component",    // desired CU component: total, cpu, mem, lfc
+			},
+		)),
 	}
 
 	return metrics, reg
@@ -420,9 +452,74 @@ func makePerVMMetricsLabels(namespace string, vmName string, endpointID string, 
 	return labels
 }
 
+func (m *PerVMMetrics) updateActive(vm *vmv1.VirtualMachine) {
+	m.activeMu.Lock()
+	defer m.activeMu.Unlock()
+
+	m.activeVMs[util.GetNamespacedName(vm)] = vmMetadata{
+		endpointID: vm.Labels[endpointLabel],
+		projectID:  vm.Labels[projectLabel],
+	}
+}
+
+func (m *PerVMMetrics) deleteActive(vm *vmv1.VirtualMachine) {
+	m.activeMu.Lock()
+	defer m.activeMu.Unlock()
+
+	delete(m.activeVMs, util.GetNamespacedName(vm))
+	// ... and any metrics that were associated with it:
+	m.desiredCU.DeletePartialMatch(prometheus.Labels{
+		"vm_namespace": vm.Namespace,
+		"vm_name":      vm.Name,
+	})
+}
+
 // vmMetric is a data object that represents a single metric
 // (either CPU or memory) for a VM.
 type vmMetric struct {
 	labels prometheus.Labels
 	value  float64
+}
+
+func (m *PerVMMetrics) updateDesiredCU(
+	vm util.NamespacedName,
+	cuMultiplier float64,
+	total uint32,
+	parts scalingevents.GoalCUComponents,
+) {
+	m.activeMu.Lock()
+	defer m.activeMu.Unlock()
+
+	// Don't do anything if this VM is not known. Either the relevant watch event hasn't been
+	// processed yet (unlikely, maybe impossible?) or it has since been deleted (in which case we
+	// don't want to leak metrics that won't get cleaned up)
+	info, ok := m.activeVMs[vm]
+	if !ok {
+		return
+	}
+
+	pairs := []struct {
+		component string
+		value     *float64
+	}{
+		{"total", lo.ToPtr(float64(total))},
+		{"cpu", parts.CPU},
+		{"mem", parts.Mem},
+		{"lfc", parts.LFC},
+	}
+
+	for _, p := range pairs {
+		labels := prometheus.Labels{
+			"vm_namespace": vm.Namespace,
+			"vm_name":      vm.Name,
+			"endpoint_id":  info.endpointID,
+			"project_id":   info.projectID,
+			"component":    p.component,
+		}
+		if p.value == nil {
+			m.desiredCU.Delete(labels)
+		} else {
+			m.desiredCU.With(labels).Set(*p.value * cuMultiplier /* multiply to allow fractional CU in metrics */)
+		}
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -120,14 +121,39 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		panic(errors.New("accessors.Items == nil"))
 	}
 
-	if handlers.AddFunc == nil {
-		handlers.AddFunc = func(obj P, preexisting bool) {}
+	// Workaround for https://github.com/kubernetes/kubernetes/issues/98925 :
+	//
+	// Pre-calculate the GVK for the object types, because List() operations only set the
+	// Kind+APIVersion on the List type, and not the individual elements.
+	sampleObj := P(new(T))
+	gvk, err := util.LookupGVKForType(sampleObj)
+	if err != nil {
+		return nil, err
 	}
-	if handlers.UpdateFunc == nil {
-		handlers.UpdateFunc = func(oldObj, newObj P) {}
+
+	// do the conversion from P -> *T. We wanted the handlers to be provided with P so that the
+	// caller doesn't need to manually specify the generics, but in order to store the callbacks
+	// inside the watch store, we need to convert them so we're not carrying around more generic
+	// parameters than we need.
+	actualHandlers := HandlerFuncs[*T]{
+		AddFunc:    func(obj *T, preexisting bool) {},
+		UpdateFunc: func(oldObj, newObj *T) {},
+		DeleteFunc: func(obj *T, mayBeStale bool) {},
 	}
-	if handlers.DeleteFunc == nil {
-		handlers.DeleteFunc = func(obj P, mayBeStale bool) {}
+	if handlers.AddFunc != nil {
+		actualHandlers.AddFunc = func(obj *T, preexisting bool) {
+			handlers.AddFunc(P(obj), preexisting)
+		}
+	}
+	if handlers.UpdateFunc != nil {
+		actualHandlers.UpdateFunc = func(oldObj, newObj *T) {
+			handlers.UpdateFunc(P(oldObj), P(newObj))
+		}
+	}
+	if handlers.DeleteFunc != nil {
+		actualHandlers.DeleteFunc = func(obj *T, mayBeStale bool) {
+			handlers.DeleteFunc(P(obj), mayBeStale)
+		}
 	}
 
 	// use a copy of the options for watching vs listing:
@@ -159,6 +185,8 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	store := Store[T]{
 		mutex:         sync.Mutex{},
 		objects:       make(map[types.UID]*T),
+		listeners:     make(map[types.UID]*util.Broadcaster),
+		handlers:      actualHandlers,
 		triggerRelist: make(chan struct{}, 1), // ensure sends are non-blocking
 		relisted:      make(chan struct{}),
 		nextIndexID:   0,
@@ -166,6 +194,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		stopSignal:    sendStop,
 		stopped:       atomic.Bool{},
 		failing:       atomic.Bool{},
+
+		deepCopy: func(t *T) *T {
+			return (*T)(P(t).DeepCopyObject().(P))
+		},
 	}
 
 	items := accessors.Items(initialList)
@@ -177,9 +209,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	} else {
 		for i := range items {
 			obj := &items[i]
+			P(obj).GetObjectKind().SetGroupVersionKind(gvk)
 			uid := P(obj).GetObjectMeta().GetUID()
 			store.objects[uid] = obj
-			handlers.AddFunc(obj, true)
+			store.handlers.AddFunc(obj, true)
 
 			// Check if the context has been cancelled. This can happen in practice if AddFunc may
 			// take a long time to complete.
@@ -232,9 +265,10 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 		// deal with possible racy operations (including adding an index).
 		for i := range deferredAdds {
 			obj := &deferredAdds[i]
+			P(obj).GetObjectKind().SetGroupVersionKind(gvk)
 			uid := P(obj).GetObjectMeta().GetUID()
 			store.objects[uid] = obj
-			handlers.AddFunc(obj, true)
+			store.handlers.AddFunc(obj, true)
 
 			if err := ctx.Err(); err != nil {
 				logger.Warn("Ending: because Context expired", zap.Error(ctx.Err()))
@@ -295,6 +329,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 						)
 						continue
 					}
+					P(obj).GetObjectKind().SetGroupVersionKind(gvk)
 
 					meta := obj.GetObjectMeta()
 					// Update ResourceVersion so subsequent calls to client.Watch won't include this
@@ -303,7 +338,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 
 					// Wrap the remainder in a function, so we can have deferred unlocks.
 					uid := meta.GetUID()
-					err := handleEvent(&store, handlers, event.Type, uid, obj)
+					err := store.handleEvent(event.Type, uid, obj)
 					if err != nil {
 						name := util.NamespacedName{Namespace: meta.GetNamespace(), Name: meta.GetName()}
 						logger.Error(
@@ -429,30 +464,38 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 					// at any time that handlers are called.
 					for uid := range deleted {
 						obj := store.objects[uid]
+						if broadcaster, ok := store.listeners[uid]; ok {
+							broadcaster.Broadcast()
+							delete(store.listeners, uid)
+						}
 						delete(store.objects, uid)
 						for _, index := range store.indexes {
 							index.Delete(obj)
 						}
-						handlers.DeleteFunc(obj, true)
+						store.handlers.DeleteFunc(obj, true)
 					}
 
 					for i := range relistItems {
 						obj := &relistItems[i]
 						uid := P(obj).GetObjectMeta().GetUID()
+						P(obj).GetObjectKind().SetGroupVersionKind(gvk)
 
 						store.objects[uid] = obj
 						oldObj, hasObj := oldObjects[uid]
 
 						if hasObj {
+							if broadcaster, ok := store.listeners[uid]; ok {
+								broadcaster.Broadcast()
+							}
 							for _, index := range store.indexes {
 								index.Update(oldObj, obj)
 							}
-							handlers.UpdateFunc(oldObj, obj)
+							store.handlers.UpdateFunc(oldObj, obj)
 						} else {
 							for _, index := range store.indexes {
 								index.Add(obj)
 							}
-							handlers.AddFunc(obj, false)
+							store.handlers.AddFunc(obj, false)
 						}
 					}
 				}()
@@ -513,15 +556,11 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 }
 
 // helper for Watch. Error events are expected to already have been handled by the caller.
-func handleEvent[T any, P ~*T](
-	store *Store[T],
-	handlers HandlerFuncs[P],
+func (store *Store[T]) handleEvent(
 	eventType watch.EventType,
 	uid types.UID,
-	ptr P,
+	obj *T,
 ) error {
-	obj := (*T)(ptr)
-
 	// Some of the cases below don't actually require locking the store. Most of the events that we
 	// receive *do* though, so we're better off doing it here for simplicity.
 	store.mutex.Lock()
@@ -536,7 +575,7 @@ func handleEvent[T any, P ~*T](
 		for _, index := range store.indexes {
 			index.Add(obj)
 		}
-		handlers.AddFunc(obj, false)
+		store.handlers.AddFunc(obj, false)
 	case watch.Deleted:
 		// We're given the state of the object immediately before deletion, which
 		// *may* be different to what we currently have stored.
@@ -544,27 +583,36 @@ func handleEvent[T any, P ~*T](
 		if !ok {
 			return errors.New("received delete event for object that's not present")
 		}
+		// If there is a listener, *do* notify them, and then delete the listeners just like we're
+		// deleting the object from the map.
+		if broadcaster, ok := store.listeners[uid]; ok {
+			broadcaster.Broadcast()
+			delete(store.listeners, uid)
+		}
 		// Update:
 		for _, index := range store.indexes {
 			index.Update(old, obj)
 		}
-		handlers.UpdateFunc(old, obj)
+		store.handlers.UpdateFunc(old, obj)
 		// Delete:
 		delete(store.objects, uid)
 		for _, index := range store.indexes {
 			index.Delete(obj)
 		}
-		handlers.DeleteFunc(obj, false)
+		store.handlers.DeleteFunc(obj, false)
 	case watch.Modified:
 		old, ok := store.objects[uid]
 		if !ok {
 			return errors.New("received update event for object that's not present")
 		}
 		store.objects[uid] = obj
+		if broadcaster, ok := store.listeners[uid]; ok {
+			broadcaster.Broadcast()
+		}
 		for _, index := range store.indexes {
 			index.Update(old, obj)
 		}
-		handlers.UpdateFunc(old, obj)
+		store.handlers.UpdateFunc(old, obj)
 	case watch.Bookmark:
 		// Nothing to do, just serves to give us a new ResourceVersion, which should be handled by
 		// the caller.
@@ -579,8 +627,17 @@ func handleEvent[T any, P ~*T](
 // Store provides an interface for getting information about a list of Ts using the event
 // listener from a previous call to Watch
 type Store[T any] struct {
-	objects map[types.UID]*T
-	mutex   sync.Mutex
+	mutex     sync.Mutex
+	objects   map[types.UID]*T
+	listeners map[types.UID]*util.Broadcaster
+
+	handlers HandlerFuncs[*T]
+
+	// helper function, created in Watch() using knowledge that *T (or, something based on it) is a
+	// runtime.Object.
+	// This is required for the implementation of (*Store[T]).NopUpdate() in order to produce a
+	// second object without having any guarantees about T.
+	deepCopy func(*T) *T
 
 	// triggerRelist has capacity=1 and *if* the channel contains an item, then relisting has been
 	// requested by some call to (*Store[T]).Relist().
@@ -615,6 +672,50 @@ func (w *Store[T]) Relist() <-chan struct{} {
 	// closed, the relevant List call *must* have happened after any attempted send on
 	// w.triggerRelist.
 	return w.relisted
+}
+
+// NopUpdate runs the update handler for the object with the given UID, blocking until completion.
+//
+// This method returns false if there is no object with the given UID.
+//
+// Why does this exist? Well, watch events are often going to be handled by adding the object to a
+// queue. And sometimes you want to re-inject something into the queue. But it's tricky for that to
+// be synchronized unless it's guaranteed to agree with the ongoing watch -- so this method allows
+// one to re-inject something into the queue if and only if the watch still belives it exists in
+// kubernetes.
+func (w *Store[T]) NopUpdate(uid types.UID) (ok bool) {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	obj, ok := w.objects[uid]
+	if !ok {
+		return false
+	}
+
+	copied := w.deepCopy(obj)
+	w.handlers.UpdateFunc(copied, obj)
+	return true
+}
+
+// Listen returns a util.BroadcastReceiver that will be updated whenever the object is modified or
+// eventually deleted.
+//
+// This method returns false if the object with the given UID does not exist.
+func (w *Store[T]) Listen(uid types.UID) (_ util.BroadcastReceiver, ok bool) {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	if _, ok := w.objects[uid]; !ok {
+		return lo.Empty[util.BroadcastReceiver](), false
+	}
+
+	if b, ok := w.listeners[uid]; ok {
+		return b.NewReceiver(), true
+	} else {
+		b := util.NewBroadcaster()
+		w.listeners[uid] = b
+		return b.NewReceiver(), true
+	}
 }
 
 func (w *Store[T]) Stop() {
