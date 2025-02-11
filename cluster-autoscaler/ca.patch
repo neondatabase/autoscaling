@@ -30,7 +30,7 @@ index 7fb533570..ddf3ea689 100644
  			schedulablePodGroups = append(schedulablePodGroups, estimator.PodEquivalenceGroup{
  				Pods: eg.Pods,
 diff --git a/cluster-autoscaler/estimator/binpacking_estimator.go b/cluster-autoscaler/estimator/binpacking_estimator.go
-index 229a2e264..552c2d8ab 100644
+index 229a2e264..c8f918d3b 100644
 --- a/cluster-autoscaler/estimator/binpacking_estimator.go
 +++ b/cluster-autoscaler/estimator/binpacking_estimator.go
 @@ -26,6 +26,7 @@ import (
@@ -84,28 +84,32 @@ index 229a2e264..552c2d8ab 100644
  				break
  			}
  
-@@ -195,10 +204,19 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnNewNodes(
+@@ -195,10 +204,22 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnNewNodes(
  			// Note that this may still fail (ex. if topology spreading with zonal topologyKey is used);
  			// in this case we can't help the pending pod. We keep the node in clusterSnapshot to avoid
  			// adding and removing node to snapshot for each such pod.
 -			if err := e.predicateChecker.CheckPredicates(e.clusterSnapshot, pod, estimationState.lastNodeName); err != nil {
+-				break
 +			err := e.predicateChecker.CheckPredicates(e.clusterSnapshot, pod, estimationState.lastNodeName)
 +
-+			ignoreErr := err != nil && err.PredicateName() == "InterPodAffinity" && err.Message() == interpodaffinity.ErrReasonAntiAffinityRulesNotMatch
-+
-+			if ignoreErr {
-+				klog.V(4).Infof("Ignoring error while checking predicates for pod %s.%s on theoretical node %s in ClusterSnapshot; %v", pod.Namespace, pod.Name, estimationState.lastNodeName, err)
-+			}
-+
-+			if err == nil || ignoreErr {
- 				break
++			/* Normally, if we get an error, it means the predicate check failed, and creating a node won't allow the pod to be scheduled
++			   However, if the error is due to InterPodAffinity, we ignore that there was an error and continue to attempt adding the node
++			*/
++			if err != nil {
++				if err.PredicateName() == "InterPodAffinity" && err.Message() == interpodaffinity.ErrReasonAntiAffinityRulesNotMatch {
++					klog.V(4).Infof("Ignoring InterPodAffinity error while checking predicates for pod %s.%s on theoretical node %s in ClusterSnapshot; %v", pod.Namespace, pod.Name, estimationState.lastNodeName, err)
++				} else {
++					klog.V(4).Infof("Error while checking predicates for pod %s.%s on theoretical node %s in ClusterSnapshot; %v, bailing", pod.Namespace, pod.Name, estimationState.lastNodeName, err)
++					break
++				}
  			}
++
  			if err := e.tryToAddNode(estimationState, pod, estimationState.lastNodeName); err != nil {
 +				klog.V(4).Infof("Error while adding pod %s.%s to node %s in ClusterSnapshot; %v", pod.Namespace, pod.Name, estimationState.lastNodeName, err)
  				return err
  			}
  		}
-@@ -211,6 +229,9 @@ func (e *BinpackingNodeEstimator) addNewNodeToSnapshot(
+@@ -211,6 +232,9 @@ func (e *BinpackingNodeEstimator) addNewNodeToSnapshot(
  	template *schedulerframework.NodeInfo,
  ) error {
  	newNodeInfo := scheduler.DeepCopyTemplateNode(template, fmt.Sprintf("e-%d", estimationState.newNodeNameIndex))
