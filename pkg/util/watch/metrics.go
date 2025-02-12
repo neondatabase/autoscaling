@@ -8,6 +8,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"k8s.io/apimachinery/pkg/watch"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 // Metrics holds some common prometheus collectors that are used by Watch
@@ -49,66 +51,59 @@ type MetricsConfig struct {
 
 const metricInstanceLabel = "watcher_instance"
 
-// NewMetrics creates a new set of metrics for one or many Watch calls
+// NewMetrics creates a new set of metrics for many Watch calls within the same service.
 //
-// All metrics' names will be prefixed with the provided string.
-func NewMetrics(prefix string) Metrics {
+// The metrics will be registered with prometheus.Registerer.
+//
+// All metric names will be prefixed with the provided string, and when used by Watch, will be
+// additionally labeled with the particular Watch instance.
+func NewMetrics(prefix string, reg prometheus.Registerer) Metrics {
 	return Metrics{
 		isFailing: false,
 
-		clientCallsTotal: prometheus.NewCounterVec(
+		clientCallsTotal: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: fmt.Sprint(prefix, "_client_calls_total"),
 				Help: "Number of calls to k8s client.{Watch,List}, labeled by method",
 			},
 			[]string{metricInstanceLabel, "method"},
-		),
-		relistRequestsTotal: prometheus.NewCounterVec(
+		)),
+		relistRequestsTotal: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: fmt.Sprint(prefix, "_relist_requests_total"),
 				Help: "Number of internal manual relisting requests",
 			},
 			[]string{metricInstanceLabel},
-		),
-		eventsTotal: prometheus.NewCounterVec(
+		)),
+		eventsTotal: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: fmt.Sprint(prefix, "_events_total"),
 				Help: "Number of k8s watch.Events that have occurred, including errors, labeled by type",
 			},
 			[]string{metricInstanceLabel, "type"},
-		),
-		errorsTotal: prometheus.NewCounterVec(
+		)),
+		errorsTotal: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: fmt.Sprint(prefix, "_errors_total"),
 				Help: "Number of errors, either error events or re-list errors, labeled by source",
 			},
 			[]string{metricInstanceLabel, "source"},
-		),
-		aliveCurrent: prometheus.NewGaugeVec(
+		)),
+		aliveCurrent: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: fmt.Sprint(prefix, "_alive_current"),
 				Help: "For each watcher, 1 iff the watcher is currently running or failing, else 0",
 			},
 			[]string{metricInstanceLabel},
-		),
-		failingCurrent: prometheus.NewGaugeVec(
+		)),
+		failingCurrent: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: fmt.Sprint(prefix, "_failing_current"),
 				Help: "For each watcher, 1 iff the watcher's last request failed *and* it's waiting to retry, else 0",
 			},
 			[]string{metricInstanceLabel},
-		),
+		)),
 	}
-}
-
-// MustRegister registers all the collectors in the Metrics
-func (m *Metrics) MustRegister(reg *prometheus.Registry) {
-	reg.MustRegister(m.clientCallsTotal)
-	reg.MustRegister(m.relistRequestsTotal)
-	reg.MustRegister(m.eventsTotal)
-	reg.MustRegister(m.errorsTotal)
-	reg.MustRegister(m.aliveCurrent)
-	reg.MustRegister(m.failingCurrent)
 }
 
 ///////////////////////////////////////////////

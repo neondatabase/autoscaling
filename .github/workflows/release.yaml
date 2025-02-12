@@ -38,8 +38,8 @@ jobs:
     needs: get-tag
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
-      build-cluster-autoscaler: true
       upload-to-ecr: true
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
   build-test-vm:
@@ -48,6 +48,7 @@ jobs:
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
       upload-vm-builder: true
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
   e2e:
@@ -84,7 +85,8 @@ jobs:
         with:
           fail_on_unmatched_files: true
           files: |
-            vm-builder/vm-builder
+            vm-builder/vm-builder-arm64
+            vm-builder/vm-builder-amd64
             rendered_manifests/autoscale-scheduler.yaml
             rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml

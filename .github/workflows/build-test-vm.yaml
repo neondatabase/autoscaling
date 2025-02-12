@@ -22,10 +22,15 @@ on:
         type: boolean
         required: false
         default: false
+      archs:
+        description: 'Architecture to build for'
+        type: string
+        required: false
+        default: '["amd64","arm64"]'
     outputs:
       vm-postgres-16-bullseye:
         description: 'image name for postgres:16-bullseye, VM-ified'
-        value: ${{ jobs.tags.outputs.vm-postgres-16-bullseye }}
+        value: ${{ jobs.merge-vm-images.outputs.vm-postgres-16-bullseye }}
 
 env:
   IMG_POSTGRES_16_BULLSEYE: "neondatabase/vm-postgres-16-bullseye"
@@ -38,25 +43,21 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
-  tags:
-    outputs:
-      vm-postgres-16-bullseye: ${{ steps.show-tags.outputs.vm-postgres-16-bullseye }}
-      daemon: ${{ steps.show-tags.outputs.daemon }}
-    runs-on: ubuntu-latest
-    steps:
-      - id: show-tags
-        run: |
-          echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${{ env.IMG_DAEMON }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
-    needs: tags
-    runs-on: [ self-hosted, gen3, large ]
-    env:
-      IMG_DAEMON: ${{ needs.tags.outputs.daemon }}
+    strategy:
+      matrix:
+        arch: ${{ fromJson(inputs.archs) }}
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
+    outputs:
+      vm-postgres-16-bullseye: ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
+      daemon: ${{ steps.tags.outputs.daemon }}
     steps:
+      - id: tags
+        run: |
+          echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${{ env.IMG_DAEMON }}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -65,15 +66,21 @@ jobs:
           cache: false
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
         timeout-minutes: 10
-      - run: make docker-build-daemon
+      - name: Build daemon image
+        run: make docker-build-daemon
+        env:
+          IMG_DAEMON: ${{ steps.tags.outputs.daemon }}
+
       - run: make bin/vm-builder
+        env:
+          IMG_DAEMON: ${{ steps.tags.outputs.daemon }}
 
       - name: upload vm-builder
         if: ${{ format('{0}', inputs.upload-vm-builder) == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: vm-builder
-          path: bin/vm-builder
+          path: ${{ format('bin/vm-builder-{0}', matrix.arch) }}
           if-no-files-found: error
           retention-days: 2
 
@@ -86,9 +93,50 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: build ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
+      - name: build ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
         run: |
-          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ needs.tags.outputs.vm-postgres-16-bullseye }} -daemon-image ${{ needs.tags.outputs.daemon }} -target-arch linux/${TARGET_ARCH}
-      - name: docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
+          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ steps.tags.outputs.vm-postgres-16-bullseye }} -daemon-image ${{ steps.tags.outputs.daemon }} -target-arch linux/${{ matrix.arch }}
+
+      - name: docker push and annotate image ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
         run: |
-          docker push ${{ needs.tags.outputs.vm-postgres-16-bullseye }}
+          # docker manifest command works only with remote images so we need to push the image first
+          docker push ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
+          docker buildx imagetools inspect ${{ steps.tags.outputs.vm-postgres-16-bullseye }} --format '{{ .Manifests }}'
+          docker manifest create ${{ steps.tags.outputs.vm-postgres-16-bullseye }} ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
+          docker manifest annotate ${{ steps.tags.outputs.vm-postgres-16-bullseye }} ${{ steps.tags.outputs.vm-postgres-16-bullseye }} --os linux --arch ${{ matrix.arch }}
+          docker manifest push ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
+
+  merge-vm-images:
+    needs: [build]
+    runs-on: ubuntu-latest
+    outputs:
+      vm-postgres-16-bullseye: ${{ steps.merge-vm-images.outputs.vm-postgres-16-bullseye }}
+    env:
+      ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: git checkout
+        uses: actions/checkout@v4
+
+      - name: docker - setup buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: login to docker hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: Merge vm images
+        id: merge-vm-images
+        run: |
+          result_image="${{ env.IMG_POSTGRES_16_BULLSEYE }}:${TAG}"
+
+          args=("-t" "${result_image}")
+          for arch in ${ARCHS}; do
+            args+=("${{ env.IMG_POSTGRES_16_BULLSEYE }}-${arch}:${TAG}")
+          done
+
+          docker buildx imagetools create "${args[@]}"
+
+          echo "vm-postgres-16-bullseye=${result_image}" >> $GITHUB_OUTPUT

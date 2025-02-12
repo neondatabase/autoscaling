@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 type Config struct {
@@ -95,8 +97,33 @@ func (mc *MetricsCollector) Run(
 	logger *zap.Logger,
 	store VMStoreForNode,
 ) error {
-	logger = logger.Named("collect")
+	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
 
+	// note: sink has its own context, so that it is canceled only after runCollector finishes.
+	sinkCtx, cancelSink := context.WithCancel(context.Background())
+	defer cancelSink() // make sure resources are cleaned up
+
+	tg.Go("collect", func(logger *zap.Logger) error {
+		defer cancelSink() // cancel event sending *only when we're done collecting*
+		return mc.runCollector(tg.Ctx(), logger, store)
+	})
+
+	tg.Go("sink-run", func(logger *zap.Logger) error {
+		err := mc.sink.Run(sinkCtx) // note: NOT tg.Ctx(); see more above.
+		if err != nil {
+			return fmt.Errorf("billing events sink failed: %w", err)
+		}
+		return nil
+	})
+
+	return tg.Wait()
+}
+
+func (mc *MetricsCollector) runCollector(
+	ctx context.Context,
+	logger *zap.Logger,
+	store VMStoreForNode,
+) error {
 	collectTicker := time.NewTicker(time.Second * time.Duration(mc.conf.CollectEverySeconds))
 	defer collectTicker.Stop()
 	// Offset by half a second, so it's a bit more deterministic.

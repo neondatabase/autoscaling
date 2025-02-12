@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	sysruntime "runtime"
 	"strconv"
 	"time"
 
@@ -47,6 +46,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/tools/record"
 
@@ -164,15 +164,32 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
-	// examine cpuScalingMode and set it to the default value if it is not set
-	if vm.Spec.CpuScalingMode == nil {
-		log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
-		vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
-		if err := r.tryUpdateVM(ctx, &vm); err != nil {
-			log.Error(err, "Failed to set default CPU scaling mode")
-			return ctrl.Result{}, err
+	// examine for nil values that should be defaulted
+	// this part is done for values that we want eventually explicitly override in the kube-api storage
+	// to a default value.
+	{
+		changed := false
+		// examine targetArchitecture and set it to the default value if it is not set
+		if vm.Spec.TargetArchitecture == nil {
+			log.Info("Setting default target architecture", "default", vmv1.CPUArchitectureAMD64)
+			vm.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
+			changed = true
 		}
-		return ctrl.Result{Requeue: true}, nil
+
+		// examine cpuScalingMode and set it to the default value if it is not set
+		if vm.Spec.CpuScalingMode == nil {
+			log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
+			vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
+			changed = true
+		}
+
+		if changed {
+			if err := r.tryUpdateVM(ctx, &vm); err != nil {
+				log.Error(err, "Failed to set default values for VirtualMachine")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
 	}
 
 	statusBefore := vm.Status.DeepCopy()
@@ -625,7 +642,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					"Memory in spec", memorySizeFromSpec)
 				vm.Status.Phase = vmv1.VmScaling
 			}
-
 		case runnerSucceeded:
 			vm.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&vm.Status.Conditions,
@@ -847,6 +863,7 @@ const (
 //
 // This is *similar* to the value of pod.Status.Phase, but we'd like to retain our own abstraction
 // to have more control over the semantics.
+// We handle PodRunning phase differently during VM Migration phase.
 func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	// Add 5 seconds to account for clock skew and k8s lagging behind.
 	deadline := metav1.NewTime(metav1.Now().Add(-5 * time.Second))
@@ -864,10 +881,41 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	case corev1.PodFailed:
 		return runnerFailed
 	case corev1.PodRunning:
-		return runnerRunning
+		return runnerContainerStatus(pod)
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
+}
+
+const (
+	runnerContainerName = "neonvm-runner"
+)
+
+// runnerContainerStatus returns status of the runner container.
+func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
+	// if the pod has no container statuses, we consider it pending
+	if len(pod.Status.ContainerStatuses) == 0 {
+		return runnerPending
+	}
+	_, role, ownedByMigration := vmv1.MigrationOwnerForPod(pod)
+
+	// if a target pod for a migration, we consider the pod running
+	// because the qemu is started in incoming migration mode
+	// and neonvm-daemon which is used in readiness probe is not available
+	if ownedByMigration && role == vmv1.MigrationRoleTarget {
+		return runnerRunning
+	}
+
+	// normal case scenario, pod is not owned by the migration
+	// and we check the neonvm-runner container for the readiness probe
+	for _, c := range pod.Status.ContainerStatuses {
+		// we only care about the neonvm-runner container
+		if c.Name == runnerContainerName && !c.Ready {
+			return runnerPending
+		}
+	}
+
+	return runnerRunning
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
@@ -1145,25 +1193,28 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
-	// if NodeSelectorTerms list is empty - add default values (arch==amd64 or os==linux)
-	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
-		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
-			a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-			corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{
-					{
-						Key:      "kubernetes.io/arch",
-						Operator: "In",
-						Values:   []string{sysruntime.GOARCH},
-					},
-					{
-						Key:      "kubernetes.io/os",
-						Operator: "In",
-						Values:   []string{"linux"},
-					},
+	nodeSelector := a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+
+	// always add default values (arch==vm.Spec.Affinity or os==linux) even if there are already some values
+	nodeSelector.NodeSelectorTerms = append(
+		nodeSelector.NodeSelectorTerms,
+		corev1.NodeSelectorTerm{
+			MatchExpressions: []corev1.NodeSelectorRequirement{
+				{
+					Key:      "kubernetes.io/os",
+					Operator: "In",
+					Values:   []string{"linux"},
 				},
-			})
-	}
+				{
+					Key:      "kubernetes.io/arch",
+					Operator: "In",
+					// vm.Spec.TargetArchitecture is guaranteed to be set by reconciler loop
+					Values: []string{string(*vm.Spec.TargetArchitecture)},
+				},
+			},
+		},
+	)
+
 	return a
 }
 
@@ -1349,6 +1400,18 @@ func podSpec(
 						}
 					}(),
 					Resources: vm.Spec.PodResources,
+					ReadinessProbe: &corev1.Probe{
+						ProbeHandler: corev1.ProbeHandler{
+							HTTPGet: &corev1.HTTPGetAction{
+								Path:   "/ready",
+								Port:   intstr.FromInt32(vm.Spec.RunnerPort),
+								Scheme: corev1.URISchemeHTTP,
+							},
+						},
+						InitialDelaySeconds: 5,
+						PeriodSeconds:       5,
+						FailureThreshold:    3,
+					},
 				}
 
 				return []corev1.Container{runner}
