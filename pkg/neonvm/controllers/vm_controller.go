@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	sysruntime "runtime"
 	"strconv"
 	"time"
 
@@ -165,15 +164,32 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
-	// examine cpuScalingMode and set it to the default value if it is not set
-	if vm.Spec.CpuScalingMode == nil {
-		log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
-		vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
-		if err := r.tryUpdateVM(ctx, &vm); err != nil {
-			log.Error(err, "Failed to set default CPU scaling mode")
-			return ctrl.Result{}, err
+	// examine for nil values that should be defaulted
+	// this part is done for values that we want eventually explicitly override in the kube-api storage
+	// to a default value.
+	{
+		changed := false
+		// examine targetArchitecture and set it to the default value if it is not set
+		if vm.Spec.TargetArchitecture == nil {
+			log.Info("Setting default target architecture", "default", vmv1.CPUArchitectureAMD64)
+			vm.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
+			changed = true
 		}
-		return ctrl.Result{Requeue: true}, nil
+
+		// examine cpuScalingMode and set it to the default value if it is not set
+		if vm.Spec.CpuScalingMode == nil {
+			log.Info("Setting default CPU scaling mode", "default", r.Config.DefaultCPUScalingMode)
+			vm.Spec.CpuScalingMode = lo.ToPtr(r.Config.DefaultCPUScalingMode)
+			changed = true
+		}
+
+		if changed {
+			if err := r.tryUpdateVM(ctx, &vm); err != nil {
+				log.Error(err, "Failed to set default values for VirtualMachine")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
 	}
 
 	statusBefore := vm.Status.DeepCopy()
@@ -1177,25 +1193,28 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	if a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
-	// if NodeSelectorTerms list is empty - add default values (arch==amd64 or os==linux)
-	if len(a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
-		a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(
-			a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-			corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{
-					{
-						Key:      "kubernetes.io/arch",
-						Operator: "In",
-						Values:   []string{sysruntime.GOARCH},
-					},
-					{
-						Key:      "kubernetes.io/os",
-						Operator: "In",
-						Values:   []string{"linux"},
-					},
+	nodeSelector := a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+
+	// always add default values (arch==vm.Spec.Affinity or os==linux) even if there are already some values
+	nodeSelector.NodeSelectorTerms = append(
+		nodeSelector.NodeSelectorTerms,
+		corev1.NodeSelectorTerm{
+			MatchExpressions: []corev1.NodeSelectorRequirement{
+				{
+					Key:      "kubernetes.io/os",
+					Operator: "In",
+					Values:   []string{"linux"},
 				},
-			})
-	}
+				{
+					Key:      "kubernetes.io/arch",
+					Operator: "In",
+					// vm.Spec.TargetArchitecture is guaranteed to be set by reconciler loop
+					Values: []string{string(*vm.Spec.TargetArchitecture)},
+				},
+			},
+		},
+	)
+
 	return a
 }
 
