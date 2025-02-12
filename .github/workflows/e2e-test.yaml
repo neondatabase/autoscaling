@@ -81,7 +81,7 @@ jobs:
       matrix:
         cluster:
           - ${{ inputs.cluster || 'k3d' }}
-        arch: [ amd64 ]
+        arch: [ amd64, arm64 ]
 
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
 
@@ -199,6 +199,9 @@ jobs:
           docker pull "$TEST_IMAGE"
           docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
           make load-example-vms
+
+      - run: make arm_patch_e2e
+        if: matrix.arch == 'arm64'
 
       - run: make e2e
         timeout-minutes: 15
