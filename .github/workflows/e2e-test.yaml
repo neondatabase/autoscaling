@@ -282,4 +282,4 @@ jobs:
       - name: Fail the job if any of the dependencies do not succeed or are skipped
         run: exit 1
         if: |
-          contains(needs.e2e-tests.result, 'failed') || contains(needs.e2e-tests.result, 'cancelled')
+          contains(needs.*.result, 'failed') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
