@@ -64,7 +64,7 @@ type vmMetricsSeconds struct {
 
 type MetricsCollector struct {
 	conf    *Config
-	sink    *reporting.EventSink[*reporting.IncrementalEvent]
+	sink    *reporting.EventSink[*IncrementalEvent]
 	metrics PromMetrics
 }
 
@@ -246,7 +246,7 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
-func logAddedEvent(logger *zap.Logger, event *reporting.IncrementalEvent) *reporting.IncrementalEvent {
+func logAddedEvent(logger *zap.Logger, event *IncrementalEvent) *IncrementalEvent {
 	logger.Info(
 		"Adding event to batch",
 		zap.String("IdempotencyKey", event.IdempotencyKey),
@@ -262,7 +262,7 @@ func (s *metricsState) drainEnqueue(
 	logger *zap.Logger,
 	conf *Config,
 	hostname string,
-	sink *reporting.EventSink[*reporting.IncrementalEvent],
+	sink *reporting.EventSink[*IncrementalEvent],
 ) {
 	now := time.Now()
 
@@ -275,7 +275,7 @@ func (s *metricsState) drainEnqueue(
 		history.finalizeCurrentTimeSlice()
 
 		countInBatch += 1
-		enqueue(logAddedEvent(logger, reporting.Enrich(now, hostname, countInBatch, batchSize, &reporting.IncrementalEvent{
+		enqueue(logAddedEvent(logger, enrich(now, hostname, countInBatch, batchSize, &IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
 			Type:           "", // set by reporting.Enrich
 			IdempotencyKey: "", // set by reporting.Enrich
@@ -287,7 +287,7 @@ func (s *metricsState) drainEnqueue(
 			Value:     int(math.Round(history.total.cpu)),
 		})))
 		countInBatch += 1
-		enqueue(logAddedEvent(logger, reporting.Enrich(now, hostname, countInBatch, batchSize, &reporting.IncrementalEvent{
+		enqueue(logAddedEvent(logger, enrich(now, hostname, countInBatch, batchSize, &IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
 			Type:           "", // set by reporting.Enrich
 			IdempotencyKey: "", // set by reporting.Enrich

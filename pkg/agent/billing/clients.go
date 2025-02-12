@@ -37,7 +37,7 @@ type HTTPClientConfig struct {
 	URL string `json:"url"`
 }
 
-type billingClient = reporting.Client[*reporting.IncrementalEvent]
+type billingClient = reporting.Client[*IncrementalEvent]
 
 func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) ([]billingClient, error) {
 	var clients []billingClient
@@ -91,9 +91,9 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 	return clients, nil
 }
 
-func jsonMarshalEvents(events []*reporting.IncrementalEvent) ([]byte, reporting.SimplifiableError) {
+func jsonMarshalEvents(events []*IncrementalEvent) ([]byte, reporting.SimplifiableError) {
 	obj := struct {
-		Events []*reporting.IncrementalEvent `json:"events"`
+		Events []*IncrementalEvent `json:"events"`
 	}{Events: events}
 
 	return reporting.JSONMarshalBatch(&obj)
