@@ -268,3 +268,19 @@ jobs:
       - name: Cleanup
         if: always()
         run: make ${{ matrix.cluster }}-destroy
+
+  # This job simplifies setting branch protection rules (in GitHub UI)
+  # by allowing to set only this job instead of listing many others.
+  # It also makes it easier to rename or parametrise jobs (using matrix)
+  # which requires changes in branch protection rules
+
+  conclusion:
+    name: Conclusion
+    needs: [e2e-tests]
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Set conclusion
+        run: exit 1
+        if: |
+          contains(needs.e2e-tests.result, 'failed') || contains(needs.e2e-tests.result, 'cancelled')
