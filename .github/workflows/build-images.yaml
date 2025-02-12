@@ -101,7 +101,6 @@ jobs:
       GO_BASE_IMG: ${{ format('localhost:5000/neondatabase/autoscaling-go-base-{0}:dev', matrix.arch) }}
     permissions:
       contents: read  # This is required for actions/checkout
-      id-token: write # This is required for aws-actions/configure-aws-credentials
     strategy:
       matrix:
         arch: ${{ fromJson(inputs.archs) }}
@@ -164,33 +163,6 @@ jobs:
           registry: cache.neon.build
           username: ${{ secrets.NEON_CI_DOCKERCACHE_USERNAME }}
           password: ${{ secrets.NEON_CI_DOCKERCACHE_PASSWORD }}
-      - name: Configure dev AWS credentials
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: eu-central-1
-          mask-aws-account-id: true
-          role-to-assume: ${{ secrets.DEV_GHA_OIDC_ECR_ROLE }}
-
-      - name: Login to dev ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.ECR_DEV }}
-
-      - name: Configure prod AWS credentials
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: eu-central-1
-          mask-aws-account-id: true
-          role-to-assume: ${{ secrets.PROD_GHA_OIDC_ECR_ROLE }}
-
-      - name: Login to prod ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.ECR_PROD }}
 
       - name: Check dependencies
         run: |
@@ -330,27 +302,6 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache,mode=max', matrix.arch) || '' }}
 
-      # TODO: do we need to copy non-merged images to ECR?
-      - name: Copy all images to ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
-        run: |
-          for image in \
-            neonvm-controller \
-            neonvm-vxlan-controller \
-            neonvm-runner \
-            vm-kernel \
-            autoscale-scheduler \
-            autoscaler-agent \
-            cluster-autoscaler-neonvm \
-            ; do
-            echo Copy ${image}-${{ matrix.arch }}:${{ inputs.tag }} to dev ECR
-            docker buildx imagetools create -t ${{ env.ECR_DEV }}/${image}-${{ matrix.arch }}:${{ inputs.tag }} \
-                                               neondatabase/${image}-${{ matrix.arch }}:${{ inputs.tag }}
-            echo Copy ${image}-${{ matrix.arch }}:${{ inputs.tag }} to prod ECR
-            docker buildx imagetools create -t ${{ env.ECR_PROD }}/${image}:${{ inputs.tag }} \
-                                               neondatabase/${image}:${{ inputs.tag }}
-          done
-
 
   merge-images:
     outputs:
@@ -361,6 +312,8 @@ jobs:
       autoscaler-agent: ${{ steps.tags.outputs.autoscaler-agent }}
       daemon: ${{ steps.tags.outputs.daemon }}
       cluster-autoscaler: ${{ steps.tags.outputs.cluster-autoscaler }}
+    permissions:
+      id-token: write # This is required for aws-actions/configure-aws-credentials
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -371,6 +324,34 @@ jobs:
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: Configure dev AWS credentials
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: eu-central-1
+          mask-aws-account-id: true
+          role-to-assume: ${{ secrets.DEV_GHA_OIDC_ECR_ROLE }}
+
+      - name: Login to dev ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_DEV }}
+
+      - name: Configure prod AWS credentials
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: eu-central-1
+          mask-aws-account-id: true
+          role-to-assume: ${{ secrets.PROD_GHA_OIDC_ECR_ROLE }}
+
+      - name: Login to prod ECR
+        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_PROD }}
 
       - name: Create multi-arch images
         env:
@@ -407,12 +388,12 @@ jobs:
       - name: Copy all merged images to ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
         run: |
-          images=("${IMG_CONTROLLER}" \
-          "${IMG_VXLAN_CONTROLLER}" \
-          "${IMG_RUNNER}" \
-          "${IMG_SCHEDULER}" \
-          "${IMG_AUTOSCALER_AGENT}" \
-          "${IMG_DAEMON}")
+          images=("neonvm-controller" \
+          "neonvm-vxlan-controller" \
+          "neonvm-runner" \
+          "autoscale-scheduler" \
+          "autoscaler-agent" \
+          "cluster-autoscaler-neonvm")
 
           for image in "${images[@]}"; do
             echo Copy ${image}:${{ inputs.tag }} to dev ECR
