@@ -273,7 +273,6 @@ jobs:
   # by allowing to set only this job instead of listing many others.
   # It also makes it easier to rename or parametrise jobs (using matrix)
   # which requires changes in branch protection rules
-
   conclusion:
     name: Conclusion
     needs: [e2e-tests]
