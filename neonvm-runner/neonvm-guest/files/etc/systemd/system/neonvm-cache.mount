@@ -1,0 +1,10 @@
+[Unit]
+Description=neonvm LFC disk
+
+[Mount]
+What=LABEL=cache
+Where=/neonvm/cache
+Options=rw,defaults
+
+[Install]
+WantedBy=systemd-nspawn@neonvm-payload.service

@@ -21,7 +21,16 @@ import (
 )
 
 const (
-	rootDiskPath    = "/vm/images/rootdisk.qcow2"
+	// In the new system, neonvm-runner launches the 'neonvm-guest' disk in
+	// the VM, and the payload comes in a different image, 'neonvm-payload'.
+	guestDiskPath   = "/neonvm-guest.qcow2"
+	payloadDiskPath = "/vm/images/neonvm-payload.qcow2"
+
+	// In the old system, the 'rootdisk' is mounted directly as the root
+	// filesystem. The basic neonvm guest services are built into the rootdisk
+	// image directly, by vm-builder.
+	rootDiskPath = "/vm/images/rootdisk.qcow2"
+
 	runtimeDiskPath = "/vm/images/runtime.iso"
 	mountedDiskPath = "/vm/images"
 
@@ -31,9 +40,26 @@ const (
 	swapName = "swapdisk"
 )
 
+// Should we use 'neonvm-guest' to launch the payload?
+func shouldUseNeonVMGuest(logger *zap.Logger) (bool, error) {
+	_, err := os.Stat(payloadDiskPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			logger.Info(fmt.Sprintf("neonvm-payload.qcow2 does not exist, using legacy rootdisk.qcow2"))
+			return false, nil
+		} else {
+			return false, err
+		}
+	} else {
+		logger.Info(fmt.Sprintf("using neonvm-payload.qcow2"))
+		return true, nil
+	}
+}
+
 // setupVMDisks creates the disks for the VM and returns the appropriate QEMU args
 func setupVMDisks(
 	logger *zap.Logger,
+	useNeonVMGuest bool,
 	diskCacheSettings string,
 	enableSSH bool,
 	swapSize *resource.Quantity,
@@ -41,7 +67,13 @@ func setupVMDisks(
 ) ([]string, error) {
 	var qemuCmd []string
 
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
+	if !useNeonVMGuest {
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
+	} else {
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=neonvm-guest,file=%s,if=virtio,media=disk,index=0,%s", guestDiskPath, diskCacheSettings))
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=neonvm-payload,file=%s,if=virtio,media=disk,index=1,%s", payloadDiskPath, diskCacheSettings))
+	}
+
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
 
 	if enableSSH {
@@ -66,7 +98,7 @@ func setupVMDisks(
 		case disk.EmptyDisk != nil:
 			logger.Info("creating QCOW2 image with empty ext4 filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
-			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
+			if err := createQCOW2(logger, disk.Name, dPath, &disk.EmptyDisk.Size, disk.EmptyDisk.EnableQuotas, nil); err != nil {
 				return nil, fmt.Errorf("Failed to create QCOW2 image: %w", err)
 			}
 			discard := ""
@@ -90,13 +122,13 @@ func setupVMDisks(
 	return qemuCmd, nil
 }
 
-func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
-	// resize rootDisk image of size specified and new size more than current
+// resize disk image at diskPath to specified targetSize (unless it's already larger)
+func resizeDisk(logger *zap.Logger, diskPath string, targetSize resource.Quantity) error {
 	type QemuImgOutputPartial struct {
 		VirtualSize int64 `json:"virtual-size"`
 	}
-	// get current disk size by qemu-img info command
-	qemuImgOut, err := exec.Command(qemuImgBin, "info", "--output=json", rootDiskPath).Output()
+	// get current size by qemu-img info command
+	qemuImgOut, err := exec.Command(qemuImgBin, "info", "--output=json", diskPath).Output()
 	if err != nil {
 		return fmt.Errorf("could not get root image size: %w", err)
 	}
@@ -107,17 +139,25 @@ func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
 	imageSizeQuantity := resource.NewQuantity(imageSize.VirtualSize, resource.BinarySI)
 
 	// going to resize
-	if !vmSpec.Guest.RootDisk.Size.IsZero() {
-		if vmSpec.Guest.RootDisk.Size.Cmp(*imageSizeQuantity) == 1 {
-			logger.Info(fmt.Sprintf("resizing rootDisk from %s to %s", imageSizeQuantity.String(), vmSpec.Guest.RootDisk.Size.String()))
-			if err := execFg(qemuImgBin, "resize", rootDiskPath, fmt.Sprintf("%d", vmSpec.Guest.RootDisk.Size.Value())); err != nil {
+	if !targetSize.IsZero() {
+		if targetSize.Cmp(*imageSizeQuantity) == 1 {
+			logger.Info(fmt.Sprintf("resizing %s from %s to %s", diskPath, imageSizeQuantity.String(), targetSize.String()))
+			if err := execFg(qemuImgBin, "resize", diskPath, fmt.Sprintf("%d", targetSize.Value())); err != nil {
 				return fmt.Errorf("failed to resize rootDisk: %w", err)
 			}
 		} else {
-			logger.Info(fmt.Sprintf("rootDisk.size (%s) is less than than image size (%s)", vmSpec.Guest.RootDisk.Size.String(), imageSizeQuantity.String()))
+			logger.Info(fmt.Sprintf("targetSize (%s) is less than than image size (%s)", targetSize.String(), imageSizeQuantity.String()))
 		}
 	}
 	return nil
+}
+
+func resizeRootDisk(logger *zap.Logger, useNeonVMGuest bool, vmSpec *vmv1.VirtualMachineSpec) error {
+	if useNeonVMGuest {
+		return resizeDisk(logger, payloadDiskPath, vmSpec.Guest.RootDisk.Size)
+	} else {
+		return resizeDisk(logger, rootDiskPath, vmSpec.Guest.RootDisk.Size)
+	}
 }
 
 func createISO9660runtime(
@@ -170,6 +210,19 @@ func createISO9660runtime(
 		}
 	}
 
+	// Put the same in a .env file. That format is easier to process in systemd-based neonvm-guest.
+	// (we could gate this on useNeonVMGuest, but there's no harm in always including it.)
+	envFileLines := []string{
+		"# Generated by neonvm-runner",
+	}
+
+	for _, e := range env {
+		envFileLines = append(envFileLines, fmt.Sprintf(`%s=%s`, e.Name, shellescape.Quote(e.Value)))
+	}
+	envFileLines = append(envFileLines, "") // for newline after last line
+
+	err = writer.AddFile(bytes.NewReader([]byte(strings.Join(envFileLines, "\n"))), "command.env")
+
 	mounts := []string{
 		"set -euxo pipefail",
 	}
@@ -183,6 +236,7 @@ func createISO9660runtime(
 	}
 
 	if len(disks) != 0 {
+		// For legacy vm-builder based VMs
 		for _, disk := range disks {
 			if disk.MountPath != "" {
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mkdir -p %s`, disk.MountPath))
@@ -336,7 +390,7 @@ func createSwap(diskPath string, swapSize *resource.Quantity) error {
 	return nil
 }
 
-func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, contentPath *string) error {
+func createQCOW2(logger *zap.Logger, diskName string, diskPath string, diskSize *resource.Quantity, enableQuotas bool, contentPath *string) error {
 	ext4blocksMin := int64(64)
 	ext4blockSize := int64(4096)
 	ext4blockCount := int64(0)
@@ -374,6 +428,15 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 
 	if err := execFg("mkfs.ext4", mkfsArgs...); err != nil {
 		return err
+	}
+
+	if enableQuotas {
+		if err := execFg("tune2fs", "-Q", "prjquota", "ext4.raw"); err != nil {
+			return err
+		}
+		if err := execFg("tune2fs", "-E", "mount_opts=prjquota", "ext4.raw"); err != nil {
+			return err
+		}
 	}
 
 	if err := execFg(qemuImgBin, "convert", "-q", "-f", "raw", "-O", "qcow2", "-o", "cluster_size=2M,lazy_refcounts=on", "ext4.raw", diskPath); err != nil {

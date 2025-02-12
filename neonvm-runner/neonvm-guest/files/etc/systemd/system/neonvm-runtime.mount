@@ -1,0 +1,14 @@
+# Mount runtime image under /neonvm/runtime. It contains configuration
+# files, generated dynamically by neonvm-runner
+
+[Unit]
+Description=neonvm configuration files
+
+[Mount]
+What=LABEL=vmruntime
+Where=/neonvm/runtime
+Options=rw,defaults
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=systemd-nspawn@neonvm-payload.service

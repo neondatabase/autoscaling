@@ -1,0 +1,23 @@
+---
+data_dir: /tmp
+api:
+  enabled: true
+  address: "0.0.0.0:8686"
+  playground: false
+sources:
+  host_metrics:
+    filesystem:
+      devices:
+        excludes: [binfmt_misc]
+      filesystems:
+        excludes: [binfmt_misc]
+      mountPoints:
+        excludes: ["*/proc/sys/fs/binfmt_misc"]
+    type: host_metrics
+    scrape_interval_secs: 1 # default is 15, but we scrape every 5s in autoscaler-agent
+sinks:
+  prom_exporter:
+    type: prometheus_exporter
+    inputs:
+      - host_metrics
+    address: "0.0.0.0:9100"

@@ -1,0 +1,10 @@
+[Unit]
+Description=neonvm pgdata disk
+
+[Mount]
+What=LABEL=pgdata
+Where=/neonvm/pgdata
+Options=rw,defaults,prjquota
+
+[Install]
+WantedBy=systemd-nspawn@neonvm-payload.service

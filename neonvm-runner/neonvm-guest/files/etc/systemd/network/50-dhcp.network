@@ -1,0 +1,11 @@
+[Match]
+Name=en*
+
+[Network]
+DHCP=yes
+
+[DHCPv4]
+UseDomains=yes
+
+[DHCPv6]
+UseDomains=yes

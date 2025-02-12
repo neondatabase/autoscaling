@@ -1,0 +1,20 @@
+## FIXME: This is unused with neonvm-guest. It's here just to remind that some
+## of this functionality still needs to be moved to systemd unit files
+
+# taken from 50-udev-default.rules
+echo 'SUBSYSTEM=="virtio-ports", KERNEL=="vport*", ATTR{name}=="?*", SYMLINK+="virtio-ports/$attr{name}"' > /lib/udev/rules.d/99-virtio-ports.rules
+
+echo 'ATTR{name}=="tech.neon.log.0" MODE="0666"' > /lib/udev/rules.d/99-neon-log-port.rules
+
+# mount virtual machine .spec.disks
+test -f /neonvm/runtime/mounts.sh && /neonvm/bin/sh /neonvm/runtime/mounts.sh
+
+# set any user-supplied sysctl settings
+test -f /neonvm/runtime/sysctl.conf && /neonvm/bin/sysctl -p /neonvm/runtime/sysctl.conf
+
+# try resize filesystem
+resize2fs /dev/vda
+
+# ssh
+# we use ed25519 keys and -N "" skips setting up a passphrase
+/neonvm/bin/ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
