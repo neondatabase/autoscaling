@@ -79,8 +79,8 @@ jobs:
         if: ${{ format('{0}', inputs.upload-vm-builder) == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: vm-builder
-          path: ${{ format('bin/vm-builder-{0}', matrix.arch) }}
+          name: ${{ format('vm-builder-{0}', matrix.arch) }}
+          path: bin/vm-builder
           if-no-files-found: error
           retention-days: 2
 
