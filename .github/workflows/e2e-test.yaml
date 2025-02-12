@@ -279,7 +279,7 @@ jobs:
     if: always()
     runs-on: ubuntu-22.04
     steps:
-      - name: Set conclusion
+      - name: Fail the job if any of the dependencies do not succeed or are skipped
         run: exit 1
         if: |
           contains(needs.e2e-tests.result, 'failed') || contains(needs.e2e-tests.result, 'cancelled')
