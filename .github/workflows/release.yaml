@@ -68,8 +68,9 @@ jobs:
       - name: download vm-builder
         uses: actions/download-artifact@v4
         with:
-          name: vm-builder
+          pattern: 'vm-builder-*'
           path: vm-builder
+          merge-multiple: true # place the various vm-builder-$ARCH binaries into this dir
 
       - name: download manifests
         uses: actions/download-artifact@v4
