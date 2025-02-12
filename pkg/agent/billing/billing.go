@@ -275,10 +275,10 @@ func (s *metricsState) drainEnqueue(
 		history.finalizeCurrentTimeSlice()
 
 		countInBatch += 1
-		enqueue(logAddedEvent(logger, enrich(now, hostname, countInBatch, batchSize, &IncrementalEvent{
+		enqueue(logAddedEvent(logger, enrichEvents(now, hostname, countInBatch, batchSize, &IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
-			Type:           "", // set by reporting.Enrich
-			IdempotencyKey: "", // set by reporting.Enrich
+			Type:           "", // set by enrichEvents
+			IdempotencyKey: "", // set by enrichEvents
 			EndpointID:     key.endpointID,
 			// TODO: maybe we should store start/stop time in the vmMetricsHistory object itself?
 			// That way we can be aligned to collection, rather than pushing.
@@ -287,10 +287,10 @@ func (s *metricsState) drainEnqueue(
 			Value:     int(math.Round(history.total.cpu)),
 		})))
 		countInBatch += 1
-		enqueue(logAddedEvent(logger, enrich(now, hostname, countInBatch, batchSize, &IncrementalEvent{
+		enqueue(logAddedEvent(logger, enrichEvents(now, hostname, countInBatch, batchSize, &IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
-			Type:           "", // set by reporting.Enrich
-			IdempotencyKey: "", // set by reporting.Enrich
+			Type:           "", // set by enrichEvents
+			IdempotencyKey: "", // set by enrichEvents
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,

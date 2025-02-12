@@ -71,9 +71,9 @@ func (e *IncrementalEvent) getIdempotencyKey() *string {
 	return &e.IdempotencyKey
 }
 
-// уnrich sets the event's Type and IdempotencyKey fields, so that users of this API don't need to
+// enrichEvents sets the event's Type and IdempotencyKey fields, so that users of this API don't need to
 // manually set them
-func enrich[E Event](now time.Time, hostname string, countInBatch, batchSize int, event E) E {
+func enrichEvents[E Event](now time.Time, hostname string, countInBatch, batchSize int, event E) E {
 	event.setType()
 
 	// RFC3339 with microsecond precision. Possible to get collisions with millis, nanos are extra.
