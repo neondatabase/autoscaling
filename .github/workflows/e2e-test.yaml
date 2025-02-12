@@ -81,7 +81,11 @@ jobs:
       matrix:
         cluster:
           - ${{ inputs.cluster || 'k3d' }}
-        arch: [ amd64 ]
+        include:
+          # TODO: when adding arm64: always set push-yamls to false -- we only need to push one at a time.
+          - arch: amd64
+            # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
+            push-yamls: ${{ inputs.push-yamls }}
 
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
 
@@ -121,11 +125,11 @@ jobs:
           IMG_AUTOSCALER_AGENT: ${{ needs.build-images.outputs.autoscaler-agent }}
 
       - name: upload manifests
-        # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
-        if: ${{ format('{0}', inputs.push-yamls) == 'true' }}
+        # nb: use format(..) to catch both true AND 'true'.
+        if: ${{ format('{0}', matrix.push-yamls) == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ format('rendered_manifests-{0}', matrix.arch) }}
+          name: rendered_manifests
           # nb: prefix before wildcard is removed from the uploaded files, so the artifact should
           # contain e.g.
           #   - autoscale-scheduler.yaml
