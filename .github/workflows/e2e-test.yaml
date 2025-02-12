@@ -62,6 +62,7 @@ jobs:
       # settings and used properly in the tests. But if skip (because inputs.tag != ''), then this
       # setting will have no effect and the release images will be normal.
       controller-preserve-runner-pods: true
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
   build-test-vm:
@@ -70,6 +71,7 @@ jobs:
     with:
       skip: ${{ inputs.tag != '' }}
       tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
   e2e-tests:
@@ -79,7 +81,10 @@ jobs:
       matrix:
         cluster:
           - ${{ inputs.cluster || 'k3d' }}
-    runs-on: [ self-hosted, gen3, large ]
+        arch: [ amd64 ]
+
+    runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -120,7 +125,7 @@ jobs:
         if: ${{ format('{0}', inputs.push-yamls) == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: rendered_manifests
+          name: ${{ format('rendered_manifests-{0}', matrix.arch) }}
           # nb: prefix before wildcard is removed from the uploaded files, so the artifact should
           # contain e.g.
           #   - autoscale-scheduler.yaml
