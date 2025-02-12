@@ -30,7 +30,7 @@ on:
     outputs:
       vm-postgres-16-bullseye:
         description: 'image name for postgres:16-bullseye, VM-ified'
-        value: ${{ jobs.merge-vm-images.outputs.vm-postgres-16-bullseye }}
+        value: ${{ jobs.tags.outputs.vm-postgres-16-bullseye }}
 
 env:
   IMG_POSTGRES_16_BULLSEYE: "neondatabase/vm-postgres-16-bullseye"
@@ -43,6 +43,17 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
+  # note: this tags job must be separate and NOT skipped with inputs.skip, so that way the workflow
+  # itself still succeeds, while not doing anything when called by the release workflow.
+  tags:
+    outputs:
+      vm-postgres-16-bullseye: ${{ steps.show-tags.outputs.vm-postgres-16-bullseye }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: show-tags
+        run: |
+          echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" >> $GITHUB_OUTPUT
+
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
@@ -109,8 +120,6 @@ jobs:
   merge-vm-images:
     needs: [build]
     runs-on: ubuntu-latest
-    outputs:
-      vm-postgres-16-bullseye: ${{ steps.merge-vm-images.outputs.vm-postgres-16-bullseye }}
     env:
       ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
       TAG: ${{ inputs.tag }}
@@ -138,5 +147,3 @@ jobs:
           done
 
           docker buildx imagetools create "${args[@]}"
-
-          echo "vm-postgres-16-bullseye=${result_image}" >> $GITHUB_OUTPUT

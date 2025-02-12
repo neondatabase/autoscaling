@@ -36,22 +36,22 @@ on:
 
       controller:
         description: 'neonvm-controller image'
-        value: ${{ jobs.merge-images.outputs.controller }}
+        value: ${{ jobs.tags.outputs.controller }}
       vxlan-controller:
         description: 'neonvm-vxlan-controller image'
-        value: ${{ jobs.merge-images.outputs.vxlan-controller }}
+        value: ${{ jobs.tags.outputs.vxlan-controller }}
       runner:
         description: 'neonvm-runner image'
-        value: ${{ jobs.merge-images.outputs.runner }}
+        value: ${{ jobs.tags.outputs.runner }}
       scheduler:
         description: 'autoscale-scheduler image'
-        value: ${{ jobs.merge-images.outputs.scheduler }}
+        value: ${{ jobs.tags.outputs.scheduler }}
       autoscaler-agent:
         description: 'autoscaler-agent image'
-        value: ${{ jobs.merge-images.outputs.autoscaler-agent }}
+        value: ${{ jobs.tags.outputs.autoscaler-agent }}
       daemon:
         description: 'neonvm-daemon image'
-        value: ${{ jobs.merge-images.outputs.daemon }}
+        value: ${{ jobs.tags.outputs.daemon }}
 
 env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
@@ -70,6 +70,27 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
+  # note: this tags job must be separate and NOT skipped with inputs.skip, so that way the workflow
+  # itself still succeeds, while not doing anything when called by the release workflow.
+  tags:
+    outputs:
+      controller: ${{ steps.show-tags.outputs.controller }}
+      vxlan-controller: ${{ steps.show-tags.outputs.vxlan-controller }}
+      runner: ${{ steps.show-tags.outputs.runner }}
+      scheduler: ${{ steps.show-tags.outputs.scheduler }}
+      autoscaler-agent: ${{ steps.show-tags.outputs.autoscaler-agent }}
+      daemon: ${{ steps.show-tags.outputs.daemon }}
+      cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: show-tags
+        run: |
+          echo "controller=${IMG_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${IMG_VXLAN_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${IMG_RUNNER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${IMG_SCHEDULER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${IMG_AUTOSCALER_AGENT}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${IMG_DAEMON}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   vm-kernel:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
@@ -304,14 +325,6 @@ jobs:
 
 
   merge-images:
-    outputs:
-      controller: ${{ steps.tags.outputs.controller }}
-      vxlan-controller: ${{ steps.tags.outputs.vxlan-controller }}
-      runner: ${{ steps.tags.outputs.runner }}
-      scheduler: ${{ steps.tags.outputs.scheduler }}
-      autoscaler-agent: ${{ steps.tags.outputs.autoscaler-agent }}
-      daemon: ${{ steps.tags.outputs.daemon }}
-      cluster-autoscaler: ${{ steps.tags.outputs.cluster-autoscaler }}
     permissions:
       id-token: write # This is required for aws-actions/configure-aws-credentials
     needs: [build]
@@ -373,17 +386,6 @@ jobs:
             done
             docker buildx imagetools create "${tags[@]}"
           done
-
-      # here we store final tagged names for merged images
-      - name: Store tags as outputs
-        id: tags
-        run: |
-          echo "controller=${IMG_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "vxlan-controller=${IMG_VXLAN_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "runner=${IMG_RUNNER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "scheduler=${IMG_SCHEDULER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "autoscaler-agent=${IMG_AUTOSCALER_AGENT}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${IMG_DAEMON}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
       - name: Copy all merged images to ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
