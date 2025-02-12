@@ -46,6 +46,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apiserver/pkg/storage/names"
 	"k8s.io/client-go/tools/record"
 
@@ -641,7 +642,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 					"Memory in spec", memorySizeFromSpec)
 				vm.Status.Phase = vmv1.VmScaling
 			}
-
 		case runnerSucceeded:
 			vm.Status.Phase = vmv1.VmSucceeded
 			meta.SetStatusCondition(&vm.Status.Conditions,
@@ -863,6 +863,7 @@ const (
 //
 // This is *similar* to the value of pod.Status.Phase, but we'd like to retain our own abstraction
 // to have more control over the semantics.
+// We handle PodRunning phase differently during VM Migration phase.
 func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	// Add 5 seconds to account for clock skew and k8s lagging behind.
 	deadline := metav1.NewTime(metav1.Now().Add(-5 * time.Second))
@@ -880,10 +881,41 @@ func runnerStatus(pod *corev1.Pod) runnerStatusKind {
 	case corev1.PodFailed:
 		return runnerFailed
 	case corev1.PodRunning:
-		return runnerRunning
+		return runnerContainerStatus(pod)
 	default:
 		panic(fmt.Errorf("unknown pod phase: %q", pod.Status.Phase))
 	}
+}
+
+const (
+	runnerContainerName = "neonvm-runner"
+)
+
+// runnerContainerStatus returns status of the runner container.
+func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
+	// if the pod has no container statuses, we consider it pending
+	if len(pod.Status.ContainerStatuses) == 0 {
+		return runnerPending
+	}
+	_, role, ownedByMigration := vmv1.MigrationOwnerForPod(pod)
+
+	// if a target pod for a migration, we consider the pod running
+	// because the qemu is started in incoming migration mode
+	// and neonvm-daemon which is used in readiness probe is not available
+	if ownedByMigration && role == vmv1.MigrationRoleTarget {
+		return runnerRunning
+	}
+
+	// normal case scenario, pod is not owned by the migration
+	// and we check the neonvm-runner container for the readiness probe
+	for _, c := range pod.Status.ContainerStatuses {
+		// we only care about the neonvm-runner container
+		if c.Name == runnerContainerName && !c.Ready {
+			return runnerPending
+		}
+	}
+
+	return runnerRunning
 }
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
@@ -1368,6 +1400,18 @@ func podSpec(
 						}
 					}(),
 					Resources: vm.Spec.PodResources,
+					ReadinessProbe: &corev1.Probe{
+						ProbeHandler: corev1.ProbeHandler{
+							HTTPGet: &corev1.HTTPGetAction{
+								Path:   "/ready",
+								Port:   intstr.FromInt32(vm.Spec.RunnerPort),
+								Scheme: corev1.URISchemeHTTP,
+							},
+						},
+						InitialDelaySeconds: 5,
+						PeriodSeconds:       5,
+						FailureThreshold:    3,
+					},
 				}
 
 				return []corev1.Container{runner}

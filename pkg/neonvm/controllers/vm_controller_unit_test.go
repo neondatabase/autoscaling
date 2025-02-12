@@ -255,8 +255,18 @@ func TestRunningPod(t *testing.T) {
 	prettyPrint(t, pod)
 
 	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, corev1.ContainerStatus{
+		Name:  "neonvm-runner",
+		Ready: true,
+	})
 	err = params.client.Status().Update(params.ctx, &pod)
 	require.NoError(t, err)
+	prettyPrint(t, pod)
+	// assert pod is ready
+	assert.True(t, lo.ContainsBy(pod.Status.ContainerStatuses, func(c corev1.ContainerStatus) bool {
+		return c.Name == "neonvm-runner" && c.Ready
+	}))
+
 	assert.Equal(t, runnerRunning, runnerStatus(&pod))
 
 	// Round 2
