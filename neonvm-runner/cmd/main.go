@@ -401,8 +401,8 @@ func buildQEMUCmd(
 
 const (
 	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=7 root=/dev/vda rw"
-	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable"
-	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
+	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable memory_hotplug.memmap_on_memory=on"
+	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s memory_hotplug.memmap_on_memory=on"
 )
 
 func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
