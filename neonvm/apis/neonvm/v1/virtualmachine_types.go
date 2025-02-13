@@ -511,6 +511,12 @@ type Disk struct {
 	// Path within the virtual machine at which the disk should be mounted.  Must
 	// not contain ':'.
 	MountPath string `json:"mountPath"`
+	// The disk source is monitored for changes if true, otherwise it is only read on VM startup (false or unspecified).
+	// This only works if the disk source is a configmap, a secret, or a projected volume.
+	// Defaults to false.
+	// +optional
+	// +kubebuilder:default:=false
+	Watch *bool `json:"watch,omitempty"`
 	// DiskSource represents the location and type of the mounted disk.
 	DiskSource `json:",inline"`
 }

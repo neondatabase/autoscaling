@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
@@ -523,6 +524,8 @@ func runQEMU(
 	go listenForHTTPRequests(ctx, logger, vmSpec.RunnerPort, callbacks, &wg, monitoring)
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
+	wg.Add(1)
+	go monitorFiles(ctx, logger, &wg, vmSpec.Disks)
 
 	qemuBin := getQemuBinaryName(cfg.architecture)
 	var bin string
@@ -684,6 +687,87 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	}
 }
 
+// monitorFiles watches a specific set of files and copied them into the guest VM via neonvm-daemon.
+func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, disks []vmv1.Disk) {
+	defer wg.Done()
+
+	secrets := make(map[string]string)
+	secretsOrd := []string{}
+	for _, disk := range disks {
+		if disk.Watch != nil && *disk.Watch {
+			// secrets/configmaps are mounted using the atomicwriter utility,
+			// which loads the directory into `..data`.
+			dataDir := fmt.Sprintf("/vm/mounts%s/..data", disk.MountPath)
+			secrets[dataDir] = disk.MountPath
+			secretsOrd = append(secretsOrd, dataDir)
+		}
+	}
+
+	if len(secretsOrd) == 0 {
+		return
+	}
+
+	// Faster loop for the initial upload.
+	// The VM might need the secrets in order for postgres to actually start up,
+	// so it's important we sync them as soon as the daemon is available.
+	for {
+		success := true
+		for _, hostpath := range secretsOrd {
+			guestpath := secrets[hostpath]
+			if err := sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+				success = false
+				logger.Error("failed to upload file to vm guest", zap.Error(err))
+			}
+		}
+		if success {
+			break
+		}
+
+		select {
+		case <-time.After(1 * time.Second):
+			continue
+		case <-ctx.Done():
+			return
+		}
+	}
+
+	// For the entire duration the VM is alive, periodically check whether any of the watched disks
+	// still match what's inside the VM, and if not, send the update.
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// for each secret we are tracking
+			for hostpath, guestpath := range secrets {
+				// get the checksum for the pod directory
+				hostsum, err := util.ChecksumFlatDir(hostpath)
+				if err != nil {
+					logger.Error("failed to get dir checksum from host", zap.Error(err), zap.String("dir", hostpath))
+					continue
+				}
+
+				// get the checksum for the VM directory
+				guestsum, err := getFileChecksumFromNeonvmDaemon(ctx, guestpath)
+				if err != nil {
+					logger.Error("failed to get dir checksum from guest", zap.Error(err), zap.String("dir", guestpath))
+					continue
+				}
+
+				// if not equal, update the files inside the VM.
+				if guestsum != hostsum {
+					if err = sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+						logger.Error("failed to upload files to vm guest", zap.Error(err))
+					}
+				}
+			}
+		}
+	}
+}
+
 func terminateQemuOnSigterm(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 	logger = logger.Named("terminate-qemu-on-sigterm")
 
@@ -795,4 +879,93 @@ func checkNeonvmDaemonCPU() error {
 		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+type File struct {
+	// base64 encoded file contents
+	Data string `json:"data"`
+}
+
+func sendFilesToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) error {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	files, err := util.ReadAllFiles(hostpath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("could not open file: %w", err)
+	}
+
+	encodedFiles := make(map[string]File)
+	for k, v := range files {
+		encodedFiles[k] = File{Data: base64.StdEncoding.EncodeToString(v)}
+	}
+	body, err := json.Marshal(encodedFiles)
+	if err != nil {
+		return fmt.Errorf("could not encode files: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	// guestpath has a leading forward slash
+	url := fmt.Sprintf("http://%s:25183/files%s", vmIP, guestpath)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("could not build request: %w", err)
+	}
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func getFileChecksumFromNeonvmDaemon(ctx context.Context, guestpath string) (string, error) {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return "", fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	// guestpath has a leading forward slash
+	url := fmt.Sprintf("http://%s:25183/files%s", vmIP, guestpath)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return "", fmt.Errorf("could not build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	checksum, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("could not read response: %w", err)
+	}
+
+	return string(checksum), nil
 }
