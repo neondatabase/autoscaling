@@ -897,11 +897,11 @@ func sendFilesToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) er
 		return fmt.Errorf("could not open file: %w", err)
 	}
 
-	dto := make(map[string]File)
+	encodedFiles := make(map[string]File)
 	for k, v := range files {
-		dto[k] = File{Data: base64.StdEncoding.EncodeToString(v)}
+		encodedFiles[k] = File{Data: base64.StdEncoding.EncodeToString(v)}
 	}
-	body, err := json.Marshal(dto)
+	body, err := json.Marshal(encodedFiles)
 	if err != nil {
 		return fmt.Errorf("could not encode files: %w", err)
 	}
