@@ -82,8 +82,8 @@ jobs:
         run: |
           # add the arch-specific suffix to the binary name, so they don't conflict when used as
           # assets attached to the release.
-          mv vm-builder-amd64/vm-builder{,-amd64}
-          mv vm-builder-arm64/vm-builder{,-arm64}
+          mv vm-builder-amd64/vm-builder vm-builder-amd64/vm-builder-amd64
+          mv vm-builder-arm64/vm-builder vm-builder-arm64/vm-builder-arm64
 
       - name: github release
         if: ${{ needs.get-tag.outputs.dry-run == 'false' }}
