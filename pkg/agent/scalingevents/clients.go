@@ -69,7 +69,7 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 
 func jsonLinesBatch[B reporting.IOBuffer](buf func() B) func() reporting.BatchBuilder[ScalingEvent] {
 	return func() reporting.BatchBuilder[ScalingEvent] {
-		return reporting.NewJSONArrayBuilder[ScalingEvent](buf())
+		return reporting.NewJSONLinesBuilder[ScalingEvent](buf())
 	}
 }
 
