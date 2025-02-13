@@ -101,23 +101,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, err
 	}
 
-	// examine DeletionTimestamp to determine if object is under deletion
-	if migration.ObjectMeta.DeletionTimestamp.IsZero() {
-		// The object is not being deleted, so if it does not have our finalizer,
-		// then lets add the finalizer and update the object. This is equivalent
-		// registering our finalizer.
-		if !controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
-			log.Info("Adding Finalizer to Migration")
-			if !controllerutil.AddFinalizer(migration, virtualmachinemigrationFinalizer) {
-				return ctrl.Result{}, errors.New("Failed to add finalizer to Migration")
-			}
-			if err := r.Update(ctx, migration); err != nil {
-				return ctrl.Result{}, err
-			}
-			// stop this reconciliation cycle, new will be triggered as Migration updated
-			return ctrl.Result{}, nil
-		}
-	} else {
+	if !migration.ObjectMeta.DeletionTimestamp.IsZero() {
 		// The object is being deleted
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
@@ -142,6 +126,20 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			}
 		}
 		// Stop reconciliation as the item is being deleted
+		return ctrl.Result{}, nil
+	}
+	// The object is not being deleted, so if it does not have our finalizer,
+	// then lets add the finalizer and update the object. This is equivalent
+	// registering our finalizer.
+	if !controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
+		log.Info("Adding Finalizer to Migration")
+		if !controllerutil.AddFinalizer(migration, virtualmachinemigrationFinalizer) {
+			return ctrl.Result{}, errors.New("Failed to add finalizer to Migration")
+		}
+		if err := r.Update(ctx, migration); err != nil {
+			return ctrl.Result{}, err
+		}
+		// stop this reconciliation cycle, new will be triggered as Migration updated
 		return ctrl.Result{}, nil
 	}
 
