@@ -1,7 +1,7 @@
 name: release
 on:
-  # # UNCOMMENT TO ALLOW TESTING:
-  # pull_request:
+  # UNCOMMENT TO ALLOW TESTING:
+  pull_request:
   push:
     tags:
       - "v*.*.*"
@@ -80,10 +80,14 @@ jobs:
 
       - name: rename vm-builder files
         run: |
+          # FOR DEBUGGING ONLY:
+          ls *
           # add the arch-specific suffix to the binary name, so they don't conflict when used as
           # assets attached to the release.
           mv vm-builder-amd64/vm-builder{,-amd64}
           mv vm-builder-arm64/vm-builder{,-arm64}
+          # FOR DEBUGGING ONLY:
+          echo 'AFTER MOVING:' && ls *
 
       - name: github release
         if: ${{ needs.get-tag.outputs.dry-run == 'false' }}
