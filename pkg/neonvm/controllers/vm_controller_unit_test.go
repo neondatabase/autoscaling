@@ -85,7 +85,7 @@ type testParams struct {
 	mockRecorder *mockRecorder
 }
 
-var reconcilerMetrics = MakeReconcilerMetrics()
+var testReconcilerMetrics = MakeReconcilerMetrics()
 
 func newTestParams(t *testing.T) *testParams {
 	os.Setenv("VM_RUNNER_IMAGE", "vm-runner-img")
@@ -128,7 +128,7 @@ func newTestParams(t *testing.T) *testParams {
 			AtMostOnePod:            false,
 			DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
 		},
-		Metrics: reconcilerMetrics,
+		Metrics: testReconcilerMetrics,
 	}
 
 	return params
