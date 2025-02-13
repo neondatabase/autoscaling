@@ -101,15 +101,24 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, err
 	}
 
+	getVM := func() (*vmv1.VirtualMachine, error) {
+		var vm vmv1.VirtualMachine
+		err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, &vm)
+		if err != nil {
+			log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+			return nil, err
+		}
+		return &vm, nil
+	}
+
 	if !migration.ObjectMeta.DeletionTimestamp.IsZero() {
 		// The object is being deleted
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for Migration")
-			vm := new(vmv1.VirtualMachine)
-			err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
+			vm, err := getVM()
 			if err != nil {
-				log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+				return ctrl.Result{}, err
 			}
 			if err := r.doFinalizerOperationsForVirtualMachineMigration(ctx, migration, vm); err != nil {
 				// if fail to delete the external dependency here, return with error
@@ -144,8 +153,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	}
 
 	// Fetch the corresponding VirtualMachine instance
-	vm := new(vmv1.VirtualMachine)
-	err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
+	vm, err := getVM()
 	if err != nil {
 		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
 		if apierrors.IsNotFound(err) {
