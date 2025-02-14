@@ -229,12 +229,9 @@ func (r *VMReconciler) deleteTmpSecret(ctx context.Context, vm *vmv1.VirtualMach
 }
 
 func certSpecCSR(vm *vmv1.VirtualMachine) (*x509.CertificateRequest, error) {
-	// TODO: configurable?
-	commonName := fmt.Sprintf("%s.%s.svc.cluster.local", vm.Name, vm.Namespace)
-
 	certSpec := certv1.CertificateSpec{
-		CommonName: commonName,
-		DNSNames:   []string{commonName},
+		CommonName: vm.Spec.TLS.ServerName,
+		DNSNames:   []string{vm.Spec.TLS.ServerName},
 		PrivateKey: &certv1.CertificatePrivateKey{
 			// TODO: can we support Ed25519?
 			Algorithm:      certv1.ECDSAKeyAlgorithm,

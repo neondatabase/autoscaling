@@ -3008,6 +3008,9 @@ spec:
                     description: This is required to set the duration before certificate
                       expiration that the certificate is renewed
                     type: string
+                  serverName:
+                    description: This is the common name for the TLS certificate
+                    type: string
                 type: object
               tolerations:
                 items:

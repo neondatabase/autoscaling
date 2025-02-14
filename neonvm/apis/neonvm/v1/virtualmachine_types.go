@@ -179,6 +179,9 @@ type TLSProvisioning struct {
 
 	// This is required to set the duration before certificate expiration that the certificate is renewed
 	RenewBefore metav1.Duration `json:"renewBefore,omitempty"`
+
+	// This is the common name for the TLS certificate
+	ServerName string `json:"serverName,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
