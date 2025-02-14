@@ -26,3 +26,4 @@ spec:
     renewBefore: 1h
     expireAfter: 24h
     certificateIssuer: "neon-ca-issuer"
+    serverName: "vm.neon.local"
