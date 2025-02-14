@@ -80,7 +80,7 @@ require (
 	k8s.io/apiserver v0.30.7
 	k8s.io/client-go v0.30.7
 	k8s.io/klog/v2 v2.120.1
-	k8s.io/kubernetes v1.30.7
+	k8s.io/kubernetes v1.30.10
 	nhooyr.io/websocket v1.8.7
 	sigs.k8s.io/controller-runtime v0.18.5 // should match k8s dependencies versions
 )
