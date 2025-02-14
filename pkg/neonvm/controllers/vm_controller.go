@@ -386,7 +386,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
 			if err := vm.Spec.Guest.ValidateMemorySize(); err != nil {
-				return fmt.Errorf("Failed to set memoryProvider for VM: %w", err)
+				return fmt.Errorf("Failed to validate memory size for VM: %w", err)
 			}
 
 			// Update the .Status on API Server to avoid creating multiple pods for a single VM

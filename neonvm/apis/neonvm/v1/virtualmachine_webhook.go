@@ -120,9 +120,6 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) (admission.Warnings,
 		{".spec.guest.cpus.max", func(v *VirtualMachine) any { return v.Spec.Guest.CPUs.Max }},
 		{".spec.guest.memorySlots.min", func(v *VirtualMachine) any { return v.Spec.Guest.MemorySlots.Min }},
 		{".spec.guest.memorySlots.max", func(v *VirtualMachine) any { return v.Spec.Guest.MemorySlots.Max }},
-		// nb: we don't check memoryProvider here, so that it's allowed to be mutable as a way of
-		// getting flexibility to solidify the memory provider or change it across restarts.
-		// ref https://github.com/neondatabase/autoscaling/pull/970#discussion_r1644225986
 		{".spec.guest.ports", func(v *VirtualMachine) any { return v.Spec.Guest.Ports }},
 		{".spec.guest.rootDisk", func(v *VirtualMachine) any { return v.Spec.Guest.RootDisk }},
 		{".spec.guest.command", func(v *VirtualMachine) any { return v.Spec.Guest.Command }},
