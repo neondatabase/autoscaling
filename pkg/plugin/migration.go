@@ -4,10 +4,10 @@ package plugin
 
 import (
 	"fmt"
+	"slices"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/exp/slices"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -74,7 +74,7 @@ func triggerMigrationsIfNecessary(
 
 	// Ok, we have some migration candidates. Let's sort them and keep triggering migrations
 	// until it'll be enough to get below the watermark.
-	slices.SortFunc(candidates, func(cx, cy state.Pod) bool {
+	slices.SortFunc(candidates, func(cx, cy state.Pod) int {
 		return cx.BetterMigrationTargetThan(cy)
 	})
 	for _, pod := range candidates {
