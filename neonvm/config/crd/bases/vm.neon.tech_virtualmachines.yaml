@@ -48,6 +48,10 @@ spec:
       name: CPUScalingMode
       priority: 1
       type: string
+    - jsonPath: .spec.targetArchitecture
+      name: TargetArchitecture
+      priority: 1
+      type: string
     name: v1
     schema:
       openAPIV3Schema:
@@ -1189,6 +1193,13 @@ spec:
                       required:
                       - size
                       type: object
+                    watch:
+                      default: false
+                      description: |-
+                        The disk source is monitored for changes if true, otherwise it is only read on VM startup (false or unspecified).
+                        This only works if the disk source is a configmap, a secret, or a projected volume.
+                        Defaults to false.
+                      type: boolean
                   required:
                   - mountPath
                   - name
@@ -2934,6 +2945,12 @@ spec:
               service_links:
                 type: boolean
               serviceAccountName:
+                type: string
+              targetArchitecture:
+                default: amd64
+                enum:
+                - amd64
+                - arm64
                 type: string
               targetRevision:
                 description: |-

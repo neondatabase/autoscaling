@@ -107,6 +107,10 @@ type VirtualMachineSpec struct {
 
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
+	// +kubebuilder:default:=amd64
+	// +optional
+	TargetArchitecture *CPUArchitecture `json:"targetArchitecture,omitempty"`
+
 	Guest Guest `json:"guest"`
 
 	// Running init containers is costly, so InitScript field should be preferred over ExtraInitContainers
@@ -169,6 +173,14 @@ func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
 		MemorySlotSize: spec.Guest.MemorySlotSize,
 	}
 }
+
+// +kubebuilder:validation:Enum=amd64;arm64
+type CPUArchitecture string
+
+const (
+	CPUArchitectureAMD64 CPUArchitecture = "amd64"
+	CPUArchitectureARM64 CPUArchitecture = "arm64"
+)
 
 // +kubebuilder:validation:Enum=QmpScaling;SysfsScaling
 type CpuScalingMode string
@@ -473,6 +485,12 @@ type Disk struct {
 	// Path within the virtual machine at which the disk should be mounted.  Must
 	// not contain ':'.
 	MountPath string `json:"mountPath"`
+	// The disk source is monitored for changes if true, otherwise it is only read on VM startup (false or unspecified).
+	// This only works if the disk source is a configmap, a secret, or a projected volume.
+	// Defaults to false.
+	// +optional
+	// +kubebuilder:default:=false
+	Watch *bool `json:"watch,omitempty"`
 	// DiskSource represents the location and type of the mounted disk.
 	DiskSource `json:",inline"`
 }
@@ -610,6 +628,7 @@ func (p VmPhase) IsAlive() bool {
 // +kubebuilder:printcolumn:name="Node",type=string,priority=1,JSONPath=`.status.node`
 // +kubebuilder:printcolumn:name="Image",type=string,priority=1,JSONPath=`.spec.guest.rootDisk.image`
 // +kubebuilder:printcolumn:name="CPUScalingMode",type=string,priority=1,JSONPath=`.spec.cpuScalingMode`
+// +kubebuilder:printcolumn:name="TargetArchitecture",type=string,priority=1,JSONPath=`.spec.targetArchitecture`
 type VirtualMachine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

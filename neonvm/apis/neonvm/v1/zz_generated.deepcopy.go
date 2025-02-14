@@ -49,6 +49,11 @@ func (in *Disk) DeepCopyInto(out *Disk) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.Watch != nil {
+		in, out := &in.Watch, &out.Watch
+		*out = new(bool)
+		**out = **in
+	}
 	in.DiskSource.DeepCopyInto(&out.DiskSource)
 }
 
@@ -682,6 +687,11 @@ func (in *VirtualMachineSpec) DeepCopyInto(out *VirtualMachineSpec) {
 		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
 		*out = make([]corev1.LocalObjectReference, len(*in))
 		copy(*out, *in)
+	}
+	if in.TargetArchitecture != nil {
+		in, out := &in.TargetArchitecture, &out.TargetArchitecture
+		*out = new(CPUArchitecture)
+		**out = **in
 	}
 	in.Guest.DeepCopyInto(&out.Guest)
 	if in.ExtraInitContainers != nil {

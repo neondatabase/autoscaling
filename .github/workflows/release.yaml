@@ -38,8 +38,8 @@ jobs:
     needs: get-tag
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
-      build-cluster-autoscaler: true
       upload-to-ecr: true
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
   build-test-vm:
@@ -48,6 +48,7 @@ jobs:
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
       upload-vm-builder: true
+      archs: '["amd64","arm64"]'
     secrets: inherit
 
   e2e:
@@ -67,8 +68,7 @@ jobs:
       - name: download vm-builder
         uses: actions/download-artifact@v4
         with:
-          name: vm-builder
-          path: vm-builder
+          pattern: 'vm-builder-*'
 
       - name: download manifests
         uses: actions/download-artifact@v4
@@ -78,13 +78,21 @@ jobs:
           # See e2e-test.yaml: the individual yamls are flattened inside the artifact.
           path: rendered_manifests
 
+      - name: rename vm-builder files
+        run: |
+          # add the arch-specific suffix to the binary name, so they don't conflict when used as
+          # assets attached to the release.
+          mv vm-builder-amd64/vm-builder vm-builder-amd64/vm-builder-amd64
+          mv vm-builder-arm64/vm-builder vm-builder-arm64/vm-builder-arm64
+
       - name: github release
         if: ${{ needs.get-tag.outputs.dry-run == 'false' }}
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
           files: |
-            vm-builder/vm-builder
+            vm-builder-amd64/vm-builder-amd64
+            vm-builder-arm64/vm-builder-arm64
             rendered_manifests/autoscale-scheduler.yaml
             rendered_manifests/autoscaler-agent.yaml
             rendered_manifests/neonvm.yaml

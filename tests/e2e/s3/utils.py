@@ -203,7 +203,7 @@ def s3_check_file(local_endpoint: str):
 
 def validate_metrics_schema(metrics: dict):
     billing_schema = yaml.safe_load(
-        open("../../../pkg/billing/billing-v1.yaml", "r").read()
+        open("billing-v1.yaml", "r").read()
     )
     metrics_schema = billing_schema["components"]["schemas"]["EventsBatch"]
     

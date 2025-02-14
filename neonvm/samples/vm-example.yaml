@@ -29,6 +29,7 @@ kind: VirtualMachine
 metadata:
   name: example
 spec:
+  cpuScalingMode: SysfsScaling
   guest:
     cpus:
       min: 1

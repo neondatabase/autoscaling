@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/billing"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 type Config struct {
@@ -65,7 +66,7 @@ type vmMetricsSeconds struct {
 
 type MetricsCollector struct {
 	conf    *Config
-	sink    *reporting.EventSink[*billing.IncrementalEvent]
+	sink    *reporting.EventSink[*IncrementalEvent]
 	metrics PromMetrics
 }
 
@@ -96,8 +97,33 @@ func (mc *MetricsCollector) Run(
 	logger *zap.Logger,
 	store VMStoreForNode,
 ) error {
-	logger = logger.Named("collect")
+	tg := taskgroup.NewGroup(logger, taskgroup.WithParentContext(ctx))
 
+	// note: sink has its own context, so that it is canceled only after runCollector finishes.
+	sinkCtx, cancelSink := context.WithCancel(context.Background())
+	defer cancelSink() // make sure resources are cleaned up
+
+	tg.Go("collect", func(logger *zap.Logger) error {
+		defer cancelSink() // cancel event sending *only when we're done collecting*
+		return mc.runCollector(tg.Ctx(), logger, store)
+	})
+
+	tg.Go("sink-run", func(logger *zap.Logger) error {
+		err := mc.sink.Run(sinkCtx) // note: NOT tg.Ctx(); see more above.
+		if err != nil {
+			return fmt.Errorf("billing events sink failed: %w", err)
+		}
+		return nil
+	})
+
+	return tg.Wait()
+}
+
+func (mc *MetricsCollector) runCollector(
+	ctx context.Context,
+	logger *zap.Logger,
+	store VMStoreForNode,
+) error {
 	collectTicker := time.NewTicker(time.Second * time.Duration(mc.conf.CollectEverySeconds))
 	defer collectTicker.Stop()
 	// Offset by half a second, so it's a bit more deterministic.
@@ -126,7 +152,7 @@ func (mc *MetricsCollector) Run(
 			state.collect(logger, store, mc.metrics)
 		case <-accumulateTicker.C:
 			logger.Info("Creating billing batch")
-			state.drainEnqueue(logger, mc.conf, billing.GetHostname(), mc.sink)
+			state.drainEnqueue(logger, mc.conf, GetHostname(), mc.sink)
 		case <-ctx.Done():
 			return nil
 		}
@@ -247,7 +273,7 @@ func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
 	return merged
 }
 
-func logAddedEvent(logger *zap.Logger, event *billing.IncrementalEvent) *billing.IncrementalEvent {
+func logAddedEvent(logger *zap.Logger, event *IncrementalEvent) *IncrementalEvent {
 	logger.Info(
 		"Adding event to batch",
 		zap.String("IdempotencyKey", event.IdempotencyKey),
@@ -263,7 +289,7 @@ func (s *metricsState) drainEnqueue(
 	logger *zap.Logger,
 	conf *Config,
 	hostname string,
-	sink *reporting.EventSink[*billing.IncrementalEvent],
+	sink *reporting.EventSink[*IncrementalEvent],
 ) {
 	now := time.Now()
 
@@ -276,10 +302,10 @@ func (s *metricsState) drainEnqueue(
 		history.finalizeCurrentTimeSlice()
 
 		countInBatch += 1
-		enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+		enqueue(logAddedEvent(logger, enrichEvents(now, hostname, countInBatch, batchSize, &IncrementalEvent{
 			MetricName:     conf.CPUMetricName,
-			Type:           "", // set by billing.Enrich
-			IdempotencyKey: "", // set by billing.Enrich
+			Type:           "", // set by enrichEvents
+			IdempotencyKey: "", // set by enrichEvents
 			EndpointID:     key.endpointID,
 			// TODO: maybe we should store start/stop time in the vmMetricsHistory object itself?
 			// That way we can be aligned to collection, rather than pushing.
@@ -288,10 +314,10 @@ func (s *metricsState) drainEnqueue(
 			Value:     int(math.Round(history.total.cpu)),
 		})))
 		countInBatch += 1
-		enqueue(logAddedEvent(logger, billing.Enrich(now, hostname, countInBatch, batchSize, &billing.IncrementalEvent{
+		enqueue(logAddedEvent(logger, enrichEvents(now, hostname, countInBatch, batchSize, &IncrementalEvent{
 			MetricName:     conf.ActiveTimeMetricName,
-			Type:           "", // set by billing.Enrich
-			IdempotencyKey: "", // set by billing.Enrich
+			Type:           "", // set by enrichEvents
+			IdempotencyKey: "", // set by enrichEvents
 			EndpointID:     key.endpointID,
 			StartTime:      s.pushWindowStart,
 			StopTime:       now,
