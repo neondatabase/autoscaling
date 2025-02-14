@@ -137,7 +137,15 @@ test: vet envtest ## Run tests.
 	find $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
 	CGO_ENABLED=0 \
 		go test $(TESTARGS) -coverprofile cover.out
+	make coverage-html
+
+.PHONY: coverage-html
+coverage-html: ## Generate HTML coverage report.
 	go tool cover -html=cover.out -o cover.html
+
+.PHONY: show-coverage
+show-coverage: ## Show coverage report.
+	open cover.html
 
 ##@ Build
 
