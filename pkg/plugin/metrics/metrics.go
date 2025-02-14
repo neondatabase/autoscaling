@@ -2,11 +2,11 @@ package metrics
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-	"golang.org/x/exp/slices"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -105,11 +105,11 @@ func buildNodeLabels(nodeMetricLabels map[string]string) nodeLabeling {
 			k8sLabel:    k8sLabel,
 		})
 	}
-	slices.SortFunc(labels, func(x, y labelPair) bool {
+	slices.SortFunc(labels, func(x, y labelPair) int {
 		if x.metricLabel == y.metricLabel {
-			return x.k8sLabel < y.k8sLabel
+			return strings.Compare(x.k8sLabel, y.k8sLabel)
 		}
-		return x.metricLabel < y.metricLabel
+		return strings.Compare(x.metricLabel, y.metricLabel)
 	})
 
 	k8sLabels := []string{}
