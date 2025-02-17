@@ -23,7 +23,7 @@ docker build -t many-small-files . && \
 Build a kernel:
 ```
 make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- -j `nproc`
-cp ./arch/x86/boot/bzImage ../../autoscaling/neonvm-kernel/vmlinuz
+cp ./arch/x86/boot/bzImage ../autoscaling/neonvm-kernel/vmlinuz
 
 make docker-build-runner && make deploy
 ```
