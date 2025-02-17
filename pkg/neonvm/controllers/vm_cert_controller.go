@@ -35,28 +35,44 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 	// Check if the TLS secret exists, if not start the creation routine.
 	err := r.Get(ctx, types.NamespacedName{Name: vm.Status.TLSSecretName, Namespace: vm.Namespace}, certSecret)
 	if err != nil && !apierrors.IsNotFound(err) {
-		log.Error(err, "Failed to get vm-runner TLS secret")
+		log.Error(err, "Failed to get vm TLS secret")
 		return nil, err
 	}
 
-	notfound := false
+	certNotFound := false
 	if err != nil /* not found */ {
 		msg := fmt.Sprintf("VirtualMachine %s TLS secret %s not found", vm.Name, vm.Status.TLSSecretName)
 		r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
 
-		notfound = true
-	} else if time.Now().After(vm.Status.TLSRenewAt.Time) /* due for renewal */ {
+		certNotFound = true
+	} else {
+		// check the certificate expiration
+		certs, err := pki.DecodeX509CertificateChainBytes(certSecret.Data[corev1.TLSCertKey])
+		if err != nil {
+			log.Error(err, "Failed to parse VM certificate")
+			return nil, err
+		}
+		renewAt := certs[0].NotAfter.Add(-vm.Spec.TLS.RenewBefore.Duration)
+
+		// if not yet due for renewal
+		if time.Now().Before(renewAt) {
+			// just in case they were left around due to a transient issue.
+			if err := r.cleanupTmpSecrets(ctx, vm); err != nil {
+				return nil, err
+			}
+
+			return certSecret, nil
+		}
+
 		msg := fmt.Sprintf("VirtualMachine %s TLS secret %s is due for renewal", vm.Name, vm.Status.TLSSecretName)
 		r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
-	} else /* certificate exists and does not need renewal */ {
-		return certSecret, nil
 	}
 
 	// Check if the TLS private key temporary secret exists, if not create a new one
 	tmpKeySecret := &corev1.Secret{}
 	err = r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-tmp", vm.Status.TLSSecretName), Namespace: vm.Namespace}, tmpKeySecret)
 	if err != nil && !apierrors.IsNotFound(err) {
-		log.Error(err, "Failed to get vm-runner TLS secret")
+		log.Error(err, "Failed to get vm TLS secret")
 		return nil, err
 	} else if err != nil /* not found */ {
 		tmpKeySecret, err = r.createTlsTmpSecret(ctx, vm)
@@ -68,13 +84,14 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 	key, err := pki.DecodePrivateKeyBytes(tmpKeySecret.Data[corev1.TLSPrivateKeyKey])
 	if err != nil {
 		log.Error(err, "Failed to decode TLS private key")
+		return nil, err
 	}
 
 	// Check if the TLS certificate already exists, if not create a new one
 	certificateReq := &certv1.CertificateRequest{}
 	err = r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, certificateReq)
 	if err != nil && !apierrors.IsNotFound(err) {
-		log.Error(err, "Failed to get vm-runner CertificateRequest")
+		log.Error(err, "Failed to get vm CertificateRequest")
 		return nil, err
 	} else if err != nil /* not found */ {
 		certificateReq, err = r.createCertificateRequest(ctx, vm, key)
@@ -91,7 +108,7 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 
 	// we have a certificate and the corresponding private key
 	// create/update the proper TLS secret and delete the tmp secret
-	if notfound {
+	if certNotFound {
 		certSecret, err = r.createTlsSecret(ctx, vm, key, certificateReq)
 		if err != nil {
 			return nil, err
@@ -102,17 +119,41 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 		}
 	}
 
-	// parse the certificate for the expiration time.
-	certs, err := pki.DecodeX509CertificateChainBytes(certSecret.Data[corev1.TLSCertKey])
-	if err != nil {
-		log.Error(err, "Failed to parse VM certificate")
+	if err := r.cleanupTmpSecrets(ctx, vm); err != nil {
 		return nil, err
 	}
-	vm.Status.TLSRenewAt.Time = certs[0].NotAfter.Add(-vm.Spec.TLS.RenewBefore.Duration)
-
-	r.deleteTmpSecret(ctx, vm, tmpKeySecret, certificateReq)
 
 	return certSecret, nil
+}
+
+func (r *VMReconciler) cleanupTmpSecrets(ctx context.Context, vm *vmv1.VirtualMachine) error {
+	log := log.FromContext(ctx)
+
+	// Check if the TLS private key temporary secret exists, if so, delete it.
+	tmpKeySecret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-tmp", vm.Status.TLSSecretName), Namespace: vm.Namespace}, tmpKeySecret)
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.Error(err, "Failed to get vm TLS secret")
+		return err
+	} else if err != nil /* not found */ {
+		if err := r.deleteTmpSecret(ctx, vm, tmpKeySecret); err != nil {
+			return err
+		}
+	}
+
+	// Check if the TLS certificate already exists, if so, delete it.
+	certificateReq := &certv1.CertificateRequest{}
+	err = r.Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, certificateReq)
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.Error(err, "Failed to get vm CertificateRequest")
+		return err
+	} else if err != nil /* not found */ {
+		if err := r.deleteCertRequest(ctx, vm, certificateReq); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *VMReconciler) createTlsTmpSecret(ctx context.Context, vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
@@ -210,22 +251,30 @@ func (r *VMReconciler) updateTlsSecret(ctx context.Context, vm *vmv1.VirtualMach
 	return nil
 }
 
-func (r *VMReconciler) deleteTmpSecret(ctx context.Context, vm *vmv1.VirtualMachine, tmpKeySecret *corev1.Secret, certificateReq *certv1.CertificateRequest) {
+func (r *VMReconciler) deleteTmpSecret(ctx context.Context, vm *vmv1.VirtualMachine, tmpKeySecret *corev1.Secret) error {
 	log := log.FromContext(ctx)
 
 	err := r.Delete(ctx, tmpKeySecret)
 	if err != nil {
 		log.Info("Virtual Machine temporary TLS private key secret could not be deleted", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
+		return err
 	}
 	msg := fmt.Sprintf("VirtualMachine %s temporary TLS private key secret %s was deleted", vm.Name, tmpKeySecret.Name)
 	r.Recorder.Event(vm, "Normal", "Deleted", msg)
+	return nil
+}
 
-	err = r.Delete(ctx, certificateReq)
+func (r *VMReconciler) deleteCertRequest(ctx context.Context, vm *vmv1.VirtualMachine, certificateReq *certv1.CertificateRequest) error {
+	log := log.FromContext(ctx)
+
+	err := r.Delete(ctx, certificateReq)
 	if err != nil {
 		log.Info("Virtual Machine CertificateRequest could not be deleted", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
+		return err
 	}
-	msg = fmt.Sprintf("VirtualMachine %s CertificateRequest %s was deleted", vm.Name, certificateReq.Name)
+	msg := fmt.Sprintf("VirtualMachine %s CertificateRequest %s was deleted", vm.Name, certificateReq.Name)
 	r.Recorder.Event(vm, "Normal", "Deleted", msg)
+	return nil
 }
 
 func certSpecCSR(vm *vmv1.VirtualMachine) (*x509.CertificateRequest, error) {
@@ -233,7 +282,6 @@ func certSpecCSR(vm *vmv1.VirtualMachine) (*x509.CertificateRequest, error) {
 		CommonName: vm.Spec.TLS.ServerName,
 		DNSNames:   []string{vm.Spec.TLS.ServerName},
 		PrivateKey: &certv1.CertificatePrivateKey{
-			// TODO: can we support Ed25519?
 			Algorithm:      certv1.ECDSAKeyAlgorithm,
 			Encoding:       certv1.PKCS1,
 			RotationPolicy: certv1.RotationPolicyAlways,

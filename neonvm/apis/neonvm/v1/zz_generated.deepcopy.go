@@ -802,7 +802,6 @@ func (in *VirtualMachineStatus) DeepCopyInto(out *VirtualMachineStatus) {
 		x := (*in).DeepCopy()
 		*out = &x
 	}
-	in.TLSRenewAt.DeepCopyInto(&out.TLSRenewAt)
 	if in.CurrentRevision != nil {
 		in, out := &in.CurrentRevision, &out.CurrentRevision
 		*out = new(RevisionWithTime)

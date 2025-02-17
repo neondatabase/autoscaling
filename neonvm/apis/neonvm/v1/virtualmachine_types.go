@@ -592,8 +592,6 @@ type VirtualMachineStatus struct {
 	SSHSecretName string `json:"sshSecretName,omitempty"`
 	// +optional
 	TLSSecretName string `json:"tlsSecretName,omitempty"`
-	// +optional
-	TLSRenewAt metav1.Time `json:"tlsRenewAt,omitempty"`
 
 	// CurrentRevision is updated with Spec.TargetRevision's value once
 	// the changes are propagated to the VM.

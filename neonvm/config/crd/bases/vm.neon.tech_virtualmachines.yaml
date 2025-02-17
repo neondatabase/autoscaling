@@ -3191,9 +3191,6 @@ spec:
                 type: integer
               sshSecretName:
                 type: string
-              tlsRenewAt:
-                format: date-time
-                type: string
               tlsSecretName:
                 type: string
             type: object
