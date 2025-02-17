@@ -5,8 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-
-	"golang.org/x/exp/slices"
+	"slices"
 )
 
 //////////////////

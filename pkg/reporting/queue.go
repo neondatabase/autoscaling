@@ -7,10 +7,10 @@ package reporting
 // they can be used in separate threads.
 
 import (
+	"slices"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"golang.org/x/exp/slices"
 )
 
 type eventQueueInternals[E any] struct {

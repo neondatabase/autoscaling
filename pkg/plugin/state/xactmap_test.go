@@ -1,10 +1,10 @@
 package state_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/exp/slices"
 
 	"github.com/neondatabase/autoscaling/pkg/plugin/state"
 )

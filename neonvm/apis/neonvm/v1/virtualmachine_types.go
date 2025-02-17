@@ -233,9 +233,6 @@ type Guest struct {
 	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
 	// +optional
 	MemorySlots MemorySlots `json:"memorySlots"`
-	// Deprecated: MemoryProvider is ignored and always interpreted as equal to VirtioMem.
-	// +optional
-	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
 	RootDisk RootDisk `json:"rootDisk"`
 	// Docker image Entrypoint array replacement.
@@ -432,29 +429,6 @@ type MemorySlots struct {
 	Use int32 `json:"use"`
 }
 
-// +kubebuilder:validation:Enum=DIMMSlots;VirtioMem
-type MemoryProvider string
-
-const (
-	MemoryProviderDIMMSlots MemoryProvider = "DIMMSlots"
-	MemoryProviderVirtioMem MemoryProvider = "VirtioMem"
-)
-
-// FlagFunc is a parsing function to be used with flag.Func
-func (p *MemoryProvider) FlagFunc(value string) error {
-	possibleValues := []string{
-		string(MemoryProviderDIMMSlots),
-		string(MemoryProviderVirtioMem),
-	}
-
-	if !slices.Contains(possibleValues, value) {
-		return fmt.Errorf("Unknown MemoryProvider %q, must be one of %v", value, possibleValues)
-	}
-
-	*p = MemoryProvider(value)
-	return nil
-}
-
 type RootDisk struct {
 	Image string `json:"image"`
 	// +optional
@@ -596,9 +570,6 @@ type VirtualMachineStatus struct {
 	CPUs *MilliCPU `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
-	// Deprecated: MemoryProvider is ignored and always interpreted as equal to VirtioMem.
-	// +optional
-	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
 
@@ -672,7 +643,6 @@ func (vm *VirtualMachine) Cleanup() {
 	vm.Status.Node = ""
 	vm.Status.CPUs = nil
 	vm.Status.MemorySize = nil
-	vm.Status.MemoryProvider = nil
 }
 
 func (vm *VirtualMachine) HasRestarted() bool {
