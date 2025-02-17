@@ -89,5 +89,6 @@ spec:
       swap: 40Gi
       sysctl:
       - vm.overcommit_memory=2
+      - vm.oom_kill_allocating_task=1
   restartPolicy: Always
   schedulerName: autoscale-scheduler
