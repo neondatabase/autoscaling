@@ -109,19 +109,6 @@ linters-settings:
     enabled-checks:
       - commentedOutImport
 
-  # see: <https://golangci-lint.run/usage/linters/#govet>
-  govet:
-    # when shadow is enabled, it prevents code like
-    #
-    #   foo, err := getFoo()
-    #    ...
-    #   for {
-    #     bar, err := getBar()
-    #     //   ^^^ err shadows from outside the loop
-    #     ...
-    #   }
-    enable:
-     - shadow
   # see: <https://golangci-lint.run/usage/linters/#nolintlint>
   nolintlint:
     allow-unused: false
