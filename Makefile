@@ -128,10 +128,14 @@ vet: ## Run go vet against code.
 	# ref https://github.com/golang/go/issues/56755
 	GOOS=linux CGO_ENABLED=0 go vet ./...
 
+##@ Tests
 
 TESTARGS ?= ./...
 .PHONY: test
-test: vet envtest ## Run tests.
+test: vet envtest run-test coverage-html
+
+.PHONY: run-test
+run-test:
 	# chmodding KUBEBUILDER_ASSETS dir to make it deletable by owner,
 	# otherwise it fails with actions/checkout on self-hosted GitHub runners
 	# 	ref: https://github.com/kubernetes-sigs/controller-runtime/pull/2245
@@ -139,7 +143,14 @@ test: vet envtest ## Run tests.
 	find $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
 	CGO_ENABLED=0 \
 		go test $(TESTARGS) -coverprofile cover.out
+
+.PHONY: coverage-html
+coverage-html: ## Generate HTML coverage report.
 	go tool cover -html=cover.out -o cover.html
+
+.PHONY: show-coverage
+show-coverage: coverage-html
+	open cover.html
 
 ##@ Build
 
