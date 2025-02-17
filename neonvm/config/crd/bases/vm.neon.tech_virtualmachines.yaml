@@ -2729,6 +2729,12 @@ spec:
                     type: array
                   kernelImage:
                     type: string
+                  memhpAutoMovableRatio:
+                    description: |-
+                      Set the maximum MOVABLE:KERNEL memory ratio in %.
+                      Kernel default is 301%.
+                      See https://docs.kernel.org/admin-guide/mm/memory-hotplug.html
+                    type: string
                   memorySlotSize:
                     anyOf:
                     - type: integer

@@ -156,6 +156,11 @@ func (in *Guest) DeepCopyInto(out *Guest) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.MemhpAutoMovableRatio != nil {
+		in, out := &in.MemhpAutoMovableRatio, &out.MemhpAutoMovableRatio
+		*out = new(string)
+		**out = **in
+	}
 	if in.AppendKernelCmdline != nil {
 		in, out := &in.AppendKernelCmdline, &out.AppendKernelCmdline
 		*out = new(string)
