@@ -222,7 +222,11 @@ const (
 type Guest struct {
 	// +optional
 	KernelImage *string `json:"kernelImage,omitempty"`
-
+	// Set the maximum MOVABLE:KERNEL memory ratio in %.
+	// Kernel default is 301%.
+	// See https://docs.kernel.org/admin-guide/mm/memory-hotplug.html
+	// +optional
+	MemhpAutoMovableRatio *string `json:"memhpAutoMovableRatio,omitempty"`
 	// +optional
 	AppendKernelCmdline *string `json:"appendKernelCmdline,omitempty"`
 

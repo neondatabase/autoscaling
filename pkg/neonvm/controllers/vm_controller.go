@@ -1342,10 +1342,16 @@ func podSpec(
 						if config.DisableRunnerCgroup {
 							cmd = append(cmd, "-skip-cgroup-management")
 						}
+
+						memhpAutoMovableRatio := config.MemhpAutoMovableRatio
+						if specValue := vm.Spec.Guest.MemhpAutoMovableRatio; specValue != nil {
+							memhpAutoMovableRatio = *specValue
+						}
+
 						cmd = append(
 							cmd,
 							"-qemu-disk-cache-settings", config.QEMUDiskCacheSettings,
-							"-memhp-auto-movable-ratio", config.MemhpAutoMovableRatio,
+							"-memhp-auto-movable-ratio", memhpAutoMovableRatio,
 						)
 						// put these last, so that the earlier args are easier to see (because these
 						// can get quite large)
