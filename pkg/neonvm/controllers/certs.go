@@ -109,8 +109,7 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 	// we have a certificate and the corresponding private key
 	// create/update the proper TLS secret and delete the tmp secret
 	if certNotFound {
-		certSecret, err = r.createTlsSecret(ctx, vm, key, certificateReq)
-		if err != nil {
+		if err := r.createTlsSecret(ctx, vm, key, certificateReq); err != nil {
 			return nil, err
 		}
 	} else if !reflect.DeepEqual(certificateReq.Status.Certificate, certSecret.Data[corev1.TLSCertKey]) {
@@ -119,11 +118,9 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 		}
 	}
 
-	if err := r.cleanupTmpSecrets(ctx, vm); err != nil {
-		return nil, err
-	}
-
-	return certSecret, nil
+	// we made a lot of changes to state.
+	// nil signals that we should re-schedule reconciliation with a refreshed state.
+	return nil, nil
 }
 
 func (r *VMReconciler) cleanupTmpSecrets(ctx context.Context, vm *vmv1.VirtualMachine) error {
@@ -208,25 +205,25 @@ func (r *VMReconciler) createCertificateRequest(ctx context.Context, vm *vmv1.Vi
 	return certificateReq, nil
 }
 
-func (r *VMReconciler) createTlsSecret(ctx context.Context, vm *vmv1.VirtualMachine, key crypto.Signer, certificateReq *certv1.CertificateRequest) (*corev1.Secret, error) {
+func (r *VMReconciler) createTlsSecret(ctx context.Context, vm *vmv1.VirtualMachine, key crypto.Signer, certificateReq *certv1.CertificateRequest) error {
 	log := log.FromContext(ctx)
 
 	certSecret, err := r.certSecretForVirtualMachine(vm, key, certificateReq.Status.Certificate)
 	if err != nil {
 		log.Error(err, "Failed to define new TLS secret resource for VirtualMachine")
-		return nil, err
+		return err
 	}
 
 	if err = r.Create(ctx, certSecret); err != nil {
 		log.Error(err, "Failed to create new TLS secret", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
-		return nil, err
+		return err
 	}
 	log.Info("Virtual Machine TLS secret was created", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
 
 	msg := fmt.Sprintf("VirtualMachine %s created TLS secret %s", vm.Name, certSecret.Name)
 	r.Recorder.Event(vm, "Normal", "Created", msg)
 
-	return certSecret, nil
+	return nil
 }
 
 func (r *VMReconciler) updateTlsSecret(ctx context.Context, vm *vmv1.VirtualMachine, key crypto.Signer, certificateReq *certv1.CertificateRequest, certSecret *corev1.Secret) error {

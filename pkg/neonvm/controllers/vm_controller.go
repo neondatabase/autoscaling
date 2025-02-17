@@ -408,6 +408,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		if err != nil {
 			return err
 		}
+		// VM is not ready to start yet.
+		if certSecret == nil {
+			return nil
+		}
 	}
 
 	switch vm.Status.Phase {
@@ -419,11 +423,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
 	case vmv1.VmPending:
-		if enableTLS && certSecret.Data == nil {
-			// VM is not ready to start yet.
-			return nil
-		}
-
 		// Generate runner pod name and set desired memory provider.
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
