@@ -401,10 +401,8 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 	}
 
 	// check if the certificate needs renewal for this running VM.
-	certSecret := &corev1.Secret{}
 	if enableTLS {
-		var err error
-		certSecret, err = r.reconcileCertificateSecret(ctx, vm)
+		certSecret, err := r.reconcileCertificateSecret(ctx, vm)
 		if err != nil {
 			return err
 		}
