@@ -146,6 +146,10 @@ type VirtualMachineSpec struct {
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
 
+	// The TLS configuration to use for provisioning certificates
+	// +optional
+	TLS *TLSProvisioning `json:"tls,omitempty"`
+
 	// TargetRevision is the identifier set by external party to track when changes to the spec
 	// propagate to the VM.
 	//
@@ -164,6 +168,20 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=false
 	// +optional
 	EnableNetworkMonitoring *bool `json:"enableNetworkMonitoring,omitempty"`
+}
+
+type TLSProvisioning struct {
+	// The CertificateIssuer for the certificates issued to this VM
+	CertificateIssuer string `json:"certificateIssuer,omitempty"`
+
+	// This is required to set the duration that the certificate should be valid for before expiring
+	ExpireAfter metav1.Duration `json:"expireAfter,omitempty"`
+
+	// This is required to set the duration before certificate expiration that the certificate is renewed
+	RenewBefore metav1.Duration `json:"renewBefore,omitempty"`
+
+	// This is the common name for the TLS certificate
+	ServerName string `json:"serverName,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -572,6 +590,8 @@ type VirtualMachineStatus struct {
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
+	// +optional
+	TLSSecretName string `json:"tlsSecretName,omitempty"`
 
 	// CurrentRevision is updated with Spec.TargetRevision's value once
 	// the changes are propagated to the VM.

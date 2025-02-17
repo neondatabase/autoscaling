@@ -455,6 +455,8 @@ kind-setup: kind kubectl ## Create local cluster by kind tool and prepared confi
 	$(KIND) create cluster --name $(CLUSTER_NAME) --config kind/config.yaml
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager
+	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager-webhook
+	$(KUBECTL) --context kind-$(CLUSTER_NAME) apply -f kind/certs.yaml
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) patch -n kube-system deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n kube-system rollout status deployment metrics-server
@@ -474,6 +476,8 @@ k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status deployment cilium-operator
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager
+	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager-webhook
+	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/certs.yaml
 
 .PHONY: k3d-destroy
 k3d-destroy: k3d ## Destroy local k3d cluster
