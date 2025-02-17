@@ -1,6 +1,6 @@
 # More info on config here: https://golangci-lint.run/usage/configuration/
 run:
-  deadline: 5m
+  timeout: 5m
   issues-exit-code: 1
 
 issues:
@@ -111,7 +111,7 @@ linters-settings:
 
   # see: <https://golangci-lint.run/usage/linters/#govet>
   govet:
-    # when check-shadowing is enabled, it prevents code like
+    # when shadow is enabled, it prevents code like
     #
     #   foo, err := getFoo()
     #    ...
@@ -120,7 +120,8 @@ linters-settings:
     #     //   ^^^ err shadows from outside the loop
     #     ...
     #   }
-    check-shadowing: false
+    enable:
+     - shadow
   # see: <https://golangci-lint.run/usage/linters/#nolintlint>
   nolintlint:
     allow-unused: false
