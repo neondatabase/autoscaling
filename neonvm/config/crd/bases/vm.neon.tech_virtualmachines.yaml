@@ -2999,6 +2999,25 @@ spec:
                 default: 5
                 format: int64
                 type: integer
+              tls:
+                description: The TLS configuration to use for provisioning certificates
+                properties:
+                  certificateIssuer:
+                    description: The CertificateIssuer for the certificates issued
+                      to this VM
+                    type: string
+                  expireAfter:
+                    description: This is required to set the duration that the certificate
+                      should be valid for before expiring
+                    type: string
+                  renewBefore:
+                    description: This is required to set the duration before certificate
+                      expiration that the certificate is renewed
+                    type: string
+                  serverName:
+                    description: This is the common name for the TLS certificate
+                    type: string
+                type: object
               tolerations:
                 items:
                   description: |-
@@ -3177,6 +3196,8 @@ spec:
                 format: int32
                 type: integer
               sshSecretName:
+                type: string
+              tlsSecretName:
                 type: string
             type: object
         type: object
