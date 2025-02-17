@@ -24,6 +24,8 @@ ifeq ($(UNAME_ARCH),x86_64)
     TARGET_ARCH ?= amd64
 else ifeq ($(UNAME_ARCH),aarch64)
     TARGET_ARCH ?= arm64
+else ifeq ($(UNAME_ARCH),arm64)
+    TARGET_ARCH ?= arm64
 else
     $(error Unsupported architecture: $(UNAME_ARCH))
 endif
