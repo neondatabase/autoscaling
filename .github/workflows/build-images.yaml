@@ -83,6 +83,11 @@ jobs:
       cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - id: show-tags
         run: |
           echo "controller=${IMG_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
@@ -134,6 +139,11 @@ jobs:
           - 5000:5000
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       # job level tags with arch and tag
       - id: tags
         run: |
@@ -330,6 +340,11 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Login to Dockerhub

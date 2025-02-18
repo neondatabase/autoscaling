@@ -41,6 +41,11 @@ jobs:
       tag: ${{ inputs.tag || steps.get-tag.outputs.tag }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: get tag
         if: ${{ inputs.tag == '' }}
         id: get-tag
@@ -90,6 +95,11 @@ jobs:
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch all, so that we also include tags
@@ -288,6 +298,11 @@ jobs:
     if: always()
     runs-on: ubuntu-22.04
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Fail the job if any of the dependencies do not succeed or are skipped
         run: exit 1
         if: |
