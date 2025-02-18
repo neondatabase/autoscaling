@@ -37,6 +37,7 @@ func NewAutoscaleEnforcerPlugin(
 	// The handler's ContentType is not the default "application/json" (it's protobuf), so we need
 	// to set it back to JSON because NeonVM doesn't support protobuf.
 	vmConfig.ContentType = "application/json"
+	vmConfig.QPS = 1000 // default QPS is 5. That's too little to handle thousands of pods.
 	vmClient, err := vmclient.NewForConfig(vmConfig)
 	if err != nil {
 		return nil, fmt.Errorf("could not create NeonVM client: %w", err)

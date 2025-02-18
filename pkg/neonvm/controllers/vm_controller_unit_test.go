@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -96,6 +97,8 @@ func newTestParams(t *testing.T) *testParams {
 	scheme := runtime.NewScheme()
 	scheme.AddKnownTypes(vmv1.SchemeGroupVersion, &vmv1.VirtualMachine{})
 	scheme.AddKnownTypes(corev1.SchemeGroupVersion, &corev1.Pod{})
+	scheme.AddKnownTypes(corev1.SchemeGroupVersion, &corev1.Secret{})
+	scheme.AddKnownTypes(certv1.SchemeGroupVersion, &certv1.CertificateRequest{})
 
 	params := &testParams{
 		t:   t,
@@ -173,6 +176,8 @@ func TestReconcile(t *testing.T) {
 	assert.Equal(t, true, res.Requeue)
 
 	// Round 2
+	params.mockRecorder.On("Event", mock.Anything, "Normal", "Created",
+		mock.Anything)
 	res, err = params.r.Reconcile(params.ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, false, res.Requeue)

@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -9,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"

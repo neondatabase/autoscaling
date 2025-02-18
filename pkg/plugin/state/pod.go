@@ -226,10 +226,10 @@ func podStateForVMRunner(pod *corev1.Pod, vmRef metav1.OwnerReference) (Pod, err
 	}, nil
 }
 
-// BetterMigrationTargetThan returns true iff the pod is a better migration target than the 'other'
+// BetterMigrationTargetThan returns <0 iff the pod is a better migration target than the 'other'
 // pod.
-func (p Pod) BetterMigrationTargetThan(other Pod) bool {
+func (p Pod) BetterMigrationTargetThan(other Pod) int {
 	// For now, just prioritize migration for older pods, so that we naturally avoid continuously
 	// re-migrating the same VMs.
-	return p.CreatedAt.Before(other.CreatedAt)
+	return p.CreatedAt.Compare(other.CreatedAt)
 }

@@ -104,8 +104,6 @@ type Config struct {
 	appendKernelCmdline  string
 	skipCgroupManagement bool
 	diskCacheSettings    string
-	// memoryProvider is a memory provider to use. Validated in newConfig.
-	memoryProvider vmv1.MemoryProvider
 	// autoMovableRatio value for VirtioMem provider. Validated in newConfig.
 	autoMovableRatio string
 	// cpuScalingMode is a mode to use for CPU scaling. Validated in newConfig.
@@ -122,7 +120,6 @@ func newConfig(logger *zap.Logger) *Config {
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
-		memoryProvider:       "",
 		autoMovableRatio:     "",
 		cpuScalingMode:       "",
 		architecture:         runtime.GOARCH,
@@ -140,16 +137,12 @@ func newConfig(logger *zap.Logger) *Config {
 		"Don't try to manage CPU")
 	flag.StringVar(&cfg.diskCacheSettings, "qemu-disk-cache-settings",
 		cfg.diskCacheSettings, "Cache settings to add to -drive args for VM disks")
-	flag.Func("memory-provider", "Set provider for memory hotplug", cfg.memoryProvider.FlagFunc)
 	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
 		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
 	flag.Func("cpu-scaling-mode", "Set CPU scaling mode", cfg.cpuScalingMode.FlagFunc)
 	flag.Parse()
 
-	if cfg.memoryProvider == "" {
-		logger.Fatal("missing required flag '-memory-provider'")
-	}
-	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem && cfg.autoMovableRatio == "" {
+	if cfg.autoMovableRatio == "" {
 		logger.Fatal("missing required flag '-memhp-auto-movable-ratio'")
 	}
 	if cfg.cpuScalingMode == "" {
@@ -356,26 +349,23 @@ func buildQEMUCmd(
 	}
 
 	// memory details
-	logger.Info(fmt.Sprintf("Using memory provider %s", cfg.memoryProvider))
 	qemuCmd = append(qemuCmd, "-m", fmt.Sprintf(
 		"size=%db,slots=%d,maxmem=%db",
 		vmSpec.Guest.MemorySlotSize.Value()*int64(vmSpec.Guest.MemorySlots.Min),
 		vmSpec.Guest.MemorySlots.Max-vmSpec.Guest.MemorySlots.Min,
 		vmSpec.Guest.MemorySlotSize.Value()*int64(vmSpec.Guest.MemorySlots.Max),
 	))
-	if cfg.memoryProvider == vmv1.MemoryProviderVirtioMem {
-		// we don't actually have any slots because it's virtio-mem, but we're still using the API
-		// designed around DIMM slots, so we need to use them to calculate how much memory we expect
-		// to be able to plug in.
-		numSlots := vmSpec.Guest.MemorySlots.Max - vmSpec.Guest.MemorySlots.Min
-		virtioMemSize := int64(numSlots) * vmSpec.Guest.MemorySlotSize.Value()
-		// We can add virtio-mem if it actually needs to be a non-zero size.
-		// Otherwise, QEMU fails with:
-		//   property 'size' of memory-backend-ram doesn't take value '0'
-		if virtioMemSize != 0 {
-			qemuCmd = append(qemuCmd, "-object", fmt.Sprintf("memory-backend-ram,id=vmem0,size=%db", virtioMemSize))
-			qemuCmd = append(qemuCmd, "-device", "virtio-mem-pci,id=vm0,memdev=vmem0,block-size=8M,requested-size=0")
-		}
+	// we don't actually have any slots because it's virtio-mem, but we're still using the API
+	// designed around DIMM slots, so we need to use them to calculate how much memory we expect
+	// to be able to plug in.
+	numSlots := vmSpec.Guest.MemorySlots.Max - vmSpec.Guest.MemorySlots.Min
+	virtioMemSize := int64(numSlots) * vmSpec.Guest.MemorySlotSize.Value()
+	// We can add virtio-mem if it actually needs to be a non-zero size.
+	// Otherwise, QEMU fails with:
+	//   property 'size' of memory-backend-ram doesn't take value '0'
+	if virtioMemSize != 0 {
+		qemuCmd = append(qemuCmd, "-object", fmt.Sprintf("memory-backend-ram,id=vmem0,size=%db", virtioMemSize))
+		qemuCmd = append(qemuCmd, "-device", "virtio-mem-pci,id=vm0,memdev=vmem0,block-size=8M,requested-size=0")
 	}
 
 	qemuNetArgs, err := setupVMNetworks(logger, vmSpec.Guest.Ports, vmSpec.ExtraNetwork)
@@ -401,21 +391,13 @@ func buildQEMUCmd(
 
 const (
 	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=7 root=/dev/vda rw"
-	kernelCmdlineDIMMSlots     = "memhp_default_state=online_movable"
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
 func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec, vmStatus *vmv1.VirtualMachineStatus, hostname string) string {
 	cmdlineParts := []string{baseKernelCmdline}
 
-	switch cfg.memoryProvider {
-	case vmv1.MemoryProviderDIMMSlots:
-		cmdlineParts = append(cmdlineParts, kernelCmdlineDIMMSlots)
-	case vmv1.MemoryProviderVirtioMem:
-		cmdlineParts = append(cmdlineParts, fmt.Sprintf(kernelCmdlineVirtioMemTmpl, cfg.autoMovableRatio))
-	default:
-		panic(fmt.Errorf("unknown memory provider %s", cfg.memoryProvider))
-	}
+	cmdlineParts = append(cmdlineParts, fmt.Sprintf(kernelCmdlineVirtioMemTmpl, cfg.autoMovableRatio))
 
 	if vmSpec.ExtraNetwork != nil && vmSpec.ExtraNetwork.Enable {
 		netDetails := fmt.Sprintf("ip=%s:::%s:%s:eth1:off", vmStatus.ExtraNetIP, vmStatus.ExtraNetMask, vmStatus.PodName)
@@ -525,7 +507,7 @@ func runQEMU(
 	wg.Add(1)
 	go forwardLogs(ctx, logger, &wg)
 	wg.Add(1)
-	go monitorFiles(ctx, logger, &wg, vmSpec.Disks)
+	go monitorFiles(ctx, logger, &wg, vmSpec)
 
 	qemuBin := getQemuBinaryName(cfg.architecture)
 	var bin string
@@ -688,12 +670,12 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 }
 
 // monitorFiles watches a specific set of files and copied them into the guest VM via neonvm-daemon.
-func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, disks []vmv1.Disk) {
+func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, vmSpec *vmv1.VirtualMachineSpec) {
 	defer wg.Done()
 
 	secrets := make(map[string]string)
 	secretsOrd := []string{}
-	for _, disk := range disks {
+	for _, disk := range vmSpec.Disks {
 		if disk.Watch != nil && *disk.Watch {
 			// secrets/configmaps are mounted using the atomicwriter utility,
 			// which loads the directory into `..data`.
@@ -701,6 +683,11 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, d
 			secrets[dataDir] = disk.MountPath
 			secretsOrd = append(secretsOrd, dataDir)
 		}
+	}
+
+	if vmSpec.TLS != nil {
+		secrets["/vm/mounts/var/tls/..data"] = "/var/tls"
+		secretsOrd = append(secretsOrd, "/vm/mounts/var/tls/..data")
 	}
 
 	if len(secretsOrd) == 0 {

@@ -18,18 +18,19 @@ package controllers
 
 import (
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"os"
 	"reflect"
 	"strconv"
 	"time"
 
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	nadapiv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/samber/lo"
 	"golang.org/x/crypto/ssh"
@@ -98,6 +99,7 @@ type VMReconciler struct {
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=vm.neon.tech,resources=ippools/finalizers,verbs=update
 //+kubebuilder:rbac:groups=k8s.cni.cncf.io,resources=network-attachment-definitions,verbs=get;list;watch
+//+kubebuilder:rbac:groups=cert-manager.io,resources=certificaterequests,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -391,10 +393,23 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		vm.Status.SSHSecretName = fmt.Sprintf("ssh-neonvm-%s", vm.Name)
 	}
 
-	// DIMMSlots memory provider is deprecated, and assumed to never be used.
-	//nolint:staticcheck // We know it's deprecated. That's why we're checking it.
-	if vm.Status.MemoryProvider != nil && *vm.Status.MemoryProvider == vmv1.MemoryProviderDIMMSlots {
-		return errors.New("DIMMSlots memory provider is deprecated and disabled")
+	enableTLS := vm.Spec.TLS != nil
+
+	// Generate tls secret name
+	if enableTLS && len(vm.Status.TLSSecretName) == 0 {
+		vm.Status.TLSSecretName = fmt.Sprintf("tls-neonvm-%s", vm.Name)
+	}
+
+	// check if the certificate needs renewal for this running VM.
+	if enableTLS {
+		certSecret, err := r.reconcileCertificateSecret(ctx, vm)
+		if err != nil {
+			return err
+		}
+		// VM is not ready to start yet.
+		if certSecret == nil {
+			return nil
+		}
 	}
 
 	switch vm.Status.Phase {
@@ -410,7 +425,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
 			if err := vm.Spec.Guest.ValidateMemorySize(); err != nil {
-				return fmt.Errorf("Failed to set memoryProvider for VM: %w", err)
+				return fmt.Errorf("Failed to validate memory size for VM: %w", err)
 			}
 
 			// Update the .Status on API Server to avoid creating multiple pods for a single VM
@@ -1147,6 +1162,64 @@ func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 	return secret, nil
 }
 
+// certReqForVirtualMachine returns a VirtualMachine CertificateRequest object
+func (r *VMReconciler) certReqForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+) (*certv1.CertificateRequest, error) {
+	cert, err := certReqSpec(vm, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, cert, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return cert, nil
+}
+
+// tmpKeySecretForVirtualMachine returns a VirtualMachine Secret object for temporarily storing the key
+func (r *VMReconciler) tmpKeySecretForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+) (*corev1.Secret, error) {
+	secret, err := tmpKeySecretSpec(vm, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, secret, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return secret, nil
+}
+
+// certSecretForVirtualMachine returns a VirtualMachine Secret object for storing the key+cert
+func (r *VMReconciler) certSecretForVirtualMachine(
+	vm *vmv1.VirtualMachine,
+	key crypto.Signer,
+	cert []byte,
+) (*corev1.Secret, error) {
+	secret, err := certSecretSpec(vm, key, cert)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ownerRef for the Certificate
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+	if err := ctrl.SetControllerReference(vm, secret, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return secret, nil
+}
+
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
 func labelsForVirtualMachine(vm *vmv1.VirtualMachine, runnerVersion *api.RunnerProtoVersion) map[string]string {
@@ -1349,11 +1422,16 @@ func podSpec(
 						if config.DisableRunnerCgroup {
 							cmd = append(cmd, "-skip-cgroup-management")
 						}
+
+						memhpAutoMovableRatio := config.MemhpAutoMovableRatio
+						if specValue := vm.Spec.Guest.MemhpAutoMovableRatio; specValue != nil {
+							memhpAutoMovableRatio = *specValue
+						}
+
 						cmd = append(
 							cmd,
 							"-qemu-disk-cache-settings", config.QEMUDiskCacheSettings,
-							"-memory-provider", string(vmv1.MemoryProviderVirtioMem),
-							"-memhp-auto-movable-ratio", config.MemhpAutoMovableRatio,
+							"-memhp-auto-movable-ratio", memhpAutoMovableRatio,
 						)
 						// put these last, so that the earlier args are easier to see (because these
 						// can get quite large)
@@ -1609,6 +1687,23 @@ func podSpec(
 		}
 	}
 
+	if vm.Spec.TLS != nil {
+		// Add TLS secret
+		mnt := corev1.VolumeMount{
+			Name:      "tls",
+			MountPath: fmt.Sprintf("/vm/mounts%s", "/var/tls"),
+		}
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: "tls",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: vm.Status.TLSSecretName,
+				},
+			},
+		})
+	}
+
 	// use multus network to add extra network interface
 	if vm.Spec.ExtraNetwork != nil && vm.Spec.ExtraNetwork.Enable {
 		var nadNetwork string
@@ -1645,6 +1740,8 @@ func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics
 	)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
+		Owns(&certv1.CertificateRequest{}).
+		Owns(&corev1.Secret{}).
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).

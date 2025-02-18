@@ -9,11 +9,12 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -112,8 +113,12 @@ func (s *agentState) DumpState(ctx context.Context, stopped bool) (*StateDump, e
 	wg.Wait()
 
 	// Sort the pods by name, so that we produce a deterministic ordering
-	slices.SortFunc(state.Pods, func(a, b podStateDump) (less bool) {
-		return a.PodName.Namespace < b.PodName.Namespace && a.PodName.Name < b.PodName.Name
+	slices.SortFunc(state.Pods, func(a, b podStateDump) int {
+		if n := strings.Compare(a.PodName.Namespace, b.PodName.Namespace); n != 0 {
+			return n
+		}
+
+		return strings.Compare(a.PodName.Name, b.PodName.Name)
 	})
 
 	return &state, nil

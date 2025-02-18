@@ -146,6 +146,10 @@ type VirtualMachineSpec struct {
 	// +optional
 	EnableSSH *bool `json:"enableSSH,omitempty"`
 
+	// The TLS configuration to use for provisioning certificates
+	// +optional
+	TLS *TLSProvisioning `json:"tls,omitempty"`
+
 	// TargetRevision is the identifier set by external party to track when changes to the spec
 	// propagate to the VM.
 	//
@@ -164,6 +168,20 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:default:=false
 	// +optional
 	EnableNetworkMonitoring *bool `json:"enableNetworkMonitoring,omitempty"`
+}
+
+type TLSProvisioning struct {
+	// The CertificateIssuer for the certificates issued to this VM
+	CertificateIssuer string `json:"certificateIssuer,omitempty"`
+
+	// This is required to set the duration that the certificate should be valid for before expiring
+	ExpireAfter metav1.Duration `json:"expireAfter,omitempty"`
+
+	// This is required to set the duration before certificate expiration that the certificate is renewed
+	RenewBefore metav1.Duration `json:"renewBefore,omitempty"`
+
+	// This is the common name for the TLS certificate
+	ServerName string `json:"serverName,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
@@ -222,7 +240,11 @@ const (
 type Guest struct {
 	// +optional
 	KernelImage *string `json:"kernelImage,omitempty"`
-
+	// Set the maximum MOVABLE:KERNEL memory ratio in %.
+	// Kernel default is 301%.
+	// See https://docs.kernel.org/admin-guide/mm/memory-hotplug.html
+	// +optional
+	MemhpAutoMovableRatio *string `json:"memhpAutoMovableRatio,omitempty"`
 	// +optional
 	AppendKernelCmdline *string `json:"appendKernelCmdline,omitempty"`
 
@@ -233,9 +255,6 @@ type Guest struct {
 	MemorySlotSize resource.Quantity `json:"memorySlotSize"`
 	// +optional
 	MemorySlots MemorySlots `json:"memorySlots"`
-	// Deprecated: MemoryProvider is ignored and always interpreted as equal to VirtioMem.
-	// +optional
-	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
 	RootDisk RootDisk `json:"rootDisk"`
 	// Docker image Entrypoint array replacement.
@@ -432,29 +451,6 @@ type MemorySlots struct {
 	Use int32 `json:"use"`
 }
 
-// +kubebuilder:validation:Enum=DIMMSlots;VirtioMem
-type MemoryProvider string
-
-const (
-	MemoryProviderDIMMSlots MemoryProvider = "DIMMSlots"
-	MemoryProviderVirtioMem MemoryProvider = "VirtioMem"
-)
-
-// FlagFunc is a parsing function to be used with flag.Func
-func (p *MemoryProvider) FlagFunc(value string) error {
-	possibleValues := []string{
-		string(MemoryProviderDIMMSlots),
-		string(MemoryProviderVirtioMem),
-	}
-
-	if !slices.Contains(possibleValues, value) {
-		return fmt.Errorf("Unknown MemoryProvider %q, must be one of %v", value, possibleValues)
-	}
-
-	*p = MemoryProvider(value)
-	return nil
-}
-
 type RootDisk struct {
 	Image string `json:"image"`
 	// +optional
@@ -596,11 +592,10 @@ type VirtualMachineStatus struct {
 	CPUs *MilliCPU `json:"cpus,omitempty"`
 	// +optional
 	MemorySize *resource.Quantity `json:"memorySize,omitempty"`
-	// Deprecated: MemoryProvider is ignored and always interpreted as equal to VirtioMem.
-	// +optional
-	MemoryProvider *MemoryProvider `json:"memoryProvider,omitempty"`
 	// +optional
 	SSHSecretName string `json:"sshSecretName,omitempty"`
+	// +optional
+	TLSSecretName string `json:"tlsSecretName,omitempty"`
 
 	// CurrentRevision is updated with Spec.TargetRevision's value once
 	// the changes are propagated to the VM.
@@ -672,7 +667,6 @@ func (vm *VirtualMachine) Cleanup() {
 	vm.Status.Node = ""
 	vm.Status.CPUs = nil
 	vm.Status.MemorySize = nil
-	vm.Status.MemoryProvider = nil
 }
 
 func (vm *VirtualMachine) HasRestarted() bool {
