@@ -88,13 +88,12 @@ jobs:
           - ${{ inputs.cluster || 'k3d' }}
         arch: [ amd64, arm64 ]
         include:
-          # TODO: when adding arm64: always set push-yamls to false -- we only need to push one at a time.
+          # we have an assumption that manifests for different architectures are the same, so we
+          # only need to push one at a time, and we push the amd64 manifests.
           - arch: amd64
             # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
             push-yamls: ${{ inputs.push-yamls }}
           - arch: arm64
-            # we have an assumption that manifests for different arches are the same, so we only
-            # need to push one at a time.
             push-yamls: false
 
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
