@@ -28,7 +28,7 @@ jobs:
         with:
           # Required: the version of golangci-lint is required and
           # should be specified with patch version.
-          version: v1.62.2
+          version: v1.64.5
           args: --timeout 5m
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
