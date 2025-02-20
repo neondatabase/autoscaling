@@ -24,6 +24,11 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-22.04
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Verify PR Title
         env:
           ON_FAILURE: |
