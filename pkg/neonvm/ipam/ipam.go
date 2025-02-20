@@ -18,8 +18,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	neonvm "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
@@ -42,11 +40,8 @@ const (
 	IpamRequestTimeout = 10 * time.Second
 
 	// DatastoreRetries defines how many retries are attempted when reading/updating the IP Pool
-	DatastoreRetries             = 5
-	DatastoreRetriesDelay        = 100 * time.Millisecond
-	DefaultLeaderLeaseDurationMs = 3000
-	DefaultLeaderRenewDeadlineMs = 2500
-	DefaultLeaderRetryPeriodMs   = 2000
+	DatastoreRetries      = 5
+	DatastoreRetriesDelay = 100 * time.Millisecond
 )
 
 type Temporary interface {
@@ -56,6 +51,8 @@ type Temporary interface {
 type IPAM struct {
 	Client
 	Config IPAMConfig
+
+	mu sync.Mutex
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName string, vmNamespace string) (net.IPNet, error) {
@@ -100,6 +97,7 @@ func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error
 	return &IPAM{
 		Config: *ipamConfig,
 		Client: *kClient,
+		mu:     sync.Mutex{},
 	}, nil
 }
 
@@ -170,80 +168,9 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 
 // Performing IPAM actions with Leader Election to avoid duplicates
 func (i *IPAM) acquireORrelease(ctx context.Context, vmName string, vmNamespace string, action int) (net.IPNet, error) {
-	var ip net.IPNet
-	var err error
-	var ipamerr error
-
-	leOverallTimeout := IpamRequestTimeout * 3
-	lockName := "neonvmipam"
-	lockIdentity := fmt.Sprintf("%s/%s", vmNamespace, vmName)
-
-	// define resource lock
-	lock := &resourcelock.LeaseLock{
-		LeaseMeta: metav1.ObjectMeta{
-			Name:      lockName,
-			Namespace: i.Config.NetworkNamespace,
-		},
-		Client: i.kubeClient.CoordinationV1(),
-		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: lockIdentity,
-		},
-	}
-
-	done := make(chan struct{})
-
-	// define leader elector
-	le, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
-		Lock:            lock,
-		ReleaseOnCancel: true,
-		LeaseDuration:   time.Millisecond * time.Duration(DefaultLeaderLeaseDurationMs),
-		RenewDeadline:   time.Millisecond * time.Duration(DefaultLeaderRenewDeadlineMs),
-		RetryPeriod:     time.Millisecond * time.Duration(DefaultLeaderRetryPeriodMs),
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(c context.Context) {
-				ip, ipamerr = i.runIPAM(ctx, vmName, vmNamespace, action)
-				close(done)
-				<-c.Done()
-			},
-			OnStoppedLeading: func() {
-				// do nothing
-				err = error(nil)
-			},
-		},
-	})
-	if err != nil {
-		return ip, err
-	}
-
-	// context with timeout for leader elector
-	leCtx, leCancel := context.WithTimeout(ctx, leOverallTimeout)
-	defer leCancel()
-
-	// run election in background
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); le.Run(leCtx) }()
-
-	// wait until job was done and then cancel election context
-	// or exit with error when context got timeout
-	select {
-	case <-done:
-		leCancel()
-	case <-leCtx.Done():
-		err = errors.New("context got timeout while waiting to become leader")
-	}
-	if err != nil {
-		return ip, err
-	}
-
-	wg.Wait()
-
-	// ip.String() returns string "<nil>" on errors in ip struct parsing or if *ip is nil
-	if ip.String() == "<nil>" {
-		return ip, errors.New("something wrong, probably with leader election")
-	}
-
-	return ip, ipamerr
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.runIPAM(ctx, vmName, vmNamespace, action)
 }
 
 // Performing IPAM actions
