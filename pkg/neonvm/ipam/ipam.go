@@ -156,26 +156,28 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 	}
 
 	// check IP ranges
-	for idx := range n.IPAM.IPRanges {
-		firstip, ipNet, err := net.ParseCIDR(n.IPAM.IPRanges[idx].Range)
+	for idx, rangeConfig := range n.IPAM.IPRanges {
+		firstip, ipNet, err := net.ParseCIDR(rangeConfig.Range)
 		if err != nil {
-			return nil, fmt.Errorf("invalid CIDR %s: %w", n.IPAM.IPRanges[idx].Range, err)
+			return nil, fmt.Errorf("invalid CIDR %s: %w", rangeConfig.Range, err)
 		}
-		n.IPAM.IPRanges[idx].Range = ipNet.String()
-		if n.IPAM.IPRanges[idx].RangeStart == nil {
+		rangeConfig.Range = ipNet.String()
+		if rangeConfig.RangeStart == nil {
 			firstip = net.ParseIP(firstip.Mask(ipNet.Mask).String()) // get real first IP from cidr
-			n.IPAM.IPRanges[idx].RangeStart = firstip
+			rangeConfig.RangeStart = firstip
 		}
-		if n.IPAM.IPRanges[idx].RangeStart != nil && !ipNet.Contains(n.IPAM.IPRanges[idx].RangeStart) {
+		if rangeConfig.RangeStart != nil && !ipNet.Contains(rangeConfig.RangeStart) {
 			return nil, fmt.Errorf("range_start IP %s not in IP Range %s",
-				n.IPAM.IPRanges[idx].RangeStart.String(),
-				n.IPAM.IPRanges[idx].Range)
+				rangeConfig.RangeStart.String(),
+				rangeConfig.Range)
 		}
-		if n.IPAM.IPRanges[idx].RangeEnd != nil && !ipNet.Contains(n.IPAM.IPRanges[idx].RangeEnd) {
+		if rangeConfig.RangeEnd != nil && !ipNet.Contains(rangeConfig.RangeEnd) {
 			return nil, fmt.Errorf("range_end IP %s not in IP Range %s",
-				n.IPAM.IPRanges[idx].RangeEnd.String(),
-				n.IPAM.IPRanges[idx].Range)
+				rangeConfig.RangeEnd.String(),
+				rangeConfig.Range)
 		}
+
+		n.IPAM.IPRanges[idx] = rangeConfig
 	}
 
 	// delete old style settings
