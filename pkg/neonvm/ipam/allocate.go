@@ -1,7 +1,6 @@
 package ipam
 
 import (
-	"context"
 	"fmt"
 	"net"
 
@@ -12,8 +11,13 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+type ipamAction = func(
+	ipRange RangeConfiguration,
+	reservation []whereaboutstypes.IPReservation,
+	vmName types.NamespacedName,
+) (net.IPNet, []whereaboutstypes.IPReservation, error)
+
 func doAcquire(
-	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
 	vmName types.NamespacedName,
@@ -42,7 +46,6 @@ func doAcquire(
 }
 
 func doRelease(
-	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
 	vmName types.NamespacedName,
