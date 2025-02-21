@@ -55,7 +55,7 @@ type IPAM struct {
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.acquireORrelease(ctx, vmName, doAcquire)
+	ip, err := i.runIPAM(ctx, vmName, doAcquire)
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to acquire IP: %w", err)
 	}
@@ -63,7 +63,7 @@ func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.acquireORrelease(ctx, vmName, doRelease)
+	ip, err := i.runIPAM(ctx, vmName, doRelease)
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
 	}
@@ -173,18 +173,14 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 	return n.IPAM, nil
 }
 
-// Performing IPAM actions with Leader Election to avoid duplicates
-func (i *IPAM) acquireORrelease(ctx context.Context, vmName types.NamespacedName, action ipamAction) (net.IPNet, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	return i.runIPAM(ctx, vmName, action)
-}
-
 // Performing IPAM actions
 func (i *IPAM) runIPAM(ctx context.Context, vmName types.NamespacedName, action ipamAction) (net.IPNet, error) {
 	var err error
 	var ip net.IPNet
 	log := log.FromContext(ctx)
+
+	i.mu.Lock()
+	defer i.mu.Unlock()
 
 	ctxWithTimeout, ctxCancel := context.WithTimeout(ctx, IpamRequestTimeout)
 	defer ctxCancel()
