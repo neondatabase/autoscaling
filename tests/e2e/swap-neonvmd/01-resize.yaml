@@ -1,0 +1,9 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+unitTest: false
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      new_size=$(( 512 * 1024 * 1024 )) # 0.5 Gi
+      kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm curl -XPOST --data "$new_size" --unix-socket /run/neonvm-daemon-socket http://localhost/resize-swap-once
