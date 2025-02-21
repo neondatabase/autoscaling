@@ -59,12 +59,12 @@ type IPAM struct {
 	mu sync.Mutex
 }
 
-func (i *IPAM) AcquireIP(ctx context.Context, vmName string, vmNamespace string) (net.IPNet, error) {
-	return i.acquireORrelease(ctx, vmName, vmNamespace, Acquire)
+func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
+	return i.acquireORrelease(ctx, vmName, Acquire)
 }
 
-func (i *IPAM) ReleaseIP(ctx context.Context, vmName string, vmNamespace string) (net.IPNet, error) {
-	return i.acquireORrelease(ctx, vmName, vmNamespace, Release)
+func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
+	return i.acquireORrelease(ctx, vmName, Release)
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
@@ -171,14 +171,14 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 }
 
 // Performing IPAM actions with Leader Election to avoid duplicates
-func (i *IPAM) acquireORrelease(ctx context.Context, vmName string, vmNamespace string, action int) (net.IPNet, error) {
+func (i *IPAM) acquireORrelease(ctx context.Context, vmName types.NamespacedName, action int) (net.IPNet, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	return i.runIPAM(ctx, vmName, vmNamespace, action)
+	return i.runIPAM(ctx, vmName, action)
 }
 
 // Performing IPAM actions
-func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, action int) (net.IPNet, error) {
+func (i *IPAM) runIPAM(ctx context.Context, vmName types.NamespacedName, action int) (net.IPNet, error) {
 	log := log.FromContext(ctx)
 
 	switch action {
@@ -199,7 +199,7 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, a
 	for _, ipRange := range i.Config.IPRanges {
 		// retry loop used to retry CRUD operations against Kubernetes
 		// if we meet some issue then just do another attepmt
-		ip, err := i.runIPAMRange(ctx, types.NamespacedName{Name: vmName, Namespace: vmNamespace}, ipRange, action)
+		ip, err := i.runIPAMRange(ctx, vmName, ipRange, action)
 		// break ipRanges loop if ip was acquired/released
 		if err == nil {
 			return ip, nil
@@ -240,13 +240,13 @@ func (i *IPAM) runIPAMRange(ctx context.Context, vmName types.NamespacedName, ip
 		var newReservation []whereaboutstypes.IPReservation
 		switch action {
 		case Acquire:
-			ip, newReservation, err = doAcquire(ctx, ipRange, currentReservation, vmName.Name, vmName.Namespace)
+			ip, newReservation, err = doAcquire(ctx, ipRange, currentReservation, vmName)
 			if err != nil {
 				// no space in the pool ? try another pool
 				return net.IPNet{}, err
 			}
 		case Release:
-			ip, newReservation, err = doRelease(ctx, ipRange, currentReservation, vmName.Name, vmName.Namespace)
+			ip, newReservation, err = doRelease(ctx, ipRange, currentReservation, vmName)
 			if err != nil {
 				// not found in the pool ? try another pool
 				return net.IPNet{}, err
