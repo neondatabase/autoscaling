@@ -153,7 +153,8 @@ func main() {
 	logConfig.Sampling = nil // Disabling sampling; it's enabled by default for zap's production configs.
 	logConfig.Level.SetLevel(zap.InfoLevel)
 	logConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	logger := zapr.NewLogger(zap.Must(logConfig.Build(zap.AddStacktrace(zapcore.PanicLevel))))
+	zapLogger := zap.Must(logConfig.Build(zap.AddStacktrace(zapcore.PanicLevel)))
+	logger := zapr.NewLogger(zapLogger)
 
 	ctrl.SetLogger(logger)
 	// define klog settings (used in LeaderElector)
@@ -207,6 +208,11 @@ func main() {
 		panic(err)
 	}
 	defer ipam.Close()
+	err = mgr.Add(ipam.Cleaner("default"))
+	if err != nil {
+		setupLog.Error(err, "unable to add ipam cleaner")
+		panic(err)
+	}
 
 	vmReconciler := &controllers.VMReconciler{
 		Client:   mgr.GetClient(),
@@ -273,10 +279,10 @@ func main() {
 	}
 
 	// NOTE: THE CONTROLLER MUST IMMEDIATELY EXIT AFTER RUNNING THE MANAGER.
-	if err := run(mgr); err != nil {
-		setupLog.Error(err, "run manager error")
-		panic(err)
-	}
+	// OTHERWISE, THE LEADER ELECTION GUARANTEE WILL BE BROKEN.
+
+	err = run(mgr)
+	panic(err)
 }
 
 func debugServerFunc(reconcilers ...controllers.ReconcilerWithMetrics) manager.RunnableFunc {

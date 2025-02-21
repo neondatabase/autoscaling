@@ -38,6 +38,9 @@ const (
 	// DatastoreRetries defines how many retries are attempted when reading/updating the IP Pool
 	DatastoreRetries      = 5
 	DatastoreRetriesDelay = 100 * time.Millisecond
+
+	// CleanupInterval defines how often the IPAM cleaner is run
+	CleanupInterval = 15 * time.Minute
 )
 
 type Temporary interface {
@@ -65,6 +68,46 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.
 		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
 	}
 	return ip, nil
+}
+
+func (i *IPAM) runCleanup(ctx context.Context, namespace string) error {
+	for {
+		vms, err := i.vmClient.NeonvmV1().VirtualMachines(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("error listing virtual machines: %w", err)
+		}
+		vmsMap := make(map[string]bool)
+		for _, vm := range vms.Items {
+			vmsMap[vm.Name] = true
+		}
+		_, err = i.runIPAM(ctx, getCleanupAction(vmsMap))
+		if err != nil {
+			return fmt.Errorf("error cleaning up IPAM: %w", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(CleanupInterval):
+		}
+	}
+}
+
+// IPAMCleaner matches Runnable and LeaderElectionRunnable interfaces
+type IPAMCleaner func(ctx context.Context) error
+
+func (i IPAMCleaner) Start(ctx context.Context) error {
+	return i(ctx)
+}
+
+func (_ IPAMCleaner) NeedLeaderElection() bool {
+	return true
+}
+
+func (i *IPAM) Cleaner(namespace string) IPAMCleaner {
+	return IPAMCleaner(func(ctx context.Context) error {
+		return i.runCleanup(ctx, namespace)
+	})
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
