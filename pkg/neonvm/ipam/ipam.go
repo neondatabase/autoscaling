@@ -65,7 +65,7 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
-func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error) {
+func New(nadName string, nadNamespace string) (*IPAM, error) {
 	// get Kubernetes client config
 	cfg, err := config.GetConfig()
 	if err != nil {
@@ -81,6 +81,8 @@ func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error
 		return nil, fmt.Errorf("error creating kubernetes client: %w", err)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), IpamRequestTimeout)
+	defer cancel()
 	// read network-attachment-definition from Kubernetes
 	nad, err := kClient.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadNamespace).Get(ctx, nadName, metav1.GetOptions{})
 	if err != nil {

@@ -127,8 +127,10 @@ func newTestParams(t *testing.T) *testParams {
 			FailingRefreshInterval:  time.Minute,
 			AtMostOnePod:            false,
 			DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
+			NADConfig:               nil,
 		},
 		Metrics: testReconcilerMetrics,
+		IPAM:    nil,
 	}
 
 	return params
