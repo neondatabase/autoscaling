@@ -14,8 +14,19 @@ import (
 type ipamAction = func(
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
-	vmName types.NamespacedName,
 ) (net.IPNet, []whereaboutstypes.IPReservation, error)
+
+func getAcquireAction(vmName types.NamespacedName) ipamAction {
+	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+		return doAcquire(ipRange, reservation, vmName)
+	}
+}
+
+func getReleaseAction(vmName types.NamespacedName) ipamAction {
+	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+		return doRelease(ipRange, reservation, vmName)
+	}
+}
 
 func doAcquire(
 	ipRange RangeConfiguration,

@@ -55,7 +55,7 @@ type IPAM struct {
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAM(ctx, vmName, doAcquire)
+	ip, err := i.runIPAM(ctx, getAcquireAction(vmName))
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to acquire IP: %w", err)
 	}
@@ -63,7 +63,7 @@ func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAM(ctx, vmName, doRelease)
+	ip, err := i.runIPAM(ctx, getReleaseAction(vmName))
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
 	}
@@ -174,7 +174,7 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 }
 
 // Performing IPAM actions
-func (i *IPAM) runIPAM(ctx context.Context, vmName types.NamespacedName, action ipamAction) (net.IPNet, error) {
+func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error) {
 	var err error
 	var ip net.IPNet
 	log := log.FromContext(ctx)
@@ -194,7 +194,7 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName types.NamespacedName, action 
 	for _, ipRange := range i.Config.IPRanges {
 		// retry loop used to retry CRUD operations against Kubernetes
 		// if we meet some issue then just do another attepmt
-		ip, err = i.runIPAMRange(ctx, vmName, ipRange, action)
+		ip, err = i.runIPAMRange(ctx, ipRange, action)
 		// break ipRanges loop if ip was acquired/released
 		if err == nil {
 			return ip, nil
@@ -204,7 +204,7 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName types.NamespacedName, action 
 	return net.IPNet{}, err
 }
 
-func (i *IPAM) runIPAMRange(ctx context.Context, vmName types.NamespacedName, ipRange RangeConfiguration, action ipamAction) (net.IPNet, error) {
+func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, action ipamAction) (net.IPNet, error) {
 	var ip net.IPNet
 	for retry := 0; retry < DatastoreRetries; retry++ {
 		select {
@@ -227,7 +227,7 @@ func (i *IPAM) runIPAMRange(ctx context.Context, vmName types.NamespacedName, ip
 
 		currentReservation := pool.Allocations(ctx)
 		var newReservation []whereaboutstypes.IPReservation
-		ip, newReservation, err = action(ipRange, currentReservation, vmName)
+		ip, newReservation, err = action(ipRange, currentReservation)
 		if err != nil {
 			return net.IPNet{}, err
 		}
