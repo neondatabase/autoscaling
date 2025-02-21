@@ -2,29 +2,28 @@ package ipam
 
 import (
 	"context"
-	"fmt"
 	"net"
 
 	whereaboutsallocate "github.com/k8snetworkplumbingwg/whereabouts/pkg/allocate"
 	whereaboutslogging "github.com/k8snetworkplumbingwg/whereabouts/pkg/logging"
 	whereaboutstypes "github.com/k8snetworkplumbingwg/whereabouts/pkg/types"
+
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func doAcquire(
 	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
-	vmName string,
-	vmNamespace string,
+	vmName types.NamespacedName,
 ) (net.IPNet, []whereaboutstypes.IPReservation, error) {
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 
-	vmID := fmt.Sprintf("%s/%s", vmNamespace, vmName)
 	_, ipnet, _ := net.ParseCIDR(ipRange.Range)
 
 	// check if IP reserved for VM already
-	foundidx := getMatchingIPReservationIndex(reservation, vmID)
+	foundidx := getMatchingIPReservationIndex(reservation, vmName.String())
 	if foundidx >= 0 {
 		return net.IPNet{IP: reservation[foundidx].IP, Mask: ipnet.Mask}, reservation, nil
 	}
@@ -32,7 +31,7 @@ func doAcquire(
 	// try to reserve new IP gor given VM
 	ip, newReservation, err := whereaboutsallocate.IterateForAssignment(*ipnet,
 		ipRange.RangeStart, ipRange.RangeEnd,
-		reservation, ipRange.OmitRanges, vmID, "")
+		reservation, ipRange.OmitRanges, vmName.String(), "")
 	if err != nil {
 		return net.IPNet{}, nil, err
 	}
@@ -44,17 +43,15 @@ func doRelease(
 	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
-	vmName string,
-	vmNamespace string,
+	vmName types.NamespacedName,
 ) (net.IPNet, []whereaboutstypes.IPReservation, error) {
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 
-	vmID := fmt.Sprintf("%s/%s", vmNamespace, vmName)
 	_, ipnet, _ := net.ParseCIDR(ipRange.Range)
 
 	// try to release IP for given VM
-	newReservation, ip, err := whereaboutsallocate.IterateForDeallocation(reservation, vmID, getMatchingIPReservationIndex)
+	newReservation, ip, err := whereaboutsallocate.IterateForDeallocation(reservation, vmName.String(), getMatchingIPReservationIndex)
 	if err != nil {
 		return net.IPNet{}, nil, err
 	}
