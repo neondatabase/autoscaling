@@ -25,11 +25,6 @@ import (
 )
 
 const (
-	// IP Acquire operation identifier
-	Acquire = 0
-	// IP Release operation identifier
-	Release = 1
-
 	UnnamedNetwork string = ""
 
 	// kubernetes client-go rate limiter settings
@@ -57,11 +52,19 @@ type IPAM struct {
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	return i.acquireORrelease(ctx, vmName, Acquire)
+	ip, err := i.runIPAM(ctx, makeAcquireAction(vmName))
+	if err != nil {
+		return net.IPNet{}, fmt.Errorf("failed to acquire IP: %w", err)
+	}
+	return ip, nil
 }
 
 func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	return i.acquireORrelease(ctx, vmName, Release)
+	ip, err := i.runIPAM(ctx, makeReleaseAction(vmName))
+	if err != nil {
+		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
+	}
+	return ip, nil
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
@@ -171,22 +174,14 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 	return n.IPAM, nil
 }
 
-// Performing IPAM actions with Leader Election to avoid duplicates
-func (i *IPAM) acquireORrelease(ctx context.Context, vmName types.NamespacedName, action int) (net.IPNet, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	return i.runIPAM(ctx, vmName, action)
-}
-
 // Performing IPAM actions
-func (i *IPAM) runIPAM(ctx context.Context, vmName types.NamespacedName, action int) (net.IPNet, error) {
+func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error) {
+	var err error
+	var ip net.IPNet
 	log := log.FromContext(ctx)
 
-	switch action {
-	case Acquire, Release:
-	default:
-		return net.IPNet{}, fmt.Errorf("got an unknown action: %v", action)
-	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
 
 	ctx, ctxCancel := context.WithTimeout(ctx, IpamRequestTimeout)
 	defer ctxCancel()
@@ -195,23 +190,17 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName types.NamespacedName, action 
 	for _, ipRange := range i.Config.IPRanges {
 		// retry loop used to retry CRUD operations against Kubernetes
 		// if we meet some issue then just do another attepmt
-		ip, err := i.runIPAMRange(ctx, vmName, ipRange, action)
+		ip, err = i.runIPAMRange(ctx, ipRange, action)
 		// break ipRanges loop if ip was acquired/released
 		if err == nil {
 			return ip, nil
 		}
 		log.Error(err, "error acquiring/releasing IP from range", ipRange.Range)
 	}
-	switch action {
-	case Acquire:
-		return net.IPNet{}, errors.New("can not acquire IP, probably there are no space in IP pools")
-	case Release:
-		return net.IPNet{}, errors.New("can not release IP")
-	}
-	return net.IPNet{}, errors.New("unknown action")
+	return net.IPNet{}, err
 }
 
-func (i *IPAM) runIPAMRange(ctx context.Context, vmName types.NamespacedName, ipRange RangeConfiguration, action int) (net.IPNet, error) {
+func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, action ipamAction) (net.IPNet, error) {
 	var ip net.IPNet
 	for retry := 0; retry < DatastoreRetries; retry++ {
 		select {
@@ -234,19 +223,9 @@ func (i *IPAM) runIPAMRange(ctx context.Context, vmName types.NamespacedName, ip
 
 		currentReservation := pool.Allocations(ctx)
 		var newReservation []whereaboutstypes.IPReservation
-		switch action {
-		case Acquire:
-			ip, newReservation, err = doAcquire(ctx, ipRange, currentReservation, vmName)
-			if err != nil {
-				// no space in the pool ? try another pool
-				return net.IPNet{}, err
-			}
-		case Release:
-			ip, newReservation, err = doRelease(ctx, ipRange, currentReservation, vmName)
-			if err != nil {
-				// not found in the pool ? try another pool
-				return net.IPNet{}, err
-			}
+		ip, newReservation, err = action(ipRange, currentReservation)
+		if err != nil {
+			return net.IPNet{}, err
 		}
 
 		// update IPPool with newReservation
