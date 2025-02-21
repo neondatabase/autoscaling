@@ -18,6 +18,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	neonvm "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
@@ -175,14 +176,12 @@ func (i *IPAM) acquireORrelease(ctx context.Context, vmName string, vmNamespace 
 
 // Performing IPAM actions
 func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, action int) (net.IPNet, error) {
-	var ip net.IPNet
-	var ipamerr error
+	log := log.FromContext(ctx)
 
-	// check action
 	switch action {
 	case Acquire, Release:
 	default:
-		return ip, fmt.Errorf("got an unknown action: %v", action)
+		return net.IPNet{}, fmt.Errorf("got an unknown action: %v", action)
 	}
 
 	ctx, ctxCancel := context.WithTimeout(ctx, IpamRequestTimeout)
@@ -192,67 +191,73 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, a
 	for _, ipRange := range i.Config.IPRanges {
 		// retry loop used to retry CRUD operations against Kubernetes
 		// if we meet some issue then just do another attepmt
-	RETRY:
-		for retry := 0; retry < DatastoreRetries; retry++ {
-			select {
-			case <-ctx.Done():
-				break RETRY
-			default:
-				// live in retry loop until context not cancelled
-			}
-
-			// read IPPool from ipppols.vm.neon.tech custom resource
-			pool, err := i.getNeonvmIPPool(ctx, ipRange.Range)
-			if err != nil {
-				if e, ok := err.(Temporary); ok && e.Temporary() {
-					// retry attempt to read IPPool
-					time.Sleep(DatastoreRetriesDelay)
-					continue
-				}
-				return ip, fmt.Errorf("error reading IP pool: %w", err)
-			}
-
-			currentReservation := pool.Allocations(ctx)
-			var newReservation []whereaboutstypes.IPReservation
-			switch action {
-			case Acquire:
-				ip, newReservation, ipamerr = doAcquire(ctx, ipRange, currentReservation, vmName, vmNamespace)
-				if ipamerr != nil {
-					// no space in the pool ? try another pool
-					break RETRY
-				}
-			case Release:
-				ip, newReservation, ipamerr = doRelease(ctx, ipRange, currentReservation, vmName, vmNamespace)
-				if ipamerr != nil {
-					// not found in the pool ? try another pool
-					break RETRY
-				}
-			}
-
-			// update IPPool with newReservation
-			err = pool.Update(ctx, newReservation)
-			if err != nil {
-				if e, ok := err.(Temporary); ok && e.Temporary() {
-					// retry attempt to update IPPool
-					time.Sleep(DatastoreRetriesDelay)
-					continue
-				}
-				return ip, fmt.Errorf("error updating IP pool: %w", err)
-			}
-			// pool was read, acquire or release was processed, pool was updated
-			// now we can break retry loop
-			break
-		}
+		ip, err := i.runIPAMRange(ctx, types.NamespacedName{Name: vmName, Namespace: vmNamespace}, ipRange, action)
 		// break ipRanges loop if ip was acquired/released
-		if ip.IP != nil {
-			break
+		if err == nil {
+			return ip, nil
 		}
+		log.Error(err, "error acquiring/releasing IP from range", ipRange.Range)
 	}
-	if ip.IP == nil && action == Acquire {
-		return ip, errors.New("can not acquire IP, probably there are no space in IP pools")
+	switch action {
+	case Acquire:
+		return net.IPNet{}, errors.New("can not acquire IP, probably there are no space in IP pools")
+	case Release:
+		return net.IPNet{}, errors.New("can not release IP")
 	}
+	return net.IPNet{}, errors.New("unknown action")
+}
 
-	return ip, ipamerr
+func (i *IPAM) runIPAMRange(ctx context.Context, vmName types.NamespacedName, ipRange RangeConfiguration, action int) (net.IPNet, error) {
+	var ip net.IPNet
+	for retry := 0; retry < DatastoreRetries; retry++ {
+		select {
+		case <-ctx.Done():
+			return net.IPNet{}, ctx.Err()
+		default:
+			// live in retry loop until context not cancelled
+		}
+
+		// read IPPool from ipppols.vm.neon.tech custom resource
+		pool, err := i.getNeonvmIPPool(ctx, ipRange.Range)
+		if err != nil {
+			if e, ok := err.(Temporary); ok && e.Temporary() {
+				// retry attempt to read IPPool
+				time.Sleep(DatastoreRetriesDelay)
+				continue
+			}
+			return net.IPNet{}, fmt.Errorf("error reading IP pool: %w", err)
+		}
+
+		currentReservation := pool.Allocations(ctx)
+		var newReservation []whereaboutstypes.IPReservation
+		switch action {
+		case Acquire:
+			ip, newReservation, err = doAcquire(ctx, ipRange, currentReservation, vmName.Name, vmName.Namespace)
+			if err != nil {
+				// no space in the pool ? try another pool
+				return net.IPNet{}, err
+			}
+		case Release:
+			ip, newReservation, err = doRelease(ctx, ipRange, currentReservation, vmName.Name, vmName.Namespace)
+			if err != nil {
+				// not found in the pool ? try another pool
+				return net.IPNet{}, err
+			}
+		}
+
+		// update IPPool with newReservation
+		err = pool.Update(ctx, newReservation)
+		if err != nil {
+			if e, ok := err.(Temporary); ok && e.Temporary() {
+				// retry attempt to update IPPool
+				time.Sleep(DatastoreRetriesDelay)
+				continue
+			}
+			return net.IPNet{}, fmt.Errorf("error updating IP pool: %w", err)
+		}
+		return ip, nil
+	}
+	return ip, errors.New("IPAMretries limit reached")
 }
 
 // Status do List() request to check NeonVM client connectivity
