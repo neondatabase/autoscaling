@@ -416,7 +416,9 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 	case "":
 		if err := r.acquireOverlayIP(ctx, vm); err != nil {
-			return err
+			log.Error(err, "Failed to acquire overlay IP", "VirtualMachine", vm.Name)
+			r.Recorder.Event(vm, "Warning", "OverlayNet", "Failed to acquire overlay IP")
+			// Don't return error, we will keep running without an overlay IP
 		}
 		// VirtualMachine just created, change Phase to "Pending"
 		vm.Status.Phase = vmv1.VmPending
