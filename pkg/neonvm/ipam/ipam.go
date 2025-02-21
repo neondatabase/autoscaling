@@ -41,6 +41,8 @@ const (
 	DefaultLeaderLeaseDurationMs = 3000
 	DefaultLeaderRenewDeadlineMs = 2500
 	DefaultLeaderRetryPeriodMs   = 2000
+
+	CleanupInterval = 15 * time.Minute
 )
 
 type Temporary interface {
@@ -68,6 +70,29 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.
 		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
 	}
 	return ip, nil
+}
+
+func (i *IPAM) RunCleanup(ctx context.Context, namespace string) error {
+	for {
+		vms, err := i.vmClient.NeonvmV1().VirtualMachines(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("error listing virtual machines: %w", err)
+		}
+		vmsMap := make(map[string]bool)
+		for _, vm := range vms.Items {
+			vmsMap[vm.Name] = true
+		}
+		_, err = i.runIPAM(ctx, getCleanupAction(vmsMap))
+		if err != nil {
+			return fmt.Errorf("error cleaning up IPAM: %w", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(CleanupInterval):
+		}
+	}
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients

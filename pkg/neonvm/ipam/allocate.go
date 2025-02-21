@@ -28,6 +28,12 @@ func getReleaseAction(vmName types.NamespacedName) ipamAction {
 	}
 }
 
+func getCleanupAction(vms map[string]bool) ipamAction {
+	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+		return doCleanup(ipRange, reservation, vms)
+	}
+}
+
 func doAcquire(
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
@@ -74,6 +80,21 @@ func doRelease(
 	}
 
 	return net.IPNet{IP: ip, Mask: ipnet.Mask}, newReservation, nil
+}
+
+func doCleanup(
+	_ RangeConfiguration,
+	reservations []whereaboutstypes.IPReservation,
+	vms map[string]bool,
+) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+	var result []whereaboutstypes.IPReservation
+	for _, r := range reservations {
+		if vms[r.ContainerID] {
+			result = append(result, r)
+		}
+	}
+	var ip net.IPNet
+	return ip, result, nil
 }
 
 func getMatchingIPReservationIndex(reservation []whereaboutstypes.IPReservation, id string) int {
