@@ -1,7 +1,6 @@
 package ipam
 
 import (
-	"context"
 	"net"
 
 	whereaboutsallocate "github.com/k8snetworkplumbingwg/whereabouts/pkg/allocate"
@@ -11,8 +10,24 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+type ipamAction = func(
+	ipRange RangeConfiguration,
+	reservation []whereaboutstypes.IPReservation,
+) (net.IPNet, []whereaboutstypes.IPReservation, error)
+
+func getAcquireAction(vmName types.NamespacedName) ipamAction {
+	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+		return doAcquire(ipRange, reservation, vmName)
+	}
+}
+
+func getReleaseAction(vmName types.NamespacedName) ipamAction {
+	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+		return doRelease(ipRange, reservation, vmName)
+	}
+}
+
 func doAcquire(
-	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
 	vmName types.NamespacedName,
@@ -40,7 +55,6 @@ func doAcquire(
 }
 
 func doRelease(
-	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
 	vmName types.NamespacedName,
