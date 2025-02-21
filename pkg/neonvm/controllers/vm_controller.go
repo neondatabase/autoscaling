@@ -258,7 +258,7 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 			return
 		}
 		defer ipam.Close()
-		ip, err := ipam.ReleaseIP(ctx, vm.Name, vm.Namespace)
+		ip, err := ipam.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
 		if err != nil {
 			// ignore error
 			log.Error(err, "fail to release IP, error ignored")
@@ -363,7 +363,7 @@ func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMac
 		return err
 	}
 	defer ipam.Close()
-	ip, err := ipam.AcquireIP(ctx, vm.Name, vm.Namespace)
+	ip, err := ipam.AcquireIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
 	if err != nil {
 		log.Error(err, "fail to acquire IP")
 		return err
