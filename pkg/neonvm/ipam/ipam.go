@@ -96,7 +96,7 @@ func (i *IPAM) RunCleanup(ctx context.Context, namespace string) error {
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
-func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error) {
+func New(nadName string, nadNamespace string) (*IPAM, error) {
 	// get Kubernetes client config
 	cfg, err := config.GetConfig()
 	if err != nil {
@@ -113,7 +113,7 @@ func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error
 	}
 
 	// read network-attachment-definition from Kubernetes
-	nad, err := kClient.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadNamespace).Get(ctx, nadName, metav1.GetOptions{})
+	nad, err := kClient.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadNamespace).Get(context.Background(), nadName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}

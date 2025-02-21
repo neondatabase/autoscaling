@@ -115,7 +115,9 @@ var _ = Describe("VirtualMachine controller", func() {
 					FailingRefreshInterval:  1 * time.Minute,
 					AtMostOnePod:            false,
 					DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
+					NADConfig:               nil,
 				},
+				IPAM: nil,
 			}
 
 			_, err = virtualmachineReconciler.Reconcile(ctx, reconcile.Request{
