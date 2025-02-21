@@ -50,6 +50,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -197,7 +198,15 @@ func main() {
 		FailingRefreshInterval:  failingRefreshInterval,
 		AtMostOnePod:            atMostOnePod,
 		DefaultCPUScalingMode:   defaultCpuScalingMode,
+		NADConfig:               controllers.GetNADConfig(),
 	}
+
+	ipam, err := ipam.New(rc.NADConfig.IPAMName, rc.NADConfig.IPAMNamespace)
+	if err != nil {
+		setupLog.Error(err, "unable to create ipam")
+		panic(err)
+	}
+	defer ipam.Close()
 
 	vmReconciler := &controllers.VMReconciler{
 		Client:   mgr.GetClient(),
@@ -205,6 +214,7 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
 		Config:   rc,
 		Metrics:  reconcilerMetrics,
+		IPAM:     ipam,
 	}
 	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
 	if err != nil {
