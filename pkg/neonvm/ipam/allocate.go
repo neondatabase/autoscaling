@@ -1,26 +1,48 @@
 package ipam
 
 import (
-	"context"
 	"fmt"
 	"net"
 
 	whereaboutsallocate "github.com/k8snetworkplumbingwg/whereabouts/pkg/allocate"
 	whereaboutslogging "github.com/k8snetworkplumbingwg/whereabouts/pkg/logging"
 	whereaboutstypes "github.com/k8snetworkplumbingwg/whereabouts/pkg/types"
+
+	"k8s.io/apimachinery/pkg/types"
 )
 
-func doAcquire(
-	_ context.Context,
+type ipamAction = func(
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
-	vmName string,
-	vmNamespace string,
+) (net.IPNet, []whereaboutstypes.IPReservation, error)
+
+func getAcquireAction(vmName types.NamespacedName) ipamAction {
+	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+		return doAcquire(ipRange, reservation, vmName)
+	}
+}
+
+func getReleaseAction(vmName types.NamespacedName) ipamAction {
+	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+		return doRelease(ipRange, reservation, vmName)
+	}
+}
+
+func getCleanupAction(vms map[string]bool) ipamAction {
+	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+		return doCleanup(ipRange, reservation, vms)
+	}
+}
+
+func doAcquire(
+	ipRange RangeConfiguration,
+	reservation []whereaboutstypes.IPReservation,
+	vmName types.NamespacedName,
 ) (net.IPNet, []whereaboutstypes.IPReservation, error) {
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 
-	vmID := fmt.Sprintf("%s/%s", vmNamespace, vmName)
+	vmID := fmt.Sprintf("%s/%s", vmName.Namespace, vmName.Name)
 	_, ipnet, _ := net.ParseCIDR(ipRange.Range)
 
 	// check if IP reserved for VM already
@@ -41,16 +63,14 @@ func doAcquire(
 }
 
 func doRelease(
-	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
-	vmName string,
-	vmNamespace string,
+	vmName types.NamespacedName,
 ) (net.IPNet, []whereaboutstypes.IPReservation, error) {
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 
-	vmID := fmt.Sprintf("%s/%s", vmNamespace, vmName)
+	vmID := fmt.Sprintf("%s/%s", vmName.Namespace, vmName.Name)
 	_, ipnet, _ := net.ParseCIDR(ipRange.Range)
 
 	// try to release IP for given VM
@@ -60,6 +80,21 @@ func doRelease(
 	}
 
 	return net.IPNet{IP: ip, Mask: ipnet.Mask}, newReservation, nil
+}
+
+func doCleanup(
+	_ RangeConfiguration,
+	reservations []whereaboutstypes.IPReservation,
+	vms map[string]bool,
+) (net.IPNet, []whereaboutstypes.IPReservation, error) {
+	var result []whereaboutstypes.IPReservation
+	for _, r := range reservations {
+		if vms[r.ContainerID] {
+			result = append(result, r)
+		}
+	}
+	var ip net.IPNet
+	return ip, result, nil
 }
 
 func getMatchingIPReservationIndex(reservation []whereaboutstypes.IPReservation, id string) int {

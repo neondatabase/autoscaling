@@ -18,19 +18,13 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	neonvm "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 )
 
 const (
-	// IP Acquire operation identifier
-	Acquire = 0
-	// IP Release operation identifier
-	Release = 1
-
 	UnnamedNetwork string = ""
 
 	// kubernetes client-go rate limiter settings
@@ -47,6 +41,8 @@ const (
 	DefaultLeaderLeaseDurationMs = 3000
 	DefaultLeaderRenewDeadlineMs = 2500
 	DefaultLeaderRetryPeriodMs   = 2000
+
+	CleanupInterval = 15 * time.Minute
 )
 
 type Temporary interface {
@@ -56,18 +52,51 @@ type Temporary interface {
 type IPAM struct {
 	Client
 	Config IPAMConfig
+
+	mu sync.Mutex
 }
 
-func (i *IPAM) AcquireIP(ctx context.Context, vmName string, vmNamespace string) (net.IPNet, error) {
-	return i.acquireORrelease(ctx, vmName, vmNamespace, Acquire)
+func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
+	ip, err := i.runIPAM(ctx, getAcquireAction(vmName))
+	if err != nil {
+		return net.IPNet{}, fmt.Errorf("failed to acquire IP: %w", err)
+	}
+	return ip, nil
 }
 
-func (i *IPAM) ReleaseIP(ctx context.Context, vmName string, vmNamespace string) (net.IPNet, error) {
-	return i.acquireORrelease(ctx, vmName, vmNamespace, Release)
+func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
+	ip, err := i.runIPAM(ctx, getReleaseAction(vmName))
+	if err != nil {
+		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
+	}
+	return ip, nil
+}
+
+func (i *IPAM) RunCleanup(ctx context.Context, namespace string) error {
+	for {
+		vms, err := i.vmClient.NeonvmV1().VirtualMachines(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("error listing virtual machines: %w", err)
+		}
+		vmsMap := make(map[string]bool)
+		for _, vm := range vms.Items {
+			vmsMap[vm.Name] = true
+		}
+		_, err = i.runIPAM(ctx, getCleanupAction(vmsMap))
+		if err != nil {
+			return fmt.Errorf("error cleaning up IPAM: %w", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(CleanupInterval):
+		}
+	}
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
-func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error) {
+func New(nadName string, nadNamespace string) (*IPAM, error) {
 	// get Kubernetes client config
 	cfg, err := config.GetConfig()
 	if err != nil {
@@ -84,7 +113,7 @@ func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error
 	}
 
 	// read network-attachment-definition from Kubernetes
-	nad, err := kClient.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadNamespace).Get(ctx, nadName, metav1.GetOptions{})
+	nad, err := kClient.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadNamespace).Get(context.Background(), nadName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +129,7 @@ func New(ctx context.Context, nadName string, nadNamespace string) (*IPAM, error
 	return &IPAM{
 		Config: *ipamConfig,
 		Client: *kClient,
+		mu:     sync.Mutex{},
 	}, nil
 }
 
@@ -114,52 +144,29 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 		return nil, fmt.Errorf("missing 'ipam' key")
 	}
 
-	// process old-style Range to Ranges array
-	if n.IPAM.Range != "" {
-		oldRange := RangeConfiguration{
-			OmitRanges: n.IPAM.OmitRanges,
-			Range:      n.IPAM.Range,
-			RangeStart: n.IPAM.RangeStart,
-			RangeEnd:   n.IPAM.RangeEnd,
-		}
-		n.IPAM.IPRanges = append([]RangeConfiguration{oldRange}, n.IPAM.IPRanges...)
-	}
-
 	// check IP ranges
-	for idx := range n.IPAM.IPRanges {
-		firstip, ipNet, err := net.ParseCIDR(n.IPAM.IPRanges[idx].Range)
+	for idx, rangeConfig := range n.IPAM.IPRanges {
+		firstip, ipNet, err := net.ParseCIDR(rangeConfig.Range)
 		if err != nil {
-			return nil, fmt.Errorf("invalid CIDR %s: %w", n.IPAM.IPRanges[idx].Range, err)
+			return nil, fmt.Errorf("invalid CIDR %s: %w", rangeConfig.Range, err)
 		}
-		n.IPAM.IPRanges[idx].Range = ipNet.String()
-		if n.IPAM.IPRanges[idx].RangeStart == nil {
+		rangeConfig.Range = ipNet.String()
+		if rangeConfig.RangeStart == nil {
 			firstip = net.ParseIP(firstip.Mask(ipNet.Mask).String()) // get real first IP from cidr
-			n.IPAM.IPRanges[idx].RangeStart = firstip
+			rangeConfig.RangeStart = firstip
 		}
-		if n.IPAM.IPRanges[idx].RangeStart != nil && !ipNet.Contains(n.IPAM.IPRanges[idx].RangeStart) {
+		if rangeConfig.RangeStart != nil && !ipNet.Contains(rangeConfig.RangeStart) {
 			return nil, fmt.Errorf("range_start IP %s not in IP Range %s",
-				n.IPAM.IPRanges[idx].RangeStart.String(),
-				n.IPAM.IPRanges[idx].Range)
+				rangeConfig.RangeStart.String(),
+				rangeConfig.Range)
 		}
-		if n.IPAM.IPRanges[idx].RangeEnd != nil && !ipNet.Contains(n.IPAM.IPRanges[idx].RangeEnd) {
+		if rangeConfig.RangeEnd != nil && !ipNet.Contains(rangeConfig.RangeEnd) {
 			return nil, fmt.Errorf("range_end IP %s not in IP Range %s",
-				n.IPAM.IPRanges[idx].RangeEnd.String(),
-				n.IPAM.IPRanges[idx].Range)
+				rangeConfig.RangeEnd.String(),
+				rangeConfig.Range)
 		}
-	}
 
-	// delete old style settings
-	n.IPAM.OmitRanges = nil
-	n.IPAM.Range = ""
-	n.IPAM.RangeStart = nil
-	n.IPAM.RangeEnd = nil
-
-	// check Excluded IP ranges
-	for idx := range n.IPAM.OmitRanges {
-		_, _, err := net.ParseCIDR(n.IPAM.OmitRanges[idx])
-		if err != nil {
-			return nil, fmt.Errorf("invalid exclude CIDR %s: %w", n.IPAM.OmitRanges[idx], err)
-		}
+		n.IPAM.IPRanges[idx] = rangeConfig
 	}
 
 	// set network namespace
@@ -168,169 +175,78 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 	return n.IPAM, nil
 }
 
-// Performing IPAM actions with Leader Election to avoid duplicates
-func (i *IPAM) acquireORrelease(ctx context.Context, vmName string, vmNamespace string, action int) (net.IPNet, error) {
-	var ip net.IPNet
-	var err error
-	var ipamerr error
-
-	leOverallTimeout := IpamRequestTimeout * 3
-	lockName := "neonvmipam"
-	lockIdentity := fmt.Sprintf("%s/%s", vmNamespace, vmName)
-
-	// define resource lock
-	lock := &resourcelock.LeaseLock{
-		LeaseMeta: metav1.ObjectMeta{
-			Name:      lockName,
-			Namespace: i.Config.NetworkNamespace,
-		},
-		Client: i.kubeClient.CoordinationV1(),
-		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: lockIdentity,
-		},
-	}
-
-	done := make(chan struct{})
-
-	// define leader elector
-	le, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
-		Lock:            lock,
-		ReleaseOnCancel: true,
-		LeaseDuration:   time.Millisecond * time.Duration(DefaultLeaderLeaseDurationMs),
-		RenewDeadline:   time.Millisecond * time.Duration(DefaultLeaderRenewDeadlineMs),
-		RetryPeriod:     time.Millisecond * time.Duration(DefaultLeaderRetryPeriodMs),
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(c context.Context) {
-				ip, ipamerr = i.runIPAM(ctx, vmName, vmNamespace, action)
-				close(done)
-				<-c.Done()
-			},
-			OnStoppedLeading: func() {
-				// do nothing
-				err = error(nil)
-			},
-		},
-	})
-	if err != nil {
-		return ip, err
-	}
-
-	// context with timeout for leader elector
-	leCtx, leCancel := context.WithTimeout(ctx, leOverallTimeout)
-	defer leCancel()
-
-	// run election in background
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); le.Run(leCtx) }()
-
-	// wait until job was done and then cancel election context
-	// or exit with error when context got timeout
-	select {
-	case <-done:
-		leCancel()
-	case <-leCtx.Done():
-		err = errors.New("context got timeout while waiting to become leader")
-	}
-	if err != nil {
-		return ip, err
-	}
-
-	wg.Wait()
-
-	// ip.String() returns string "<nil>" on errors in ip struct parsing or if *ip is nil
-	if ip.String() == "<nil>" {
-		return ip, errors.New("something wrong, probably with leader election")
-	}
-
-	return ip, ipamerr
-}
-
 // Performing IPAM actions
-func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, action int) (net.IPNet, error) {
+func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error) {
+	var err error
 	var ip net.IPNet
-	var ipamerr error
+	log := log.FromContext(ctx)
 
-	// check action
-	switch action {
-	case Acquire, Release:
-	default:
-		return ip, fmt.Errorf("got an unknown action: %v", action)
-	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
 
 	ctxWithTimeout, ctxCancel := context.WithTimeout(ctx, IpamRequestTimeout)
 	defer ctxCancel()
 
 	// Check connectivity to kubernetes
 	if err := i.Status(ctxWithTimeout); err != nil {
-		return ip, fmt.Errorf("connectivity error: %w", err)
+		return net.IPNet{}, fmt.Errorf("connectivity error: %w", err)
 	}
 
 	// handle the ip add/del until successful
 	for _, ipRange := range i.Config.IPRanges {
 		// retry loop used to retry CRUD operations against Kubernetes
 		// if we meet some issue then just do another attepmt
-	RETRY:
-		for retry := 0; retry < DatastoreRetries; retry++ {
-			select {
-			case <-ctx.Done():
-				break RETRY
-			default:
-				// live in retry loop until context not cancelled
-			}
-
-			// read IPPool from ipppols.vm.neon.tech custom resource
-			pool, err := i.getNeonvmIPPool(ctxWithTimeout, ipRange.Range)
-			if err != nil {
-				if e, ok := err.(Temporary); ok && e.Temporary() {
-					// retry attempt to read IPPool
-					time.Sleep(DatastoreRetriesDelay)
-					continue
-				}
-				return ip, fmt.Errorf("error reading IP pool: %w", err)
-			}
-
-			currentReservation := pool.Allocations(ctx)
-			var newReservation []whereaboutstypes.IPReservation
-			switch action {
-			case Acquire:
-				ip, newReservation, ipamerr = doAcquire(ctx, ipRange, currentReservation, vmName, vmNamespace)
-				if ipamerr != nil {
-					// no space in the pool ? try another pool
-					break RETRY
-				}
-			case Release:
-				ip, newReservation, ipamerr = doRelease(ctx, ipRange, currentReservation, vmName, vmNamespace)
-				if ipamerr != nil {
-					// not found in the pool ? try another pool
-					break RETRY
-				}
-			}
-
-			// update IPPool with newReservation
-			err = pool.Update(ctxWithTimeout, newReservation)
-			if err != nil {
-				if e, ok := err.(Temporary); ok && e.Temporary() {
-					// retry attempt to update IPPool
-					time.Sleep(DatastoreRetriesDelay)
-					continue
-				}
-				return ip, fmt.Errorf("error updating IP pool: %w", err)
-			}
-			// pool was read, acquire or release was processed, pool was updated
-			// now we can break retry loop
-			break
-		}
+		ip, err = i.runIPAMRange(ctx, ipRange, action)
 		// break ipRanges loop if ip was acquired/released
-		if ip.IP != nil {
-			break
+		if err == nil {
+			return ip, nil
 		}
+		log.Error(err, "error acquiring/releasing IP from range", ipRange.Range)
 	}
-	if ip.IP == nil && action == Acquire {
-		return ip, errors.New("can not acquire IP, probably there are no space in IP pools")
-	}
+	return net.IPNet{}, err
+}
 
-	return ip, ipamerr
+func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, action ipamAction) (net.IPNet, error) {
+	var ip net.IPNet
+	for retry := 0; retry < DatastoreRetries; retry++ {
+		select {
+		case <-ctx.Done():
+			return net.IPNet{}, ctx.Err()
+		default:
+			// live in retry loop until context not cancelled
+		}
+
+		// read IPPool from ipppols.vm.neon.tech custom resource
+		pool, err := i.getNeonvmIPPool(ctx, ipRange.Range)
+		if err != nil {
+			if e, ok := err.(Temporary); ok && e.Temporary() {
+				// retry attempt to read IPPool
+				time.Sleep(DatastoreRetriesDelay)
+				continue
+			}
+			return net.IPNet{}, fmt.Errorf("error reading IP pool: %w", err)
+		}
+
+		currentReservation := pool.Allocations(ctx)
+		var newReservation []whereaboutstypes.IPReservation
+		ip, newReservation, err = action(ipRange, currentReservation)
+		if err != nil {
+			return net.IPNet{}, err
+		}
+
+		// update IPPool with newReservation
+		err = pool.Update(ctx, newReservation)
+		if err != nil {
+			if e, ok := err.(Temporary); ok && e.Temporary() {
+				// retry attempt to update IPPool
+				time.Sleep(DatastoreRetriesDelay)
+				continue
+			}
+			return net.IPNet{}, fmt.Errorf("error updating IP pool: %w", err)
+		}
+		return ip, nil
+	}
+	return ip, errors.New("IPAMretries limit reached")
 }
 
 // Status do List() request to check NeonVM client connectivity
