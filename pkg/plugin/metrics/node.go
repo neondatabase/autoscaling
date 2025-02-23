@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"slices"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/neondatabase/autoscaling/pkg/plugin/state"
@@ -10,6 +12,8 @@ import (
 type Node struct {
 	// InheritedLabels are the labels on the node that are directly used as part of the metrics
 	InheritedLabels []string
+
+	lastLabels []string
 
 	cpu *prometheus.GaugeVec
 	mem *prometheus.GaugeVec
@@ -22,6 +26,8 @@ func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) Node {
 
 	return Node{
 		InheritedLabels: labels.k8sLabelNames,
+
+		lastLabels: []string{}, // will be set when (*Node).Update() is first called
 
 		cpu: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -47,9 +53,10 @@ func (m *Node) Update(node *state.Node) {
 		commonLabels = append(commonLabels, value)
 	}
 
-	// Remove old metrics before setting the new ones, because otherwise we may end up with
-	// un-updated metrics if node labels change.
-	m.Remove(node)
+	if !slices.Equal(commonLabels, m.lastLabels) {
+		// Remove old metrics before setting the new ones
+		m.Remove(node)
+	}
 
 	for _, f := range node.CPU.Fields() {
 		//nolint:gocritic // assigning append value to a different slice is intentional here
@@ -61,6 +68,8 @@ func (m *Node) Update(node *state.Node) {
 		labels := append(commonLabels, f.Name)
 		m.mem.WithLabelValues(labels...).Set(f.Value.AsFloat64())
 	}
+
+	m.lastLabels = commonLabels
 }
 
 func (m *Node) Remove(node *state.Node) {
