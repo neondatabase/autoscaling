@@ -182,7 +182,7 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
+		panic(err)
 	}
 
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
@@ -209,7 +209,7 @@ func main() {
 	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
-		os.Exit(1)
+		panic(err)
 	}
 	vmWebhook := &controllers.VMWebhook{
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-webhook"),
@@ -217,7 +217,7 @@ func main() {
 	}
 	if err := vmWebhook.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
-		os.Exit(1)
+		panic(err)
 	}
 
 	migrationReconciler := &controllers.VirtualMachineMigrationReconciler{
@@ -230,7 +230,7 @@ func main() {
 	migrationReconcilerMetrics, err := migrationReconciler.SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
-		os.Exit(1)
+		panic(err)
 	}
 	migrationWebhook := &controllers.VMMigrationWebhook{
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-webhook"),
@@ -238,34 +238,34 @@ func main() {
 	}
 	if err := migrationWebhook.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
-		os.Exit(1)
+		panic(err)
 	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
+		panic(err)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
+		panic(err)
 	}
 
 	dbgSrv := debugServerFunc(vmReconcilerMetrics, migrationReconcilerMetrics)
 	if err := mgr.Add(dbgSrv); err != nil {
 		setupLog.Error(err, "unable to set up debug server")
-		os.Exit(1)
+		panic(err)
 	}
 
 	if err := mgr.Add(vmReconcilerMetrics.FailingRefresher()); err != nil {
 		setupLog.Error(err, "unable to set up failing refresher")
-		os.Exit(1)
+		panic(err)
 	}
 
 	// NOTE: THE CONTROLLER MUST IMMEDIATELY EXIT AFTER RUNNING THE MANAGER.
 	if err := run(mgr); err != nil {
 		setupLog.Error(err, "run manager error")
-		os.Exit(1)
+		panic(err)
 	}
 }
 
