@@ -127,8 +127,6 @@ build: |
       && make -j $(nproc) \
       && make install
 
-  FROM quay.io/curl/curl-base:8.12.1 AS curl
-
 merge: |
   RUN adduser --system --disabled-login --no-create-home --home /nonexistent --gecos "monitor user" --shell /bin/false vm-monitor
 
