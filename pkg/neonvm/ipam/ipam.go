@@ -72,13 +72,13 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.
 
 func (i *IPAM) runCleanup(ctx context.Context, namespace string) error {
 	for {
-		vms, err := i.vmClient.NeonvmV1().VirtualMachines(namespace).List(ctx, metav1.ListOptions{})
+		vms, err := i.VMClient.NeonvmV1().VirtualMachines(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return fmt.Errorf("error listing virtual machines: %w", err)
 		}
 		vmsMap := make(map[string]bool)
 		for _, vm := range vms.Items {
-			vmsMap[vm.Name] = true
+			vmsMap[fmt.Sprintf("%s/%s", vm.Namespace, vm.Name)] = true
 		}
 		_, err = i.runIPAM(ctx, getCleanupAction(vmsMap))
 		if err != nil {
@@ -126,11 +126,15 @@ func New(nadName string, nadNamespace string) (*IPAM, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating kubernetes client: %w", err)
 	}
+	return NewWithClient(kClient, nadName, nadNamespace)
+}
 
+func NewWithClient(kClient *Client, nadName string, nadNamespace string) (*IPAM, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), IpamRequestTimeout)
 	defer cancel()
+
 	// read network-attachment-definition from Kubernetes
-	nad, err := kClient.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadNamespace).Get(ctx, nadName, metav1.GetOptions{})
+	nad, err := kClient.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadNamespace).Get(ctx, nadName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +145,9 @@ func New(nadName string, nadNamespace string) (*IPAM, error) {
 	ipamConfig, err := LoadFromNad(nad.Spec.Config, nadNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("network-attachment-definition IPAM config parse error: %w", err)
+	}
+	if len(ipamConfig.IPRanges) == 0 {
+		return nil, fmt.Errorf("network-attachment-definition %s has not IP ranges", nad.Name)
 	}
 
 	return &IPAM{
@@ -288,7 +295,7 @@ func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, act
 
 // Status do List() request to check NeonVM client connectivity
 func (i *IPAM) Status(ctx context.Context) error {
-	_, err := i.vmClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).List(ctx, metav1.ListOptions{})
+	_, err := i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).List(ctx, metav1.ListOptions{})
 	return err
 }
 
@@ -321,7 +328,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 		poolName = fmt.Sprintf("%s-%s", i.Config.NetworkName, strings.ReplaceAll(ipRange, "/", "-"))
 	}
 
-	pool, err := i.vmClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Get(ctx, poolName, metav1.GetOptions{})
+	pool, err := i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Get(ctx, poolName, metav1.GetOptions{})
 	if err != nil && apierrors.IsNotFound(err) {
 		// pool does not exist, create it
 		newPool := &vmv1.IPPool{
@@ -334,7 +341,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 				Allocations: make(map[string]vmv1.IPAllocation),
 			},
 		}
-		_, err = i.vmClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Create(ctx, newPool, metav1.CreateOptions{})
+		_, err = i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Create(ctx, newPool, metav1.CreateOptions{})
 		if err != nil && apierrors.IsAlreadyExists(err) {
 			// the pool was just created -- allow retry
 			return nil, &temporaryError{err}
@@ -354,7 +361,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 	}
 
 	return &NeonvmIPPool{
-		vmClient: i.Client.vmClient,
+		vmClient: i.Client.VMClient,
 		pool:     pool,
 		firstip:  ip,
 	}, nil

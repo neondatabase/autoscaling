@@ -11,9 +11,9 @@ import (
 
 // Set of kubernetets clients
 type Client struct {
-	kubeClient kubernetes.Interface
-	vmClient   neonvm.Interface
-	nadClient  nad.Interface
+	KubeClient kubernetes.Interface
+	VMClient   neonvm.Interface
+	NADClient  nad.Interface
 }
 
 func NewKubeClient(cfg *rest.Config) (*Client, error) {
@@ -31,8 +31,8 @@ func NewKubeClient(cfg *rest.Config) (*Client, error) {
 	}
 
 	return &Client{
-		kubeClient: kubeClient,
-		vmClient:   vmClient,
-		nadClient:  nadClient,
+		KubeClient: kubeClient,
+		VMClient:   vmClient,
+		NADClient:  nadClient,
 	}, nil
 }
