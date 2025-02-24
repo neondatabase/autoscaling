@@ -58,6 +58,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
 
       - name: set kernel cache tag
@@ -143,6 +148,11 @@ jobs:
       canonical: ${{ steps.get-tags.outputs.canonical }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: git checkout
         uses: actions/checkout@v4
 
@@ -182,6 +192,11 @@ jobs:
 
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: git checkout
         uses: actions/checkout@v4
 
@@ -253,6 +268,11 @@ jobs:
     outputs:
       image: ${{ steps.merge-kernel-images.outputs.image }}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: git checkout
         uses: actions/checkout@v4
 

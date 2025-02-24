@@ -110,7 +110,7 @@ func (r *azureRequest) LogFields() zap.Field {
 func (r *azureRequest) Send(ctx context.Context, payload []byte) SimplifiableError {
 	var err error
 
-	opts := azblob.UploadBufferOptions{} //nolint:exhaustruct // It's part of Azure SDK
+	opts := azblob.UploadBufferOptions{}
 	_, err = r.client.UploadBuffer(ctx, r.cfg.Container, r.key, payload, &opts)
 	if err != nil {
 		return AzureError{Err: err}

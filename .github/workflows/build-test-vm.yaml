@@ -50,6 +50,11 @@ jobs:
       vm-postgres-16-bullseye: ${{ steps.show-tags.outputs.vm-postgres-16-bullseye }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - id: show-tags
         run: |
           echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}:${{ inputs.tag }}" >> $GITHUB_OUTPUT
@@ -65,10 +70,16 @@ jobs:
       vm-postgres-16-bullseye: ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
       daemon: ${{ steps.tags.outputs.daemon }}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - id: tags
         run: |
           echo "vm-postgres-16-bullseye=${{ env.IMG_POSTGRES_16_BULLSEYE }}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "daemon=${{ env.IMG_DAEMON }}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -124,6 +135,11 @@ jobs:
       ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
       TAG: ${{ inputs.tag }}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: git checkout
         uses: actions/checkout@v4
 

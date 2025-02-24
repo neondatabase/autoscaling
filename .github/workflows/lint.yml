@@ -15,6 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -23,7 +28,7 @@ jobs:
         with:
           # Required: the version of golangci-lint is required and
           # should be specified with patch version.
-          version: v1.62.2
+          version: v1.64.5
           args: --timeout 5m
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -32,6 +37,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -53,6 +63,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
       - name: make generate
         run: |
@@ -71,6 +86,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
       - uses: codespell-project/actions-codespell@406322ec52dd7b488e48c1c4b82e2a8b3a1bf630 # v2.1
         with:
@@ -81,6 +101,11 @@ jobs:
   actionlint:
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
       - uses: reviewdog/action-actionlint@eaf7d6d28c81a1965d0a848128dde7c42f726097 # v1.54.0
         env:

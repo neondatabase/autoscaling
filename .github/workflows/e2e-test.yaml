@@ -41,6 +41,11 @@ jobs:
       tag: ${{ inputs.tag || steps.get-tag.outputs.tag }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: get tag
         if: ${{ inputs.tag == '' }}
         id: get-tag
@@ -81,15 +86,24 @@ jobs:
       matrix:
         cluster:
           - ${{ inputs.cluster || 'k3d' }}
+        arch: [ amd64, arm64 ]
         include:
-          # TODO: when adding arm64: always set push-yamls to false -- we only need to push one at a time.
+          # we have an assumption that manifests for different architectures are the same, so we
+          # only need to push one at a time, and we push the amd64 manifests.
           - arch: amd64
             # nb: use format(..) to catch both inputs.push-yamls = true AND inputs.push-yamls = 'true'.
             push-yamls: ${{ inputs.push-yamls }}
+          - arch: arm64
+            push-yamls: false
 
     runs-on: ${{ fromJson(format('["self-hosted", "{0}"]', matrix.arch == 'arm64' && 'huge-arm64' || 'large')) }}
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch all, so that we also include tags
@@ -204,6 +218,9 @@ jobs:
           docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
           make load-example-vms
 
+      - run: make arm_patch_e2e
+        if: matrix.arch == 'arm64'
+
       - run: make e2e
         timeout-minutes: 15
 
@@ -288,6 +305,11 @@ jobs:
     if: always()
     runs-on: ubuntu-22.04
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Fail the job if any of the dependencies do not succeed or are skipped
         run: exit 1
         if: |
