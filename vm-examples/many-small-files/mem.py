@@ -192,10 +192,10 @@ if __name__ == "__main__":
         try:
             while True:
                 print_system_info()
-                try:
-                    subprocess.run(["sh", "-c", "echo 1 > /proc/sys/vm/drop_caches"], check=True)
-                except subprocess.CalledProcessError as e:
-                    print(f"Failed to drop caches: {e}")
+                # try:
+                #     subprocess.run(["sh", "-c", "echo 1 > /proc/sys/vm/drop_caches"], check=True)
+                # except subprocess.CalledProcessError as e:
+                #     print(f"Failed to drop caches: {e}")
                 time.sleep(delay_seconds)
         except KeyboardInterrupt:
             print("\nExiting...")
