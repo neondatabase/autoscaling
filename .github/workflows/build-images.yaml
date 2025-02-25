@@ -334,6 +334,7 @@ jobs:
   merge-images:
     permissions:
       id-token: write # This is required for aws-actions/configure-aws-credentials
+      packages: write  # required for pushing to GHCR
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -425,6 +426,31 @@ jobs:
             docker buildx imagetools create -t ${image_ecr_dev} \
                                             -t ${image_ecr_prod} \
                                                ${image_from}
+          done
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy all merged images to GHCR
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          images=("${IMG_CONTROLLER}" \
+                  "${IMG_VXLAN_CONTROLLER}" \
+                  "${IMG_RUNNER}" \
+                  "${IMG_SCHEDULER}" \
+                  "${IMG_AUTOSCALER_AGENT}" \
+                  "${IMG_DAEMON}" \
+                  "${IMG_CLUSTER_AUTOSCALER}")
+
+          for image in "${images[@]}"; do
+            echo Copy ${image}:${TAG} to GHCR
+            docker buildx imagetools create -t "ghcr.io/${image}:${TAG}" \
+                                                        ${image}:${TAG}
           done
 
   push-to-acr-dev:
