@@ -171,7 +171,7 @@ func createISO9660runtime(
 	}
 
 	mounts := []string{
-		"set -euxo pipefail",
+		"set -euo pipefail",
 	}
 	if enableSSH {
 		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
