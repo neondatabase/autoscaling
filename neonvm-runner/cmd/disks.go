@@ -230,7 +230,7 @@ func createISO9660runtime(
 	if swapSize != nil {
 		lines := []string{
 			`#!/neonvm/bin/sh`,
-			`set -euxo pipefail`,
+			`set -euo pipefail`,
 			// this script may be run as root, so we should avoid potentially-malicious path
 			// injection
 			`export PATH="/neonvm/bin"`,
