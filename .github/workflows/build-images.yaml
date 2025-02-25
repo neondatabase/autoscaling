@@ -22,7 +22,7 @@ on:
         description: 'ONLY USE FOR E2E TESTS: Set neonvm-controller to never delete VM runner pods'
         type: boolean
         required: false
-      upload-to-ecr:
+      upload-to-ecr-acr:
         description: 'Should images be uploaded to neon ECR'
         type: boolean
         required: false
@@ -354,7 +354,7 @@ jobs:
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
       - name: Configure dev AWS credentials
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: eu-central-1
@@ -362,13 +362,13 @@ jobs:
           role-to-assume: ${{ secrets.DEV_GHA_OIDC_ECR_ROLE }}
 
       - name: Login to dev ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ env.ECR_DEV }}
 
       - name: Configure prod AWS credentials
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: eu-central-1
@@ -376,7 +376,7 @@ jobs:
           role-to-assume: ${{ secrets.PROD_GHA_OIDC_ECR_ROLE }}
 
       - name: Login to prod ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ env.ECR_PROD }}
@@ -403,7 +403,7 @@ jobs:
           done
 
       - name: Copy all merged images to ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
         run: |
           images=("neonvm-controller" \
           "neonvm-vxlan-controller" \
@@ -422,7 +422,7 @@ jobs:
           done
 
   push-to-acr-dev:
-    if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+    if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
     needs: [ merge-images ]
     uses: ./.github/workflows/_push-to-acr.yaml
     with:
@@ -435,7 +435,7 @@ jobs:
     secrets: inherit
 
   push-to-acr-prod:
-    if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+    if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
     needs: [ merge-images ]
     uses: ./.github/workflows/_push-to-acr.yaml
     with:
