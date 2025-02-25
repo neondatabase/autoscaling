@@ -1691,7 +1691,7 @@ func podSpec(
 		// Add TLS secret
 		mnt := corev1.VolumeMount{
 			Name:      "tls",
-			MountPath: fmt.Sprintf("/vm/mounts%s", "/var/tls"),
+			MountPath: fmt.Sprintf("/vm/mounts%s", vm.Spec.TLS.MountPath),
 		}
 		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mnt)
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
