@@ -23,12 +23,12 @@ type Node struct {
 	mem *prometheus.GaugeVec
 }
 
-func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) Node {
+func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) *Node {
 	finalMetricLabels := []string{"node"}
 	finalMetricLabels = append(finalMetricLabels, labels.metricLabelNames...)
 	finalMetricLabels = append(finalMetricLabels, "field")
 
-	return Node{
+	return &Node{
 		InheritedLabels: labels.k8sLabelNames,
 
 		mu:         sync.Mutex{},
