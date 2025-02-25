@@ -3,3 +3,11 @@ self-hosted-runner:
     - gen3
     - large
     - small
+config-variables:
+  - AZURE_DEV_CLIENT_ID
+  - AZURE_DEV_REGISTRY_NAME
+  - AZURE_DEV_SUBSCRIPTION_ID
+  - AZURE_PROD_CLIENT_ID
+  - AZURE_PROD_REGISTRY_NAME
+  - AZURE_PROD_SUBSCRIPTION_ID
+  - AZURE_TENANT_ID

@@ -420,3 +420,29 @@ jobs:
             docker buildx imagetools create -t ${{ env.ECR_PROD }}/${image}:${{ inputs.tag }} \
                                                neondatabase/${image}:${{ inputs.tag }}
           done
+
+  push-to-acr-dev:
+    if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+    needs: [ merge-images ]
+    uses: ./.github/workflows/_push-to-acr.yaml
+    with:
+      client_id: ${{ vars.AZURE_DEV_CLIENT_ID }}
+      image_tag: ${{ inputs.tag }}
+      images: neonvm-controller neonvm-vxlan-controller neonvm-runner autoscale-scheduler autoscaler-agent cluster-autoscaler-neonvm
+      registry_name: ${{ vars.AZURE_DEV_REGISTRY_NAME }}
+      subscription_id: ${{ vars.AZURE_DEV_SUBSCRIPTION_ID }}
+      tenant_id: ${{ vars.AZURE_TENANT_ID }}
+    secrets: inherit
+
+  push-to-acr-prod:
+    if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+    needs: [ merge-images ]
+    uses: ./.github/workflows/_push-to-acr.yaml
+    with:
+      client_id: ${{ vars.AZURE_PROD_CLIENT_ID }}
+      images: neonvm-controller neonvm-vxlan-controller neonvm-runner autoscale-scheduler autoscaler-agent cluster-autoscaler-neonvm
+      image_tag: ${{ inputs.tag }}
+      registry_name: ${{ vars.AZURE_PROD_REGISTRY_NAME }}
+      tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      subscription_id: ${{ vars.AZURE_PROD_SUBSCRIPTION_ID }}
+    secrets: inherit
