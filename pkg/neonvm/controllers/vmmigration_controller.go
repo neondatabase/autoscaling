@@ -62,6 +62,55 @@ type VirtualMachineMigrationReconciler struct {
 	Metrics ReconcilerMetrics
 }
 
+func (r *VirtualMachineMigrationReconciler) createTargetPod(
+	ctx context.Context,
+	migration *vmv1.VirtualMachineMigration,
+	vm *vmv1.VirtualMachine,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
+	enableSSH := *vm.Spec.EnableSSH
+	var sshSecret *corev1.Secret
+	if enableSSH {
+		// We require the SSH secret to exist because we cannot unmount and
+		// mount the new secret into the VM after the live migration. If a
+		// VM's SSH secret is deleted accidentally then live migration is
+		// not possible.
+		if len(vm.Status.SSHSecretName) == 0 {
+			err := errors.New("VM has .Spec.EnableSSH but its .Status.SSHSecretName is empty")
+			logger.Error(err, "Failed to get VM's SSH Secret")
+			r.Recorder.Event(migration, "Warning", "Failed", err.Error())
+			return ctrl.Result{}, err
+		}
+		sshSecret = &corev1.Secret{}
+		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
+		if err != nil {
+			logger.Error(err, "Failed to get VM's SSH Secret")
+			r.Recorder.Event(migration, "Warning", "Failed", fmt.Sprintf("Failed to get VM's SSH Secret: %v", err))
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Define a new target pod
+	tpod, err := r.targetPodForVirtualMachine(vm, migration, sshSecret)
+	if err != nil {
+		logger.Error(err, "Failed to generate Target Pod spec")
+		return ctrl.Result{}, err
+	}
+	logger.Info("Creating a Target Pod", "Pod.Namespace", tpod.Namespace, "Pod.Name", tpod.Name)
+	if err = r.Create(ctx, tpod); err != nil {
+		logger.Error(err, "Failed to create Target Pod", "Pod.Namespace", tpod.Namespace, "Pod.Name", tpod.Name)
+		return ctrl.Result{}, err
+	}
+	logger.Info("Target runner Pod was created", "Pod.Namespace", tpod.Namespace, "Pod.Name", tpod.Name)
+	// add event with some info
+	r.Recorder.Event(migration, "Normal", "Created",
+		fmt.Sprintf("VM (%s) ready migrate to target pod (%s)",
+			vm.Name, tpod.Name))
+	// target pod was just created, so requeue reconcile
+	return ctrl.Result{RequeueAfter: time.Second}, nil
+}
+
 // The following markers are used to generate the rules permissions (RBAC) on config/rbac using controller-gen
 // when controller-gen (used by 'make generate') is executed.
 // To know more about markers see: https://book.kubebuilder.io/reference/markers.html
@@ -101,31 +150,24 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, err
 	}
 
-	// examine DeletionTimestamp to determine if object is under deletion
-	if migration.ObjectMeta.DeletionTimestamp.IsZero() {
-		// The object is not being deleted, so if it does not have our finalizer,
-		// then lets add the finalizer and update the object. This is equivalent
-		// registering our finalizer.
-		if !controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
-			log.Info("Adding Finalizer to Migration")
-			if !controllerutil.AddFinalizer(migration, virtualmachinemigrationFinalizer) {
-				return ctrl.Result{}, errors.New("Failed to add finalizer to Migration")
-			}
-			if err := r.Update(ctx, migration); err != nil {
-				return ctrl.Result{}, err
-			}
-			// stop this reconciliation cycle, new will be triggered as Migration updated
-			return ctrl.Result{}, nil
+	getVM := func() (*vmv1.VirtualMachine, error) {
+		var vm vmv1.VirtualMachine
+		err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, &vm)
+		if err != nil {
+			log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+			return nil, err
 		}
-	} else {
+		return &vm, nil
+	}
+
+	if !migration.ObjectMeta.DeletionTimestamp.IsZero() {
 		// The object is being deleted
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for Migration")
-			vm := new(vmv1.VirtualMachine)
-			err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
+			vm, err := getVM()
 			if err != nil {
-				log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+				return ctrl.Result{}, err
 			}
 			if err := r.doFinalizerOperationsForVirtualMachineMigration(ctx, migration, vm); err != nil {
 				// if fail to delete the external dependency here, return with error
@@ -144,10 +186,23 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		// Stop reconciliation as the item is being deleted
 		return ctrl.Result{}, nil
 	}
+	// The object is not being deleted, so if it does not have our finalizer,
+	// then lets add the finalizer and update the object. This is equivalent
+	// registering our finalizer.
+	if !controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
+		log.Info("Adding Finalizer to Migration")
+		if !controllerutil.AddFinalizer(migration, virtualmachinemigrationFinalizer) {
+			return ctrl.Result{}, errors.New("Failed to add finalizer to Migration")
+		}
+		if err := r.Update(ctx, migration); err != nil {
+			return ctrl.Result{}, err
+		}
+		// stop this reconciliation cycle, new will be triggered as Migration updated
+		return ctrl.Result{}, nil
+	}
 
 	// Fetch the corresponding VirtualMachine instance
-	vm := new(vmv1.VirtualMachine)
-	err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
+	vm, err := getVM()
 	if err != nil {
 		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
 		if apierrors.IsNotFound(err) {
@@ -199,10 +254,8 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return r.updateMigrationStatus(ctx, migration)
 	}
 
-	switch migration.Status.Phase {
-
-	case "":
-		// need change VM status asap to prevent autoscler change CPU/RAM in VM
+	if migration.Status.Phase == "" {
+		// need change VM status asap to prevent autoscaler change CPU/RAM in VM
 		// but only if VM running
 		if vm.Status.Phase == vmv1.VmRunning {
 			vm.Status.Phase = vmv1.VmPreMigrating
@@ -216,55 +269,20 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 		// some other VM status (Scaling may be), requeue after second
 		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+
+	switch migration.Status.Phase {
 
 	case vmv1.VmmPending:
+
 		// Check if the target runner pod already exists,
 		// if not create a new one using source pod as template
 		targetRunner := &corev1.Pod{}
 		err := r.Get(ctx, types.NamespacedName{Name: migration.Status.TargetPodName, Namespace: vm.Namespace}, targetRunner)
 		if err != nil && apierrors.IsNotFound(err) {
-			// NB: .Spec.EnableSSH guaranteed non-nil because the k8s API server sets the default for us.
-			enableSSH := *vm.Spec.EnableSSH
-			var sshSecret *corev1.Secret
-			if enableSSH {
-				// We require the SSH secret to exist because we cannot unmount and
-				// mount the new secret into the VM after the live migration. If a
-				// VM's SSH secret is deleted accidentally then live migration is
-				// not possible.
-				if len(vm.Status.SSHSecretName) == 0 {
-					err := errors.New("VM has .Spec.EnableSSH but its .Status.SSHSecretName is empty")
-					log.Error(err, "Failed to get VM's SSH Secret")
-					r.Recorder.Event(migration, "Warning", "Failed", err.Error())
-					return ctrl.Result{}, err
-				}
-				sshSecret = &corev1.Secret{}
-				err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
-				if err != nil {
-					log.Error(err, "Failed to get VM's SSH Secret")
-					r.Recorder.Event(migration, "Warning", "Failed", fmt.Sprintf("Failed to get VM's SSH Secret: %v", err))
-					return ctrl.Result{}, err
-				}
-			}
-
-			// Define a new target pod
-			tpod, err := r.targetPodForVirtualMachine(vm, migration, sshSecret)
-			if err != nil {
-				log.Error(err, "Failed to generate Target Pod spec")
-				return ctrl.Result{}, err
-			}
-			log.Info("Creating a Target Pod", "Pod.Namespace", tpod.Namespace, "Pod.Name", tpod.Name)
-			if err = r.Create(ctx, tpod); err != nil {
-				log.Error(err, "Failed to create Target Pod", "Pod.Namespace", tpod.Namespace, "Pod.Name", tpod.Name)
-				return ctrl.Result{}, err
-			}
-			log.Info("Target runner Pod was created", "Pod.Namespace", tpod.Namespace, "Pod.Name", tpod.Name)
-			// add event with some info
-			r.Recorder.Event(migration, "Normal", "Created",
-				fmt.Sprintf("VM (%s) ready migrate to target pod (%s)",
-					vm.Name, tpod.Name))
-			// target pod was just created, so requeue reconcile
-			return ctrl.Result{RequeueAfter: time.Second}, nil
-		} else if err != nil {
+			return r.createTargetPod(ctx, migration, vm)
+		}
+		if err != nil {
 			log.Error(err, "Failed to get Target Pod")
 			return ctrl.Result{}, err
 		}

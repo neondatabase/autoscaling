@@ -3010,6 +3010,12 @@ spec:
                     description: This is required to set the duration that the certificate
                       should be valid for before expiring
                     type: string
+                  mountPath:
+                    default: /var/tls
+                    description: |-
+                      Which directory in the VM these certificates should be mounted to.
+                      Will be exposed as `tls.key` and `tls.crt`.
+                    type: string
                   renewBefore:
                     description: This is required to set the duration before certificate
                       expiration that the certificate is renewed

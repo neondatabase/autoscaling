@@ -182,6 +182,12 @@ type TLSProvisioning struct {
 
 	// This is the common name for the TLS certificate
 	ServerName string `json:"serverName,omitempty"`
+
+	// Which directory in the VM these certificates should be mounted to.
+	// Will be exposed as `tls.key` and `tls.crt`.
+	// +kubebuilder:default:=/var/tls
+	// +optional
+	MountPath string `json:"mountPath,omitempty"`
 }
 
 func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
