@@ -185,13 +185,8 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, a
 		return ip, fmt.Errorf("got an unknown action: %v", action)
 	}
 
-	ctxWithTimeout, ctxCancel := context.WithTimeout(ctx, IpamRequestTimeout)
+	ctx, ctxCancel := context.WithTimeout(ctx, IpamRequestTimeout)
 	defer ctxCancel()
-
-	// Check connectivity to kubernetes
-	if err := i.Status(ctxWithTimeout); err != nil {
-		return ip, fmt.Errorf("connectivity error: %w", err)
-	}
 
 	// handle the ip add/del until successful
 	for _, ipRange := range i.Config.IPRanges {
@@ -207,7 +202,7 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, a
 			}
 
 			// read IPPool from ipppols.vm.neon.tech custom resource
-			pool, err := i.getNeonvmIPPool(ctxWithTimeout, ipRange.Range)
+			pool, err := i.getNeonvmIPPool(ctx, ipRange.Range)
 			if err != nil {
 				if e, ok := err.(Temporary); ok && e.Temporary() {
 					// retry attempt to read IPPool
@@ -235,7 +230,7 @@ func (i *IPAM) runIPAM(ctx context.Context, vmName string, vmNamespace string, a
 			}
 
 			// update IPPool with newReservation
-			err = pool.Update(ctxWithTimeout, newReservation)
+			err = pool.Update(ctx, newReservation)
 			if err != nil {
 				if e, ok := err.(Temporary); ok && e.Temporary() {
 					// retry attempt to update IPPool
