@@ -60,7 +60,6 @@ env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
   IMG_VXLAN_CONTROLLER:   "neondatabase/neonvm-vxlan-controller"
   IMG_RUNNER:             "neondatabase/neonvm-runner"
-  IMG_KERNEL:             "neondatabase/vm-kernel"
   IMG_SCHEDULER:          "neondatabase/autoscale-scheduler"
   IMG_AUTOSCALER_AGENT:   "neondatabase/autoscaler-agent"
   IMG_DAEMON:             "neondatabase/neonvm-daemon"
