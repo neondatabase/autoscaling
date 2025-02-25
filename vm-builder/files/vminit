@@ -25,6 +25,9 @@ mount -t proc  proc  /proc
 mount -t sysfs sysfs /sys
 mount -t cgroup2 cgroup2 /sys/fs/cgroup
 
+# change kernel log level to DEBUG
+echo 7 > /proc/sys/kernel/printk
+
 # Allow all users to move processes to/from the root cgroup.
 #
 # This is required in order to be able to 'cgexec' anything, if the entrypoint is not being run as
@@ -57,4 +60,4 @@ ip link set up dev eth0
 
 # ssh
 # we use ed25519 keys and -N "" skips setting up a passphrase
-/neonvm/bin/ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
+/neonvm/bin/ssh-keygen -q -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
