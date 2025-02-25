@@ -1,6 +1,11 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestAssert
 timeout: 70
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      kubectl exec -n "$NAMESPACE" $pod -- scp guest-vm:/var/tls/tls.crt tls.crt
 ---
 apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
