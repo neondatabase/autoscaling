@@ -230,11 +230,10 @@ func run(logger *zap.Logger) error {
 		// add the tls path.
 		// this is needed to just `mkdir` the mounting directory.
 		if vmSpec.TLS != nil {
-			watch := true
 			disks = append(disks, vmv1.Disk{
 				Name:      "tls-keys",
 				MountPath: vmSpec.TLS.MountPath,
-				Watch:     &watch,
+				Watch:     lo.ToPtr(true),
 				ReadOnly:  nil,
 				DiskSource: vmv1.DiskSource{
 					EmptyDisk: nil,
