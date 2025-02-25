@@ -409,7 +409,8 @@ func buildQEMUCmd(
 }
 
 const (
-	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=7 root=/dev/vda rw"
+	// this loglevel is used only during startup, later it is overriden during vminit
+	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=6 root=/dev/vda rw"
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
