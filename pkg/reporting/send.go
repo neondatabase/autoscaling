@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type eventSender[E any] struct {
@@ -14,8 +12,12 @@ type eventSender[E any] struct {
 
 	metrics *EventSinkMetrics
 
-	queue         *eventBatcher[E]
-	batchComplete util.BroadcastReceiver
+	queue *eventBatcher[E]
+	// batchComplete is a buffered channel with an item placed into it whenever a batch is finished
+	// and ready for consumption.
+	// This means that notifications will be coalesced, so it is the eventSender's responsibility to
+	// drain all batches whenever there is a notification.
+	batchComplete <-chan struct{}
 
 	// lastSendDuration tracks the "real" last full duration of (eventSender).sendAllCompletedBatches().
 	//
@@ -55,8 +57,9 @@ func (s eventSender[E]) senderLoop(ctx context.Context, logger *zap.Logger) {
 			final = true
 			// finish up any in-progress batch, so that we can send it before we exit.
 			s.queue.finishOngoing()
-		case <-s.batchComplete.Wait():
-			s.batchComplete.Awake() // consume this notification
+		case <-s.batchComplete:
+			// We've been notified that there's completed batches to be sent!
+			// Do that below...
 		case <-timer.C:
 			// Timer has expired without any notification of a completed batch. Let's explicitly ask
 			// for in-progress events to be wrapped up into a batch so we ship them fast enough and

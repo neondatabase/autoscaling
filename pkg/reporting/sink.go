@@ -28,10 +28,18 @@ func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients 
 	var senders []eventSender[E]
 
 	for _, c := range clients {
-		broadcaster := util.NewBroadcaster()
+		batchComplete := make(chan struct{}, 1)
+		notifyComplete := func() {
+			// Send into the channel, only if it doesn't already have an item in it.
+			select {
+			case batchComplete <- struct{}{}:
+			default:
+			}
+		}
+
 		sizeGauge := metrics.queueSizeCurrent.WithLabelValues(c.Name)
 
-		batcher := newEventBatcher[E](int(c.BaseConfig.MaxBatchSize), broadcaster.Broadcast, sizeGauge)
+		batcher := newEventBatcher[E](int(c.BaseConfig.MaxBatchSize), notifyComplete, sizeGauge)
 		queueWriters = append(queueWriters, batcher)
 
 		// Create the sender -- we'll save starting it for the call to Run()
@@ -39,7 +47,7 @@ func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients 
 			client:           c,
 			metrics:          metrics,
 			queue:            batcher,
-			batchComplete:    broadcaster.NewReceiver(),
+			batchComplete:    batchComplete,
 			lastSendDuration: 0,
 		})
 	}
