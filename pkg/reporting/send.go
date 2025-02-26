@@ -45,6 +45,10 @@ type eventSender[E any] struct {
 func (s eventSender[E]) senderLoop(ctx context.Context, logger *zap.Logger) {
 	heartbeat := time.Second * time.Duration(s.client.BaseConfig.PushEverySeconds)
 
+	// note: Why a timer and not a ticker? The idea here is that we should only allow the
+	// "heartbeat" to trigger sending a batch if we haven't *already* sent something in the last
+	// PushEverySeconds. So instead, we reset the timer every time we send a batch, meaning that
+	// we'll only ever get a signal from the timer if it's been too long since the last batch.
 	timer := time.NewTimer(heartbeat)
 	defer timer.Stop()
 
