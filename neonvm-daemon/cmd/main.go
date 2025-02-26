@@ -8,11 +8,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	k8sutil "k8s.io/kubernetes/pkg/volume/util"
@@ -128,6 +130,10 @@ func (s *cpuServer) handleGetFileChecksum(w http.ResponseWriter, r *http.Request
 type File struct {
 	// base64 encoded file contents
 	Data string `json:"data"`
+	// the name of the user that should own this file
+	User string `json:"user"`
+	// the file mode
+	Mode int32 `json:"mode"`
 }
 
 func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request, path string) {
@@ -168,12 +174,37 @@ func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request, pat
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		payload[k] = k8sutil.FileProjection{
-			Data: data,
-			// read-write by root
+
+		mode := v.Mode
+		if mode == 0 {
+			// read-write by owner
 			// read-only otherwise
-			Mode:   0o644,
-			FsUser: nil,
+			mode = 0o644
+		}
+
+		var fsuser *int64
+		if v.User != "" {
+			user, err := user.Lookup(v.User)
+			if err != nil {
+				s.logger.Error("invalid user", zap.Error(err))
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			// Uid is the user ID. On POSIX systems, this is a decimal number representing the uid.
+			uid, err := strconv.Atoi(user.Uid)
+			if err != nil {
+				s.logger.Error("invalid user id", zap.Error(err))
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			fsuser = lo.ToPtr(int64(uid))
+		}
+
+		payload[k] = k8sutil.FileProjection{
+			Data:   data,
+			Mode:   mode,
+			FsUser: fsuser,
 		}
 	}
 

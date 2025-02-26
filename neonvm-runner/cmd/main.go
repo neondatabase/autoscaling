@@ -693,21 +693,27 @@ func forwardLogs(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup) {
 func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, vmSpec *vmv1.VirtualMachineSpec) {
 	defer wg.Done()
 
-	secrets := make(map[string]string)
+	type Dir struct {
+		path string
+		user string
+		mode int32
+	}
+
+	secrets := make(map[string]Dir)
 	secretsOrd := []string{}
 	for _, disk := range vmSpec.Disks {
 		if disk.Watch != nil && *disk.Watch {
 			// secrets/configmaps are mounted using the atomicwriter utility,
 			// which loads the directory into `..data`.
 			dataDir := fmt.Sprintf("/vm/mounts%s/..data", disk.MountPath)
-			secrets[dataDir] = disk.MountPath
+			secrets[dataDir] = Dir{path: disk.MountPath, user: "", mode: 0o644}
 			secretsOrd = append(secretsOrd, dataDir)
 		}
 	}
 
 	if vmSpec.TLS != nil {
 		dataDir := fmt.Sprintf("/vm/mounts%s/..data", vmSpec.TLS.MountPath)
-		secrets[dataDir] = vmSpec.TLS.MountPath
+		secrets[dataDir] = Dir{path: vmSpec.TLS.MountPath, user: "postgres", mode: 0o600}
 		secretsOrd = append(secretsOrd, dataDir)
 	}
 
@@ -721,8 +727,8 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, v
 	for {
 		success := true
 		for _, hostpath := range secretsOrd {
-			guestpath := secrets[hostpath]
-			if err := sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+			dir := secrets[hostpath]
+			if err := sendFilesToNeonvmDaemon(ctx, hostpath, dir.path, dir.user, dir.mode); err != nil {
 				success = false
 				logger.Error("failed to upload file to vm guest", zap.Error(err))
 			}
@@ -750,7 +756,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, v
 			return
 		case <-ticker.C:
 			// for each secret we are tracking
-			for hostpath, guestpath := range secrets {
+			for hostpath, dir := range secrets {
 				// get the checksum for the pod directory
 				hostsum, err := util.ChecksumFlatDir(hostpath)
 				if err != nil {
@@ -759,15 +765,15 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, v
 				}
 
 				// get the checksum for the VM directory
-				guestsum, err := getFileChecksumFromNeonvmDaemon(ctx, guestpath)
+				guestsum, err := getFileChecksumFromNeonvmDaemon(ctx, dir.path)
 				if err != nil {
-					logger.Error("failed to get dir checksum from guest", zap.Error(err), zap.String("dir", guestpath))
+					logger.Error("failed to get dir checksum from guest", zap.Error(err), zap.String("dir", dir.path))
 					continue
 				}
 
 				// if not equal, update the files inside the VM.
 				if guestsum != hostsum {
-					if err = sendFilesToNeonvmDaemon(ctx, hostpath, guestpath); err != nil {
+					if err = sendFilesToNeonvmDaemon(ctx, hostpath, dir.path, dir.user, dir.mode); err != nil {
 						logger.Error("failed to upload files to vm guest", zap.Error(err))
 					}
 				}
@@ -892,9 +898,13 @@ func checkNeonvmDaemonCPU() error {
 type File struct {
 	// base64 encoded file contents
 	Data string `json:"data"`
+	// the name of the user that should own this file
+	User string `json:"user"`
+	// the file mode
+	Mode int32 `json:"mode"`
 }
 
-func sendFilesToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) error {
+func sendFilesToNeonvmDaemon(ctx context.Context, hostpath, guestpath string, user string, mode int32) error {
 	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
 	if err != nil {
 		return fmt.Errorf("could not calculate VM IP address: %w", err)
@@ -907,7 +917,11 @@ func sendFilesToNeonvmDaemon(ctx context.Context, hostpath, guestpath string) er
 
 	encodedFiles := make(map[string]File)
 	for k, v := range files {
-		encodedFiles[k] = File{Data: base64.StdEncoding.EncodeToString(v)}
+		encodedFiles[k] = File{
+			Data: base64.StdEncoding.EncodeToString(v),
+			User: user,
+			Mode: mode,
+		}
 	}
 	body, err := json.Marshal(encodedFiles)
 	if err != nil {
