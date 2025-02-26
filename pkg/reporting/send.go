@@ -92,7 +92,7 @@ func (s eventSender[E]) senderLoop(ctx context.Context, logger *zap.Logger) {
 func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
 	logger.Info("Pushing all available event batches")
 
-	if len(s.queue.peekCompleted()) == 0 {
+	if s.queue.completedCount() == 0 {
 		logger.Info("No event batches to push")
 		s.lastSendDuration = 0
 		s.metrics.lastSendDuration.WithLabelValues(s.client.Name).Set(1e-6) // small value, to indicate that nothing happened
@@ -112,10 +112,10 @@ func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
 	// s.metrics.lastSendDuration as we go (provided the request timeout isn't too long), so we
 	// should get observability for it either way.
 	for {
-		batches := s.queue.peekCompleted()
+		remainingBatchesCount := s.queue.completedCount()
 
-		if len(batches) != 0 {
-			logger.Info("Current queue size is non-zero", zap.Int("batchCount", len(batches)))
+		if remainingBatchesCount != 0 {
+			logger.Info("Current queue size is non-zero", zap.Int("batchCount", remainingBatchesCount))
 		} else {
 			totalTime := time.Since(startTime)
 			s.lastSendDuration = totalTime
@@ -130,7 +130,7 @@ func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
 			return
 		}
 
-		batch := batches[0]
+		batch := s.queue.peekLatestCompleted()
 
 		req := s.client.Base.NewRequest()
 
@@ -179,7 +179,7 @@ func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
 			return
 		}
 
-		s.queue.dropCompleted(1) // mark this batch as complete
+		s.queue.dropLatestCompleted() // mark this batch as complete
 		totalEvents += len(batch.events)
 		totalBatches += 1
 		currentTotalTime := time.Since(startTime)

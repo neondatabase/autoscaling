@@ -76,32 +76,36 @@ func (b *eventBatcher[E]) finishOngoing() {
 	b.finishCurrentBatch()
 }
 
-// peekCompleted returns the batches that have been completed but not yet dropped, without modifying
-// the batcher.
-//
-// Once done with these batches, you should call (*eventBatcher[E]).dropCompleted() to remove them
-// from future consideration.
-func (b *eventBatcher[E]) peekCompleted() []batch[E] {
+// completedCount returns the number of completed batches
+func (b *eventBatcher[E]) completedCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	tmp := make([]batch[E], len(b.completed))
-	copy(tmp, b.completed)
-	return tmp
+	return len(b.completed)
 }
 
-// dropCompleted drops the given number of batches from internal storage, removing them from view in
-// (*eventBatcher[E]).peekCompleted().
-func (b *eventBatcher[e]) dropCompleted(batchCount int) {
+// peekLatestCompleted returns the most recently completed batch that has not yet been removed by
+// (*eventBatcher[E]).dropLatestCompleted().
+//
+// The batcher is not modified by this call.
+//
+// Once done with this batch, you should call (*eventBatcher[E]).dropLatestCompleted() to remove it
+// from future consideration.
+func (b *eventBatcher[E]) peekLatestCompleted() batch[E] {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.completed[0]
+}
+
+// dropLatestCompleted drops the most recently completed batch from internal storage.
+//
+// This method will panic if (*eventBatcher[E]).completedCount() is zero.
+func (b *eventBatcher[e]) dropLatestCompleted() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dropped := b.completed[:batchCount]
-	b.completed = b.completed[batchCount:]
-
-	for _, batch := range dropped {
-		b.completedSize -= len(batch.events)
-	}
+	dropped := b.completed[0]
+	b.completed = b.completed[1:]
+	b.completedSize -= len(dropped.events)
 
 	b.updateGauge()
 }
