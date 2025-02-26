@@ -163,7 +163,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 	// pass incoming traffic to .Guest.Spec.Ports into VM
 	var iptablesArgs []string
 	for _, port := range ports {
-		logger.Info(fmt.Sprintf("setup DNAT rule for incoming traffic to port %d", port.Port))
+		logger.Debug(fmt.Sprintf("setup DNAT rule for incoming traffic to port %d", port.Port))
 		iptablesArgs = []string{
 			"-t", "nat", "-A", "PREROUTING",
 			"-i", "eth0", "-p", fmt.Sprint(port.Protocol), "--dport", fmt.Sprint(port.Port),
@@ -173,7 +173,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			logger.Error("could not set up DNAT rule for incoming traffic", zap.Error(err))
 			return nil, err
 		}
-		logger.Info(fmt.Sprintf("setup DNAT rule for traffic originating from localhost to port %d", port.Port))
+		logger.Debug(fmt.Sprintf("setup DNAT rule for traffic originating from localhost to port %d", port.Port))
 		iptablesArgs = []string{
 			"-t", "nat", "-A", "OUTPUT",
 			"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "LOCAL",
@@ -184,7 +184,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			logger.Error("could not set up DNAT rule for traffic from localhost", zap.Error(err))
 			return nil, err
 		}
-		logger.Info(fmt.Sprintf("setup ACCEPT rule for traffic originating from localhost to port %d", port.Port))
+		logger.Debug(fmt.Sprintf("setup ACCEPT rule for traffic originating from localhost to port %d", port.Port))
 		iptablesArgs = []string{
 			"-A", "OUTPUT",
 			"-s", "127.0.0.1", "-d", ipVm.String(),
@@ -196,7 +196,7 @@ func defaultNetwork(logger *zap.Logger, cidr string, ports []vmv1.Port) (mac.MAC
 			return nil, err
 		}
 	}
-	logger.Info("setup MASQUERADE rule for traffic originating from localhost")
+	logger.Debug("setup MASQUERADE rule for traffic originating from localhost")
 	iptablesArgs = []string{
 		"-t", "nat", "-A", "POSTROUTING",
 		"-m", "addrtype", "--src-type", "LOCAL", "--dst-type", "UNICAST",
