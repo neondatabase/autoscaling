@@ -37,13 +37,19 @@ func TestPodStateExtraction(t *testing.T) {
 		migrating     bool
 	}
 
+	type overcommitFactors struct {
+		cpu float64
+		mem float64
+	}
+
 	type extractedPod struct {
 		vm    *util.NamespacedName
 		flags *flags
 
-		reserved  resources
-		requested *resources
-		factor    *resources
+		reserved   resources
+		requested  *resources
+		factor     *resources
+		overcommit *overcommitFactors
 	}
 
 	mib := 1024 * 1024
@@ -79,8 +85,9 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(750),
 					mem: api.Bytes(1280 * mib),
 				},
-				requested: nil,
-				factor:    nil,
+				requested:  nil,
+				factor:     nil,
+				overcommit: nil,
 			},
 		},
 		{
@@ -114,8 +121,9 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(1000),
 					mem: api.Bytes(2048 * mib),
 				},
-				requested: nil,
-				factor:    nil,
+				requested:  nil,
+				factor:     nil,
+				overcommit: nil,
 			},
 		},
 		{
@@ -167,6 +175,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
+				overcommit: nil,
 			},
 		},
 		{
@@ -222,6 +231,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
+				overcommit: nil,
 			},
 		},
 		{
@@ -282,6 +292,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
+				overcommit: nil,
 			},
 		},
 		{
@@ -354,6 +365,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
+				overcommit: nil,
 			},
 		},
 		{
@@ -430,6 +442,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
+				overcommit: nil,
 			},
 		},
 		{
@@ -505,6 +518,92 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
+				overcommit: nil,
+			},
+		},
+		{
+			name: "external-vm-with-overcommit",
+			obj: podObj{
+				labels: nil,
+				annotations: map[string]string{
+					"vm.neon.tech/resources": `{
+						"cpus": { "min": "500m", "use": "1000m", "max": "1500m" },
+						"memorySlots": { "min": 1, "use": 2, "max": 3 },
+						"memorySlotSize": "1Gi"
+					}`,
+					`vm.neon.tech/overcommit`: `{
+						"cpu": "2500m",
+						"memory": "1500m"
+					}`,
+				},
+				ownerRefs: []metav1.OwnerReference{{
+					APIVersion:         "vm.neon.tech/v1",
+					Kind:               "VirtualMachine",
+					Name:               "vm-name",
+					UID:                "vm-uid",
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: nil,
+				}},
+				containers: nil,
+			},
+			extracted: extractedPod{
+				vm: &util.NamespacedName{
+					Name:      "vm-name",
+					Namespace: "test-namespace",
+				},
+				flags: nil,
+				reserved: resources{
+					cpu: vmv1.MilliCPU(1000),
+					mem: api.Bytes(2048 * mib),
+				},
+				requested: nil,
+				factor:    nil,
+				overcommit: &overcommitFactors{
+					cpu: 2.5,
+					mem: 1.5,
+				},
+			},
+		},
+		{
+			name: "external-vm-with-partial-overcommit",
+			obj: podObj{
+				labels: nil,
+				annotations: map[string]string{
+					"vm.neon.tech/resources": `{
+						"cpus": { "min": "500m", "use": "1000m", "max": "1500m" },
+						"memorySlots": { "min": 1, "use": 2, "max": 3 },
+						"memorySlotSize": "1Gi"
+					}`,
+					`vm.neon.tech/overcommit`: `{
+						"cpu": "2500m"
+					}`,
+				},
+				ownerRefs: []metav1.OwnerReference{{
+					APIVersion:         "vm.neon.tech/v1",
+					Kind:               "VirtualMachine",
+					Name:               "vm-name",
+					UID:                "vm-uid",
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: nil,
+				}},
+				containers: nil,
+			},
+			extracted: extractedPod{
+				vm: &util.NamespacedName{
+					Name:      "vm-name",
+					Namespace: "test-namespace",
+				},
+				flags: nil,
+				reserved: resources{
+					cpu: vmv1.MilliCPU(1000),
+					mem: api.Bytes(2048 * mib),
+				},
+				requested: nil,
+				factor:    nil,
+				overcommit: &overcommitFactors{
+					cpu: 2.5,
+					mem: 1.0, // in this case, we have no explicit overcommit, so we should get the default of 1.0
+				},
 			},
 		},
 	}
@@ -541,6 +640,11 @@ func TestPodStateExtraction(t *testing.T) {
 				},
 			}
 
+			defaultOvercommit := overcommitFactors{
+				cpu: 1.0,
+				mem: 1.0,
+			}
+
 			expectedPod := state.Pod{
 				NamespacedName: util.NamespacedName{
 					Name:      "pod-name",
@@ -553,20 +657,23 @@ func TestPodStateExtraction(t *testing.T) {
 				AlwaysMigrate:  lo.FromPtr(c.extracted.flags).alwaysMigrate,
 				Migrating:      lo.FromPtr(c.extracted.flags).migrating,
 				CPU: state.PodResources[vmv1.MilliCPU]{
-					Reserved:  c.extracted.reserved.cpu,
-					Requested: lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).cpu,
-					Factor:    lo.FromPtr(c.extracted.factor).cpu,
+					Reserved:   c.extracted.reserved.cpu,
+					Requested:  lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).cpu,
+					Factor:     lo.FromPtr(c.extracted.factor).cpu,
+					Overcommit: lo.FromPtrOr(c.extracted.overcommit, defaultOvercommit).cpu,
 				},
 				Mem: state.PodResources[api.Bytes]{
-					Reserved:  c.extracted.reserved.mem,
-					Requested: lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).mem,
-					Factor:    lo.FromPtr(c.extracted.factor).mem,
+					Reserved:   c.extracted.reserved.mem,
+					Requested:  lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).mem,
+					Factor:     lo.FromPtr(c.extracted.factor).mem,
+					Overcommit: lo.FromPtrOr(c.extracted.overcommit, defaultOvercommit).mem,
 				},
 			}
 
 			pod, err := state.PodStateFromK8sObj(obj)
 			if err != nil {
 				t.Error("failed to extract pod state: ", err.Error())
+				return
 			}
 
 			assert.Equal(t, expectedPod, pod)

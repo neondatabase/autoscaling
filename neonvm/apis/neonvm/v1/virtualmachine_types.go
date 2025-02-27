@@ -52,6 +52,12 @@ const (
 	//
 	// The value of this annotation is always a JSON-encoded VirtualMachineResources object.
 	VirtualMachineResourcesAnnotation string = "vm.neon.tech/resources"
+
+	// VirtualMachineOvercommitAnnotation is the annotation added to runner pods of VMs with
+	// non-nil .Spec.Overcommit.
+	//
+	// The value of this annotation is always a JSON-encoded OvercommitSettings.
+	VirtualMachineOvercommitAnnotation string = "vm.neon.tech/overcommit"
 )
 
 // VirtualMachineUsage provides information about a VM's current usage. This is the type of the
@@ -150,6 +156,9 @@ type VirtualMachineSpec struct {
 	// +optional
 	TLS *TLSProvisioning `json:"tls,omitempty"`
 
+	// Overcommit sets factors by which to discount resource usage from the VM.
+	Overcommit *OvercommitSettings `json:"overcommit,omitempty"`
+
 	// TargetRevision is the identifier set by external party to track when changes to the spec
 	// propagate to the VM.
 	//
@@ -196,6 +205,24 @@ func (spec *VirtualMachineSpec) Resources() VirtualMachineResources {
 		MemorySlots:    spec.Guest.MemorySlots,
 		MemorySlotSize: spec.Guest.MemorySlotSize,
 	}
+}
+
+// OvercommitSettings sets factors by which to discount resource usage from a VM.
+//
+// For example, if all VMs have a CPU overcommit factor of 2, then twice as many VMs of the same
+// amount of CPU could be scheduled onto nodes of the same size.
+//
+// Note: Overcommit factors are INHERENTLY DANGEROUS. Setting any of these values greater than 1
+// ONLY makes sense when all your VMs are much smaller than the nodes they run on, AND you have
+// verified that average resource usage is, in practice, significantly below what's allocated.
+type OvercommitSettings struct {
+	// CPU overcommit factor.
+	// +optional
+	CPU *resource.Quantity `json:"cpu,omitempty"`
+
+	// Memory overcommit factor.
+	// +optional
+	Memory *resource.Quantity `json:"memory,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=amd64;arm64
