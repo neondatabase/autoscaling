@@ -11,17 +11,23 @@ type eventSender[E any] struct {
 	client Client[E]
 
 	metrics *EventSinkMetrics
-	queue   eventQueuePuller[E]
 
-	// lastSendDuration tracks the "real" last full duration of (eventSender).sendAllCurrentEvents().
+	queue *eventBatcher[E]
+	// batchComplete is a buffered channel with an item placed into it whenever a batch is finished
+	// and ready for consumption.
+	// This means that notifications will be coalesced, so it is the eventSender's responsibility to
+	// drain all batches whenever there is a notification.
+	batchComplete <-chan struct{}
+
+	// lastSendDuration tracks the "real" last full duration of (eventSender).sendAllCompletedBatches().
 	//
 	// It's separate from metrics.lastSendDuration because (a) we'd like to include the duration of
-	// ongoing calls to sendAllCurrentEvents, but (b) we don't want the bias towards lower durations
-	// that comes with that.
+	// ongoing calls to sendAllCompletedBatches, but (b) we don't want the bias towards lower
+	// durations that comes with that.
 	//
 	// Here's some more detail:
 	//
-	// To make sure that long-running sendAllCurrentEvents() loops show up in the metrics while
+	// To make sure that long-running sendAllCompletedBatches() loops show up in the metrics while
 	// they're still running, we want to periodically update metrics.lastSendDuration before the
 	// loop has finished. A side-effect of doing this naively is that the gauge will sometimes
 	// return durations that are much shorter than the *actual* previous send loop duration.
@@ -37,8 +43,14 @@ type eventSender[E any] struct {
 }
 
 func (s eventSender[E]) senderLoop(ctx context.Context, logger *zap.Logger) {
-	ticker := time.NewTicker(time.Second * time.Duration(s.client.BaseConfig.PushEverySeconds))
-	defer ticker.Stop()
+	heartbeat := time.Second * time.Duration(s.client.BaseConfig.PushEverySeconds)
+
+	// note: Why a timer and not a ticker? The idea here is that we should only allow the
+	// "heartbeat" to trigger sending a batch if we haven't *already* sent something in the last
+	// PushEverySeconds. So instead, we reset the timer every time we send a batch, meaning that
+	// we'll only ever get a signal from the timer if it's been too long since the last batch.
+	timer := time.NewTimer(heartbeat)
+	defer timer.Stop()
 
 	for {
 		final := false
@@ -47,10 +59,28 @@ func (s eventSender[E]) senderLoop(ctx context.Context, logger *zap.Logger) {
 		case <-ctx.Done():
 			logger.Info("Received notification that events submission is done")
 			final = true
-		case <-ticker.C:
+			// finish up any in-progress batch, so that we can send it before we exit.
+			s.queue.finishOngoing()
+		case <-s.batchComplete:
+			// We've been notified that there's completed batches to be sent!
+			// Do that below...
+		case <-timer.C:
+			// Timer has expired without any notification of a completed batch. Let's explicitly ask
+			// for in-progress events to be wrapped up into a batch so we ship them fast enough and
+			// reset the timer.
+			//
+			// consume s.batchComplete on repeat if there were events; otherwise wait until the
+			// timer expires again.
+			s.queue.finishOngoing()
+			timer.Reset(heartbeat)
+			continue
 		}
 
-		s.sendAllCurrentEvents(logger)
+		// Make sure that if there are no more events within the next heartbeat duration, that we'll
+		// push the events that have been accumulated so far.
+		timer.Reset(heartbeat)
+
+		s.sendAllCompletedBatches(logger)
 
 		if final {
 			logger.Info("Ending events sender loop")
@@ -59,51 +89,54 @@ func (s eventSender[E]) senderLoop(ctx context.Context, logger *zap.Logger) {
 	}
 }
 
-func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
-	logger.Info("Pushing all available events")
+func (s eventSender[E]) sendAllCompletedBatches(logger *zap.Logger) {
+	logger.Info("Pushing all available event batches")
 
-	if s.queue.size() == 0 {
-		logger.Info("No events to push")
+	if s.queue.completedCount() == 0 {
+		logger.Info("No event batches to push")
 		s.lastSendDuration = 0
 		s.metrics.lastSendDuration.WithLabelValues(s.client.Name).Set(1e-6) // small value, to indicate that nothing happened
 		return
 	}
 
-	total := 0
+	totalEvents := 0
+	totalBatches := 0
 	startTime := time.Now()
 
-	// while there's still events in the queue, send them
+	// while there's still batches of events in the queue, send them
 	//
-	// If events are being added to the queue faster than we can send them, this loop will not
-	// terminate. For the most part, that's ok: worst-case, we miss the collectorFinished
-	// notification, which isn't the end of the world. Any long-running call to this function will
-	// be reported by s.metrics.lastSendDuration as we go (provided the request timeout isn't too
-	// long).
+	// If batches are being added to the queue faster than we can send them, this loop will not
+	// terminate. For the most part, that's ok: worst-case, we miss that the parent context has
+	// expired, which isn't the end of the world (eventually the autoscaler-agent will just be
+	// force-killed). Any long-running call to this function will be reported by
+	// s.metrics.lastSendDuration as we go (provided the request timeout isn't too long), so we
+	// should get observability for it either way.
 	for {
-		if size := s.queue.size(); size != 0 {
-			logger.Info("Current queue size is non-zero", zap.Int("queueSize", size))
-		}
+		remainingBatchesCount := s.queue.completedCount()
 
-		chunk := s.queue.get(int(s.client.BaseConfig.MaxBatchSize))
-		count := len(chunk)
-		if count == 0 {
+		if remainingBatchesCount != 0 {
+			logger.Info("Current queue size is non-zero", zap.Int("batchCount", remainingBatchesCount))
+		} else {
 			totalTime := time.Since(startTime)
 			s.lastSendDuration = totalTime
 			s.metrics.lastSendDuration.WithLabelValues(s.client.Name).Set(totalTime.Seconds())
 
 			logger.Info(
-				"All available events have been sent",
-				zap.Int("total", total),
+				"All available event batches have been sent",
+				zap.Int("totalEvents", totalEvents),
+				zap.Int("totalBatches", totalBatches),
 				zap.Duration("totalTime", totalTime),
 			)
 			return
 		}
 
+		batch := s.queue.peekLatestCompleted()
+
 		req := s.client.Base.NewRequest()
 
 		logger.Info(
-			"Pushing events",
-			zap.Int("count", count),
+			"Pushing events batch",
+			zap.Int("count", len(batch.events)),
 			req.LogFields(),
 		)
 
@@ -115,7 +148,7 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 			)
 			defer cancel()
 
-			payload, err := s.client.SerializeBatch(chunk)
+			payload, err := s.client.SerializeBatch(batch.events)
 			if err != nil {
 				return err
 			}
@@ -129,10 +162,11 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 			// events.
 			logger.Error(
 				"Failed to push billing events",
-				zap.Int("count", count),
+				zap.Int("count", len(batch.events)),
 				zap.Duration("after", reqDuration),
 				req.LogFields(),
-				zap.Int("total", total),
+				zap.Int("totalEvents", totalEvents),
+				zap.Int("totalBatches", totalBatches),
 				zap.Duration("totalTime", time.Since(startTime)),
 				zap.Error(err),
 			)
@@ -145,16 +179,18 @@ func (s eventSender[E]) sendAllCurrentEvents(logger *zap.Logger) {
 			return
 		}
 
-		s.queue.drop(count) // mark len(chunk) as successfully processed
-		total += len(chunk)
+		s.queue.dropLatestCompleted() // mark this batch as complete
+		totalEvents += len(batch.events)
+		totalBatches += 1
 		currentTotalTime := time.Since(startTime)
 
 		logger.Info(
 			"Successfully pushed some events",
-			zap.Int("count", count),
+			zap.Int("count", len(batch.events)),
 			zap.Duration("after", reqDuration),
 			req.LogFields(),
-			zap.Int("total", total),
+			zap.Int("totalEvents", totalEvents),
+			zap.Int("totalBatches", totalBatches),
 			zap.Duration("totalTime", currentTotalTime),
 		)
 
