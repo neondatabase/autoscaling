@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -199,6 +200,9 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	if err := r.doReconcile(ctx, &vm); err != nil {
 		r.Recorder.Eventf(&vm, corev1.EventTypeWarning, "Failed",
 			"Failed to reconcile (%s): %s", vm.Name, err)
+		if errors.Is(err, ipam.ErrAgain) {
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -330,7 +334,6 @@ func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMac
 	log := log.FromContext(ctx)
 	ip, err := r.IPAM.AcquireIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
 	if err != nil {
-		log.Error(err, "fail to acquire IP")
 		return err
 	}
 	message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
@@ -381,6 +384,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 	case "":
 		if err := r.acquireOverlayIP(ctx, vm); err != nil {
+			if errors.Is(err, ipam.ErrAgain) {
+				// We are being rate limited by IPAM, let's try again later.
+				return err
+			}
+			log.Error(err, "Failed to acquire overlay IP", "VirtualMachine", vm.Name)
+			r.Recorder.Event(vm, "Warning", "OverlayNet", "Failed to acquire overlay IP")
 			return err
 		}
 		// VirtualMachine just created, change Phase to "Pending"

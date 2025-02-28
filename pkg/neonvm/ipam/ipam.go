@@ -13,6 +13,7 @@ import (
 
 	whereaboutsallocate "github.com/k8snetworkplumbingwg/whereabouts/pkg/allocate"
 	whereaboutstypes "github.com/k8snetworkplumbingwg/whereabouts/pkg/types"
+	"golang.org/x/sync/semaphore"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -40,6 +41,8 @@ const (
 	DatastoreRetriesDelay = 100 * time.Millisecond
 )
 
+var ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
+
 type Temporary interface {
 	Temporary() bool
 }
@@ -48,7 +51,8 @@ type IPAM struct {
 	Client
 	Config IPAMConfig
 
-	mu sync.Mutex
+	mu                 sync.Mutex
+	concurrencyLimiter *semaphore.Weighted
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
@@ -68,7 +72,7 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
-func New(nadName string, nadNamespace string) (*IPAM, error) {
+func New(nadName string, nadNamespace string, concurrencyLimit int) (*IPAM, error) {
 	// get Kubernetes client config
 	cfg, err := config.GetConfig()
 	if err != nil {
@@ -83,10 +87,10 @@ func New(nadName string, nadNamespace string) (*IPAM, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating kubernetes client: %w", err)
 	}
-	return NewWithClient(kClient, nadName, nadNamespace)
+	return NewWithClient(kClient, nadName, nadNamespace, concurrencyLimit)
 }
 
-func NewWithClient(kClient *Client, nadName string, nadNamespace string) (*IPAM, error) {
+func NewWithClient(kClient *Client, nadName string, nadNamespace string, concurrencyLimit int) (*IPAM, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), IpamRequestTimeout)
 	defer cancel()
 
@@ -108,9 +112,10 @@ func NewWithClient(kClient *Client, nadName string, nadNamespace string) (*IPAM,
 	}
 
 	return &IPAM{
-		Config: *ipamConfig,
-		Client: *kClient,
-		mu:     sync.Mutex{},
+		Config:             *ipamConfig,
+		Client:             *kClient,
+		mu:                 sync.Mutex{},
+		concurrencyLimiter: semaphore.NewWeighted(int64(concurrencyLimit)),
 	}, nil
 }
 
@@ -187,6 +192,16 @@ func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error
 	var ip net.IPNet
 	log := log.FromContext(ctx)
 
+	// We have a semaphore to limit the number of concurrent IPAM requests.
+	// Note that we use TryAcquire(), so we release the current reconcilliation worker
+	// from waiting on a mutex below.
+	ok := i.concurrencyLimiter.TryAcquire(1)
+	if !ok {
+		return net.IPNet{}, ErrAgain
+	}
+	defer i.concurrencyLimiter.Release(1)
+
+	// We still want to access the IPPool one VM at a time.
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
