@@ -38,7 +38,7 @@ func makeIPAM(t *testing.T, cfg string) *ipam.IPAM {
 	}, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	ipam, err := ipam.NewWithClient(&client, "nad", "default")
+	ipam, err := ipam.NewWithClient(&client, "nad", "default", 1)
 	require.NoError(t, err)
 
 	return ipam

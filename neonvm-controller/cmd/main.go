@@ -201,7 +201,9 @@ func main() {
 		NADConfig:               controllers.GetNADConfig(),
 	}
 
-	ipam, err := ipam.New(rc.NADConfig.IPAMName, rc.NADConfig.IPAMNamespace)
+	// Let's not have more than a quater of reconcilliation workers stuck
+	// at IPAM mutex.
+	ipam, err := ipam.New(rc.NADConfig.IPAMName, rc.NADConfig.IPAMNamespace, max(1, concurrencyLimit/4))
 	if err != nil {
 		setupLog.Error(err, "unable to create ipam")
 		panic(err)

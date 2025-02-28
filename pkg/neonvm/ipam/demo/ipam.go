@@ -46,7 +46,7 @@ func main() {
 	ctx := log.IntoContext(context.Background(), logger)
 
 	// Create IPAM object
-	ipam, err := ipam.New(*nadName, *nadNs)
+	ipam, err := ipam.New(*nadName, *nadNs, 1)
 	if err != nil {
 		logger.Error(err, "failed to create IPAM")
 		os.Exit(1)
