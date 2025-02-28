@@ -1,5 +1,5 @@
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
-index b9be94b6e..5efb40df2 100644
+index b9be94b6e..8e62c3cda 100644
 --- a/cluster-autoscaler/utils/kubernetes/listers.go
 +++ b/cluster-autoscaler/utils/kubernetes/listers.go
 @@ -17,10 +17,12 @@ limitations under the License.
@@ -15,8 +15,8 @@ index b9be94b6e..5efb40df2 100644
  	"k8s.io/apimachinery/pkg/fields"
  	"k8s.io/apimachinery/pkg/labels"
  	"k8s.io/client-go/informers"
-@@ -46,6 +48,14 @@ type ListerRegistry interface {
- 	StatefulSetLister() v1appslister.StatefulSetLister
+@@ -221,6 +223,30 @@ type AllPodLister struct {
+ 	podLister v1lister.PodLister
  }
  
 +// copied from github.com/neondatabase/autoscaling, neonvm/apis/neonvm/v1/virtualmachine_types.go.
@@ -27,13 +27,6 @@ index b9be94b6e..5efb40df2 100644
 +	Memory resource.Quantity `json:"memory"`
 +}
 +
- type listerRegistryImpl struct {
- 	allNodeLister               NodeLister
- 	readyNodeLister             NodeLister
-@@ -221,6 +231,22 @@ type AllPodLister struct {
- 	podLister v1lister.PodLister
- }
- 
 +func updatePodRequestsFromNeonVMAnnotation(pod *apiv1.Pod) {
 +	annotation, ok := pod.Annotations["vm.neon.tech/usage"]
 +	if !ok {
