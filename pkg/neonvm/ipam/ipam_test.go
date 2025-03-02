@@ -8,6 +8,7 @@ import (
 
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -22,7 +23,12 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
-func makeIPAM(t *testing.T, cfg string) *ipam.IPAM {
+type testParams struct {
+	prom *prometheus.Registry
+	ipam *ipam.IPAM
+}
+
+func makeIPAM(t *testing.T, cfg string) *testParams {
 	client := ipam.Client{
 		KubeClient: kfake.NewSimpleClientset(),
 		VMClient:   nfake.NewSimpleClientset(),
@@ -42,14 +48,69 @@ func makeIPAM(t *testing.T, cfg string) *ipam.IPAM {
 	}, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	ipam, err := ipam.NewWithClient(&client, "nad", "default", 1)
+	prom := prometheus.NewRegistry()
+	ipam, err := ipam.NewWithClient(&client, &ipam.IPAMParams{
+		NadName:          "nad",
+		NadNamespace:     "default",
+		ConcurrencyLimit: 1,
+		MetricsReg:       prom,
+	})
+
 	require.NoError(t, err)
 
-	return ipam
+	return &testParams{
+		prom: prom,
+		ipam: ipam,
+	}
+}
+
+type metricValue struct {
+	Name    string
+	Action  string
+	Outcome string
+	Value   float64
+}
+
+func collectMetrics(t *testing.T, reg *prometheus.Registry) []metricValue {
+	metrics, err := reg.Gather()
+	require.NoError(t, err)
+
+	var result []metricValue
+
+	// Check duration metrics
+	for _, metric := range metrics {
+		for _, m := range metric.GetMetric() {
+			var action, outcome string
+
+			for _, label := range m.GetLabel() {
+				if label.GetName() == "action" {
+					action = label.GetValue()
+				}
+				if label.GetName() == "outcome" {
+					outcome = label.GetValue()
+				}
+			}
+			var value float64
+			if m.GetHistogram() != nil {
+				value = float64(m.GetHistogram().GetSampleCount())
+			} else if m.GetGauge() != nil {
+				value = m.GetGauge().GetValue()
+			}
+
+			result = append(result, metricValue{
+				Name:    metric.GetName(),
+				Action:  action,
+				Outcome: outcome,
+				Value:   value,
+			})
+		}
+	}
+
+	return result
 }
 
 func TestIPAM(t *testing.T) {
-	ipam := makeIPAM(t,
+	params := makeIPAM(t,
 		`{
 			"ipRanges": [
 				{
@@ -61,6 +122,7 @@ func TestIPAM(t *testing.T) {
 			]
 		}`,
 	)
+	ipam := params.ipam
 
 	defer ipam.Close()
 
@@ -98,10 +160,18 @@ func TestIPAM(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ip3)
 	assert.Equal(t, ip2, ip3)
+
+	metrics := collectMetrics(t, params.prom)
+	assert.ElementsMatch(t, []metricValue{
+		{Name: "ipam_request_duration_seconds", Action: "acquire", Outcome: "success", Value: 4},
+		{Name: "ipam_request_duration_seconds", Action: "release", Outcome: "success", Value: 1},
+		{Name: "ipam_ongoing_requests", Action: "acquire", Outcome: "", Value: 0},
+		{Name: "ipam_ongoing_requests", Action: "release", Outcome: "", Value: 0},
+	}, metrics)
 }
 
 func TestIPAMCleanup(t *testing.T) {
-	ipam := makeIPAM(t,
+	params := makeIPAM(t,
 		`{
 			"ipRanges": [
 				{
@@ -113,6 +183,7 @@ func TestIPAMCleanup(t *testing.T) {
 			"network_name":"nadNetworkName"
 		}`,
 	)
+	ipam := params.ipam
 
 	defer ipam.Close()
 
@@ -188,9 +259,54 @@ func TestIPAMCleanup(t *testing.T) {
 			// Test succeeded
 			assert.Equal(t, ipPool.Spec.Allocations["2"].ContainerID, "default/vm2")
 			cancel()
+
+			metrics := collectMetrics(t, params.prom)
+			assert.Contains(t, metrics, metricValue{
+				Name:    "ipam_request_duration_seconds",
+				Action:  "cleanup",
+				Outcome: "success",
+				Value:   1,
+			})
+
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	require.Fail(t, "cleanup did not finish", ipPool.Spec.Allocations)
+}
+
+func TestIPAMMetricsOnError(t *testing.T) {
+	params := makeIPAM(t,
+		`{
+			"ipRanges": [
+				{
+					"range":"10.100.123.0/24",
+					"range_start":"10.100.123.1",
+					"range_end":"10.100.123.254"
+				}
+			]
+		}`,
+	)
+	ipam := params.ipam
+
+	defer ipam.Close()
+
+	// Create a context that's already canceled to force an error
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	name := types.NamespacedName{
+		Namespace: "default",
+		Name:      "vm",
+	}
+
+	// This should fail because the context is already canceled
+	_, err := ipam.AcquireIP(ctx, name)
+	require.Error(t, err)
+
+	metrics := collectMetrics(t, params.prom)
+	assert.ElementsMatch(t, []metricValue{
+		{Name: "ipam_request_duration_seconds", Action: "acquire", Outcome: "failure", Value: 1},
+		{Name: "ipam_ongoing_requests", Action: "acquire", Outcome: "", Value: 0},
+	}, metrics)
 }
