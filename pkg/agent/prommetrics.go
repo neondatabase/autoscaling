@@ -358,6 +358,7 @@ type PerVMMetrics struct {
 	memory       *prometheus.GaugeVec
 	restartCount *prometheus.GaugeVec
 	desiredCU    *prometheus.GaugeVec
+	extraIP      *prometheus.GaugeVec
 }
 
 type vmMetadata struct {
@@ -425,6 +426,13 @@ func makePerVMMetrics() (*PerVMMetrics, *prometheus.Registry) {
 			makeLabels(
 				"component", // desired CU component: total, cpu, mem, lfc
 			),
+		)),
+		extraIP: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_vm_extra_ip",
+				Help: "Whether the VM has an extra IP address",
+			},
+			makeLabels(),
 		)),
 	}
 

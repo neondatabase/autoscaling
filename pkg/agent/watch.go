@@ -300,6 +300,23 @@ func makeVMRestartMetrics(vm *vmv1.VirtualMachine) []vmMetric {
 	}
 }
 
+func makeVMExtraIPMetrics(vm *vmv1.VirtualMachine) []vmMetric {
+	endpointID := vm.Labels[endpointLabel]
+	projectID := vm.Labels[projectLabel]
+	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, endpointID, projectID, "")
+
+	value := 0
+	if vm.Status.ExtraNetIP != "" {
+		value = 1
+	}
+	return []vmMetric{
+		{
+			labels: labels,
+			value:  float64(value),
+		},
+	}
+}
+
 // gaugeSpec groups a source of metrics (maker) with a destination (gauge).
 type gaugeSpec struct {
 	maker func(*vmv1.VirtualMachine) []vmMetric
@@ -322,6 +339,10 @@ func getGaugeSpecs(perVMMetrics *PerVMMetrics) []gaugeSpec {
 		{
 			maker: makeVMRestartMetrics,
 			gauge: perVMMetrics.restartCount,
+		},
+		{
+			maker: makeVMExtraIPMetrics,
+			gauge: perVMMetrics.extraIP,
 		},
 	}
 }
