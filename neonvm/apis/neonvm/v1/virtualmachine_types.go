@@ -607,6 +607,10 @@ type VirtualMachineStatus struct {
 	// the changes are propagated to the VM.
 	// +optional
 	CurrentRevision *RevisionWithTime `json:"currentRevision,omitempty"`
+
+	// MigrationName is the name of the migration that is currently in progress.
+	// +optional
+	MigrationName string `json:"migrationName,omitempty"`
 }
 
 type VmPhase string

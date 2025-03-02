@@ -102,22 +102,25 @@ func (p *migrationTestParams) refetchMigration(vmm *vmv1.VirtualMachineMigration
 	require.NoError(p.t, err)
 }
 
-func (p *migrationTestParams) reconcileSuccess(vmm *vmv1.VirtualMachineMigration) {
+func (p *migrationTestParams) reconcile(vmm *vmv1.VirtualMachineMigration) (reconcile.Result, error) {
 	req := reconcile.Request{
 		NamespacedName: client.ObjectKeyFromObject(vmm),
 	}
 	res, err := p.r.Reconcile(p.ctx, req)
+	return res, err
+}
+
+func (p *migrationTestParams) reconcileSuccess(vmm *vmv1.VirtualMachineMigration) {
+	res, err := p.reconcile(vmm)
 	require.NoError(p.t, err)
 	require.Equal(p.t, reconcile.Result{}, res)
 
 	p.refetchMigration(vmm)
 }
 
+//nolint:unused // We will need it for future tests
 func (p *migrationTestParams) reconcileTimeout(vmm *vmv1.VirtualMachineMigration) {
-	req := reconcile.Request{
-		NamespacedName: client.ObjectKeyFromObject(vmm),
-	}
-	res, err := p.r.Reconcile(p.ctx, req)
+	res, err := p.reconcile(vmm)
 	require.NoError(p.t, err)
 	require.Equal(p.t, reconcile.Result{RequeueAfter: time.Second}, res)
 
@@ -179,6 +182,7 @@ func Test_VMM_to_Pending(t *testing.T) {
 	params.refetchVM(vm)
 	require.Equal(t, vmm.Status.Phase, vmv1.VmmPending)
 	require.Equal(t, vm.Status.Phase, vmv1.VmPreMigrating)
+	require.Equal(t, vm.Status.MigrationName, vmm.Name)
 }
 
 func Test_VMM_twice_to_Pending(t *testing.T) {
@@ -212,12 +216,14 @@ func Test_VMM_twice_to_Pending(t *testing.T) {
 
 	params.migrationToPending(vmm1)
 
-	// Second migration proceeds until it detects VM is not running
+	// Second migration proceeds until it detects another migration is in progress
 
 	params.migrationPrePending(vmm2)
-	params.reconcileTimeout(vmm2)
+	params.reconcileSuccess(vmm2)
 
-	// TODO: should it fail instead?
+	params.refetchMigration(vmm2)
+	require.Equal(t, vmm2.Status.Phase, vmv1.VmmFailed)
+	require.Equal(t, vmm2.Status.Info.Status, "Another migration is in progress")
 }
 
 func Test_VMM_to_Pending_then_removed(t *testing.T) {
@@ -320,16 +326,14 @@ func Test_VMM_failure_updating_migration_status(t *testing.T) {
 	params.createMigration(vmm)
 	params.migrationPrePending(vmm)
 
-	// Replace with client that errors on migration status updates
-	originalClient := params.client
-	params.client = &erroringClient{
-		Client: originalClient,
+	errClient := &erroringClient{
+		Client: params.client,
 		shouldErrorOnUpdate: func(obj client.Object) bool {
 			_, isMigration := obj.(*vmv1.VirtualMachineMigration)
 			return isMigration
 		},
 	}
-	params.r.Client = params.client
+	params.r.Client = errClient
 
 	// Reconcile and verify error
 	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(vmm)}
@@ -338,10 +342,16 @@ func Test_VMM_failure_updating_migration_status(t *testing.T) {
 	require.Contains(t, err.Error(), "simulated error")
 
 	// Verify state after error
-	params.client, params.r.Client = originalClient, originalClient
 	params.refetchVM(vm)
 	params.refetchMigration(vmm)
 	require.Equal(t, vm.Status.Phase, vmv1.VmPreMigrating)
 	require.Equal(t, vmm.Status.Phase, vmv1.VmmPhase(""))
-	// TODO: this is very bad state, we will not be able to escape it.
+	// Now this case is no longer dead end.
+	// We fix our client and reconcile again.ß
+
+	params.r.Client = params.client
+	params.reconcileSuccess(vmm)
+
+	params.refetchMigration(vmm)
+	require.Equal(t, vmm.Status.Phase, vmv1.VmmPending)
 }
