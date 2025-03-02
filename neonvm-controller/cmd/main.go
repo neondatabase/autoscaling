@@ -37,6 +37,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -201,9 +202,16 @@ func main() {
 		NADConfig:               controllers.GetNADConfig(),
 	}
 
-	// Let's not have more than a quater of reconcilliation workers stuck
-	// at IPAM mutex.
-	ipam, err := ipam.New(rc.NADConfig.IPAMName, rc.NADConfig.IPAMNamespace, max(1, concurrencyLimit/4))
+	ipam, err := ipam.New(&ipam.IPAMParams{
+		NadName:      rc.NADConfig.IPAMName,
+		NadNamespace: rc.NADConfig.IPAMNamespace,
+
+		// Let's not have more than a quater of reconcilliation workers stuck
+		// at IPAM mutex.
+		ConcurrencyLimit: max(1, concurrencyLimit/4),
+
+		MetricsReg: metrics.Registry,
+	})
 	if err != nil {
 		setupLog.Error(err, "unable to create ipam")
 		panic(err)
