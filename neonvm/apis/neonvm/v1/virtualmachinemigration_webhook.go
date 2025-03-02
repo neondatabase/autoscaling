@@ -17,6 +17,8 @@ limitations under the License.
 package v1
 
 import (
+	"fmt"
+
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -42,7 +44,6 @@ var _ webhook.Validator = &VirtualMachineMigration{}
 //
 // The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateCreate() (admission.Warnings, error) {
-	// TODO: implement creation validation webhook (?)
 	return nil, nil
 }
 
@@ -50,14 +51,13 @@ func (r *VirtualMachineMigration) ValidateCreate() (admission.Warnings, error) {
 //
 // The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	// TODO: implement update validation webhook
-	return nil, nil
+	return nil, fmt.Errorf("updating migration is not allowed")
 }
 
 // ValidateDelete implements webhook.Validator
 //
 // The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateDelete() (admission.Warnings, error) {
-	// TODO: implement deletion validation webhook (?)
+	// No validation needed - we have a finalizer that prevents deletion
 	return nil, nil
 }
