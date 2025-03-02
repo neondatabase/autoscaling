@@ -150,14 +150,28 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, err
 	}
 
-	getVM := func() (*vmv1.VirtualMachine, error) {
-		var vm vmv1.VirtualMachine
-		err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, &vm)
-		if err != nil {
-			log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
-			return nil, err
+	// Fetch the corresponding VirtualMachine instance
+	var vmObject vmv1.VirtualMachine
+	err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, &vmObject)
+	vm := &vmObject
+	if err != nil {
+		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+		if apierrors.IsNotFound(err) {
+			// stop reconcile loop if vm not found (already deleted?)
+			message := fmt.Sprintf("VM (%s) not found", migration.Spec.VmName)
+			r.Recorder.Event(migration, "Warning", "Failed", message)
+			meta.SetStatusCondition(&migration.Status.Conditions,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachineMigration,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Reconciling",
+					Message: message,
+				})
+			migration.Status.Phase = vmv1.VmmFailed
+			return r.updateMigrationStatus(ctx, migration)
 		}
-		return &vm, nil
+		// return err and try reconcile again
+		return ctrl.Result{}, err
 	}
 
 	if !migration.ObjectMeta.DeletionTimestamp.IsZero() {
@@ -165,10 +179,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for Migration")
-			vm, err := getVM()
-			if err != nil {
-				return ctrl.Result{}, err
-			}
 			if err := r.doFinalizerOperationsForVirtualMachineMigration(ctx, migration, vm); err != nil {
 				// if fail to delete the external dependency here, return with error
 				// so that it can be retried
@@ -199,28 +209,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 		// stop this reconciliation cycle, new will be triggered as Migration updated
 		return ctrl.Result{}, nil
-	}
-
-	// Fetch the corresponding VirtualMachine instance
-	vm, err := getVM()
-	if err != nil {
-		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
-		if apierrors.IsNotFound(err) {
-			// stop reconcile loop if vm not found (already deleted?)
-			message := fmt.Sprintf("VM (%s) not found", migration.Spec.VmName)
-			r.Recorder.Event(migration, "Warning", "Failed", message)
-			meta.SetStatusCondition(&migration.Status.Conditions,
-				metav1.Condition{
-					Type:    typeDegradedVirtualMachineMigration,
-					Status:  metav1.ConditionTrue,
-					Reason:  "Reconciling",
-					Message: message,
-				})
-			migration.Status.Phase = vmv1.VmmFailed
-			return r.updateMigrationStatus(ctx, migration)
-		}
-		// return err and try reconcile again
-		return ctrl.Result{}, err
 	}
 
 	// Set owner for VM migration object
