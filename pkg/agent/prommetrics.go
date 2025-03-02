@@ -379,6 +379,15 @@ const (
 func makePerVMMetrics() (*PerVMMetrics, *prometheus.Registry) {
 	reg := prometheus.NewRegistry()
 
+	makeLabels := func(otherLabels ...string) []string {
+		return append([]string{
+			"vm_namespace", // .metadata.namespace
+			"vm_name",      // .metadata.name
+			"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
+			"project_id",   // .metadata.labels["neon/project-id"]
+		}, otherLabels...)
+	}
+
 	metrics := &PerVMMetrics{
 		activeMu:  sync.Mutex{},
 		activeVMs: make(map[util.NamespacedName]vmMetadata),
@@ -388,51 +397,34 @@ func makePerVMMetrics() (*PerVMMetrics, *prometheus.Registry) {
 				Name: "autoscaling_vm_cpu_cores",
 				Help: "Number of CPUs for a VM: min, max, spec using, or status using",
 			},
-			[]string{
-				"vm_namespace", // .metadata.namespace
-				"vm_name",      // .metadata.name
-				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
-				"project_id",   // .metadata.labels["neon/project-id"]
-				"value",        // vmResourceValue: min, spec_use, status_use, max
-			},
+			makeLabels(
+				"value", // vmResourceValue: min, spec_use, status_use, max
+			),
 		)),
 		memory: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_vm_memory_bytes",
 				Help: "Amount of memory in bytes for a VM: min, max, spec using, or status using",
 			},
-			[]string{
-				"vm_namespace", // .metadata.namespace
-				"vm_name",      // .metadata.name
-				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
-				"project_id",   // .metadata.labels["neon/project-id"]
-				"value",        // vmResourceValue: min, spec_use, status_use, max
-			},
+			makeLabels(
+				"value", // vmResourceValue: min, spec_use, status_use, max
+			),
 		)),
 		restartCount: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_vm_restart_count",
 				Help: "Number of times that the VM has restarted",
 			},
-			[]string{
-				"vm_namespace", // .metadata.namespace
-				"vm_name",      // .metadata.name
-				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
-				"project_id",   // .metadata.labels["neon/project-id"]
-			},
+			makeLabels(),
 		)),
 		desiredCU: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_vm_desired_cu",
 				Help: "Amount of Compute Units desired for a VM: the total, and the components for cpu, memory, and LFC",
 			},
-			[]string{
-				"vm_namespace", // .metadata.namespace
-				"vm_name",      // .metadata.name
-				"endpoint_id",  // .metadata.labels["neon/endpoint-id"]
-				"project_id",   // .metadata.labels["neon/project-id"]
-				"component",    // desired CU component: total, cpu, mem, lfc
-			},
+			makeLabels(
+				"component", // desired CU component: total, cpu, mem, lfc
+			),
 		)),
 	}
 
