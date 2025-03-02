@@ -300,6 +300,23 @@ func makeVMRestartMetrics(vm *vmv1.VirtualMachine) []vmMetric {
 	}
 }
 
+func makeVMExtraIPMetrics(vm *vmv1.VirtualMachine) []vmMetric {
+	endpointID := vm.Labels[endpointLabel]
+	projectID := vm.Labels[projectLabel]
+	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, endpointID, projectID, "")
+
+	value := 0
+	if vm.Status.ExtraNetIP != "" {
+		value = 1
+	}
+	return []vmMetric{
+		{
+			labels: labels,
+			value:  float64(value),
+		},
+	}
+}
+
 type gaugeSpec struct {
 	maker func(*vmv1.VirtualMachine) []vmMetric
 	gauge *prometheus.GaugeVec
@@ -319,6 +336,10 @@ func getGaugeSpecs(perVMMetrics *PerVMMetrics) []gaugeSpec {
 		{
 			maker: makeVMRestartMetrics,
 			gauge: perVMMetrics.restartCount,
+		},
+		{
+			maker: makeVMExtraIPMetrics,
+			gauge: perVMMetrics.extraIP,
 		},
 	}
 }
@@ -373,6 +394,10 @@ func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmv1.VirtualMachi
 		updateMetrics(spec.gauge, oldMetrics, newMetrics)
 	}
 
+	oldExtraIPMetrics := makeVMExtraIPMetrics(oldVM)
+	newExtraIPMetrics := makeVMExtraIPMetrics(newVM)
+	updateMetrics(perVMMetrics.extraIP, oldExtraIPMetrics, newExtraIPMetrics)
+
 	// Update the VM in the internal tracker:
 	perVMMetrics.updateActive(newVM) // note: don't need to clean up old one, because it's keyed by name
 }
@@ -387,6 +412,11 @@ func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeNa
 		for _, m := range metrics {
 			spec.gauge.Delete(m.labels)
 		}
+	}
+
+	extraIPMetrics := makeVMExtraIPMetrics(vm)
+	for _, m := range extraIPMetrics {
+		perVMMetrics.extraIP.Delete(m.labels)
 	}
 
 	// Remove the VM from the internal tracker:
