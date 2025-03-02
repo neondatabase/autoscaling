@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -260,4 +261,87 @@ func Test_VMM_to_Pending_then_removed(t *testing.T) {
 
 	params.refetchVM(vm)
 	require.Equal(params.t, vm.Status.Phase, vmv1.VmRunning)
+}
+
+// erroringClient wraps a client.Client and returns an error for specific operations
+type erroringClient struct {
+	client.Client
+	shouldErrorOnUpdate func(obj client.Object) bool
+}
+
+// Update returns an error when shouldErrorOnUpdate returns true
+func (c *erroringClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if c.shouldErrorOnUpdate(obj) {
+		return errors.New("simulated error updating object")
+	}
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+// Status returns a subresource client that errors on status updates
+func (c *erroringClient) Status() client.StatusWriter {
+	return &erroringStatusWriter{
+		StatusWriter:        c.Client.Status(),
+		shouldErrorOnUpdate: c.shouldErrorOnUpdate,
+	}
+}
+
+// erroringStatusWriter wraps a StatusWriter and returns an error for specific operations
+type erroringStatusWriter struct {
+	client.StatusWriter
+	shouldErrorOnUpdate func(obj client.Object) bool
+}
+
+// Update returns an error when shouldErrorOnUpdate returns true
+func (sw *erroringStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	if sw.shouldErrorOnUpdate(obj) {
+		return errors.New("simulated error updating status")
+	}
+	return sw.StatusWriter.Update(ctx, obj, opts...)
+}
+
+func Test_VMM_failure_updating_migration_status(t *testing.T) {
+	params := newMigrationTestParams(t)
+
+	// Create VM in Running state and attach migration
+	vm := defaultVm()
+	vm.Status.Phase = vmv1.VmRunning
+	vm.Status.PodIP = "1.2.3.4"
+	params.createVM(vm)
+
+	vmm := &vmv1.VirtualMachineMigration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-migration",
+			Namespace: vm.Namespace,
+		},
+		Spec: vmv1.VirtualMachineMigrationSpec{
+			VmName: vm.Name,
+		},
+	}
+	params.createMigration(vmm)
+	params.migrationPrePending(vmm)
+
+	// Replace with client that errors on migration status updates
+	originalClient := params.client
+	params.client = &erroringClient{
+		Client: originalClient,
+		shouldErrorOnUpdate: func(obj client.Object) bool {
+			_, isMigration := obj.(*vmv1.VirtualMachineMigration)
+			return isMigration
+		},
+	}
+	params.r.Client = params.client
+
+	// Reconcile and verify error
+	req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(vmm)}
+	_, err := params.r.Reconcile(params.ctx, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "simulated error")
+
+	// Verify state after error
+	params.client, params.r.Client = originalClient, originalClient
+	params.refetchVM(vm)
+	params.refetchMigration(vmm)
+	require.Equal(t, vm.Status.Phase, vmv1.VmPreMigrating)
+	require.Equal(t, vmm.Status.Phase, vmv1.VmmPhase(""))
+	// TODO: this is very bad state, we will not be able to escape it.
 }
