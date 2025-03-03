@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -46,7 +47,12 @@ func main() {
 	ctx := log.IntoContext(context.Background(), logger)
 
 	// Create IPAM object
-	ipam, err := ipam.New(*nadName, *nadNs, 1)
+	ipam, err := ipam.New(&ipam.IPAMParams{
+		NadName:          *nadName,
+		NadNamespace:     *nadNs,
+		ConcurrencyLimit: 1,
+		MetricsReg:       prometheus.NewRegistry(),
+	})
 	if err != nil {
 		logger.Error(err, "failed to create IPAM")
 		os.Exit(1)

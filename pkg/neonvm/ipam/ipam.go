@@ -13,6 +13,7 @@ import (
 
 	whereaboutsallocate "github.com/k8snetworkplumbingwg/whereabouts/pkg/allocate"
 	whereaboutstypes "github.com/k8snetworkplumbingwg/whereabouts/pkg/types"
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/semaphore"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -52,14 +53,15 @@ type Temporary interface {
 
 type IPAM struct {
 	Client
-	Config IPAMConfig
+	Config  IPAMConfig
+	metrics *IPAMMetrics
 
 	mu                 sync.Mutex
 	concurrencyLimiter *semaphore.Weighted
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAM(ctx, getAcquireAction(vmName))
+	ip, err := i.runIPAMWithMetrics(ctx, getAcquireAction(vmName), IPAMAcquire)
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to acquire IP: %w", err)
 	}
@@ -67,7 +69,7 @@ func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAM(ctx, getReleaseAction(vmName))
+	ip, err := i.runIPAMWithMetrics(ctx, getReleaseAction(vmName), IPAMRelease)
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
 	}
@@ -84,7 +86,7 @@ func (i *IPAM) runCleanup(ctx context.Context, namespace string) error {
 		for _, vm := range vms.Items {
 			vmsMap[fmt.Sprintf("%s/%s", vm.Namespace, vm.Name)] = true
 		}
-		_, err = i.runIPAM(ctx, getCleanupAction(vmsMap))
+		_, err = i.runIPAMWithMetrics(ctx, getCleanupAction(vmsMap), IPAMCleanup)
 		if err != nil {
 			return fmt.Errorf("error cleaning up IPAM: %w", err)
 		}
@@ -114,8 +116,15 @@ func (i *IPAM) Cleaner(namespace string) IPAMCleaner {
 	})
 }
 
+type IPAMParams struct {
+	NadName          string
+	NadNamespace     string
+	ConcurrencyLimit int
+	MetricsReg       prometheus.Registerer
+}
+
 // New returns a new IPAM object with ipam config and k8s/crd clients
-func New(nadName string, nadNamespace string, concurrencyLimit int) (*IPAM, error) {
+func New(params *IPAMParams) (*IPAM, error) {
 	// get Kubernetes client config
 	cfg, err := config.GetConfig()
 	if err != nil {
@@ -130,15 +139,15 @@ func New(nadName string, nadNamespace string, concurrencyLimit int) (*IPAM, erro
 	if err != nil {
 		return nil, fmt.Errorf("error creating kubernetes client: %w", err)
 	}
-	return NewWithClient(kClient, nadName, nadNamespace, concurrencyLimit)
+	return NewWithClient(kClient, params)
 }
 
-func NewWithClient(kClient *Client, nadName string, nadNamespace string, concurrencyLimit int) (*IPAM, error) {
+func NewWithClient(kClient *Client, params *IPAMParams) (*IPAM, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), IpamRequestTimeout)
 	defer cancel()
 
 	// read network-attachment-definition from Kubernetes
-	nad, err := kClient.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadNamespace).Get(ctx, nadName, metav1.GetOptions{})
+	nad, err := kClient.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(params.NadNamespace).Get(ctx, params.NadName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +155,7 @@ func NewWithClient(kClient *Client, nadName string, nadNamespace string, concurr
 		return nil, fmt.Errorf("network-attachment-definition %s hasn't IPAM config section", nad.Name)
 	}
 
-	ipamConfig, err := LoadFromNad(nad.Spec.Config, nadNamespace)
+	ipamConfig, err := LoadFromNad(nad.Spec.Config, params.NadNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("network-attachment-definition IPAM config parse error: %w", err)
 	}
@@ -157,8 +166,9 @@ func NewWithClient(kClient *Client, nadName string, nadNamespace string, concurr
 	return &IPAM{
 		Config:             *ipamConfig,
 		Client:             *kClient,
+		metrics:            NewIPAMMetrics(params.MetricsReg),
 		mu:                 sync.Mutex{},
-		concurrencyLimiter: semaphore.NewWeighted(int64(concurrencyLimit)),
+		concurrencyLimiter: semaphore.NewWeighted(int64(params.ConcurrencyLimit)),
 	}, nil
 }
 
@@ -227,6 +237,20 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 	n.IPAM.NetworkNamespace = nadNamespace
 
 	return n.IPAM, nil
+}
+
+func (i *IPAM) runIPAMWithMetrics(ctx context.Context, action ipamAction, actionName string) (net.IPNet, error) {
+	timer := i.metrics.StartTimer(actionName)
+	// This is if we get a panic
+	defer timer.Finish(IPAMUnknown)
+
+	ip, err := i.runIPAM(ctx, action)
+	if err != nil {
+		timer.Finish(IPAMFailure)
+	} else {
+		timer.Finish(IPAMSuccess)
+	}
+	return ip, err
 }
 
 // Performing IPAM actions
