@@ -255,6 +255,7 @@ func main() {
 	migrationWebhook := &controllers.VMMigrationWebhook{
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-webhook"),
 		Config:   rc,
+		Client:   mgr.GetClient(),
 	}
 	if err := migrationWebhook.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
