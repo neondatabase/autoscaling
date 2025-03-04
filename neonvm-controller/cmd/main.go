@@ -50,6 +50,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -152,7 +153,8 @@ func main() {
 	logConfig.Sampling = nil // Disabling sampling; it's enabled by default for zap's production configs.
 	logConfig.Level.SetLevel(zap.InfoLevel)
 	logConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	logger := zapr.NewLogger(zap.Must(logConfig.Build(zap.AddStacktrace(zapcore.PanicLevel))))
+	zapLogger := zap.Must(logConfig.Build(zap.AddStacktrace(zapcore.PanicLevel)))
+	logger := zapr.NewLogger(zapLogger)
 
 	ctrl.SetLogger(logger)
 	// define klog settings (used in LeaderElector)
@@ -182,7 +184,7 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
+		panic(err)
 	}
 
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
@@ -197,6 +199,21 @@ func main() {
 		FailingRefreshInterval:  failingRefreshInterval,
 		AtMostOnePod:            atMostOnePod,
 		DefaultCPUScalingMode:   defaultCpuScalingMode,
+		NADConfig:               controllers.GetNADConfig(),
+	}
+
+	// Let's not have more than a quater of reconcilliation workers stuck
+	// at IPAM mutex.
+	ipam, err := ipam.New(rc.NADConfig.IPAMName, rc.NADConfig.IPAMNamespace, max(1, concurrencyLimit/4))
+	if err != nil {
+		setupLog.Error(err, "unable to create ipam")
+		panic(err)
+	}
+	defer ipam.Close()
+	err = mgr.Add(ipam.Cleaner("default"))
+	if err != nil {
+		setupLog.Error(err, "unable to add ipam cleaner")
+		panic(err)
 	}
 
 	vmReconciler := &controllers.VMReconciler{
@@ -205,11 +222,12 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
 		Config:   rc,
 		Metrics:  reconcilerMetrics,
+		IPAM:     ipam,
 	}
 	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
-		os.Exit(1)
+		panic(err)
 	}
 	vmWebhook := &controllers.VMWebhook{
 		Recorder: mgr.GetEventRecorderFor("virtualmachine-webhook"),
@@ -217,7 +235,7 @@ func main() {
 	}
 	if err := vmWebhook.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
-		os.Exit(1)
+		panic(err)
 	}
 
 	migrationReconciler := &controllers.VirtualMachineMigrationReconciler{
@@ -230,7 +248,7 @@ func main() {
 	migrationReconcilerMetrics, err := migrationReconciler.SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachineMigration")
-		os.Exit(1)
+		panic(err)
 	}
 	migrationWebhook := &controllers.VMMigrationWebhook{
 		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-webhook"),
@@ -238,35 +256,35 @@ func main() {
 	}
 	if err := migrationWebhook.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "VirtualMachine")
-		os.Exit(1)
+		panic(err)
 	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
+		panic(err)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
+		panic(err)
 	}
 
 	dbgSrv := debugServerFunc(vmReconcilerMetrics, migrationReconcilerMetrics)
 	if err := mgr.Add(dbgSrv); err != nil {
 		setupLog.Error(err, "unable to set up debug server")
-		os.Exit(1)
+		panic(err)
 	}
 
 	if err := mgr.Add(vmReconcilerMetrics.FailingRefresher()); err != nil {
 		setupLog.Error(err, "unable to set up failing refresher")
-		os.Exit(1)
+		panic(err)
 	}
 
 	// NOTE: THE CONTROLLER MUST IMMEDIATELY EXIT AFTER RUNNING THE MANAGER.
-	if err := run(mgr); err != nil {
-		setupLog.Error(err, "run manager error")
-		os.Exit(1)
-	}
+	// OTHERWISE, THE LEADER ELECTION GUARANTEE WILL BE BROKEN.
+
+	err = run(mgr)
+	panic(err)
 }
 
 func debugServerFunc(reconcilers ...controllers.ReconcilerWithMetrics) manager.RunnableFunc {

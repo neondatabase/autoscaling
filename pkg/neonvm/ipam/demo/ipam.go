@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
@@ -45,7 +46,7 @@ func main() {
 	ctx := log.IntoContext(context.Background(), logger)
 
 	// Create IPAM object
-	ipam, err := ipam.New(ctx, *nadName, *nadNs)
+	ipam, err := ipam.New(*nadName, *nadNs, 1)
 	if err != nil {
 		logger.Error(err, "failed to create IPAM")
 		os.Exit(1)
@@ -62,7 +63,7 @@ func main() {
 			startTime := time.Now()
 			id := fmt.Sprintf("demo-ipam-%d", i)
 			logger.Info("try to lease", "id", id)
-			if ip, err := ipam.AcquireIP(ctx, id, demoNamespace); err != nil {
+			if ip, err := ipam.AcquireIP(ctx, types.NamespacedName{Name: id, Namespace: demoNamespace}); err != nil {
 				logger.Error(err, "lease failed", "id", id)
 			} else {
 				logger.Info("acquired", "id", id, "ip", ip.String(), "acquired in", time.Since(startTime))
@@ -80,7 +81,7 @@ func main() {
 			startTime := time.Now()
 			id := fmt.Sprintf("demo-ipam-%d", i)
 			logger.Info("try to release", "id", id)
-			if ip, err := ipam.ReleaseIP(ctx, id, demoNamespace); err != nil {
+			if ip, err := ipam.ReleaseIP(ctx, types.NamespacedName{Name: id, Namespace: demoNamespace}); err != nil {
 				logger.Error(err, "release failed", "id", id)
 			} else {
 				logger.Info("released", "id", id, "ip", ip.String(), "released in", time.Since(startTime))
