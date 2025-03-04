@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Generation script that's run inside of the Dockerfile.generate container.
+# Generation script that's run inside of the generate.Dockerfile container.
 
 set -eu -o pipefail
 
