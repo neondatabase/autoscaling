@@ -132,7 +132,7 @@ func (r *VMReconciler) cleanupTmpSecrets(ctx context.Context, vm *vmv1.VirtualMa
 	if err != nil && !apierrors.IsNotFound(err) {
 		log.Error(err, "Failed to get vm TLS secret")
 		return err
-	} else if err != nil /* not found */ {
+	} else if err == nil /* found */ {
 		if err := r.deleteTmpSecret(ctx, vm, tmpKeySecret); err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func (r *VMReconciler) cleanupTmpSecrets(ctx context.Context, vm *vmv1.VirtualMa
 	if err != nil && !apierrors.IsNotFound(err) {
 		log.Error(err, "Failed to get vm CertificateRequest")
 		return err
-	} else if err != nil /* not found */ {
+	} else if err == nil /* found */ {
 		if err := r.deleteCertRequest(ctx, vm, certificateReq); err != nil {
 			return err
 		}
