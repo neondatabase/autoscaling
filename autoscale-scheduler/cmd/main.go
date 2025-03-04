@@ -20,6 +20,7 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/plugin"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	_ "go.uber.org/automaxprocs"
 )
 
 // all of the juicy bits are defined in pkg/plugin/
