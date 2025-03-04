@@ -23,7 +23,7 @@ with the following sequence of actions:
 1. On the host, run:
    ```sh
    cd neonvm-kernel # this directory
-   docker build --build-arg KERNEL_VERSION=$NEW_VERSION --target build-deps -t kernel-build-deps -f kernel-builder.Dockerfile .
+   docker build --build-arg KERNEL_VERSION=$NEW_VERSION --target build-deps -t kernel-build-deps .
    docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
    ```
 2. Then, inside the container, run:
@@ -47,7 +47,7 @@ with the following sequence of actions:
 1. On the host, run:
    ```sh
    cd neonvm-kernel # this directory
-   docker build --build-arg KERNEL_VERSION=$NEW_VERSION --target build-deps -t kernel-build-deps -f kernel-builder.Dockerfile .
+   docker build --build-arg KERNEL_VERSION=$NEW_VERSION --target build-deps -t kernel-build-deps .
    docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
    ```
 2. Then, inside the container, run:
@@ -74,7 +74,7 @@ mention the old kernel version.
 To adjust the kernel config, try the following from this directory:
 
 ```sh
-docker build --build-arg KERNEL_VERSION=6.6.64 --platform linux/x86_64 --target build-deps -t kernel-build-deps -f kernel-builder.Dockerfile .
+docker build --build-arg KERNEL_VERSION=6.6.64 --platform linux/x86_64 --target build-deps -t kernel-build-deps .
 docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
 # inside that bash shell, do the menuconfig, then copy-out the config to /host
 ```

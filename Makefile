@@ -18,7 +18,7 @@ GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
 
 # The target architecture for linux kernel. Possible values: amd64 or arm64.
-# Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/kernel-builder.Dockerfile
+# Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile
 UNAME_ARCH := $(shell uname -m)
 ifeq ($(UNAME_ARCH),x86_64)
     TARGET_ARCH ?= amd64
@@ -300,7 +300,7 @@ kernel: ## Build linux kernel.
 		--pull \
 		--load \
 		--iidfile $$iidfile \
-		--file neonvm-kernel/kernel-builder.Dockerfile \
+		--file neonvm-kernel/Dockerfile \
 		neonvm-kernel; \
 	id=$$(docker create $$(cat $$iidfile)); \
 	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \

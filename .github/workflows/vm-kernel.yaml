@@ -247,7 +247,7 @@ jobs:
         with:
           build-args: KERNEL_VERSION=${{ needs.get-tags.outputs.kernel_version_tag }}
           context: neonvm-kernel
-          # neonvm-kernel/kernel-builder.Dockerfile has different targets for different architectures
+          # neonvm-kernel/Dockerfile has different targets for different architectures
           # so we need to specify the target explicitly
           target: ${{ format('kernel_{0}', matrix.arch) }}
           # Push kernel image only for scheduled builds or if workflow_dispatch/workflow_call input is true
@@ -255,7 +255,7 @@ jobs:
           pull: true
           provenance: false
           sbom: false
-          file: neonvm-kernel/kernel-builder.Dockerfile
+          file: neonvm-kernel/Dockerfile
           cache-from: ${{ format('type=registry,ref=cache.neon.build/vm-kernel-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/vm-kernel-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.generate-full-image-tags.outputs.tags }}
