@@ -300,24 +300,63 @@ func makeVMRestartMetrics(vm *vmv1.VirtualMachine) []vmMetric {
 	}
 }
 
+func makeVMExtraIPMetrics(vm *vmv1.VirtualMachine) []vmMetric {
+	endpointID := vm.Labels[endpointLabel]
+	projectID := vm.Labels[projectLabel]
+	labels := makePerVMMetricsLabels(vm.Namespace, vm.Name, endpointID, projectID, "")
+
+	value := 0
+	if vm.Status.ExtraNetIP != "" {
+		value = 1
+	}
+	return []vmMetric{
+		{
+			labels: labels,
+			value:  float64(value),
+		},
+	}
+}
+
+type gaugeSpec struct {
+	maker func(*vmv1.VirtualMachine) []vmMetric
+	gauge *prometheus.GaugeVec
+}
+
+// getGaugeSpecs ties together a source of metrics with a destination.
+func getGaugeSpecs(perVMMetrics *PerVMMetrics) []gaugeSpec {
+	return []gaugeSpec{
+		{
+			maker: makeVMCPUMetrics,
+			gauge: perVMMetrics.cpu,
+		},
+		{
+			maker: makeVMMemMetrics,
+			gauge: perVMMetrics.memory,
+		},
+		{
+			maker: makeVMRestartMetrics,
+			gauge: perVMMetrics.restartCount,
+		},
+		{
+			maker: makeVMExtraIPMetrics,
+			gauge: perVMMetrics.extraIP,
+		},
+	}
+}
+
 func setVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeName string) {
 	if vm.Status.Node != nodeName {
 		return
 	}
 
-	cpuMetrics := makeVMCPUMetrics(vm)
-	for _, m := range cpuMetrics {
-		perVMMetrics.cpu.With(m.labels).Set(m.value)
+	push := func(metrics []vmMetric, gauge *prometheus.GaugeVec) {
+		for _, m := range metrics {
+			gauge.With(m.labels).Set(m.value)
+		}
 	}
 
-	memMetrics := makeVMMemMetrics(vm)
-	for _, m := range memMetrics {
-		perVMMetrics.memory.With(m.labels).Set(m.value)
-	}
-
-	restartCountMetrics := makeVMRestartMetrics(vm)
-	for _, m := range restartCountMetrics {
-		perVMMetrics.restartCount.With(m.labels).Set(m.value)
+	for _, spec := range getGaugeSpecs(perVMMetrics) {
+		push(spec.maker(vm), spec.gauge)
 	}
 
 	// Add the VM to the internal tracker:
@@ -349,17 +388,15 @@ func updateVMMetrics(perVMMetrics *PerVMMetrics, oldVM, newVM *vmv1.VirtualMachi
 		}
 	}
 
-	oldCPUMetrics := makeVMCPUMetrics(oldVM)
-	newCPUMetrics := makeVMCPUMetrics(newVM)
-	updateMetrics(perVMMetrics.cpu, oldCPUMetrics, newCPUMetrics)
+	for _, spec := range getGaugeSpecs(perVMMetrics) {
+		oldMetrics := spec.maker(oldVM)
+		newMetrics := spec.maker(newVM)
+		updateMetrics(spec.gauge, oldMetrics, newMetrics)
+	}
 
-	oldMemMetrics := makeVMMemMetrics(oldVM)
-	newMemMetrics := makeVMMemMetrics(newVM)
-	updateMetrics(perVMMetrics.memory, oldMemMetrics, newMemMetrics)
-
-	oldRestartCountMetrics := makeVMRestartMetrics(oldVM)
-	newRestartCountMetrics := makeVMRestartMetrics(newVM)
-	updateMetrics(perVMMetrics.restartCount, oldRestartCountMetrics, newRestartCountMetrics)
+	oldExtraIPMetrics := makeVMExtraIPMetrics(oldVM)
+	newExtraIPMetrics := makeVMExtraIPMetrics(newVM)
+	updateMetrics(perVMMetrics.extraIP, oldExtraIPMetrics, newExtraIPMetrics)
 
 	// Update the VM in the internal tracker:
 	perVMMetrics.updateActive(newVM) // note: don't need to clean up old one, because it's keyed by name
@@ -370,19 +407,16 @@ func deleteVMMetrics(perVMMetrics *PerVMMetrics, vm *vmv1.VirtualMachine, nodeNa
 		return
 	}
 
-	cpuMetrics := makeVMCPUMetrics(vm)
-	for _, m := range cpuMetrics {
-		perVMMetrics.cpu.Delete(m.labels)
+	for _, spec := range getGaugeSpecs(perVMMetrics) {
+		metrics := spec.maker(vm)
+		for _, m := range metrics {
+			spec.gauge.Delete(m.labels)
+		}
 	}
 
-	memMetrics := makeVMMemMetrics(vm)
-	for _, m := range memMetrics {
-		perVMMetrics.memory.Delete(m.labels)
-	}
-
-	restartCountMetrics := makeVMRestartMetrics(vm)
-	for _, m := range restartCountMetrics {
-		perVMMetrics.restartCount.Delete(m.labels)
+	extraIPMetrics := makeVMExtraIPMetrics(vm)
+	for _, m := range extraIPMetrics {
+		perVMMetrics.extraIP.Delete(m.labels)
 	}
 
 	// Remove the VM from the internal tracker:
