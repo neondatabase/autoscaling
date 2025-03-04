@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"math"
 
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/constraints"
@@ -64,7 +65,8 @@ type NodeResources[T constraints.Unsigned] struct {
 	// This value does not change.
 	Total T
 
-	// Reserved is exactly equal to all Pods' <resource>.Reserved values.
+	// Reserved is the sum of all Pods' <resource>.Reserved values, after applying overcommit
+	// factors.
 	//
 	// It SHOULD be less than or equal to Total, and - when live migration is enabled - we take
 	// active measures to reduce it once it is above Watermark.
@@ -358,17 +360,25 @@ func (n *Node) RemovePod(uid types.UID) (exists bool) {
 	return true
 }
 
+func applyOvercommit[T constraints.Unsigned](value T, overcommit float64) T {
+	return T(math.Round(float64(value) / overcommit))
+}
+
 func (r *NodeResources[T]) add(p *PodResources[T], migrating bool) {
-	r.Reserved += p.Reserved
+	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
+
+	r.Reserved += actualReserved
 	if migrating {
-		r.Migrating += p.Reserved
+		r.Migrating += actualReserved
 	}
 }
 
 func (r *NodeResources[T]) remove(p PodResources[T], migrating bool) {
-	r.Reserved -= p.Reserved
+	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
+
+	r.Reserved -= actualReserved
 	if migrating {
-		r.Migrating -= p.Reserved
+		r.Migrating -= actualReserved
 	}
 }
 
@@ -385,9 +395,12 @@ func (r *NodeResources[T]) reconcilePod(p *PodResources[T], migrating bool) (don
 		return true // nothing to do!
 	}
 
-	// Difficult case: Requested is greater than Reserved -- how much can we give?
 	desiredIncrease := p.Requested - p.Reserved
-	remaining := util.SaturatingSub(r.Total, r.Reserved)
+
+	// Difficult case: Requested is greater than Reserved -- how much can we give?
+	// The answer is relative to the overcommit -- taking Total-Reserved and inverting the
+	// overcommit so that we translate the amount relative to the *pod's* overcommit.
+	remaining := T(math.Floor(float64(util.SaturatingSub(r.Total, r.Reserved)) * p.Overcommit))
 
 	// (X / M) * M is equivalent to floor(X / M) -- any amount that we give must be a multiple of
 	// the factor (roughly, the compute unit).

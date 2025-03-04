@@ -80,6 +80,15 @@ func VirtualMachineResourcesFromPod(pod *corev1.Pod) (*VirtualMachineResources, 
 	return extractFromAnnotation[VirtualMachineResources](pod, VirtualMachineResourcesAnnotation)
 }
 
+// VirtualMachineOvercommitFromPod returns the overcommit settings for the virtual machine, as
+// encoded by the helper annotation on the pod.
+//
+// If the annotation is not present, which may be true if the VM object doesn't have them, this
+// function returns (nil, nil).
+func VirtualMachineOvercommitFromPod(pod *corev1.Pod) (*OvercommitSettings, error) {
+	return extractFromAnnotation[OvercommitSettings](pod, VirtualMachineOvercommitAnnotation)
+}
+
 func extractFromAnnotation[T any](pod *corev1.Pod, annotation string) (*T, error) {
 	jsonString, ok := pod.Annotations[annotation]
 	if !ok {
