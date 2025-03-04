@@ -1,3 +1,137 @@
+diff --git a/cluster-autoscaler/core/scaleup/orchestrator/orchestrator.go b/cluster-autoscaler/core/scaleup/orchestrator/orchestrator.go
+index 7fb533570..ddf3ea689 100644
+--- a/cluster-autoscaler/core/scaleup/orchestrator/orchestrator.go
++++ b/cluster-autoscaler/core/scaleup/orchestrator/orchestrator.go
+@@ -42,6 +42,7 @@ import (
+ 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
+ 	"k8s.io/autoscaler/cluster-autoscaler/utils/klogx"
+ 	"k8s.io/autoscaler/cluster-autoscaler/utils/taints"
++	interpodaffinity "k8s.io/kubernetes/pkg/scheduler/framework/plugins/interpodaffinity"
+ )
+ 
+ // ScaleUpOrchestrator implements scaleup.Orchestrator interface.
+@@ -604,7 +605,17 @@ func (o *ScaleUpOrchestrator) SchedulablePodGroups(
+ 	var schedulablePodGroups []estimator.PodEquivalenceGroup
+ 	for _, eg := range podEquivalenceGroups {
+ 		samplePod := eg.Pods[0]
+-		if err := o.autoscalingContext.PredicateChecker.CheckPredicates(o.autoscalingContext.ClusterSnapshot, samplePod, nodeInfo.Node().Name); err == nil {
++		err := o.autoscalingContext.PredicateChecker.CheckPredicates(o.autoscalingContext.ClusterSnapshot, samplePod, nodeInfo.Node().Name)
++		// Ignore inter-pod affinity since this is not usually a reason to fail the ASG
++		// (unless the anti-affinity conflict is with a DaemonSet pod, but there's no way to tell)
++
++		ignoreErr := err != nil && err.PredicateName() == "InterPodAffinity" && err.Message() == interpodaffinity.ErrReasonAntiAffinityRulesNotMatch
++
++		if ignoreErr {
++			klog.V(4).Infof("Ignoring error while checking predicates for pod %s.%s on node %s in ClusterSnapshot; %v", samplePod.Namespace, samplePod.Name, nodeInfo.Node().Name, err)
++		}
++
++		if err == nil || ignoreErr {
+ 			// Add pods to option.
+ 			schedulablePodGroups = append(schedulablePodGroups, estimator.PodEquivalenceGroup{
+ 				Pods: eg.Pods,
+diff --git a/cluster-autoscaler/estimator/binpacking_estimator.go b/cluster-autoscaler/estimator/binpacking_estimator.go
+index 229a2e264..c8f918d3b 100644
+--- a/cluster-autoscaler/estimator/binpacking_estimator.go
++++ b/cluster-autoscaler/estimator/binpacking_estimator.go
+@@ -26,6 +26,7 @@ import (
+ 	"k8s.io/autoscaler/cluster-autoscaler/utils/scheduler"
+ 	klog "k8s.io/klog/v2"
+ 	schedulerframework "k8s.io/kubernetes/pkg/scheduler/framework"
++	interpodaffinity "k8s.io/kubernetes/pkg/scheduler/framework/plugins/interpodaffinity"
+ )
+ 
+ // BinpackingNodeEstimator estimates the number of needed nodes to handle the given amount of pods.
+@@ -108,13 +109,18 @@ func (e *BinpackingNodeEstimator) Estimate(
+ 		var err error
+ 		var remainingPods []*apiv1.Pod
+ 
++		klog.V(4).Infof("trying to schedule %d pods on existing nodes", len(podsEquivalenceGroup.Pods))
+ 		remainingPods, err = e.tryToScheduleOnExistingNodes(estimationState, podsEquivalenceGroup.Pods)
++
++		klog.V(4).Infof("After attempt, there are %d pods that couldn't be scheduled", len(remainingPods))
+ 		if err != nil {
+ 			klog.Errorf(err.Error())
+ 			return 0, nil
+ 		}
+ 
++		klog.V(4).Infof("trying to schedule %d pods on new nodes", len(remainingPods))
+ 		err = e.tryToScheduleOnNewNodes(estimationState, nodeTemplate, remainingPods)
++		klog.V(4).Infof("After attempt, there are %d pods that couldn't be scheduled", len(remainingPods))
+ 		if err != nil {
+ 			klog.Errorf(err.Error())
+ 			return 0, nil
+@@ -137,6 +143,7 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnExistingNodes(
+ 
+ 		// Check schedulability on all nodes created during simulation
+ 		nodeName, err := e.predicateChecker.FitsAnyNodeMatching(e.clusterSnapshot, pod, func(nodeInfo *schedulerframework.NodeInfo) bool {
++			klog.V(4).Infof("checking if pod %s.%s with nodeSelector %v fits on node %s", pod.Namespace, pod.Name, pod.Spec.NodeSelector, nodeInfo.Node().Name)
+ 			return estimationState.newNodeNames[nodeInfo.Node().Name]
+ 		})
+ 		if err != nil {
+@@ -144,6 +151,7 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnExistingNodes(
+ 		}
+ 
+ 		if err := e.tryToAddNode(estimationState, pod, nodeName); err != nil {
++			klog.V(4).Infof("Error while adding pod %s.%s to node %s in ClusterSnapshot; %v", pod.Namespace, pod.Name, nodeName, err)
+ 			return nil, err
+ 		}
+ 	}
+@@ -183,6 +191,7 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnNewNodes(
+ 			// each call that returns true, one node gets added. Therefore this
+ 			// must be the last check right before really adding a node.
+ 			if !e.limiter.PermissionToAddNode() {
++				klog.V(4).Infof("Tried to add node, but couldn't due to hitting the limit")
+ 				break
+ 			}
+ 
+@@ -195,10 +204,22 @@ func (e *BinpackingNodeEstimator) tryToScheduleOnNewNodes(
+ 			// Note that this may still fail (ex. if topology spreading with zonal topologyKey is used);
+ 			// in this case we can't help the pending pod. We keep the node in clusterSnapshot to avoid
+ 			// adding and removing node to snapshot for each such pod.
+-			if err := e.predicateChecker.CheckPredicates(e.clusterSnapshot, pod, estimationState.lastNodeName); err != nil {
+-				break
++			err := e.predicateChecker.CheckPredicates(e.clusterSnapshot, pod, estimationState.lastNodeName)
++
++			/* Normally, if we get an error, it means the predicate check failed, and creating a node won't allow the pod to be scheduled
++			   However, if the error is due to InterPodAffinity, we ignore that there was an error and continue to attempt adding the node
++			*/
++			if err != nil {
++				if err.PredicateName() == "InterPodAffinity" && err.Message() == interpodaffinity.ErrReasonAntiAffinityRulesNotMatch {
++					klog.V(4).Infof("Ignoring InterPodAffinity error while checking predicates for pod %s.%s on theoretical node %s in ClusterSnapshot; %v", pod.Namespace, pod.Name, estimationState.lastNodeName, err)
++				} else {
++					klog.V(4).Infof("Error while checking predicates for pod %s.%s on theoretical node %s in ClusterSnapshot; %v, bailing", pod.Namespace, pod.Name, estimationState.lastNodeName, err)
++					break
++				}
+ 			}
++
+ 			if err := e.tryToAddNode(estimationState, pod, estimationState.lastNodeName); err != nil {
++				klog.V(4).Infof("Error while adding pod %s.%s to node %s in ClusterSnapshot; %v", pod.Namespace, pod.Name, estimationState.lastNodeName, err)
+ 				return err
+ 			}
+ 		}
+@@ -211,6 +232,9 @@ func (e *BinpackingNodeEstimator) addNewNodeToSnapshot(
+ 	template *schedulerframework.NodeInfo,
+ ) error {
+ 	newNodeInfo := scheduler.DeepCopyTemplateNode(template, fmt.Sprintf("e-%d", estimationState.newNodeNameIndex))
++
++	klog.V(4).Infof("[Estimator] adding new node %s to ClusterSnapshot, with labels %v and taints %v", newNodeInfo.Node().Name, newNodeInfo.Node().Labels, newNodeInfo.Node().Spec.Taints)
++
+ 	var pods []*apiv1.Pod
+ 	for _, podInfo := range newNodeInfo.Pods {
+ 		pods = append(pods, podInfo.Pod)
+diff --git a/cluster-autoscaler/simulator/predicatechecker/schedulerbased.go b/cluster-autoscaler/simulator/predicatechecker/schedulerbased.go
+index 8a13ee2cf..77589f408 100644
+--- a/cluster-autoscaler/simulator/predicatechecker/schedulerbased.go
++++ b/cluster-autoscaler/simulator/predicatechecker/schedulerbased.go
+@@ -129,6 +129,8 @@ func (p *SchedulerBasedPredicateChecker) FitsAnyNodeMatching(clusterSnapshot clu
+ 		if filterStatus.IsSuccess() {
+ 			p.lastIndex = (p.lastIndex + i + 1) % len(nodeInfosList)
+ 			return nodeInfo.Node().Name, nil
++		} else {
++			klog.V(4).Infof("Pod %s cannot be placed on node %s because: %s", pod.Name, nodeInfo.Node().Name, filterStatus.Message())
+ 		}
+ 	}
+ 	return "", fmt.Errorf("cannot put pod %s on any node", pod.Name)
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
 index b9be94b6e..8e62c3cda 100644
 --- a/cluster-autoscaler/utils/kubernetes/listers.go
