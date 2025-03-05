@@ -9,7 +9,7 @@ USER root
 
 FROM {{.NeonvmDaemonImage}} AS neonvm-daemon-loader
 
-FROM busybox:1.35.0-musl AS busybox-loader
+FROM busybox:1.35.0-musl@sha256:1602e40bcbe33b2424709f35005c974bb8de80a11e2722316535f38af3036da8 AS busybox-loader
 
 FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS vm-runtime
 ARG TARGET_ARCH
