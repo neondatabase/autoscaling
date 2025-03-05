@@ -51,7 +51,7 @@ files:
 
 build: |
   # Build vm-monitor
-  FROM rust:1.85-alpine AS monitor-builder
+  FROM rust:1.85-alpine@sha256:1030547bd568497d69e41771ada279179f0613369dc54779e46a3f6f376b3020 AS monitor-builder
   WORKDIR /workspace
 
   RUN apk add musl-dev git openssl-dev
