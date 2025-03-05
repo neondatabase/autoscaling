@@ -75,7 +75,7 @@ build: |
   # At time of writing (2023-03-14), debian bullseye has a version of cgroup-tools (technically
   # libcgroup) that doesn't support cgroup v2 (version 0.41-11). Unfortunately, the vm-monitor
   # requires cgroup v2, so we'll build cgroup-tools ourselves.
-  FROM debian:bullseye-slim AS libcgroup-builder
+  FROM debian:bullseye-slim@sha256:33b7c2e071c29e618182ec872c471f39d2dde3d8904d95f5b7a61acf3a592e7b AS libcgroup-builder
   ENV LIBCGROUP_VERSION v2.0.3
 
   RUN set -exu \
@@ -107,7 +107,7 @@ build: |
 
   # Build pgbouncer
   #
-  FROM debian:bullseye-slim AS pgbouncer
+  FROM debian:bullseye-slim@sha256:33b7c2e071c29e618182ec872c471f39d2dde3d8904d95f5b7a61acf3a592e7b AS pgbouncer
   RUN set -e \
       && apt-get update \
       && apt-get install -y \
