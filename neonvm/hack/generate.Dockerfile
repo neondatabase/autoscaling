@@ -1,4 +1,4 @@
-FROM golang:1.23
+FROM golang:1.23.7@sha256:1acb493b9f9dfdfe705042ce09e8ded908ce4fb342405ecf3ca61ce7f3b168c7
 
 RUN apt-get update && apt-get install -y patch
 
