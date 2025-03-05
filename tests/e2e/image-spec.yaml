@@ -103,7 +103,7 @@ build: |
       # actually build the thing...
       && make install
 
-  FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
+  FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0@sha256:f34d50a64a4d558ad118ffc73be45a359ac8f30b8daba4b241458bcb9f94e254 AS postgres-exporter
 
   # Build pgbouncer
   #
