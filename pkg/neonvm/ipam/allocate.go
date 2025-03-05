@@ -1,11 +1,13 @@
 package ipam
 
 import (
+	"context"
 	"net"
 
 	whereaboutsallocate "github.com/k8snetworkplumbingwg/whereabouts/pkg/allocate"
 	whereaboutslogging "github.com/k8snetworkplumbingwg/whereabouts/pkg/logging"
 	whereaboutstypes "github.com/k8snetworkplumbingwg/whereabouts/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -16,20 +18,21 @@ type ipamAction = func(
 ) (net.IPNet, []whereaboutstypes.IPReservation, error)
 
 // makeAcquireAction creates a callback which changes IPPool state to include a new IP reservation.
-func makeAcquireAction(vmName types.NamespacedName) ipamAction {
+func makeAcquireAction(ctx context.Context, vmName types.NamespacedName) ipamAction {
 	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
-		return doAcquire(ipRange, reservation, vmName)
+		return doAcquire(ctx, ipRange, reservation, vmName)
 	}
 }
 
 // makeReleaseAction creates a callback which changes IPPool state to deallocate an IP reservation.
-func makeReleaseAction(vmName types.NamespacedName) ipamAction {
+func makeReleaseAction(ctx context.Context, vmName types.NamespacedName) ipamAction {
 	return func(ipRange RangeConfiguration, reservation []whereaboutstypes.IPReservation) (net.IPNet, []whereaboutstypes.IPReservation, error) {
-		return doRelease(ipRange, reservation, vmName)
+		return doRelease(ctx, ipRange, reservation, vmName)
 	}
 }
 
 func doAcquire(
+	_ context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
 	vmName types.NamespacedName,
@@ -57,6 +60,7 @@ func doAcquire(
 }
 
 func doRelease(
+	ctx context.Context,
 	ipRange RangeConfiguration,
 	reservation []whereaboutstypes.IPReservation,
 	vmName types.NamespacedName,
@@ -64,12 +68,19 @@ func doRelease(
 	// reduce whereabouts logging
 	whereaboutslogging.SetLogLevel("error")
 
+	log := log.FromContext(ctx)
+
 	_, ipnet, _ := net.ParseCIDR(ipRange.Range)
 
 	// try to release IP for given VM
 	newReservation, ip, err := whereaboutsallocate.IterateForDeallocation(reservation, vmName.String(), getMatchingIPReservationIndex)
 	if err != nil {
-		return net.IPNet{}, nil, err
+		// The only reason to get an error here is if we are trying
+		// to deallocate the same IP twice.
+		log.Info("Failed to deallocate IP", "error", err)
+
+		// Ignore the error.
+		return net.IPNet{IP: ip, Mask: ipnet.Mask}, newReservation, nil
 	}
 
 	return net.IPNet{IP: ip, Mask: ipnet.Mask}, newReservation, nil
