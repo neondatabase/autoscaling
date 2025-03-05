@@ -56,7 +56,7 @@ type IPAM struct {
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAM(ctx, makeAcquireAction(vmName))
+	ip, err := i.runIPAM(ctx, makeAcquireAction(ctx, vmName))
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to acquire IP: %w", err)
 	}
@@ -64,7 +64,7 @@ func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAM(ctx, makeReleaseAction(vmName))
+	ip, err := i.runIPAM(ctx, makeReleaseAction(ctx, vmName))
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
 	}

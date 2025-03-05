@@ -3,6 +3,7 @@ package ipam_test
 import (
 	"context"
 	"fmt"
+	"net"
 	"testing"
 
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -94,4 +95,43 @@ func TestIPAM(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ip3)
 	assert.Equal(t, ip2, ip3)
+}
+
+func TestIPAMReleaseTwice(t *testing.T) {
+	ipam := makeIPAM(t,
+		`{
+			"ipRanges": [
+				{
+					"range":"10.100.123.0/24",
+					"range_start":"10.100.123.1",
+					"range_end":"10.100.123.254"
+				}
+			]
+		}`,
+	)
+
+	defer ipam.Close()
+
+	name := types.NamespacedName{
+		Namespace: "default",
+		Name:      "vm",
+	}
+
+	ip, err := ipam.AcquireIP(context.Background(), name)
+	require.NoError(t, err)
+	require.NotNil(t, ip)
+
+	// Release the IP
+	ipResult, err := ipam.ReleaseIP(context.Background(), name)
+	require.NoError(t, err)
+	require.Equal(t, ip, ipResult)
+
+	// Release the IP again
+	ipResult, err = ipam.ReleaseIP(context.Background(), name)
+	require.NoError(t, err)
+	// This time we get nil IP
+	require.Equal(t, net.IPNet{
+		IP:   nil,
+		Mask: ip.Mask,
+	}, ipResult)
 }

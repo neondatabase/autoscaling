@@ -151,7 +151,10 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		if controllerutil.ContainsFinalizer(&vm, virtualmachineFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for VirtualMachine before delete it")
-			r.doFinalizerOperationsForVirtualMachine(ctx, &vm)
+			if err := r.doFinalizerOperationsForVirtualMachine(ctx, &vm); err != nil {
+				log.Error(err, "Failed to perform finalizer operations for VirtualMachine")
+				return ctrl.Result{}, err
+			}
 
 			// remove our finalizer from the list and update it.
 			log.Info("Removing Finalizer for VirtualMachine after successfully perform the operations")
@@ -226,7 +229,7 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
-func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, vm *vmv1.VirtualMachine) {
+func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, vm *vmv1.VirtualMachine) error {
 	// Note: It is not recommended to use finalizers with the purpose of delete resources which are
 	// created and managed in the reconciliation. These ones, such as the Pod created on this reconcile,
 	// are defined as depended of the custom resource. See that we use the method ctrl.SetControllerReference.
@@ -245,14 +248,13 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 	if vm.Spec.ExtraNetwork != nil {
 		ip, err := r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
 		if err != nil {
-			// ignore error
-			log.Error(err, "fail to release IP, error ignored")
-			return
+			return fmt.Errorf("fail to release IP: %w", err)
 		}
 		message := fmt.Sprintf("Released IP %s", ip.String())
 		log.Info(message)
 		r.Recorder.Event(vm, "Normal", "OverlayNet", message)
 	}
+	return nil
 }
 
 func getRunnerVersion(pod *corev1.Pod) (api.RunnerProtoVersion, error) {
