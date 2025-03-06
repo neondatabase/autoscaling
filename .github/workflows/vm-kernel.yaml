@@ -40,7 +40,7 @@ on:
         value: ${{ jobs.merge-kernel-images.outputs.image || jobs.setup-build-vm-kernel-image.outputs.image }}
 
 env:
-  VM_KERNEL_IMAGE: neondatabase/vm-kernel
+  VM_KERNEL_IMAGE: ghcr.io/neondatabase/vm-kernel
 
 
 defaults:
@@ -49,6 +49,9 @@ defaults:
 
 jobs:
   setup-build-vm-kernel-image:
+    permissions:
+      contents: read  # This is required for actions/checkout
+      packages: write  # required for pushing to GHCR
     strategy:
       matrix:
         arch: ${{ fromJson(inputs.archs) }}
@@ -73,6 +76,13 @@ jobs:
                           'neonvm-kernel/**') }}
         run: |
           echo "kernel-cache-tag=${KERNEL_CACHE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: get kernel image
         id: get-kernel-image
@@ -123,22 +133,14 @@ jobs:
 
           echo "retag-needed=${RETAG_NEEDED}" >> $GITHUB_OUTPUT
 
-      - name: login to docker hub
-        if: steps.check-if-retag-needed.outputs.retag-needed == 'true'
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
-        with:
-          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
-          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
-
       - name: tag image with new tag
         if: steps.check-if-retag-needed.outputs.retag-needed == 'true'
         env:
           CACHED_IMAGE: ${{ steps.get-kernel-image.outputs.image }}
           NEW_TAG: ${{ inputs.tag }}
         run: |
-          docker pull ${CACHED_IMAGE}
-          docker tag ${CACHED_IMAGE} ${VM_KERNEL_IMAGE}:${NEW_TAG}
-          docker push ${VM_KERNEL_IMAGE}:${NEW_TAG}
+          docker buildx imagetools create -t "${VM_KERNEL_IMAGE}:${NEW_TAG}" \
+                                             "${CACHED_IMAGE}"
 
   get-tags:
     needs: setup-build-vm-kernel-image
@@ -181,6 +183,9 @@ jobs:
           echo "canonical=${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
 
   build-vm-kernel-image:
+    permissions:
+      contents: read  # This is required for actions/checkout
+      packages: write  # required for pushing to GHCR
     needs: [setup-build-vm-kernel-image, get-tags]
     if: needs.setup-build-vm-kernel-image.outputs.image == ''
     outputs:
@@ -205,6 +210,12 @@ jobs:
 
       - name: docker - setup buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: login to docker hub
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
@@ -220,7 +231,6 @@ jobs:
       - name: Generate full image tags
         id: generate-full-image-tags
         env:
-          VM_KERNEL_IMAGE: neondatabase/vm-kernel
           TAGS: "${{ join(fromJson(needs.get-tags.outputs.tags), ' ')}}"
         run: |
           # build list of full qualified image names with all tags we have for this run
@@ -228,7 +238,7 @@ jobs:
           PROCESSED_TAGS=""
           for tag in ${TAGS}; do
 
-            # build full image tag like "neondatabase/vm-kernel-amd64:6.1.63"
+            # build full image tag like "ghcr.io/neondatabase/vm-kernel-amd64:6.1.63"
             full_image_tag="$VM_KERNEL_IMAGE-${{ matrix.arch }}:${tag}"
 
             # add or instantiate list of full qualified image names with all tags we have for this run
@@ -261,6 +271,9 @@ jobs:
           tags: ${{ steps.generate-full-image-tags.outputs.tags }}
 
   merge-kernel-images:
+    permissions:
+      contents: read  # This is required for actions/checkout
+      packages: write  # required for pushing to GHCR
     needs: [setup-build-vm-kernel-image, build-vm-kernel-image, get-tags]
     # onlye merge images build during this workflow invocation
     if: needs.setup-build-vm-kernel-image.outputs.image == ''
@@ -279,11 +292,12 @@ jobs:
       - name: docker - setup buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
-      - name: login to docker hub
+      - name: Login to GHCR
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
-          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
-          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
@@ -309,17 +323,18 @@ jobs:
 
           echo "image=${result_image}" >> $GITHUB_OUTPUT
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
       - name: Copy vm-kernel to GHCR
         env:
           TAG: ${{ needs.get-tags.outputs.canonical }}
         run: |
-          echo Copy ${VM_KERNEL_IMAGE}:${TAG} to GHCR
-          docker buildx imagetools create -t "ghcr.io/${VM_KERNEL_IMAGE}:${TAG}" \
-                                                      ${VM_KERNEL_IMAGE}:${TAG}
+          echo Copy ${VM_KERNEL_IMAGE}:${TAG} to Docker Hub
+
+          # New image on Docker Hub matches GHCR image, but without "ghcr.io/" prefix
+          docker buildx imagetools create -t "${VM_KERNEL_IMAGE#ghcr.io/}:${TAG}" \
+                                             "${VM_KERNEL_IMAGE}:${TAG}"

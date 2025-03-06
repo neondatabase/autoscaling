@@ -57,13 +57,13 @@ on:
         value: ${{ jobs.tags.outputs.cluster-autoscaler }}
 
 env:
-  IMG_CONTROLLER:         "neondatabase/neonvm-controller"
-  IMG_VXLAN_CONTROLLER:   "neondatabase/neonvm-vxlan-controller"
-  IMG_RUNNER:             "neondatabase/neonvm-runner"
-  IMG_SCHEDULER:          "neondatabase/autoscale-scheduler"
-  IMG_AUTOSCALER_AGENT:   "neondatabase/autoscaler-agent"
-  IMG_DAEMON:             "neondatabase/neonvm-daemon"
-  IMG_CLUSTER_AUTOSCALER: "neondatabase/cluster-autoscaler-neonvm"
+  IMG_CONTROLLER:         "ghcr.io/neondatabase/neonvm-controller"
+  IMG_VXLAN_CONTROLLER:   "ghcr.io/neondatabase/neonvm-vxlan-controller"
+  IMG_RUNNER:             "ghcr.io/neondatabase/neonvm-runner"
+  IMG_SCHEDULER:          "ghcr.io/neondatabase/autoscale-scheduler"
+  IMG_AUTOSCALER_AGENT:   "ghcr.io/neondatabase/autoscaler-agent"
+  IMG_DAEMON:             "ghcr.io/neondatabase/neonvm-daemon"
+  IMG_CLUSTER_AUTOSCALER: "ghcr.io/neondatabase/cluster-autoscaler-neonvm"
   ECR_DEV:                "369495373322.dkr.ecr.eu-central-1.amazonaws.com"
   ECR_PROD:               "093970136003.dkr.ecr.eu-central-1.amazonaws.com"
 
@@ -123,6 +123,7 @@ jobs:
       GO_BASE_IMG: ${{ format('localhost:5000/neondatabase/autoscaling-go-base-{0}:dev', matrix.arch) }}
     permissions:
       contents: read  # This is required for actions/checkout
+      packages: write  # required for pushing to GHCR
     strategy:
       matrix:
         arch: ${{ fromJson(inputs.archs) }}
@@ -183,6 +184,13 @@ jobs:
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to Docker cache registry
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
@@ -344,11 +352,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
-      - name: Login to Dockerhub
+      - name: Login to GHCR
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
-          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
-          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure dev AWS credentials
         if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
@@ -427,14 +436,13 @@ jobs:
                                                ${image_from}
           done
 
-      - name: Login to GHCR
+      - name: Login to Dockerhub
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
-      - name: Copy all merged images to GHCR
+      - name: Copy all merged images to Docker Hub
         env:
           TAG: ${{ inputs.tag }}
         run: |
@@ -447,9 +455,11 @@ jobs:
                   "${IMG_CLUSTER_AUTOSCALER}")
 
           for image in "${images[@]}"; do
-            echo Copy ${image}:${TAG} to GHCR
-            docker buildx imagetools create -t "ghcr.io/${image}:${TAG}" \
-                                                        ${image}:${TAG}
+            echo Copy ${image}:${TAG} to Docker Hub
+
+            # New image on Docker Hub matches GHCR image, but without "ghcr.io/" prefix
+            docker buildx imagetools create -t "${image#ghcr.io/}:${TAG}" \
+                                               "${image}:${TAG}"
           done
 
   push-to-acr-dev:
