@@ -18,6 +18,7 @@ package v1
 
 import (
 	"fmt"
+	"reflect"
 
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -51,7 +52,11 @@ func (r *VirtualMachineMigration) ValidateCreate() (admission.Warnings, error) {
 //
 // The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	return nil, fmt.Errorf("updating migration is not allowed")
+	oldVMM := old.(*VirtualMachineMigration)
+	if !reflect.DeepEqual(r.Spec, oldVMM.Spec) {
+		return nil, fmt.Errorf("updating migration spec is not allowed")
+	}
+	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator
