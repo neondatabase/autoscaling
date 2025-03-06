@@ -49,10 +49,15 @@ func TestPodStateExtraction(t *testing.T) {
 		reserved   resources
 		requested  *resources
 		factor     *resources
-		overcommit *overcommitFactors
+		overcommit overcommitFactors
 	}
 
 	mib := 1024 * 1024
+
+	defaultOvercommit := overcommitFactors{
+		cpu: 1.0,
+		mem: 1.0,
+	}
 
 	cases := []struct {
 		name string
@@ -87,7 +92,7 @@ func TestPodStateExtraction(t *testing.T) {
 				},
 				requested:  nil,
 				factor:     nil,
-				overcommit: nil,
+				overcommit: defaultOvercommit,
 			},
 		},
 		{
@@ -123,7 +128,7 @@ func TestPodStateExtraction(t *testing.T) {
 				},
 				requested:  nil,
 				factor:     nil,
-				overcommit: nil,
+				overcommit: defaultOvercommit,
 			},
 		},
 		{
@@ -175,7 +180,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
-				overcommit: nil,
+				overcommit: defaultOvercommit,
 			},
 		},
 		{
@@ -231,7 +236,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
-				overcommit: nil,
+				overcommit: defaultOvercommit,
 			},
 		},
 		{
@@ -292,7 +297,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
-				overcommit: nil,
+				overcommit: defaultOvercommit,
 			},
 		},
 		{
@@ -365,7 +370,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
-				overcommit: nil,
+				overcommit: defaultOvercommit,
 			},
 		},
 		{
@@ -442,7 +447,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
-				overcommit: nil,
+				overcommit: defaultOvercommit,
 			},
 		},
 		{
@@ -518,7 +523,7 @@ func TestPodStateExtraction(t *testing.T) {
 					cpu: vmv1.MilliCPU(500),
 					mem: api.Bytes(1024 * mib),
 				},
-				overcommit: nil,
+				overcommit: defaultOvercommit,
 			},
 		},
 		{
@@ -558,7 +563,7 @@ func TestPodStateExtraction(t *testing.T) {
 				},
 				requested: nil,
 				factor:    nil,
-				overcommit: &overcommitFactors{
+				overcommit: overcommitFactors{
 					cpu: 2.5,
 					mem: 1.5,
 				},
@@ -600,7 +605,7 @@ func TestPodStateExtraction(t *testing.T) {
 				},
 				requested: nil,
 				factor:    nil,
-				overcommit: &overcommitFactors{
+				overcommit: overcommitFactors{
 					cpu: 2.5,
 					mem: 1.0, // in this case, we have no explicit overcommit, so we should get the default of 1.0
 				},
@@ -640,11 +645,6 @@ func TestPodStateExtraction(t *testing.T) {
 				},
 			}
 
-			defaultOvercommit := overcommitFactors{
-				cpu: 1.0,
-				mem: 1.0,
-			}
-
 			expectedPod := state.Pod{
 				NamespacedName: util.NamespacedName{
 					Name:      "pod-name",
@@ -660,13 +660,13 @@ func TestPodStateExtraction(t *testing.T) {
 					Reserved:   c.extracted.reserved.cpu,
 					Requested:  lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).cpu,
 					Factor:     lo.FromPtr(c.extracted.factor).cpu,
-					Overcommit: lo.FromPtrOr(c.extracted.overcommit, defaultOvercommit).cpu,
+					Overcommit: c.extracted.overcommit.cpu,
 				},
 				Mem: state.PodResources[api.Bytes]{
 					Reserved:   c.extracted.reserved.mem,
 					Requested:  lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).mem,
 					Factor:     lo.FromPtr(c.extracted.factor).mem,
-					Overcommit: lo.FromPtrOr(c.extracted.overcommit, defaultOvercommit).mem,
+					Overcommit: c.extracted.overcommit.mem,
 				},
 			}
 
