@@ -101,7 +101,7 @@ type PodResources[T constraints.Unsigned] struct {
 	// As an example, setting this value equal to 1500 on all pods would allow 50% more of this
 	// resource to be scheduled (1500m ≈ 1.5 ⇒ 50% more).
 	//
-	// For pods that aren't VMs, this should be set to 1.0.
+	// For pods that aren't VMs, this should be set to 1000.
 	OvercommitMillis int64
 }
 
