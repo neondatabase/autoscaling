@@ -50,10 +50,10 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 		logger.Info("Created HTTP client for billing events", zap.Any("config", c))
 
 		clients = append(clients, billingClient{
-			Name:           "http",
-			Base:           client,
-			BaseConfig:     c.BaseClientConfig,
-			SerializeBatch: jsonMarshalEvents, // note: NOT gzipped.
+			Name:            "http",
+			Base:            client,
+			BaseConfig:      c.BaseClientConfig,
+			NewBatchBuilder: jsonArrayBatch(reporting.NewByteBuffer), // note: NOT gzipped.
 		})
 
 	}
@@ -66,10 +66,10 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 		logger.Info("Created Azure Blob Storage client for billing events", zap.Any("config", c))
 
 		clients = append(clients, billingClient{
-			Name:           "azureblob",
-			Base:           client,
-			BaseConfig:     c.BaseClientConfig,
-			SerializeBatch: reporting.WrapSerialize(reporting.GZIPCompress, jsonMarshalEvents),
+			Name:            "azureblob",
+			Base:            client,
+			BaseConfig:      c.BaseClientConfig,
+			NewBatchBuilder: jsonArrayBatch(reporting.NewGZIPBuffer),
 		})
 	}
 	if c := cfg.S3; c != nil {
@@ -81,22 +81,20 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 		logger.Info("Created S3 client for billing events", zap.Any("config", c))
 
 		clients = append(clients, billingClient{
-			Name:           "s3",
-			Base:           client,
-			BaseConfig:     c.BaseClientConfig,
-			SerializeBatch: reporting.WrapSerialize(reporting.GZIPCompress, jsonMarshalEvents),
+			Name:            "s3",
+			Base:            client,
+			BaseConfig:      c.BaseClientConfig,
+			NewBatchBuilder: jsonArrayBatch(reporting.NewGZIPBuffer),
 		})
 	}
 
 	return clients, nil
 }
 
-func jsonMarshalEvents(events []*IncrementalEvent) ([]byte, reporting.SimplifiableError) {
-	obj := struct {
-		Events []*IncrementalEvent `json:"events"`
-	}{Events: events}
-
-	return reporting.JSONMarshalBatch(&obj)
+func jsonArrayBatch[B reporting.IOBuffer](buf func() B) func() reporting.BatchBuilder[*IncrementalEvent] {
+	return func() reporting.BatchBuilder[*IncrementalEvent] {
+		return reporting.NewJSONArrayBuilder[*IncrementalEvent](buf(), "events")
+	}
 }
 
 // Returns a function to generate keys for the placement of billing events data into blob storage.

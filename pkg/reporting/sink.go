@@ -39,7 +39,7 @@ func NewEventSink[E any](logger *zap.Logger, metrics *EventSinkMetrics, clients 
 
 		sizeGauge := metrics.queueSizeCurrent.WithLabelValues(c.Name)
 
-		batcher := newEventBatcher[E](int(c.BaseConfig.MaxBatchSize), notifyComplete, sizeGauge)
+		batcher := newEventBatcher[E](int(c.BaseConfig.MaxBatchSize), c.NewBatchBuilder, notifyComplete, sizeGauge)
 		queueWriters = append(queueWriters, batcher)
 
 		// Create the sender -- we'll save starting it for the call to Run()
