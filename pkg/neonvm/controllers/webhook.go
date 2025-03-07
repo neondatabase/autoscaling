@@ -111,7 +111,6 @@ func (w *VMWebhook) ValidateDelete(ctx context.Context, obj runtime.Object) (adm
 type VMMigrationWebhook struct {
 	Recorder record.EventRecorder
 	Config   *ReconcilerConfig
-	Client   client.Client
 }
 
 func (w *VMMigrationWebhook) SetupWithManager(mgr ctrl.Manager) error {
