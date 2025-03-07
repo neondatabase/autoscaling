@@ -38,8 +38,8 @@ func TestPodStateExtraction(t *testing.T) {
 	}
 
 	type overcommitFactors struct {
-		cpu int64
-		mem int64
+		cpu *resource.Quantity
+		mem *resource.Quantity
 	}
 
 	type extractedPod struct {
@@ -55,8 +55,8 @@ func TestPodStateExtraction(t *testing.T) {
 	mib := 1024 * 1024
 
 	defaultOvercommit := overcommitFactors{
-		cpu: 1000,
-		mem: 1000,
+		cpu: lo.ToPtr(resource.MustParse("1000m")),
+		mem: lo.ToPtr(resource.MustParse("1000m")),
 	}
 
 	cases := []struct {
@@ -564,8 +564,8 @@ func TestPodStateExtraction(t *testing.T) {
 				requested: nil,
 				factor:    nil,
 				overcommit: overcommitFactors{
-					cpu: 2500,
-					mem: 1500,
+					cpu: lo.ToPtr(resource.MustParse("2500m")),
+					mem: lo.ToPtr(resource.MustParse("1500m")),
 				},
 			},
 		},
@@ -606,8 +606,9 @@ func TestPodStateExtraction(t *testing.T) {
 				requested: nil,
 				factor:    nil,
 				overcommit: overcommitFactors{
-					cpu: 2500,
-					mem: 1000, // in this case, we have no explicit overcommit, so we should get the default of 1.0
+					cpu: lo.ToPtr(resource.MustParse("2500m")),
+					// for memory, we have no explicit overcommit, so we should get the default of 1.0
+					mem: lo.ToPtr(resource.MustParse("1000m")),
 				},
 			},
 		},
@@ -657,16 +658,16 @@ func TestPodStateExtraction(t *testing.T) {
 				AlwaysMigrate:  lo.FromPtr(c.extracted.flags).alwaysMigrate,
 				Migrating:      lo.FromPtr(c.extracted.flags).migrating,
 				CPU: state.PodResources[vmv1.MilliCPU]{
-					Reserved:         c.extracted.reserved.cpu,
-					Requested:        lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).cpu,
-					Factor:           lo.FromPtr(c.extracted.factor).cpu,
-					OvercommitMillis: c.extracted.overcommit.cpu,
+					Reserved:   c.extracted.reserved.cpu,
+					Requested:  lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).cpu,
+					Factor:     lo.FromPtr(c.extracted.factor).cpu,
+					Overcommit: c.extracted.overcommit.cpu,
 				},
 				Mem: state.PodResources[api.Bytes]{
-					Reserved:         c.extracted.reserved.mem,
-					Requested:        lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).mem,
-					Factor:           lo.FromPtr(c.extracted.factor).mem,
-					OvercommitMillis: c.extracted.overcommit.mem,
+					Reserved:   c.extracted.reserved.mem,
+					Requested:  lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).mem,
+					Factor:     lo.FromPtr(c.extracted.factor).mem,
+					Overcommit: c.extracted.overcommit.mem,
 				},
 			}
 
@@ -675,6 +676,13 @@ func TestPodStateExtraction(t *testing.T) {
 				t.Error("failed to extract pod state: ", err.Error())
 				return
 			}
+
+			// Force cached formatting of resource.Quantity values so that the stored
+			// representations are exactly equal:
+			_ = expectedPod.CPU.Overcommit.String()
+			_ = expectedPod.Mem.Overcommit.String()
+			_ = pod.CPU.Overcommit.String()
+			_ = pod.Mem.Overcommit.String()
 
 			assert.Equal(t, expectedPod, pod)
 		})

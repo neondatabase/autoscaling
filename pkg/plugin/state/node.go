@@ -9,6 +9,7 @@ import (
 	"golang.org/x/exp/constraints"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -360,12 +361,12 @@ func (n *Node) RemovePod(uid types.UID) (exists bool) {
 }
 
 // applyOvercommit turns pod-level resource requests into node-level capacity change
-func applyOvercommit[T constraints.Integer](value T, overcommitMillis int64) T {
-	return T(int64(value) * 1000 / overcommitMillis)
+func applyOvercommit[T constraints.Integer](value T, overcommit *resource.Quantity) T {
+	return T(int64(value) * 1000 / overcommit.MilliValue())
 }
 
 func (r *NodeResources[T]) add(p *PodResources[T], migrating bool) {
-	actualReserved := applyOvercommit(p.Reserved, p.OvercommitMillis)
+	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
 
 	r.Reserved += actualReserved
 	if migrating {
@@ -374,7 +375,7 @@ func (r *NodeResources[T]) add(p *PodResources[T], migrating bool) {
 }
 
 func (r *NodeResources[T]) remove(p PodResources[T], migrating bool) {
-	actualReserved := applyOvercommit(p.Reserved, p.OvercommitMillis)
+	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
 
 	r.Reserved -= actualReserved
 	if migrating {
@@ -400,7 +401,7 @@ func (r *NodeResources[T]) reconcilePod(p *PodResources[T], migrating bool) (don
 	// Difficult case: Requested is greater than Reserved -- how much can we give?
 	// The answer is relative to the overcommit -- taking Total-Reserved and inverting the
 	// overcommit so that we translate the amount relative to the *pod's* overcommit.
-	remaining := T(int64(util.SaturatingSub(r.Total, r.Reserved)) * p.OvercommitMillis / 1000)
+	remaining := T(int64(util.SaturatingSub(r.Total, r.Reserved)) * p.Overcommit.MilliValue() / 1000)
 
 	// (X / M) * M is equivalent to floor(X / M) -- any amount that we give must be a multiple of
 	// the factor (roughly, the compute unit).

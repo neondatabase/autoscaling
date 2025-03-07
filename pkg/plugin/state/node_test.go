@@ -10,6 +10,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -40,16 +41,16 @@ func fixedPod(id int, cpu vmv1.MilliCPU, mem api.Bytes) state.Pod {
 		AlwaysMigrate:  false,
 		Migrating:      false,
 		CPU: state.PodResources[vmv1.MilliCPU]{
-			Reserved:         cpu,
-			Requested:        cpu,
-			Factor:           0,
-			OvercommitMillis: 1000,
+			Reserved:   cpu,
+			Requested:  cpu,
+			Factor:     0,
+			Overcommit: lo.ToPtr(resource.MustParse("1000m")), // 1000m = 1.0 = "no overcommit"
 		},
 		Mem: state.PodResources[api.Bytes]{
-			Reserved:         mem,
-			Requested:        mem,
-			Factor:           0,
-			OvercommitMillis: 1000,
+			Reserved:   mem,
+			Requested:  mem,
+			Factor:     0,
+			Overcommit: lo.ToPtr(resource.MustParse("1000m")), // 1000m = 1.0 = "no overcommit"
 		},
 	}
 }
@@ -188,8 +189,8 @@ func TestPodReconciling(t *testing.T) {
 	}
 
 	type overcommit struct {
-		cpu int64
-		mem int64
+		cpu *resource.Quantity
+		mem *resource.Quantity
 	}
 
 	cpu := vmv1.MilliCPU(1000)
@@ -199,8 +200,8 @@ func TestPodReconciling(t *testing.T) {
 	factorMem := 4 * gib
 
 	defaultOvercommit := overcommit{
-		cpu: 1000,
-		mem: 1000,
+		cpu: lo.ToPtr(resource.MustParse("1000m")),
+		mem: lo.ToPtr(resource.MustParse("1000m")),
 	}
 
 	makePod := func(p pod, overcommitFactors overcommit) state.Pod {
@@ -222,16 +223,16 @@ func TestPodReconciling(t *testing.T) {
 			AlwaysMigrate: false,
 			Migrating:     false,
 			CPU: state.PodResources[vmv1.MilliCPU]{
-				Reserved:         p.cpu.reserved,
-				Requested:        p.cpu.requested,
-				Factor:           factorCPU,
-				OvercommitMillis: overcommitFactors.cpu,
+				Reserved:   p.cpu.reserved,
+				Requested:  p.cpu.requested,
+				Factor:     factorCPU,
+				Overcommit: overcommitFactors.cpu,
 			},
 			Mem: state.PodResources[api.Bytes]{
-				Reserved:         p.mem.reserved,
-				Requested:        p.mem.requested,
-				Factor:           factorMem,
-				OvercommitMillis: overcommitFactors.mem,
+				Reserved:   p.mem.reserved,
+				Requested:  p.mem.requested,
+				Factor:     factorMem,
+				Overcommit: overcommitFactors.mem,
 			},
 		}
 	}
@@ -564,8 +565,8 @@ func TestPodReconciling(t *testing.T) {
 				mem: 8 * factorMem,
 			},
 			overcommit: overcommit{
-				cpu: 2000,
-				mem: 2000,
+				cpu: lo.ToPtr(resource.MustParse("2000m")),
+				mem: lo.ToPtr(resource.MustParse("2000m")),
 			},
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
@@ -611,8 +612,8 @@ func TestPodReconciling(t *testing.T) {
 			}
 
 			node := makeNode(
-				c.nodeBefore.cpu-vmv1.MilliCPU(int64(c.podBefore.cpu.reserved)*1000/c.overcommit.cpu),
-				c.nodeBefore.mem-api.Bytes(int64(c.podBefore.mem.reserved)*1000/c.overcommit.mem),
+				c.nodeBefore.cpu-vmv1.MilliCPU(int64(c.podBefore.cpu.reserved)*1000/c.overcommit.cpu.MilliValue()),
+				c.nodeBefore.mem-api.Bytes(int64(c.podBefore.mem.reserved)*1000/c.overcommit.mem.MilliValue()),
 			)
 			node.AddPod(makePod(c.podBefore, c.overcommit))
 
