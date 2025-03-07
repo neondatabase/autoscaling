@@ -18,7 +18,7 @@ GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
 
 # The target architecture for linux kernel. Possible values: amd64 or arm64.
-# Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile.kernel-builder
+# Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile
 UNAME_ARCH := $(shell uname -m)
 ifeq ($(UNAME_ARCH),x86_64)
     TARGET_ARCH ?= amd64
@@ -99,7 +99,7 @@ generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
 		--build-arg GROUP_ID=$(shell id -g $(USER)) \
 		--build-arg CONTROLLER_TOOLS_VERSION=$(CONTROLLER_TOOLS_VERSION) \
 		--build-arg CODE_GENERATOR_VERSION=$(CODE_GENERATOR_VERSION) \
-		--file neonvm/hack/Dockerfile.generate \
+		--file neonvm/hack/generate.Dockerfile \
 		--iidfile $$iidfile . ; \
 	volumes=('--volume' "$$PWD:/go/src/github.com/neondatabase/autoscaling") ; \
 	if [ -f .git ]; then \
@@ -192,7 +192,7 @@ docker-push: docker-build ## Push docker images to docker registry
 docker-build-go-base:
 	docker build \
 		--tag $(GO_BASE_IMG) \
-		--file Dockerfile.go-base \
+		--file go-base.Dockerfile \
 		.
 
 .PHONY: docker-build-controller
@@ -270,13 +270,13 @@ docker-build-pg16-disk-test: bin/vm-builder ## Build a VM image for testing
 #PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 #.PHONY: docker-buildx
 #docker-buildx: test ## Build and push docker image for the controller for cross-platform support
-#	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-#	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+#	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into cross.Dockerfile, and preserve the original Dockerfile
+#	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > cross.Dockerfile
 #	- docker buildx create --name project-v3-builder
 #	docker buildx use project-v3-builder
-#	- docker buildx build --push --platform=$(PLATFORMS) --tag ${IMG_CONTROLLER} -f Dockerfile.cross
+#	- docker buildx build --push --platform=$(PLATFORMS) --tag ${IMG_CONTROLLER} -f cross.Dockerfile
 #	- docker buildx rm project-v3-builder
-#	rm Dockerfile.cross
+#	rm cross.Dockerfile
 
 ##@ Deployment
 
@@ -300,7 +300,7 @@ kernel: ## Build linux kernel.
 		--pull \
 		--load \
 		--iidfile $$iidfile \
-		--file neonvm-kernel/Dockerfile.kernel-builder \
+		--file neonvm-kernel/Dockerfile \
 		neonvm-kernel; \
 	id=$$(docker create $$(cat $$iidfile)); \
 	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \

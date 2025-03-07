@@ -2,7 +2,6 @@ package billing
 
 import (
 	"fmt"
-	"math/rand"
 	"os"
 )
 
@@ -12,7 +11,7 @@ func init() {
 	var err error
 	hostname, err = os.Hostname()
 	if err != nil {
-		hostname = fmt.Sprintf("unknown-%d", rand.Intn(1000))
+		panic(fmt.Errorf("failed to get hostname: %w", err))
 	}
 }
 

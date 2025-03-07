@@ -51,7 +51,7 @@ files:
 
 build: |
   # Build vm-monitor
-  FROM rust:1.85-alpine AS monitor-builder
+  FROM rust:1.85-alpine@sha256:1030547bd568497d69e41771ada279179f0613369dc54779e46a3f6f376b3020 AS monitor-builder
   WORKDIR /workspace
 
   RUN apk add musl-dev git openssl-dev
@@ -75,7 +75,7 @@ build: |
   # At time of writing (2023-03-14), debian bullseye has a version of cgroup-tools (technically
   # libcgroup) that doesn't support cgroup v2 (version 0.41-11). Unfortunately, the vm-monitor
   # requires cgroup v2, so we'll build cgroup-tools ourselves.
-  FROM debian:bullseye-slim AS libcgroup-builder
+  FROM debian:bullseye-slim@sha256:33b7c2e071c29e618182ec872c471f39d2dde3d8904d95f5b7a61acf3a592e7b AS libcgroup-builder
   ENV LIBCGROUP_VERSION v2.0.3
 
   RUN set -exu \
@@ -103,11 +103,11 @@ build: |
       # actually build the thing...
       && make install
 
-  FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0 AS postgres-exporter
+  FROM quay.io/prometheuscommunity/postgres-exporter:v0.12.0@sha256:f34d50a64a4d558ad118ffc73be45a359ac8f30b8daba4b241458bcb9f94e254 AS postgres-exporter
 
   # Build pgbouncer
   #
-  FROM debian:bullseye-slim AS pgbouncer
+  FROM debian:bullseye-slim@sha256:33b7c2e071c29e618182ec872c471f39d2dde3d8904d95f5b7a61acf3a592e7b AS pgbouncer
   RUN set -e \
       && apt-get update \
       && apt-get install -y \

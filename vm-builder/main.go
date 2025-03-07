@@ -30,7 +30,7 @@ import (
 // vm-builder --src alpine:3.19 --dst vm-alpine:dev --file vm-alpine.qcow2
 
 var (
-	//go:embed files/Dockerfile.img
+	//go:embed files/img.Dockerfile
 	dockerfileVmBuilder string
 	//go:embed files/helper.move-bins.sh
 	scriptMoveBinsHelper string

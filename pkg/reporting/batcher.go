@@ -6,12 +6,25 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// BatchBuilder is an interface for gradually converting []E to []byte, allowing us to construct
+// batches of events without buffering them uncompressed, in memory.
+//
+// Implementations of BatchBuilder are defined in various 'batch_*.go' files.
+type BatchBuilder[E any] interface {
+	// Add appends an event to the in-progress batch.
+	Add(event E)
+	// Finish completes the in-progress batch, returning the events serialized as bytes.
+	Finish() []byte
+}
+
 type eventBatcher[E any] struct {
 	mu sync.Mutex
 
 	targetBatchSize int
 
-	ongoing []E
+	newBatch    func() BatchBuilder[E]
+	ongoing     BatchBuilder[E]
+	ongoingSize int
 
 	completed     []batch[E]
 	onComplete    func()
@@ -21,11 +34,13 @@ type eventBatcher[E any] struct {
 }
 
 type batch[E any] struct {
-	events []E
+	serialized []byte
+	count      int
 }
 
 func newEventBatcher[E any](
 	targetBatchSize int,
+	newBatch func() BatchBuilder[E],
 	notifyCompletedBatch func(),
 	sizeGauge prometheus.Gauge,
 ) *eventBatcher[E] {
@@ -34,7 +49,9 @@ func newEventBatcher[E any](
 
 		targetBatchSize: targetBatchSize,
 
-		ongoing: []E{},
+		newBatch:    newBatch,
+		ongoing:     newBatch(),
+		ongoingSize: 0,
 
 		completed:     []batch[E]{},
 		onComplete:    notifyCompletedBatch,
@@ -52,10 +69,11 @@ func (b *eventBatcher[E]) enqueue(event E) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.ongoing = append(b.ongoing, event)
+	b.ongoing.Add(event)
+	b.ongoingSize += 1
 	b.updateGauge()
 
-	if len(b.ongoing) >= b.targetBatchSize {
+	if b.ongoingSize >= b.targetBatchSize {
 		b.finishCurrentBatch()
 	}
 }
@@ -69,7 +87,7 @@ func (b *eventBatcher[E]) finishOngoing() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if len(b.ongoing) == 0 {
+	if b.ongoingSize == 0 {
 		return
 	}
 
@@ -103,26 +121,28 @@ func (b *eventBatcher[e]) dropLatestCompleted() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	dropped := b.completed[0]
+	batch := b.completed[0]
 	b.completed = b.completed[1:]
-	b.completedSize -= len(dropped.events)
+	b.completedSize -= batch.count
 
 	b.updateGauge()
 }
 
 // NB: must hold mu
 func (b *eventBatcher[E]) updateGauge() {
-	b.sizeGauge.Set(float64(len(b.ongoing) + b.completedSize))
+	b.sizeGauge.Set(float64(b.ongoingSize + b.completedSize))
 }
 
 // NB: must hold mu
 func (b *eventBatcher[E]) finishCurrentBatch() {
 	b.completed = append(b.completed, batch[E]{
-		events: b.ongoing,
+		serialized: b.ongoing.Finish(),
+		count:      b.ongoingSize,
 	})
 
-	b.completedSize += len(b.ongoing)
-	b.ongoing = []E{}
+	b.completedSize += b.ongoingSize
+	b.ongoingSize = 0
+	b.ongoing = b.newBatch()
 
 	b.onComplete()
 }

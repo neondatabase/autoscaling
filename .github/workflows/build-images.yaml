@@ -217,7 +217,7 @@ jobs:
           sbom: false
           context: .
           push: true
-          file: Dockerfile.go-base
+          file: go-base.Dockerfile
           cache-from: ${{ format('type=registry,ref=cache.neon.build/autoscaling-go-base-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/autoscaling-go-base-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ env.GO_BASE_IMG }}

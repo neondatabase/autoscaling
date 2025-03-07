@@ -1,5 +1,5 @@
 # Force initial check that KERNEL_VERSION is set appropriately
-FROM ubuntu:24.04 AS check-arg
+FROM ubuntu:24.04@sha256:72297848456d5d37d1262630108ab308d3e9ec7ed1c3286a32fe09856619a782 AS check-arg
 ARG KERNEL_VERSION
 WORKDIR /build
 
@@ -8,7 +8,7 @@ RUN set -e \
     && test -n "${KERNEL_VERSION}" \
     && echo "force this as a requirement for build-deps" > /build/arg-check-succeeded
 
-FROM ubuntu:24.04 AS build-deps
+FROM ubuntu:24.04@sha256:72297848456d5d37d1262630108ab308d3e9ec7ed1c3286a32fe09856619a782 AS build-deps
 WORKDIR /build
 
 RUN apt-get update && apt-get -y install \
@@ -60,7 +60,7 @@ RUN cd linux-${KERNEL_VERSION} && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gn
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
-FROM --platform=linux/amd64 alpine:3.19 AS kernel_amd64
+FROM --platform=linux/amd64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_amd64
 ARG KERNEL_VERSION
 COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
 
@@ -73,10 +73,10 @@ RUN cd linux-${KERNEL_VERSION} && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gn
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
-FROM --platform=linux/arm64 alpine:3.19 AS kernel_arm64
+FROM --platform=linux/arm64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_arm64
 ARG KERNEL_VERSION
 COPY --from=build_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
 
 # Dummy default target without target architecture
-FROM alpine:3.19
+FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
 RUN echo "No target architecture specified, can't build kernel image" && exit 1
