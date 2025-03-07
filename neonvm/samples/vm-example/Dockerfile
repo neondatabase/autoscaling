@@ -1,4 +1,4 @@
-FROM alpine:3.19 AS rootdisk
+FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS rootdisk
 
 RUN set -e \
 	&& apk add --no-cache \
@@ -35,7 +35,7 @@ ADD postgresql.conf /etc/postgresql/
 ADD pg_hba.conf     /etc/postgresql/
 
 
-FROM alpine:3.19 AS image
+FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS image
 
 ARG DISK_SIZE=2G
 
@@ -47,6 +47,6 @@ RUN set -e \
     && rm -f /disk.raw \
     && qemu-img info /disk.qcow2
 
-FROM alpine:3.19
+FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
 
 COPY --from=image /disk.qcow2 /
