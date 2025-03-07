@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -81,6 +82,7 @@ type VMReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 	Config   *ReconcilerConfig
+	IPAM     *ipam.IPAM
 
 	Metrics ReconcilerMetrics `exhaustruct:"optional"`
 }
@@ -149,7 +151,10 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		if controllerutil.ContainsFinalizer(&vm, virtualmachineFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for VirtualMachine before delete it")
-			r.doFinalizerOperationsForVirtualMachine(ctx, &vm)
+			if err := r.doFinalizerOperationsForVirtualMachine(ctx, &vm); err != nil {
+				log.Error(err, "Failed to perform finalizer operations for VirtualMachine")
+				return ctrl.Result{}, err
+			}
 
 			// remove our finalizer from the list and update it.
 			log.Info("Removing Finalizer for VirtualMachine after successfully perform the operations")
@@ -198,6 +203,9 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	if err := r.doReconcile(ctx, &vm); err != nil {
 		r.Recorder.Eventf(&vm, corev1.EventTypeWarning, "Failed",
 			"Failed to reconcile (%s): %s", vm.Name, err)
+		if errors.Is(err, ipam.ErrAgain) {
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -221,7 +229,7 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 }
 
 // doFinalizerOperationsForVirtualMachine will perform the required operations before delete the CR.
-func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, vm *vmv1.VirtualMachine) {
+func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Context, vm *vmv1.VirtualMachine) error {
 	// Note: It is not recommended to use finalizers with the purpose of delete resources which are
 	// created and managed in the reconciliation. These ones, such as the Pod created on this reconcile,
 	// are defined as depended of the custom resource. See that we use the method ctrl.SetControllerReference.
@@ -238,36 +246,15 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 
 	// Release overlay IP address
 	if vm.Spec.ExtraNetwork != nil {
-		// Create IPAM object
-		nadName, err := nadIpamName()
+		ip, err := r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
 		if err != nil {
-			// ignore error
-			log.Error(err, "ignored error")
-			return
-		}
-		nadNamespace, err := nadIpamNamespace()
-		if err != nil {
-			// ignore error
-			log.Error(err, "ignored error")
-			return
-		}
-		ipam, err := ipam.New(ctx, nadName, nadNamespace)
-		if err != nil {
-			// ignore error
-			log.Error(err, "ignored error")
-			return
-		}
-		defer ipam.Close()
-		ip, err := ipam.ReleaseIP(ctx, vm.Name, vm.Namespace)
-		if err != nil {
-			// ignore error
-			log.Error(err, "fail to release IP, error ignored")
-			return
+			return fmt.Errorf("fail to release IP: %w", err)
 		}
 		message := fmt.Sprintf("Released IP %s", ip.String())
 		log.Info(message)
 		r.Recorder.Event(vm, "Normal", "OverlayNet", message)
 	}
+	return nil
 }
 
 func getRunnerVersion(pod *corev1.Pod) (api.RunnerProtoVersion, error) {
@@ -347,25 +334,8 @@ func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMac
 	}
 
 	log := log.FromContext(ctx)
-
-	// Create IPAM object
-	nadName, err := nadIpamName()
+	ip, err := r.IPAM.AcquireIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
 	if err != nil {
-		return err
-	}
-	nadNamespace, err := nadIpamNamespace()
-	if err != nil {
-		return err
-	}
-	ipam, err := ipam.New(ctx, nadName, nadNamespace)
-	if err != nil {
-		log.Error(err, "failed to create IPAM")
-		return err
-	}
-	defer ipam.Close()
-	ip, err := ipam.AcquireIP(ctx, vm.Name, vm.Namespace)
-	if err != nil {
-		log.Error(err, "fail to acquire IP")
 		return err
 	}
 	message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
@@ -416,6 +386,12 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 	case "":
 		if err := r.acquireOverlayIP(ctx, vm); err != nil {
+			if errors.Is(err, ipam.ErrAgain) {
+				// We are being rate limited by IPAM, let's try again later.
+				return err
+			}
+			log.Error(err, "Failed to acquire overlay IP", "VirtualMachine", vm.Name)
+			r.Recorder.Event(vm, "Warning", "OverlayNet", "Failed to acquire overlay IP")
 			return err
 		}
 		// VirtualMachine just created, change Phase to "Pending"
@@ -1710,15 +1686,7 @@ func podSpec(
 		if len(vm.Spec.ExtraNetwork.MultusNetwork) > 0 { // network specified in spec
 			nadNetwork = vm.Spec.ExtraNetwork.MultusNetwork
 		} else { // get network from env variables
-			nadName, err := nadRunnerName()
-			if err != nil {
-				return nil, err
-			}
-			nadNamespace, err := nadRunnerNamespace()
-			if err != nil {
-				return nil, err
-			}
-			nadNetwork = fmt.Sprintf("%s/%s", nadNamespace, nadName)
+			nadNetwork = fmt.Sprintf("%s/%s", config.NADConfig.RunnerNamespace, config.NADConfig.RunnerName)
 		}
 		pod.ObjectMeta.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", nadNetwork, vm.Spec.ExtraNetwork.Interface)
 	}
@@ -1768,33 +1736,27 @@ func (r *VMReconciler) tryUpdateVM(ctx context.Context, vm *vmv1.VirtualMachine)
 	return r.Update(ctx, vm)
 }
 
-// return Network Attachment Definition name with IPAM settings
-func nadIpamName() (string, error) {
-	return getEnvVarValue("NAD_IPAM_NAME")
+type NADConfig struct {
+	IPAMName        string
+	IPAMNamespace   string
+	RunnerName      string
+	RunnerNamespace string
 }
 
-// return Network Attachment Definition namespace with IPAM settings
-func nadIpamNamespace() (string, error) {
-	return getEnvVarValue("NAD_IPAM_NAMESPACE")
-}
-
-// return Network Attachment Definition name for second interface in Runner
-func nadRunnerName() (string, error) {
-	return getEnvVarValue("NAD_RUNNER_NAME")
-}
-
-// return Network Attachment Definition namespace for second interface in Runner
-func nadRunnerNamespace() (string, error) {
-	return getEnvVarValue("NAD_RUNNER_NAMESPACE")
-}
-
-// return env variable value
-func getEnvVarValue(envVarName string) (string, error) {
-	value, found := os.LookupEnv(envVarName)
-	if !found {
-		return "", fmt.Errorf("unable to find %s environment variable", envVarName)
+func GetNADConfig() *NADConfig {
+	getVar := func(envVarName string) string {
+		value, ok := os.LookupEnv(envVarName)
+		if !ok {
+			panic(fmt.Errorf("unable to find %s environment variable", envVarName))
+		}
+		return value
 	}
-	return value, nil
+	return &NADConfig{
+		IPAMName:        getVar("NAD_IPAM_NAME"),
+		IPAMNamespace:   getVar("NAD_IPAM_NAMESPACE"),
+		RunnerName:      getVar("NAD_RUNNER_NAME"),
+		RunnerNamespace: getVar("NAD_RUNNER_NAMESPACE"),
+	}
 }
 
 // sshKeygen generates a pair of public and private keys using the ed25519
