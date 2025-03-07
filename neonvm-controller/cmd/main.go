@@ -206,7 +206,7 @@ func main() {
 		NadName:      rc.NADConfig.IPAMName,
 		NadNamespace: rc.NADConfig.IPAMNamespace,
 
-		// Let's not have more than a quater of reconcilliation workers stuck
+		// Let's not have more than a quarter of reconcilliation workers stuck
 		// at IPAM mutex.
 		ConcurrencyLimit: max(1, concurrencyLimit/4),
 
