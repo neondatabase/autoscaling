@@ -359,6 +359,7 @@ func (n *Node) RemovePod(uid types.UID) (exists bool) {
 	return true
 }
 
+// applyOvercommit turns pod-level resource requests into node-level capacity change
 func applyOvercommit[T constraints.Integer](value T, overcommitMillis int64) T {
 	return T(int64(value) * 1000 / overcommitMillis)
 }
