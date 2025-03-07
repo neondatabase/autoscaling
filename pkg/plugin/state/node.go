@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"math"
 
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/constraints"
@@ -360,12 +359,12 @@ func (n *Node) RemovePod(uid types.UID) (exists bool) {
 	return true
 }
 
-func applyOvercommit[T constraints.Unsigned](value T, overcommit float64) T {
-	return T(math.Round(float64(value) / overcommit))
+func applyOvercommit[T constraints.Integer](value T, overcommitMillis int64) T {
+	return T(int64(value) * 1000 / overcommitMillis)
 }
 
 func (r *NodeResources[T]) add(p *PodResources[T], migrating bool) {
-	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
+	actualReserved := applyOvercommit(p.Reserved, p.OvercommitMillis)
 
 	r.Reserved += actualReserved
 	if migrating {
@@ -374,7 +373,7 @@ func (r *NodeResources[T]) add(p *PodResources[T], migrating bool) {
 }
 
 func (r *NodeResources[T]) remove(p PodResources[T], migrating bool) {
-	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
+	actualReserved := applyOvercommit(p.Reserved, p.OvercommitMillis)
 
 	r.Reserved -= actualReserved
 	if migrating {
@@ -400,7 +399,7 @@ func (r *NodeResources[T]) reconcilePod(p *PodResources[T], migrating bool) (don
 	// Difficult case: Requested is greater than Reserved -- how much can we give?
 	// The answer is relative to the overcommit -- taking Total-Reserved and inverting the
 	// overcommit so that we translate the amount relative to the *pod's* overcommit.
-	remaining := T(math.Floor(float64(util.SaturatingSub(r.Total, r.Reserved)) * p.Overcommit))
+	remaining := T(int64(util.SaturatingSub(r.Total, r.Reserved)) * p.OvercommitMillis / 1000)
 
 	// (X / M) * M is equivalent to floor(X / M) -- any amount that we give must be a multiple of
 	// the factor (roughly, the compute unit).

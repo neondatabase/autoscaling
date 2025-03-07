@@ -40,16 +40,16 @@ func fixedPod(id int, cpu vmv1.MilliCPU, mem api.Bytes) state.Pod {
 		AlwaysMigrate:  false,
 		Migrating:      false,
 		CPU: state.PodResources[vmv1.MilliCPU]{
-			Reserved:   cpu,
-			Requested:  cpu,
-			Factor:     0,
-			Overcommit: 1.0,
+			Reserved:         cpu,
+			Requested:        cpu,
+			Factor:           0,
+			OvercommitMillis: 1000,
 		},
 		Mem: state.PodResources[api.Bytes]{
-			Reserved:   mem,
-			Requested:  mem,
-			Factor:     0,
-			Overcommit: 1.0,
+			Reserved:         mem,
+			Requested:        mem,
+			Factor:           0,
+			OvercommitMillis: 1000,
 		},
 	}
 }
@@ -188,8 +188,8 @@ func TestPodReconciling(t *testing.T) {
 	}
 
 	type overcommit struct {
-		cpu float64
-		mem float64
+		cpu int64
+		mem int64
 	}
 
 	cpu := vmv1.MilliCPU(1000)
@@ -203,8 +203,8 @@ func TestPodReconciling(t *testing.T) {
 		createdAt := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
 		defaultOvercommit := overcommit{
-			cpu: 1.0,
-			mem: 1.0,
+			cpu: 1000,
+			mem: 1000,
 		}
 
 		return state.Pod{
@@ -222,16 +222,16 @@ func TestPodReconciling(t *testing.T) {
 			AlwaysMigrate: false,
 			Migrating:     false,
 			CPU: state.PodResources[vmv1.MilliCPU]{
-				Reserved:   p.cpu.reserved,
-				Requested:  p.cpu.requested,
-				Factor:     factorCPU,
-				Overcommit: lo.FromPtrOr(overcommitFactors, defaultOvercommit).cpu,
+				Reserved:         p.cpu.reserved,
+				Requested:        p.cpu.requested,
+				Factor:           factorCPU,
+				OvercommitMillis: lo.FromPtrOr(overcommitFactors, defaultOvercommit).cpu,
 			},
 			Mem: state.PodResources[api.Bytes]{
-				Reserved:   p.mem.reserved,
-				Requested:  p.mem.requested,
-				Factor:     factorMem,
-				Overcommit: lo.FromPtrOr(overcommitFactors, defaultOvercommit).mem,
+				Reserved:         p.mem.reserved,
+				Requested:        p.mem.requested,
+				Factor:           factorMem,
+				OvercommitMillis: lo.FromPtrOr(overcommitFactors, defaultOvercommit).mem,
 			},
 		}
 	}
@@ -564,8 +564,8 @@ func TestPodReconciling(t *testing.T) {
 				mem: 8 * factorMem,
 			},
 			overcommit: &overcommit{
-				cpu: 2.0,
-				mem: 2.0,
+				cpu: 2000,
+				mem: 2000,
 			},
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
@@ -610,11 +610,11 @@ func TestPodReconciling(t *testing.T) {
 				return n
 			}
 
-			overcommit := lo.FromPtrOr(c.overcommit, overcommit{cpu: 1.0, mem: 1.0})
+			overcommit := lo.FromPtrOr(c.overcommit, overcommit{cpu: 1000, mem: 1000})
 
 			node := makeNode(
-				c.nodeBefore.cpu-vmv1.MilliCPU(float64(c.podBefore.cpu.reserved)*(1/overcommit.cpu)),
-				c.nodeBefore.mem-api.Bytes(float64(c.podBefore.mem.reserved)*(1/overcommit.mem)),
+				c.nodeBefore.cpu-vmv1.MilliCPU(int64(c.podBefore.cpu.reserved)*1000/overcommit.cpu),
+				c.nodeBefore.mem-api.Bytes(int64(c.podBefore.mem.reserved)*1000/overcommit.mem),
 			)
 			node.AddPod(makePod(c.podBefore, c.overcommit))
 

@@ -1,13 +1,12 @@
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
-index b9be94b6e..74ac792d4 100644
+index b9be94b6e..24e108218 100644
 --- a/cluster-autoscaler/utils/kubernetes/listers.go
 +++ b/cluster-autoscaler/utils/kubernetes/listers.go
-@@ -17,10 +17,13 @@ limitations under the License.
+@@ -17,10 +17,12 @@ limitations under the License.
  package kubernetes
  
  import (
 +	"encoding/json"
-+	"math"
  	"time"
  
  	apiv1 "k8s.io/api/core/v1"
@@ -16,7 +15,7 @@ index b9be94b6e..74ac792d4 100644
  	"k8s.io/apimachinery/pkg/fields"
  	"k8s.io/apimachinery/pkg/labels"
  	"k8s.io/client-go/informers"
-@@ -221,6 +224,67 @@ type AllPodLister struct {
+@@ -221,6 +223,63 @@ type AllPodLister struct {
  	podLister v1lister.PodLister
  }
  
@@ -56,19 +55,15 @@ index b9be94b6e..74ac792d4 100644
 +		}
 +
 +		if cpuFactor := overcommit.CPU; cpuFactor != nil {
-+			cpuFactor := float64(cpuFactor.MilliValue()) / 1000.0
-+
 +			newCPU := resource.NewMilliQuantity(
-+				int64(math.Round(float64(usage.CPU.MilliValue())/cpuFactor)),
++				usage.CPU.MilliValue()*1000/cpuFactor.MilliValue(),
 +				usage.CPU.Format,
 +			)
 +			usage.CPU = *newCPU
 +		}
 +		if memFactor := overcommit.Memory; memFactor != nil {
-+			memFactor := float64(memFactor.MilliValue()) / 1000.0
-+
 +			newMem := resource.NewQuantity(
-+				int64(math.Round(float64(usage.Memory.Value())/memFactor)),
++				usage.Memory.Value()*1000/memFactor.MilliValue(),
 +				usage.Memory.Format,
 +			)
 +			usage.Memory = *newMem
@@ -84,7 +79,7 @@ index b9be94b6e..74ac792d4 100644
  // List returns all scheduled pods.
  func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
  	var pods []*apiv1.Pod
-@@ -231,7 +295,10 @@ func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
+@@ -231,7 +290,10 @@ func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
  	}
  	for _, p := range allPods {
  		if p.Status.Phase != apiv1.PodSucceeded && p.Status.Phase != apiv1.PodFailed {

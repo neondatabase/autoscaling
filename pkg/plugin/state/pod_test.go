@@ -38,8 +38,8 @@ func TestPodStateExtraction(t *testing.T) {
 	}
 
 	type overcommitFactors struct {
-		cpu float64
-		mem float64
+		cpu int64
+		mem int64
 	}
 
 	type extractedPod struct {
@@ -55,8 +55,8 @@ func TestPodStateExtraction(t *testing.T) {
 	mib := 1024 * 1024
 
 	defaultOvercommit := overcommitFactors{
-		cpu: 1.0,
-		mem: 1.0,
+		cpu: 1000,
+		mem: 1000,
 	}
 
 	cases := []struct {
@@ -564,8 +564,8 @@ func TestPodStateExtraction(t *testing.T) {
 				requested: nil,
 				factor:    nil,
 				overcommit: overcommitFactors{
-					cpu: 2.5,
-					mem: 1.5,
+					cpu: 2500,
+					mem: 1500,
 				},
 			},
 		},
@@ -606,8 +606,8 @@ func TestPodStateExtraction(t *testing.T) {
 				requested: nil,
 				factor:    nil,
 				overcommit: overcommitFactors{
-					cpu: 2.5,
-					mem: 1.0, // in this case, we have no explicit overcommit, so we should get the default of 1.0
+					cpu: 2500,
+					mem: 1000, // in this case, we have no explicit overcommit, so we should get the default of 1.0
 				},
 			},
 		},
@@ -657,16 +657,16 @@ func TestPodStateExtraction(t *testing.T) {
 				AlwaysMigrate:  lo.FromPtr(c.extracted.flags).alwaysMigrate,
 				Migrating:      lo.FromPtr(c.extracted.flags).migrating,
 				CPU: state.PodResources[vmv1.MilliCPU]{
-					Reserved:   c.extracted.reserved.cpu,
-					Requested:  lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).cpu,
-					Factor:     lo.FromPtr(c.extracted.factor).cpu,
-					Overcommit: c.extracted.overcommit.cpu,
+					Reserved:         c.extracted.reserved.cpu,
+					Requested:        lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).cpu,
+					Factor:           lo.FromPtr(c.extracted.factor).cpu,
+					OvercommitMillis: c.extracted.overcommit.cpu,
 				},
 				Mem: state.PodResources[api.Bytes]{
-					Reserved:   c.extracted.reserved.mem,
-					Requested:  lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).mem,
-					Factor:     lo.FromPtr(c.extracted.factor).mem,
-					Overcommit: c.extracted.overcommit.mem,
+					Reserved:         c.extracted.reserved.mem,
+					Requested:        lo.FromPtrOr(c.extracted.requested, c.extracted.reserved).mem,
+					Factor:           lo.FromPtr(c.extracted.factor).mem,
+					OvercommitMillis: c.extracted.overcommit.mem,
 				},
 			}
 
