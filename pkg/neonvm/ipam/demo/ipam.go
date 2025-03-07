@@ -47,7 +47,7 @@ func main() {
 	ctx := log.IntoContext(context.Background(), logger)
 
 	// Create IPAM object
-	ipam, err := ipam.New(&ipam.IPAMParams{
+	ipam, err := ipam.New(ipam.IPAMParams{
 		NadName:          *nadName,
 		NadNamespace:     *nadNs,
 		ConcurrencyLimit: 1,

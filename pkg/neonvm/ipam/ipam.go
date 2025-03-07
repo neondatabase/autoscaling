@@ -81,7 +81,7 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 // New returns a new IPAM object with ipam config and k8s/crd clients
-func New(params *IPAMParams) (*IPAM, error) {
+func New(params IPAMParams) (*IPAM, error) {
 	// get Kubernetes client config
 	cfg, err := config.GetConfig()
 	if err != nil {
@@ -99,7 +99,7 @@ func New(params *IPAMParams) (*IPAM, error) {
 	return NewWithClient(kClient, params)
 }
 
-func NewWithClient(kClient *Client, params *IPAMParams) (*IPAM, error) {
+func NewWithClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), IpamRequestTimeout)
 	defer cancel()
 
@@ -199,7 +199,7 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 func (i *IPAM) runIPAMWithMetrics(ctx context.Context, action ipamAction, actionName string) (net.IPNet, error) {
 	timer := i.metrics.StartTimer(actionName)
 	// This is if we get a panic
-	defer timer.Finish(IPAMUnknown)
+	defer timer.Finish(IPAMPanic)
 
 	ip, err := i.runIPAM(ctx, action)
 	if err != nil {

@@ -46,7 +46,7 @@ func makeIPAM(t *testing.T, cfg string) *testParams {
 	require.NoError(t, err)
 
 	prom := prometheus.NewRegistry()
-	ipam, err := ipam.NewWithClient(&client, &ipam.IPAMParams{
+	ipam, err := ipam.NewWithClient(&client, ipam.IPAMParams{
 		NadName:          "nad",
 		NadNamespace:     "default",
 		ConcurrencyLimit: 1,

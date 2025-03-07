@@ -202,7 +202,7 @@ func main() {
 		NADConfig:               controllers.GetNADConfig(),
 	}
 
-	ipam, err := ipam.New(&ipam.IPAMParams{
+	ipam, err := ipam.New(ipam.IPAMParams{
 		NadName:      rc.NADConfig.IPAMName,
 		NadNamespace: rc.NADConfig.IPAMNamespace,
 
