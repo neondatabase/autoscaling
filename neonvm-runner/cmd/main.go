@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -487,17 +488,42 @@ func runQEMU(
 
 	callbacks = cpuServerCallbacks{
 		get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
-			return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
+			switch cfg.cpuScalingMode {
+			case vmv1.CpuScalingModeSysfs:
+				cpu, err := getNeonvmDaemonCPU()
+				if err != nil {
+					logger.Error("failed to get CPU from NeonVM Daemon", zap.Error(err))
+					return nil, err
+				}
+				storedCpu := vmv1.MilliCPU(lastValue.Load())
+				if storedCpu.RoundedUp() != cpu.RoundedUp() {
+					logger.Warn("CPU from NeonVM Daemon does not match stored value, returning daemon value to let controller reconcile correct state", zap.Any("stored", storedCpu), zap.Any("current", cpu))
+					return &cpu, nil
+				}
+				logger.Debug("Returning stored CPU value to controller", zap.Any("cpu", storedCpu))
+				return &storedCpu, nil
+
+			case vmv1.CpuScalingModeQMP:
+				return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
+			default:
+				panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
+			}
 		},
 		set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
-			if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
+			switch cfg.cpuScalingMode {
+			case vmv1.CpuScalingModeSysfs:
 				err := setNeonvmDaemonCPU(cpu)
 				if err != nil {
 					logger.Error("setting CPU through NeonVM Daemon failed", zap.Any("cpu", cpu), zap.Error(err))
 					return err
 				}
+				lastValue.Store(uint32(cpu))
+			case vmv1.CpuScalingModeQMP:
+				lastValue.Store(uint32(cpu))
+				return nil
+			default:
+				panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
 			}
-			lastValue.Store(uint32(cpu))
 			return nil
 		},
 		ready: func(logger *zap.Logger) bool {
@@ -863,6 +889,45 @@ func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
 	}
 
 	return nil
+}
+
+func getNeonvmDaemonCPU() (vmv1.MilliCPU, error) {
+	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
+	if err != nil {
+		return 0, fmt.Errorf("could not calculate VM IP address: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s:25183/cpu", vmIP)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("could not build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("could not send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return 0, fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("could not read response: %w", err)
+	}
+
+	value, err := strconv.ParseUint(string(body), 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse response: %w", err)
+	}
+
+	return vmv1.MilliCPU(value), nil
 }
 
 // checkNeonvmDaemonCPU sends a GET request to the NeonVM Daemon to get the current CPU limit for the sake of readiness probe.
