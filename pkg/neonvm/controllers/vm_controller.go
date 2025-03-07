@@ -616,13 +616,18 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			// compare guest spec and count of plugged
 
 			specUseCPU := vm.Spec.Guest.CPUs.Use
-			scaleCgroupCPU := specUseCPU != cgroupUsage.VCPUs
+			scaleCgroupCPU := specUseCPU.RoundedUp() != cgroupUsage.VCPUs.RoundedUp()
 			scaleQemuCPU := specUseCPU.RoundedUp() != pluggedCPU
 			if scaleCgroupCPU || scaleQemuCPU {
 				log.Info("VM goes into scaling mode, CPU count needs to be changed",
 					"CPUs on runner pod cgroup", cgroupUsage.VCPUs,
+					"CPUs on runner pod cgroup rounded up", cgroupUsage.VCPUs.RoundedUp(),
+					"CPU in spec rounded up", vm.Spec.Guest.CPUs.Use.RoundedUp(),
 					"CPUs on board", pluggedCPU,
-					"CPUs in spec", vm.Spec.Guest.CPUs.Use)
+					"CPUs in spec", vm.Spec.Guest.CPUs.Use,
+					"scaleCgroupCPU", scaleCgroupCPU,
+					"scaleQemuCPU", scaleQemuCPU,
+				)
 				vm.Status.Phase = vmv1.VmScaling
 			}
 
