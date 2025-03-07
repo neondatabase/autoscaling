@@ -131,6 +131,7 @@ func (r *VirtualMachine) ValidateUpdate(old runtime.Object) (admission.Warnings,
 		{".spec.podResources", func(v *VirtualMachine) any { return v.Spec.PodResources }},
 		{".spec.enableAcceleration", func(v *VirtualMachine) any { return v.Spec.EnableAcceleration }},
 		{".spec.enableSSH", func(v *VirtualMachine) any { return v.Spec.EnableSSH }},
+		// nb: we don't check overcommit here, so that it's allowed to be mutable.
 		{".spec.initScript", func(v *VirtualMachine) any { return v.Spec.InitScript }},
 		{".spec.enableNetworkMonitoring", func(v *VirtualMachine) any { return v.Spec.EnableNetworkMonitoring }},
 	}

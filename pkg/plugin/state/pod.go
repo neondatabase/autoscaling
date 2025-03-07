@@ -9,6 +9,7 @@ import (
 	"golang.org/x/exp/constraints"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -90,6 +91,17 @@ type PodResources[T constraints.Unsigned] struct {
 	//
 	// For pods that aren't VMs, this should be set to zero, as it has no impact.
 	Factor T
+
+	// Overcommit is the amount that usage of this resource should be discounted, taken from
+	// the VirtualMachine's .Spec.Overcommit field.
+	//
+	// We use a resource.Quantity as a general-purpose fixed-point number here.
+	//
+	// As an example, setting this value equal to 1.5 / 1500m on all pods would allow 50% more of
+	// this resource to be scheduled.
+	//
+	// For pods that aren't VMs, this should be set to 1.
+	Overcommit *resource.Quantity
 }
 
 func PodStateFromK8sObj(pod *corev1.Pod) (Pod, error) {
@@ -125,14 +137,16 @@ func podStateForNormalPod(pod *corev1.Pod) Pod {
 		Migrating:      false,
 
 		CPU: PodResources[vmv1.MilliCPU]{
-			Reserved:  cpu,
-			Requested: cpu,
-			Factor:    0,
+			Reserved:   cpu,
+			Requested:  cpu,
+			Factor:     0,
+			Overcommit: resource.NewMilliQuantity(1000, resource.DecimalSI), // 1000m = 1.0 = "no overcommit"
 		},
 		Mem: PodResources[api.Bytes]{
-			Reserved:  mem,
-			Requested: mem,
-			Factor:    0,
+			Reserved:   mem,
+			Requested:  mem,
+			Factor:     0,
+			Overcommit: resource.NewMilliQuantity(1000, resource.DecimalSI), // 1000m = 1.0 = "no overcommit"
 		},
 	}
 }
@@ -162,6 +176,11 @@ func podStateForVMRunner(pod *corev1.Pod, vmRef metav1.OwnerReference) (Pod, err
 	actualResources := &api.Resources{
 		VCPU: res.CPUs.Use,
 		Mem:  api.BytesFromResourceQuantity(res.MemorySlotSize) * api.Bytes(res.MemorySlots.Use),
+	}
+
+	overcommit, err := vmv1.VirtualMachineOvercommitFromPod(pod)
+	if err != nil {
+		return lo.Empty[Pod](), err
 	}
 
 	var scalingUnit, requested, approved *api.Resources
@@ -214,16 +233,28 @@ func podStateForVMRunner(pod *corev1.Pod, vmRef metav1.OwnerReference) (Pod, err
 		Migrating:      migrating,
 
 		CPU: PodResources[vmv1.MilliCPU]{
-			Reserved:  approved.VCPU,
-			Requested: requested.VCPU,
-			Factor:    scalingUnit.VCPU,
+			Reserved:   approved.VCPU,
+			Requested:  requested.VCPU,
+			Factor:     scalingUnit.VCPU,
+			Overcommit: overcommitFromOptionalQuantity(lo.FromPtr(overcommit).CPU),
 		},
 		Mem: PodResources[api.Bytes]{
-			Reserved:  approved.Mem,
-			Requested: requested.Mem,
-			Factor:    scalingUnit.Mem,
+			Reserved:   approved.Mem,
+			Requested:  requested.Mem,
+			Factor:     scalingUnit.Mem,
+			Overcommit: overcommitFromOptionalQuantity(lo.FromPtr(overcommit).Memory),
 		},
 	}, nil
+}
+
+func overcommitFromOptionalQuantity(q *resource.Quantity) *resource.Quantity {
+	if q != nil {
+		// Standardize outputs, so that direct equality comparisons in tests will *tend* to work.
+		return resource.NewMilliQuantity(q.MilliValue(), resource.DecimalSI)
+	}
+
+	// Otherwise, return 1000m = 1.0 = "no overcommit"
+	return resource.NewMilliQuantity(1000, resource.DecimalSI)
 }
 
 // BetterMigrationTargetThan returns <0 iff the pod is a better migration target than the 'other'
