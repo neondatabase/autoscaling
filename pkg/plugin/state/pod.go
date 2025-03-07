@@ -95,13 +95,12 @@ type PodResources[T constraints.Unsigned] struct {
 	// Overcommit is the amount that usage of this resource should be discounted, taken from
 	// the VirtualMachine's .Spec.Overcommit field.
 	//
-	// This field is a milli-Value -- i.e., 1000 times the (potentially fractional) value that is
-	// being expressed.
+	// We use a resource.Quantity as a general-purpose fixed-point number here.
 	//
-	// As an example, setting this value equal to 1500 on all pods would allow 50% more of this
-	// resource to be scheduled (1500m ≈ 1.5 ⇒ 50% more).
+	// As an example, setting this value equal to 1.5 / 1500m on all pods would allow 50% more of
+	// this resource to be scheduled.
 	//
-	// For pods that aren't VMs, this should be set to 1000.
+	// For pods that aren't VMs, this should be set to 1.
 	Overcommit *resource.Quantity
 }
 
