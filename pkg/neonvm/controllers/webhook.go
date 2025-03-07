@@ -16,7 +16,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -137,16 +136,6 @@ var _ webhook.CustomValidator = (*VMWebhook)(nil)
 // ValidateCreate implements webhook.CustomValidator
 func (w *VMMigrationWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	vmm := obj.(*vmv1.VirtualMachineMigration)
-	var vm vmv1.VirtualMachine
-	err := w.Client.Get(ctx, types.NamespacedName{Name: vmm.Spec.VmName, Namespace: vmm.Namespace}, &vm)
-	if err != nil {
-		return nil, fmt.Errorf("vm %s not found: %w", vmm.Spec.VmName, err)
-	}
-
-	if vm.Status.ExtraNetIP == "" {
-		return nil, fmt.Errorf("vm %s does not have an extra net IP", vmm.Spec.VmName)
-	}
-
 	return vmm.ValidateCreate()
 }
 
