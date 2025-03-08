@@ -17,6 +17,9 @@ limitations under the License.
 package v1
 
 import (
+	"fmt"
+	"reflect"
+
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -42,7 +45,9 @@ var _ webhook.Validator = &VirtualMachineMigration{}
 //
 // The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateCreate() (admission.Warnings, error) {
-	// TODO: implement creation validation webhook (?)
+	if len(r.Spec.VmName) == 0 {
+		return nil, fmt.Errorf("vmName is required")
+	}
 	return nil, nil
 }
 
@@ -50,7 +55,10 @@ func (r *VirtualMachineMigration) ValidateCreate() (admission.Warnings, error) {
 //
 // The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	// TODO: implement update validation webhook
+	oldVMM := old.(*VirtualMachineMigration)
+	if !reflect.DeepEqual(r.Spec, oldVMM.Spec) {
+		return nil, fmt.Errorf("updating migration spec is not allowed")
+	}
 	return nil, nil
 }
 
@@ -58,6 +66,6 @@ func (r *VirtualMachineMigration) ValidateUpdate(old runtime.Object) (admission.
 //
 // The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateDelete() (admission.Warnings, error) {
-	// TODO: implement deletion validation webhook (?)
+	// No validation needed - we have a finalizer that prevents deletion
 	return nil, nil
 }
