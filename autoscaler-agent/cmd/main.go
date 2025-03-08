@@ -17,6 +17,7 @@ import (
 	vmclient "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 	"github.com/neondatabase/autoscaling/pkg/agent"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	_ "go.uber.org/automaxprocs"
 )
 
 func main() {
