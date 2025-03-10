@@ -43,7 +43,7 @@ jobs:
     needs: get-tag
     with:
       tag: ${{ needs.get-tag.outputs.tag }}
-      upload-to-ecr: true
+      upload-to-ecr-acr: true
       archs: '["amd64","arm64"]'
     secrets: inherit
 
