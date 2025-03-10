@@ -30,6 +30,7 @@ on:
 jobs:
   push-to-acr:
     runs-on: ubuntu-22.04
+    environment: ${{ inputs.client_id == vars.AZURE_PROD_CLIENT_ID && 'prod' || 'dev' }}-azure-eastus2
     permissions:
       contents: read  # This is required for actions/checkout
       id-token: write # This is required for Azure Login to work.
