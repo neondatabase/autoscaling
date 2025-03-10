@@ -1,5 +1,5 @@
 diff --git a/cluster-autoscaler/utils/kubernetes/listers.go b/cluster-autoscaler/utils/kubernetes/listers.go
-index b9be94b6e..8e62c3cda 100644
+index b9be94b6e..24e108218 100644
 --- a/cluster-autoscaler/utils/kubernetes/listers.go
 +++ b/cluster-autoscaler/utils/kubernetes/listers.go
 @@ -17,10 +17,12 @@ limitations under the License.
@@ -15,7 +15,7 @@ index b9be94b6e..8e62c3cda 100644
  	"k8s.io/apimachinery/pkg/fields"
  	"k8s.io/apimachinery/pkg/labels"
  	"k8s.io/client-go/informers"
-@@ -221,6 +223,30 @@ type AllPodLister struct {
+@@ -221,6 +223,63 @@ type AllPodLister struct {
  	podLister v1lister.PodLister
  }
  
@@ -27,16 +27,49 @@ index b9be94b6e..8e62c3cda 100644
 +	Memory resource.Quantity `json:"memory"`
 +}
 +
++// copied from github.com/neondatabase/autoscaling, neonvm/apis/neonvm/v1/virtualmachine_types.go.
++//
++// this is duplicated so we're not *also* managing an additional dependency.
++type virtualMachineOvercommitSettings struct {
++	CPU    *resource.Quantity `json:"cpu,omitempty"`
++	Memory *resource.Quantity `json:"memory,omitempty"`
++}
++
 +func updatePodRequestsFromNeonVMAnnotation(pod *apiv1.Pod) {
-+	annotation, ok := pod.Annotations["vm.neon.tech/usage"]
++	usageAnnotation, ok := pod.Annotations["vm.neon.tech/usage"]
 +	if !ok {
 +		return
 +	}
 +
 +	var usage virtualMachineUsage
-+	if err := json.Unmarshal([]byte(annotation), &usage); err != nil {
++	if err := json.Unmarshal([]byte(usageAnnotation), &usage); err != nil {
 +		return
 +	}
++
++	// Handle overcommit, if present
++	overcommitAnnotation, ok := pod.Annotations["vm.neon.tech/overcommit"]
++	if ok {
++		var overcommit virtualMachineOvercommitSettings
++		if err := json.Unmarshal([]byte(overcommitAnnotation), &overcommit); err != nil {
++			return
++		}
++
++		if cpuFactor := overcommit.CPU; cpuFactor != nil {
++			newCPU := resource.NewMilliQuantity(
++				usage.CPU.MilliValue()*1000/cpuFactor.MilliValue(),
++				usage.CPU.Format,
++			)
++			usage.CPU = *newCPU
++		}
++		if memFactor := overcommit.Memory; memFactor != nil {
++			newMem := resource.NewQuantity(
++				usage.Memory.Value()*1000/memFactor.MilliValue(),
++				usage.Memory.Format,
++			)
++			usage.Memory = *newMem
++		}
++	}
++
 +	pod.Spec.Containers[0].Resources.Requests = apiv1.ResourceList(map[apiv1.ResourceName]resource.Quantity{
 +		apiv1.ResourceCPU:    usage.CPU,
 +		apiv1.ResourceMemory: usage.Memory,
@@ -46,7 +79,7 @@ index b9be94b6e..8e62c3cda 100644
  // List returns all scheduled pods.
  func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
  	var pods []*apiv1.Pod
-@@ -231,7 +257,10 @@ func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
+@@ -231,7 +290,10 @@ func (lister *AllPodLister) List() ([]*apiv1.Pod, error) {
  	}
  	for _, p := range allPods {
  		if p.Status.Phase != apiv1.PodSucceeded && p.Status.Phase != apiv1.PodFailed {
