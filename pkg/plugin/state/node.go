@@ -9,6 +9,7 @@ import (
 	"golang.org/x/exp/constraints"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -64,7 +65,8 @@ type NodeResources[T constraints.Unsigned] struct {
 	// This value does not change.
 	Total T
 
-	// Reserved is exactly equal to all Pods' <resource>.Reserved values.
+	// Reserved is the sum of all Pods' <resource>.Reserved values, after applying overcommit
+	// factors.
 	//
 	// It SHOULD be less than or equal to Total, and - when live migration is enabled - we take
 	// active measures to reduce it once it is above Watermark.
@@ -358,17 +360,26 @@ func (n *Node) RemovePod(uid types.UID) (exists bool) {
 	return true
 }
 
+// applyOvercommit turns pod-level resource requests into node-level capacity change
+func applyOvercommit[T constraints.Integer](value T, overcommit *resource.Quantity) T {
+	return T(int64(value) * 1000 / overcommit.MilliValue())
+}
+
 func (r *NodeResources[T]) add(p *PodResources[T], migrating bool) {
-	r.Reserved += p.Reserved
+	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
+
+	r.Reserved += actualReserved
 	if migrating {
-		r.Migrating += p.Reserved
+		r.Migrating += actualReserved
 	}
 }
 
 func (r *NodeResources[T]) remove(p PodResources[T], migrating bool) {
-	r.Reserved -= p.Reserved
+	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
+
+	r.Reserved -= actualReserved
 	if migrating {
-		r.Migrating -= p.Reserved
+		r.Migrating -= actualReserved
 	}
 }
 
@@ -385,9 +396,12 @@ func (r *NodeResources[T]) reconcilePod(p *PodResources[T], migrating bool) (don
 		return true // nothing to do!
 	}
 
-	// Difficult case: Requested is greater than Reserved -- how much can we give?
 	desiredIncrease := p.Requested - p.Reserved
-	remaining := util.SaturatingSub(r.Total, r.Reserved)
+
+	// Difficult case: Requested is greater than Reserved -- how much can we give?
+	// The answer is relative to the overcommit -- taking Total-Reserved and inverting the
+	// overcommit so that we translate the amount relative to the *pod's* overcommit.
+	remaining := T(int64(util.SaturatingSub(r.Total, r.Reserved)) * p.Overcommit.MilliValue() / 1000)
 
 	// (X / M) * M is equivalent to floor(X / M) -- any amount that we give must be a multiple of
 	// the factor (roughly, the compute unit).
