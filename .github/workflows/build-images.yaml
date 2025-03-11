@@ -413,9 +413,12 @@ jobs:
           "${IMG_CLUSTER_AUTOSCALER}")
 
           for image in "${images[@]}"; do
+            # Remove "neondatabase/" prefix from image name
+            image_without_prefix=${image#neondatabase/}
+
             image_from=${image}:${TAG}
-            image_ecr_dev=${ECR_DEV}/${image#neondatabase/}:${TAG}
-            image_ecr_prod=${ECR_PROD}/${image#neondatabase/}:${TAG}
+            image_ecr_dev="${ECR_DEV}/${image_without_prefix}:${TAG}"
+            image_ecr_prod="${ECR_PROD}/${image_without_prefix}:${TAG}"
 
             echo "Copy ${image_from} to ${image_ecr_dev} (dev), and ${image_ecr_prod} (prod)"
 
