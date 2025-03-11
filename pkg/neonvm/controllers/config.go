@@ -51,4 +51,7 @@ type ReconcilerConfig struct {
 	AtMostOnePod bool
 	// DefaultCPUScalingMode is the default CPU scaling mode that will be used for VMs with empty spec.cpuScalingMode
 	DefaultCPUScalingMode vmv1.CpuScalingMode
+
+	// NADConfig is the configuration for the Network Attachment Definitions
+	NADConfig *NADConfig
 }

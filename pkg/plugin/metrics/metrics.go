@@ -20,7 +20,7 @@ type Plugin struct {
 	nodeLabels nodeLabeling
 
 	Framework Framework
-	Nodes     Node
+	Nodes     *Node
 	Reconcile Reconcile
 
 	ResourceRequests      *prometheus.CounterVec

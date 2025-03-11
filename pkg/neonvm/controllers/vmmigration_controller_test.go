@@ -69,6 +69,7 @@ func newMigrationTestParams(t *testing.T) *migrationTestParams {
 			FailingRefreshInterval:  time.Minute,
 			AtMostOnePod:            false,
 			DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
+			NADConfig:               nil,
 		},
 		Metrics: testReconcilerMetrics,
 	}

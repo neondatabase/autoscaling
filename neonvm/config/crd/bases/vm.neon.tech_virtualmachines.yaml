@@ -2863,6 +2863,25 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
+              overcommit:
+                description: Overcommit sets factors by which to discount resource
+                  usage from the VM.
+                properties:
+                  cpu:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: CPU overcommit factor.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  memory:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Memory overcommit factor.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                type: object
               podResources:
                 description: ResourceRequirements describes the compute resource requirements.
                 properties:
@@ -3009,6 +3028,12 @@ spec:
                   expireAfter:
                     description: This is required to set the duration that the certificate
                       should be valid for before expiring
+                    type: string
+                  mountPath:
+                    default: /var/tls
+                    description: |-
+                      Which directory in the VM these certificates should be mounted to.
+                      Will be exposed as `tls.key` and `tls.crt`.
                     type: string
                   renewBefore:
                     description: This is required to set the duration before certificate

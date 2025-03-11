@@ -225,13 +225,32 @@ func run(logger *zap.Logger) error {
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	tg.Go("iso9660-runtime", func(logger *zap.Logger) error {
+		disks := vmSpec.Disks
+
+		// add the tls path.
+		// this is needed to just `mkdir` the mounting directory.
+		if vmSpec.TLS != nil {
+			disks = append(disks, vmv1.Disk{
+				Name:      "tls-keys",
+				MountPath: vmSpec.TLS.MountPath,
+				Watch:     lo.ToPtr(true),
+				ReadOnly:  nil,
+				DiskSource: vmv1.DiskSource{
+					EmptyDisk: nil,
+					ConfigMap: nil,
+					Secret:    nil,
+					Tmpfs:     nil,
+				},
+			})
+		}
+
 		return createISO9660runtime(
 			runtimeDiskPath,
 			vmSpec.Guest.Command,
 			vmSpec.Guest.Args,
 			sysctl,
 			vmSpec.Guest.Env,
-			vmSpec.Disks,
+			disks,
 			enableSSH,
 			swapSize,
 			shmSize,
@@ -390,7 +409,8 @@ func buildQEMUCmd(
 }
 
 const (
-	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=7 root=/dev/vda rw"
+	// this loglevel is used only during startup, later it is overriden during vminit
+	baseKernelCmdline          = "panic=-1 init=/neonvm/bin/init loglevel=6 root=/dev/vda rw"
 	kernelCmdlineVirtioMemTmpl = "memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=%s"
 )
 
@@ -686,8 +706,9 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, v
 	}
 
 	if vmSpec.TLS != nil {
-		secrets["/vm/mounts/var/tls/..data"] = "/var/tls"
-		secretsOrd = append(secretsOrd, "/vm/mounts/var/tls/..data")
+		dataDir := fmt.Sprintf("/vm/mounts%s/..data", vmSpec.TLS.MountPath)
+		secrets[dataDir] = vmSpec.TLS.MountPath
+		secretsOrd = append(secretsOrd, dataDir)
 	}
 
 	if len(secretsOrd) == 0 {

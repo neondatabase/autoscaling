@@ -10,6 +10,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -40,14 +41,16 @@ func fixedPod(id int, cpu vmv1.MilliCPU, mem api.Bytes) state.Pod {
 		AlwaysMigrate:  false,
 		Migrating:      false,
 		CPU: state.PodResources[vmv1.MilliCPU]{
-			Reserved:  cpu,
-			Requested: cpu,
-			Factor:    0,
+			Reserved:   cpu,
+			Requested:  cpu,
+			Factor:     0,
+			Overcommit: lo.ToPtr(resource.MustParse("1000m")), // 1000m = 1.0 = "no overcommit"
 		},
 		Mem: state.PodResources[api.Bytes]{
-			Reserved:  mem,
-			Requested: mem,
-			Factor:    0,
+			Reserved:   mem,
+			Requested:  mem,
+			Factor:     0,
+			Overcommit: lo.ToPtr(resource.MustParse("1000m")), // 1000m = 1.0 = "no overcommit"
 		},
 	}
 }
@@ -185,13 +188,23 @@ func TestPodReconciling(t *testing.T) {
 		mem resources[api.Bytes]
 	}
 
+	type overcommit struct {
+		cpu *resource.Quantity
+		mem *resource.Quantity
+	}
+
 	cpu := vmv1.MilliCPU(1000)
 	gib := api.Bytes(1024 * 1024 * 1024)
 
 	factorCPU := cpu
 	factorMem := 4 * gib
 
-	makePod := func(p pod) state.Pod {
+	defaultOvercommit := overcommit{
+		cpu: lo.ToPtr(resource.MustParse("1000m")),
+		mem: lo.ToPtr(resource.MustParse("1000m")),
+	}
+
+	makePod := func(p pod, overcommitFactors overcommit) state.Pod {
 		// Jan 1 2000 at 00:00:00 UTC
 		createdAt := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -210,14 +223,16 @@ func TestPodReconciling(t *testing.T) {
 			AlwaysMigrate: false,
 			Migrating:     false,
 			CPU: state.PodResources[vmv1.MilliCPU]{
-				Reserved:  p.cpu.reserved,
-				Requested: p.cpu.requested,
-				Factor:    factorCPU,
+				Reserved:   p.cpu.reserved,
+				Requested:  p.cpu.requested,
+				Factor:     factorCPU,
+				Overcommit: overcommitFactors.cpu,
 			},
 			Mem: state.PodResources[api.Bytes]{
-				Reserved:  p.mem.reserved,
-				Requested: p.mem.requested,
-				Factor:    factorMem,
+				Reserved:   p.mem.reserved,
+				Requested:  p.mem.requested,
+				Factor:     factorMem,
+				Overcommit: overcommitFactors.mem,
 			},
 		}
 	}
@@ -226,6 +241,7 @@ func TestPodReconciling(t *testing.T) {
 		name       string
 		nodeTotals node
 		nodeBefore node
+		overcommit overcommit
 		podBefore  pod
 		done       bool
 		nodeAfter  node
@@ -241,6 +257,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 3 * factorCPU,
 				mem: 3 * factorMem,
 			},
+			overcommit: defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -278,6 +295,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 3 * factorCPU,
 				mem: 3 * factorMem,
 			},
+			overcommit: defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -315,6 +333,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 8 * factorCPU,
 				mem: 8 * factorMem,
 			},
+			overcommit: defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -352,6 +371,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 9 * factorCPU,
 				mem: 9 * factorMem,
 			},
+			overcommit: defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -390,6 +410,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 10 * factorCPU,
 				mem: 10 * factorMem,
 			},
+			overcommit: defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -428,6 +449,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 9 * factorCPU,
 				mem: 9 * factorMem,
 			},
+			overcommit: defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -465,6 +487,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 11 * factorCPU,
 				mem: 11 * factorMem,
 			},
+			overcommit: defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -502,6 +525,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 12 * factorCPU,
 				mem: 12 * factorMem,
 			},
+			overcommit: defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  4 * factorCPU,
@@ -528,6 +552,48 @@ func TestPodReconciling(t *testing.T) {
 				},
 			},
 		},
+		{
+			// Pod that upscales from 3 -> 7 CU, exactly landing at the node limits because it's
+			// overcommitted by 2x
+			name: "upscale-overcomitted-full-exact",
+			nodeTotals: node{
+				cpu: 10 * factorCPU,
+				mem: 10 * factorMem,
+			},
+			nodeBefore: node{
+				cpu: 8 * factorCPU,
+				mem: 8 * factorMem,
+			},
+			overcommit: overcommit{
+				cpu: lo.ToPtr(resource.MustParse("2000m")),
+				mem: lo.ToPtr(resource.MustParse("2000m")),
+			},
+			podBefore: pod{
+				cpu: resources[vmv1.MilliCPU]{
+					reserved:  3 * factorCPU,
+					requested: 7 * factorCPU,
+				},
+				mem: resources[api.Bytes]{
+					reserved:  3 * factorMem,
+					requested: 7 * factorMem,
+				},
+			},
+			done: true,
+			nodeAfter: node{
+				cpu: 10 * factorCPU,
+				mem: 10 * factorMem,
+			},
+			podAfter: pod{
+				cpu: resources[vmv1.MilliCPU]{
+					reserved:  7 * factorCPU,
+					requested: 7 * factorCPU,
+				},
+				mem: resources[api.Bytes]{
+					reserved:  7 * factorMem,
+					requested: 7 * factorMem,
+				},
+			},
+		},
 	}
 
 	for _, c := range cases {
@@ -546,10 +612,10 @@ func TestPodReconciling(t *testing.T) {
 			}
 
 			node := makeNode(
-				c.nodeBefore.cpu-c.podBefore.cpu.reserved,
-				c.nodeBefore.mem-c.podBefore.mem.reserved,
+				c.nodeBefore.cpu-vmv1.MilliCPU(int64(c.podBefore.cpu.reserved)*1000/c.overcommit.cpu.MilliValue()),
+				c.nodeBefore.mem-api.Bytes(int64(c.podBefore.mem.reserved)*1000/c.overcommit.mem.MilliValue()),
 			)
-			node.AddPod(makePod(c.podBefore))
+			node.AddPod(makePod(c.podBefore, c.overcommit))
 
 			// Check that the initial node equals what we expect
 			nodeBefore := makeNode(c.nodeBefore.cpu, c.nodeBefore.mem)
@@ -562,11 +628,11 @@ func TestPodReconciling(t *testing.T) {
 			done := node.ReconcilePodReserved(&p)
 
 			// Check the pod matches what we expect
-			assert.Equal(t, makePod(c.podAfter), p)
+			assert.Equal(t, makePod(c.podAfter, c.overcommit), p)
 			// ... and, check that the modified pod *and* the pod in the node still match.
 			p, ok = node.GetPod("pod-uid")
 			assert.Equal(t, true, ok)
-			assert.Equal(t, makePod(c.podAfter), p)
+			assert.Equal(t, makePod(c.podAfter, c.overcommit), p)
 			// + check whether we're done matches:
 			assert.Equal(t, c.done, done)
 			// + check the node:

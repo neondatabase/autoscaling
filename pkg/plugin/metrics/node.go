@@ -1,6 +1,9 @@
 package metrics
 
 import (
+	"slices"
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/neondatabase/autoscaling/pkg/plugin/state"
@@ -11,17 +14,25 @@ type Node struct {
 	// InheritedLabels are the labels on the node that are directly used as part of the metrics
 	InheritedLabels []string
 
+	// mu locks access to lastLabels
+	mu sync.Mutex
+	// map of node name -> list of labels that were last used in metrics
+	lastLabels map[string][]string
+
 	cpu *prometheus.GaugeVec
 	mem *prometheus.GaugeVec
 }
 
-func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) Node {
+func buildNodeMetrics(labels nodeLabeling, reg prometheus.Registerer) *Node {
 	finalMetricLabels := []string{"node"}
 	finalMetricLabels = append(finalMetricLabels, labels.metricLabelNames...)
 	finalMetricLabels = append(finalMetricLabels, "field")
 
-	return Node{
+	return &Node{
 		InheritedLabels: labels.k8sLabelNames,
+
+		mu:         sync.Mutex{},
+		lastLabels: make(map[string][]string),
 
 		cpu: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -47,9 +58,13 @@ func (m *Node) Update(node *state.Node) {
 		commonLabels = append(commonLabels, value)
 	}
 
-	// Remove old metrics before setting the new ones, because otherwise we may end up with
-	// un-updated metrics if node labels change.
-	m.Remove(node)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !slices.Equal(commonLabels, m.lastLabels[node.Name]) {
+		// Remove old metrics before setting the new ones
+		m.removeLocked(node)
+	}
 
 	for _, f := range node.CPU.Fields() {
 		//nolint:gocritic // assigning append value to a different slice is intentional here
@@ -61,10 +76,19 @@ func (m *Node) Update(node *state.Node) {
 		labels := append(commonLabels, f.Name)
 		m.mem.WithLabelValues(labels...).Set(f.Value.AsFloat64())
 	}
+
+	m.lastLabels[node.Name] = commonLabels
 }
 
 func (m *Node) Remove(node *state.Node) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeLocked(node)
+}
+
+func (m *Node) removeLocked(node *state.Node) {
 	baseMatch := prometheus.Labels{"node": node.Name}
 	m.cpu.DeletePartialMatch(baseMatch)
 	m.mem.DeletePartialMatch(baseMatch)
+	delete(m.lastLabels, node.Name)
 }
