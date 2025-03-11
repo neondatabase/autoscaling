@@ -52,6 +52,9 @@ on:
       daemon:
         description: 'neonvm-daemon image'
         value: ${{ jobs.tags.outputs.daemon }}
+      cluster-autoscaler:
+        description: 'cluster-autoscaler image'
+        value: ${{ jobs.tags.outputs.cluster-autoscaler }}
 
 env:
   IMG_CONTROLLER:         "neondatabase/neonvm-controller"
@@ -74,12 +77,12 @@ jobs:
   # itself still succeeds, while not doing anything when called by the release workflow.
   tags:
     outputs:
-      controller: ${{ steps.show-tags.outputs.controller }}
-      vxlan-controller: ${{ steps.show-tags.outputs.vxlan-controller }}
-      runner: ${{ steps.show-tags.outputs.runner }}
-      scheduler: ${{ steps.show-tags.outputs.scheduler }}
-      autoscaler-agent: ${{ steps.show-tags.outputs.autoscaler-agent }}
-      daemon: ${{ steps.show-tags.outputs.daemon }}
+      controller:         ${{ steps.show-tags.outputs.controller }}
+      vxlan-controller:   ${{ steps.show-tags.outputs.vxlan-controller }}
+      runner:             ${{ steps.show-tags.outputs.runner }}
+      scheduler:          ${{ steps.show-tags.outputs.scheduler }}
+      autoscaler-agent:   ${{ steps.show-tags.outputs.autoscaler-agent }}
+      daemon:             ${{ steps.show-tags.outputs.daemon }}
       cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
     runs-on: ubuntu-latest
     steps:
@@ -96,6 +99,7 @@ jobs:
           echo "scheduler=${IMG_SCHEDULER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "autoscaler-agent=${IMG_AUTOSCALER_AGENT}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "daemon=${IMG_DAEMON}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${IMG_CLUSTER_AUTOSCALER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   vm-kernel:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
@@ -111,13 +115,6 @@ jobs:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
     needs: [ vm-kernel ]
-    outputs:
-      controller:         ${{ steps.tags.outputs.controller }}
-      vxlan-controller:   ${{ steps.tags.outputs.vxlan-controller }}
-      runner:             ${{ steps.tags.outputs.runner }}
-      scheduler:          ${{ steps.tags.outputs.scheduler }}
-      autoscaler-agent:   ${{ steps.tags.outputs.autoscaler-agent }}
-      cluster-autoscaler: ${{ steps.tags.outputs.cluster-autoscaler }}
     env:
       # Why localhost? We use a local registry so that when docker/build-push-action tries to pull the
       # image we built locally, it'll actually have a place to pull from.
@@ -152,8 +149,8 @@ jobs:
           echo "runner=${IMG_RUNNER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "scheduler=${IMG_SCHEDULER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "autoscaler-agent=${IMG_AUTOSCALER_AGENT}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "cluster-autoscaler=${IMG_CLUSTER_AUTOSCALER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
           echo "daemon=${IMG_DAEMON}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${IMG_CLUSTER_AUTOSCALER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
       - uses: actions/checkout@v4
 
@@ -405,12 +402,13 @@ jobs:
       - name: Copy all merged images to ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
         run: |
-          images=("neonvm-controller" \
-          "neonvm-vxlan-controller" \
-          "neonvm-runner" \
-          "autoscale-scheduler" \
-          "autoscaler-agent" \
-          "cluster-autoscaler-neonvm")
+          # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
+          images=("${IMG_CONTROLLER}" \
+          "${IMG_VXLAN_CONTROLLER}" \
+          "${IMG_RUNNER}" \
+          "${IMG_SCHEDULER}" \
+          "${IMG_AUTOSCALER_AGENT}" \
+          "${IMG_CLUSTER_AUTOSCALER}")
 
           for image in "${images[@]}"; do
             echo Copy ${image}:${{ inputs.tag }} to dev ECR
