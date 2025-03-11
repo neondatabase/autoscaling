@@ -242,7 +242,7 @@ func (p *CpuScalingMode) FlagFunc(value string) error {
 		string(CpuScalingModeSysfs),
 	}
 
-	if !slices.Contains(possibleValues, value) {
+	if !slices.Contains(possibleValues, value) || value == "" {
 		return fmt.Errorf("Unknown CpuScalingMode %q, must be one of %v", value, possibleValues)
 	}
 
