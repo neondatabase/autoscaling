@@ -1,0 +1,21 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 70
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      kubectl exec -n "$NAMESPACE" $pod -- scp guest-vm:/var/run/secrets/tokens/token token
+---
+apiVersion: vm.neon.tech/v1
+kind: VirtualMachine
+metadata:
+  name: example
+status:
+  phase: Running
+  restartCount: 0
+  conditions:
+    - type: Available
+      status: "True"
+  cpus: 250m
+  memorySize: 1Gi
