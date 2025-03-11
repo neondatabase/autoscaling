@@ -5,6 +5,7 @@ IMG_RUNNER ?= runner:dev
 IMG_DAEMON ?= daemon:dev
 IMG_SCHEDULER ?= autoscale-scheduler:dev
 IMG_AUTOSCALER_AGENT ?= autoscaler-agent:dev
+IMG_TRACE_COLLECTOR ?= cluster-trace-collector:dev
 
 # Shared base image for caching compiled dependencies.
 # It's only used during image builds, so doesn't need to be pushed.
@@ -178,7 +179,7 @@ lint: ## Run golangci-lint against code.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: docker-build-controller docker-build-runner docker-build-daemon docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler
+docker-build: docker-build-controller docker-build-runner docker-build-daemon docker-build-vxlan-controller docker-build-autoscaler-agent docker-build-scheduler docker-build-trace-collector ## Build docker images for NeonVM controllers, NeonVM runner, autoscaler-agent, scheduler
 
 .PHONY: docker-push
 docker-push: docker-build ## Push docker images to docker registry
@@ -187,6 +188,7 @@ docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_VXLAN_CONTROLLER)
 	docker push -q $(IMG_SCHEDULER)
 	docker push -q $(IMG_AUTOSCALER_AGENT)
+	docker push -q $(IMG_TRACE_COLLECTOR)
 
 .PHONY: docker-build-go-base
 docker-build-go-base:
@@ -246,6 +248,14 @@ docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscal
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg "GIT_INFO=$(GIT_INFO)" \
 		--file autoscale-scheduler/Dockerfile \
+		.
+
+.PHONY: docker-build-trace-collector
+docker-build-trace-collector: docker-build-go-base ## Build docker image for cluster trace collector
+	docker buildx build \
+		--tag $(IMG_TRACE_COLLECTOR) \
+		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--file cluster-trace-collector/Dockerfile \
 		.
 
 .PHONY: docker-build-examples
