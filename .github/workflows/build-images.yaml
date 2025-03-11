@@ -401,6 +401,8 @@ jobs:
 
       - name: Copy all merged images to ECR
         if: ${{ format('{0}', inputs.upload-to-ecr) == 'true' }}
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
           # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
           images=("${IMG_CONTROLLER}" \
@@ -411,10 +413,13 @@ jobs:
           "${IMG_CLUSTER_AUTOSCALER}")
 
           for image in "${images[@]}"; do
-            echo Copy ${image}:${{ inputs.tag }} to dev ECR
-            docker buildx imagetools create -t ${{ env.ECR_DEV }}/${image}:${{ inputs.tag }} \
-                                               neondatabase/${image}:${{ inputs.tag }}
-            echo Copy ${image}:${{ inputs.tag }} to prod ECR
-            docker buildx imagetools create -t ${{ env.ECR_PROD }}/${image}:${{ inputs.tag }} \
-                                               neondatabase/${image}:${{ inputs.tag }}
+            image_from=${image}:${TAG}
+            image_ecr_dev=${ECR_DEV}/${image#neondatabase/}:${TAG}
+            image_ecr_prod=${ECR_PROD}/${image#neondatabase/}:${TAG}
+
+            echo "Copy ${image_from} to ${image_ecr_dev} (dev), and ${image_ecr_prod} (prod)"
+
+            docker buildx imagetools create -t ${image_ecr_dev} \
+                                            -t ${image_ecr_prod} \
+                                               ${image_from}
           done
