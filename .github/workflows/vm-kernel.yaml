@@ -40,8 +40,9 @@ on:
         value: ${{ jobs.merge-kernel-images.outputs.image || jobs.setup-build-vm-kernel-image.outputs.image }}
 
 env:
-  VM_KERNEL_IMAGE: ghcr.io/neondatabase/vm-kernel
-
+  VM_KERNEL_IMAGE:    "vm-kernel"
+  GHCR_REGISTRY:      "ghcr.io/neondatabase"
+  DOCKERHUB_REGISTRY: "docker.io/neondatabase"
 
 defaults:
   run:
@@ -91,13 +92,14 @@ jobs:
           FORCE_REBUILD: ${{ inputs.force-rebuild }}
           CACHE_TAG: ${{ steps.get-kernel-cache-tag.outputs.kernel-cache-tag }}
         run: |
+          ghcr_image="${GHCR_REGISTRY}/${VM_KERNEL_IMAGE}"
           if [ -n "${FORCED_TAG}" ]; then
-            DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${FORCED_TAG} -v | jq -r '.Descriptor.digest')
-            IMAGE="${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${FORCED_TAG}@${DIGEST}"
+            DIGEST=$(docker manifest inspect ${ghcr_image}-${{ matrix.arch }}:${FORCED_TAG} -v | jq -r '.Descriptor.digest')
+            IMAGE="${ghcr_image}-${{ matrix.arch }}:${FORCED_TAG}@${DIGEST}"
           elif [ "${FORCE_REBUILD}" == "false" ]; then
-            CACHE_TAG_DIGEST=$(docker manifest inspect ${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${CACHE_TAG} -v | jq -r '.Descriptor.digest' || true)
+            CACHE_TAG_DIGEST=$(docker manifest inspect ${ghcr_image}-${{ matrix.arch }}:${CACHE_TAG} -v | jq -r '.Descriptor.digest' || true)
             if [ -n "${CACHE_TAG_DIGEST}" ]; then
-              IMAGE="${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${CACHE_TAG}@${CACHE_TAG_DIGEST}"
+              IMAGE="${ghcr_image}-${{ matrix.arch }}:${CACHE_TAG}@${CACHE_TAG_DIGEST}"
             else
               IMAGE=""
             fi
@@ -239,7 +241,7 @@ jobs:
           for tag in ${TAGS}; do
 
             # build full image tag like "ghcr.io/neondatabase/vm-kernel-amd64:6.1.63"
-            full_image_tag="$VM_KERNEL_IMAGE-${{ matrix.arch }}:${tag}"
+            full_image_tag="${GHCR_REGISTRY}/${VM_KERNEL_IMAGE}-${{ matrix.arch }}:${tag}"
 
             # add or instantiate list of full qualified image names with all tags we have for this run
             if [ -z "$PROCESSED_TAGS" ]; then
@@ -313,28 +315,22 @@ jobs:
           TAG: ${{ needs.get-tags.outputs.canonical }}
 
         run: |
-          result_image="${VM_KERNEL_IMAGE}:${TAG}"
+          result_image="${GHCR_REGISTRY}/${VM_KERNEL_IMAGE}:${TAG}"
 
           args=("-t" "${result_image}")
           for arch in ${ARCHS}; do
-            args+=("${VM_KERNEL_IMAGE}-${arch}:${TAG}")
+            args+=("${GHCR_REGISTRY}/${VM_KERNEL_IMAGE}-${arch}:${TAG}")
           done
           docker buildx imagetools create "${args[@]}"
 
           echo "image=${result_image}" >> $GITHUB_OUTPUT
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
-        with:
-          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
-          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
-
-      - name: Copy vm-kernel to GHCR
+      - name: Copy vm-kernel to Docker Hub
         env:
           TAG: ${{ needs.get-tags.outputs.canonical }}
         run: |
           echo Copy ${VM_KERNEL_IMAGE}:${TAG} to Docker Hub
 
           # New image on Docker Hub matches GHCR image, but without "ghcr.io/" prefix
-          docker buildx imagetools create -t "${VM_KERNEL_IMAGE#ghcr.io/}:${TAG}" \
-                                             "${VM_KERNEL_IMAGE}:${TAG}"
+          docker buildx imagetools create -t "${DOCKERHUB_REGISTRY}/${VM_KERNEL_IMAGE}:${TAG}" \
+                                                  "${GHCR_REGISTRY}/${VM_KERNEL_IMAGE}:${TAG}"
