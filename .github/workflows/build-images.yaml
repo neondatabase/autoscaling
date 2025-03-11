@@ -33,7 +33,6 @@ on:
         default: '["amd64","arm64"]'
 
     outputs:
-
       controller:
         description: 'neonvm-controller image'
         value: ${{ jobs.tags.outputs.controller }}
@@ -57,13 +56,15 @@ on:
         value: ${{ jobs.tags.outputs.cluster-autoscaler }}
 
 env:
-  IMG_CONTROLLER:         "ghcr.io/neondatabase/neonvm-controller"
-  IMG_VXLAN_CONTROLLER:   "ghcr.io/neondatabase/neonvm-vxlan-controller"
-  IMG_RUNNER:             "ghcr.io/neondatabase/neonvm-runner"
-  IMG_SCHEDULER:          "ghcr.io/neondatabase/autoscale-scheduler"
-  IMG_AUTOSCALER_AGENT:   "ghcr.io/neondatabase/autoscaler-agent"
-  IMG_DAEMON:             "ghcr.io/neondatabase/neonvm-daemon"
-  IMG_CLUSTER_AUTOSCALER: "ghcr.io/neondatabase/cluster-autoscaler-neonvm"
+  IMG_CONTROLLER:         "neonvm-controller"
+  IMG_VXLAN_CONTROLLER:   "neonvm-vxlan-controller"
+  IMG_RUNNER:             "neonvm-runner"
+  IMG_SCHEDULER:          "autoscale-scheduler"
+  IMG_AUTOSCALER_AGENT:   "autoscaler-agent"
+  IMG_DAEMON:             "neonvm-daemon"
+  IMG_CLUSTER_AUTOSCALER: "cluster-autoscaler-neonvm"
+  GHCR_REGISTRY:          "ghcr.io/neondatabase"
+  DOCKERHUB_REGISTRY:     "docker.io/neondatabase"
   ECR_DEV:                "369495373322.dkr.ecr.eu-central-1.amazonaws.com"
   ECR_PROD:               "093970136003.dkr.ecr.eu-central-1.amazonaws.com"
 
@@ -92,13 +93,13 @@ jobs:
 
       - id: show-tags
         run: |
-          echo "controller=${IMG_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "vxlan-controller=${IMG_VXLAN_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "runner=${IMG_RUNNER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "scheduler=${IMG_SCHEDULER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "autoscaler-agent=${IMG_AUTOSCALER_AGENT}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${IMG_DAEMON}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "cluster-autoscaler=${IMG_CLUSTER_AUTOSCALER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "controller=${GHCR_REGISTRY}/${IMG_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${GHCR_REGISTRY}/${IMG_VXLAN_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${GHCR_REGISTRY}/${IMG_RUNNER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${GHCR_REGISTRY}/${IMG_SCHEDULER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${GHCR_REGISTRY}/${IMG_AUTOSCALER_AGENT}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${GHCR_REGISTRY}/${IMG_DAEMON}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${GHCR_REGISTRY}/${IMG_CLUSTER_AUTOSCALER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   vm-kernel:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
@@ -144,13 +145,13 @@ jobs:
       # job level tags with arch and tag
       - id: tags
         run: |
-          echo "controller=${IMG_CONTROLLER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "vxlan-controller=${IMG_VXLAN_CONTROLLER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "runner=${IMG_RUNNER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "scheduler=${IMG_SCHEDULER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "autoscaler-agent=${IMG_AUTOSCALER_AGENT}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${IMG_DAEMON}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "cluster-autoscaler=${IMG_CLUSTER_AUTOSCALER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "controller=${GHCR_REGISTRY}/${IMG_CONTROLLER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${GHCR_REGISTRY}/${IMG_VXLAN_CONTROLLER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${GHCR_REGISTRY}/${IMG_RUNNER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${GHCR_REGISTRY}/${IMG_SCHEDULER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${GHCR_REGISTRY}/${IMG_AUTOSCALER_AGENT}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${GHCR_REGISTRY}/${IMG_DAEMON}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${GHCR_REGISTRY}/${IMG_CLUSTER_AUTOSCALER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -392,18 +393,20 @@ jobs:
           ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
           TAG: ${{ inputs.tag }}
         run: |
-          images=("${IMG_CONTROLLER}" \
-          "${IMG_VXLAN_CONTROLLER}" \
-          "${IMG_RUNNER}" \
-          "${IMG_SCHEDULER}" \
-          "${IMG_AUTOSCALER_AGENT}" \
-          "${IMG_DAEMON}" \
-          "${IMG_CLUSTER_AUTOSCALER}"
+          images=(
+            "${IMG_CONTROLLER}"
+            "${IMG_VXLAN_CONTROLLER}"
+            "${IMG_RUNNER}"
+            "${IMG_SCHEDULER}"
+            "${IMG_AUTOSCALER_AGENT}"
+            "${IMG_DAEMON}"
+            "${IMG_CLUSTER_AUTOSCALER}"
           )
+
           for image in "${images[@]}"; do
-            tags=("-t" "$image:$TAG")
+            tags=("-t" "${GHCR_REGISTRY}/${image}:${TAG}")
             for arch in ${ARCHS}; do
-              tags+=("$image-$arch:$TAG")
+              tags+=("${GHCR_REGISTRY}/${image}-${arch}:${TAG}")
             done
             docker buildx imagetools create "${tags[@]}"
           done
@@ -414,20 +417,19 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
-          images=("${IMG_CONTROLLER}" \
-          "${IMG_VXLAN_CONTROLLER}" \
-          "${IMG_RUNNER}" \
-          "${IMG_SCHEDULER}" \
-          "${IMG_AUTOSCALER_AGENT}" \
-          "${IMG_CLUSTER_AUTOSCALER}")
+          images=(
+            "${IMG_CONTROLLER}"
+            "${IMG_VXLAN_CONTROLLER}"
+            "${IMG_RUNNER}"
+            "${IMG_SCHEDULER}"
+            "${IMG_AUTOSCALER_AGENT}"
+            "${IMG_CLUSTER_AUTOSCALER}"
+          )
 
           for image in "${images[@]}"; do
-            # Remove "neondatabase/" prefix from image name
-            image_without_prefix=${image#neondatabase/}
-
-            image_from=${image}:${TAG}
-            image_ecr_dev="${ECR_DEV}/${image_without_prefix}:${TAG}"
-            image_ecr_prod="${ECR_PROD}/${image_without_prefix}:${TAG}"
+            image_from="${GHCR_REGISTRY}/${image}:${TAG}"
+            image_ecr_dev="${ECR_DEV}/${image}:${TAG}"
+            image_ecr_prod="${ECR_PROD}/${image}:${TAG}"
 
             echo "Copy ${image_from} to ${image_ecr_dev} (dev), and ${image_ecr_prod} (prod)"
 
@@ -446,20 +448,21 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          images=("${IMG_CONTROLLER}" \
-                  "${IMG_VXLAN_CONTROLLER}" \
-                  "${IMG_RUNNER}" \
-                  "${IMG_SCHEDULER}" \
-                  "${IMG_AUTOSCALER_AGENT}" \
-                  "${IMG_DAEMON}" \
-                  "${IMG_CLUSTER_AUTOSCALER}")
+          # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
+          images=(
+            "${IMG_CONTROLLER}"
+            "${IMG_VXLAN_CONTROLLER}"
+            "${IMG_RUNNER}"
+            "${IMG_SCHEDULER}"
+            "${IMG_AUTOSCALER_AGENT}"
+            "${IMG_CLUSTER_AUTOSCALER}"
+          )
 
           for image in "${images[@]}"; do
-            echo Copy ${image}:${TAG} to Docker Hub
+            echo "Copy ${image}:${TAG} to Docker Hub"
 
-            # New image on Docker Hub matches GHCR image, but without "ghcr.io/" prefix
-            docker buildx imagetools create -t "${image#ghcr.io/}:${TAG}" \
-                                               "${image}:${TAG}"
+            docker buildx imagetools create -t "${DOCKERHUB_REGISTRY}/${image}:${TAG}" \
+                                                    "${GHCR_REGISTRY}/${image}:${TAG}"
           done
 
   push-to-acr-dev:
@@ -469,6 +472,7 @@ jobs:
     with:
       client_id: ${{ vars.AZURE_DEV_CLIENT_ID }}
       image_tag: ${{ inputs.tag }}
+      # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
       images: neonvm-controller neonvm-vxlan-controller neonvm-runner autoscale-scheduler autoscaler-agent cluster-autoscaler-neonvm
       registry_name: ${{ vars.AZURE_DEV_REGISTRY_NAME }}
       subscription_id: ${{ vars.AZURE_DEV_SUBSCRIPTION_ID }}
@@ -481,6 +485,7 @@ jobs:
     uses: ./.github/workflows/_push-to-acr.yaml
     with:
       client_id: ${{ vars.AZURE_PROD_CLIENT_ID }}
+      # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
       images: neonvm-controller neonvm-vxlan-controller neonvm-runner autoscale-scheduler autoscaler-agent cluster-autoscaler-neonvm
       image_tag: ${{ inputs.tag }}
       registry_name: ${{ vars.AZURE_PROD_REGISTRY_NAME }}
