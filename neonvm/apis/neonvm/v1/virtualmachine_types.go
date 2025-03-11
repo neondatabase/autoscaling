@@ -169,7 +169,6 @@ type VirtualMachineSpec struct {
 	TargetRevision *RevisionWithTime `json:"targetRevision,omitempty"`
 
 	// Controls how CPU scaling is performed, either hotplug new CPUs with QMP, or enable them in sysfs.
-	// +kubebuilder:default:=QmpScaling
 	// +optional
 	CpuScalingMode *CpuScalingMode `json:"cpuScalingMode,omitempty"`
 
