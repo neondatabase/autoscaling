@@ -365,7 +365,7 @@ func buildQEMUCmd(
 		))
 	default:
 		// we should never get here because we validate the flag in newConfig
-		panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
+		panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 	}
 
 	// memory details
@@ -506,7 +506,7 @@ func runQEMU(
 			case vmv1.CpuScalingModeQMP:
 				return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
 			default:
-				panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
+				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
 		},
 		set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
@@ -522,7 +522,7 @@ func runQEMU(
 				lastValue.Store(uint32(cpu))
 				return nil
 			default:
-				panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
+				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
 			return nil
 		},
@@ -542,7 +542,7 @@ func runQEMU(
 			default:
 				// explicit panic for unknown CPU scaling mode
 				// in case if we add a new CPU scaling mode and forget to update this function
-				panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
+				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
 		},
 	}
@@ -589,7 +589,7 @@ func getQemuBinaryName(architecture string) string {
 	case architectureAmd64:
 		return qemuBinX8664
 	default:
-		panic(fmt.Errorf("unknown architecture %s", architecture))
+		panic(fmt.Errorf("unknown architecture %q", architecture))
 	}
 }
 
@@ -602,7 +602,7 @@ func getMachineType(architecture string) string {
 		// q35 is the most up to date and generic x86_64 machine architecture
 		return "q35"
 	default:
-		panic(fmt.Errorf("unknown architecture %s", architecture))
+		panic(fmt.Errorf("unknown architecture %q", architecture))
 	}
 }
 
