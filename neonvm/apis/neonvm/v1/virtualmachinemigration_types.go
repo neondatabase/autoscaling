@@ -28,6 +28,7 @@ const MigrationPort int32 = 20187
 
 // VirtualMachineMigrationSpec defines the desired state of VirtualMachineMigration
 type VirtualMachineMigrationSpec struct {
+	// +kubebuilder:validation:MinLength=1
 	VmName string `json:"vmName"`
 
 	// TODO: not implemented
