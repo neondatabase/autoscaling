@@ -500,7 +500,6 @@ func runQEMU(
 					logger.Warn("CPU from NeonVM Daemon does not match stored value, returning daemon value to let controller reconcile correct state", zap.Any("stored", storedCpu), zap.Any("current", cpu))
 					return &cpu, nil
 				}
-				logger.Debug("Returning stored CPU value to controller", zap.Any("cpu", storedCpu))
 				return &storedCpu, nil
 
 			case vmv1.CpuScalingModeQMP:
@@ -530,7 +529,7 @@ func runQEMU(
 			switch cfg.cpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
 				// check if the NeonVM Daemon is ready to accept requests
-				err := checkNeonvmDaemonCPU()
+				_, err := getNeonvmDaemonCPU()
 				if err != nil {
 					logger.Warn("neonvm-daemon ready probe failed", zap.Error(err))
 					return false
@@ -928,30 +927,6 @@ func getNeonvmDaemonCPU() (vmv1.MilliCPU, error) {
 	}
 
 	return vmv1.MilliCPU(value), nil
-}
-
-// checkNeonvmDaemonCPU sends a GET request to the NeonVM Daemon to get the current CPU limit for the sake of readiness probe.
-func checkNeonvmDaemonCPU() error {
-	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
-	if err != nil {
-		return fmt.Errorf("could not calculate VM IP address: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
-	defer cancel()
-	url := fmt.Sprintf("http://%s:25183/cpu", vmIP)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("could not build request: %w", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("could not send request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
-	}
-	return nil
 }
 
 type File struct {
