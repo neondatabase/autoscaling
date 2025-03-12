@@ -169,7 +169,6 @@ type VirtualMachineSpec struct {
 	TargetRevision *RevisionWithTime `json:"targetRevision,omitempty"`
 
 	// Controls how CPU scaling is performed, either hotplug new CPUs with QMP, or enable them in sysfs.
-	// +kubebuilder:default:=QmpScaling
 	// +optional
 	CpuScalingMode *CpuScalingMode `json:"cpuScalingMode,omitempty"`
 
@@ -243,7 +242,7 @@ func (p *CpuScalingMode) FlagFunc(value string) error {
 		string(CpuScalingModeSysfs),
 	}
 
-	if !slices.Contains(possibleValues, value) {
+	if !slices.Contains(possibleValues, value) || value == "" {
 		return fmt.Errorf("Unknown CpuScalingMode %q, must be one of %v", value, possibleValues)
 	}
 
