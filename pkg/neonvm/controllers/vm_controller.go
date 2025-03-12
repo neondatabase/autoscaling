@@ -1639,9 +1639,7 @@ func podSpec(
 			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: disk.Name,
 				VolumeSource: corev1.VolumeSource{
-					Projected: &corev1.ProjectedVolumeSource{
-						Sources: disk.Projected.Sources,
-					},
+					Projected: disk.Projected,
 				},
 			})
 		case disk.EmptyDisk != nil:

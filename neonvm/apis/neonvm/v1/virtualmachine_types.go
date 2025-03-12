@@ -564,7 +564,13 @@ type DiskSource struct {
 	// TmpfsDisk represents a tmpfs.
 	// +optional
 	Tmpfs *TmpfsDiskSource `json:"tmpfs,omitempty"`
+	// Implicit represents an implicit volume that will be automatically mounted.
+	// Suitable for `aws-iam-token` or `azure-identity-token`, among other things.
+	// +optional
+	Implicit *ImplicitDiskSource `json:"implicit,omitempty"`
 }
+
+type ImplicitDiskSource struct{}
 
 type EmptyDiskSource struct {
 	Size resource.Quantity `json:"size"`
