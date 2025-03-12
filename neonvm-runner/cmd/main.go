@@ -218,10 +218,14 @@ func run(logger *zap.Logger) error {
 		}
 	}
 
+	// Run init script before doing anything else. It can create
+	// iptables rules, which we don't want to interleave with rules
+	// created by code in net.go
+	if err := runInitScript(logger, vmSpec.InitScript); err != nil {
+		return fmt.Errorf("failed to run init script: %w", err)
+	}
+
 	tg := taskgroup.NewGroup(logger)
-	tg.Go("init-script", func(logger *zap.Logger) error {
-		return runInitScript(logger, vmSpec.InitScript)
-	})
 
 	// create iso9660 disk with runtime options (command, args, envs, mounts)
 	tg.Go("iso9660-runtime", func(logger *zap.Logger) error {
