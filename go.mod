@@ -70,6 +70,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/tychoish/fun v0.8.5
 	github.com/vishvananda/netlink v1.1.1-0.20220125195016-0639e7e787ba
+	go.uber.org/automaxprocs v1.6.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.31.0
