@@ -45,9 +45,6 @@ var _ webhook.Validator = &VirtualMachineMigration{}
 //
 // The controller wraps this logic so it can inject extra control in the webhook.
 func (r *VirtualMachineMigration) ValidateCreate() (admission.Warnings, error) {
-	if len(r.Spec.VmName) == 0 {
-		return nil, fmt.Errorf("vmName is required")
-	}
 	return nil, nil
 }
 

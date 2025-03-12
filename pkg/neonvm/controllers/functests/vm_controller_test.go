@@ -149,3 +149,25 @@ var _ = Describe("VirtualMachine controller", func() {
 		})
 	})
 })
+
+var _ = Describe("VirtualMachineMigration controller", func() {
+	It("should reject invalid VirtualMachineMigration", func() {
+		ctx := context.Background()
+
+		By("Creating the custom resource for the Kind VirtualMachineMigration")
+		virtualmachinemigration := &vmv1.VirtualMachineMigration{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-migration",
+				Namespace: "default",
+			},
+		}
+		err := k8sClient.Create(ctx, virtualmachinemigration)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.vmName in body should be at least 1 chars long"))
+
+		// Now fix it
+		virtualmachinemigration.Spec.VmName = "test-vm"
+		err = k8sClient.Create(ctx, virtualmachinemigration)
+		Expect(err).To(Not(HaveOccurred()))
+	})
+})
