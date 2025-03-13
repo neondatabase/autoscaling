@@ -1099,11 +1099,6 @@ spec:
                       required:
                       - size
                       type: object
-                    implicit:
-                      description: |-
-                        Implicit represents an implicit volume that will be automatically mounted.
-                        Suitable for `aws-iam-token` or `azure-identity-token`, among other things.
-                      type: object
                     mountPath:
                       description: |-
                         Path within the virtual machine at which the disk should be mounted.  Must

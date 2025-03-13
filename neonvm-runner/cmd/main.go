@@ -248,7 +248,6 @@ func run(logger *zap.Logger) error {
 					Secret:    nil,
 					Projected: nil,
 					Tmpfs:     nil,
-					Implicit:  nil,
 				},
 			})
 		}
@@ -732,13 +731,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, v
 		if disk.Watch != nil && *disk.Watch {
 			// secrets/configmaps are mounted using the atomicwriter utility,
 			// which loads the directory into `..data`.
-			dataDir := fmt.Sprintf("%s/..data", disk.MountPath)
-
-			// when we mount the disk ourselves, it goes into /vm/mounts.
-			// when the volumemount is implicit, it exists where it exists.
-			if disk.DiskSource.Implicit == nil {
-				dataDir = fmt.Sprintf("/vm/mounts%s", dataDir)
-			}
+			dataDir := fmt.Sprintf("/vm/mounts%s/..data", disk.MountPath)
 
 			secrets[dataDir] = disk.MountPath
 			secretsOrd = append(secretsOrd, dataDir)
