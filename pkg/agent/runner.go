@@ -502,27 +502,43 @@ func getMetricsLoop[M core.FromPrometheus](
 ) {
 	waitBetweenDuration := time.Second * time.Duration(config.SecondsBetweenRequests)
 
-	randomStartWait := util.NewTimeRange(time.Second, 0, int(config.SecondsBetweenRequests)).Random()
-
-	lastActive := mgr.isActive()
-
-	// Don't log anything if we're not making this type of metrics request currently.
+	// Pick a random offset for our long-running periodic fetches. This is to load-balance against
+	// cases where many VMs start at once, or immediately after the autoscaler-agent starts.
 	//
-	// The idea is that isActive() can/should be used for gradual rollout of new metrics, and we
-	// don't want to log every time we *don't* do the new thing.
-	if lastActive {
-		logger.Info(
-			fmt.Sprintf("Sleeping for random delay before making first %s metrics request", mgr.kind),
-			zap.Duration("delay", randomStartWait),
-		)
+	// However, the FIRST request must be done within config.FirstRequestWithinSeconds, so we ALSO
+	// pick a random offset within that value, and
+	firstWait := util.NewTimeRange(time.Second, 0, int(config.FirstRequestWithinSeconds)).Random()
+	secondWait := util.NewTimeRange(time.Second, 0, int(config.SecondsBetweenRequests)).Random()
+
+	if firstWait > secondWait {
+		firstWait = secondWait
+		secondWait += waitBetweenDuration // wait a full SecondsBetweenRequests, firstWait is now close enough.
 	}
+
+	// Long-running timer to help manage the complication around "first request quickly, all others
+	// slower, on a different period".
+	//
+	// Every time we receive from this timer, we make a metrics request. But before that, we
+	// IMMEDIATELY reset it to the next time at which we should fetch metrics. There's basically two
+	// reasons to do that:
+	//
+	//  1. It makes the initial handling simpler
+	//  2. It means that temporary network delays won't unablanace the random distribution by
+	//     causing their timings to align.
+	//
+	// However, it's worth noting that (2) means there's no graceful degradation under load -- we
+	// keep making requests at the same intervals, even if they start taking longer.
+	timer := time.NewTimer(firstWait)
+	defer timer.Stop()
 
 	select {
 	case <-ctx.Done():
 		return
-	case <-time.After(randomStartWait):
+	case <-timer.C:
+		timer.Reset(secondWait - firstWait)
 	}
 
+	lastActive := mgr.isActive()
 	for {
 		if !mgr.isActive() {
 			if lastActive {
@@ -551,7 +567,8 @@ func getMetricsLoop[M core.FromPrometheus](
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(waitBetweenDuration):
+		case <-timer.C:
+			timer.Reset(waitBetweenDuration)
 		}
 	}
 }
