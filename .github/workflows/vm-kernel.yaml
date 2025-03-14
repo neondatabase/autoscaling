@@ -330,7 +330,5 @@ jobs:
           TAG: ${{ needs.get-tags.outputs.canonical }}
         run: |
           echo Copy ${VM_KERNEL_IMAGE}:${TAG} to Docker Hub
-
-          # New image on Docker Hub matches GHCR image, but without "ghcr.io/" prefix
           docker buildx imagetools create -t "${DOCKERHUB_REGISTRY}/${VM_KERNEL_IMAGE}:${TAG}" \
                                                   "${GHCR_REGISTRY}/${VM_KERNEL_IMAGE}:${TAG}"

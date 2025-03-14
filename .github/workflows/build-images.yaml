@@ -64,9 +64,6 @@ env:
   IMG_DAEMON:             "neonvm-daemon"
   IMG_CLUSTER_AUTOSCALER: "cluster-autoscaler-neonvm"
   GHCR_REGISTRY:          "ghcr.io/neondatabase"
-  DOCKERHUB_REGISTRY:     "docker.io/neondatabase"
-  ECR_DEV:                "369495373322.dkr.ecr.eu-central-1.amazonaws.com"
-  ECR_PROD:               "093970136003.dkr.ecr.eu-central-1.amazonaws.com"
 
 defaults:
   run:
@@ -338,11 +335,9 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache,mode=max', matrix.arch) || '' }}
 
-
   merge-images:
     permissions:
-      id-token: write # This is required for aws-actions/configure-aws-credentials
-      packages: write  # required for pushing to GHCR
+      packages: write # required for pushing to GHCR
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -359,34 +354,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure dev AWS credentials
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
-        with:
-          aws-region: eu-central-1
-          mask-aws-account-id: true
-          role-to-assume: ${{ secrets.DEV_GHA_OIDC_ECR_ROLE }}
-
-      - name: Login to dev ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
-        with:
-          registry: ${{ env.ECR_DEV }}
-
-      - name: Configure prod AWS credentials
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
-        with:
-          aws-region: eu-central-1
-          mask-aws-account-id: true
-          role-to-assume: ${{ secrets.PROD_GHA_OIDC_ECR_ROLE }}
-
-      - name: Login to prod ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
-        with:
-          registry: ${{ env.ECR_PROD }}
 
       - name: Create multi-arch images
         env:
@@ -411,84 +378,102 @@ jobs:
             docker buildx imagetools create "${tags[@]}"
           done
 
-      - name: Copy all merged images to ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        env:
-          TAG: ${{ inputs.tag }}
-        run: |
-          # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
-          images=(
-            "${IMG_CONTROLLER}"
-            "${IMG_VXLAN_CONTROLLER}"
-            "${IMG_RUNNER}"
-            "${IMG_SCHEDULER}"
-            "${IMG_AUTOSCALER_AGENT}"
-            "${IMG_CLUSTER_AUTOSCALER}"
-          )
-
-          for image in "${images[@]}"; do
-            image_from="${GHCR_REGISTRY}/${image}:${TAG}"
-            image_ecr_dev="${ECR_DEV}/${image}:${TAG}"
-            image_ecr_prod="${ECR_PROD}/${image}:${TAG}"
-
-            echo "Copy ${image_from} to ${image_ecr_dev} (dev), and ${image_ecr_prod} (prod)"
-
-            docker buildx imagetools create -t ${image_ecr_dev} \
-                                            -t ${image_ecr_prod} \
-                                               ${image_from}
-          done
-
-      - name: Login to Dockerhub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
-          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
-
-      - name: Copy all merged images to Docker Hub
-        env:
-          TAG: ${{ inputs.tag }}
-        run: |
-          # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
-          images=(
-            "${IMG_CONTROLLER}"
-            "${IMG_VXLAN_CONTROLLER}"
-            "${IMG_RUNNER}"
-            "${IMG_SCHEDULER}"
-            "${IMG_AUTOSCALER_AGENT}"
-            "${IMG_CLUSTER_AUTOSCALER}"
-          )
-
-          for image in "${images[@]}"; do
-            echo "Copy ${image}:${TAG} to Docker Hub"
-
-            docker buildx imagetools create -t "${DOCKERHUB_REGISTRY}/${image}:${TAG}" \
-                                                    "${GHCR_REGISTRY}/${image}:${TAG}"
-          done
-
-  push-to-acr-dev:
+  push-to-dev:
     if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
     needs: [ merge-images ]
-    uses: ./.github/workflows/_push-to-acr.yaml
-    with:
-      client_id: ${{ vars.AZURE_DEV_CLIENT_ID }}
-      image_tag: ${{ inputs.tag }}
-      # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
-      images: neonvm-controller neonvm-vxlan-controller neonvm-runner autoscale-scheduler autoscaler-agent cluster-autoscaler-neonvm
-      registry_name: ${{ vars.AZURE_DEV_REGISTRY_NAME }}
-      subscription_id: ${{ vars.AZURE_DEV_SUBSCRIPTION_ID }}
-      tenant_id: ${{ vars.AZURE_TENANT_ID }}
-    secrets: inherit
 
-  push-to-acr-prod:
+    permissions:
+      id-token: write  # Required for aws/azure login
+      packages: write  # required for pushing to GHCR
+
+    uses: ./.github/workflows/_push-to-container-registry.yml
+    secrets: inherit
+    with:
+      # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
+      image-map: |
+        {
+          "ghcr.io/neondatabase/neonvm-controller:${{ inputs.tag }}": [
+            "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-controller:${{ inputs.tag }}",
+                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neonvm-controller:${{ inputs.tag }}",
+                                                                          "docker.io/neondatabase/neonvm-controller:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/neonvm-vxlan-controller:${{ inputs.tag }}": [
+            "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-vxlan-controller:${{ inputs.tag }}",
+                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neonvm-vxlan-controller:${{ inputs.tag }}",
+                                                                          "docker.io/neondatabase/neonvm-vxlan-controller:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/neonvm-runner:${{ inputs.tag }}": [
+            "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-runner:${{ inputs.tag }}",
+                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neonvm-runner:${{ inputs.tag }}",
+                                                                          "docker.io/neondatabase/neonvm-runner:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/autoscale-scheduler:${{ inputs.tag }}": [
+            "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/autoscale-scheduler:${{ inputs.tag }}",
+                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/autoscale-scheduler:${{ inputs.tag }}",
+                                                                          "docker.io/neondatabase/autoscale-scheduler:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/autoscaler-agent:${{ inputs.tag }}": [
+            "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/autoscaler-agent:${{ inputs.tag }}",
+                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/autoscaler-agent:${{ inputs.tag }}",
+                                                                          "docker.io/neondatabase/autoscaler-agent:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/cluster-autoscaler-neonvm:${{ inputs.tag }}": [
+            "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/cluster-autoscaler-neonvm:${{ inputs.tag }}",
+                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/cluster-autoscaler-neonvm:${{ inputs.tag }}",
+                                                                          "docker.io/neondatabase/cluster-autoscaler-neonvm:${{ inputs.tag }}"
+          ]
+        }
+      aws-region: "${{ vars.AWS_ECR_REGION }}"
+      aws-account-id: "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}"
+      aws-role-to-assume: "gha-oidc-ecr-rw"
+      azure-client-id: "${{ vars.AZURE_DEV_CLIENT_ID }}"
+      azure-subscription-id: "${{ vars.AZURE_DEV_SUBSCRIPTION_ID }}"
+      azure-tenant-id: "${{ vars.AZURE_TENANT_ID }}"
+      acr-registry-name: "${{ vars.AZURE_DEV_REGISTRY_NAME }}"
+
+  push-to-prod:
     if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
     needs: [ merge-images ]
-    uses: ./.github/workflows/_push-to-acr.yaml
-    with:
-      client_id: ${{ vars.AZURE_PROD_CLIENT_ID }}
-      # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
-      images: neonvm-controller neonvm-vxlan-controller neonvm-runner autoscale-scheduler autoscaler-agent cluster-autoscaler-neonvm
-      image_tag: ${{ inputs.tag }}
-      registry_name: ${{ vars.AZURE_PROD_REGISTRY_NAME }}
-      tenant_id: ${{ vars.AZURE_TENANT_ID }}
-      subscription_id: ${{ vars.AZURE_PROD_SUBSCRIPTION_ID }}
+
+    permissions:
+      id-token: write  # Required for aws/azure login
+      packages: write  # required for pushing to GHCR
+
+    uses: ./.github/workflows/_push-to-container-registry.yml
     secrets: inherit
+    with:
+      # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
+      image-map: |
+        {
+          "ghcr.io/neondatabase/neonvm-controller:${{ inputs.tag }}": [
+              "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-controller:${{ inputs.tag }}",
+                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neonvm-controller:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/neonvm-vxlan-controller:${{ inputs.tag }}": [
+              "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-vxlan-controller:${{ inputs.tag }}",
+                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neonvm-vxlan-controller:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/neonvm-runner:${{ inputs.tag }}": [
+              "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-runner:${{ inputs.tag }}",
+                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neonvm-runner:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/autoscale-scheduler:${{ inputs.tag }}": [
+              "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/autoscale-scheduler:${{ inputs.tag }}",
+                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/autoscale-scheduler:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/autoscaler-agent:${{ inputs.tag }}": [
+              "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/autoscaler-agent:${{ inputs.tag }}",
+                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/autoscaler-agent:${{ inputs.tag }}"
+          ],
+          "ghcr.io/neondatabase/cluster-autoscaler-neonvm:${{ inputs.tag }}": [
+              "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/cluster-autoscaler-neonvm:${{ inputs.tag }}",
+                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/cluster-autoscaler-neonvm:${{ inputs.tag }}"
+          ]
+        }
+      aws-region: "${{ vars.AWS_ECR_REGION }}"
+      aws-account-id: "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}"
+      aws-role-to-assume: "gha-oidc-ecr-rw"
+      azure-client-id: "${{ vars.AZURE_PROD_CLIENT_ID }}"
+      azure-subscription-id: "${{ vars.AZURE_PROD_SUBSCRIPTION_ID }}"
+      azure-tenant-id: "${{ vars.AZURE_TENANT_ID }}"
+      acr-registry-name: "${{ vars.AZURE_PROD_REGISTRY_NAME }}"
