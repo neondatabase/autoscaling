@@ -4,6 +4,7 @@ self-hosted-runner:
     - large
     - small
 config-variables:
+  - AWS_ECR_REGION
   - AZURE_DEV_CLIENT_ID
   - AZURE_DEV_REGISTRY_NAME
   - AZURE_DEV_SUBSCRIPTION_ID
@@ -11,3 +12,5 @@ config-variables:
   - AZURE_PROD_REGISTRY_NAME
   - AZURE_PROD_SUBSCRIPTION_ID
   - AZURE_TENANT_ID
+  - NEON_DEV_AWS_ACCOUNT_ID
+  - NEON_PROD_AWS_ACCOUNT_ID
