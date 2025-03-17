@@ -394,32 +394,32 @@ jobs:
         {
           "ghcr.io/neondatabase/neonvm-controller:${{ inputs.tag }}": [
             "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-controller:${{ inputs.tag }}",
-                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neonvm-controller:${{ inputs.tag }}",
+                                     "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neondatabase/neonvm-controller:${{ inputs.tag }}",
                                                                           "docker.io/neondatabase/neonvm-controller:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/neonvm-vxlan-controller:${{ inputs.tag }}": [
             "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-vxlan-controller:${{ inputs.tag }}",
-                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neonvm-vxlan-controller:${{ inputs.tag }}",
+                                     "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neondatabase/neonvm-vxlan-controller:${{ inputs.tag }}",
                                                                           "docker.io/neondatabase/neonvm-vxlan-controller:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/neonvm-runner:${{ inputs.tag }}": [
             "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-runner:${{ inputs.tag }}",
-                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neonvm-runner:${{ inputs.tag }}",
+                                     "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neondatabase/neonvm-runner:${{ inputs.tag }}",
                                                                           "docker.io/neondatabase/neonvm-runner:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/autoscale-scheduler:${{ inputs.tag }}": [
             "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/autoscale-scheduler:${{ inputs.tag }}",
-                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/autoscale-scheduler:${{ inputs.tag }}",
+                                     "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neondatabase/autoscale-scheduler:${{ inputs.tag }}",
                                                                           "docker.io/neondatabase/autoscale-scheduler:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/autoscaler-agent:${{ inputs.tag }}": [
             "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/autoscaler-agent:${{ inputs.tag }}",
-                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/autoscaler-agent:${{ inputs.tag }}",
+                                     "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neondatabase/autoscaler-agent:${{ inputs.tag }}",
                                                                           "docker.io/neondatabase/autoscaler-agent:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/cluster-autoscaler-neonvm:${{ inputs.tag }}": [
             "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/cluster-autoscaler-neonvm:${{ inputs.tag }}",
-                                                  "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/cluster-autoscaler-neonvm:${{ inputs.tag }}",
+                                     "${{ vars.AZURE_DEV_REGISTRY_NAME }}.azurecr.io/neondatabase/cluster-autoscaler-neonvm:${{ inputs.tag }}",
                                                                           "docker.io/neondatabase/cluster-autoscaler-neonvm:${{ inputs.tag }}"
           ]
         }
@@ -447,27 +447,27 @@ jobs:
         {
           "ghcr.io/neondatabase/neonvm-controller:${{ inputs.tag }}": [
               "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-controller:${{ inputs.tag }}",
-                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neonvm-controller:${{ inputs.tag }}"
+                                       "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neondatabase/neonvm-controller:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/neonvm-vxlan-controller:${{ inputs.tag }}": [
               "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-vxlan-controller:${{ inputs.tag }}",
-                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neonvm-vxlan-controller:${{ inputs.tag }}"
+                                       "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neondatabase/neonvm-vxlan-controller:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/neonvm-runner:${{ inputs.tag }}": [
               "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/neonvm-runner:${{ inputs.tag }}",
-                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neonvm-runner:${{ inputs.tag }}"
+                                       "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neondatabase/neonvm-runner:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/autoscale-scheduler:${{ inputs.tag }}": [
               "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/autoscale-scheduler:${{ inputs.tag }}",
-                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/autoscale-scheduler:${{ inputs.tag }}"
+                                       "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neondatabase/autoscale-scheduler:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/autoscaler-agent:${{ inputs.tag }}": [
               "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/autoscaler-agent:${{ inputs.tag }}",
-                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/autoscaler-agent:${{ inputs.tag }}"
+                                       "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neondatabase/autoscaler-agent:${{ inputs.tag }}"
           ],
           "ghcr.io/neondatabase/cluster-autoscaler-neonvm:${{ inputs.tag }}": [
               "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_ECR_REGION }}.amazonaws.com/cluster-autoscaler-neonvm:${{ inputs.tag }}",
-                                                    "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/cluster-autoscaler-neonvm:${{ inputs.tag }}"
+                                       "${{ vars.AZURE_PROD_REGISTRY_NAME }}.azurecr.io/neondatabase/cluster-autoscaler-neonvm:${{ inputs.tag }}"
           ]
         }
       aws-region: "${{ vars.AWS_ECR_REGION }}"
