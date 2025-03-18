@@ -19,8 +19,8 @@ package v1
 
 import (
 	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type VirtualMachineMigrationLister interface {
 
 // virtualMachineMigrationLister implements the VirtualMachineMigrationLister interface.
 type virtualMachineMigrationLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1.VirtualMachineMigration]
 }
 
 // NewVirtualMachineMigrationLister returns a new VirtualMachineMigrationLister.
 func NewVirtualMachineMigrationLister(indexer cache.Indexer) VirtualMachineMigrationLister {
-	return &virtualMachineMigrationLister{indexer: indexer}
-}
-
-// List lists all VirtualMachineMigrations in the indexer.
-func (s *virtualMachineMigrationLister) List(selector labels.Selector) (ret []*v1.VirtualMachineMigration, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.VirtualMachineMigration))
-	})
-	return ret, err
+	return &virtualMachineMigrationLister{listers.New[*v1.VirtualMachineMigration](indexer, v1.Resource("virtualmachinemigration"))}
 }
 
 // VirtualMachineMigrations returns an object that can list and get VirtualMachineMigrations.
 func (s *virtualMachineMigrationLister) VirtualMachineMigrations(namespace string) VirtualMachineMigrationNamespaceLister {
-	return virtualMachineMigrationNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return virtualMachineMigrationNamespaceLister{listers.NewNamespaced[*v1.VirtualMachineMigration](s.ResourceIndexer, namespace)}
 }
 
 // VirtualMachineMigrationNamespaceLister helps list and get VirtualMachineMigrations.
@@ -73,26 +65,5 @@ type VirtualMachineMigrationNamespaceLister interface {
 // virtualMachineMigrationNamespaceLister implements the VirtualMachineMigrationNamespaceLister
 // interface.
 type virtualMachineMigrationNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all VirtualMachineMigrations in the indexer for a given namespace.
-func (s virtualMachineMigrationNamespaceLister) List(selector labels.Selector) (ret []*v1.VirtualMachineMigration, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.VirtualMachineMigration))
-	})
-	return ret, err
-}
-
-// Get retrieves the VirtualMachineMigration from the indexer for a given namespace and name.
-func (s virtualMachineMigrationNamespaceLister) Get(name string) (*v1.VirtualMachineMigration, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1.Resource("virtualmachinemigration"), name)
-	}
-	return obj.(*v1.VirtualMachineMigration), nil
+	listers.ResourceIndexer[*v1.VirtualMachineMigration]
 }
