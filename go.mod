@@ -2,6 +2,7 @@ module github.com/neondatabase/autoscaling
 
 go 1.23.0
 
+
 replace (
 	github.com/google/gnostic => github.com/google/gnostic v0.7.0
 	github.com/optiopay/kafka => github.com/optiopay/kafka v0.0.0
