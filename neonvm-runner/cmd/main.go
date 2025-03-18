@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -368,7 +369,7 @@ func buildQEMUCmd(
 		))
 	default:
 		// we should never get here because we validate the flag in newConfig
-		panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
+		panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 	}
 
 	// memory details
@@ -491,24 +492,48 @@ func runQEMU(
 
 	callbacks = cpuServerCallbacks{
 		get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
-			return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
+			switch cfg.cpuScalingMode {
+			case vmv1.CpuScalingModeSysfs:
+				cpu, err := getNeonvmDaemonCPU()
+				if err != nil {
+					logger.Error("failed to get CPU from NeonVM Daemon", zap.Error(err))
+					return nil, err
+				}
+				storedCpu := vmv1.MilliCPU(lastValue.Load())
+				if storedCpu.RoundedUp() != cpu.RoundedUp() {
+					logger.Warn("CPU from NeonVM Daemon does not match stored value, returning daemon value to let controller reconcile correct state", zap.Any("stored", storedCpu), zap.Any("current", cpu))
+					return &cpu, nil
+				}
+				return &storedCpu, nil
+
+			case vmv1.CpuScalingModeQMP:
+				return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
+			default:
+				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
+			}
 		},
 		set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
-			if cfg.cpuScalingMode == vmv1.CpuScalingModeSysfs {
+			switch cfg.cpuScalingMode {
+			case vmv1.CpuScalingModeSysfs:
 				err := setNeonvmDaemonCPU(cpu)
 				if err != nil {
 					logger.Error("setting CPU through NeonVM Daemon failed", zap.Any("cpu", cpu), zap.Error(err))
 					return err
 				}
+				lastValue.Store(uint32(cpu))
+			case vmv1.CpuScalingModeQMP:
+				lastValue.Store(uint32(cpu))
+				return nil
+			default:
+				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
-			lastValue.Store(uint32(cpu))
 			return nil
 		},
 		ready: func(logger *zap.Logger) bool {
 			switch cfg.cpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
 				// check if the NeonVM Daemon is ready to accept requests
-				err := checkNeonvmDaemonCPU()
+				_, err := getNeonvmDaemonCPU()
 				if err != nil {
 					logger.Warn("neonvm-daemon ready probe failed", zap.Error(err))
 					return false
@@ -520,7 +545,7 @@ func runQEMU(
 			default:
 				// explicit panic for unknown CPU scaling mode
 				// in case if we add a new CPU scaling mode and forget to update this function
-				panic(fmt.Errorf("unknown CPU scaling mode %s", cfg.cpuScalingMode))
+				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
 		},
 	}
@@ -567,7 +592,7 @@ func getQemuBinaryName(architecture string) string {
 	case architectureAmd64:
 		return qemuBinX8664
 	default:
-		panic(fmt.Errorf("unknown architecture %s", architecture))
+		panic(fmt.Errorf("unknown architecture %q", architecture))
 	}
 }
 
@@ -580,7 +605,7 @@ func getMachineType(architecture string) string {
 		// q35 is the most up to date and generic x86_64 machine architecture
 		return "q35"
 	default:
-		panic(fmt.Errorf("unknown architecture %s", architecture))
+		panic(fmt.Errorf("unknown architecture %q", architecture))
 	}
 }
 
@@ -869,28 +894,43 @@ func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
 	return nil
 }
 
-// checkNeonvmDaemonCPU sends a GET request to the NeonVM Daemon to get the current CPU limit for the sake of readiness probe.
-func checkNeonvmDaemonCPU() error {
+func getNeonvmDaemonCPU() (vmv1.MilliCPU, error) {
 	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
 	if err != nil {
-		return fmt.Errorf("could not calculate VM IP address: %w", err)
+		return 0, fmt.Errorf("could not calculate VM IP address: %w", err)
 	}
+
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
 	defer cancel()
+
 	url := fmt.Sprintf("http://%s:25183/cpu", vmIP)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("could not build request: %w", err)
+		return 0, fmt.Errorf("could not build request: %w", err)
 	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("could not send request: %w", err)
+		return 0, fmt.Errorf("could not send request: %w", err)
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+		return 0, fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
 	}
-	return nil
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("could not read response: %w", err)
+	}
+
+	value, err := strconv.ParseUint(string(body), 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse response: %w", err)
+	}
+
+	return vmv1.MilliCPU(value), nil
 }
 
 type File struct {

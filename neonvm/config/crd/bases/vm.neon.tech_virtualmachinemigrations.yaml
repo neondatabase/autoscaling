@@ -300,6 +300,7 @@ spec:
                 default: true
                 type: boolean
               vmName:
+                minLength: 1
                 type: string
             required:
             - vmName

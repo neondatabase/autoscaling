@@ -51,7 +51,7 @@ func NewJSONArrayBuilder[E any](buf IOBuffer, nestedFields ...string) *JSONArray
 
 func (b *JSONArrayBuilder[E]) Add(event E) {
 	if b.started {
-		if _, err := b.buf.Write([]byte("\n\t,")); err != nil {
+		if _, err := b.buf.Write([]byte(",")); err != nil {
 			panic(fmt.Sprintf("failed to write: %s", err))
 		}
 	}
@@ -70,7 +70,7 @@ func (b *JSONArrayBuilder[E]) Add(event E) {
 }
 
 func (b *JSONArrayBuilder[E]) Finish() []byte {
-	if _, err := b.buf.Write([]byte("\n]")); err != nil {
+	if _, err := b.buf.Write([]byte("]")); err != nil {
 		panic(fmt.Sprintf("failed to write: %s", err))
 	}
 	for i := 0; i < b.nestingCount; i++ {
