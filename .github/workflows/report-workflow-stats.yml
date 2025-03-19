@@ -16,6 +16,9 @@ on:
     - vm-kernel
     types: [completed]
 
+permissions:
+  contents: read
+
 jobs:
   gh-workflow-stats:
     name: Github Workflow Stats
@@ -24,12 +27,12 @@ jobs:
       actions: read
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@v2
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
         with:
           egress-policy: audit
 
       - name: Export GH Workflow Stats
-        uses: neondatabase/gh-workflow-stats-action@v0.1.4
+        uses: neondatabase/gh-workflow-stats-action@e8595dc8961ed9ab05e33cb9b987b8a9fc1e1f83 # v0.1.4
         with:
           DB_URI: ${{ secrets.GH_REPORT_STATS_DB_RW_CONNSTR }}
           DB_TABLE: 'gh_workflow_stats_autoscaling'
