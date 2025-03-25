@@ -167,7 +167,7 @@ jobs:
         id: get-git-info
         run: |
           # note: --tags enables matching on lightweight (i.e. not annotated) tags, which normally
-          # wouldn't be necessary, except that actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 does weird things to setup the
+          # wouldn't be necessary, except that actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2 does weird things to setup the
           # repository that means that we actually end up checked out with *just* a lightweight tag
           # to the tagged commit.
           echo "info=$(git describe --tags --long --dirty)" >> $GITHUB_OUTPUT
