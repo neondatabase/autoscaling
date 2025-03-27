@@ -19,14 +19,13 @@ package v1
 
 import (
 	"context"
-	"time"
 
 	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	scheme "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
-	rest "k8s.io/client-go/rest"
+	gentype "k8s.io/client-go/gentype"
 )
 
 // VirtualMachineMigrationsGetter has a method to return a VirtualMachineMigrationInterface.
@@ -39,6 +38,7 @@ type VirtualMachineMigrationsGetter interface {
 type VirtualMachineMigrationInterface interface {
 	Create(ctx context.Context, virtualMachineMigration *v1.VirtualMachineMigration, opts metav1.CreateOptions) (*v1.VirtualMachineMigration, error)
 	Update(ctx context.Context, virtualMachineMigration *v1.VirtualMachineMigration, opts metav1.UpdateOptions) (*v1.VirtualMachineMigration, error)
+	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 	UpdateStatus(ctx context.Context, virtualMachineMigration *v1.VirtualMachineMigration, opts metav1.UpdateOptions) (*v1.VirtualMachineMigration, error)
 	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error
@@ -51,144 +51,18 @@ type VirtualMachineMigrationInterface interface {
 
 // virtualMachineMigrations implements VirtualMachineMigrationInterface
 type virtualMachineMigrations struct {
-	client rest.Interface
-	ns     string
+	*gentype.ClientWithList[*v1.VirtualMachineMigration, *v1.VirtualMachineMigrationList]
 }
 
 // newVirtualMachineMigrations returns a VirtualMachineMigrations
 func newVirtualMachineMigrations(c *NeonvmV1Client, namespace string) *virtualMachineMigrations {
 	return &virtualMachineMigrations{
-		client: c.RESTClient(),
-		ns:     namespace,
+		gentype.NewClientWithList[*v1.VirtualMachineMigration, *v1.VirtualMachineMigrationList](
+			"virtualmachinemigrations",
+			c.RESTClient(),
+			scheme.ParameterCodec,
+			namespace,
+			func() *v1.VirtualMachineMigration { return &v1.VirtualMachineMigration{} },
+			func() *v1.VirtualMachineMigrationList { return &v1.VirtualMachineMigrationList{} }),
 	}
-}
-
-// Get takes name of the virtualMachineMigration, and returns the corresponding virtualMachineMigration object, and an error if there is any.
-func (c *virtualMachineMigrations) Get(ctx context.Context, name string, options metav1.GetOptions) (result *v1.VirtualMachineMigration, err error) {
-	result = &v1.VirtualMachineMigration{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// List takes label and field selectors, and returns the list of VirtualMachineMigrations that match those selectors.
-func (c *virtualMachineMigrations) List(ctx context.Context, opts metav1.ListOptions) (result *v1.VirtualMachineMigrationList, err error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	result = &v1.VirtualMachineMigrationList{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Watch returns a watch.Interface that watches the requested virtualMachineMigrations.
-func (c *virtualMachineMigrations) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch(ctx)
-}
-
-// Create takes the representation of a virtualMachineMigration and creates it.  Returns the server's representation of the virtualMachineMigration, and an error, if there is any.
-func (c *virtualMachineMigrations) Create(ctx context.Context, virtualMachineMigration *v1.VirtualMachineMigration, opts metav1.CreateOptions) (result *v1.VirtualMachineMigration, err error) {
-	result = &v1.VirtualMachineMigration{}
-	err = c.client.Post().
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(virtualMachineMigration).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Update takes the representation of a virtualMachineMigration and updates it. Returns the server's representation of the virtualMachineMigration, and an error, if there is any.
-func (c *virtualMachineMigrations) Update(ctx context.Context, virtualMachineMigration *v1.VirtualMachineMigration, opts metav1.UpdateOptions) (result *v1.VirtualMachineMigration, err error) {
-	result = &v1.VirtualMachineMigration{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		Name(virtualMachineMigration.Name).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(virtualMachineMigration).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *virtualMachineMigrations) UpdateStatus(ctx context.Context, virtualMachineMigration *v1.VirtualMachineMigration, opts metav1.UpdateOptions) (result *v1.VirtualMachineMigration, err error) {
-	result = &v1.VirtualMachineMigration{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		Name(virtualMachineMigration.Name).
-		SubResource("status").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(virtualMachineMigration).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Delete takes name of the virtualMachineMigration and deletes it. Returns an error if one occurs.
-func (c *virtualMachineMigrations) Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error {
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		Name(name).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *virtualMachineMigrations) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
-	var timeout time.Duration
-	if listOpts.TimeoutSeconds != nil {
-		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
-	}
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		VersionedParams(&listOpts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// Patch applies the patch and returns the patched virtualMachineMigration.
-func (c *virtualMachineMigrations) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.VirtualMachineMigration, err error) {
-	result = &v1.VirtualMachineMigration{}
-	err = c.client.Patch(pt).
-		Namespace(c.ns).
-		Resource("virtualmachinemigrations").
-		Name(name).
-		SubResource(subresources...).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
 }

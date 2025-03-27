@@ -19,8 +19,8 @@ package v1
 
 import (
 	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type VirtualMachineLister interface {
 
 // virtualMachineLister implements the VirtualMachineLister interface.
 type virtualMachineLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1.VirtualMachine]
 }
 
 // NewVirtualMachineLister returns a new VirtualMachineLister.
 func NewVirtualMachineLister(indexer cache.Indexer) VirtualMachineLister {
-	return &virtualMachineLister{indexer: indexer}
-}
-
-// List lists all VirtualMachines in the indexer.
-func (s *virtualMachineLister) List(selector labels.Selector) (ret []*v1.VirtualMachine, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.VirtualMachine))
-	})
-	return ret, err
+	return &virtualMachineLister{listers.New[*v1.VirtualMachine](indexer, v1.Resource("virtualmachine"))}
 }
 
 // VirtualMachines returns an object that can list and get VirtualMachines.
 func (s *virtualMachineLister) VirtualMachines(namespace string) VirtualMachineNamespaceLister {
-	return virtualMachineNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return virtualMachineNamespaceLister{listers.NewNamespaced[*v1.VirtualMachine](s.ResourceIndexer, namespace)}
 }
 
 // VirtualMachineNamespaceLister helps list and get VirtualMachines.
@@ -73,26 +65,5 @@ type VirtualMachineNamespaceLister interface {
 // virtualMachineNamespaceLister implements the VirtualMachineNamespaceLister
 // interface.
 type virtualMachineNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all VirtualMachines in the indexer for a given namespace.
-func (s virtualMachineNamespaceLister) List(selector labels.Selector) (ret []*v1.VirtualMachine, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.VirtualMachine))
-	})
-	return ret, err
-}
-
-// Get retrieves the VirtualMachine from the indexer for a given namespace and name.
-func (s virtualMachineNamespaceLister) Get(name string) (*v1.VirtualMachine, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1.Resource("virtualmachine"), name)
-	}
-	return obj.(*v1.VirtualMachine), nil
+	listers.ResourceIndexer[*v1.VirtualMachine]
 }
