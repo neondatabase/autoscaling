@@ -15,6 +15,9 @@ defaults:
   run:
     shell: bash -euo pipefail {0}
 
+permissions:
+  contents: read
+
 jobs:
   pr-format-verification:
     name: Check PR title
@@ -25,7 +28,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@v2
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
         with:
           egress-policy: audit
 
@@ -67,9 +70,14 @@ jobs:
           COMPONENT="$WORD(/$WORD)*" # one or more '/'-separated words
           TITLE_PREFIX="$COMPONENT(,$COMPONENT)*" # one or more ','-separated components
           TITLE_MSG='.+' # Any non-empty message.
-          TITLE_REGEX="^$TITLE_PREFIX: $TITLE_MSG\$"
+          TITLE_REGEX="$TITLE_PREFIX: $TITLE_MSG"
 
-          if ! grep -qiP "$TITLE_REGEX" <(echo "$title") >/dev/null ; then
+          DEPENDABOT_TITLE="build(deps): bump .*"
+          CI_RUN_TITLE="CI run for PR .*"
+          OTHER_VALID_TITLES="$DEPENDABOT_TITLE|$CI_RUN_TITLE"
+          FULL_TITLE_REGEX="^($TITLE_REGEX|$OTHER_VALID_TITLES)\$"
+
+          if ! grep -qiP "$FULL_TITLE_REGEX" <(echo "$title") >/dev/null ; then
               echo "$ON_FAILURE" >/dev/stderr
               exit 1
           fi
