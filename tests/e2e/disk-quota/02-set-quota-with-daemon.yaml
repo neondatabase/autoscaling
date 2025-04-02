@@ -5,6 +5,6 @@ commands:
   - script: |
       set -eux
       pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
-      new_size=$(( 3 * 1024 * 1024 )) # 1 Gi
+      new_size=$(( 1 * 1024 * 1024 )) # 1 Gi
       mountpoint="/var/db/postgres/compute"
-      kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm /neonvm/bin/set-disk-quota "$new_size" "$mountpoint"
+      kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm curl -XPOST --data "$new_size" --unix-socket /run/neonvm-daemon-socket http://localhost/set-disk-quota
