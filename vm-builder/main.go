@@ -60,6 +60,7 @@ var (
 
 const (
 	targetArchLinuxAmd64 = "linux/amd64"
+	targetArchLinuxX64   = "linux/x64" // alias for linux/amd64, used for compatibility with other repositories
 	targetArchLinuxArm64 = "linux/arm64"
 )
 
@@ -151,10 +152,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *targetArch != targetArchLinuxAmd64 && *targetArch != targetArchLinuxArm64 {
+	if *targetArch != targetArchLinuxAmd64 && *targetArch != targetArchLinuxArm64 && *targetArch != targetArchLinuxX64 {
 		log.Fatalf("Unsupported target architecture: %q", *targetArch)
 		flag.PrintDefaults()
 		return
+	}
+
+	if *targetArch == targetArchLinuxX64 {
+		*targetArch = targetArchLinuxAmd64
 	}
 
 	neonvmDaemonImage := NeonvmDaemonImage
