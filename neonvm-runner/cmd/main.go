@@ -488,43 +488,43 @@ func runQEMU(
 	lastValue.Store(uint32(vmSpec.Guest.CPUs.Min))
 
 	callbacks = cpuServerCallbacks{
-		get: func(logger *zap.Logger) (*vmv1.MilliCPU, *int, error) {
+		get: func(logger *zap.Logger) (*vmv1.MilliCPU, int, error) {
 			switch cfg.cpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
 				cpu, status, err := getNeonvmDaemonCPU()
 				if err != nil {
 					logger.Error("failed to get CPU from NeonVM Daemon", zap.Error(err))
-					return nil, &status, err
+					return nil, status, err
 				}
 				storedCpu := vmv1.MilliCPU(lastValue.Load())
 				if storedCpu.RoundedUp() != cpu.RoundedUp() {
 					logger.Warn("CPU from NeonVM Daemon does not match stored value, returning daemon value to let controller reconcile correct state", zap.Any("stored", storedCpu), zap.Any("current", cpu))
-					return &cpu, nil, nil
+					return &cpu, 0, nil
 				}
-				return &storedCpu, nil, nil
+				return &storedCpu, 0, nil
 
 			case vmv1.CpuScalingModeQMP:
-				return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil, nil
+				return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), 0, nil
 			default:
 				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
 		},
-		set: func(logger *zap.Logger, cpu vmv1.MilliCPU) (*int, error) {
+		set: func(logger *zap.Logger, cpu vmv1.MilliCPU) (int, error) {
 			switch cfg.cpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
 				status, err := setNeonvmDaemonCPU(cpu)
 				if err != nil {
 					logger.Error("setting CPU through NeonVM Daemon failed", zap.Any("cpu", cpu), zap.Error(err))
-					return &status, err
+					return status, err
 				}
 				lastValue.Store(uint32(cpu))
 			case vmv1.CpuScalingModeQMP:
 				lastValue.Store(uint32(cpu))
-				return nil, nil
+				return 0, nil
 			default:
 				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
-			return nil, nil
+			return 0, nil
 		},
 		ready: func(logger *zap.Logger) bool {
 			switch cfg.cpuScalingMode {
