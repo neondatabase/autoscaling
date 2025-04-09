@@ -12,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
@@ -19,8 +20,8 @@ import (
 )
 
 type cpuServerCallbacks struct {
-	get   func(*zap.Logger) (*vmv1.MilliCPU, error)
-	set   func(*zap.Logger, vmv1.MilliCPU) error
+	get   func(*zap.Logger) (*vmv1.MilliCPU, *int, error)
+	set   func(*zap.Logger, vmv1.MilliCPU) (*int, error)
 	ready func(*zap.Logger) bool
 }
 
@@ -87,7 +88,7 @@ func handleCPUChange(
 	logger *zap.Logger,
 	w http.ResponseWriter,
 	r *http.Request,
-	set func(*zap.Logger, vmv1.MilliCPU) error,
+	set func(*zap.Logger, vmv1.MilliCPU) (*int, error),
 ) {
 	if r.Method != "POST" {
 		logger.Error("unexpected method", zap.String("method", r.Method))
@@ -110,10 +111,10 @@ func handleCPUChange(
 
 	// update cgroup
 	logger.Info("got CPU update", zap.Float64("CPU", parsed.VCPUs.AsFloat64()))
-	err = set(logger, parsed.VCPUs)
+	status, err := set(logger, parsed.VCPUs)
 	if err != nil {
 		logger.Error("could not set cgroup limit", zap.Error(err))
-		w.WriteHeader(500)
+		w.WriteHeader(lo.FromPtrOr(status, 500))
 		return
 	}
 
@@ -124,7 +125,7 @@ func handleCPUCurrent(
 	logger *zap.Logger,
 	w http.ResponseWriter,
 	r *http.Request,
-	get func(*zap.Logger) (*vmv1.MilliCPU, error),
+	get func(*zap.Logger) (*vmv1.MilliCPU, *int, error),
 ) {
 	if r.Method != "GET" {
 		logger.Error("unexpected method", zap.String("method", r.Method))
@@ -132,10 +133,10 @@ func handleCPUCurrent(
 		return
 	}
 
-	cpus, err := get(logger)
+	cpus, status, err := get(logger)
 	if err != nil {
 		logger.Error("could not get cgroup quota", zap.Error(err))
-		w.WriteHeader(500)
+		w.WriteHeader(lo.FromPtrOr(status, 500))
 		return
 	}
 	resp := api.VCPUCgroup{VCPUs: *cpus}
