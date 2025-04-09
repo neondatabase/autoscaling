@@ -406,10 +406,6 @@ load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM im
 .PHONY: example-vms
 example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
 
-.PHONY: example-vms-arm64
-example-vms-arm64: TARGET_ARCH=arm64
-example-vms-arm64: example-vms
-
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG16_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
