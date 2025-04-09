@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/storage/names"
-	"k8s.io/client-go/tools/record"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/buildtag"
@@ -55,9 +54,8 @@ const (
 // VirtualMachineMigrationReconciler reconciles a VirtualMachineMigration object
 type VirtualMachineMigrationReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
-	Config   *ReconcilerConfig
+	Scheme *runtime.Scheme
+	Config *ReconcilerConfig
 
 	Metrics ReconcilerMetrics
 }
@@ -79,14 +77,12 @@ func (r *VirtualMachineMigrationReconciler) createTargetPod(
 		if len(vm.Status.SSHSecretName) == 0 {
 			err := errors.New("VM has .Spec.EnableSSH but its .Status.SSHSecretName is empty")
 			logger.Error(err, "Failed to get VM's SSH Secret")
-			r.Recorder.Event(migration, "Warning", "Failed", err.Error())
 			return ctrl.Result{}, err
 		}
 		sshSecret = &corev1.Secret{}
 		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.SSHSecretName, Namespace: vm.Namespace}, sshSecret)
 		if err != nil {
 			logger.Error(err, "Failed to get VM's SSH Secret")
-			r.Recorder.Event(migration, "Warning", "Failed", fmt.Sprintf("Failed to get VM's SSH Secret: %v", err))
 			return ctrl.Result{}, err
 		}
 	}
@@ -103,10 +99,6 @@ func (r *VirtualMachineMigrationReconciler) createTargetPod(
 		return ctrl.Result{}, err
 	}
 	logger.Info("Target runner Pod was created", "Pod.Namespace", tpod.Namespace, "Pod.Name", tpod.Name)
-	// add event with some info
-	r.Recorder.Event(migration, "Normal", "Created",
-		fmt.Sprintf("VM (%s) ready migrate to target pod (%s)",
-			vm.Name, tpod.Name))
 	// target pod was just created, so requeue reconcile
 	return ctrl.Result{RequeueAfter: time.Second}, nil
 }
@@ -208,7 +200,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		if apierrors.IsNotFound(err) {
 			// stop reconcile loop if vm not found (already deleted?)
 			message := fmt.Sprintf("VM (%s) not found", migration.Spec.VmName)
-			r.Recorder.Event(migration, "Warning", "Failed", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
 				metav1.Condition{
 					Type:    typeDegradedVirtualMachineMigration,
@@ -350,7 +341,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				}
 				message := fmt.Sprintf("Migration was started to target runner (%s)", targetRunner.Name)
 				log.Info(message)
-				r.Recorder.Event(migration, "Normal", "Started", message)
 				meta.SetStatusCondition(&migration.Status.Conditions,
 					metav1.Condition{
 						Type:    typeAvailableVirtualMachineMigration,
@@ -366,7 +356,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			// target runner pod finished without error? but it shouldn't finish
 			message := fmt.Sprintf("Target Pod (%s) completed suddenly", targetRunner.Name)
 			log.Info(message)
-			r.Recorder.Event(migration, "Warning", "Failed", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
 				metav1.Condition{
 					Type:    typeDegradedVirtualMachineMigration,
@@ -379,7 +368,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		case runnerFailed:
 			message := fmt.Sprintf("Target Pod (%s) failed", targetRunner.Name)
 			log.Info(message)
-			r.Recorder.Event(migration, "Warning", "Failed", message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
 				metav1.Condition{
 					Type:    typeDegradedVirtualMachineMigration,
@@ -401,7 +389,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		if err != nil && apierrors.IsNotFound(err) {
 			// lost target pod for running Migration ?
 			message := fmt.Sprintf("Target Pod (%s) disappeared", migration.Status.TargetPodName)
-			r.Recorder.Event(migration, "Error", "NotFound", message)
+			log.Error(err, message)
 			meta.SetStatusCondition(&migration.Status.Conditions,
 				metav1.Condition{
 					Type:    typeDegradedVirtualMachineMigration,
@@ -431,10 +419,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 
 		// check if migration done
 		if migrationInfo.Status == "completed" {
-			message := fmt.Sprintf("Migration finished with success to target pod (%s)",
-				targetRunner.Name)
-			log.Info(message)
-			r.Recorder.Event(migration, "Normal", "Finished", message)
+			log.Info(fmt.Sprintf("Migration finished with success to target pod (%s)", targetRunner.Name))
 
 			// re-fetch the vm
 			err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, vm)
@@ -505,10 +490,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		// check if migration failed
 		if migrationInfo.Status == "failed" {
 			// oops, migration failed
-			message := fmt.Sprintf("Migration to target pod (%s) was failed",
-				targetRunner.Name)
-			log.Info(message)
-			r.Recorder.Event(migration, "Warning", "Failed", message)
+			log.Info(fmt.Sprintf("Migration to target pod (%s) was failed", targetRunner.Name))
 
 			// try to stop hypervisor in target runner
 			if targetRunner.Status.Phase == corev1.PodRunning {
@@ -576,20 +558,17 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 				log.Error(err, "Failed to get source runner Pod for deletion")
 				return ctrl.Result{}, err
 			}
-			var msg, eventReason string
+			var msg string
 			if buildtag.NeverDeleteRunnerPods {
 				msg = fmt.Sprintf("Source runner pod deletion was skipped due to '%s' build tag", buildtag.TagnameNeverDeleteRunnerPods)
-				eventReason = "DeleteSkipped"
 			} else {
 				if err := r.Delete(ctx, sourceRunner); err != nil {
 					log.Error(err, "Failed to delete source runner Pod")
 					return ctrl.Result{}, err
 				}
 				msg = "Source runner was deleted"
-				eventReason = "Deleted"
 			}
 			log.Info(msg, "Pod.Namespace", sourceRunner.Namespace, "Pod.Name", sourceRunner.Name)
-			r.Recorder.Event(migration, "Normal", eventReason, fmt.Sprintf("%s: %s", msg, sourceRunner.Name))
 			migration.Status.SourcePodName = ""
 			migration.Status.SourcePodIP = ""
 			return r.updateMigrationStatus(ctx, migration)
@@ -634,9 +613,7 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 	log := log.FromContext(ctx)
 
 	if migration.Status.Phase == vmv1.VmmRunning || vm.Status.Phase == vmv1.VmPreMigrating {
-		message := fmt.Sprintf("Running Migration (%s) is being deleted", migration.Name)
-		log.Info(message)
-		r.Recorder.Event(migration, "Warning", "Deleting", message)
+		log.Info(fmt.Sprintf("Running Migration (%s) is being deleted", migration.Name))
 
 		// try to cancel migration
 		log.Info("Canceling migration")
@@ -674,9 +651,7 @@ func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachi
 				log.Error(err, "Failed to delete target runner Pod")
 				return err
 			}
-			message := fmt.Sprintf("Target runner (%s) was deleted", pod.Name)
-			log.Info(message)
-			r.Recorder.Event(migration, "Normal", "Deleted", message)
+			log.Info(fmt.Sprintf("Target runner (%s) was deleted", pod.Name))
 		}
 	}
 

@@ -41,9 +41,7 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 
 	certNotFound := false
 	if err != nil /* not found */ {
-		msg := fmt.Sprintf("VirtualMachine %s TLS secret %s not found", vm.Name, vm.Status.TLSSecretName)
-		r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
-
+		log.Info("VirtualMachine TLS secret not found", "Secret.Namespace", vm.Namespace, "Secret.Name", vm.Status.TLSSecretName)
 		certNotFound = true
 	} else {
 		// check the certificate expiration
@@ -64,8 +62,7 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 			return certSecret, nil
 		}
 
-		msg := fmt.Sprintf("VirtualMachine %s TLS secret %s is due for renewal", vm.Name, vm.Status.TLSSecretName)
-		r.Recorder.Event(vm, "Normal", "SigningCertificate", msg)
+		log.Info("VirtualMachine TLS secret is due for renewal", "Secret.Namespace", vm.Namespace, "Secret.Name", vm.Status.TLSSecretName)
 	}
 
 	// Check if the TLS private key temporary secret exists, if not create a new one
@@ -113,7 +110,7 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 			return nil, err
 		}
 	} else if !reflect.DeepEqual(certificateReq.Status.Certificate, certSecret.Data[corev1.TLSCertKey]) {
-		if err := r.updateTlsSecret(ctx, vm, key, certificateReq, certSecret); err != nil {
+		if err := r.updateTlsSecret(ctx, key, certificateReq, certSecret); err != nil {
 			return nil, err
 		}
 	}
@@ -133,7 +130,7 @@ func (r *VMReconciler) cleanupTmpSecrets(ctx context.Context, vm *vmv1.VirtualMa
 		log.Error(err, "Failed to get vm TLS secret")
 		return err
 	} else if err == nil /* found */ {
-		if err := r.deleteTmpSecret(ctx, vm, tmpKeySecret); err != nil {
+		if err := r.deleteTmpSecret(ctx, tmpKeySecret); err != nil {
 			return err
 		}
 	}
@@ -145,7 +142,7 @@ func (r *VMReconciler) cleanupTmpSecrets(ctx context.Context, vm *vmv1.VirtualMa
 		log.Error(err, "Failed to get vm CertificateRequest")
 		return err
 	} else if err == nil /* found */ {
-		if err := r.deleteCertRequest(ctx, vm, certificateReq); err != nil {
+		if err := r.deleteCertRequest(ctx, certificateReq); err != nil {
 			return err
 		}
 	}
@@ -176,9 +173,6 @@ func (r *VMReconciler) createTlsTmpSecret(ctx context.Context, vm *vmv1.VirtualM
 	}
 	log.Info("Virtual Machine temporary TLS private key secret was created", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
 
-	msg := fmt.Sprintf("VirtualMachine %s created temporary TLS private key secret %s", vm.Name, tmpKeySecret.Name)
-	r.Recorder.Event(vm, "Normal", "Created", msg)
-
 	return tmpKeySecret, nil
 }
 
@@ -199,9 +193,6 @@ func (r *VMReconciler) createCertificateRequest(ctx context.Context, vm *vmv1.Vi
 	}
 	log.Info("Runner CertificateRequest was created", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
 
-	msg := fmt.Sprintf("VirtualMachine %s created CertificateRequest %s", vm.Name, certificateReq.Name)
-	r.Recorder.Event(vm, "Normal", "Created", msg)
-
 	return certificateReq, nil
 }
 
@@ -220,13 +211,10 @@ func (r *VMReconciler) createTlsSecret(ctx context.Context, vm *vmv1.VirtualMach
 	}
 	log.Info("Virtual Machine TLS secret was created", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
 
-	msg := fmt.Sprintf("VirtualMachine %s created TLS secret %s", vm.Name, certSecret.Name)
-	r.Recorder.Event(vm, "Normal", "Created", msg)
-
 	return nil
 }
 
-func (r *VMReconciler) updateTlsSecret(ctx context.Context, vm *vmv1.VirtualMachine, key crypto.Signer, certificateReq *certv1.CertificateRequest, certSecret *corev1.Secret) error {
+func (r *VMReconciler) updateTlsSecret(ctx context.Context, key crypto.Signer, certificateReq *certv1.CertificateRequest, certSecret *corev1.Secret) error {
 	log := log.FromContext(ctx)
 
 	encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
@@ -242,13 +230,10 @@ func (r *VMReconciler) updateTlsSecret(ctx context.Context, vm *vmv1.VirtualMach
 	}
 	log.Info("Virtual Machine TLS secret was updated", "Secret.Namespace", certSecret.Namespace, "Secret.Name", certSecret.Name)
 
-	msg := fmt.Sprintf("VirtualMachine %s updated TLS secret %s", vm.Name, certSecret.Name)
-	r.Recorder.Event(vm, "Normal", "Updated", msg)
-
 	return nil
 }
 
-func (r *VMReconciler) deleteTmpSecret(ctx context.Context, vm *vmv1.VirtualMachine, tmpKeySecret *corev1.Secret) error {
+func (r *VMReconciler) deleteTmpSecret(ctx context.Context, tmpKeySecret *corev1.Secret) error {
 	log := log.FromContext(ctx)
 
 	err := r.Delete(ctx, tmpKeySecret)
@@ -256,12 +241,11 @@ func (r *VMReconciler) deleteTmpSecret(ctx context.Context, vm *vmv1.VirtualMach
 		log.Info("Virtual Machine temporary TLS private key secret could not be deleted", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
 		return err
 	}
-	msg := fmt.Sprintf("VirtualMachine %s temporary TLS private key secret %s was deleted", vm.Name, tmpKeySecret.Name)
-	r.Recorder.Event(vm, "Normal", "Deleted", msg)
+	log.Info("VirtualMachine temporary TLS private key secret was deleted", "Secret.Namespace", tmpKeySecret.Namespace, "Secret.Name", tmpKeySecret.Name)
 	return nil
 }
 
-func (r *VMReconciler) deleteCertRequest(ctx context.Context, vm *vmv1.VirtualMachine, certificateReq *certv1.CertificateRequest) error {
+func (r *VMReconciler) deleteCertRequest(ctx context.Context, certificateReq *certv1.CertificateRequest) error {
 	log := log.FromContext(ctx)
 
 	err := r.Delete(ctx, certificateReq)
@@ -269,8 +253,7 @@ func (r *VMReconciler) deleteCertRequest(ctx context.Context, vm *vmv1.VirtualMa
 		log.Info("Virtual Machine CertificateRequest could not be deleted", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
 		return err
 	}
-	msg := fmt.Sprintf("VirtualMachine %s CertificateRequest %s was deleted", vm.Name, certificateReq.Name)
-	r.Recorder.Event(vm, "Normal", "Deleted", msg)
+	log.Info("VirtualMachine CertificateRequest was deleted", "CertificateRequest.Namespace", certificateReq.Namespace, "CertificateRequest.Name", certificateReq.Name)
 	return nil
 }
 
