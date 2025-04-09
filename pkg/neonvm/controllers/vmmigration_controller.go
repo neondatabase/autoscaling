@@ -150,14 +150,28 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, err
 	}
 
-	getVM := func() (*vmv1.VirtualMachine, error) {
-		var vm vmv1.VirtualMachine
-		err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, &vm)
-		if err != nil {
-			log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
-			return nil, err
+	// Fetch the corresponding VirtualMachine instance
+	var vmObject vmv1.VirtualMachine
+	err := r.Get(ctx, types.NamespacedName{Name: migration.Spec.VmName, Namespace: migration.Namespace}, &vmObject)
+	vm := &vmObject
+	if err != nil {
+		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+		if apierrors.IsNotFound(err) {
+			// stop reconcile loop if vm not found (already deleted?)
+			message := fmt.Sprintf("VM (%s) not found", migration.Spec.VmName)
+			r.Recorder.Event(migration, "Warning", "Failed", message)
+			meta.SetStatusCondition(&migration.Status.Conditions,
+				metav1.Condition{
+					Type:    typeDegradedVirtualMachineMigration,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Reconciling",
+					Message: message,
+				})
+			migration.Status.Phase = vmv1.VmmFailed
+			return r.updateMigrationStatus(ctx, migration)
 		}
-		return &vm, nil
+		// return err and try reconcile again
+		return ctrl.Result{}, err
 	}
 
 	if !migration.ObjectMeta.DeletionTimestamp.IsZero() {
@@ -165,10 +179,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for Migration")
-			vm, err := getVM()
-			if err != nil {
-				return ctrl.Result{}, err
-			}
 			if err := r.doFinalizerOperationsForVirtualMachineMigration(ctx, migration, vm); err != nil {
 				// if fail to delete the external dependency here, return with error
 				// so that it can be retried
@@ -199,28 +209,6 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 		// stop this reconciliation cycle, new will be triggered as Migration updated
 		return ctrl.Result{}, nil
-	}
-
-	// Fetch the corresponding VirtualMachine instance
-	vm, err := getVM()
-	if err != nil {
-		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
-		if apierrors.IsNotFound(err) {
-			// stop reconcile loop if vm not found (already deleted?)
-			message := fmt.Sprintf("VM (%s) not found", migration.Spec.VmName)
-			r.Recorder.Event(migration, "Warning", "Failed", message)
-			meta.SetStatusCondition(&migration.Status.Conditions,
-				metav1.Condition{
-					Type:    typeDegradedVirtualMachineMigration,
-					Status:  metav1.ConditionTrue,
-					Reason:  "Reconciling",
-					Message: message,
-				})
-			migration.Status.Phase = vmv1.VmmFailed
-			return r.updateMigrationStatus(ctx, migration)
-		}
-		// return err and try reconcile again
-		return ctrl.Result{}, err
 	}
 
 	// Set owner for VM migration object
@@ -254,21 +242,31 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return r.updateMigrationStatus(ctx, migration)
 	}
 
-	if migration.Status.Phase == "" {
-		// need change VM status asap to prevent autoscaler change CPU/RAM in VM
-		// but only if VM running
-		if vm.Status.Phase == vmv1.VmRunning {
-			vm.Status.Phase = vmv1.VmPreMigrating
-			if err := r.Status().Update(ctx, vm); err != nil {
-				log.Error(err, "Failed to update VM status to PreMigrating", "Status", vm.Status.Phase)
-				return ctrl.Result{}, err
-			}
-			// Migration just created, change Phase to "Pending"
-			migration.Status.Phase = vmv1.VmmPending
-			return r.updateMigrationStatus(ctx, migration)
+	if vm.Status.MigrationName == "" {
+		if vm.Status.Phase != vmv1.VmRunning {
+			// VM must be scaling, so we will try again in a second
+			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-		// some other VM status (Scaling may be), requeue after second
-		return ctrl.Result{RequeueAfter: time.Second}, nil
+		vm.Status.MigrationName = migration.Name
+		vm.Status.Phase = vmv1.VmPreMigrating
+		if err := r.Status().Update(ctx, vm); err != nil {
+			log.Error(err, "Failed to set migration on a VM", "MigrationName", migration.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
+	if vm.Status.MigrationName != migration.Name {
+		log.Info("Another migration is in progress", "InProgress", vm.Status.MigrationName, "Requested", migration.Name)
+		migration.Status.Phase = vmv1.VmmFailed
+		migration.Status.Info.Status = "Another migration is in progress"
+
+		return r.updateMigrationStatus(ctx, migration)
+	}
+
+	if migration.Status.Phase == "" {
+		// We have locked VM to the current migration, we can proceed
+		migration.Status.Phase = vmv1.VmmPending
+		return r.updateMigrationStatus(ctx, migration)
 	}
 
 	switch migration.Status.Phase {
@@ -632,6 +630,11 @@ func (r *VirtualMachineMigrationReconciler) updateMigrationStatus(ctx context.Co
 // finalizeVirtualMachineMigration will perform the required operations before delete the CR.
 func (r *VirtualMachineMigrationReconciler) doFinalizerOperationsForVirtualMachineMigration(ctx context.Context, migration *vmv1.VirtualMachineMigration, vm *vmv1.VirtualMachine) error {
 	log := log.FromContext(ctx)
+
+	if vm.Status.MigrationName != migration.Name {
+		log.Info("VM is not locked to this migration, skipping finalizer operations")
+		return nil
+	}
 
 	if migration.Status.Phase == vmv1.VmmRunning || vm.Status.Phase == vmv1.VmPreMigrating {
 		message := fmt.Sprintf("Running Migration (%s) is being deleted", migration.Name)
