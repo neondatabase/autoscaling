@@ -2,7 +2,9 @@ apiVersion: k3d.io/v1alpha5
 kind: Simple
 servers: 1
 agents:  2
-image: rancher/k3s:v1.30.6-k3s1
+# See https://github.com/k3s-io/k3s/releases, get SHA via index manifest from dockerhub.
+# NOTE: releases are named v1.X.Y+k3sN, but image tags replace '+' with '-'.
+image: rancher/k3s:v1.31.6-k3s1@sha256:654b028f2d213cf1ba28b4c69ed41bada00796a9c4b065c0a21bc93ac36fc49b
 
 options:
   k3d: # k3d runtime settings

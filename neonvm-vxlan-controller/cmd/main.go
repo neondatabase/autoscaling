@@ -164,9 +164,10 @@ func createVxlanInterface(name string, vxlanID int, ownIP string, bridgeName str
 		LinkAttrs: netlink.LinkAttrs{
 			Name: name,
 		},
-		VxlanId: vxlanID,
-		SrcAddr: net.ParseIP(ownIP),
-		Port:    4789,
+		VxlanId:  vxlanID,
+		SrcAddr:  net.ParseIP(ownIP),
+		Port:     4789,
+		Learning: true,
 	}
 
 	if err := netlink.LinkAdd(link); err != nil {
