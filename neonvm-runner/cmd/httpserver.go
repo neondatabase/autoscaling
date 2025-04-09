@@ -46,9 +46,9 @@ func listenForHTTPRequests(
 	})
 	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		if callbacks.ready(logger) {
-			w.WriteHeader(200)
+			w.WriteHeader(http.StatusOK)
 		} else {
-			w.WriteHeader(500)
+			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 	})
 	if networkMonitoring {
