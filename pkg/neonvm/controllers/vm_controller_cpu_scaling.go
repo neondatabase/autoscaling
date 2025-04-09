@@ -2,14 +2,12 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	corev1 "k8s.io/api/core/v1"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/autoscaling/pkg/api"
 )
 
 // handleCPUScaling encapsulates the logic to handle CPU scaling.
@@ -66,21 +64,15 @@ func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.Virtual
 		if err := QmpPlugCpu(QmpAddr(vm)); err != nil {
 			return false, err
 		}
-		r.Recorder.Event(vm, "Normal", "ScaleUp",
-			fmt.Sprintf("One more CPU was plugged into VM %s",
-				vm.Name))
 	} else if specCPU.RoundedUp() < pluggedCPU {
 		// going to unplug one CPU
 		log.Info("Unplug one CPU from VM")
 		if err := QmpUnplugCpu(QmpAddr(vm)); err != nil {
 			return false, err
 		}
-		r.Recorder.Event(vm, "Normal", "ScaleDown",
-			fmt.Sprintf("One CPU was unplugged from VM %s",
-				vm.Name))
 		return false, nil
 	} else if specCPU != cgroupUsage.VCPUs {
-		_, err := r.handleCgroupCPUUpdate(ctx, vm, cgroupUsage)
+		_, err := r.handleCgroupCPUUpdate(ctx, vm)
 		if err != nil {
 			log.Error(err, "Failed to update cgroup CPU", "VirtualMachine", vm.Name)
 			return false, err
@@ -104,23 +96,19 @@ func (r *VMReconciler) handleCPUScalingSysfs(ctx context.Context, vm *vmv1.Virtu
 		return false, err
 	}
 	if specCPU != cgroupUsage.VCPUs {
-		return r.handleCgroupCPUUpdate(ctx, vm, cgroupUsage)
+		return r.handleCgroupCPUUpdate(ctx, vm)
 	}
 	r.updateVMStatusCPU(ctx, vm, vmRunner, cgroupUsage.VCPUs.RoundedUp(), cgroupUsage)
 	return true, nil
 }
 
-func (r *VMReconciler) handleCgroupCPUUpdate(ctx context.Context, vm *vmv1.VirtualMachine, cgroupUsage *api.VCPUCgroup) (bool, error) {
+func (r *VMReconciler) handleCgroupCPUUpdate(ctx context.Context, vm *vmv1.VirtualMachine) (bool, error) {
+	log := log.FromContext(ctx)
+
 	specCPU := vm.Spec.Guest.CPUs.Use
 	if err := setRunnerCPULimits(ctx, vm, specCPU); err != nil {
 		return false, err
 	}
-	reason := "ScaleDown"
-	if specCPU > cgroupUsage.VCPUs {
-		reason = "ScaleUp"
-	}
-	r.Recorder.Event(vm, "Normal", reason,
-		fmt.Sprintf("Runner pod cgroups was updated on VM %s %s",
-			vm.Name, specCPU))
+	log.Info("Runner pod cgroups updated for VM", "SpecCPU", specCPU)
 	return true, nil
 }
