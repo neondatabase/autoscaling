@@ -19,8 +19,8 @@ package v1
 
 import (
 	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type IPPoolLister interface {
 
 // iPPoolLister implements the IPPoolLister interface.
 type iPPoolLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1.IPPool]
 }
 
 // NewIPPoolLister returns a new IPPoolLister.
 func NewIPPoolLister(indexer cache.Indexer) IPPoolLister {
-	return &iPPoolLister{indexer: indexer}
-}
-
-// List lists all IPPools in the indexer.
-func (s *iPPoolLister) List(selector labels.Selector) (ret []*v1.IPPool, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.IPPool))
-	})
-	return ret, err
+	return &iPPoolLister{listers.New[*v1.IPPool](indexer, v1.Resource("ippool"))}
 }
 
 // IPPools returns an object that can list and get IPPools.
 func (s *iPPoolLister) IPPools(namespace string) IPPoolNamespaceLister {
-	return iPPoolNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return iPPoolNamespaceLister{listers.NewNamespaced[*v1.IPPool](s.ResourceIndexer, namespace)}
 }
 
 // IPPoolNamespaceLister helps list and get IPPools.
@@ -73,26 +65,5 @@ type IPPoolNamespaceLister interface {
 // iPPoolNamespaceLister implements the IPPoolNamespaceLister
 // interface.
 type iPPoolNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all IPPools in the indexer for a given namespace.
-func (s iPPoolNamespaceLister) List(selector labels.Selector) (ret []*v1.IPPool, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1.IPPool))
-	})
-	return ret, err
-}
-
-// Get retrieves the IPPool from the indexer for a given namespace and name.
-func (s iPPoolNamespaceLister) Get(name string) (*v1.IPPool, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1.Resource("ippool"), name)
-	}
-	return obj.(*v1.IPPool), nil
+	listers.ResourceIndexer[*v1.IPPool]
 }
