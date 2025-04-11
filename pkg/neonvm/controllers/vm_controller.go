@@ -445,6 +445,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			if !vm.HasRestarted() {
 				d := pod.CreationTimestamp.Time.Sub(vm.CreationTimestamp.Time)
 				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
+				log.Info("VM creation to runner pod creation time", "duration_sec", d.Seconds())
 			}
 		} else if err != nil {
 			log.Error(err, "Failed to get vm-runner Pod")

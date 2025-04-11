@@ -38,6 +38,12 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 		1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 40, 50, 60,
 	}
 
+	// This time is almost never less than 10 seconds, but sometimes goes above several minutes.
+	vmCreationToVMRunningBuckets := []float64{
+		1, 5, 10, 12, 14, 16, 18, 20, 25, 30, 40, 50, 60,
+		80, 100, 120, 140, 160, 200, 300,
+	}
+
 	m := ReconcilerMetrics{
 		failing: util.RegisterMetric(metrics.Registry, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -57,14 +63,14 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 			prometheus.HistogramOpts{
 				Name:    "vm_runner_creation_to_vm_running_duration_seconds",
 				Help:    "Time duration from runner Pod.CreationTimestamp to the moment when VirtualMachine.Status.Phase becomes Running",
-				Buckets: buckets,
+				Buckets: vmCreationToVMRunningBuckets,
 			},
 		)),
 		vmCreationToVMRunningTime: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Name:    "vm_creation_to_vm_running_duration_seconds",
 				Help:    "Time duration from VirtualMachine.CreationTimeStamp to the moment when VirtualMachine.Status.Phase becomes Running",
-				Buckets: buckets,
+				Buckets: vmCreationToVMRunningBuckets,
 			},
 		)),
 		vmRestartCounts: util.RegisterMetric(metrics.Registry, prometheus.NewCounter(
