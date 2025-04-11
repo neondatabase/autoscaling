@@ -72,12 +72,14 @@ func TestBasicNodeOperations(t *testing.T) {
 	assert.Equal(t, state.NodeResources[vmv1.MilliCPU]{
 		Total:     10 * cpu,
 		Reserved:  3 * cpu,
+		Committed: 3 * cpu,
 		Watermark: 8 * cpu,
 		Migrating: 0,
 	}, node.CPU)
 	assert.Equal(t, state.NodeResources[api.Bytes]{
 		Total:     40 * gib,
 		Reserved:  12 * gib,
+		Committed: 12 * gib,
 		Watermark: 32 * gib,
 		Migrating: 0,
 	}, node.Mem)
@@ -87,12 +89,14 @@ func TestBasicNodeOperations(t *testing.T) {
 	assert.Equal(t, state.NodeResources[vmv1.MilliCPU]{
 		Total:     10 * cpu,
 		Reserved:  2 * cpu,
+		Committed: 2 * cpu,
 		Watermark: 8 * cpu,
 		Migrating: 0,
 	}, node.CPU)
 	assert.Equal(t, state.NodeResources[api.Bytes]{
 		Total:     40 * gib,
 		Reserved:  8 * gib,
+		Committed: 8 * gib,
 		Watermark: 32 * gib,
 		Migrating: 0,
 	}, node.Mem)
@@ -115,12 +119,14 @@ func TestSpeculativeNodeOperations(t *testing.T) {
 	assert.Equal(t, state.NodeResources[vmv1.MilliCPU]{
 		Total:     10 * cpu,
 		Reserved:  2 * cpu,
+		Committed: 2 * cpu,
 		Watermark: 8 * cpu,
 		Migrating: 0,
 	}, node.CPU)
 	assert.Equal(t, state.NodeResources[api.Bytes]{
 		Total:     40 * gib,
 		Reserved:  8 * gib,
+		Committed: 8 * gib,
 		Watermark: 32 * gib,
 		Migrating: 0,
 	}, node.Mem)
@@ -140,12 +146,14 @@ func TestSpeculativeNodeOperations(t *testing.T) {
 	assert.Equal(t, state.NodeResources[vmv1.MilliCPU]{
 		Total:     10 * cpu,
 		Reserved:  2 * cpu,
+		Committed: 2 * cpu,
 		Watermark: 8 * cpu,
 		Migrating: 0,
 	}, node.CPU)
 	assert.Equal(t, state.NodeResources[api.Bytes]{
 		Total:     40 * gib,
 		Reserved:  8 * gib,
+		Committed: 8 * gib,
 		Watermark: 32 * gib,
 		Migrating: 0,
 	}, node.Mem)
@@ -161,12 +169,14 @@ func TestSpeculativeNodeOperations(t *testing.T) {
 	assert.Equal(t, state.NodeResources[vmv1.MilliCPU]{
 		Total:     10 * cpu,
 		Reserved:  3 * cpu,
+		Committed: 3 * cpu,
 		Watermark: 8 * cpu,
 		Migrating: 0,
 	}, node.CPU)
 	assert.Equal(t, state.NodeResources[api.Bytes]{
 		Total:     40 * gib,
 		Reserved:  12 * gib,
+		Committed: 12 * gib,
 		Watermark: 32 * gib,
 		Migrating: 0,
 	}, node.Mem)
@@ -238,14 +248,24 @@ func TestPodReconciling(t *testing.T) {
 	}
 
 	cases := []struct {
-		name       string
+		name string
+
 		nodeTotals node
+
 		nodeBefore node
+		// sets the "committed" resource fields of the initial node, if present. Otherwise they'll
+		// be taken from `nodeBefore`
+		nodeBeforeCommitted *node
+
 		overcommit overcommit
 		podBefore  pod
 		done       bool
-		nodeAfter  node
-		podAfter   pod
+
+		nodeAfter node
+		// same as nodeBeforeCommitted, but augmenting nodeAfter
+		nodeAfterCommitted *node
+
+		podAfter pod
 	}{
 		{
 			name: "normal-pod-nothing-to-do",
@@ -257,7 +277,8 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 3 * factorCPU,
 				mem: 3 * factorMem,
 			},
-			overcommit: defaultOvercommit,
+			nodeBeforeCommitted: nil,
+			overcommit:          defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -273,6 +294,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 3 * factorCPU,
 				mem: 3 * factorMem,
 			},
+			nodeAfterCommitted: nil,
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -295,7 +317,8 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 3 * factorCPU,
 				mem: 3 * factorMem,
 			},
-			overcommit: defaultOvercommit,
+			nodeBeforeCommitted: nil,
+			overcommit:          defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -311,6 +334,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 5 * factorCPU,
 				mem: 5 * factorMem,
 			},
+			nodeAfterCommitted: nil,
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  5 * factorCPU,
@@ -333,7 +357,8 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 8 * factorCPU,
 				mem: 8 * factorMem,
 			},
-			overcommit: defaultOvercommit,
+			nodeBeforeCommitted: nil,
+			overcommit:          defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -349,6 +374,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 10 * factorCPU,
 				mem: 10 * factorMem,
 			},
+			nodeAfterCommitted: nil,
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  5 * factorCPU,
@@ -371,7 +397,8 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 9 * factorCPU,
 				mem: 9 * factorMem,
 			},
-			overcommit: defaultOvercommit,
+			nodeBeforeCommitted: nil,
+			overcommit:          defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -387,6 +414,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 10 * factorCPU,
 				mem: 10 * factorMem,
 			},
+			nodeAfterCommitted: nil,
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  4 * factorCPU,
@@ -410,7 +438,8 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 10 * factorCPU,
 				mem: 10 * factorMem,
 			},
-			overcommit: defaultOvercommit,
+			nodeBeforeCommitted: nil,
+			overcommit:          defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -426,6 +455,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 10 * factorCPU,
 				mem: 10 * factorMem,
 			},
+			nodeAfterCommitted: nil,
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -449,7 +479,8 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 9 * factorCPU,
 				mem: 9 * factorMem,
 			},
-			overcommit: defaultOvercommit,
+			nodeBeforeCommitted: nil,
+			overcommit:          defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -465,6 +496,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 10 * factorCPU,
 				mem: 10 * factorMem,
 			},
+			nodeAfterCommitted: nil,
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  4 * factorCPU,
@@ -487,7 +519,8 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 11 * factorCPU,
 				mem: 11 * factorMem,
 			},
-			overcommit: defaultOvercommit,
+			nodeBeforeCommitted: nil,
+			overcommit:          defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -503,6 +536,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 11 * factorCPU,
 				mem: 11 * factorMem,
 			},
+			nodeAfterCommitted: nil,
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -525,7 +559,8 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 12 * factorCPU,
 				mem: 12 * factorMem,
 			},
-			overcommit: defaultOvercommit,
+			nodeBeforeCommitted: nil,
+			overcommit:          defaultOvercommit,
 			podBefore: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  4 * factorCPU,
@@ -541,6 +576,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 11 * factorCPU,
 				mem: 11 * factorMem,
 			},
+			nodeAfterCommitted: nil,
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  3 * factorCPU,
@@ -564,6 +600,7 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 8 * factorCPU,
 				mem: 8 * factorMem,
 			},
+			nodeBeforeCommitted: nil,
 			overcommit: overcommit{
 				cpu: lo.ToPtr(resource.MustParse("2000m")),
 				mem: lo.ToPtr(resource.MustParse("2000m")),
@@ -583,6 +620,11 @@ func TestPodReconciling(t *testing.T) {
 				cpu: 10 * factorCPU,
 				mem: 10 * factorMem,
 			},
+			// overcommit is 2x; reserved went 8 -> 10, so committed should go 8 -> 12.
+			nodeAfterCommitted: &node{
+				cpu: 12 * factorCPU,
+				mem: 12 * factorMem,
+			},
 			podAfter: pod{
 				cpu: resources[vmv1.MilliCPU]{
 					reserved:  7 * factorCPU,
@@ -598,7 +640,12 @@ func TestPodReconciling(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			makeNode := func(reservedCPU vmv1.MilliCPU, reservedMem api.Bytes) *state.Node {
+			makeNode := func(
+				reservedCPU vmv1.MilliCPU,
+				reservedMem api.Bytes,
+				committedCPU vmv1.MilliCPU,
+				committedMem api.Bytes,
+			) *state.Node {
 				n := state.NodeStateFromParams(
 					"node-name",
 					c.nodeTotals.cpu,
@@ -608,17 +655,22 @@ func TestPodReconciling(t *testing.T) {
 				)
 				n.CPU.Reserved = reservedCPU
 				n.Mem.Reserved = reservedMem
+				n.CPU.Committed = committedCPU
+				n.Mem.Committed = committedMem
 				return n
 			}
 
+			committedBefore := lo.FromPtrOr(c.nodeBeforeCommitted, c.nodeBefore)
 			node := makeNode(
 				c.nodeBefore.cpu-vmv1.MilliCPU(int64(c.podBefore.cpu.reserved)*1000/c.overcommit.cpu.MilliValue()),
 				c.nodeBefore.mem-api.Bytes(int64(c.podBefore.mem.reserved)*1000/c.overcommit.mem.MilliValue()),
+				committedBefore.cpu-c.podBefore.cpu.reserved,
+				committedBefore.mem-c.podBefore.mem.reserved,
 			)
 			node.AddPod(makePod(c.podBefore, c.overcommit))
 
 			// Check that the initial node equals what we expect
-			nodeBefore := makeNode(c.nodeBefore.cpu, c.nodeBefore.mem)
+			nodeBefore := makeNode(c.nodeBefore.cpu, c.nodeBefore.mem, committedBefore.cpu, committedBefore.mem)
 			assert.Equal(t, nodeBefore.CPU, node.CPU)
 			assert.Equal(t, nodeBefore.Mem, node.Mem)
 
@@ -636,7 +688,8 @@ func TestPodReconciling(t *testing.T) {
 			// + check whether we're done matches:
 			assert.Equal(t, c.done, done)
 			// + check the node:
-			nodeAfter := makeNode(c.nodeAfter.cpu, c.nodeAfter.mem)
+			committedAfter := lo.FromPtrOr(c.nodeAfterCommitted, c.nodeAfter)
+			nodeAfter := makeNode(c.nodeAfter.cpu, c.nodeAfter.mem, committedAfter.cpu, committedAfter.mem)
 			assert.Equal(t, nodeAfter.CPU, node.CPU)
 			assert.Equal(t, nodeAfter.Mem, node.Mem)
 		})

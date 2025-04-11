@@ -10,7 +10,6 @@ import (
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,22 +25,6 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 )
-
-type mockRecorder struct {
-	mock.Mock
-}
-
-func (m *mockRecorder) Event(object runtime.Object, eventtype, reason, message string) {
-	m.Called(object, eventtype, reason, message)
-}
-
-func (m *mockRecorder) Eventf(object runtime.Object, eventtype, reason, messageFmt string, args ...interface{}) {
-	m.Called(object, eventtype, reason, messageFmt, args)
-}
-
-func (m *mockRecorder) AnnotatedEventf(object runtime.Object, annotations map[string]string, eventtype, reason, messageFmt string, args ...interface{}) {
-	m.Called(object, annotations, eventtype, reason, messageFmt, args)
-}
 
 // defaultVm returns a VM which is similar to what we can reasonably
 // expect from the control plane.
@@ -77,12 +60,11 @@ func defaultVm() *vmv1.VirtualMachine {
 }
 
 type testParams struct {
-	t            *testing.T
-	ctx          context.Context
-	r            *VMReconciler
-	client       client.Client
-	origVM       *vmv1.VirtualMachine
-	mockRecorder *mockRecorder
+	t      *testing.T
+	ctx    context.Context
+	r      *VMReconciler
+	client client.Client
+	origVM *vmv1.VirtualMachine
 }
 
 var testReconcilerMetrics = MakeReconcilerMetrics()
@@ -107,16 +89,13 @@ func newTestParams(t *testing.T) *testParams {
 			WithScheme(scheme).
 			WithStatusSubresource(&vmv1.VirtualMachine{}).
 			Build(),
-		//nolint:exhaustruct // This is a mock
-		mockRecorder: &mockRecorder{},
-		r:            nil,
-		origVM:       nil,
+		r:      nil,
+		origVM: nil,
 	}
 
 	params.r = &VMReconciler{
-		Client:   params.client,
-		Recorder: params.mockRecorder,
-		Scheme:   scheme,
+		Client: params.client,
+		Scheme: scheme,
 		Config: &ReconcilerConfig{
 			DisableRunnerCgroup:     false,
 			MaxConcurrentReconciles: 10,
@@ -178,8 +157,6 @@ func TestReconcile(t *testing.T) {
 	assert.Equal(t, true, res.Requeue)
 
 	// Round 2
-	params.mockRecorder.On("Event", mock.Anything, "Normal", "Created",
-		mock.Anything)
 	res, err = params.r.Reconcile(params.ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, false, res.Requeue)
@@ -188,8 +165,6 @@ func TestReconcile(t *testing.T) {
 	assert.Equal(t, vmv1.VmPending, params.getVM().Status.Phase)
 
 	// Round 3
-	params.mockRecorder.On("Event", mock.Anything, "Normal", "Created",
-		mock.Anything)
 	res, err = params.r.Reconcile(params.ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, false, res.Requeue)
@@ -231,8 +206,6 @@ func TestRunningPod(t *testing.T) {
 	}
 
 	// Round 1
-	params.mockRecorder.On("Event", mock.Anything, "Normal", "Created",
-		mock.Anything)
 	// Requeue because we expect default values to be set
 	res, err := params.r.Reconcile(params.ctx, req)
 	require.NoError(t, err)

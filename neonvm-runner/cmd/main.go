@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -487,49 +488,49 @@ func runQEMU(
 	lastValue.Store(uint32(vmSpec.Guest.CPUs.Min))
 
 	callbacks = cpuServerCallbacks{
-		get: func(logger *zap.Logger) (*vmv1.MilliCPU, error) {
+		get: func(logger *zap.Logger) (*vmv1.MilliCPU, int, error) {
 			switch cfg.cpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
-				cpu, err := getNeonvmDaemonCPU()
+				cpu, status, err := getNeonvmDaemonCPU()
 				if err != nil {
 					logger.Error("failed to get CPU from NeonVM Daemon", zap.Error(err))
-					return nil, err
+					return nil, status, err
 				}
 				storedCpu := vmv1.MilliCPU(lastValue.Load())
 				if storedCpu.RoundedUp() != cpu.RoundedUp() {
 					logger.Warn("CPU from NeonVM Daemon does not match stored value, returning daemon value to let controller reconcile correct state", zap.Any("stored", storedCpu), zap.Any("current", cpu))
-					return &cpu, nil
+					return &cpu, 0, nil
 				}
-				return &storedCpu, nil
+				return &storedCpu, 0, nil
 
 			case vmv1.CpuScalingModeQMP:
-				return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), nil
+				return lo.ToPtr(vmv1.MilliCPU(lastValue.Load())), 0, nil
 			default:
 				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
 		},
-		set: func(logger *zap.Logger, cpu vmv1.MilliCPU) error {
+		set: func(logger *zap.Logger, cpu vmv1.MilliCPU) (int, error) {
 			switch cfg.cpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
-				err := setNeonvmDaemonCPU(cpu)
+				status, err := setNeonvmDaemonCPU(cpu)
 				if err != nil {
 					logger.Error("setting CPU through NeonVM Daemon failed", zap.Any("cpu", cpu), zap.Error(err))
-					return err
+					return status, err
 				}
 				lastValue.Store(uint32(cpu))
 			case vmv1.CpuScalingModeQMP:
 				lastValue.Store(uint32(cpu))
-				return nil
+				return 0, nil
 			default:
 				panic(fmt.Errorf("unknown CPU scaling mode %q", cfg.cpuScalingMode))
 			}
-			return nil
+			return 0, nil
 		},
 		ready: func(logger *zap.Logger) bool {
 			switch cfg.cpuScalingMode {
 			case vmv1.CpuScalingModeSysfs:
 				// check if the NeonVM Daemon is ready to accept requests
-				_, err := getNeonvmDaemonCPU()
+				_, _, err := getNeonvmDaemonCPU()
 				if err != nil {
 					logger.Warn("neonvm-daemon ready probe failed", zap.Error(err))
 					return false
@@ -860,10 +861,31 @@ func execFg(name string, arg ...string) error {
 	return nil
 }
 
-func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
+func httpStatusForURLError(err error) int {
+	// From RFC 9110:
+	//
+	// > The 502 (Bad Gateway) status code indicates that the server, while acting as a gateway or
+	// > proxy, received an invalid response from an inbound server it accessed while attempting to
+	// > fulfill the request.
+	//
+	// and
+	//
+	// > The 504 (Gateway Timeout) status code indicates that the server, while acting as a gateway
+	// > or proxy, did not receive a timely response from an upstream server it needed to access in
+	// > order to complete the request.
+
+	urlErr := new(neturl.Error)
+	if errors.As(err, &urlErr) && urlErr.Timeout() {
+		return http.StatusGatewayTimeout
+	} else {
+		return http.StatusBadGateway
+	}
+}
+
+func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) (status int, _ error) {
 	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
 	if err != nil {
-		return fmt.Errorf("could not calculate VM IP address: %w", err)
+		return http.StatusInternalServerError, fmt.Errorf("could not calculate VM IP address: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
@@ -874,26 +896,27 @@ func setNeonvmDaemonCPU(cpu vmv1.MilliCPU) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
 	if err != nil {
-		return fmt.Errorf("could not build request: %w", err)
+		return http.StatusInternalServerError, fmt.Errorf("could not build request: %w", err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("could not send request: %w", err)
+		status := httpStatusForURLError(err)
+		return status, fmt.Errorf("could not send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+		return http.StatusBadGateway, fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
 	}
 
-	return nil
+	return http.StatusOK, nil
 }
 
-func getNeonvmDaemonCPU() (vmv1.MilliCPU, error) {
+func getNeonvmDaemonCPU() (_ vmv1.MilliCPU, status int, _ error) {
 	_, vmIP, _, err := calcIPs(defaultNetworkCIDR)
 	if err != nil {
-		return 0, fmt.Errorf("could not calculate VM IP address: %w", err)
+		return 0, http.StatusInternalServerError, fmt.Errorf("could not calculate VM IP address: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
@@ -903,30 +926,31 @@ func getNeonvmDaemonCPU() (vmv1.MilliCPU, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return 0, fmt.Errorf("could not build request: %w", err)
+		return 0, http.StatusInternalServerError, fmt.Errorf("could not build request: %w", err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("could not send request: %w", err)
+		status := httpStatusForURLError(err)
+		return 0, status, fmt.Errorf("could not send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return 0, fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
+		return 0, http.StatusBadGateway, fmt.Errorf("neonvm-daemon responded with status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, fmt.Errorf("could not read response: %w", err)
+		return 0, http.StatusBadGateway, fmt.Errorf("could not read response: %w", err)
 	}
 
 	value, err := strconv.ParseUint(string(body), 10, 32)
 	if err != nil {
-		return 0, fmt.Errorf("could not parse response: %w", err)
+		return 0, http.StatusBadGateway, fmt.Errorf("could not parse response: %w", err)
 	}
 
-	return vmv1.MilliCPU(value), nil
+	return vmv1.MilliCPU(value), http.StatusOK, nil
 }
 
 type File struct {

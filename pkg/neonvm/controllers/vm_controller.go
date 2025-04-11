@@ -50,7 +50,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apiserver/pkg/storage/names"
-	"k8s.io/client-go/tools/record"
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
@@ -79,10 +78,9 @@ const (
 // VMReconciler reconciles a VirtualMachine object
 type VMReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
-	Config   *ReconcilerConfig
-	IPAM     *ipam.IPAM
+	Scheme *runtime.Scheme
+	Config *ReconcilerConfig
+	IPAM   *ipam.IPAM
 
 	Metrics ReconcilerMetrics `exhaustruct:"optional"`
 }
@@ -201,8 +199,6 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	statusBefore := vm.Status.DeepCopy()
 	if err := r.doReconcile(ctx, &vm); err != nil {
-		r.Recorder.Eventf(&vm, corev1.EventTypeWarning, "Failed",
-			"Failed to reconcile (%s): %s", vm.Name, err)
 		if errors.Is(err, ipam.ErrAgain) {
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
@@ -239,20 +235,15 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 	log := log.FromContext(ctx)
 
 	// The following implementation will raise an event
-	r.Recorder.Event(vm, "Warning", "Deleting",
-		fmt.Sprintf("Custom Resource %s is being deleted from the namespace %s",
-			vm.Name,
-			vm.Namespace))
+	log.Info("Deleting VirtualMachine")
 
 	// Release overlay IP address
 	if vm.Spec.ExtraNetwork != nil {
 		ip, err := r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
 		if err != nil {
-			return fmt.Errorf("fail to release IP: %w", err)
+			return fmt.Errorf("fail to release overlay IP: %w", err)
 		}
-		message := fmt.Sprintf("Released IP %s", ip.String())
-		log.Info(message)
-		r.Recorder.Event(vm, "Normal", "OverlayNet", message)
+		log.Info(fmt.Sprintf("Released overlay IP %s", ip.String()))
 	}
 	return nil
 }
@@ -307,23 +298,20 @@ func (r *VMReconciler) updateVMStatusCPU(
 	}
 	if vm.Status.CPUs == nil || *vm.Status.CPUs != currentCPUUsage {
 		vm.Status.CPUs = &currentCPUUsage
-		r.Recorder.Event(vm, "Normal", "CpuInfo",
-			fmt.Sprintf("VirtualMachine %s uses %v cpu cores",
-				vm.Name,
-				vm.Status.CPUs))
+		log.Info(fmt.Sprintf("VirtualMachine uses %v CPU cores", vm.Status.CPUs))
 	}
 }
 
 func (r *VMReconciler) updateVMStatusMemory(
+	ctx context.Context,
 	vm *vmv1.VirtualMachine,
 	qmpMemorySize *resource.Quantity,
 ) {
+	log := log.FromContext(ctx)
+
 	if vm.Status.MemorySize == nil || !qmpMemorySize.Equal(*vm.Status.MemorySize) {
 		vm.Status.MemorySize = qmpMemorySize
-		r.Recorder.Event(vm, "Normal", "MemoryInfo",
-			fmt.Sprintf("VirtualMachine %s uses %v memory",
-				vm.Name,
-				vm.Status.MemorySize))
+		log.Info(fmt.Sprintf("VirtualMachine uses %v memory", vm.Status.MemorySize))
 	}
 }
 
@@ -338,11 +326,9 @@ func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMac
 	if err != nil {
 		return err
 	}
-	message := fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String())
-	log.Info(message)
 	vm.Status.ExtraNetIP = ip.IP.String()
 	vm.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
-	r.Recorder.Event(vm, "Normal", "OverlayNet", message)
+	log.Info(fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String()))
 	return nil
 }
 
@@ -391,7 +377,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				return err
 			}
 			log.Error(err, "Failed to acquire overlay IP", "VirtualMachine", vm.Name)
-			r.Recorder.Event(vm, "Warning", "OverlayNet", "Failed to acquire overlay IP")
 			return err
 		}
 		// VirtualMachine just created, change Phase to "Pending"
@@ -457,11 +442,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			}
 			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
-			msg := fmt.Sprintf("VirtualMachine %s created, Pod %s", vm.Name, pod.Name)
-			if sshSecret != nil {
-				msg = fmt.Sprintf("%s, SSH Secret %s", msg, sshSecret.Name)
-			}
-			r.Recorder.Event(vm, "Normal", "Created", msg)
 			if !vm.HasRestarted() {
 				d := pod.CreationTimestamp.Time.Sub(vm.CreationTimestamp.Time)
 				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
@@ -527,9 +507,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			// lost runner pod for running VirtualMachine ?
-			r.Recorder.Event(vm, "Warning", "NotFound",
-				fmt.Sprintf("runner pod %s not found",
-					vm.Status.PodName))
+			log.Error(err, fmt.Sprintf("Runner pod not found even though VirtualMachine is %s", vm.Status.Phase))
 			vm.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{
@@ -610,7 +588,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				return err
 			}
 			// update status by memory sizes used in the VM
-			r.updateVMStatusMemory(vm, memorySize)
+			r.updateVMStatusMemory(ctx, vm, memorySize)
 
 			// check if need hotplug/unplug CPU or memory
 			// compare guest spec and count of plugged
@@ -661,9 +639,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err != nil && apierrors.IsNotFound(err) {
 			// lost runner pod for running VirtualMachine ?
-			r.Recorder.Event(vm, "Warning", "NotFound",
-				fmt.Sprintf("runner pod %s not found",
-					vm.Status.PodName))
+			log.Error(err, fmt.Sprintf("Runner pod not found even though VirtualMachine is %s", vm.Status.Phase))
 			vm.Status.Phase = vmv1.VmFailed
 			meta.SetStatusCondition(&vm.Status.Conditions,
 				metav1.Condition{
@@ -728,7 +704,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		ramScaled := false
 
 		// do hotplug/unplug Memory
-		ramScaled, err = r.doVirtioMemScaling(vm)
+		ramScaled, err = r.doVirtioMemScaling(ctx, vm)
 		if err != nil {
 			return err
 		}
@@ -745,7 +721,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err == nil {
 			// delete current runner
-			if err := r.deleteRunnerPodIfEnabled(ctx, vm, vmRunner); err != nil {
+			if err := r.deleteRunnerPodIfEnabled(ctx, vmRunner); err != nil {
 				return err
 			}
 		} else if !apierrors.IsNotFound(err) {
@@ -805,7 +781,12 @@ func propagateRevision(vm *vmv1.VirtualMachine) {
 	vm.Status.CurrentRevision = &rev
 }
 
-func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _ error) {
+func (r *VMReconciler) doVirtioMemScaling(
+	ctx context.Context,
+	vm *vmv1.VirtualMachine,
+) (done bool, _ error) {
+	log := log.FromContext(ctx)
+
 	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - vm.Spec.Guest.MemorySlots.Min)
 
 	targetVirtioMemSize := int64(targetSlotCount) * vm.Spec.Guest.MemorySlotSize.Value()
@@ -820,12 +801,8 @@ func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _
 	)
 
 	if previousTarget != targetVirtioMemSize {
-		// We changed the requested size. Make an event for it.
-		reason := "ScaleUp"
-		if targetVirtioMemSize < previousTarget {
-			reason = "ScaleDown"
-		}
-		r.Recorder.Eventf(vm, "Normal", reason, "Set virtio-mem size for %v total memory", goalTotalSize)
+		// We changed the requested size, make a note of that in the logs
+		log.Info(fmt.Sprintf("Set virtio-mem size from %v to %v", previousTarget, goalTotalSize))
 	}
 
 	// Maybe we're already using the amount we want?
@@ -837,7 +814,7 @@ func (r *VMReconciler) doVirtioMemScaling(vm *vmv1.VirtualMachine) (done bool, _
 	}
 
 	done = currentTotalSize.Value() == goalTotalSize.Value()
-	r.updateVMStatusMemory(vm, currentTotalSize)
+	r.updateVMStatusMemory(ctx, vm, currentTotalSize)
 	return done, nil
 }
 
@@ -911,26 +888,19 @@ func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
 
 // deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
 // then emits an event and log line about what it did, whether it actually deleted the runner pod.
-func (r *VMReconciler) deleteRunnerPodIfEnabled(
-	ctx context.Context,
-	vm *vmv1.VirtualMachine,
-	runner *corev1.Pod,
-) error {
+func (r *VMReconciler) deleteRunnerPodIfEnabled(ctx context.Context, runner *corev1.Pod) error {
 	log := log.FromContext(ctx)
-	var msg, eventReason string
+	var msg string
 	if buildtag.NeverDeleteRunnerPods {
 		msg = fmt.Sprintf("VM runner pod deletion was skipped due to '%s' build tag", buildtag.TagnameNeverDeleteRunnerPods)
-		eventReason = "DeleteSkipped"
 	} else {
 		// delete current runner
 		if err := r.Delete(ctx, runner); err != nil {
 			return err
 		}
 		msg = "VM runner pod was deleted"
-		eventReason = "Deleted"
 	}
 	log.Info(msg, "Pod.Namespace", runner.Namespace, "Pod.Name", runner.Name)
-	r.Recorder.Event(vm, "Normal", eventReason, fmt.Sprintf("%s: %s", msg, runner.Name))
 	return nil
 }
 
