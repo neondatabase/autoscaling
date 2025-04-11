@@ -25,7 +25,7 @@ func ChecksumFlatDir(path string) (string, error) {
 	sort.Strings(keys)
 
 	// note: any changes to the hash need to be sychronised between neonvm-runner and neonvm-daemon.
-	// Since they are updated independantly, this is not trivial.
+	// Since they are updated independently, this is not trivial.
 	// If in doubt, make a new function and don't touch this one.
 	hasher, err := blake2b.New256(nil)
 	if err != nil {

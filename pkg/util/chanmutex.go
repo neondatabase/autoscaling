@@ -52,9 +52,9 @@ func (m *ChanMutex) WaitLock() <-chan struct{} {
 	return m.ch
 }
 
-// TryLock blocks until locking m succeeds or the context is cancelled
+// TryLock blocks until locking m succeeds or the context is canceled
 //
-// If the context is cancelled while waiting to lock m, the lock will be left unchanged and
+// If the context is canceled while waiting to lock m, the lock will be left unchanged and
 // ctx.Err() will be returned.
 func (m *ChanMutex) TryLock(ctx context.Context) error {
 	if m.ch == nil {

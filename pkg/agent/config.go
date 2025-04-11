@@ -35,7 +35,7 @@ type RateThresholdConfig struct {
 type MonitorConfig struct {
 	ResponseTimeoutSeconds uint `json:"responseTimeoutSeconds"`
 	// ConnectionTimeoutSeconds gives how long we may take to connect to the
-	// monitor before cancelling.
+	// monitor before canceling.
 	ConnectionTimeoutSeconds uint `json:"connectionTimeoutSeconds"`
 	// ConnectionRetryMinWaitSeconds gives the minimum amount of time we must wait between attempts
 	// to connect to the vm-monitor, regardless of whether they're successful.

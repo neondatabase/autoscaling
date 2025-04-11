@@ -1,6 +1,6 @@
 package util
 
-// Signalling primitives: single-signal sender/receiver pair and sync.Cond-ish exposed over a
+// Signaling primitives: single-signal sender/receiver pair and sync.Cond-ish exposed over a
 // channel instead
 
 import (
@@ -75,7 +75,7 @@ func (c *CondChannelSender) Send() {
 
 // Unsend cancels an existing signal that has been sent but not yet received.
 //
-// It returns whether there was a signal to be cancelled.
+// It returns whether there was a signal to be canceled.
 func (c *CondChannelSender) Unsend() bool {
 	select {
 	case <-c.ch:

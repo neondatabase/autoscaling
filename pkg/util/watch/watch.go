@@ -214,7 +214,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 			store.objects[uid] = obj
 			store.handlers.AddFunc(obj, true)
 
-			// Check if the context has been cancelled. This can happen in practice if AddFunc may
+			// Check if the context has been canceled. This can happen in practice if AddFunc may
 			// take a long time to complete.
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -681,7 +681,7 @@ func (w *Store[T]) Relist() <-chan struct{} {
 // Why does this exist? Well, watch events are often going to be handled by adding the object to a
 // queue. And sometimes you want to re-inject something into the queue. But it's tricky for that to
 // be synchronized unless it's guaranteed to agree with the ongoing watch -- so this method allows
-// one to re-inject something into the queue if and only if the watch still belives it exists in
+// one to re-inject something into the queue if and only if the watch still believes it exists in
 // kubernetes.
 func (w *Store[T]) NopUpdate(uid types.UID) (ok bool) {
 	w.mutex.Lock()
