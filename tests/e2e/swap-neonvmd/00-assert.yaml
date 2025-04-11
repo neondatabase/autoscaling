@@ -1,0 +1,27 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 20
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      swap="$(kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm cat /proc/meminfo | grep '^SwapTotal' | grep -oE '[[:digit:]]+ kB')"
+      swap_header_size="$(getconf PAGE_SIZE)"
+      # not quite 1Gi because of overhead
+      swap_total=$(( ( 1024*1024*1024 - swap_header_size ) / 1024 ))
+      [ "$swap" = "$swap_total kB" ]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app.kubernetes.io/name: NeonVM
+    vm.neon.tech/name: example
+  ownerReferences:
+  - apiVersion: vm.neon.tech/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: VirtualMachine
+    name: example
+status:
+  phase: Running
