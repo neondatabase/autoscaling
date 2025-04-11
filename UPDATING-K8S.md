@@ -11,7 +11,7 @@ Broadly, this is separated into three parts:
 
 > [!NOTE]
 > There's a checklist available at [`UPDATING-K8S-CHECKLIST.md`](./UPDATING-K8S-CHECKLIST.md).
-> Once you've made a some changes, you can create a PR with that checklist via the Github CLI:
+> Once you've made some changes, you can create a PR with that checklist via the Github CLI:
 > ```sh
 > gh pr create --web --draft --title "Update to Kubernetes 1.XX" --body-file 'UPDATING-K8S-CHECKLIST.md'
 > ```
