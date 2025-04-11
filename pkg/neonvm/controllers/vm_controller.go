@@ -53,7 +53,6 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/buildtag"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
 )
@@ -891,16 +890,18 @@ func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
 func (r *VMReconciler) deleteRunnerPodIfEnabled(ctx context.Context, runner *corev1.Pod) error {
 	log := log.FromContext(ctx)
 	var msg string
-	if buildtag.NeverDeleteRunnerPods {
-		msg = fmt.Sprintf("VM runner pod deletion was skipped due to '%s' build tag", buildtag.TagnameNeverDeleteRunnerPods)
-	} else {
-		// delete current runner
-		if err := r.Delete(ctx, runner); err != nil {
+	// delete current runner
+	if err := r.Delete(ctx, runner); err != nil {
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "Failed to delete VM runner pod")
 			return err
 		}
-		msg = "VM runner pod was deleted"
+		msg = "VM runner pod already deleted"
+	} else {
+		msg = "Deleted VM runner pod"
 	}
-	log.Info(msg, "Pod.Namespace", runner.Namespace, "Pod.Name", runner.Name)
+	log.Info(msg)
+	r.Recorder.Eventf(runner, "Normal", "Deleted", msg)
 	return nil
 }
 
