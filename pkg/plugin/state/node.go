@@ -77,7 +77,12 @@ type NodeResources[T constraints.Unsigned] struct {
 	// * Other pods are scheduled without going through our scheduler plugin
 	Reserved T
 
-	// Migrating is the amount of T that we expect will be removed by ongoing live migration.
+	// Committed is the sum of all Pods' <resource>.Reserved values, BEFORE applying any overcommit
+	// factors.
+	Committed T
+
+	// Migrating is the amount of Reserved T that we expect will be removed by ongoing live
+	// migration.
 	Migrating T
 
 	// Watermark is the amount of T reserved to pods above which we attempt to reduce usage via
@@ -96,6 +101,7 @@ func (r NodeResources[T]) Fields() []NodeResourceField[T] {
 	return []NodeResourceField[T]{
 		{"Total", r.Total},
 		{"Reserved", r.Reserved},
+		{"Committed", r.Committed},
 		{"Migrating", r.Migrating},
 		{"Watermark", r.Watermark},
 	}
@@ -158,12 +164,14 @@ func NodeStateFromParams(
 		CPU: NodeResources[vmv1.MilliCPU]{
 			Total:     totalCPU,
 			Reserved:  0,
+			Committed: 0,
 			Migrating: 0,
 			Watermark: vmv1.MilliCPU(float64(totalCPU) * watermarkFraction),
 		},
 		Mem: NodeResources[api.Bytes]{
 			Total:     totalMem,
 			Reserved:  0,
+			Committed: 0,
 			Migrating: 0,
 			Watermark: api.Bytes(float64(totalMem) * watermarkFraction),
 		},
@@ -240,12 +248,14 @@ func (n *Node) Update(newState *Node) (changed bool) {
 		CPU: NodeResources[vmv1.MilliCPU]{
 			Total:     newState.CPU.Total,
 			Reserved:  n.CPU.Reserved,
+			Committed: n.CPU.Committed,
 			Migrating: n.CPU.Migrating,
 			Watermark: newState.CPU.Watermark,
 		},
 		Mem: NodeResources[api.Bytes]{
 			Total:     newState.Mem.Total,
 			Reserved:  n.Mem.Reserved,
+			Committed: n.Mem.Committed,
 			Migrating: n.Mem.Migrating,
 			Watermark: newState.Mem.Watermark,
 		},
@@ -369,6 +379,7 @@ func (r *NodeResources[T]) add(p *PodResources[T], migrating bool) {
 	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
 
 	r.Reserved += actualReserved
+	r.Committed += p.Reserved
 	if migrating {
 		r.Migrating += actualReserved
 	}
@@ -378,6 +389,7 @@ func (r *NodeResources[T]) remove(p PodResources[T], migrating bool) {
 	actualReserved := applyOvercommit(p.Reserved, p.Overcommit)
 
 	r.Reserved -= actualReserved
+	r.Committed -= p.Reserved
 	if migrating {
 		r.Migrating -= actualReserved
 	}

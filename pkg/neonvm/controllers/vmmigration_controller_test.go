@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,11 +22,10 @@ import (
 )
 
 type migrationTestParams struct {
-	t            *testing.T
-	ctx          context.Context
-	r            *VirtualMachineMigrationReconciler
-	client       client.Client
-	mockRecorder *mockRecorder
+	t      *testing.T
+	ctx    context.Context
+	r      *VirtualMachineMigrationReconciler
+	client client.Client
 }
 
 func newMigrationTestParams(t *testing.T) *migrationTestParams {
@@ -50,15 +48,12 @@ func newMigrationTestParams(t *testing.T) *migrationTestParams {
 			WithStatusSubresource(&vmv1.VirtualMachine{}).
 			WithStatusSubresource(&vmv1.VirtualMachineMigration{}).
 			Build(),
-		//nolint:exhaustruct // This is a mock
-		mockRecorder: &mockRecorder{},
-		r:            nil,
+		r: nil,
 	}
 
 	params.r = &VirtualMachineMigrationReconciler{
-		Client:   params.client,
-		Recorder: params.mockRecorder,
-		Scheme:   scheme,
+		Client: params.client,
+		Scheme: scheme,
 		Config: &ReconcilerConfig{
 			DisableRunnerCgroup:     false,
 			MaxConcurrentReconciles: 10,
@@ -245,8 +240,6 @@ func Test_VMM_to_Pending_then_removed(t *testing.T) {
 
 	err := params.client.Delete(params.ctx, vmm)
 	require.NoError(t, err)
-
-	params.mockRecorder.On("Event", mock.Anything, "Warning", "Deleting", "Running Migration (test-migration) is being deleted")
 
 	req := reconcile.Request{
 		NamespacedName: client.ObjectKeyFromObject(vmm),
