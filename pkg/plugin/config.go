@@ -52,6 +52,8 @@ type Config struct {
 	// PatchRetryWaitSeconds sets the minimum duration, in seconds, that we must wait between
 	// successive patch operations on a VirtualMachine object.
 	PatchRetryWaitSeconds int `json:"patchRetryWaitSeconds"`
+	
+	UpdateTimeoutSeconds int `json:"updateTimeoutSeconds"`
 
 	// NodeMetricLabels gives additional labels to annotate node metrics with.
 	// The map is keyed by the metric name, and gives the kubernetes label that should be used to
@@ -137,6 +139,10 @@ func (c *Config) validate() (string, error) {
 
 	if c.PatchRetryWaitSeconds <= 0 {
 		return "patchRetryWaitSeconds", errors.New("value must be > 0")
+	}
+	
+	if c.UpdateTimeoutSeconds <= 0 {
+		return "updateTimeoutSeconds", errors.New("value must be > 0")
 	}
 
 	if c.Watermark <= 0.0 {
