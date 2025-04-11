@@ -49,7 +49,7 @@ func onlyErr[T any](_ T, err error) error {
 	return err
 }
 
-func watchConfig[T any](metrics watch.Metrics) watch.Config {
+func watchConfig[T any](metrics watch.Metrics, config Config) watch.Config {
 	sampleObj := any(new(T)).(runtime.Object)
 	gvk, err := util.LookupGVKForType(sampleObj)
 	if err != nil {
@@ -63,9 +63,8 @@ func watchConfig[T any](metrics watch.Metrics) watch.Config {
 			Metrics:  metrics,
 			Instance: fmt.Sprint(kind, "s"),
 		},
-		// FIXME: make these configurable.
-		RetryRelistAfter: util.NewTimeRange(time.Second, 3, 5),
-		RetryWatchAfter:  util.NewTimeRange(time.Second, 3, 5),
+		RetryRelistAfter: util.NewTimeRange(time.Second, int(config.RetryRelistMinSeconds), int(config.RetryRelistMaxSeconds)),
+		RetryWatchAfter:  util.NewTimeRange(time.Second, int(config.RetryWatchMinSeconds), int(config.RetryWatchMaxSeconds)),
 	}
 }
 
@@ -74,13 +73,14 @@ func watchNodeEvents(
 	parentLogger *zap.Logger,
 	client coreclient.Interface,
 	metrics watch.Metrics,
+	config Config,
 	callbacks watch.HandlerFuncs[*corev1.Node],
 ) (*watch.Store[corev1.Node], error) {
 	return watch.Watch(
 		ctx,
 		parentLogger.Named("watch-nodes"),
 		client.CoreV1().Nodes(),
-		watchConfig[corev1.Node](metrics),
+		watchConfig[corev1.Node](metrics, config),
 		watch.Accessors[*corev1.NodeList, corev1.Node]{
 			Items: func(list *corev1.NodeList) []corev1.Node { return list.Items },
 		},
@@ -95,13 +95,14 @@ func watchPodEvents(
 	parentLogger *zap.Logger,
 	client coreclient.Interface,
 	metrics watch.Metrics,
+	config Config,
 	callbacks watch.HandlerFuncs[*corev1.Pod],
 ) (*watch.Store[corev1.Pod], error) {
 	return watch.Watch(
 		ctx,
 		parentLogger.Named("watch-pods"),
 		client.CoreV1().Pods(corev1.NamespaceAll),
-		watchConfig[corev1.Pod](metrics),
+		watchConfig[corev1.Pod](metrics, config),
 		watch.Accessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
 		},
@@ -116,13 +117,14 @@ func watchMigrationEvents(
 	parentLogger *zap.Logger,
 	client vmclient.Interface,
 	metrics watch.Metrics,
+	config Config,
 	callbacks watch.HandlerFuncs[*vmv1.VirtualMachineMigration],
 ) error {
 	return onlyErr(watch.Watch(
 		ctx,
 		parentLogger.Named("watch-migrations"),
 		client.NeonvmV1().VirtualMachineMigrations(corev1.NamespaceAll),
-		watchConfig[vmv1.VirtualMachineMigration](metrics),
+		watchConfig[vmv1.VirtualMachineMigration](metrics, config),
 		watch.Accessors[*vmv1.VirtualMachineMigrationList, vmv1.VirtualMachineMigration]{
 			Items: func(list *vmv1.VirtualMachineMigrationList) []vmv1.VirtualMachineMigration { return list.Items },
 		},
