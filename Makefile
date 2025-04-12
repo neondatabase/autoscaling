@@ -140,7 +140,7 @@ run-test:
 	# otherwise it fails with actions/checkout on self-hosted GitHub runners
 	# 	ref: https://github.com/kubernetes-sigs/controller-runtime/pull/2245
 	export KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
-	find $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
+	find . $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
 	CGO_ENABLED=0 \
 		go test $(TESTARGS) -coverprofile cover.out
 
