@@ -605,7 +605,7 @@ $(ETCD): $(LOCALBIN)
 .PHONY: yq
 yq: $(YQ) ## Download yq locally if necessary.
 $(YQ): $(LOCALBIN)
-	test -s $(LOCALBIN)/yq || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_linux_$(TARGET_ARCH) && chmod +x $(YQ); }
+	test -s $(LOCALBIN)/yq || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$(GOOS)_$(TARGET_ARCH) && chmod +x $(YQ); }
 
 # modify suites to work on arm64
 # Set cpuScalingMode to SysfsScaling
