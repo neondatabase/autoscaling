@@ -894,13 +894,13 @@ func (r *VMReconciler) deleteRunnerPodIfEnabled(ctx context.Context, runner *cor
 	if err := r.Delete(ctx, runner); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "Failed to delete VM runner pod")
-			return err
+			return err // Return error only if it's not NotFound
 		}
 		msg = "VM runner pod already deleted"
 	} else {
 		msg = "Deleted VM runner pod"
 	}
-	log.Info(msg)
+	log.Info(msg, "Pod.Namespace", runner.Namespace, "Pod.Name", runner.Name)
 	r.Recorder.Eventf(runner, "Normal", "Deleted", msg)
 	return nil
 }

@@ -559,12 +559,16 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			}
 			var msg string
 			if err := r.Delete(ctx, sourceRunner); err != nil {
-				log.Error(err, "Failed to delete source runner Pod")
+				if !apierrors.IsNotFound(err) {
+					log.Error(err, "Failed to delete source runner Pod")
+					return ctrl.Result{}, err
+				}
+				msg = "Source runner pod already deleted"
 			} else {
 				msg = "Deleted source runner pod"
-				log.Info(msg)
-				r.Recorder.Eventf(sourceRunner, "Normal", "Deleted", msg)
 			}
+			log.Info(msg, "Pod.Namespace", sourceRunner.Namespace, "Pod.Name", sourceRunner.Name)
+			r.Recorder.Eventf(sourceRunner, "Normal", "Deleted", msg)
 			migration.Status.SourcePodName = ""
 			migration.Status.SourcePodIP = ""
 			return r.updateMigrationStatus(ctx, migration)
