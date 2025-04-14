@@ -720,9 +720,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err == nil {
 			// delete current runner
-			if err := r.deleteRunnerPodIfEnabled(ctx, vmRunner); err != nil {
+			if err := r.Delete(ctx, vmRunner); err != nil {
 				return err
 			}
+			log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
 		} else if !apierrors.IsNotFound(err) {
 			return err
 		}
@@ -883,17 +884,6 @@ func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
 	}
 
 	return runnerRunning
-}
-
-// deleteRunnerPodIfEnabled deletes the runner pod.
-func (r *VMReconciler) deleteRunnerPodIfEnabled(ctx context.Context, runner *corev1.Pod) error {
-	log := log.FromContext(ctx)
-	// delete current runner
-	if err := r.Delete(ctx, runner); err != nil {
-		return err
-	}
-	log.Info("VM runner pod was deleted", "Pod.Namespace", runner.Namespace, "Pod.Name", runner.Name)
-	return nil
 }
 
 // updates the values of the runner pod's labels and annotations so that they are exactly equal to
