@@ -7,6 +7,7 @@ import (
 )
 
 type Reconcile struct {
+	Workers          prometheus.Gauge
 	WaitDurations    prometheus.Histogram
 	ProcessDurations *prometheus.HistogramVec
 	Failing          *prometheus.GaugeVec
@@ -15,6 +16,12 @@ type Reconcile struct {
 
 func buildReconcileMetrics(reg prometheus.Registerer) Reconcile {
 	return Reconcile{
+		Workers: util.RegisterMetric(reg, prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "autoscaling_plugin_reconcile_workers",
+				Help: "Number of worker threads used for reconcile operations",
+			},
+		)),
 		WaitDurations: util.RegisterMetric(reg, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Name: "autoscaling_plugin_reconcile_queue_wait_durations",
