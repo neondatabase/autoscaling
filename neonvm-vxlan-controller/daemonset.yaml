@@ -63,10 +63,6 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: status.hostIP
-        lifecycle:
-          preStop:
-            exec:
-              command: ["vxlan-controller", "-delete"]
         volumeMounts:
           - mountPath: /host/opt/cni/bin
             name: cni-bin-dir

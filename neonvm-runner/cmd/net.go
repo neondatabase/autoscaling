@@ -336,13 +336,13 @@ func NewMonitoringMetrics(reg *prometheus.Registry) *NetworkMonitoringMetrics {
 	m := &NetworkMonitoringMetrics{
 		IngressBytes: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
-				Name: "runner_vm_ingress_bytes",
+				Name: "runner_vm_ingress_bytes_total",
 				Help: "Number of bytes received by the VM from the open internet",
 			},
 		)),
 		EgressBytes: util.RegisterMetric(reg, prometheus.NewCounter(
 			prometheus.CounterOpts{
-				Name: "runner_vm_egress_bytes",
+				Name: "runner_vm_egress_bytes_total",
 				Help: "Number of bytes sent by the VM to the open internet",
 			},
 		)),

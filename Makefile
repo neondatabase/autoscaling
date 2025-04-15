@@ -406,10 +406,6 @@ load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM im
 .PHONY: example-vms
 example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
 
-.PHONY: example-vms-arm64
-example-vms-arm64: TARGET_ARCH=arm64
-example-vms-arm64: example-vms
-
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG16_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
@@ -492,26 +488,28 @@ $(LOCALBIN):
 
 ## Tools
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
-# _should_ be the same version kubectl v1.30.x uses (IE https://github.com/kubernetes/kubectl/blob/release-1.30/go.mod#L44) however
-# there is apparently no 5.0.4 binary release
-KUSTOMIZE_VERSION ?= v5.1.1
+# Should be the same version kubectl uses.
+# Find sigs.k8s.io/kustomize/kustomize in: https://github.com/kubernetes/kubectl/blob/<version>/go.mod
+KUSTOMIZE_VERSION ?= v5.4.2
+
+# Match k8s deps minor version from:
+# https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
+CONTROLLER_TOOLS_VERSION ?= v0.16.5
 
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-# List of available versions: https://storage.googleapis.com/kubebuilder-tools
-ENVTEST_K8S_VERSION = 1.30.0
+# List of available versions:
+# https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/master/envtest-releases.yaml
+ENVTEST_K8S_VERSION = 1.31.0
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 
-# k8s deps @ 1.30.7 https://github.com/kubernetes-sigs/controller-tools/blob/<version>/go.mod
-CONTROLLER_TOOLS_VERSION ?= v0.15.0
-
 # Should match the kubernetes minor vesion
-CODE_GENERATOR_VERSION ?= v0.30.7
+CODE_GENERATOR_VERSION ?= v0.31.7
 
 KUTTL ?= $(LOCALBIN)/kuttl
-# k8s deps @ 1.30.7
-KUTTL_VERSION ?= v0.18.0
+# If we can, match k8s deps from https://github.com/kudobuilder/kuttl/blob/<version>/go.mod
+KUTTL_VERSION ?= v0.20.0
 ifeq ($(GOARCH), arm64)
     KUTTL_ARCH = arm64
 else ifeq ($(GOARCH), amd64)
@@ -519,8 +517,9 @@ else ifeq ($(GOARCH), amd64)
 else
     $(error Unsupported architecture: $(GOARCH))
 endif
+
 KUBECTL ?= $(LOCALBIN)/kubectl
-KUBECTL_VERSION ?= v1.30.7
+KUBECTL_VERSION ?= v1.31.7
 
 
 YQ ?= $(LOCALBIN)/yq
@@ -528,17 +527,19 @@ YQ_VERSION ?= v4.45.1
 
 ETCD ?= $(LOCALBIN)/etcd
 
-# Use the same version kuberentes is tested against, see
-# https://github.com/kubernetes/kubernetes/blob/release-1.30/build/dependencies.yaml#L65-L67 for example
+# Use the same version kubernetes is tested against, see:
+# https://github.com/kubernetes/kubernetes/blob/v1.31.7/build/dependencies.yaml#L65-L67
 ETCD_VERSION ?= v3.5.15
 
 KIND ?= $(LOCALBIN)/kind
-# https://github.com/kubernetes-sigs/kind/releases/tag/v0.24.0, supports k8s up to 1.31
-KIND_VERSION ?= v0.24.0
+# https://github.com/kubernetes-sigs/kind/releases/tag/v0.27.0, supports k8s up to 1.32
+KIND_VERSION ?= v0.27.0
 
 K3D ?= $(LOCALBIN)/k3d
-# k8s deps in go.mod @ 1.30.7
-K3D_VERSION ?= v5.7.5
+# Only k8s version is in https://github.com/k3d-io/k3d/blob/<version>/go.mod
+# Doesn't need to exactly match k8s version - k3s image is more effectful.
+# But broadly good to keep up to date.
+K3D_VERSION ?= v5.8.3
 
 ## Install tools
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"

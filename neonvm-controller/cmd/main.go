@@ -219,12 +219,11 @@ func main() {
 	defer ipam.Close()
 
 	vmReconciler := &controllers.VMReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("virtualmachine-controller"),
-		Config:   rc,
-		Metrics:  reconcilerMetrics,
-		IPAM:     ipam,
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Config:  rc,
+		Metrics: reconcilerMetrics,
+		IPAM:    ipam,
 	}
 	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
 	if err != nil {
@@ -241,11 +240,10 @@ func main() {
 	}
 
 	migrationReconciler := &controllers.VirtualMachineMigrationReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("virtualmachinemigration-controller"),
-		Config:   rc,
-		Metrics:  reconcilerMetrics,
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Config:  rc,
+		Metrics: reconcilerMetrics,
 	}
 	migrationReconcilerMetrics, err := migrationReconciler.SetupWithManager(mgr)
 	if err != nil {
