@@ -17,6 +17,8 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto"
 	"crypto/ed25519"
@@ -1264,6 +1266,20 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
+func encodeGZIPBase64(input []byte) string {
+	buf := bytes.Buffer{}
+
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(input); err != nil {
+		panic(err)
+	}
+	if err := gz.Close(); err != nil {
+		panic(err)
+	}
+
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
 func podSpec(
 	vm *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
@@ -1399,8 +1415,8 @@ func podSpec(
 						// can get quite large)
 						cmd = append(
 							cmd,
-							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
-							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
+							"-vmspec", encodeGZIPBase64(vmSpecJson),
+							"-vmstatus", encodeGZIPBase64(vmStatusJson),
 						)
 						// NB: We don't need to check if the value is nil because the default value
 						// was set in Reconcile

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -127,9 +128,9 @@ func newConfig(logger *zap.Logger) *Config {
 		architecture:         runtime.GOARCH,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
-		"Base64 encoded VirtualMachine json specification")
+		"Base64 gzip compressed VirtualMachine json specification")
 	flag.StringVar(&cfg.vmStatusDump, "vmstatus", cfg.vmStatusDump,
-		"Base64 encoded VirtualMachine json status")
+		"Base64 gzip compressed VirtualMachine json status")
 	flag.StringVar(&cfg.kernelPath, "kernelpath", cfg.kernelPath,
 		"Override path for kernel to use")
 	flag.StringVar(&cfg.appendKernelCmdline, "appendKernelCmdline",
@@ -162,14 +163,36 @@ func main() {
 	}
 }
 
+func decodeGZIPBase64(input string) ([]byte, error) {
+	buf := bytes.Buffer{}
+
+	gz, err := gzip.NewReader(bytes.NewBuffer([]byte(input)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	if _, err := buf.ReadFrom(gz); err != nil {
+		return nil, fmt.Errorf("failed to read gzipped data: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close gzip reader: %w", err)
+	}
+
+	finalBytes, err := base64.StdEncoding.DecodeString(string(buf.Bytes()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to base64 decode: %w", err)
+	}
+
+	return finalBytes, nil
+}
+
 func run(logger *zap.Logger) error {
 	cfg := newConfig(logger)
 
-	vmSpecJson, err := base64.StdEncoding.DecodeString(cfg.vmSpecDump)
+	vmSpecJson, err := decodeGZIPBase64(cfg.vmSpecDump)
 	if err != nil {
 		return fmt.Errorf("failed to decode VirtualMachine Spec dump: %w", err)
 	}
-	vmStatusJson, err := base64.StdEncoding.DecodeString(cfg.vmStatusDump)
+	vmStatusJson, err := decodeGZIPBase64(cfg.vmStatusDump)
 	if err != nil {
 		return fmt.Errorf("failed to decode VirtualMachine Status dump: %w", err)
 	}
