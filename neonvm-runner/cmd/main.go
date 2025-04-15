@@ -177,7 +177,7 @@ func decodeGZIPBase64(input string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to close gzip reader: %w", err)
 	}
 
-	finalBytes, err := base64.StdEncoding.DecodeString(string(buf.Bytes()))
+	finalBytes, err := base64.StdEncoding.DecodeString(buf.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to base64 decode: %w", err)
 	}
