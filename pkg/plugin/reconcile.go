@@ -14,6 +14,12 @@ func (s *PluginState) reconcileQueueWaitCallback(duration time.Duration) {
 	s.metrics.Reconcile.WaitDurations.Observe(duration.Seconds())
 }
 
+func (s *PluginState) reconcileQueueStatusCallback(waiting bool) {
+	// update the timer so we record the amount of time during which at least some items were
+	// waiting in the queue.
+	s.metrics.Reconcile.WaitingTimer.SetWaiting(waiting)
+}
+
 func (s *PluginState) reconcileResultCallback(params reconcile.ObjectParams, duration time.Duration, err error) {
 	outcome := "success"
 	if err != nil {

@@ -84,6 +84,9 @@ func NewAutoscaleEnforcerPlugin(
 		reconcile.WithQueueWaitDurationCallback(func(duration time.Duration) {
 			pluginState.reconcileQueueWaitCallback(duration)
 		}),
+		reconcile.WithQueueStatusCallback(func(waiting bool) {
+			pluginState.reconcileQueueStatusCallback(waiting)
+		}),
 		reconcile.WithResultCallback(func(params reconcile.ObjectParams, duration time.Duration, err error) {
 			pluginState.reconcileResultCallback(params, duration, err)
 		}),
