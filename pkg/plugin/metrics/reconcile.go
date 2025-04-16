@@ -1,21 +1,24 @@
 package metrics
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/neondatabase/autoscaling/pkg/plugin/reconcile"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type Reconcile struct {
-	WaitDurations    prometheus.Histogram
-	ProcessDurations *prometheus.HistogramVec
-	Failing          *prometheus.GaugeVec
-	Panics           *prometheus.CounterVec
+	waitDurations    prometheus.Histogram
+	processDurations *prometheus.HistogramVec
+	failing          *prometheus.GaugeVec
+	panics           *prometheus.CounterVec
 }
 
 func buildReconcileMetrics(reg prometheus.Registerer) Reconcile {
 	return Reconcile{
-		WaitDurations: util.RegisterMetric(reg, prometheus.NewHistogram(
+		waitDurations: util.RegisterMetric(reg, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
 				Name: "autoscaling_plugin_reconcile_queue_wait_durations",
 				Help: "Duration that items in the reconcile queue are waiting to be picked up",
@@ -29,7 +32,7 @@ func buildReconcileMetrics(reg prometheus.Registerer) Reconcile {
 				},
 			},
 		)),
-		ProcessDurations: util.RegisterMetric(reg, prometheus.NewHistogramVec(
+		processDurations: util.RegisterMetric(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name: "autoscaling_plugin_reconcile_duration_seconds",
 				Help: "Duration that items take to be reconciled",
@@ -44,14 +47,14 @@ func buildReconcileMetrics(reg prometheus.Registerer) Reconcile {
 			},
 			[]string{"kind", "outcome"},
 		)),
-		Failing: util.RegisterMetric(reg, prometheus.NewGaugeVec(
+		failing: util.RegisterMetric(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "autoscaling_plugin_reconcile_failing_objects",
 				Help: "Number of objects currently failing to be reconciled",
 			},
 			[]string{"kind"},
 		)),
-		Panics: util.RegisterMetric(reg, prometheus.NewCounterVec(
+		panics: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "autoscaling_plugin_reconcile_panics_count",
 				Help: "Number of times reconcile operations have panicked",
@@ -59,4 +62,25 @@ func buildReconcileMetrics(reg prometheus.Registerer) Reconcile {
 			[]string{"kind"},
 		)),
 	}
+}
+
+func (r Reconcile) QueueWaitDurationCallback(duration time.Duration) {
+	r.waitDurations.Observe(duration.Seconds())
+}
+
+func (r Reconcile) ResultCallback(params reconcile.ObjectParams, duration time.Duration, err error) {
+	outcome := "success"
+	if err != nil {
+		outcome = "failure"
+	}
+	r.processDurations.WithLabelValues(params.GVK.Kind, outcome).Observe(duration.Seconds())
+}
+
+func (r Reconcile) ErrorStatsCallback(params reconcile.ObjectParams, stats reconcile.ErrorStats) {
+	// update count of current failing objects
+	r.failing.WithLabelValues(params.GVK.Kind).Set(float64(stats.TypedCount))
+}
+
+func (r Reconcile) PanicCallback(params reconcile.ObjectParams) {
+	r.panics.WithLabelValues(params.GVK.Kind).Inc()
 }
