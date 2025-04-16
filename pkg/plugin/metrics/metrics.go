@@ -29,14 +29,18 @@ type Plugin struct {
 	K8sOps *prometheus.CounterVec
 }
 
-func BuildPluginMetrics(nodeMetricLabels map[string]string, reg prometheus.Registerer) Plugin {
+func BuildPluginMetrics(
+	reg prometheus.Registerer,
+	nodeMetricLabels map[string]string,
+	numWorkers int,
+) *Plugin {
 	nodeLabels := buildNodeLabels(nodeMetricLabels)
 
-	return Plugin{
+	return &Plugin{
 		nodeLabels: nodeLabels,
 		Framework:  buildSchedFrameworkMetrics(nodeLabels, reg),
 		Nodes:      buildNodeMetrics(nodeLabels, reg),
-		Reconcile:  buildReconcileMetrics(reg),
+		Reconcile:  buildReconcileMetrics(reg, numWorkers),
 
 		ResourceRequests: util.RegisterMetric(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
