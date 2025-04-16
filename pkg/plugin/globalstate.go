@@ -89,7 +89,7 @@ func NewPluginState(
 
 	indexedNodeStore := watch.NewIndexedStore(nodeWatchStore, watch.NewFlatNameIndex[corev1.Node]())
 
-	metrics := metrics.BuildPluginMetrics(config.NodeMetricLabels, reg)
+	metrics := metrics.BuildPluginMetrics(reg, config.NodeMetricLabels)
 
 	return &PluginState{
 		mu: sync.Mutex{},
