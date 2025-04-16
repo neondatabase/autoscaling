@@ -401,8 +401,12 @@ jobs:
         env:
           # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
           COMPONENTS:
-            '["${{ env.IMG_CONTROLLER}}", "${{ env.IMG_VXLAN_CONTROLLER}}", "${{ env.IMG_RUNNER}}",
-              "${{ env.IMG_SCHEDULER}}", "${{ env.IMG_AUTOSCALER_AGENT}}", "${{ env.IMG_CLUSTER_AUTOSCALER}}"]'
+            '["${{ env.IMG_CONTROLLER }}",
+              "${{ env.IMG_VXLAN_CONTROLLER }}",
+              "${{ env.IMG_RUNNER }}",
+              "${{ env.IMG_SCHEDULER }}",
+              "${{ env.IMG_AUTOSCALER_AGENT }}",
+              "${{ env.IMG_CLUSTER_AUTOSCALER }}"]'
           SOURCE_TAG: "${{ inputs.tag }}"
           TARGET_TAG: "${{ inputs.tag }}"
           DEV_ACR: "${{ vars.AZURE_DEV_REGISTRY_NAME }}"
@@ -422,7 +426,7 @@ jobs:
     uses: ./.github/workflows/_push-to-container-registry.yml
     secrets: inherit
     with:
-      image-map: '${{ needs.generate-image-maps.outputs.dev }}'
+      image-map: "${{ needs.generate-image-maps.outputs.dev }}"
       aws-region: "${{ vars.AWS_ECR_REGION }}"
       aws-account-id: "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}"
       aws-role-to-assume: "gha-oidc-ecr-rw"
@@ -442,7 +446,7 @@ jobs:
     uses: ./.github/workflows/_push-to-container-registry.yml
     secrets: inherit
     with:
-      image-map: '${{ needs.generate-image-maps.outputs.prod }}'
+      image-map: "${{ needs.generate-image-maps.outputs.prod }}"
       aws-region: "${{ vars.AWS_ECR_REGION }}"
       aws-account-id: "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}"
       aws-role-to-assume: "gha-oidc-ecr-rw"
