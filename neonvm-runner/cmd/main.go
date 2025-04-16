@@ -33,6 +33,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/gzip64"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
@@ -127,9 +128,9 @@ func newConfig(logger *zap.Logger) *Config {
 		architecture:         runtime.GOARCH,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
-		"Base64 encoded VirtualMachine json specification")
+		"Base64 gzip compressed VirtualMachine json specification")
 	flag.StringVar(&cfg.vmStatusDump, "vmstatus", cfg.vmStatusDump,
-		"Base64 encoded VirtualMachine json status")
+		"Base64 gzip compressed VirtualMachine json status")
 	flag.StringVar(&cfg.kernelPath, "kernelpath", cfg.kernelPath,
 		"Override path for kernel to use")
 	flag.StringVar(&cfg.appendKernelCmdline, "appendKernelCmdline",
@@ -165,11 +166,11 @@ func main() {
 func run(logger *zap.Logger) error {
 	cfg := newConfig(logger)
 
-	vmSpecJson, err := base64.StdEncoding.DecodeString(cfg.vmSpecDump)
+	vmSpecJson, err := gzip64.Decode(cfg.vmSpecDump)
 	if err != nil {
 		return fmt.Errorf("failed to decode VirtualMachine Spec dump: %w", err)
 	}
-	vmStatusJson, err := base64.StdEncoding.DecodeString(cfg.vmStatusDump)
+	vmStatusJson, err := gzip64.Decode(cfg.vmStatusDump)
 	if err != nil {
 		return fmt.Errorf("failed to decode VirtualMachine Status dump: %w", err)
 	}
