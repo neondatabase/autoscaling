@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -34,6 +33,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/gzip64"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
@@ -163,36 +163,14 @@ func main() {
 	}
 }
 
-func decodeGZIPBase64(input string) ([]byte, error) {
-	buf := bytes.Buffer{}
-
-	gz, err := gzip.NewReader(bytes.NewBuffer([]byte(input)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
-	}
-	if _, err := buf.ReadFrom(gz); err != nil {
-		return nil, fmt.Errorf("failed to read gzipped data: %w", err)
-	}
-	if err := gz.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close gzip reader: %w", err)
-	}
-
-	finalBytes, err := base64.StdEncoding.DecodeString(buf.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to base64 decode: %w", err)
-	}
-
-	return finalBytes, nil
-}
-
 func run(logger *zap.Logger) error {
 	cfg := newConfig(logger)
 
-	vmSpecJson, err := decodeGZIPBase64(cfg.vmSpecDump)
+	vmSpecJson, err := gzip64.Decode(cfg.vmSpecDump)
 	if err != nil {
 		return fmt.Errorf("failed to decode VirtualMachine Spec dump: %w", err)
 	}
-	vmStatusJson, err := decodeGZIPBase64(cfg.vmStatusDump)
+	vmStatusJson, err := gzip64.Decode(cfg.vmStatusDump)
 	if err != nil {
 		return fmt.Errorf("failed to decode VirtualMachine Status dump: %w", err)
 	}

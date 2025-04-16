@@ -17,13 +17,10 @@ limitations under the License.
 package controllers
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -57,6 +54,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/buildtag"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
+	"github.com/neondatabase/autoscaling/pkg/util/gzip64"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
 )
 
@@ -1266,20 +1264,6 @@ func imageForVmRunner() (string, error) {
 	return image, nil
 }
 
-func encodeGZIPBase64(input []byte) string {
-	buf := bytes.Buffer{}
-
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(input); err != nil {
-		panic(err)
-	}
-	if err := gz.Close(); err != nil {
-		panic(err)
-	}
-
-	return base64.StdEncoding.EncodeToString(buf.Bytes())
-}
-
 func podSpec(
 	vm *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
@@ -1415,8 +1399,8 @@ func podSpec(
 						// can get quite large)
 						cmd = append(
 							cmd,
-							"-vmspec", encodeGZIPBase64(vmSpecJson),
-							"-vmstatus", encodeGZIPBase64(vmStatusJson),
+							"-vmspec", gzip64.Encode(vmSpecJson),
+							"-vmstatus", gzip64.Encode(vmStatusJson),
 						)
 						// NB: We don't need to check if the value is nil because the default value
 						// was set in Reconcile
