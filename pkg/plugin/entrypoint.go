@@ -54,6 +54,8 @@ func NewAutoscaleEnforcerPlugin(
 	promReg := prometheus.NewRegistry()
 	metrics.RegisterDefaultCollectors(promReg)
 
+	pluginMetrics := metrics.BuildPluginMetrics(promReg, config.NodeMetricLabels, config.ReconcileWorkers)
+
 	// pre-define this so that we can reference it in the handlers, knowing that it won't be used
 	// until we start the workers (which we do *after* we've set this value).
 	var pluginState *PluginState
@@ -78,20 +80,20 @@ func NewAutoscaleEnforcerPlugin(
 		},
 		reconcile.WithBaseContext(ctx),
 		reconcile.WithMiddleware(initEvents),
-		// Note: we need one layer of indirection for callbacks referencing pluginState, because
-		// it's initialized later, so directly referencing the methods at this point will use the
-		// nil pluginState and panic on use.
 		reconcile.WithQueueWaitDurationCallback(func(duration time.Duration) {
-			pluginState.reconcileQueueWaitCallback(duration)
+			reconcileQueueWaitCallback(pluginMetrics, duration)
+		}),
+		reconcile.WithQueueStatusCallback(func(waiting bool) {
+			reconcileQueueStatusCallback(pluginMetrics, waiting)
 		}),
 		reconcile.WithResultCallback(func(params reconcile.ObjectParams, duration time.Duration, err error) {
-			pluginState.reconcileResultCallback(params, duration, err)
+			reconcileResultCallback(pluginMetrics, params, duration, err)
 		}),
 		reconcile.WithErrorStatsCallback(func(params reconcile.ObjectParams, stats reconcile.ErrorStats) {
-			pluginState.reconcileErrorStatsCallback(logger, params, stats)
+			reconcileErrorStatsCallback(pluginMetrics, config, logger, params, stats)
 		}),
 		reconcile.WithPanicCallback(func(params reconcile.ObjectParams) {
-			pluginState.reconcilePanicCallback(params)
+			reconcilePanicCallback(pluginMetrics, params)
 		}),
 	)
 	if err != nil {
@@ -123,7 +125,7 @@ func NewAutoscaleEnforcerPlugin(
 		return nil, fmt.Errorf("could not start watch on VirtualMachineMigration events: %w", err)
 	}
 
-	pluginState = NewPluginState(*config, vmClient, promReg, podStore, nodeStore)
+	pluginState = NewPluginState(*config, vmClient, pluginMetrics, podStore, nodeStore)
 
 	// Start the workers for the queue. We can't do these earlier because our handlers depend on the
 	// PluginState that only exists now.
