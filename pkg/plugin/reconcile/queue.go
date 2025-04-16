@@ -159,6 +159,11 @@ func NewQueue(handlers map[Object]HandlerFunc, opts ...QueueOption) (*Queue, err
 
 	go q.handleNotifications(ctx, next, enqueuedRcvr)
 
+	// Register the initial status of the queue:
+	if q.queueStatusCallback != nil {
+		q.queueStatusCallback(false /* waiting? no */)
+	}
+
 	return q, nil
 }
 
