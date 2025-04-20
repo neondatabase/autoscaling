@@ -392,6 +392,9 @@ deploy: check-local-context docker-build load-images render-manifests kubectl ##
 	$(KUBECTL) -n kube-system rollout status deployment autoscale-scheduler
 	$(KUBECTL) apply -f $(RENDERED)/autoscaler-agent.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset autoscaler-agent
+	# Apply Fluent Bit logging agent
+	@echo "Applying Fluent Bit manifests..."
+	$(KUBECTL) apply -f tests/fluent-bit/
 
 .PHONY: load-images
 load-images: check-local-context kubectl kind k3d ## Push docker images to the local kind/k3d cluster
@@ -456,9 +459,10 @@ kind-setup: kind kubectl ## Create local cluster by kind tool and prepared confi
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) patch -n kube-system deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n kube-system rollout status deployment metrics-server
+	$(KUBECTL) --context kind-$(CLUSTER_NAME) apply -f tests/fluent-bit/
 
 .PHONY: kind-destroy
-kind-destroy: kind ## Destroy local kind cluster
+kind-destroy: kind clean-logs ## Destroy local kind cluster
 	$(KIND) delete cluster --name $(CLUSTER_NAME)
 
 ##@ Local k3d cluster
@@ -466,7 +470,10 @@ kind-destroy: kind ## Destroy local kind cluster
 # K3D_FIX_MOUNTS=1 used to allow foreign CNI (cilium, multus and so on), https://github.com/k3d-io/k3d/pull/1268
 .PHONY: k3d-setup
 k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
-	K3D_FIX_MOUNTS=1 $(K3D) cluster create $(CLUSTER_NAME) --config k3d/config.yaml $(if $(USE_REGISTRIES_FILE),--registry-config=k3d/registries.yaml)
+	K3D_FIX_MOUNTS=1 $(K3D) cluster create $(CLUSTER_NAME) \
+		--config k3d/config.yaml \
+		--volume "$(PWD)/tests/logs:/logs@all" \
+		$(if $(USE_REGISTRIES_FILE),--registries-file=$(PWD)/k3d/registries.yaml)
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/cilium.yaml
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status daemonset  cilium
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status deployment cilium-operator
@@ -474,11 +481,18 @@ k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager-webhook
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/certs.yaml
+	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f tests/fluent-bit/
 
 .PHONY: k3d-destroy
-k3d-destroy: k3d ## Destroy local k3d cluster
+k3d-destroy: k3d clean-logs ## Destroy local k3d cluster
 	$(K3D) cluster delete $(CLUSTER_NAME)
 
+.PHONY: clean-logs
+clean-logs:
+	@rm -rf tests/logs/*
+
+.PHONY: clean
+clean: clean-logs
 ##@ Build Dependencies
 
 ## Location to install dependencies to
