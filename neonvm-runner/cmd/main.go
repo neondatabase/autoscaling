@@ -332,8 +332,17 @@ func buildQEMUCmd(
 			"-device", "virtconsole,chardev=virtio-console",
 		)
 	case architectureAmd64:
-		// on amd we have multiple UART ports so we can just use serial stdio
-		qemuCmd = append(qemuCmd, "-serial", "stdio")
+		// UART port is used by default but it has performance issues.
+		// Virtio console is more performant.
+		if vmSpec.VirtioConsole {
+			qemuCmd = append(qemuCmd,
+				"-chardev", "stdio,id=virtio-console",
+				"-device", "virtconsole,chardev=virtio-console",
+			)
+		} else {
+			// on amd we have multiple UART ports so we can just use serial stdio
+			qemuCmd = append(qemuCmd, "-serial", "stdio")
+		}
 	default:
 		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
@@ -450,7 +459,12 @@ func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMach
 		// use virtio-serial device kernel console
 		cmdlineParts = append(cmdlineParts, "console=hvc0")
 	case architectureAmd64:
-		cmdlineParts = append(cmdlineParts, "console=ttyS1")
+		// use virtio-serial device if virtio console is enabled
+		if vmSpec.VirtioConsole {
+			cmdlineParts = append(cmdlineParts, "console=hvc0")
+		} else {
+			cmdlineParts = append(cmdlineParts, "console=ttyS1")
+		}
 	default:
 		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}

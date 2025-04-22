@@ -3069,6 +3069,9 @@ spec:
                       type: string
                   type: object
                 type: array
+              virtioConsole:
+                default: false
+                type: boolean
             required:
             - guest
             type: object
