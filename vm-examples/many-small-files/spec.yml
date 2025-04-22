@@ -13,7 +13,7 @@ metadata:
   name: compute-msf-unreal
   namespace: default
 spec:
-  cpuScalingMode: QmpScaling
+  cpuScalingMode: SysfsScaling
   disks:
   - emptyDisk:
       discard: true
@@ -32,6 +32,7 @@ spec:
   enableNetworkMonitoring: false
   enableSSH: true
   guest:
+    memhpAutoMovableRatio: "401"
     args:
     - -c
     - /usr/local/bin/many-small-files -s 5 -d /var/db/postgres/compute/pgdata/manysnaps -f 1500000 2>&1
@@ -89,6 +90,5 @@ spec:
       swap: 40Gi
       sysctl:
       - vm.overcommit_memory=2
-      - vm.oom_kill_allocating_task=1
   restartPolicy: Always
   schedulerName: autoscale-scheduler
