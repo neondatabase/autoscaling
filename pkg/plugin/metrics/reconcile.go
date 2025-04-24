@@ -16,7 +16,16 @@ type Reconcile struct {
 	panics           *prometheus.CounterVec
 }
 
-func buildReconcileMetrics(reg prometheus.Registerer) Reconcile {
+func buildReconcileMetrics(reg prometheus.Registerer, numWorkers int) Reconcile {
+	// No need to return this - it won't change:
+	workers := util.RegisterMetric(reg, prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "autoscaling_plugin_reconcile_workers",
+			Help: "Number of worker threads used for reconcile operations",
+		},
+	))
+	workers.Set(float64(numWorkers))
+
 	return Reconcile{
 		waitDurations: util.RegisterMetric(reg, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
