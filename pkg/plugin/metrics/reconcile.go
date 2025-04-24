@@ -11,6 +11,7 @@ import (
 
 type Reconcile struct {
 	waitDurations    prometheus.Histogram
+	waitingTimer     *WaitingTimer
 	processDurations *prometheus.HistogramVec
 	failing          *prometheus.GaugeVec
 	panics           *prometheus.CounterVec
@@ -39,6 +40,12 @@ func buildReconcileMetrics(reg prometheus.Registerer, numWorkers int) Reconcile 
 					// 1s, 2.5s, 5s, 10s, 20s, 45s
 					1.0, 2.5, 5, 10, 20, 45,
 				},
+			},
+		)),
+		waitingTimer: util.RegisterMetric(reg, NewWaitingTimer(
+			prometheus.Opts{
+				Name: "autoscaling_plugin_reconcile_waiting_seconds_total",
+				Help: "Total duration where there were some reconcile operations waiting to be picked up",
 			},
 		)),
 		processDurations: util.RegisterMetric(reg, prometheus.NewHistogramVec(
@@ -75,6 +82,12 @@ func buildReconcileMetrics(reg prometheus.Registerer, numWorkers int) Reconcile 
 
 func (r Reconcile) QueueWaitDurationCallback(duration time.Duration) {
 	r.waitDurations.Observe(duration.Seconds())
+}
+
+func (r Reconcile) QueueStatusCallback(waiting bool) {
+	// update the timer so we record the amount of time during which at least some items were
+	// waiting in the queue.
+	r.waitingTimer.SetWaiting(waiting)
 }
 
 func (r Reconcile) ResultCallback(params reconcile.ObjectParams, duration time.Duration, err error) {
