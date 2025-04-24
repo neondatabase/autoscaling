@@ -224,13 +224,30 @@ type OvercommitSettings struct {
 	Memory *resource.Quantity `json:"memory,omitempty"`
 }
 
-// +kubebuilder:validation:Enum=amd64;arm64
+// +kubebuilder:validation:Enum=amd64;x86_64;arm64;aarch64
 type CPUArchitecture string
 
 const (
+	// 64-bit x86
 	CPUArchitectureAMD64 CPUArchitecture = "amd64"
-	CPUArchitectureARM64 CPUArchitecture = "arm64"
+	CPUArchitectureX8664 CPUArchitecture = "x86_64"
+
+	// 64-bit ARM
+	CPUArchitectureARM64   CPUArchitecture = "arm64"
+	CPUArchitectureAarch64 CPUArchitecture = "aarch64"
 )
+
+// Canonicalize the architecture into the version used by Kubernetes
+func (arch CPUArchitecture) Canonicalize() CPUArchitecture {
+	switch arch {
+	case CPUArchitectureAMD64, CPUArchitectureX8664:
+		return CPUArchitectureAMD64
+	case CPUArchitectureARM64, CPUArchitectureAarch64:
+		return CPUArchitectureARM64
+	default:
+		panic(fmt.Sprintf("unknown architecture %q", arch))
+	}
+}
 
 // +kubebuilder:validation:Enum=QmpScaling;SysfsScaling
 type CpuScalingMode string

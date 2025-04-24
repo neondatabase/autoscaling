@@ -1244,7 +1244,7 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 					Key:      "kubernetes.io/arch",
 					Operator: "In",
 					// vm.Spec.TargetArchitecture is guaranteed to be set by reconciler loop
-					Values: []string{string(*vm.Spec.TargetArchitecture)},
+					Values: []string{string(vm.Spec.TargetArchitecture.Canonicalize())},
 				},
 			},
 		},
