@@ -14,9 +14,11 @@ spec:
   schedulerName: autoscale-scheduler
   enableNetworkMonitoring: true
   enableSSH: true
-  tlsCertificateIssuer: "neon-ca-issuer"
-  tlsExpiration: 5m
-  tlsRenewal: 3m
+  tls:
+    certificateIssuer: "neon-ca-issuer"
+    expireAfter: 5m
+    renewBefore: 3m
+    serverName: "example.local"
   guest:
     cpus: { min: 0.25, use: 0.25, max: 1.25 }
     memorySlotSize: 1Gi
