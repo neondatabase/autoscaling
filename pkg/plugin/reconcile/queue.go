@@ -55,6 +55,9 @@ type Queue struct {
 
 	// if not nil, a callback that records how long each item was waiting to be reconciled
 	queueWaitCallback QueueWaitDurationCallback
+
+	// if not nil, a callback that records whether there are currently any items in the queue
+	queueStatusCallback QueueStatusCallback
 }
 
 type kv struct {
@@ -150,7 +153,13 @@ func NewQueue(handlers map[Object]HandlerFunc, opts ...QueueOption) (*Queue, err
 
 		handlers: enrichedHandlers,
 
-		queueWaitCallback: settings.waitCallback,
+		queueWaitCallback:   settings.waitCallback,
+		queueStatusCallback: settings.statusCallback,
+	}
+
+	// Register the initial status of the queue:
+	if q.queueStatusCallback != nil {
+		q.queueStatusCallback(false /* waiting? no */)
 	}
 
 	go q.handleNotifications(ctx, next, enqueuedRcvr)
@@ -297,12 +306,20 @@ func (q *Queue) Enqueue(eventKind EventKind, obj Object) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
+	// Is the queue empty beforehand? if so, we'll need to call the status update callback to
+	// inform that it's now not empty.
+	wasEmpty := q.queue.Len() == 0
+
 	// If the object is already being reconciled, we should store the update in 'pending'
 	_, ongoingReconcile := q.ongoing[k]
 	if ongoingReconcile {
 		q.enqueuePendingChange(k, v)
 	} else {
 		q.enqueueInactive(k, v)
+	}
+
+	if wasEmpty && q.queueStatusCallback != nil {
+		q.queueStatusCallback(true /* waiting? yes */)
 	}
 }
 
@@ -324,6 +341,11 @@ func (q *Queue) Next() (_ ReconcileCallback, ok bool) {
 
 	callback := func(logger *zap.Logger) {
 		q.reconcile(logger, kv.k, kv.v)
+	}
+
+	// If the queue is now empty, we need to call the status update callback to inform it:
+	if q.queue.Len() == 0 && q.queueStatusCallback != nil {
+		q.queueStatusCallback(false /* waiting? no */)
 	}
 
 	return callback, true

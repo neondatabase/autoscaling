@@ -16,6 +16,7 @@ type queueSettings struct {
 	baseContext    context.Context
 	middleware     []Middleware
 	waitCallback   QueueWaitDurationCallback
+	statusCallback QueueStatusCallback
 	resultCallback ResultCallback
 	errorCallback  ErrorStatsCallback
 	panicCallback  PanicCallback
@@ -26,6 +27,7 @@ func defaultQueueSettings() *queueSettings {
 		baseContext:    context.Background(),
 		middleware:     []Middleware{},
 		waitCallback:   nil,
+		statusCallback: nil,
 		resultCallback: nil,
 		errorCallback:  nil,
 		panicCallback:  nil,
@@ -64,6 +66,23 @@ func WithQueueWaitDurationCallback(cb QueueWaitDurationCallback) QueueOption {
 	return QueueOption{
 		apply: func(s *queueSettings) {
 			s.waitCallback = cb
+		},
+	}
+}
+
+// QueueStatusCallback represents the signature of the callback that may be provided to add
+// observability for the amount of time that there are at least some items waiting in the queue.
+//
+// Whenever the queue changes between empty and non-empty, this function will be called, with
+// 'waiting' indicating whether there are items in the queue.
+type QueueStatusCallback = func(waiting bool)
+
+// WithQueueStatusCallback sets the QueueStatusCallback that will be called with the current status
+// of the queue (whether items are waiting) whenever the queue changes between empty and non-empty.
+func WithQueueStatusCallback(cb QueueStatusCallback) QueueOption {
+	return QueueOption{
+		apply: func(s *queueSettings) {
+			s.statusCallback = cb
 		},
 	}
 }

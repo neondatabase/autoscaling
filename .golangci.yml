@@ -75,7 +75,7 @@ linters-settings:
       - '^github\.com/docker/docker/api/types/container\.Config$'
       - '^github\.com/docker/docker/api/types\.\w+Options$'
       - '^github\.com/opencontainers/runtime-spec/specs-go\.\w+$' # Exempt the entire package. Too many big structs.
-      - '^github\.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'
+      - '^github\.com/prometheus/client_golang/prometheus(/.*)?\.\w*Opts$'
       - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
       - '^github\.com/vishvananda/netlink\.\w+$' # Exempt the entire package. Too many big structs.
       # vmapi.{VirtualMachine,VirtualMachineSpec,VirtualMachineMigration,VirtualMachineMigrationSpec}
