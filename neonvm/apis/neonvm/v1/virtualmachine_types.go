@@ -96,10 +96,6 @@ type VirtualMachineSpec struct {
 	// +optional
 	RunnerPort int32 `json:"runnerPort,omitempty"`
 
-	// +kubebuilder:default:=true
-	// +optional
-	VirtioConsole bool `json:"virtioConsole,omitempty"`
-
 	// +kubebuilder:default:=5
 	// +optional
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds"`
