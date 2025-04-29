@@ -1,7 +1,7 @@
 ::sysinit:/neonvm/bin/vminit
 ::once:/neonvm/bin/touch /neonvm/vmstart.allowed
 # we might be using hvc0 console, so we need to print the kernel version in user space, after virtio console is initialized
-::once:/neonvm/bin/uname -a
+::once:cat /proc/version
 ::respawn:/neonvm/bin/udhcpc -t 1 -T 1 -A 1 -f -i eth0 -O 121 -O 119 -s /neonvm/bin/udhcpc.script
 ::respawn:/neonvm/bin/udevd
 ::wait:/neonvm/bin/udev-init.sh
