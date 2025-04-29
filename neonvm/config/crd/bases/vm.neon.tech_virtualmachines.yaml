@@ -3070,7 +3070,7 @@ spec:
                   type: object
                 type: array
               virtioConsole:
-                default: false
+                default: true
                 type: boolean
             required:
             - guest
