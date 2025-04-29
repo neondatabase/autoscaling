@@ -140,7 +140,7 @@ run-test:
 	# otherwise it fails with actions/checkout on self-hosted GitHub runners
 	# 	ref: https://github.com/kubernetes-sigs/controller-runtime/pull/2245
 	export KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
-	find $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
+	find . $(KUBEBUILDER_ASSETS) -type d -exec chmod 0755 {} \; ; \
 	CGO_ENABLED=0 \
 		go test $(TESTARGS) -coverprofile cover.out
 
@@ -165,7 +165,7 @@ build: vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	GOOS=linux CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go
+	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go
 .PHONY: run
 run: vet ## Run a controller from your host.
 	go run ./neonvm/main.go
@@ -604,7 +604,7 @@ $(ETCD): $(LOCALBIN)
 .PHONY: yq
 yq: $(YQ) ## Download yq locally if necessary.
 $(YQ): $(LOCALBIN)
-	test -s $(LOCALBIN)/yq || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_linux_$(TARGET_ARCH) && chmod +x $(YQ); }
+	test -s $(LOCALBIN)/yq || { curl -sfSLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$(GOOS)_$(TARGET_ARCH) && chmod +x $(YQ); }
 
 # modify suites to work on arm64
 # Set cpuScalingMode to SysfsScaling
