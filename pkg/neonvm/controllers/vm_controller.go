@@ -1385,6 +1385,10 @@ func podSpec(
 							cmd = append(cmd, "-skip-cgroup-management")
 						}
 
+						if config.UseVirtioConsole {
+							cmd = append(cmd, "-use-virtio-console")
+						}
+
 						memhpAutoMovableRatio := config.MemhpAutoMovableRatio
 						if specValue := vm.Spec.Guest.MemhpAutoMovableRatio; specValue != nil {
 							memhpAutoMovableRatio = *specValue

@@ -107,6 +107,7 @@ func newTestParams(t *testing.T) *testParams {
 			AtMostOnePod:            false,
 			DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
 			NADConfig:               nil,
+			UseVirtioConsole:        false,
 		},
 		Metrics: testReconcilerMetrics,
 		IPAM:    nil,
