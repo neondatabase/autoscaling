@@ -21,11 +21,7 @@ type Nad struct {
 type IPAMConfig struct {
 	Routes           []*cnitypes.Route    `json:"routes"`
 	IPRanges         []RangeConfiguration `json:"ipRanges"`
-	OmitRanges       []string             `json:"exclude,omitempty"`
 	DNS              cnitypes.DNS         `json:"dns"`
-	Range            string               `json:"range"`
-	RangeStart       net.IP               `json:"range_start,omitempty"`
-	RangeEnd         net.IP               `json:"range_end,omitempty"`
 	NetworkNamespace string
 	NetworkName      string `json:"network_name,omitempty"`
 }
