@@ -36,17 +36,11 @@ const (
 
 	// RequestTimeout for IPAM queries
 	IpamRequestTimeout = 10 * time.Second
-
-	// DatastoreRetries defines how many retries are attempted when reading/updating the IP Pool
-	DatastoreRetries      = 5
-	DatastoreRetriesDelay = 100 * time.Millisecond
 )
 
-var ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
-
-type Temporary interface {
-	Temporary() bool
-}
+var (
+	ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
+)
 
 type IPAM struct {
 	Client
@@ -229,6 +223,13 @@ func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	// Now that we have the lock, maybe the context was canceled.
+	select {
+	case <-ctx.Done():
+		return net.IPNet{}, ctx.Err()
+	default:
+	}
+
 	ctx, ctxCancel := context.WithTimeout(ctx, IpamRequestTimeout)
 	defer ctxCancel()
 
@@ -248,45 +249,26 @@ func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error
 
 func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, action ipamAction) (net.IPNet, error) {
 	var ip net.IPNet
-	for retry := 0; retry < DatastoreRetries; retry++ {
-		select {
-		case <-ctx.Done():
-			return net.IPNet{}, ctx.Err()
-		default:
-			// live in retry loop until context not cancelled
-		}
 
-		// read IPPool from ipppols.vm.neon.tech custom resource
-		pool, err := i.getNeonvmIPPool(ctx, ipRange.Range)
-		if err != nil {
-			if e, ok := err.(Temporary); ok && e.Temporary() {
-				// retry attempt to read IPPool
-				time.Sleep(DatastoreRetriesDelay)
-				continue
-			}
-			return net.IPNet{}, fmt.Errorf("error reading IP pool: %w", err)
-		}
-
-		currentReservation := pool.Allocations(ctx)
-		var newReservation []whereaboutstypes.IPReservation
-		ip, newReservation, err = action(ipRange, currentReservation)
-		if err != nil {
-			return net.IPNet{}, err
-		}
-
-		// update IPPool with newReservation
-		err = pool.Update(ctx, newReservation)
-		if err != nil {
-			if e, ok := err.(Temporary); ok && e.Temporary() {
-				// retry attempt to update IPPool
-				time.Sleep(DatastoreRetriesDelay)
-				continue
-			}
-			return net.IPNet{}, fmt.Errorf("error updating IP pool: %w", err)
-		}
-		return ip, nil
+	// read IPPool from ipppols.vm.neon.tech custom resource
+	pool, err := i.getNeonvmIPPool(ctx, ipRange.Range)
+	if err != nil {
+		return net.IPNet{}, fmt.Errorf("error reading IP pool: %w", err)
 	}
-	return ip, errors.New("IPAMretries limit reached")
+
+	currentReservation := pool.Allocations(ctx)
+	var newReservation []whereaboutstypes.IPReservation
+	ip, newReservation, err = action(ipRange, currentReservation)
+	if err != nil {
+		return net.IPNet{}, err
+	}
+
+	// update IPPool with newReservation
+	err = pool.Update(ctx, newReservation)
+	if err != nil {
+		return net.IPNet{}, fmt.Errorf("error updating IP pool: %w", err)
+	}
+	return ip, nil
 }
 
 // Status do List() request to check NeonVM client connectivity
@@ -325,7 +307,10 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 	}
 
 	pool, err := i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Get(ctx, poolName, metav1.GetOptions{})
-	if err != nil && apierrors.IsNotFound(err) {
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("error getting IP pool: %w", err)
+		}
 		// pool does not exist, create it
 		newPool := &vmv1.IPPool{
 			ObjectMeta: metav1.ObjectMeta{
@@ -337,17 +322,11 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 				Allocations: make(map[string]vmv1.IPAllocation),
 			},
 		}
-		_, err = i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Create(ctx, newPool, metav1.CreateOptions{})
-		if err != nil && apierrors.IsAlreadyExists(err) {
-			// the pool was just created -- allow retry
-			return nil, &temporaryError{err}
-		} else if err != nil {
-			return nil, err
+		ipPool, err := i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Create(ctx, newPool, metav1.CreateOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("error creating IP pool: %w", err)
 		}
-		// if the pool was created for the first time, trigger another retry of the allocation loop
-		return nil, &temporaryError{errors.New("NeonvmIPPool was initialized")}
-	} else if err != nil {
-		return nil, err
+		pool = ipPool
 	}
 
 	// get first IP in the pool
@@ -367,13 +346,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 func (p *NeonvmIPPool) Update(ctx context.Context, reservation []whereaboutstypes.IPReservation) error {
 	p.pool.Spec.Allocations = toAllocations(reservation, p.firstip)
 	_, err := p.vmClient.NeonvmV1().IPPools(p.pool.Namespace).Update(ctx, p.pool, metav1.UpdateOptions{})
-	if err != nil {
-		if apierrors.IsConflict(err) {
-			return &temporaryError{err}
-		}
-		return err
-	}
-	return nil
+	return err
 }
 
 // taken from whereabouts code as it not exported
