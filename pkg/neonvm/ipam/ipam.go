@@ -134,17 +134,6 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 		return nil, fmt.Errorf("missing 'ipam' key")
 	}
 
-	// process old-style Range to Ranges array
-	if n.IPAM.Range != "" {
-		oldRange := RangeConfiguration{
-			OmitRanges: n.IPAM.OmitRanges,
-			Range:      n.IPAM.Range,
-			RangeStart: n.IPAM.RangeStart,
-			RangeEnd:   n.IPAM.RangeEnd,
-		}
-		n.IPAM.IPRanges = append([]RangeConfiguration{oldRange}, n.IPAM.IPRanges...)
-	}
-
 	// check IP ranges
 	for idx, rangeConfig := range n.IPAM.IPRanges {
 		firstip, ipNet, err := net.ParseCIDR(rangeConfig.Range)
@@ -168,20 +157,6 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 		}
 
 		n.IPAM.IPRanges[idx] = rangeConfig
-	}
-
-	// delete old style settings
-	n.IPAM.OmitRanges = nil
-	n.IPAM.Range = ""
-	n.IPAM.RangeStart = nil
-	n.IPAM.RangeEnd = nil
-
-	// check Excluded IP ranges
-	for idx := range n.IPAM.OmitRanges {
-		_, _, err := net.ParseCIDR(n.IPAM.OmitRanges[idx])
-		if err != nil {
-			return nil, fmt.Errorf("invalid exclude CIDR %s: %w", n.IPAM.OmitRanges[idx], err)
-		}
 	}
 
 	// set network namespace
