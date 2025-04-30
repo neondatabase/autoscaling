@@ -238,7 +238,7 @@ func TestIPAMReleaseTwice(t *testing.T) {
 	// This time we get nil IP
 	require.Equal(t, net.IPNet{
 		IP:   nil,
-		Mask: ip.Mask,
+		Mask: nil,
 	}, ipResult)
 }
 

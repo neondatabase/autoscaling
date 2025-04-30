@@ -13,10 +13,11 @@ type IPAMMetrics struct {
 	duration *prometheus.HistogramVec
 }
 
+type IPAMAction string
+
 const (
-	IPAMAcquire = "acquire"
-	IPAMRelease = "release"
-	IPAMCleanup = "cleanup"
+	IPAMAcquire IPAMAction = "acquire"
+	IPAMRelease IPAMAction = "release"
 )
 
 const (
