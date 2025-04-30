@@ -6,14 +6,6 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 )
 
-type temporaryError struct {
-	error
-}
-
-func (t *temporaryError) Temporary() bool {
-	return true
-}
-
 type RangeConfiguration struct {
 	OmitRanges []string `json:"exclude,omitempty"`
 	Range      string   `json:"range"`
