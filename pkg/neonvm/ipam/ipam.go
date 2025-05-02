@@ -38,9 +38,7 @@ const (
 	IpamRequestTimeout = 10 * time.Second
 )
 
-var (
-	ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
-)
+var ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
 
 type IPAM struct {
 	Client
@@ -339,8 +337,8 @@ func toIPReservation(ctx context.Context, allocations map[string]vmv1.IPAllocati
 		ip := whereaboutsallocate.IPAddOffset(firstip, uint64(numOffset))
 		reservelist = append(reservelist, whereaboutstypes.IPReservation{
 			IP:          ip,
-			ContainerID: a.ContainerID,
-			PodRef:      a.PodRef,
+			ContainerID: a.OwnerID,
+			PodRef:      "",
 			IsAllocated: false,
 		})
 	}
@@ -352,7 +350,7 @@ func toAllocations(reservelist []whereaboutstypes.IPReservation, firstip net.IP)
 	allocations := make(map[string]vmv1.IPAllocation)
 	for _, r := range reservelist {
 		index := whereaboutsallocate.IPGetOffset(r.IP, firstip)
-		allocations[fmt.Sprintf("%d", index)] = vmv1.IPAllocation{ContainerID: r.ContainerID, PodRef: r.PodRef}
+		allocations[fmt.Sprintf("%d", index)] = vmv1.IPAllocation{OwnerID: r.ContainerID}
 	}
 	return allocations
 }

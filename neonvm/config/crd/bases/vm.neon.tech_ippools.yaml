@@ -42,12 +42,11 @@ spec:
               allocations:
                 additionalProperties:
                   description: |-
-                    IPAllocation represents metadata about the pod/container owner of a specific IP
-                    coped from Whereabout CNI as their allocation functions used
+                    IPAllocation represents metadata about the owner of a specific IP.
+
+                    When VirtualMachine owns the IP, the OwnerID is the VM's NamespacedName.
                   properties:
                     id:
-                      type: string
-                    podref:
                       type: string
                   required:
                   - id

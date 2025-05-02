@@ -13,11 +13,11 @@ type IPPoolSpec struct {
 	Allocations map[string]IPAllocation `json:"allocations"`
 }
 
-// IPAllocation represents metadata about the pod/container owner of a specific IP
-// coped from Whereabout CNI as their allocation functions used
+// IPAllocation represents metadata about the owner of a specific IP.
+//
+// When VirtualMachine owns the IP, the OwnerID is the VM's NamespacedName.
 type IPAllocation struct {
-	ContainerID string `json:"id"`
-	PodRef      string `json:"podref,omitempty"`
+	OwnerID string `json:"id"`
 }
 
 //+genclient
