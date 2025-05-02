@@ -17,12 +17,14 @@ import (
 	kfake "k8s.io/client-go/kubernetes/fake"
 
 	nfake "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/fake"
+	"github.com/neondatabase/autoscaling/pkg/agent/core/testhelpers"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 )
 
 type testParams struct {
-	prom *prometheus.Registry
-	ipam *ipam.IPAM
+	prom  *prometheus.Registry
+	ipam  *ipam.IPAM
+	clock *testhelpers.FakeClock
 }
 
 func makeIPAM(t *testing.T, cfg string) *testParams {
@@ -46,18 +48,21 @@ func makeIPAM(t *testing.T, cfg string) *testParams {
 	require.NoError(t, err)
 
 	prom := prometheus.NewRegistry()
+	clock := testhelpers.NewFakeClock(t)
 	ipam, err := ipam.NewWithClient(&client, ipam.IPAMParams{
 		NadName:          "nad",
 		NadNamespace:     "default",
 		ConcurrencyLimit: 1,
 		MetricsReg:       prom,
+		Clock:            clock.Now,
 	})
 
 	require.NoError(t, err)
 
 	return &testParams{
-		prom: prom,
-		ipam: ipam,
+		prom:  prom,
+		ipam:  ipam,
+		clock: clock,
 	}
 }
 
@@ -119,66 +124,76 @@ func TestIPAM(t *testing.T) {
 			]
 		}`,
 	)
-	ipam := params.ipam
 
-	defer ipam.Close()
+	defer params.ipam.Close()
 
 	name := types.NamespacedName{
 		Namespace: "default",
 		Name:      "vm",
 	}
 
-	ip1, err := ipam.AcquireIP(context.Background(), name)
+	ip1, err := params.ipam.AcquireIP(context.Background(), name)
 	require.NoError(t, err)
 	require.NotNil(t, ip1)
 	assert.Equal(t, "10.100.123.1/24", ip1.String())
 
 	// Same VM - same IP
-	ipResult, err := ipam.AcquireIP(context.Background(), name)
+	ipResult, err := params.ipam.AcquireIP(context.Background(), name)
 	require.NoError(t, err)
 	require.NotNil(t, ipResult)
 	assert.Equal(t, ip1, ipResult)
 
 	// Different VM - different IP
 	name.Name = "vm2"
-	ip2, err := ipam.AcquireIP(context.Background(), name)
+	ip2, err := params.ipam.AcquireIP(context.Background(), name)
 	require.NoError(t, err)
 	require.NotNil(t, ip2)
 	assert.Equal(t, "10.100.123.2/24", ip2.String())
 
 	// Release the second IP
-	ipResult, err = ipam.ReleaseIP(context.Background(), name)
+	ipResult, err = params.ipam.ReleaseIP(context.Background(), name)
 	require.NoError(t, err)
 	require.Equal(t, ip2, ipResult)
 
-	// Allocate it again
+	params.clock.Inc(2 * ipam.QuarantinePeriod)
+
+	// Allocate third IP - second is in quarantine
 	name.Name = "vm3"
-	ip3, err := ipam.AcquireIP(context.Background(), name)
+	ip3, err := params.ipam.AcquireIP(context.Background(), name)
 	require.NoError(t, err)
 	require.NotNil(t, ip3)
-	assert.Equal(t, ip2, ip3)
+	assert.Equal(t, "10.100.123.3/24", ip3.String())
+
+	params.clock.Inc(2 * ipam.QuarantinePeriod)
+
+	// Allocate another IP - it is the second one
+	name.Name = "vm4"
+	ip4, err := params.ipam.AcquireIP(context.Background(), name)
+	require.NoError(t, err)
+	require.NotNil(t, ip4)
+	assert.Equal(t, ip2, ip4)
 
 	metrics := collectMetrics(t, params.prom)
 	assert.ElementsMatch(t, []metricValue{
-		{Name: "ipam_request_duration_seconds", Action: "acquire", Outcome: "success", Value: 4},
+		{Name: "ipam_request_duration_seconds", Action: "acquire", Outcome: "success", Value: 5},
 		{Name: "ipam_request_duration_seconds", Action: "release", Outcome: "success", Value: 1},
 		{Name: "ipam_ongoing_requests", Action: "acquire", Outcome: "", Value: 0},
 		{Name: "ipam_ongoing_requests", Action: "release", Outcome: "", Value: 0},
 	}, metrics)
 }
 
+const ipamConfig = `{
+	"ipRanges": [
+		{
+			"range":"10.100.123.0/24",
+			"range_start":"10.100.123.1",
+			"range_end":"10.100.123.254"
+		}
+	]
+}`
+
 func TestIPAMMetricsOnError(t *testing.T) {
-	params := makeIPAM(t,
-		`{
-			"ipRanges": [
-				{
-					"range":"10.100.123.0/24",
-					"range_start":"10.100.123.1",
-					"range_end":"10.100.123.254"
-				}
-			]
-		}`,
-	)
+	params := makeIPAM(t, ipamConfig)
 	ipam := params.ipam
 
 	defer ipam.Close()
@@ -204,36 +219,27 @@ func TestIPAMMetricsOnError(t *testing.T) {
 }
 
 func TestIPAMReleaseTwice(t *testing.T) {
-	params := makeIPAM(t,
-		`{
-			"ipRanges": [
-				{
-					"range":"10.100.123.0/24",
-					"range_start":"10.100.123.1",
-					"range_end":"10.100.123.254"
-				}
-			]
-		}`,
-	)
-	ipam := params.ipam
-	defer ipam.Close()
+	params := makeIPAM(t, ipamConfig)
+	defer params.ipam.Close()
 
 	name := types.NamespacedName{
 		Namespace: "default",
 		Name:      "vm",
 	}
 
-	ip, err := ipam.AcquireIP(context.Background(), name)
+	ip, err := params.ipam.AcquireIP(context.Background(), name)
 	require.NoError(t, err)
 	require.NotNil(t, ip)
 
 	// Release the IP
-	ipResult, err := ipam.ReleaseIP(context.Background(), name)
+	ipResult, err := params.ipam.ReleaseIP(context.Background(), name)
 	require.NoError(t, err)
 	require.Equal(t, ip, ipResult)
 
+	params.clock.Inc(2 * ipam.QuarantinePeriod)
+
 	// Release the IP again
-	ipResult, err = ipam.ReleaseIP(context.Background(), name)
+	ipResult, err = params.ipam.ReleaseIP(context.Background(), name)
 	require.NoError(t, err)
 	// This time we get nil IP
 	require.Equal(t, net.IPNet{

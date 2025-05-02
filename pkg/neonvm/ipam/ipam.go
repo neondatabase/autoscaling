@@ -35,6 +35,9 @@ const (
 
 	// RequestTimeout for IPAM queries
 	IpamRequestTimeout = 10 * time.Second
+
+	// QuarantinePeriod is the period that we quarantine IPs for.
+	QuarantinePeriod = 30 * time.Second
 )
 
 var ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
@@ -44,6 +47,7 @@ type IPAM struct {
 	Config  IPAMConfig
 	metrics *IPAMMetrics
 
+	clock              func() time.Time
 	mu                 sync.Mutex
 	concurrencyLimiter *semaphore.Weighted
 }
@@ -53,6 +57,7 @@ type IPAMParams struct {
 	NadNamespace     string
 	ConcurrencyLimit int
 	MetricsReg       prometheus.Registerer
+	Clock            func() time.Time
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
@@ -117,6 +122,7 @@ func NewWithClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 		metrics:            NewIPAMMetrics(params.MetricsReg),
 		mu:                 sync.Mutex{},
 		concurrencyLimiter: semaphore.NewWeighted(int64(params.ConcurrencyLimit)),
+		clock:              params.Clock,
 	}, nil
 }
 
@@ -288,9 +294,13 @@ type NeonvmIPPool struct {
 	pool     *vmv1.IPPool
 	ipRange  RangeConfiguration
 	ipNet    *net.IPNet
+
+	clock func() time.Time
 }
 
 func (p *NeonvmIPPool) allocate(vmName string) (net.IPNet, error) {
+	p.advanceQuarantine()
+
 	offset := p.find(vmName)
 	if offset != "" {
 		return p.offsetStringFormat(offset)
@@ -311,6 +321,7 @@ func (p *NeonvmIPPool) allocate(vmName string) (net.IPNet, error) {
 
 		return p.offsetFormat(offset), nil
 	}
+
 	return net.IPNet{}, fmt.Errorf("no free IP in the pool: %s", p.ipRange.Range)
 }
 
@@ -369,8 +380,32 @@ func (p *NeonvmIPPool) release(vmName string) (net.IPNet, error) {
 			Mask: nil,
 		}, nil
 	}
-	delete(p.pool.Spec.Allocations, offset)
+	p.pool.Spec.Allocations[offset] = vmv1.IPAllocation{
+		OwnerID: "quarantined",
+	}
+	p.pool.Spec.QuarantinedOffsetsPending = append(p.pool.Spec.QuarantinedOffsetsPending, offset)
+	p.advanceQuarantine()
 	return p.offsetStringFormat(offset)
+}
+
+func (p *NeonvmIPPool) advanceQuarantine() {
+	now := p.clock().UTC()
+	if p.pool.Spec.QuarantineStartTime.IsZero() {
+		p.pool.Spec.QuarantineStartTime = metav1.NewTime(now)
+	}
+	if now.Sub(p.pool.Spec.QuarantineStartTime.Time) < QuarantinePeriod {
+		return
+	}
+
+	// Clear QuarantinedOffsets - for them quarantine is over
+	for _, offset := range p.pool.Spec.QuarantinedOffsets {
+		delete(p.pool.Spec.Allocations, offset)
+	}
+
+	// Start new quarantine period
+	p.pool.Spec.QuarantinedOffsets = p.pool.Spec.QuarantinedOffsetsPending
+	p.pool.Spec.QuarantinedOffsetsPending = []string{}
+	p.pool.Spec.QuarantineStartTime = metav1.NewTime(now)
 }
 
 // getNeonvmIPPool returns a NeonVM IPPool for the given IP range
@@ -397,8 +432,11 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange RangeConfiguration) 
 				Namespace: i.Config.NetworkNamespace,
 			},
 			Spec: vmv1.IPPoolSpec{
-				Range:       ipRange.Range,
-				Allocations: make(map[string]vmv1.IPAllocation),
+				Range:                     ipRange.Range,
+				Allocations:               make(map[string]vmv1.IPAllocation),
+				QuarantinedOffsets:        nil,
+				QuarantinedOffsetsPending: nil,
+				QuarantineStartTime:       metav1.NewTime(i.clock().UTC()),
 			},
 		}
 		ipPool, err := i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Create(ctx, newPool, metav1.CreateOptions{})
@@ -415,6 +453,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange RangeConfiguration) 
 	}
 
 	return &NeonvmIPPool{
+		clock:    i.clock,
 		vmClient: i.Client.VMClient,
 		pool:     pool,
 		ipRange:  ipRange,
