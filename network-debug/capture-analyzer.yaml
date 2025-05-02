@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcpdump-analyzer
+  namespace: kube-system
+  labels:
+    app: tcpdump-analyzer
+spec:
+  selector:
+    app: tcpdump-analyzer
+  ports:
+  - port: 80
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tcpdump-analyzer
+  namespace: kube-system
+  labels:
+    app: tcpdump-analyzer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tcpdump-analyzer
+  template:
+    metadata:
+      labels:
+        app: tcpdump-analyzer
+    spec:
+      containers:
+      - name: analyzer
+        image: nicolaka/netshoot:latest
+        ports:
+        - containerPort: 8080
+        command:
+        - /bin/sh
+        - -c
+        - /scripts/analyzer.sh
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: captures-pv
+          mountPath: /captures
+      volumes:
+      - name: scripts
+        configMap:
+          name: tcpdump-scripts
+          defaultMode: 0755
+      - name: captures-pv
+        persistentVolumeClaim:
+          claimName: tcpdump-captures-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tcpdump-captures-pvc
+  namespace: kube-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path

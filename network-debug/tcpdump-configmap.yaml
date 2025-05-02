@@ -1,0 +1,238 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tcpdump-scripts
+  namespace: kube-system
+data:
+  capture.sh: |
+    #!/bin/bash
+    set -e
+
+    # Create directory for captures
+    mkdir -p /captures
+    
+    # Get node name
+    NODE_NAME=$(hostname)
+    
+    # Detect bridge interfaces
+    # Common bridge interfaces in Kubernetes environments
+    BRIDGE_INTERFACES=""
+    
+    # Check for bridge interfaces
+    for iface in $(ip link show type bridge | grep -o -E '^[0-9]+: [^:]+' | awk '{print $2}'); do
+      BRIDGE_INTERFACES="$BRIDGE_INTERFACES $iface"
+    done
+    
+    # Check for common CNI bridges
+    for bridge in cni0 cbr0 cilium_host cilium_net br-int br0 docker0 neon-br0; do
+      if ip link show $bridge &>/dev/null; then
+        BRIDGE_INTERFACES="$BRIDGE_INTERFACES $bridge"
+      fi
+    done
+    
+    # Check for vxlan interfaces
+    for iface in $(ip link show type vxlan | grep -o -E '^[0-9]+: [^:]+' | awk '{print $2}'); do
+      BRIDGE_INTERFACES="$BRIDGE_INTERFACES $iface"
+    done
+    
+    # Log detected interfaces
+    echo "Detected bridge/overlay interfaces on $NODE_NAME: $BRIDGE_INTERFACES"
+    
+    # If no interfaces found, check all interfaces
+    if [ -z "$BRIDGE_INTERFACES" ]; then
+      echo "No bridge interfaces found, listing all interfaces:"
+      ip link show
+      echo "Will monitor all non-loopback interfaces"
+      BRIDGE_INTERFACES=$(ip -o link show | grep -v "lo:" | awk -F': ' '{print $2}' | cut -d'@' -f1)
+    fi
+    
+    # Function to start tcpdump for an interface
+    start_tcpdump() {
+      local interface=$1
+      local output_dir="/captures/$NODE_NAME"
+      local max_size_mb=100
+      local rotate_count=5
+      
+      mkdir -p "$output_dir"
+      
+      echo "Starting tcpdump on interface $interface"
+      
+      # Run tcpdump with file rotation
+      tcpdump -i "$interface" -s 0 -n -w "$output_dir/$interface.pcap" -W "$rotate_count" -C "$max_size_mb" &
+      
+      # Store PID for potential cleanup
+      echo $! > "/captures/$NODE_NAME/$interface.pid"
+    }
+    
+    # Start tcpdump for each interface
+    for interface in $BRIDGE_INTERFACES; do
+      start_tcpdump "$interface"
+    done
+    
+    # Log summary
+    echo "tcpdump started on node $NODE_NAME for interfaces: $BRIDGE_INTERFACES"
+    echo "Capture files are stored in /captures/$NODE_NAME/"
+    
+    # Keep the container running
+    tail -f /dev/null
+
+  analyzer.sh: |
+    #!/bin/bash
+    set -e
+
+    # Create directory for captures
+    mkdir -p /captures
+    mkdir -p /tmp/analysis
+
+    echo "Starting packet capture analyzer service..."
+
+    # Install required packages (using Alpine's package manager)
+    apk update && apk add --no-cache python3 py3-pip py3-flask
+
+    # Create a simple web server for browsing and analyzing captures
+    cat > /tmp/analysis/server.py << 'EOF'
+    from flask import Flask, render_template_string, send_file, request, redirect, url_for
+    import os
+    import subprocess
+    import glob
+    import datetime
+
+    app = Flask(__name__)
+
+    HTML_TEMPLATE = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>tcpdump Capture Analyzer</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            h1 { color: #333; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
+            tr:hover { background-color: #f5f5f5; }
+            .actions { display: flex; gap: 10px; }
+            .button { 
+                background-color: #4CAF50; 
+                color: white; 
+                padding: 8px 16px; 
+                text-decoration: none; 
+                border-radius: 4px;
+                display: inline-block;
+            }
+            .button.analyze { background-color: #2196F3; }
+            pre { background-color: #f8f8f8; padding: 10px; border-radius: 5px; overflow-x: auto; }
+        </style>
+    </head>
+    <body>
+        <h1>tcpdump Capture Analyzer</h1>
+        
+        {% if analysis_result %}
+        <h2>Analysis Result</h2>
+        <pre>{{ analysis_result }}</pre>
+        <a href="/" class="button">Back to Files</a>
+        <hr>
+        {% endif %}
+        
+        <h2>Capture Files</h2>
+        <table>
+            <tr>
+                <th>Node</th>
+                <th>Interface</th>
+                <th>Size</th>
+                <th>Last Modified</th>
+                <th>Actions</th>
+            </tr>
+            {% for file in files %}
+            <tr>
+                <td>{{ file.node }}</td>
+                <td>{{ file.interface }}</td>
+                <td>{{ file.size }}</td>
+                <td>{{ file.modified }}</td>
+                <td class="actions">
+                    <a href="/download?file={{ file.path }}" class="button">Download</a>
+                    <a href="/analyze?file={{ file.path }}" class="button analyze">Analyze</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </body>
+    </html>
+    """
+
+    @app.route('/')
+    def index():
+        files = []
+        for pcap_file in glob.glob('/captures/*/*.pcap'):
+            path_parts = pcap_file.split('/')
+            node = path_parts[-2]
+            interface = path_parts[-1].replace('.pcap', '')
+            
+            stat = os.stat(pcap_file)
+            size = f"{stat.st_size / (1024*1024):.2f} MB"
+            modified = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            
+            files.append({
+                'node': node,
+                'interface': interface,
+                'size': size,
+                'modified': modified,
+                'path': pcap_file
+            })
+        
+        return render_template_string(HTML_TEMPLATE, files=files, analysis_result=None)
+
+    @app.route('/download')
+    def download():
+        file_path = request.args.get('file')
+        if os.path.exists(file_path) and file_path.startswith('/captures/'):
+            return send_file(file_path, as_attachment=True)
+        return "File not found", 404
+
+    @app.route('/analyze')
+    def analyze():
+        file_path = request.args.get('file')
+        if not os.path.exists(file_path) or not file_path.startswith('/captures/'):
+            return "File not found", 404
+            
+        # Run basic analysis with tcpdump
+        try:
+            # Get packet summary
+            cmd = f"tcpdump -r {file_path} -n -c 1000"
+            summary = subprocess.check_output(cmd, shell=True, text=True)
+            
+            # Get protocol statistics
+            cmd = f"tcpdump -r {file_path} -n -c 5000 | awk '{{print $2}}' | sort | uniq -c | sort -nr"
+            protocols = subprocess.check_output(cmd, shell=True, text=True)
+            
+            # Get top talkers
+            cmd = f"tcpdump -r {file_path} -n -c 5000 | awk '{{print $3, $5}}' | sort | uniq -c | sort -nr | head -20"
+            talkers = subprocess.check_output(cmd, shell=True, text=True)
+            
+            analysis = f"""
+    PACKET CAPTURE ANALYSIS
+    =======================
+    File: {file_path}
+
+    PROTOCOL DISTRIBUTION:
+    ---------------------
+    {protocols}
+
+    TOP TALKERS:
+    -----------
+    {talkers}
+
+    PACKET SAMPLE (first 1000):
+    --------------------------
+    {summary}
+    """
+            return render_template_string(HTML_TEMPLATE, files=[], analysis_result=analysis)
+            
+        except subprocess.CalledProcessError as e:
+            return f"Analysis failed: {str(e)}", 500
+
+    if __name__ == '__main__':
+        app.run(host='0.0.0.0', port=8080)
+    EOF
+
+    # Start the web server
+    python3 /tmp/analysis/server.py
