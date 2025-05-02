@@ -241,3 +241,19 @@ func TestIPAMReleaseTwice(t *testing.T) {
 		Mask: ip.Mask,
 	}, ipResult)
 }
+
+func TestIPAMNoRangeBorders(t *testing.T) {
+	params := makeIPAM(t,
+		`{
+			"ipRanges": [
+				{
+					"range":"10.100.123.0/24"
+				}
+			]
+		}`,
+	)
+	ipam := params.ipam
+	defer ipam.Close()
+	assert.Equal(t, "10.100.123.0", ipam.Config.IPRanges[0].RangeStart.String())
+	assert.Equal(t, "10.100.123.255", ipam.Config.IPRanges[0].RangeEnd.String())
+}

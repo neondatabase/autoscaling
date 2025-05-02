@@ -121,6 +121,24 @@ func NewWithClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 	}, nil
 }
 
+func lastIP(ipNet *net.IPNet) net.IP {
+	ip := ipNet.IP
+	mask := ipNet.Mask
+	if ip.To4() != nil {
+		ip = ip.To4()
+		mask = net.IPMask(net.IP(mask).To4())
+
+	}
+	lastIP := make(net.IP, len(ip))
+
+	// ~mask has ones in places which would be variable in the subnet
+	// so we OR it with the start IP to get the end of the range
+	for i := range ip {
+		lastIP[i] = ip[i] | ^mask[i]
+	}
+	return lastIP
+}
+
 // Load Network Attachment Definition and parse config to fill IPAM config
 func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 	var n Nad
@@ -134,21 +152,26 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 
 	// check IP ranges
 	for idx, rangeConfig := range n.IPAM.IPRanges {
-		firstip, ipNet, err := net.ParseCIDR(rangeConfig.Range)
+		_, ipNet, err := net.ParseCIDR(rangeConfig.Range)
 		if err != nil {
 			return nil, fmt.Errorf("invalid CIDR %s: %w", rangeConfig.Range, err)
 		}
 		rangeConfig.Range = ipNet.String()
-		if rangeConfig.RangeStart == nil {
-			firstip = net.ParseIP(firstip.Mask(ipNet.Mask).String()) // get real first IP from cidr
-			rangeConfig.RangeStart = firstip
+
+		if len(rangeConfig.RangeStart) == 0 {
+			rangeConfig.RangeStart = make([]byte, len(ipNet.IP))
+			copy(rangeConfig.RangeStart, ipNet.IP)
 		}
-		if rangeConfig.RangeStart != nil && !ipNet.Contains(rangeConfig.RangeStart) {
+		if !ipNet.Contains(rangeConfig.RangeStart) {
 			return nil, fmt.Errorf("range_start IP %s not in IP Range %s",
 				rangeConfig.RangeStart.String(),
 				rangeConfig.Range)
 		}
-		if rangeConfig.RangeEnd != nil && !ipNet.Contains(rangeConfig.RangeEnd) {
+
+		if len(rangeConfig.RangeEnd) == 0 {
+			rangeConfig.RangeEnd = lastIP(ipNet)
+		}
+		if !ipNet.Contains(rangeConfig.RangeEnd) {
 			return nil, fmt.Errorf("range_end IP %s not in IP Range %s",
 				rangeConfig.RangeEnd.String(),
 				rangeConfig.Range)
@@ -303,7 +326,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 	}
 
 	// get first IP in the pool
-	ip, _, err := net.ParseCIDR(pool.Spec.Range)
+	_, ipNet, err := net.ParseCIDR(pool.Spec.Range)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +334,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 	return &NeonvmIPPool{
 		vmClient: i.Client.VMClient,
 		pool:     pool,
-		firstip:  ip,
+		firstip:  ipNet.IP,
 	}, nil
 }
 
@@ -349,7 +372,8 @@ func toIPReservation(ctx context.Context, allocations map[string]vmv1.IPAllocati
 func toAllocations(reservelist []whereaboutstypes.IPReservation, firstip net.IP) map[string]vmv1.IPAllocation {
 	allocations := make(map[string]vmv1.IPAllocation)
 	for _, r := range reservelist {
-		index := whereaboutsallocate.IPGetOffset(r.IP, firstip)
+		// We need To16(), otherwise whereabouts can't operate properly.
+		index := whereaboutsallocate.IPGetOffset(r.IP.To16(), firstip.To16())
 		allocations[fmt.Sprintf("%d", index)] = vmv1.IPAllocation{OwnerID: r.ContainerID}
 	}
 	return allocations
