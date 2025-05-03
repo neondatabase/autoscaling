@@ -70,28 +70,17 @@ logs() {
 
 # Start port forwarding to access the analyzer UI
 port_forward() {
-  # List all analyzer pods with their nodes
-  echo "Available analyzer pods:"
-  kubectl -n kube-system get pods -l app=tcpdump-analyzer -o wide
-  
-  # Ask user to select a pod
-  echo ""
-  echo "Enter the name of the analyzer pod to connect to (or press Enter for the first one):"
-  read -r POD_NAME
-  
-  if [ -z "$POD_NAME" ]; then
-    ANALYZER_POD=$(kubectl -n kube-system get pods -l app=tcpdump-analyzer -o name | head -n 1)
-  else
-    ANALYZER_POD="pod/$POD_NAME"
-  fi
+  # Get the first available analyzer pod
+  ANALYZER_POD=$(kubectl -n kube-system get pods -l app=tcpdump-analyzer -o name | head -n 1)
   
   if [ -z "$ANALYZER_POD" ]; then
     echo "Analyzer pod not found. Make sure the daemonset is running."
     return 1
   fi
   
-  echo "Starting port forwarding to analyzer UI on $ANALYZER_POD..."
+  echo "Starting port forwarding to analyzer UI..."
   echo "Access the UI at: http://localhost:8080"
+  echo "The UI will show capture files from all nodes in the cluster."
   echo "Press Ctrl+C to stop"
   
   kubectl -n kube-system port-forward "$ANALYZER_POD" 8080:8080

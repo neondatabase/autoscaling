@@ -326,11 +326,27 @@ data:
                     # Forward the request to the target pod
                     try:
                         url = f"http://{pod_ip}:{PORT}/download?file={urllib.parse.quote(file_path)}"
-                        response = requests.get(url, stream=True, timeout=5)
+                        print(f"Sending request to: {url}")
+                        
+                        # Increase timeout for large files
+                        response = requests.get(url, stream=True, timeout=30)
                         
                         if response.status_code != 200:
+                            print(f"Target pod returned error: {response.status_code} {response.reason}")
                             self.send_error(response.status_code, response.reason)
                             return
+                        
+                        # Get content length if available
+                        content_length = response.headers.get('content-length')
+                        if content_length:
+                            content_length = int(content_length)
+                            print(f"Content length: {content_length} bytes")
+                            
+                            # Limit file size to 500MB to prevent issues
+                            if content_length > 500 * 1024 * 1024:
+                                print(f"File too large: {content_length} bytes")
+                                self.send_error(413, "File too large (max 500MB)")
+                                return
                         
                         # Forward the response headers
                         self.send_response(200)
@@ -339,16 +355,27 @@ data:
                                 self.send_header(header, value)
                         self.end_headers()
                         
-                        # Stream the response body
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                try:
-                                    self.wfile.write(chunk)
-                                except BrokenPipeError:
-                                    print("Client disconnected during proxied download")
-                                    return
-                        
-                        print(f"Proxied download completed for {file_path} from pod {pod_ip}")
+                        # Stream the response body with better error handling
+                        bytes_transferred = 0
+                        try:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                if chunk:
+                                    try:
+                                        self.wfile.write(chunk)
+                                        bytes_transferred += len(chunk)
+                                        
+                                        # Log progress for large files
+                                        if content_length and content_length > 10 * 1024 * 1024 and bytes_transferred % (5 * 1024 * 1024) < 8192:
+                                            print(f"Download progress: {bytes_transferred}/{content_length} bytes ({bytes_transferred*100//content_length}%)")
+                                    except (BrokenPipeError, ConnectionResetError) as e:
+                                        print(f"Client connection error during proxied download: {str(e)}")
+                                        return
+                        except (requests.exceptions.ChunkedEncodingError, requests.exceptions.ConnectionError) as e:
+                            print(f"Connection error while reading from source pod: {str(e)}")
+                            # Don't send error to client as headers are already sent
+                            return
+                            
+                        print(f"Proxied download completed for {file_path} from pod {pod_ip}: {bytes_transferred} bytes transferred")
                     except requests.exceptions.RequestException as e:
                         print(f"Error proxying request to pod {pod_ip}: {str(e)}")
                         self.send_error(502, f"Error proxying request: {str(e)}")
@@ -381,27 +408,55 @@ data:
                     file_size = os.path.getsize(file_path)
                     print(f"File exists, size: {file_size} bytes")
                     
+                    # Limit file size to 500MB to prevent issues
+                    if file_size > 500 * 1024 * 1024:
+                        print(f"File too large: {file_size} bytes")
+                        self.send_error(413, "File too large (max 500MB)")
+                        return
+                    
                     # Serve the file for download
                     self.send_response(200)
                     self.send_header('Content-type', 'application/octet-stream')
                     self.send_header('Content-Length', str(file_size))
                     self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(file_path)}"')
+                    # Add cache control headers to prevent caching issues
+                    self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                    self.send_header('Pragma', 'no-cache')
+                    self.send_header('Expires', '0')
                     self.end_headers()
                     
                     # Read and send the file in chunks to avoid memory issues with large files
-                    with open(file_path, 'rb') as f:
-                        chunk_size = 8192  # 8KB chunks
-                        while True:
-                            chunk = f.read(chunk_size)
-                            if not chunk:
-                                break
-                            try:
-                                self.wfile.write(chunk)
-                            except BrokenPipeError:
-                                print("Client disconnected during download")
-                                return
-                    
-                    print(f"File download completed: {file_path}")
+                    bytes_transferred = 0
+                    try:
+                        with open(file_path, 'rb') as f:
+                            chunk_size = 8192  # 8KB chunks
+                            while True:
+                                try:
+                                    # Add timeout to read operation
+                                    chunk = f.read(chunk_size)
+                                    if not chunk:
+                                        break
+                                    
+                                    try:
+                                        self.wfile.write(chunk)
+                                        bytes_transferred += len(chunk)
+                                        
+                                        # Log progress for large files
+                                        if file_size > 10 * 1024 * 1024 and bytes_transferred % (5 * 1024 * 1024) < 8192:
+                                            print(f"Download progress: {bytes_transferred}/{file_size} bytes ({bytes_transferred*100//file_size}%)")
+                                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+                                        print(f"Client connection error during download: {str(e)}")
+                                        return
+                                except (TimeoutError, IOError) as e:
+                                    print(f"Error reading file: {str(e)}")
+                                    # Headers already sent, can't send error response
+                                    return
+                    except Exception as e:
+                        print(f"Unexpected error during file transfer: {str(e)}")
+                        # Headers already sent, can't send error response
+                        return
+                        
+                    print(f"File download completed: {file_path}, {bytes_transferred} bytes transferred")
                     return
                 except Exception as e:
                     print(f"Error during download: {str(e)}")
