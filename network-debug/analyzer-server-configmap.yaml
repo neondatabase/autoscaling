@@ -53,28 +53,56 @@ data:
                 self.wfile.write(html.encode())
                 return
             elif self.path.startswith('/download?file='):
-                # Parse the file path from the query string
-                query = urllib.parse.urlparse(self.path).query
-                file_path = urllib.parse.parse_qs(query)['file'][0]
-                
-                # Validate the file path (must be in /captures directory)
-                if not file_path.startswith('/captures/'):
-                    self.send_error(403, "Access denied")
-                    return
+                try:
+                    print(f"Download request received: {self.path}")
                     
-                if not os.path.exists(file_path):
-                    self.send_error(404, "File not found")
-                    return
+                    # Parse the file path from the query string
+                    query = urllib.parse.urlparse(self.path).query
+                    file_path = urllib.parse.parse_qs(query)['file'][0]
+                    print(f"Requested file path: {file_path}")
                     
-                # Serve the file for download
-                self.send_response(200)
-                self.send_header('Content-type', 'application/octet-stream')
-                self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(file_path)}"')
-                self.end_headers()
-                
-                with open(file_path, 'rb') as f:
-                    self.wfile.write(f.read())
-                return
+                    # Validate the file path (must be in /captures directory)
+                    if not file_path.startswith('/captures/'):
+                        print(f"Access denied: Path does not start with /captures/: {file_path}")
+                        self.send_error(403, "Access denied")
+                        return
+                        
+                    if not os.path.exists(file_path):
+                        print(f"File not found: {file_path}")
+                        self.send_error(404, "File not found")
+                        return
+                    
+                    file_size = os.path.getsize(file_path)
+                    print(f"File exists, size: {file_size} bytes")
+                    
+                    # Serve the file for download
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/octet-stream')
+                    self.send_header('Content-Length', str(file_size))
+                    self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(file_path)}"')
+                    self.end_headers()
+                    
+                    # Read and send the file in chunks to avoid memory issues with large files
+                    with open(file_path, 'rb') as f:
+                        chunk_size = 8192  # 8KB chunks
+                        while True:
+                            chunk = f.read(chunk_size)
+                            if not chunk:
+                                break
+                            try:
+                                self.wfile.write(chunk)
+                            except BrokenPipeError:
+                                print("Client disconnected during download")
+                                return
+                    
+                    print(f"File download completed: {file_path}")
+                    return
+                except Exception as e:
+                    print(f"Error during download: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    self.send_error(500, f"Internal server error: {str(e)}")
+                    return
             else:
                 self.send_error(404, "File not found")
                 return
@@ -113,6 +141,42 @@ data:
             return "".join(files_html)
 
     print(f"Starting HTTP server on port {PORT}")
-    with socketserver.TCPServer(("", PORT), CaptureHandler) as httpd:
-        print(f"Serving at port {PORT}")
-        httpd.serve_forever()
+    
+    # Add error handling for server startup and request handling
+    try:
+        # Allow reusing the address if the previous server crashed
+        socketserver.TCPServer.allow_reuse_address = True
+        
+        with socketserver.TCPServer(("", PORT), CaptureHandler) as httpd:
+            print(f"Serving at port {PORT}")
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                print("Server stopped by keyboard interrupt")
+            except Exception as e:
+                print(f"Server error: {str(e)}")
+                import traceback
+                traceback.print_exc()
+    except OSError as e:
+        if e.errno == 98:  # Address already in use
+            print(f"Error: Port {PORT} is already in use")
+            print("Trying to use a different port...")
+            
+            # Try a different port
+            for alt_port in range(PORT + 1, PORT + 10):
+                try:
+                    print(f"Attempting to start server on port {alt_port}...")
+                    with socketserver.TCPServer(("", alt_port), CaptureHandler) as httpd:
+                        print(f"Serving at port {alt_port}")
+                        httpd.serve_forever()
+                        break
+                except OSError:
+                    print(f"Port {alt_port} is also in use, trying next port...")
+        else:
+            print(f"Error starting server: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        import traceback
+        traceback.print_exc()
