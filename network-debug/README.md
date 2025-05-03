@@ -103,7 +103,6 @@ To remove all deployed resources:
 You can customize the toolkit by modifying the following files:
 
 - **tcpdump-daemonset.yaml**: Modify the DaemonSet configuration
-- **tcpdump-configmap.yaml**: Customize the capture and analysis scripts
 - **capture-analyzer.yaml**: Adjust the analyzer deployment and service
 
 ## Troubleshooting
