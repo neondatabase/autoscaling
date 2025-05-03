@@ -5,5 +5,7 @@ namespace: kube-system
 
 resources:
 - tcpdump-daemonset.yaml
-- tcpdump-configmap.yaml
+- tcpdump-capture-configmap.yaml
+- analyzer-configmap.yaml
+- analyzer-server-configmap.yaml
 - capture-analyzer.yaml

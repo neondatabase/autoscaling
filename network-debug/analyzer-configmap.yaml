@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analyzer-scripts
+  namespace: kube-system
+data:
+  analyzer.sh: |
+    #!/bin/bash
+    set -e
+
+    # Create directory for captures
+    mkdir -p /captures
+    mkdir -p /tmp/analysis
+
+    # Get node name from environment variable (set by Kubernetes Downward API)
+    # If not set, fall back to hostname
+    NODE_NAME=${NODE_NAME:-$(hostname)}
+    
+    echo "Starting packet capture analyzer service on node $NODE_NAME..."
+
+    # Try to install Python
+    echo "Installing Python..."
+    apk update && apk add --no-cache python3 || true
+
+    # Copy the server script from the ConfigMap
+    cp /tmp/server.py /tmp/analysis/server.py
+    
+    # Start the web server
+    echo "Starting Python HTTP server..."
+    python3 /tmp/analysis/server.py

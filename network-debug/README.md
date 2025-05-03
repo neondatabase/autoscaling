@@ -7,6 +7,7 @@ This toolkit provides a comprehensive solution for debugging network issues in K
 - **Automated Interface Detection**: Automatically detects bridge and overlay network interfaces on each node
 - **Distributed Packet Capture**: Runs tcpdump on all nodes in the cluster as a DaemonSet
 - **Web-based Analysis UI**: Provides a simple web interface to browse, download, and analyze capture files
+- **Node Selection**: Easily switch between nodes to view capture files from different nodes
 - **Capture Rotation**: Automatically rotates capture files to prevent disk space issues
 
 ## Prerequisites
@@ -25,20 +26,51 @@ The toolkit includes a deployment script that makes it easy to deploy and manage
 # Check the status
 ./deploy.sh status
 
-# Access the analyzer UI
-./deploy.sh port-forward
-# or
-kubectl -n kube-system port-forward $(kubectl -n kube-system get pods -l app=tcpdump-analyzer -o name) 8080:8080
+# Access the analyzer UI (if port 8080 is already in use, use a different port)
+kubectl -n kube-system port-forward svc/tcpdump-analyzer 8081:80
 ```
 
-Then access the analyzer UI at http://localhost:8080
+Then access the analyzer UI at http://localhost:8081
 
-## Components
+## Architecture
 
-1. **tcpdump DaemonSet**: Runs on all nodes and captures packets on bridge interfaces
-2. **Analyzer Deployment**: Provides a web UI for browsing and analyzing capture files
-3. **ConfigMap**: Contains scripts for packet capture and analysis
-4. **PersistentVolumeClaim**: Stores capture files
+The toolkit consists of two main components:
+
+1. **tcpdump DaemonSet**: Runs on all nodes and captures packets on bridge and overlay interfaces
+   - Automatically detects relevant interfaces (cilium_host, cilium_net, cilium_vxlan, neon-br0, neon-vxlan0)
+   - Stores capture files in a hostPath volume (/var/log/tcpdump-captures)
+   - Rotates capture files to prevent disk space issues
+
+2. **Analyzer DaemonSet**: Provides a web UI for browsing and analyzing capture files
+   - Runs on all nodes in the cluster
+   - Each instance accesses capture files from its node's hostPath volume
+   - Provides a web UI to browse, download, and analyze capture files
+   - Includes a node selector to easily switch between nodes
+
+## Using the Analyzer UI
+
+The analyzer UI provides a simple interface to browse, download, and analyze capture files:
+
+1. **Node Access**: Each analyzer pod shows capture files from its own node
+2. **File Browsing**: View all capture files from the current node
+3. **File Analysis**: Click the "Analyze" button to analyze a capture file
+4. **File Download**: Click the "Download" button to download a capture file for offline analysis
+
+To view capture files from a different node, you need to port-forward to the analyzer pod on that node:
+
+```bash
+# List all analyzer pods with their nodes
+kubectl -n kube-system get pods -l app=tcpdump-analyzer -o wide
+
+# Port-forward to a specific analyzer pod
+kubectl -n kube-system port-forward pod/tcpdump-analyzer-[pod-id] 8080:8080
+```
+
+Alternatively, you can use the `port-forward` command in the deploy script, which will prompt you to select a pod:
+
+```bash
+./deploy.sh port-forward
+```
 
 ## Debugging Packet Loss in Overlay Networks
 
@@ -83,11 +115,11 @@ If you encounter issues:
    kubectl -n kube-system logs -l app=tcpdump-bridge
    ```
 
-2. Check the logs of the analyzer pod:
+2. Check the logs of the analyzer pods:
    ```bash
    kubectl -n kube-system logs -l app=tcpdump-analyzer
    ```
 
-3. Ensure the PersistentVolumeClaim is bound:
+3. Ensure the analyzer pods can access the capture files:
    ```bash
-   kubectl -n kube-system get pvc
+   kubectl exec -n kube-system $(kubectl -n kube-system get pods -l app=tcpdump-analyzer -o name | head -n 1) -- find /captures -type f | grep pcap

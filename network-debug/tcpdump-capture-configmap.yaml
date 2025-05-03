@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tcpdump-scripts
+  namespace: kube-system
+data:
+  capture.sh: |
+    #!/bin/bash
+    set -e
+
+    # Create directory for captures
+    mkdir -p /captures
+    
+    # Get node name
+    NODE_NAME=$(hostname)
+    
+    # Create node directory
+    mkdir -p "/captures/$NODE_NAME"
+    
+    # Detect bridge interfaces
+    # Common bridge interfaces in Kubernetes environments
+    BRIDGE_INTERFACES=""
+    DETECTED_INTERFACES=()
+    
+    echo "Scanning for bridge interfaces..."
+    # Check for bridge interfaces
+    for iface in $(ip link show type bridge 2>/dev/null | grep -o -E '^[0-9]+: [^:]+' | awk '{print $2}' 2>/dev/null || echo ""); do
+      echo "Found bridge interface: $iface"
+      if [[ ! " ${DETECTED_INTERFACES[@]} " =~ " ${iface} " ]]; then
+        DETECTED_INTERFACES+=("$iface")
+        BRIDGE_INTERFACES="$BRIDGE_INTERFACES $iface"
+      fi
+    done
+    
+    echo "Checking for common CNI bridges..."
+    # Check for common CNI bridges
+    for bridge in cni0 cbr0 cilium_host cilium_net br-int br0 docker0 neon-br0; do
+      if ip link show $bridge &>/dev/null; then
+        echo "Found CNI bridge: $bridge"
+        if [[ ! " ${DETECTED_INTERFACES[@]} " =~ " ${bridge} " ]]; then
+          DETECTED_INTERFACES+=("$bridge")
+          BRIDGE_INTERFACES="$BRIDGE_INTERFACES $bridge"
+        fi
+      fi
+    done
+    
+    echo "Scanning for vxlan interfaces..."
+    # Check for vxlan interfaces
+    for iface in $(ip link show type vxlan 2>/dev/null | grep -o -E '^[0-9]+: [^:]+' | awk '{print $2}' 2>/dev/null || echo ""); do
+      echo "Found vxlan interface: $iface"
+      if [[ ! " ${DETECTED_INTERFACES[@]} " =~ " ${iface} " ]]; then
+        DETECTED_INTERFACES+=("$iface")
+        BRIDGE_INTERFACES="$BRIDGE_INTERFACES $iface"
+      fi
+    done
+    
+    # Log detected interfaces
+    echo "Detected bridge/overlay interfaces on $NODE_NAME: $BRIDGE_INTERFACES"
+    
+    # If no interfaces found, check all interfaces
+    if [ -z "$BRIDGE_INTERFACES" ]; then
+      echo "No bridge interfaces found, will monitor all non-loopback interfaces"
+      echo "Listing all available interfaces:"
+      ip link show
+      
+      echo "Selecting all non-loopback interfaces..."
+      BRIDGE_INTERFACES=$(ip -o link show 2>/dev/null | grep -v "lo:" | awk -F': ' '{print $2}' | cut -d'@' -f1 2>/dev/null || echo "eth0")
+      echo "Selected interfaces: $BRIDGE_INTERFACES"
+    fi
+    
+    # Function to start tcpdump for an interface
+    start_tcpdump() {
+      local interface=$1
+      local output_dir="/captures/$NODE_NAME"
+      local max_size_mb=100
+      local rotate_count=5
+      
+      mkdir -p "$output_dir"
+      
+      echo "Starting tcpdump on interface $interface"
+      
+      # Run tcpdump with file rotation
+      tcpdump -i "$interface" -s 0 -n -w "$output_dir/$interface.pcap" -W "$rotate_count" -C "$max_size_mb" &
+      
+      # Store PID for potential cleanup
+      echo $! > "/captures/$NODE_NAME/$interface.pid"
+    }
+    
+    # Start tcpdump for each interface
+    for interface in $BRIDGE_INTERFACES; do
+      start_tcpdump "$interface"
+    done
+    
+    # Log summary
+    echo "tcpdump started on node $NODE_NAME for interfaces: $BRIDGE_INTERFACES"
+    echo "Capture files are stored in /captures/$NODE_NAME/"
+    
+    # Keep the container running
+    tail -f /dev/null

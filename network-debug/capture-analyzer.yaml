@@ -13,14 +13,13 @@ spec:
     targetPort: 8080
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: tcpdump-analyzer
   namespace: kube-system
   labels:
     app: tcpdump-analyzer
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: tcpdump-analyzer
@@ -38,29 +37,51 @@ spec:
         - /bin/sh
         - -c
         - /scripts/analyzer.sh
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 20
         volumeMounts:
-        - name: scripts
+        - name: analyzer-scripts
           mountPath: /scripts
-        - name: captures-pv
+        - name: server-scripts
+          mountPath: /tmp/server.py
+          subPath: server.py
+        - name: captures
           mountPath: /captures
       volumes:
-      - name: scripts
+      - name: analyzer-scripts
         configMap:
-          name: tcpdump-scripts
+          name: analyzer-scripts
           defaultMode: 0755
-      - name: captures-pv
-        persistentVolumeClaim:
-          claimName: tcpdump-captures-pvc
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: tcpdump-captures-pvc
-  namespace: kube-system
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-  storageClassName: local-path
+      - name: server-scripts
+        configMap:
+          name: analyzer-server
+          defaultMode: 0644
+      - name: captures
+        hostPath:
+          path: /var/log/tcpdump-captures
+          type: DirectoryOrCreate
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists
