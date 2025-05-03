@@ -11,6 +11,22 @@ spec:
   ports:
   - port: 80
     targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcpdump-analyzer-headless
+  namespace: kube-system
+  labels:
+    app: tcpdump-analyzer
+spec:
+  clusterIP: None
+  selector:
+    app: tcpdump-analyzer
+  ports:
+  - port: 8080
+    targetPort: 8080
 ---
 apiVersion: apps/v1
 kind: DaemonSet
