@@ -33,6 +33,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/gzip64"
 	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
@@ -112,6 +113,8 @@ type Config struct {
 	cpuScalingMode vmv1.CpuScalingMode
 	// System CPU architecture. Set automatically equal to runtime.GOARCH.
 	architecture string
+	// useVirtioConsole is a flag to use virtio console instead of serial console.
+	useVirtioConsole bool
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -125,11 +128,12 @@ func newConfig(logger *zap.Logger) *Config {
 		autoMovableRatio:     "",
 		cpuScalingMode:       "",
 		architecture:         runtime.GOARCH,
+		useVirtioConsole:     false,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
-		"Base64 encoded VirtualMachine json specification")
+		"Base64 gzip compressed VirtualMachine json specification")
 	flag.StringVar(&cfg.vmStatusDump, "vmstatus", cfg.vmStatusDump,
-		"Base64 encoded VirtualMachine json status")
+		"Base64 gzip compressed VirtualMachine json status")
 	flag.StringVar(&cfg.kernelPath, "kernelpath", cfg.kernelPath,
 		"Override path for kernel to use")
 	flag.StringVar(&cfg.appendKernelCmdline, "appendKernelCmdline",
@@ -142,6 +146,8 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
 		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
 	flag.Func("cpu-scaling-mode", "Set CPU scaling mode", cfg.cpuScalingMode.FlagFunc)
+	flag.BoolVar(&cfg.useVirtioConsole, "use-virtio-console",
+		cfg.useVirtioConsole, "Use virtio console instead of serial console")
 	flag.Parse()
 
 	if cfg.autoMovableRatio == "" {
@@ -165,11 +171,11 @@ func main() {
 func run(logger *zap.Logger) error {
 	cfg := newConfig(logger)
 
-	vmSpecJson, err := base64.StdEncoding.DecodeString(cfg.vmSpecDump)
+	vmSpecJson, err := gzip64.Decode(cfg.vmSpecDump)
 	if err != nil {
 		return fmt.Errorf("failed to decode VirtualMachine Spec dump: %w", err)
 	}
-	vmStatusJson, err := base64.StdEncoding.DecodeString(cfg.vmStatusDump)
+	vmStatusJson, err := gzip64.Decode(cfg.vmStatusDump)
 	if err != nil {
 		return fmt.Errorf("failed to decode VirtualMachine Status dump: %w", err)
 	}
@@ -331,8 +337,17 @@ func buildQEMUCmd(
 			"-device", "virtconsole,chardev=virtio-console",
 		)
 	case architectureAmd64:
-		// on amd we have multiple UART ports so we can just use serial stdio
-		qemuCmd = append(qemuCmd, "-serial", "stdio")
+		// UART port is used by default but it has performance issues.
+		// Virtio console is more performant.
+		if cfg.useVirtioConsole {
+			qemuCmd = append(qemuCmd,
+				"-chardev", "stdio,id=virtio-console",
+				"-device", "virtconsole,chardev=virtio-console",
+			)
+		} else {
+			// on amd we have multiple UART ports so we can just use serial stdio
+			qemuCmd = append(qemuCmd, "-serial", "stdio")
+		}
 	default:
 		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
@@ -449,7 +464,12 @@ func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMach
 		// use virtio-serial device kernel console
 		cmdlineParts = append(cmdlineParts, "console=hvc0")
 	case architectureAmd64:
-		cmdlineParts = append(cmdlineParts, "console=ttyS1")
+		// use virtio-serial device if virtio console is enabled
+		if cfg.useVirtioConsole {
+			cmdlineParts = append(cmdlineParts, "console=hvc0")
+		} else {
+			cmdlineParts = append(cmdlineParts, "console=ttyS1")
+		}
 	default:
 		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}

@@ -21,7 +21,6 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -55,6 +54,7 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/buildtag"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
+	"github.com/neondatabase/autoscaling/pkg/util/gzip64"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
 )
 
@@ -1385,6 +1385,10 @@ func podSpec(
 							cmd = append(cmd, "-skip-cgroup-management")
 						}
 
+						if config.UseVirtioConsole {
+							cmd = append(cmd, "-use-virtio-console")
+						}
+
 						memhpAutoMovableRatio := config.MemhpAutoMovableRatio
 						if specValue := vm.Spec.Guest.MemhpAutoMovableRatio; specValue != nil {
 							memhpAutoMovableRatio = *specValue
@@ -1399,8 +1403,8 @@ func podSpec(
 						// can get quite large)
 						cmd = append(
 							cmd,
-							"-vmspec", base64.StdEncoding.EncodeToString(vmSpecJson),
-							"-vmstatus", base64.StdEncoding.EncodeToString(vmStatusJson),
+							"-vmspec", gzip64.Encode(vmSpecJson),
+							"-vmstatus", gzip64.Encode(vmStatusJson),
 						)
 						// NB: We don't need to check if the value is nil because the default value
 						// was set in Reconcile

@@ -19,6 +19,9 @@ type ReconcilerConfig struct {
 	// to neonvm-runner.
 	DisableRunnerCgroup bool
 
+	// UseVirtioConsole, if true, uses virtio console instead of serial console.
+	UseVirtioConsole bool
+
 	MaxConcurrentReconciles int
 
 	// SkipUpdateValidationFor is the set of object names that we should ignore when doing webhook
