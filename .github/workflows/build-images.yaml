@@ -29,7 +29,6 @@ on:
         default: '["amd64","arm64"]'
 
     outputs:
-
       controller:
         description: 'neonvm-controller image'
         value: ${{ jobs.tags.outputs.controller }}
@@ -53,16 +52,14 @@ on:
         value: ${{ jobs.tags.outputs.cluster-autoscaler }}
 
 env:
-  IMG_CONTROLLER:         "neondatabase/neonvm-controller"
-  IMG_VXLAN_CONTROLLER:   "neondatabase/neonvm-vxlan-controller"
-  IMG_RUNNER:             "neondatabase/neonvm-runner"
-  IMG_KERNEL:             "neondatabase/vm-kernel"
-  IMG_SCHEDULER:          "neondatabase/autoscale-scheduler"
-  IMG_AUTOSCALER_AGENT:   "neondatabase/autoscaler-agent"
-  IMG_DAEMON:             "neondatabase/neonvm-daemon"
-  IMG_CLUSTER_AUTOSCALER: "neondatabase/cluster-autoscaler-neonvm"
-  ECR_DEV:                "369495373322.dkr.ecr.eu-central-1.amazonaws.com"
-  ECR_PROD:               "093970136003.dkr.ecr.eu-central-1.amazonaws.com"
+  IMG_CONTROLLER:         "neonvm-controller"
+  IMG_VXLAN_CONTROLLER:   "neonvm-vxlan-controller"
+  IMG_RUNNER:             "neonvm-runner"
+  IMG_SCHEDULER:          "autoscale-scheduler"
+  IMG_AUTOSCALER_AGENT:   "autoscaler-agent"
+  IMG_DAEMON:             "neonvm-daemon"
+  IMG_CLUSTER_AUTOSCALER: "cluster-autoscaler-neonvm"
+  GHCR_REGISTRY:          "ghcr.io/neondatabase"
 
 defaults:
   run:
@@ -89,13 +86,13 @@ jobs:
 
       - id: show-tags
         run: |
-          echo "controller=${IMG_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "vxlan-controller=${IMG_VXLAN_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "runner=${IMG_RUNNER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "scheduler=${IMG_SCHEDULER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "autoscaler-agent=${IMG_AUTOSCALER_AGENT}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${IMG_DAEMON}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "cluster-autoscaler=${IMG_CLUSTER_AUTOSCALER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "controller=${GHCR_REGISTRY}/${IMG_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${GHCR_REGISTRY}/${IMG_VXLAN_CONTROLLER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${GHCR_REGISTRY}/${IMG_RUNNER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${GHCR_REGISTRY}/${IMG_SCHEDULER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${GHCR_REGISTRY}/${IMG_AUTOSCALER_AGENT}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${GHCR_REGISTRY}/${IMG_DAEMON}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${GHCR_REGISTRY}/${IMG_CLUSTER_AUTOSCALER}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
   vm-kernel:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
@@ -120,6 +117,7 @@ jobs:
       GO_BASE_IMG: ${{ format('localhost:5000/neondatabase/autoscaling-go-base-{0}:dev', matrix.arch) }}
     permissions:
       contents: read  # This is required for actions/checkout
+      packages: write  # required for pushing to GHCR
     strategy:
       matrix:
         arch: ${{ fromJson(inputs.archs) }}
@@ -140,13 +138,13 @@ jobs:
       # job level tags with arch and tag
       - id: tags
         run: |
-          echo "controller=${IMG_CONTROLLER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "vxlan-controller=${IMG_VXLAN_CONTROLLER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "runner=${IMG_RUNNER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "scheduler=${IMG_SCHEDULER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "autoscaler-agent=${IMG_AUTOSCALER_AGENT}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "daemon=${IMG_DAEMON}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
-          echo "cluster-autoscaler=${IMG_CLUSTER_AUTOSCALER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "controller=${GHCR_REGISTRY}/${IMG_CONTROLLER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "vxlan-controller=${GHCR_REGISTRY}/${IMG_VXLAN_CONTROLLER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "runner=${GHCR_REGISTRY}/${IMG_RUNNER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "scheduler=${GHCR_REGISTRY}/${IMG_SCHEDULER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "autoscaler-agent=${GHCR_REGISTRY}/${IMG_AUTOSCALER_AGENT}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "daemon=${GHCR_REGISTRY}/${IMG_DAEMON}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
+          echo "cluster-autoscaler=${GHCR_REGISTRY}/${IMG_CLUSTER_AUTOSCALER}-${{ matrix.arch }}:${{ inputs.tag }}" | tee -a $GITHUB_OUTPUT
 
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -180,6 +178,13 @@ jobs:
         with:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to Docker cache registry
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
@@ -314,12 +319,11 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache,mode=max', matrix.arch) || '' }}
 
-
   merge-images:
     permissions:
-      id-token: write # This is required for aws-actions/configure-aws-credentials
-    needs: [build]
-    runs-on: ubuntu-latest
+      packages: write # required for pushing to GHCR
+    needs: [ build ]
+    runs-on: ubuntu-22.04
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
@@ -328,111 +332,109 @@ jobs:
 
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
-      - name: Login to Dockerhub
+      - name: Login to GHCR
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
-          username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
-          password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
-
-      - name: Configure dev AWS credentials
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
-        with:
-          aws-region: eu-central-1
-          mask-aws-account-id: true
-          role-to-assume: ${{ secrets.DEV_GHA_OIDC_ECR_ROLE }}
-
-      - name: Login to dev ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
-        with:
-          registry: ${{ env.ECR_DEV }}
-
-      - name: Configure prod AWS credentials
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
-        with:
-          aws-region: eu-central-1
-          mask-aws-account-id: true
-          role-to-assume: ${{ secrets.PROD_GHA_OIDC_ECR_ROLE }}
-
-      - name: Login to prod ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
-        with:
-          registry: ${{ env.ECR_PROD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create multi-arch images
         env:
           ARCHS: ${{ join(fromJson(inputs.archs), ' ') }}
           TAG: ${{ inputs.tag }}
         run: |
-          images=("${IMG_CONTROLLER}" \
-          "${IMG_VXLAN_CONTROLLER}" \
-          "${IMG_RUNNER}" \
-          "${IMG_SCHEDULER}" \
-          "${IMG_AUTOSCALER_AGENT}" \
-          "${IMG_DAEMON}" \
-          "${IMG_CLUSTER_AUTOSCALER}"
+          images=(
+            "${IMG_CONTROLLER}"
+            "${IMG_VXLAN_CONTROLLER}"
+            "${IMG_RUNNER}"
+            "${IMG_SCHEDULER}"
+            "${IMG_AUTOSCALER_AGENT}"
+            "${IMG_DAEMON}"
+            "${IMG_CLUSTER_AUTOSCALER}"
           )
+
           for image in "${images[@]}"; do
-            tags=("-t" "$image:$TAG")
+            tags=("-t" "${GHCR_REGISTRY}/${image}:${TAG}")
             for arch in ${ARCHS}; do
-              tags+=("$image-$arch:$TAG")
+              tags+=("${GHCR_REGISTRY}/${image}-${arch}:${TAG}")
             done
             docker buildx imagetools create "${tags[@]}"
           done
 
-      - name: Copy all merged images to ECR
-        if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
+  generate-image-maps:
+    needs: [ build ]
+    runs-on: ubuntu-22.04
+    outputs:
+      dev: ${{ steps.generate.outputs.dev }}
+      prod: ${{ steps.generate.outputs.prod }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github/scripts/generate_image_maps.py
+          sparse-checkout-cone-mode: false
+
+      - name: Generate Image Maps
+        id: generate
+        run: python3 .github/scripts/generate_image_maps.py
         env:
-          TAG: ${{ inputs.tag }}
-        run: |
           # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
-          images=("${IMG_CONTROLLER}" \
-          "${IMG_VXLAN_CONTROLLER}" \
-          "${IMG_RUNNER}" \
-          "${IMG_SCHEDULER}" \
-          "${IMG_AUTOSCALER_AGENT}" \
-          "${IMG_CLUSTER_AUTOSCALER}")
+          COMPONENTS:
+            '["${{ env.IMG_CONTROLLER }}",
+              "${{ env.IMG_VXLAN_CONTROLLER }}",
+              "${{ env.IMG_RUNNER }}",
+              "${{ env.IMG_SCHEDULER }}",
+              "${{ env.IMG_AUTOSCALER_AGENT }}",
+              "${{ env.IMG_CLUSTER_AUTOSCALER }}"]'
+          SOURCE_TAG: "${{ inputs.tag }}"
+          TARGET_TAG: "${{ inputs.tag }}"
+          DEV_ACR: "${{ vars.AZURE_DEV_REGISTRY_NAME }}"
+          PROD_ACR: "${{ vars.AZURE_PROD_REGISTRY_NAME }}"
+          DEV_AWS: "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}"
+          PROD_AWS: "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}"
+          AWS_REGION: "${{ vars.AWS_ECR_REGION }}"
 
-          for image in "${images[@]}"; do
-            # Remove "neondatabase/" prefix from image name
-            image_without_prefix=${image#neondatabase/}
-
-            image_from=${image}:${TAG}
-            image_ecr_dev="${ECR_DEV}/${image_without_prefix}:${TAG}"
-            image_ecr_prod="${ECR_PROD}/${image_without_prefix}:${TAG}"
-
-            echo "Copy ${image_from} to ${image_ecr_dev} (dev), and ${image_ecr_prod} (prod)"
-
-            docker buildx imagetools create -t ${image_ecr_dev} \
-                                            -t ${image_ecr_prod} \
-                                               ${image_from}
-          done
-
-  push-to-acr-dev:
+  push-to-dev:
     if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-    needs: [ merge-images ]
-    uses: ./.github/workflows/_push-to-acr.yaml
-    with:
-      client_id: ${{ vars.AZURE_DEV_CLIENT_ID }}
-      image_tag: ${{ inputs.tag }}
-      images: neonvm-controller neonvm-vxlan-controller neonvm-runner autoscale-scheduler autoscaler-agent cluster-autoscaler-neonvm
-      registry_name: ${{ vars.AZURE_DEV_REGISTRY_NAME }}
-      subscription_id: ${{ vars.AZURE_DEV_SUBSCRIPTION_ID }}
-      tenant_id: ${{ vars.AZURE_TENANT_ID }}
-    secrets: inherit
+    needs: [ merge-images, generate-image-maps ]
 
-  push-to-acr-prod:
-    if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-    needs: [ merge-images ]
-    uses: ./.github/workflows/_push-to-acr.yaml
-    with:
-      client_id: ${{ vars.AZURE_PROD_CLIENT_ID }}
-      images: neonvm-controller neonvm-vxlan-controller neonvm-runner autoscale-scheduler autoscaler-agent cluster-autoscaler-neonvm
-      image_tag: ${{ inputs.tag }}
-      registry_name: ${{ vars.AZURE_PROD_REGISTRY_NAME }}
-      tenant_id: ${{ vars.AZURE_TENANT_ID }}
-      subscription_id: ${{ vars.AZURE_PROD_SUBSCRIPTION_ID }}
+    permissions:
+      id-token: write  # Required for aws/azure login
+      packages: write  # required for pushing to GHCR
+
+    uses: ./.github/workflows/_push-to-container-registry.yml
     secrets: inherit
+    with:
+      image-map: "${{ needs.generate-image-maps.outputs.dev }}"
+      aws-region: "${{ vars.AWS_ECR_REGION }}"
+      aws-account-id: "${{ vars.NEON_DEV_AWS_ACCOUNT_ID }}"
+      aws-role-to-assume: "gha-oidc-ecr-rw"
+      azure-client-id: "${{ vars.AZURE_DEV_CLIENT_ID }}"
+      azure-subscription-id: "${{ vars.AZURE_DEV_SUBSCRIPTION_ID }}"
+      azure-tenant-id: "${{ vars.AZURE_TENANT_ID }}"
+      acr-registry-name: "${{ vars.AZURE_DEV_REGISTRY_NAME }}"
+
+  push-to-prod:
+    if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
+    needs: [ merge-images, generate-image-maps ]
+
+    permissions:
+      id-token: write  # Required for aws/azure login
+      packages: write  # required for pushing to GHCR
+
+    uses: ./.github/workflows/_push-to-container-registry.yml
+    secrets: inherit
+    with:
+      image-map: "${{ needs.generate-image-maps.outputs.prod }}"
+      aws-region: "${{ vars.AWS_ECR_REGION }}"
+      aws-account-id: "${{ vars.NEON_PROD_AWS_ACCOUNT_ID }}"
+      aws-role-to-assume: "gha-oidc-ecr-rw"
+      azure-client-id: "${{ vars.AZURE_PROD_CLIENT_ID }}"
+      azure-subscription-id: "${{ vars.AZURE_PROD_SUBSCRIPTION_ID }}"
+      azure-tenant-id: "${{ vars.AZURE_TENANT_ID }}"
+      acr-registry-name: "${{ vars.AZURE_PROD_REGISTRY_NAME }}"

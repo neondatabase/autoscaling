@@ -115,6 +115,7 @@ var _ = Describe("VirtualMachine controller", func() {
 					AtMostOnePod:            false,
 					DefaultCPUScalingMode:   vmv1.CpuScalingModeQMP,
 					NADConfig:               nil,
+					UseVirtioConsole:        true,
 				},
 				IPAM: nil,
 			}
