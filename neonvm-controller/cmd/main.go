@@ -105,6 +105,7 @@ func main() {
 	var failurePendingPeriod time.Duration
 	var failingRefreshInterval time.Duration
 	var atMostOnePod bool
+	var useVirtioConsole bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -148,6 +149,8 @@ func main() {
 	flag.BoolVar(&atMostOnePod, "at-most-one-pod", false,
 		"If true, the controller will ensure that at most one pod is running at a time. "+
 			"Otherwise, the outdated pod might be left to terminate, while the new one is already running.")
+	flag.BoolVar(&useVirtioConsole, "use-virtio-console", false,
+		"If true, the controller will set up the runner to use virtio console instead of serial console.")
 	flag.Parse()
 
 	logConfig := zap.NewProductionConfig()
@@ -200,6 +203,7 @@ func main() {
 		AtMostOnePod:            atMostOnePod,
 		DefaultCPUScalingMode:   defaultCpuScalingMode,
 		NADConfig:               controllers.GetNADConfig(),
+		UseVirtioConsole:        useVirtioConsole,
 	}
 
 	ipam, err := ipam.New(ipam.IPAMParams{

@@ -113,6 +113,8 @@ type Config struct {
 	cpuScalingMode vmv1.CpuScalingMode
 	// System CPU architecture. Set automatically equal to runtime.GOARCH.
 	architecture string
+	// useVirtioConsole is a flag to use virtio console instead of serial console.
+	useVirtioConsole bool
 }
 
 func newConfig(logger *zap.Logger) *Config {
@@ -126,6 +128,7 @@ func newConfig(logger *zap.Logger) *Config {
 		autoMovableRatio:     "",
 		cpuScalingMode:       "",
 		architecture:         runtime.GOARCH,
+		useVirtioConsole:     false,
 	}
 	flag.StringVar(&cfg.vmSpecDump, "vmspec", cfg.vmSpecDump,
 		"Base64 gzip compressed VirtualMachine json specification")
@@ -143,6 +146,8 @@ func newConfig(logger *zap.Logger) *Config {
 	flag.StringVar(&cfg.autoMovableRatio, "memhp-auto-movable-ratio",
 		cfg.autoMovableRatio, "Set value of kernel's memory_hotplug.auto_movable_ratio [virtio-mem only]")
 	flag.Func("cpu-scaling-mode", "Set CPU scaling mode", cfg.cpuScalingMode.FlagFunc)
+	flag.BoolVar(&cfg.useVirtioConsole, "use-virtio-console",
+		cfg.useVirtioConsole, "Use virtio console instead of serial console")
 	flag.Parse()
 
 	if cfg.autoMovableRatio == "" {
@@ -332,8 +337,17 @@ func buildQEMUCmd(
 			"-device", "virtconsole,chardev=virtio-console",
 		)
 	case architectureAmd64:
-		// on amd we have multiple UART ports so we can just use serial stdio
-		qemuCmd = append(qemuCmd, "-serial", "stdio")
+		// UART port is used by default but it has performance issues.
+		// Virtio console is more performant.
+		if cfg.useVirtioConsole {
+			qemuCmd = append(qemuCmd,
+				"-chardev", "stdio,id=virtio-console",
+				"-device", "virtconsole,chardev=virtio-console",
+			)
+		} else {
+			// on amd we have multiple UART ports so we can just use serial stdio
+			qemuCmd = append(qemuCmd, "-serial", "stdio")
+		}
 	default:
 		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
@@ -450,7 +464,12 @@ func makeKernelCmdline(cfg *Config, logger *zap.Logger, vmSpec *vmv1.VirtualMach
 		// use virtio-serial device kernel console
 		cmdlineParts = append(cmdlineParts, "console=hvc0")
 	case architectureAmd64:
-		cmdlineParts = append(cmdlineParts, "console=ttyS1")
+		// use virtio-serial device if virtio console is enabled
+		if cfg.useVirtioConsole {
+			cmdlineParts = append(cmdlineParts, "console=hvc0")
+		} else {
+			cmdlineParts = append(cmdlineParts, "console=ttyS1")
+		}
 	default:
 		logger.Fatal("unsupported architecture", zap.String("architecture", cfg.architecture))
 	}
