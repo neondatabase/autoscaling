@@ -473,7 +473,8 @@ k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
 	K3D_FIX_MOUNTS=1 $(K3D) cluster create $(CLUSTER_NAME) \
 		--config k3d/config.yaml \
 		--volume "$(PWD)/tests/logs:/logs@all" \
-		$(if $(USE_REGISTRIES_FILE),--registries-file=$(PWD)/k3d/registries.yaml)
+		$(if $(USE_REGISTRIES_FILE),--registry-config=k3d/registries.yaml) 
+		
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/cilium.yaml
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status daemonset  cilium
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status deployment cilium-operator
