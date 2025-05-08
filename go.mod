@@ -34,6 +34,8 @@ replace (
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.31.7
 	k8s.io/sample-cli-plugin => k8s.io/sample-cli-plugin v0.31.7
 	k8s.io/sample-controller => k8s.io/sample-controller v0.31.7
+	// Moved to the github.com/coder namespace: https://coder.com/blog/websocket
+	nhooyr.io/websocket => github.com/coder/websocket v1.8.7
 )
 
 require (
@@ -83,7 +85,7 @@ require (
 	k8s.io/client-go v0.31.7
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubernetes v1.31.7
-	nhooyr.io/websocket v1.8.7
+	nhooyr.io/websocket v0.0.0-00010101000000-000000000000
 	sigs.k8s.io/controller-runtime v0.19.7 // should match k8s dependencies versions
 )
 
