@@ -1,0 +1,12 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 20
+commands:
+  - script: |
+      set -eux
+      pod="$(kubectl get neonvm -n "$NAMESPACE" example -o jsonpath='{.status.podName}')"
+      swap="$(kubectl exec -n "$NAMESPACE" "$pod" -- ssh guest-vm cat /proc/meminfo | grep '^SwapTotal' | grep -oE '[[:digit:]]+ kB')"
+      swap_header_size="$(getconf PAGE_SIZE)"
+      # not quite 0.5Gi because of swap overhead.
+      swap_total=$(( ( 512*1024*1024 - swap_header_size ) / 1024 ))
+      [ "$swap" = "$swap_total kB" ]
