@@ -1,0 +1,615 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analyzer-server
+  namespace: kube-system
+data:
+  server.py: |
+    import http.server
+    import socketserver
+    import os
+    import glob
+    import datetime
+    import socket
+    import urllib.parse
+    import json
+    import time
+    import threading
+    import requests
+    from http.client import HTTPConnection
+    from urllib.error import URLError
+
+    # Get the node name from environment variable (set by Kubernetes Downward API)
+    # If not set, fall back to hostname
+    NODE_NAME = os.environ.get('NODE_NAME', socket.gethostname())
+    POD_NAME = socket.gethostname()
+    PORT = 8080
+    
+    # Headless service name for pod discovery
+    HEADLESS_SERVICE = "tcpdump-analyzer-headless.kube-system.svc.cluster.local"
+    
+    # Cache of discovered pods and their nodes
+    pod_cache = {}
+    pod_cache_lock = threading.Lock()
+    pod_cache_last_update = 0
+    POD_CACHE_TTL = 30  # seconds
+    
+    def discover_pods():
+        """Discover other analyzer pods using the headless service DNS"""
+        global pod_cache, pod_cache_last_update
+        
+        current_time = time.time()
+        with pod_cache_lock:
+            # Return cached results if they're fresh enough
+            if current_time - pod_cache_last_update < POD_CACHE_TTL and pod_cache:
+                return pod_cache
+        
+        try:
+            print(f"Discovering pods via DNS lookup of {HEADLESS_SERVICE}...")
+            pod_ips = {}
+            
+            # Resolve the headless service to get all pod IPs
+            try:
+                ips = socket.getaddrinfo(HEADLESS_SERVICE, PORT, socket.AF_INET, socket.SOCK_STREAM)
+                for ip_info in ips:
+                    ip = ip_info[4][0]
+                    if ip not in pod_ips:
+                        pod_ips[ip] = {"ip": ip, "status": "unknown"}
+            except socket.gaierror:
+                print(f"Warning: Could not resolve {HEADLESS_SERVICE}")
+            
+            # Skip further discovery if no pods were found
+            if not pod_ips:
+                print("No pods discovered via DNS")
+                with pod_cache_lock:
+                    pod_cache = {}
+                    pod_cache_last_update = current_time
+                return {}
+            
+            # Query each pod to get its node name
+            for ip, pod_info in pod_ips.items():
+                try:
+                    # Skip self
+                    if ip == get_own_ip():
+                        pod_info["node"] = NODE_NAME
+                        pod_info["status"] = "self"
+                        continue
+                    
+                    # Query the pod's /api/info endpoint
+                    url = f"http://{ip}:{PORT}/api/info"
+                    try:
+                        response = requests.get(url, timeout=2)
+                        if response.status_code == 200:
+                            info = response.json()
+                            pod_info["node"] = info.get("node", "unknown")
+                            pod_info["status"] = "up"
+                        else:
+                            pod_info["status"] = f"error-{response.status_code}"
+                    except requests.exceptions.RequestException as e:
+                        print(f"Error connecting to pod {ip}: {str(e)}")
+                        pod_info["status"] = "error"
+                except Exception as e:
+                    print(f"Error processing pod {ip}: {str(e)}")
+                    pod_info["status"] = "error"
+            
+            # Update the cache
+            with pod_cache_lock:
+                pod_cache = pod_ips
+                pod_cache_last_update = current_time
+            
+            print(f"Discovered {len(pod_ips)} pods: {json.dumps(pod_ips)}")
+            return pod_ips
+        except Exception as e:
+            print(f"Error during pod discovery: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {}
+    
+    def get_own_ip():
+        """Get the IP address of this pod"""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return "127.0.0.1"
+    
+    def get_all_capture_files():
+        """Get capture files from all nodes"""
+        all_files = {}
+        
+        # Get local capture files
+        local_files = get_local_capture_files()
+        if NODE_NAME not in all_files:
+            all_files[NODE_NAME] = []
+        all_files[NODE_NAME].extend(local_files)
+        
+        # Discover other pods
+        pods = discover_pods()
+        
+        # Get capture files from other pods
+        for ip, pod_info in pods.items():
+            if pod_info["status"] == "self" or pod_info["status"] != "up":
+                continue
+                
+            node = pod_info["node"]
+            if node not in all_files:
+                all_files[node] = []
+            
+            try:
+                url = f"http://{ip}:{PORT}/api/files"
+                response = requests.get(url, timeout=3)
+                if response.status_code == 200:
+                    remote_files = response.json()
+                    for file_info in remote_files:
+                        # Add source pod IP to the file info for proxying
+                        file_info["source_pod"] = ip
+                        all_files[node].append(file_info)
+            except Exception as e:
+                print(f"Error getting files from pod {ip}: {str(e)}")
+        
+        return all_files
+    
+    def get_local_capture_files():
+        """Get capture files from the local node"""
+        files = []
+        node_dir = f"/captures/{NODE_NAME}"
+        
+        if os.path.exists(node_dir):
+            for pcap_file in glob.glob(f"{node_dir}/*.pcap*"):
+                interface = os.path.basename(pcap_file).replace('.pcap', '').replace('.pcap0', '')
+                
+                stat = os.stat(pcap_file)
+                size = stat.st_size
+                size_mb = f"{size / (1024*1024):.2f} MB"
+                modified = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                
+                files.append({
+                    "interface": interface,
+                    "size": size_mb,
+                    "size_bytes": size,
+                    "modified": modified,
+                    "path": pcap_file,
+                    "local": True
+                })
+        
+        return files
+
+    class CaptureHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/':
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                
+                html = f"""
+                <html>
+                <head>
+                    <title>tcpdump Capture Analyzer</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        h1 {{ color: #333; }}
+                        h2 {{ color: #555; }}
+                        .node-section {{
+                            margin-bottom: 30px;
+                            border: 1px solid #ddd;
+                            border-radius: 5px;
+                            padding: 10px;
+                        }}
+                        .node-header {{
+                            background-color: #f5f5f5;
+                            padding: 10px;
+                            margin: -10px -10px 10px -10px;
+                            border-bottom: 1px solid #ddd;
+                            border-radius: 5px 5px 0 0;
+                        }}
+                        table {{ border-collapse: collapse; width: 100%; }}
+                        th, td {{ text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }}
+                        tr:hover {{ background-color: #f5f5f5; }}
+                        .actions {{ display: flex; gap: 10px; }}
+                        .button {{
+                            background-color: #4CAF50;
+                            color: white;
+                            padding: 8px 16px;
+                            text-decoration: none;
+                            border-radius: 4px;
+                            display: inline-block;
+                        }}
+                        .button.analyze {{ background-color: #2196F3; }}
+                        .status-indicator {{
+                            display: inline-block;
+                            width: 10px;
+                            height: 10px;
+                            border-radius: 50%;
+                            margin-right: 5px;
+                        }}
+                        .status-up {{ background-color: #4CAF50; }}
+                        .status-self {{ background-color: #2196F3; }}
+                        .status-error {{ background-color: #f44336; }}
+                        .status-unknown {{ background-color: #9e9e9e; }}
+                        .refresh-button {{
+                            background-color: #2196F3;
+                            color: white;
+                            border: none;
+                            padding: 8px 16px;
+                            text-align: center;
+                            text-decoration: none;
+                            display: inline-block;
+                            font-size: 14px;
+                            margin: 10px 0;
+                            cursor: pointer;
+                            border-radius: 4px;
+                        }}
+                    </style>
+                    <script>
+                        function refreshPage() {{
+                            window.location.reload();
+                        }}
+                        
+                        // Auto-refresh every 30 seconds
+                        setTimeout(refreshPage, 30000);
+                    </script>
+                </head>
+                <body>
+                    <h1>tcpdump Capture Analyzer</h1>
+                    
+                    <div>
+                        <p>This analyzer is running on pod <strong>{POD_NAME}</strong> on node <strong>{NODE_NAME}</strong>.</p>
+                        <p>Showing capture files from all nodes in the cluster.</p>
+                        <button class="refresh-button" onclick="refreshPage()">Refresh</button>
+                    </div>
+                    
+                    <h2>Capture Files</h2>
+                    {self.list_all_capture_files()}
+                </body>
+                </html>
+                """
+                
+                self.wfile.write(html.encode())
+                return
+            
+            elif self.path == '/api/info':
+                # Return information about this pod
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                
+                info = {
+                    "node": NODE_NAME,
+                    "pod": POD_NAME,
+                    "ip": get_own_ip()
+                }
+                
+                self.wfile.write(json.dumps(info).encode())
+                return
+                
+            elif self.path == '/api/files':
+                # Return list of capture files on this node
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                
+                files = get_local_capture_files()
+                self.wfile.write(json.dumps(files).encode())
+                return
+                
+            elif self.path == '/api/pods':
+                # Return list of discovered pods
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                
+                pods = discover_pods()
+                self.wfile.write(json.dumps(pods).encode())
+                return
+                
+            elif self.path.startswith('/proxy/download?'):
+                # Proxy download request to another pod
+                try:
+                    print(f"Proxy download request received: {self.path}")
+                    
+                    # Parse the query string
+                    query = urllib.parse.urlparse(self.path).query
+                    params = urllib.parse.parse_qs(query)
+                    
+                    if 'pod' not in params or 'file' not in params:
+                        self.send_error(400, "Missing required parameters: pod and file")
+                        return
+                    
+                    pod_ip = params['pod'][0]
+                    file_path = params['file'][0]
+                    
+                    print(f"Proxying download request to pod {pod_ip} for file {file_path}")
+                    
+                    # Forward the request to the target pod
+                    try:
+                        url = f"http://{pod_ip}:{PORT}/download?file={urllib.parse.quote(file_path)}"
+                        print(f"Sending request to: {url}")
+                        
+                        # Increase timeout for large files
+                        response = requests.get(url, stream=True, timeout=30)
+                        
+                        if response.status_code != 200:
+                            print(f"Target pod returned error: {response.status_code} {response.reason}")
+                            self.send_error(response.status_code, response.reason)
+                            return
+                        
+                        # Get content length if available
+                        content_length = response.headers.get('content-length')
+                        if content_length:
+                            content_length = int(content_length)
+                            print(f"Content length: {content_length} bytes")
+                            
+                            # Limit file size to 500MB to prevent issues
+                            if content_length > 500 * 1024 * 1024:
+                                print(f"File too large: {content_length} bytes")
+                                self.send_error(413, "File too large (max 500MB)")
+                                return
+                        
+                        # Forward the response headers
+                        self.send_response(200)
+                        for header, value in response.headers.items():
+                            if header.lower() in ('content-type', 'content-disposition', 'content-length'):
+                                self.send_header(header, value)
+                        self.end_headers()
+                        
+                        # Stream the response body with better error handling
+                        bytes_transferred = 0
+                        try:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                if chunk:
+                                    try:
+                                        self.wfile.write(chunk)
+                                        bytes_transferred += len(chunk)
+                                        
+                                        # Log progress for large files
+                                        if content_length and content_length > 10 * 1024 * 1024 and bytes_transferred % (5 * 1024 * 1024) < 8192:
+                                            print(f"Download progress: {bytes_transferred}/{content_length} bytes ({bytes_transferred*100//content_length}%)")
+                                    except (BrokenPipeError, ConnectionResetError) as e:
+                                        print(f"Client connection error during proxied download: {str(e)}")
+                                        return
+                        except (requests.exceptions.ChunkedEncodingError, requests.exceptions.ConnectionError) as e:
+                            print(f"Connection error while reading from source pod: {str(e)}")
+                            # Don't send error to client as headers are already sent
+                            return
+                            
+                        print(f"Proxied download completed for {file_path} from pod {pod_ip}: {bytes_transferred} bytes transferred")
+                    except requests.exceptions.RequestException as e:
+                        print(f"Error proxying request to pod {pod_ip}: {str(e)}")
+                        self.send_error(502, f"Error proxying request: {str(e)}")
+                except Exception as e:
+                    print(f"Error during proxy download: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    self.send_error(500, f"Internal server error: {str(e)}")
+                return
+            elif self.path.startswith('/download?file='):
+                try:
+                    print(f"Download request received: {self.path}")
+                    
+                    # Parse the file path from the query string
+                    query = urllib.parse.urlparse(self.path).query
+                    file_path = urllib.parse.parse_qs(query)['file'][0]
+                    print(f"Requested file path: {file_path}")
+                    
+                    # Validate the file path (must be in /captures directory)
+                    if not file_path.startswith('/captures/'):
+                        print(f"Access denied: Path does not start with /captures/: {file_path}")
+                        self.send_error(403, "Access denied")
+                        return
+                        
+                    if not os.path.exists(file_path):
+                        print(f"File not found: {file_path}")
+                        self.send_error(404, "File not found")
+                        return
+                    
+                    file_size = os.path.getsize(file_path)
+                    print(f"File exists, size: {file_size} bytes")
+                    
+                    # Limit file size to 500MB to prevent issues
+                    if file_size > 500 * 1024 * 1024:
+                        print(f"File too large: {file_size} bytes")
+                        self.send_error(413, "File too large (max 500MB)")
+                        return
+                    
+                    # Serve the file for download
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/octet-stream')
+                    self.send_header('Content-Length', str(file_size))
+                    self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(file_path)}"')
+                    # Add cache control headers to prevent caching issues
+                    self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                    self.send_header('Pragma', 'no-cache')
+                    self.send_header('Expires', '0')
+                    self.end_headers()
+                    
+                    # Read and send the file in chunks to avoid memory issues with large files
+                    bytes_transferred = 0
+                    try:
+                        with open(file_path, 'rb') as f:
+                            chunk_size = 8192  # 8KB chunks
+                            while True:
+                                try:
+                                    # Add timeout to read operation
+                                    chunk = f.read(chunk_size)
+                                    if not chunk:
+                                        break
+                                    
+                                    try:
+                                        self.wfile.write(chunk)
+                                        bytes_transferred += len(chunk)
+                                        
+                                        # Log progress for large files
+                                        if file_size > 10 * 1024 * 1024 and bytes_transferred % (5 * 1024 * 1024) < 8192:
+                                            print(f"Download progress: {bytes_transferred}/{file_size} bytes ({bytes_transferred*100//file_size}%)")
+                                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+                                        print(f"Client connection error during download: {str(e)}")
+                                        return
+                                except (TimeoutError, IOError) as e:
+                                    print(f"Error reading file: {str(e)}")
+                                    # Headers already sent, can't send error response
+                                    return
+                    except Exception as e:
+                        print(f"Unexpected error during file transfer: {str(e)}")
+                        # Headers already sent, can't send error response
+                        return
+                        
+                    print(f"File download completed: {file_path}, {bytes_transferred} bytes transferred")
+                    return
+                except Exception as e:
+                    print(f"Error during download: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    self.send_error(500, f"Internal server error: {str(e)}")
+                    return
+            else:
+                self.send_error(404, "File not found")
+                return
+        
+        def list_all_capture_files(self):
+            """List capture files from all nodes"""
+            all_files = get_all_capture_files()
+            files_html = []
+            
+            # Show pod discovery status
+            pods = discover_pods()
+            files_html.append("<div style='margin-bottom: 20px;'>")
+            files_html.append("<h3>Pod Discovery Status</h3>")
+            files_html.append("<table border='1' cellpadding='5' cellspacing='0' style='width: auto;'>")
+            files_html.append("<tr><th>Pod IP</th><th>Node</th><th>Status</th></tr>")
+            
+            for ip, pod_info in pods.items():
+                status_class = f"status-{pod_info['status']}" if pod_info['status'] in ['up', 'self', 'error'] else "status-unknown"
+                files_html.append("<tr>")
+                files_html.append(f"<td>{ip}</td>")
+                files_html.append(f"<td>{pod_info.get('node', 'unknown')}</td>")
+                files_html.append(f"<td><span class='status-indicator {status_class}'></span>{pod_info['status']}</td>")
+                files_html.append("</tr>")
+            
+            if not pods:
+                files_html.append("<tr><td colspan='3'>No pods discovered</td></tr>")
+            
+            files_html.append("</table>")
+            files_html.append("</div>")
+            
+            # No files found case
+            if not all_files:
+                files_html.append("<p>No capture files found on any node.</p>")
+                return "".join(files_html)
+            
+            # Show files from each node
+            for node, node_files in all_files.items():
+                if not node_files:
+                    continue
+                    
+                files_html.append(f"<div class='node-section'>")
+                files_html.append(f"<div class='node-header'><h3>Node: {node}</h3></div>")
+                
+                files_html.append("<table border='1' cellpadding='5' cellspacing='0'>")
+                files_html.append("<tr><th>Interface</th><th>Size</th><th>Last Modified</th><th>Actions</th></tr>")
+                
+                for file_info in node_files:
+                    interface = file_info["interface"]
+                    size = file_info["size"]
+                    modified = file_info["modified"]
+                    path = file_info["path"]
+                    
+                    files_html.append("<tr>")
+                    files_html.append(f"<td>{interface}</td>")
+                    files_html.append(f"<td>{size}</td>")
+                    files_html.append(f"<td>{modified}</td>")
+                    
+                    # For local files, use direct download
+                    if node == NODE_NAME:
+                        files_html.append(f"<td><a href='/download?file={path}' class='button'>Download</a></td>")
+                    else:
+                        # For remote files, use proxy download
+                        source_pod = file_info.get("source_pod", "")
+                        if source_pod:
+                            files_html.append(f"<td><a href='/proxy/download?pod={source_pod}&file={path}' class='button'>Download</a></td>")
+                        else:
+                            files_html.append(f"<td>Download unavailable</td>")
+                    
+                    files_html.append("</tr>")
+                
+                files_html.append("</table>")
+                files_html.append("</div>")
+            
+            return "".join(files_html)
+            
+        def list_capture_files(self):
+            """List capture files from the local node only (legacy method)"""
+            node_dir = f"/captures/{NODE_NAME}"
+            files_html = []
+            
+            if os.path.exists(node_dir):
+                pcap_files = glob.glob(f"{node_dir}/*.pcap*")
+                
+                if pcap_files:
+                    files_html.append("<table border='1' cellpadding='5' cellspacing='0'>")
+                    files_html.append("<tr><th>Interface</th><th>Size</th><th>Last Modified</th><th>Actions</th></tr>")
+                    
+                    for pcap_file in pcap_files:
+                        interface = os.path.basename(pcap_file).replace('.pcap', '').replace('.pcap0', '')
+                        
+                        stat = os.stat(pcap_file)
+                        size = f"{stat.st_size / (1024*1024):.2f} MB"
+                        modified = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        files_html.append("<tr>")
+                        files_html.append(f"<td>{interface}</td>")
+                        files_html.append(f"<td>{size}</td>")
+                        files_html.append(f"<td>{modified}</td>")
+                        files_html.append(f"<td><a href='/download?file={pcap_file}' class='button'>Download</a></td>")
+                        files_html.append("</tr>")
+                    
+                    files_html.append("</table>")
+                else:
+                    files_html.append("<p>No capture files found on this node.</p>")
+            else:
+                files_html.append(f"<p>Capture directory {node_dir} not found.</p>")
+            
+            return "".join(files_html)
+
+    print(f"Starting HTTP server on port {PORT}")
+    
+    # Add error handling for server startup and request handling
+    try:
+        # Allow reusing the address if the previous server crashed
+        socketserver.TCPServer.allow_reuse_address = True
+        
+        with socketserver.TCPServer(("", PORT), CaptureHandler) as httpd:
+            print(f"Serving at port {PORT}")
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                print("Server stopped by keyboard interrupt")
+            except Exception as e:
+                print(f"Server error: {str(e)}")
+                import traceback
+                traceback.print_exc()
+    except OSError as e:
+        if e.errno == 98:  # Address already in use
+            print(f"Error: Port {PORT} is already in use")
+            print("Trying to use a different port...")
+            
+            # Try a different port
+            for alt_port in range(PORT + 1, PORT + 10):
+                try:
+                    print(f"Attempting to start server on port {alt_port}...")
+                    with socketserver.TCPServer(("", alt_port), CaptureHandler) as httpd:
+                        print(f"Serving at port {alt_port}")
+                        httpd.serve_forever()
+                        break
+                except OSError:
+                    print(f"Port {alt_port} is also in use, trying next port...")
+        else:
+            print(f"Error starting server: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        import traceback
+        traceback.print_exc()
