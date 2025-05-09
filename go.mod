@@ -56,7 +56,6 @@ require (
 	github.com/go-logr/zapr v1.3.0
 	github.com/jpillora/backoff v1.0.0
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.4.0
-	github.com/k8snetworkplumbingwg/whereabouts v0.6.1
 	github.com/kdomanski/iso9660 v0.3.3
 	github.com/lithammer/shortuuid v3.0.0+incompatible
 	github.com/onsi/ginkgo/v2 v2.19.0
