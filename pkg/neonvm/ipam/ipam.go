@@ -37,7 +37,7 @@ const (
 	IpamRequestTimeout = 10 * time.Second
 
 	// QuarantinePeriod is the period that we quarantine IPs for.
-	QuarantinePeriod = 30 * time.Second
+	QuarantinePeriod = 300 * time.Second
 )
 
 var ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
