@@ -164,6 +164,10 @@ func TestIPAM(t *testing.T) {
 	require.NotNil(t, ip3)
 	assert.Equal(t, "10.100.123.3/24", ip3.String())
 
+	metrics := collectMetrics(t, params.prom)
+	assert.Contains(t, metrics, metricValue{Name: "ipam_allocations_size", Action: "", Outcome: "", Value: 3})
+	assert.Contains(t, metrics, metricValue{Name: "ipam_quarantine_size", Action: "", Outcome: "", Value: 1})
+
 	params.clock.Inc(2 * ipam.QuarantinePeriod)
 
 	// Allocate another IP - it is the second one
@@ -173,12 +177,14 @@ func TestIPAM(t *testing.T) {
 	require.NotNil(t, ip4)
 	assert.Equal(t, ip2, ip4)
 
-	metrics := collectMetrics(t, params.prom)
+	metrics = collectMetrics(t, params.prom)
 	assert.ElementsMatch(t, []metricValue{
 		{Name: "ipam_request_duration_seconds", Action: "acquire", Outcome: "success", Value: 5},
 		{Name: "ipam_request_duration_seconds", Action: "release", Outcome: "success", Value: 1},
 		{Name: "ipam_ongoing_requests", Action: "acquire", Outcome: "", Value: 0},
 		{Name: "ipam_ongoing_requests", Action: "release", Outcome: "", Value: 0},
+		{Name: "ipam_allocations_size", Action: "", Outcome: "", Value: 3},
+		{Name: "ipam_quarantine_size", Action: "", Outcome: "", Value: 0},
 	}, metrics)
 }
 

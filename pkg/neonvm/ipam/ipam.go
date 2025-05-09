@@ -274,6 +274,7 @@ func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, act
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("error updating IP pool: %w", err)
 	}
+	i.metrics.PoolChanged(pool.pool)
 	return ip, nil
 }
 

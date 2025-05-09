@@ -5,12 +5,15 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type IPAMMetrics struct {
-	ongoing  *prometheus.GaugeVec
-	duration *prometheus.HistogramVec
+	ongoing         *prometheus.GaugeVec
+	duration        *prometheus.HistogramVec
+	allocationsSize *prometheus.GaugeVec
+	quarantineSize  *prometheus.GaugeVec
 }
 
 type IPAMAction string
@@ -42,7 +45,20 @@ func NewIPAMMetrics(reg prometheus.Registerer) *IPAMMetrics {
 			Help:    "Duration of IPAM requests",
 			Buckets: buckets,
 		}, []string{"action", "outcome"})),
+		allocationsSize: util.RegisterMetric(reg, prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ipam_allocations_size",
+			Help: "Size of IPAM allocations map",
+		}, []string{"pool"})),
+		quarantineSize: util.RegisterMetric(reg, prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ipam_quarantine_size",
+			Help: "Size of IPAM quarantine list",
+		}, []string{"pool"})),
 	}
+}
+
+func (m *IPAMMetrics) PoolChanged(pool *v1.IPPool) {
+	m.allocationsSize.WithLabelValues(pool.Name).Set(float64(len(pool.Spec.Allocations)))
+	m.quarantineSize.WithLabelValues(pool.Name).Set(float64(len(pool.Spec.QuarantinedOffsets)))
 }
 
 type metricTimer struct {
