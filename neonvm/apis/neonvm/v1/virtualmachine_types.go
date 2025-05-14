@@ -38,9 +38,6 @@ const (
 	// the VM's name).
 	VirtualMachineNameLabel string = "vm.neon.tech/name"
 
-	// Label that determines the version of runner pod. May be missing on older runners
-	RunnerPodVersionLabel string = "vm.neon.tech/runner-version"
-
 	// VirtualMachineUsageAnnotation is the annotation added to each runner Pod, mirroring
 	// information about the resource allocations of the VM running in the pod.
 	//
