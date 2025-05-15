@@ -14,7 +14,8 @@ import (
 type cliFlags struct {
 	metricsAddr             string
 	probeAddr               string
-	enableLeaderElection    bool
+	leaderElection          leaderElectionCliFlags
+	k8sClient               k8sClientCliFlags
 	concurrencyLimit        int
 	skipUpdateValidationFor map[types.NamespacedName]struct{}
 	disableRunnerCgroup     bool
@@ -27,12 +28,38 @@ type cliFlags struct {
 	useVirtioConsole        bool
 }
 
+type leaderElectionCliFlags struct {
+	enable        bool
+	leaseDuration time.Duration
+	renewDeadline time.Duration
+	retryPeriod   time.Duration
+}
+
+type k8sClientCliFlags struct {
+	qps   int
+	burst int
+}
+
 func getCli() cliFlags {
 	metricsAddr := flag.String("metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	probeAddr := flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+
+	// leader election: Comments and defaults taken from the manager.Options fields in
+	// controller-runtime.
 	enableLeaderElection := flag.Bool("leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	leaderElectionLeaseDuration := flag.Duration("leader-election-lease-duration", 15*time.Second,
+		"The duration that non-leaders will wait to force acquire leadership.")
+	leaderElectionRenewDeadline := flag.Duration("leader-election-renew-deadline", 10*time.Second,
+		"The duration that the leader will retry refreshing leadership before giving up.")
+	leaderElectionRetryPeriod := flag.Duration("leader-election-retry-period", 2*time.Second,
+		"The duration leader election clients should wait between action attempts.")
+
+	// k8s client rate limits: Defaults taken from our hard-coded limits as of 2025-05-15.
+	k8sClientQPS := flag.Int("k8s-client-qps", 1000, "Client-side rate limit for k8s operations per second")
+	k8sClientBurst := flag.Int("k8s-client-burst", 2000, "Maximum k8s operations per second that can be bursted to")
+
 	concurrencyLimit := flag.Int("concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
 	skipUpdateValidationFor := namespacedNameSetFlag(
 		"skip-update-validation-for",
@@ -56,9 +83,18 @@ func getCli() cliFlags {
 	flag.Parse()
 
 	return cliFlags{
-		metricsAddr:             *metricsAddr,
-		probeAddr:               *probeAddr,
-		enableLeaderElection:    *enableLeaderElection,
+		metricsAddr: *metricsAddr,
+		probeAddr:   *probeAddr,
+		leaderElection: leaderElectionCliFlags{
+			enable:        *enableLeaderElection,
+			leaseDuration: *leaderElectionLeaseDuration,
+			renewDeadline: *leaderElectionRenewDeadline,
+			retryPeriod:   *leaderElectionRetryPeriod,
+		},
+		k8sClient: k8sClientCliFlags{
+			qps:   *k8sClientQPS,
+			burst: *k8sClientBurst,
+		},
 		concurrencyLimit:        *concurrencyLimit,
 		skipUpdateValidationFor: *skipUpdateValidationFor,
 		disableRunnerCgroup:     *disableRunnerCgroup,
