@@ -201,7 +201,6 @@ docker-build-controller: docker-build-go-base ## Build docker image for NeonVM c
 		--tag $(IMG_CONTROLLER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) \
-		--build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) \
 		--file neonvm-controller/Dockerfile \
 		.
 
