@@ -18,6 +18,18 @@ in use, although this can be overridden on an individual VM basis using the
 Assuming a plain upgrade (i.e. no additional features to enable), upgrading the kernel can be done
 with the following sequence of actions:
 
+After copying your old `.config` into the new kernel directory, you can:
+
+```sh
+# Quick upgrade using automatic defaults for new config options (non-interactive)
+make olddefconfig ARCH=x86_64  # or ARCH=arm64
+
+# OR
+
+# Interactively review all new config options 
+make oldconfig ARCH=x86_64  # or ARCH=arm64
+```
+
 ### On amd64 (x64)
 
 1. On the host, run:
