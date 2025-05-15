@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/neondatabase/autoscaling/pkg/agent/config"
 	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/watch"
 )
@@ -52,6 +53,7 @@ func StartSchedulerWatcher(
 	kubeClient *kubernetes.Clientset,
 	metrics watch.Metrics,
 	schedulerName string,
+	schedulerConfig config.SchedulerConfig,
 ) (*SchedulerTracker, error) {
 	logger := parentLogger.Named("watch-schedulers")
 
@@ -72,10 +74,8 @@ func StartSchedulerWatcher(
 				Instance: "Scheduler Pod",
 			},
 			// We don't need to be super responsive to scheduler changes.
-			//
-			// FIXME: make these configurable.
-			RetryRelistAfter: util.NewTimeRange(time.Second, 4, 5),
-			RetryWatchAfter:  util.NewTimeRange(time.Second, 4, 5),
+			RetryRelistAfter: schedulerConfig.RetryRelistIntervals.ToTimeRange(),
+			RetryWatchAfter:  schedulerConfig.RetryWatchIntervals.ToTimeRange(),
 		},
 		watch.Accessors[*corev1.PodList, corev1.Pod]{
 			Items: func(list *corev1.PodList) []corev1.Pod { return list.Items },
