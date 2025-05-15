@@ -103,15 +103,15 @@ func main() {
 
 	// tune k8s client for manager
 	cfg := ctrl.GetConfigOrDie()
-	cfg.QPS = 1000
-	cfg.Burst = 2000
+	cfg.QPS = float32(cli.k8sClient.qps)
+	cfg.Burst = cli.k8sClient.burst
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress: cli.metricsAddr,
 		},
 		HealthProbeBindAddress: cli.probeAddr,
-		LeaderElection:         cli.enableLeaderElection,
+		LeaderElection:         cli.leaderElection.enable,
 		LeaderElectionID:       "a3b22509.neon.tech",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -122,6 +122,10 @@ func main() {
 		// This option is only safe as long as the program immediately exits after the manager
 		// stops.
 		LeaderElectionReleaseOnCancel: true,
+
+		LeaseDuration: &cli.leaderElection.leaseDuration,
+		RenewDeadline: &cli.leaderElection.renewDeadline,
+		RetryPeriod:   &cli.leaderElection.retryPeriod,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
