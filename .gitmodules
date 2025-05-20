@@ -1,3 +1,3 @@
 [submodule "neonvm-kernel/neon-pagecache-kmod"]
 	path = neonvm-kernel/neon-pagecache-kmod
-	url = ssh://git@github.com:neondatabase-labs/christian-kernel-page-cache
+	url = ssh://git@github.com:neondatabase-labs/christian-kernel-page-cache.git
