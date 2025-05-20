@@ -209,6 +209,7 @@ jobs:
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
           docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz
+          docker cp ${ID}:/modules neonvm-kernel/modules
           docker rm -f ${ID}
 
       - name: Build go dependencies image
