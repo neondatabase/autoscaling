@@ -290,6 +290,7 @@ endif
 .PHONY: kernel
 kernel: ## Build linux kernel.
 	rm -f neonvm-kernel/vmlinuz; \
+	rm -rf neonvm-kernel/modules; \
 	linux_config=$$(ls neonvm-kernel/linux-config-*) \
 	kernel_version=$${linux_config##*-} \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
@@ -304,6 +305,7 @@ kernel: ## Build linux kernel.
 		neonvm-kernel; \
 	id=$$(docker create $$(cat $$iidfile)); \
 	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \
+	docker cp $$id:/modules neonvm-kernel/modules; \
 	docker rm -f $$id
 
 .PHONY: check-local-context
