@@ -157,6 +157,8 @@ func main() {
 		ConcurrencyLimit: max(1, cli.concurrencyLimit/4),
 
 		MetricsReg: metrics.Registry,
+
+		Clock: time.Now,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to create ipam")
