@@ -25,6 +25,12 @@ mount -t proc  proc  /proc
 mount -t sysfs sysfs /sys
 mount -t cgroup2 cgroup2 /sys/fs/cgroup
 
+# load kernel modules
+mkdir -p /lib/modules/$(uname -r)/kernel/extra/
+mount -t iso9660 -o ro,mode=0644 /dev/vdc /lib/modules/$(uname -r)/kernel/extra/
+## XXX avoid hard-coding list of kernel modules; supply list as a text file in the ISO, produced by neonvm-kernel/Dockerfile ?
+modprobe neon_pagecache
+
 # change kernel log level to DEBUG
 echo 7 > /proc/sys/kernel/printk
 
