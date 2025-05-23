@@ -74,7 +74,7 @@ func setupVMDisks(
 				discard = ",discard=unmap"
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, diskCacheSettings, discard))
-		case disk.ConfigMap != nil || disk.Secret != nil:
+		case disk.ConfigMap != nil || disk.Secret != nil || disk.Projected != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 			logger.Info("creating iso9660 image", zap.String("diskPath", dPath), zap.String("diskName", disk.Name), zap.String("mountPath", mnt))
@@ -206,7 +206,7 @@ func createISO9660runtime(
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount %s $(/neonvm/bin/blkid -L %s) %s`, opts, disk.Name, disk.MountPath))
 				// Note: chmod must be after mount, otherwise it gets overwritten by mount.
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
-			case disk.ConfigMap != nil || disk.Secret != nil:
+			case disk.ConfigMap != nil || disk.Secret != nil || disk.Projected != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/mount -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L %s) %s`, disk.Name, disk.MountPath))
 			case disk.Tmpfs != nil:
 				mounts = append(mounts, fmt.Sprintf(`/neonvm/bin/chmod 0777 %s`, disk.MountPath))
