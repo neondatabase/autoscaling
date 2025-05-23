@@ -6,6 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
@@ -22,16 +23,10 @@ func TestNormalizeScoreRandomization(t *testing.T) {
 	metricsPlugin := metrics.BuildPluginMetrics(registry, nil)
 
 	// Create a minimal enforcer with just enough dependencies to not crash
+	//nolint:exhaustruct // Only initializing fields needed for the test
 	enforcer := &AutoscaleEnforcer{
-		logger: zap.NewNop(),
-		state: &PluginState{
-			config: Config{
-				Scoring: ScoringConfig{
-					Randomize: true,
-				},
-			},
-		},
-		// Use the Framework field from the metrics plugin
+		logger:  zap.NewNop(),
+		state:   &PluginState{},
 		metrics: &metricsPlugin.Framework,
 	}
 
@@ -118,16 +113,10 @@ func TestMultipleNormalizeScoreRuns(t *testing.T) {
 	metricsPlugin := metrics.BuildPluginMetrics(registry, nil)
 
 	// Create a minimal enforcer with just enough dependencies to not crash
+	//nolint:exhaustruct // Only initializing fields needed for the test
 	enforcer := &AutoscaleEnforcer{
-		logger: zap.NewNop(),
-		state: &PluginState{
-			config: Config{
-				Scoring: ScoringConfig{
-					Randomize: true,
-				},
-			},
-		},
-		// Use the Framework field from the metrics plugin
+		logger:  zap.NewNop(),
+		state:   &PluginState{},
 		metrics: &metricsPlugin.Framework,
 	}
 
