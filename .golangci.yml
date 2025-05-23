@@ -42,6 +42,7 @@ linters:
     - nolintlint       # bad "nolint" directives
     - predeclared      # no identifiers in Go's list of predeclared identifiers, see <https://go.dev/ref/spec#Predeclared_identifiers>
     - unparam          # no unused function parameters or return values
+    - misspell         # checks commonly misspelled English words
 
 linters-settings:
   # see: <https://golangci-lint.run/usage/linters/#dupword>, <https://github.com/Abirdcfly/dupword>
@@ -116,3 +117,8 @@ linters-settings:
     allow-unused: false
     require-explanation: true
     require-specific: true
+
+  # see: <https://golangci-lint.run/usage/linters/#misspell>
+  misspell:
+    locale: US
+    ignore-words: []
