@@ -4,3 +4,8 @@ bin/
 testbin/
 
 rendered_manifests
+
+# When working on kernel patches locally, don't try to include the entire kernel source in the
+# docker context. See neonvm-kernel/.gitignore for more.
+neonvm-kernel/kernel-*/
+neonvm-kernel/linux-*.tar.xz

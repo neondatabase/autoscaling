@@ -47,6 +47,11 @@ RUN set -e \
     && echo "unpacking kernel archive" \
     && tar --strip-components=1 -C linux-${KERNEL_VERSION} -xf linux-${KERNEL_VERSION}.tar.xz
 
+# Apply any patches
+COPY patches patches
+RUN set -e \
+    && cd linux-${KERNEL_VERSION} \
+    && for f in $(ls -1 ../patches | sort); do echo "Applying $f..."; patch -p1 < ../patches/$f; done
 
 
 ### Cross-compilation related steps

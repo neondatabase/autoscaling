@@ -1,0 +1,63 @@
+diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
+--- a/arch/x86/mm/init_64.c	2025-06-03 12:28:16.295867043 +0100
++++ b/arch/x86/mm/init_64.c	2025-06-03 12:26:37.513837290 +0100
+@@ -576,8 +576,10 @@
+ 		}
+ 
+ 		pte = alloc_low_page();
+-		if (!pte)
++		if (!pte) {
++			printk(KERN_INFO "NEON DEBUG: alloc_low_page() pte failed");
+ 			return 0; // allocation failed
++		}
+ 		paddr_last = phys_pte_init(pte, paddr, paddr_end, new_prot, init);
+ 		BUG_ON(!paddr_last);
+ 
+@@ -669,8 +671,10 @@
+ 		}
+ 
+ 		pmd = alloc_low_page();
+-		if (!pmd)
++		if (!pmd) {
++			printk(KERN_INFO "NEON DEBUG: alloc_low_page() pmd failed");
+ 			return 0; // allocation failed
++		}
+ 		paddr_last = phys_pmd_init(pmd, paddr, paddr_end,
+ 					   page_size_mask, prot, init);
+ 
+@@ -731,8 +735,10 @@
+ 		}
+ 
+ 		pud = alloc_low_page();
+-		if (!pud)
++		if (!pud) {
++			printk(KERN_INFO "NEON DEBUG: alloc_low_page() pud failed");
+ 			return 0; // allocation failed
++		}
+ 		paddr_last = phys_pud_init(pud, paddr, __pa(vaddr_end),
+ 					   page_size_mask, prot, init);
+ 
+@@ -779,8 +785,10 @@
+ 		}
+ 
+ 		p4d = alloc_low_page();
+-		if (!p4d)
++		if (!p4d) {
++			printk(KERN_INFO "NEON DEBUG: alloc_low_page() p4d failed");
+ 			return 0; // allocation failed
++		}
+ 		paddr_last = phys_p4d_init(p4d, __pa(vaddr), __pa(vaddr_end),
+ 					   page_size_mask, prot, init);
+ 
+@@ -1007,8 +1015,10 @@
+ 	unsigned long start_pfn = start >> PAGE_SHIFT;
+ 	unsigned long nr_pages = size >> PAGE_SHIFT;
+ 
+-	if (!init_memory_mapping(start, start + size, params->pgprot))
++	if (!init_memory_mapping(start, start + size, params->pgprot)) {
++		printk(KERN_INFO "NEON DEBUG: init_memory_mapping() failed with supposed OOM");
+ 		return -ENOMEM;
++	}
+ 
+ 	return add_pages(nid, start_pfn, nr_pages, params);
+ }
