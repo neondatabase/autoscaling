@@ -4,7 +4,7 @@
 #
 # Example usage:
 #
-#   echo "Using version $(./get-version.sh)"
+#   echo "Using version $(./echo-version.sh)"
 
 set -eu -o pipefail
 
