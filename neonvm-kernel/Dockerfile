@@ -44,7 +44,7 @@ RUN set -e \
     && rm arg-check-succeeded \
     && mkdir -p linux-${KERNEL_VERSION} \
     && echo "downloading linux-${KERNEL_VERSION}.tar.xz" \
-    && curl -sfL "$(./echo-source-url.sh "${KERNEL_VERSION}")" -o "linux-${KENREL_VERSION}.tar.xz" \
+    && curl -sfL "$(./echo-source-url.sh "${KERNEL_VERSION}")" -o "linux-${KERNEL_VERSION}.tar.xz" \
     && echo "unpacking kernel archive" \
     && tar --strip-components=1 -C linux-${KERNEL_VERSION} -xf linux-${KERNEL_VERSION}.tar.xz
 
