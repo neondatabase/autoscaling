@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
@@ -53,7 +52,7 @@ type PluginState struct {
 	// We use this when scoring pod placements.
 	maxNodeMem api.Bytes
 
-	metrics metrics.Plugin
+	metrics *metrics.Plugin
 
 	requeuePod      func(uid types.UID) error
 	requeueNode     func(nodeName string) error
@@ -81,15 +80,13 @@ type nodeState struct {
 func NewPluginState(
 	config Config,
 	vmClient vmclient.Interface,
-	reg prometheus.Registerer,
+	metrics *metrics.Plugin,
 	podWatchStore *watch.Store[corev1.Pod],
 	nodeWatchStore *watch.Store[corev1.Node],
 ) *PluginState {
 	crudTimeout := time.Second * time.Duration(config.K8sCRUDTimeoutSeconds)
 
 	indexedNodeStore := watch.NewIndexedStore(nodeWatchStore, watch.NewFlatNameIndex[corev1.Node]())
-
-	metrics := metrics.BuildPluginMetrics(config.NodeMetricLabels, reg)
 
 	return &PluginState{
 		mu: sync.Mutex{},

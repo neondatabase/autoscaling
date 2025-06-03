@@ -50,7 +50,7 @@ func (m *Framework) IncReserveOverBudget(ignored bool, node *state.Node) {
 	m.reserveOverBudget.WithLabelValues(labelValues...).Inc()
 }
 
-func buildSchedFrameworkMetrics(labels nodeLabeling, reg prometheus.Registerer) Framework {
+func buildSchedFrameworkMetrics(reg prometheus.Registerer, labels nodeLabeling) Framework {
 	reserveLabels := []string{"node"}
 	reserveLabels = append(reserveLabels, labels.metricLabelNames...)
 	reserveLabels = append(reserveLabels, "ignored_namespace")
