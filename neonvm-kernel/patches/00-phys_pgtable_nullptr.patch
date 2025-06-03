@@ -1,18 +1,22 @@
 diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
 --- a/arch/x86/mm/init_64.c	2025-05-02 06:59:33.000000000 +0100
-+++ b/arch/x86/mm/init_64.c	2025-06-03 12:25:46.532789127 +0100
-@@ -576,7 +576,10 @@
++++ b/arch/x86/mm/init_64.c	2025-06-03 19:31:29.734581461 +0100
+@@ -576,7 +576,14 @@
  		}
  
  		pte = alloc_low_page();
 +		if (!pte)
-+			return 0; // allocation failed
++			return 0;
  		paddr_last = phys_pte_init(pte, paddr, paddr_end, new_prot, init);
++		/*
++		 * phys_{pmd,pud,p4d}_init return zero if allocation failed.
++		 * phys_pte_init makes no allocations, so should not return zero.
++		 */
 +		BUG_ON(!paddr_last);
  
  		spin_lock(&init_mm.page_table_lock);
  		pmd_populate_kernel_init(&init_mm, pmd, pte, init);
-@@ -590,7 +593,7 @@
+@@ -590,7 +597,7 @@
   * Create PUD level page table mapping for physical addresses. The virtual
   * and physical address do not have to be aligned at this level. KASLR can
   * randomize virtual addresses up to this level.
@@ -21,7 +25,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
   */
  static unsigned long __meminit
  phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
-@@ -629,6 +632,8 @@
+@@ -629,6 +636,8 @@
  							   paddr_end,
  							   page_size_mask,
  							   prot, init);
@@ -30,15 +34,20 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  				continue;
  			}
  			/*
-@@ -664,12 +669,17 @@
+@@ -664,12 +673,22 @@
  		}
  
  		pmd = alloc_low_page();
 +		if (!pmd)
-+			return 0; // allocation failed
++			return 0;
  		paddr_last = phys_pmd_init(pmd, paddr, paddr_end,
  					   page_size_mask, prot, init);
  
++		/*
++		 * We might have !paddr_last if allocation failed, but we should still
++		 * update pud before bailing, so that subsequent retries can pick up on
++		 * progress (here and in phys_pmd_init) without leaking pmd.
++		 */
  		spin_lock(&init_mm.page_table_lock);
  		pud_populate_init(&init_mm, pud, pmd, init);
  		spin_unlock(&init_mm.page_table_lock);
@@ -48,7 +57,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  	}
  
  	update_page_count(PG_LEVEL_1G, pages);
-@@ -715,16 +725,23 @@
+@@ -715,16 +734,26 @@
  			pud = pud_offset(p4d, 0);
  			paddr_last = phys_pud_init(pud, paddr, __pa(vaddr_end),
  					page_size_mask, prot, init);
@@ -59,7 +68,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  
  		pud = alloc_low_page();
 +		if (!pud)
-+			return 0; // allocation failed
++			return 0;
  		paddr_last = phys_pud_init(pud, paddr, __pa(vaddr_end),
  					   page_size_mask, prot, init);
  
@@ -67,40 +76,46 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  		p4d_populate_init(&init_mm, p4d, pud, init);
  		spin_unlock(&init_mm.page_table_lock);
 +
++		/*
++		 * Bail only after updating p4d to keep progress from pud across retries.
++		 */
 +		if (!paddr_last)
-+			return 0; // allocation failed
++			return 0;
  	}
  
  	return paddr_last;
-@@ -756,10 +773,14 @@
+@@ -756,10 +785,14 @@
  						   __pa(vaddr_end),
  						   page_size_mask,
  						   prot, init);
 +			if (!paddr_last)
-+				return 0; // allocation failed
++				return 0;
  			continue;
  		}
  
  		p4d = alloc_low_page();
 +		if (!p4d)
-+			return 0; // allocation failed
++			return 0;
  		paddr_last = phys_p4d_init(p4d, __pa(vaddr), __pa(vaddr_end),
  					   page_size_mask, prot, init);
  
-@@ -771,7 +792,12 @@
+@@ -771,7 +804,15 @@
  					  (pud_t *) p4d, init);
  
  		spin_unlock(&init_mm.page_table_lock);
 +
++		/*
++		 * Bail only after updating pgd/p4d to keep progress from p4d across retries.
++		 */
 +		if (!paddr_last)
-+			return 0; // allocation failed
++			return 0;
 +
  		pgd_changed = true;
 +
  	}
  
  	if (pgd_changed)
-@@ -785,7 +811,8 @@
+@@ -785,7 +826,8 @@
   * Create page table mapping for the physical memory for specific physical
   * addresses. Note that it can only be used to populate non-present entries.
   * The virtual and physical addresses have to be aligned on PMD level
@@ -110,7 +125,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
   */
  unsigned long __meminit
  kernel_physical_mapping_init(unsigned long paddr_start,
-@@ -980,7 +1007,8 @@
+@@ -980,7 +1022,8 @@
  	unsigned long start_pfn = start >> PAGE_SHIFT;
  	unsigned long nr_pages = size >> PAGE_SHIFT;
  
