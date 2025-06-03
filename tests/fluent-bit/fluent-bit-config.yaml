@@ -55,16 +55,6 @@ data:
         # Optionally turn On to include annotations
         Annotations       Off
 
-  output-file.conf: |
-    [OUTPUT]
-        Name              file
-        Match             pod.*
-        Path              /logs/
-        # File key removed, filename defaults to rewritten tag
-        # Use plain format
-        Format            plain
-
-  # Add the rewrite tag filter definition here
   filter-rewrite-tag.conf: |
     [FILTER]
         Name                rewrite_tag
@@ -77,6 +67,15 @@ data:
         # Keep - Keep the original record after rewriting the tag.
         Rule  $kubernetes['pod_name'] ^(.+)$ pod.$1 true
         Emitter_Name re_emitted
+
+  output-file.conf: |
+    [OUTPUT]
+        Name              file
+        Match             pod.*
+        Path              /logs/
+        # File key removed, filename defaults to rewritten tag
+        # Use plain format
+        Format            plain
 
   parsers.conf: |
     [PARSER]

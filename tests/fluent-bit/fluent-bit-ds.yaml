@@ -80,5 +80,5 @@ spec:
         securityContext:
           # Required to read log files owned by root and others
           runAsUser: 0
-          # Optional: runAsGroup: 0
-          privileged: true # Often required for access to /var/log and device drivers 
+          # Often required for access to /var/log and device drivers
+          privileged: true
