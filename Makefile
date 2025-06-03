@@ -458,7 +458,7 @@ kind-setup: kind kubectl logs-dir-setup ## Create local cluster by kind tool and
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n kube-system rollout status deployment metrics-server
 
 .PHONY: kind-destroy
-kind-destroy: kind kind-destroy-cluster logs-dir-destroy
+kind-destroy: kind kind-destroy-cluster logs-dir-cleanup
 
 .PHONY: kind-destroy-cluster
 kind-destroy-cluster:
@@ -483,7 +483,7 @@ k3d-setup: k3d kubectl logs-dir-setup ## Create local cluster by k3d tool and pr
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/certs.yaml
 
 .PHONY: k3d-destroy
-k3d-destroy: k3d k3d-destroy-cluster logs-dir-destroy
+k3d-destroy: k3d k3d-destroy-cluster logs-dir-cleanup
 
 .PHONY: k3d-destroy-cluster
 k3d-destroy-cluster:
@@ -500,9 +500,9 @@ deploy-fluent-bit: kubectl
 	$(KUBECTL) apply -f tests/fluent-bit/
 	$(KUBECTL) -n kube-system rollout status daemonset fluent-bit
 
-.PHONY: logs-dir-destroy
-logs-dir-destroy:
-	@rm -rf tests/logs
+.PHONY: logs-dir-cleanup
+logs-dir-cleanup:
+	@rm -rf tests/logs/*
 
 ##@ Build Dependencies
 
