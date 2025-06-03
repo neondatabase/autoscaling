@@ -1,6 +1,15 @@
 diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
 --- a/arch/x86/mm/init_64.c	2025-05-02 06:59:33.000000000 +0100
-+++ b/arch/x86/mm/init_64.c	2025-06-03 19:31:29.734581461 +0100
++++ b/arch/x86/mm/init_64.c	2025-06-03 19:42:59.899204421 +0100
+@@ -504,7 +504,7 @@
+ /*
+  * Create PMD level page table mapping for physical addresses. The virtual
+  * and physical address have to be aligned at this level.
+- * It returns the last physical address mapped.
++ * It returns the last physical address mapped, or zero if allocation failed.
+  */
+ static unsigned long __meminit
+ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
 @@ -576,7 +576,14 @@
  		}
  
