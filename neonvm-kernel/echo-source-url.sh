@@ -4,7 +4,7 @@
 #
 # Example usage:
 #
-#   curl "$(./get-version-url 6.12.26)" -o linux-6.12.26.tar.xz
+#   curl "$(./echo-source-url 6.12.26)" -o linux-6.12.26.tar.xz
 
 set -eu -o pipefail
 
