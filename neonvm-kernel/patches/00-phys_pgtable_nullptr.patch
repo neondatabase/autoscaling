@@ -1,5 +1,5 @@
 diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
---- a/arch/x86/mm/init_64.c	2025-06-03 12:24:30.043215712 +0100
+--- a/arch/x86/mm/init_64.c	2025-05-02 06:59:33.000000000 +0100
 +++ b/arch/x86/mm/init_64.c	2025-06-03 12:25:46.532789127 +0100
 @@ -576,7 +576,10 @@
  		}
@@ -121,7 +121,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  	return add_pages(nid, start_pfn, nr_pages, params);
  }
 diff -ru a/arch/x86/mm/init.c b/arch/x86/mm/init.c
---- a/arch/x86/mm/init.c	2025-06-03 12:24:30.043215712 +0100
+--- a/arch/x86/mm/init.c	2025-05-02 06:59:33.000000000 +0100
 +++ b/arch/x86/mm/init.c	2025-06-02 19:40:35.351712227 +0100
 @@ -533,6 +533,7 @@
   * Setup the direct mapping of the physical memory at PAGE_OFFSET.

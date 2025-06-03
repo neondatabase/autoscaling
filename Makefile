@@ -290,8 +290,7 @@ endif
 .PHONY: kernel
 kernel: ## Build linux kernel.
 	rm -f neonvm-kernel/vmlinuz; \
-	linux_config=$$(ls neonvm-kernel/linux-config-*) \
-	kernel_version=$${linux_config##*-} \
+	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
 	docker buildx build \
@@ -305,6 +304,53 @@ kernel: ## Build linux kernel.
 	id=$$(docker create $$(cat $$iidfile)); \
 	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \
 	docker rm -f $$id
+
+.PHONY: kernel-source
+kernel-source: ## Download the current kernel source and expand existing patches
+	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
+	mkdir -p "neonvm-kernel/sources"; \
+	file="neonvm-kernel/sources/linux-$${kernel_version}.tar.xz"; \
+	dir="neonvm-kernel/sources/linux-$${kernel_version}"; \
+	test -f "$$file" || ( \
+		set -x ; curl -fL "$$(neonvm-kernel/echo-source-url.sh "$$kernel_version")" -o "$$file" \
+	); \
+	( set -x ; rm -rf "$$dir"; mkdir -p "$$dir/base" ); \
+	(set -x ; tar --strip-components=1 -C "$$dir/base" -xf "$$file" ); \
+	if [ -d neonvm-kernel/patches ]; then \
+		last="base"; \
+		for p in $$(ls -1 neonvm-kernel/patches | sort); do \
+			d="$${p%%.patch}"; \
+			( set -x; \
+				cp --preserve --recursive "$$dir/$$last" "$$dir/$$d"; \
+				patch --set-utc --force --strip=1 -d "$$dir/$$d" < "neonvm-kernel/patches/$$p"; \
+			); \
+			last="$$d"; \
+		done \
+	fi \
+
+.PHONY: kernel-patches
+kernel-patches: ## Generate kernel patch files from diffs in source directories
+	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
+	file="linux-$${kernel_version}.tar.xz"; \
+	dir="$$(pwd)/neonvm-kernel/sources/linux-$${kernel_version}"; \
+	( set -x ; test -d "$$dir" ); \
+	rm -rf "neonvm-kernel/patches"; \
+	mkdir -p "neonvm-kernel/patches"; \
+	tmpdir="$$(mktemp -d /tmp/neonvm-kernel-diff-XXXXXX)"; \
+	trap "rm -r $$tmpdir" EXIT; \
+	for d in $$(ls -1 "$$dir" | sort); do \
+		if [ "$$d" = "base" ]; then \
+			continue; \
+		fi; \
+		if [ ! -d "$$tmpdir/b" ]; then \
+			ln -s "$$dir/base" "$$tmpdir/a"; \
+		else \
+			rm "$$tmpdir/a"; \
+			mv "$$tmpdir/b" "$$tmpdir/a"; \
+		fi; \
+		ln -s "$$dir/$$d" "$$tmpdir/b"; \
+		( cd "$$tmpdir" && { diff -ru a b || true; } ) > neonvm-kernel/patches/$$d.patch; \
+	done
 
 .PHONY: check-local-context
 check-local-context: ## Asserts that the current kubectl context is pointing at k3d or kind, to avoid accidentally applying to prod

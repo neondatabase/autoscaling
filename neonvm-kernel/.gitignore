@@ -1,6 +1,5 @@
 vmlinuz
 
-# When working on kernel patches locally, it's sometimes helpful to download the source to this
-# directory. If it's not excluded from git, certain operations become unexpectedly VERY expensive.
-kernel-*/
-linux-*.tar.xz
+# Exclude files for local kernel development.
+# Otherwise certain git operations become unexpectedly very expensive.
+sources/
