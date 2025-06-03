@@ -54,6 +54,8 @@ jobs:
     permissions:
       id-token: write  # Required for aws/azure login
       packages: write  # required for pushing to GHCR
+    # Azure OIDC configuration requires the environment to be set to push images on git tags
+    environment: ${{ inputs.azure-client-id == vars.AZURE_PROD_CLIENT_ID && 'prod' || 'dev' }}-azure-eastus2
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
