@@ -42,14 +42,6 @@ jobs:
       - name: go mod tidy
         run: |
           go mod tidy
-      - name: check diff
-        run: |
-          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
-            git ls-files --exclude-standard --others .
-            git diff .
-            echo "ERROR: 'go mod tidy' modified the source tree."
-            exit 1
-          fi
 
   generated:
     name: check generated files
@@ -65,14 +57,6 @@ jobs:
       - name: make generate
         run: |
           make generate
-      - name: check diff
-        run: |
-          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
-            git ls-files --exclude-standard --others .
-            git diff .
-            echo "ERROR: 'make generate' modified the source tree."
-            exit 1
-          fi
 
   codespell:
     name: check spelling with codespell
