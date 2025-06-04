@@ -65,16 +65,14 @@ type IPAMParams struct {
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAMWithMetrics(ctx, makeAcquireAction(ctx, vmName), IPAMAcquire)
-	if err != nil {
+	ip := i.runIPAMWithMetrics(ctx, makeAcquireAction(ctx, vmName), IPAMAcquire) handle err {
 		return net.IPNet{}, fmt.Errorf("failed to acquire IP: %w", err)
 	}
 	return ip, nil
 }
 
 func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAMWithMetrics(ctx, makeReleaseAction(ctx, vmName), IPAMRelease)
-	if err != nil {
+	ip := i.runIPAMWithMetrics(ctx, makeReleaseAction(ctx, vmName), IPAMRelease) handle err {
 		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
 	}
 	return ip, nil
@@ -83,8 +81,7 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.
 // New returns a new IPAM object with ipam config and k8s/crd clients
 func New(params IPAMParams) (*IPAM, error) {
 	// get Kubernetes client config
-	cfg, err := config.GetConfig()
-	if err != nil {
+	cfg := config.GetConfig() handle err {
 		return nil, fmt.Errorf("error building kubernetes configuration: %w", err)
 	}
 
@@ -92,8 +89,7 @@ func New(params IPAMParams) (*IPAM, error) {
 	cfg.QPS = KubernetesClientQPS
 	cfg.Burst = KubernetesClientBurst
 
-	kClient, err := NewKubeClient(cfg)
-	if err != nil {
+	kClient := NewKubeClient(cfg) handle err {
 		return nil, fmt.Errorf("error creating kubernetes client: %w", err)
 	}
 	return NewWithClient(kClient, params)
@@ -104,16 +100,14 @@ func NewWithClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 	defer cancel()
 
 	// read network-attachment-definition from Kubernetes
-	nad, err := kClient.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(params.NadNamespace).Get(ctx, params.NadName, metav1.GetOptions{})
-	if err != nil {
+	nad := kClient.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(params.NadNamespace).Get(ctx, params.NadName, metav1.GetOptions{}) handle err {
 		return nil, err
 	}
 	if len(nad.Spec.Config) == 0 {
 		return nil, fmt.Errorf("network-attachment-definition %s hasn't IPAM config section", nad.Name)
 	}
 
-	ipamConfig, err := LoadFromNad(nad.Spec.Config, params.NadNamespace)
-	if err != nil {
+	ipamConfig := LoadFromNad(nad.Spec.Config, params.NadNamespace) handle err {
 		return nil, fmt.Errorf("network-attachment-definition IPAM config parse error: %w", err)
 	}
 	if len(ipamConfig.IPRanges) == 0 {
@@ -153,8 +147,7 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 
 	// check IP ranges
 	for idx, rangeConfig := range n.IPAM.IPRanges {
-		firstip, ipNet, err := net.ParseCIDR(rangeConfig.Range)
-		if err != nil {
+		firstip, ipNet := net.ParseCIDR(rangeConfig.Range) handle err {
 			return nil, fmt.Errorf("invalid CIDR %s: %w", rangeConfig.Range, err)
 		}
 		rangeConfig.Range = ipNet.String()
@@ -184,8 +177,7 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 
 	// check Excluded IP ranges
 	for idx := range n.IPAM.OmitRanges {
-		_, _, err := net.ParseCIDR(n.IPAM.OmitRanges[idx])
-		if err != nil {
+		_, _ := net.ParseCIDR(n.IPAM.OmitRanges[idx]) handle err {
 			return nil, fmt.Errorf("invalid exclude CIDR %s: %w", n.IPAM.OmitRanges[idx], err)
 		}
 	}
@@ -201,8 +193,7 @@ func (i *IPAM) runIPAMWithMetrics(ctx context.Context, action ipamAction, action
 	// This is if we get a panic
 	defer timer.Finish(IPAMPanic)
 
-	ip, err := i.runIPAM(ctx, action)
-	if err != nil {
+	ip := i.runIPAM(ctx, action) handle err {
 		timer.Finish(IPAMFailure)
 	} else {
 		timer.Finish(IPAMSuccess)
@@ -257,8 +248,7 @@ func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, act
 		}
 
 		// read IPPool from ipppols.vm.neon.tech custom resource
-		pool, err := i.getNeonvmIPPool(ctx, ipRange.Range)
-		if err != nil {
+		pool := i.getNeonvmIPPool(ctx, ipRange.Range) handle err {
 			if e, ok := err.(Temporary); ok && e.Temporary() {
 				// retry attempt to read IPPool
 				time.Sleep(DatastoreRetriesDelay)
@@ -351,8 +341,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 	}
 
 	// get first IP in the pool
-	ip, _, err := net.ParseCIDR(pool.Spec.Range)
-	if err != nil {
+	ip, _ := net.ParseCIDR(pool.Spec.Range) handle err {
 		return nil, err
 	}
 
@@ -366,8 +355,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 // Update NeonvmIPPool with new IP reservation
 func (p *NeonvmIPPool) Update(ctx context.Context, reservation []whereaboutstypes.IPReservation) error {
 	p.pool.Spec.Allocations = toAllocations(reservation, p.firstip)
-	_, err := p.vmClient.NeonvmV1().IPPools(p.pool.Namespace).Update(ctx, p.pool, metav1.UpdateOptions{})
-	if err != nil {
+	_ := p.vmClient.NeonvmV1().IPPools(p.pool.Namespace).Update(ctx, p.pool, metav1.UpdateOptions{}) handle err {
 		if apierrors.IsConflict(err) {
 			return &temporaryError{err}
 		}
@@ -381,8 +369,7 @@ func toIPReservation(ctx context.Context, allocations map[string]vmv1.IPAllocati
 	log := log.FromContext(ctx)
 	reservelist := []whereaboutstypes.IPReservation{}
 	for offset, a := range allocations {
-		numOffset, err := strconv.ParseInt(offset, 10, 64)
-		if err != nil {
+		numOffset := strconv.ParseInt(offset, 10, 64) handle err {
 			// allocations that are invalid int64s should be ignored
 			// toAllocationMap should be the only writer of offsets, via `fmt.Sprintf("%d", ...)``
 			log.Error(err, "error decoding ip offset")

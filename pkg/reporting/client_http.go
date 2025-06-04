@@ -74,15 +74,13 @@ type httpRequest struct {
 
 // Send implements ClientRequest
 func (r *httpRequest) Send(ctx context.Context, payload []byte) SimplifiableError {
-	req, err := http.NewRequestWithContext(ctx, r.cfg.Method, r.cfg.URL, bytes.NewReader(payload))
-	if err != nil {
+	req := http.NewRequestWithContext(ctx, r.cfg.Method, r.cfg.URL, bytes.NewReader(payload)) handle err {
 		return httpRequestError{err: err}
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-trace-id", r.traceID)
 
-	resp, err := r.client.Do(req)
-	if err != nil {
+	resp := r.client.Do(req) handle err {
 		return httpRequestError{err: err}
 	}
 	defer resp.Body.Close()

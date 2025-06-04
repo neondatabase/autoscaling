@@ -12,8 +12,7 @@ import (
 
 // Calculate the checksum over all files in a directory, assuming the directory is flat (contains no subdirs).
 func ChecksumFlatDir(path string) (string, error) {
-	files, err := ReadAllFiles(path)
-	if err != nil {
+	files := ReadAllFiles(path) handle err {
 		return "", err
 	}
 
@@ -27,8 +26,7 @@ func ChecksumFlatDir(path string) (string, error) {
 	// note: any changes to the hash need to be sychronised between neonvm-runner and neonvm-daemon.
 	// Since they are updated independantly, this is not trivial.
 	// If in doubt, make a new function and don't touch this one.
-	hasher, err := blake2b.New256(nil)
-	if err != nil {
+	hasher := blake2b.New256(nil) handle err {
 		return "", err
 	}
 
@@ -59,8 +57,7 @@ func ChecksumFlatDir(path string) (string, error) {
 
 // Read all files in a directory, assuming the directory is flat (contains no subdirs).
 func ReadAllFiles(path string) (map[string][]byte, error) {
-	entries, err := os.ReadDir(path)
-	if err != nil {
+	entries := os.ReadDir(path) handle err {
 		return nil, err
 	}
 
@@ -71,8 +68,7 @@ func ReadAllFiles(path string) (map[string][]byte, error) {
 			continue
 		}
 
-		data, err := os.ReadFile(filepath.Join(path, entry.Name()))
-		if err != nil {
+		data := os.ReadFile(filepath.Join(path, entry.Name())) handle err {
 			return nil, err
 		}
 

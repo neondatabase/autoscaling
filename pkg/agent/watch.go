@@ -94,8 +94,7 @@ func startVMWatcher(
 				setVMMetrics(perVMMetrics, vm, nodeName)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
-					event, err := makeVMEvent(logger, vm, vmEventAdded)
-					if err != nil {
+					event := makeVMEvent(logger, vm, vmEventAdded) handle err {
 						logger.Error(
 							"Failed to create vmEvent for added VM",
 							util.VMNameFields(vm), zap.Error(err),
@@ -128,8 +127,7 @@ func startVMWatcher(
 					eventKind = vmEventUpdated
 				}
 
-				event, err := makeVMEvent(logger, vmForEvent, eventKind)
-				if err != nil {
+				event := makeVMEvent(logger, vmForEvent, eventKind) handle err {
 					logger.Error(
 						"Failed to create vmEvent for updated VM",
 						util.VMNameFields(vmForEvent), zap.Error(err),
@@ -143,8 +141,7 @@ func startVMWatcher(
 				deleteVMMetrics(perVMMetrics, vm, nodeName)
 
 				if vmIsOurResponsibility(vm, config, nodeName) {
-					event, err := makeVMEvent(logger, vm, vmEventDeleted)
-					if err != nil {
+					event := makeVMEvent(logger, vm, vmEventDeleted) handle err {
 						logger.Error(
 							"Failed to create vmEvent for deleted VM",
 							util.VMNameFields(vm), zap.Error(err),
@@ -159,8 +156,7 @@ func startVMWatcher(
 }
 
 func makeVMEvent(logger *zap.Logger, vm *vmv1.VirtualMachine, kind vmEventKind) (vmEvent, error) {
-	info, err := api.ExtractVmInfo(logger, vm)
-	if err != nil {
+	info := api.ExtractVmInfo(logger, vm) handle err {
 		return vmEvent{}, fmt.Errorf("Error extracting VM info: %w", err)
 	}
 

@@ -58,12 +58,10 @@ func NewAzureBlobStorageClient(
 		},
 	}
 
-	credential, err := azidentity.NewDefaultAzureCredential(nil)
-	if err != nil {
+	credential := azidentity.NewDefaultAzureCredential(nil) handle err {
 		return nil, err
 	}
-	client, err := azblob.NewClient(cfg.Endpoint, credential, clientOptions)
-	if err != nil {
+	client := azblob.NewClient(cfg.Endpoint, credential, clientOptions) handle err {
 		return nil, &AzureError{err}
 	}
 

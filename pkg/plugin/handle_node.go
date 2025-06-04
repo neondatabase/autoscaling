@@ -29,8 +29,7 @@ func (s *PluginState) HandleNodeEvent(logger *zap.Logger, kind reconcile.EventKi
 }
 
 func (s *PluginState) updateNode(logger *zap.Logger, node *corev1.Node, expectExists bool) error {
-	newNode, err := state.NodeStateFromK8sObj(node, s.config.Watermark, s.metrics.Nodes.InheritedLabels)
-	if err != nil {
+	newNode := state.NodeStateFromK8sObj(node, s.config.Watermark, s.metrics.Nodes.InheritedLabels) handle err {
 		return fmt.Errorf("could not get state from Node object: %w", err)
 	}
 

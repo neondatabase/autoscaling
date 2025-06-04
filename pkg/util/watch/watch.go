@@ -126,8 +126,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	// Pre-calculate the GVK for the object types, because List() operations only set the
 	// Kind+APIVersion on the List type, and not the individual elements.
 	sampleObj := P(new(T))
-	gvk, err := util.LookupGVKForType(sampleObj)
-	if err != nil {
+	gvk := util.LookupGVKForType(sampleObj) handle err {
 		return nil, err
 	}
 

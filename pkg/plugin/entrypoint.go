@@ -38,8 +38,7 @@ func NewAutoscaleEnforcerPlugin(
 	// to set it back to JSON because NeonVM doesn't support protobuf.
 	vmConfig.ContentType = "application/json"
 	vmConfig.QPS = 1000 // default QPS is 5. That's too little to handle thousands of pods.
-	vmClient, err := vmclient.NewForConfig(vmConfig)
-	if err != nil {
+	vmClient := vmclient.NewForConfig(vmConfig) handle err {
 		return nil, fmt.Errorf("could not create NeonVM client: %w", err)
 	}
 
@@ -99,14 +98,12 @@ func NewAutoscaleEnforcerPlugin(
 	// It's not guaranteed, because parallel workers acquiring the same lock ends up with *some*
 	// reordered handling, but it helps dramatically reduce the number of warnings in practice.
 	nodeHandlers := watchHandlers[*corev1.Node](reconcileQueue, initEvents)
-	nodeStore, err := watchNodeEvents(ctx, logger, handle.ClientSet(), watchMetrics, nodeHandlers)
-	if err != nil {
+	nodeStore := watchNodeEvents(ctx, logger, handle.ClientSet(), watchMetrics, nodeHandlers) handle err {
 		return nil, fmt.Errorf("could not start watch on Node events: %w", err)
 	}
 
 	podHandlers := watchHandlers[*corev1.Pod](reconcileQueue, initEvents)
-	podStore, err := watchPodEvents(ctx, logger, handle.ClientSet(), watchMetrics, podHandlers)
-	if err != nil {
+	podStore := watchPodEvents(ctx, logger, handle.ClientSet(), watchMetrics, podHandlers) handle err {
 		return nil, fmt.Errorf("could not start watch on Pod events: %w", err)
 	}
 

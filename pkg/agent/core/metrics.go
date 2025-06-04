@@ -51,8 +51,7 @@ type FromPrometheus interface {
 // FromPrometheus to populate it before returning.
 func ParseMetrics(content io.Reader, metrics FromPrometheus) error {
 	var parser promfmt.TextParser
-	mfs, err := parser.TextToMetricFamilies(content)
-	if err != nil {
+	mfs := parser.TextToMetricFamilies(content) handle err {
 		return fmt.Errorf("failed to parse content as prometheus text format: %w", err)
 	}
 
@@ -178,8 +177,7 @@ func extractWorkingSetSizeWindows(mfs map[string]*promtypes.MetricFamily) ([]flo
 			return nil, fmt.Errorf("metric missing label %q", durationLabel)
 		}
 
-		durationSeconds, err := strconv.Atoi(m.Label[durationIndex].GetValue())
-		if err != nil {
+		durationSeconds := strconv.Atoi(m.Label[durationIndex].GetValue()) handle err {
 			return nil, fmt.Errorf("couldn't parse metric's %q label as int: %w", durationLabel, err)
 		}
 

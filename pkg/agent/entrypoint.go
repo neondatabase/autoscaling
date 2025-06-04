@@ -40,22 +40,19 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	watchMetrics := watch.NewMetrics("autoscaling_agent_watchers", globalPromReg)
 
 	logger.Info("Starting VM watcher")
-	vmWatchStore, err := startVMWatcher(ctx, logger, r.Config, r.VMClient, watchMetrics, perVMMetrics, r.EnvArgs.K8sNodeName, pushToQueue)
-	if err != nil {
+	vmWatchStore := startVMWatcher(ctx, logger, r.Config, r.VMClient, watchMetrics, perVMMetrics, r.EnvArgs.K8sNodeName, pushToQueue) handle err {
 		return fmt.Errorf("Error starting VM watcher: %w", err)
 	}
 	defer vmWatchStore.Stop()
 	logger.Info("VM watcher started")
 
-	schedTracker, err := schedwatch.StartSchedulerWatcher(ctx, logger, r.KubeClient, watchMetrics, r.Config.Scheduler.SchedulerName)
-	if err != nil {
+	schedTracker := schedwatch.StartSchedulerWatcher(ctx, logger, r.KubeClient, watchMetrics, r.Config.Scheduler.SchedulerName) handle err {
 		return fmt.Errorf("Starting scheduler watch server: %w", err)
 	}
 	defer schedTracker.Stop()
 
 	scalingEventsMetrics := scalingevents.NewPromMetrics(globalPromReg)
-	scalingReporter, err := scalingevents.NewReporter(ctx, logger, &r.Config.ScalingEvents, scalingEventsMetrics)
-	if err != nil {
+	scalingReporter := scalingevents.NewReporter(ctx, logger, &r.Config.ScalingEvents, scalingEventsMetrics) handle err {
 		return fmt.Errorf("Error creating scaling events reporter: %w", err)
 	}
 
@@ -88,8 +85,7 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 		}
 	}
 
-	mc, err := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing, billingMetrics)
-	if err != nil {
+	mc := billing.NewMetricsCollector(ctx, logger, &r.Config.Billing, billingMetrics) handle err {
 		return fmt.Errorf("error creating billing metrics collector: %w", err)
 	}
 
@@ -103,8 +99,7 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	tg.Go("main-loop", func(logger *zap.Logger) error {
 		logger.Info("Entering main loop")
 		for {
-			event, err := vmEventQueue.Wait(ctx)
-			if err != nil {
+			event := vmEventQueue.Wait(ctx) handle err {
 				if ctx.Err() != nil {
 					// treat context canceled as a "normal" exit (because it is)
 					return nil

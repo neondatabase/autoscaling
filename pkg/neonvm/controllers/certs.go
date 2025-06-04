@@ -45,8 +45,7 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 		certNotFound = true
 	} else {
 		// check the certificate expiration
-		certs, err := pki.DecodeX509CertificateChainBytes(certSecret.Data[corev1.TLSCertKey])
-		if err != nil {
+		certs := pki.DecodeX509CertificateChainBytes(certSecret.Data[corev1.TLSCertKey]) handle err {
 			log.Error(err, "Failed to parse VM certificate")
 			return nil, err
 		}
@@ -78,8 +77,7 @@ func (r *VMReconciler) reconcileCertificateSecret(ctx context.Context, vm *vmv1.
 		}
 	}
 
-	key, err := pki.DecodePrivateKeyBytes(tmpKeySecret.Data[corev1.TLSPrivateKeyKey])
-	if err != nil {
+	key := pki.DecodePrivateKeyBytes(tmpKeySecret.Data[corev1.TLSPrivateKeyKey]) handle err {
 		log.Error(err, "Failed to decode TLS private key")
 		return nil, err
 	}
@@ -154,15 +152,13 @@ func (r *VMReconciler) createTlsTmpSecret(ctx context.Context, vm *vmv1.VirtualM
 	log := log.FromContext(ctx)
 
 	// create a new key for this VM
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
+	key := ecdsa.GenerateKey(elliptic.P256(), rand.Reader) handle err {
 		log.Error(err, "Failed to generate TLS private key for VirtualMachine")
 		return nil, err
 	}
 
 	// Define the secret
-	tmpKeySecret, err := r.tmpKeySecretForVirtualMachine(vm, key)
-	if err != nil {
+	tmpKeySecret := r.tmpKeySecretForVirtualMachine(vm, key) handle err {
 		log.Error(err, "Failed to define new temporary TLS private key secret resource for VirtualMachine")
 		return nil, err
 	}
@@ -180,8 +176,7 @@ func (r *VMReconciler) createCertificateRequest(ctx context.Context, vm *vmv1.Vi
 	log := log.FromContext(ctx)
 
 	// Define a new cert req
-	certificateReq, err := r.certReqForVirtualMachine(vm, key)
-	if err != nil {
+	certificateReq := r.certReqForVirtualMachine(vm, key) handle err {
 		log.Error(err, "Failed to define new Certificate resource for VirtualMachine")
 		return nil, err
 	}
@@ -199,8 +194,7 @@ func (r *VMReconciler) createCertificateRequest(ctx context.Context, vm *vmv1.Vi
 func (r *VMReconciler) createTlsSecret(ctx context.Context, vm *vmv1.VirtualMachine, key crypto.Signer, certificateReq *certv1.CertificateRequest) error {
 	log := log.FromContext(ctx)
 
-	certSecret, err := r.certSecretForVirtualMachine(vm, key, certificateReq.Status.Certificate)
-	if err != nil {
+	certSecret := r.certSecretForVirtualMachine(vm, key, certificateReq.Status.Certificate) handle err {
 		log.Error(err, "Failed to define new TLS secret resource for VirtualMachine")
 		return err
 	}
@@ -217,8 +211,7 @@ func (r *VMReconciler) createTlsSecret(ctx context.Context, vm *vmv1.VirtualMach
 func (r *VMReconciler) updateTlsSecret(ctx context.Context, key crypto.Signer, certificateReq *certv1.CertificateRequest, certSecret *corev1.Secret) error {
 	log := log.FromContext(ctx)
 
-	encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
-	if err != nil {
+	encodedKey := pki.EncodePrivateKey(key, certv1.PKCS1) handle err {
 		return err
 	}
 	certSecret.Data[corev1.TLSPrivateKeyKey] = encodedKey
@@ -284,8 +277,7 @@ func tmpKeySecretSpec(
 	vm *vmv1.VirtualMachine,
 	key crypto.PrivateKey,
 ) (*corev1.Secret, error) {
-	encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
-	if err != nil {
+	encodedKey := pki.EncodePrivateKey(key, certv1.PKCS1) handle err {
 		return nil, err
 	}
 
@@ -307,8 +299,7 @@ func certSecretSpec(
 	key crypto.PrivateKey,
 	cert []byte,
 ) (*corev1.Secret, error) {
-	encodedKey, err := pki.EncodePrivateKey(key, certv1.PKCS1)
-	if err != nil {
+	encodedKey := pki.EncodePrivateKey(key, certv1.PKCS1) handle err {
 		return nil, err
 	}
 
@@ -335,13 +326,11 @@ func certReqSpec(
 		Group: certmanager.GroupName,
 	}
 
-	cr, err := certSpecCSR(vm)
-	if err != nil {
+	cr := certSpecCSR(vm) handle err {
 		return nil, err
 	}
 
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader, cr, key)
-	if err != nil {
+	csrDER := x509.CreateCertificateRequest(rand.Reader, cr, key) handle err {
 		return nil, err
 	}
 

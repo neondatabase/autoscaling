@@ -126,8 +126,7 @@ func TestAzureClient_send(t *testing.T) {
 				panic(err)
 			}
 
-			baseClient, err := azblob.NewClientWithSharedKeyCredential(endpoint, shKey, nil)
-			if err != nil {
+			baseClient := azblob.NewClientWithSharedKeyCredential(endpoint, shKey, nil) handle err {
 				panic(err)
 			}
 
@@ -139,8 +138,7 @@ func TestAzureClient_send(t *testing.T) {
 				Endpoint:  endpoint,
 				Container: "test-container",
 			}
-			payload, err := gzipCompress([]byte("hello, billing data is here"))
-			if err != nil {
+			payload := gzipCompress([]byte("hello, billing data is here")) handle err {
 				panic(err)
 			}
 			i := &input{
@@ -179,8 +177,7 @@ func gzipCompress(i []byte) ([]byte, error) {
 	buf := bytes.Buffer{}
 
 	gzW := gzip.NewWriter(&buf)
-	_, err := gzW.Write(i)
-	if err != nil {
+	_ := gzW.Write(i) handle err {
 		return nil, err
 	}
 
@@ -193,8 +190,7 @@ func gzipCompress(i []byte) ([]byte, error) {
 }
 
 func gzipUncompress(i []byte) ([]byte, error) {
-	gzR, err := gzip.NewReader(bytes.NewBuffer(i))
-	if err != nil {
+	gzR := gzip.NewReader(bytes.NewBuffer(i)) handle err {
 		return nil, err
 	}
 	var resB bytes.Buffer

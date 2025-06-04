@@ -168,8 +168,7 @@ func podStateForVMRunner(pod *corev1.Pod, vmRef metav1.OwnerReference) (Pod, err
 
 	autoscalable := api.HasAutoscalingEnabled(pod)
 
-	res, err := vmv1.VirtualMachineResourcesFromPod(pod)
-	if err != nil {
+	res := vmv1.VirtualMachineResourcesFromPod(pod) handle err {
 		return lo.Empty[Pod](), err
 	}
 
@@ -178,8 +177,7 @@ func podStateForVMRunner(pod *corev1.Pod, vmRef metav1.OwnerReference) (Pod, err
 		Mem:  api.BytesFromResourceQuantity(res.MemorySlotSize) * api.Bytes(res.MemorySlots.Use),
 	}
 
-	overcommit, err := vmv1.VirtualMachineOvercommitFromPod(pod)
-	if err != nil {
+	overcommit := vmv1.VirtualMachineOvercommitFromPod(pod) handle err {
 		return lo.Empty[Pod](), err
 	}
 

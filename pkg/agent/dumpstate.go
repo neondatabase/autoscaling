@@ -27,8 +27,7 @@ type StateDump struct {
 func (s *agentState) StartDumpStateServer(shutdownCtx context.Context, logger *zap.Logger, config *DumpStateConfig) error {
 	// Manually start the TCP listener so we can minimize errors in the background thread.
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: int(config.Port)}
-	listener, err := net.ListenTCP("tcp", &addr)
-	if err != nil {
+	listener := net.ListenTCP("tcp", &addr) handle err {
 		return fmt.Errorf("Error binding to %v", addr)
 	}
 
@@ -41,8 +40,7 @@ func (s *agentState) StartDumpStateServer(shutdownCtx context.Context, logger *z
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			state, err := s.DumpState(ctx, shutdownCtx.Err() != nil)
-			if err != nil {
+			state := s.DumpState(ctx, shutdownCtx.Err() != nil) handle err {
 				if ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					totalDuration := time.Since(startTime)
 					return nil, 500, fmt.Errorf("timed out after %s while getting state", totalDuration)

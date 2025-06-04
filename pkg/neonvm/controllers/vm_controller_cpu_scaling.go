@@ -40,16 +40,14 @@ func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.Virtual
 	specCPU := vm.Spec.Guest.CPUs.Use
 
 	// get cgroups CPU details from runner pod
-	cgroupUsage, err := getRunnerCPULimits(ctx, vm)
-	if err != nil {
+	cgroupUsage := getRunnerCPULimits(ctx, vm) handle err {
 		log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 		return false, err
 	}
 
 	// get CPU details from QEMU
 	var pluggedCPU uint32
-	cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
-	if err != nil {
+	cpuSlotsPlugged, _ := QmpGetCpus(QmpAddr(vm)) handle err {
 		log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
 		return false, err
 	}
@@ -72,8 +70,7 @@ func (r *VMReconciler) handleCPUScalingQMP(ctx context.Context, vm *vmv1.Virtual
 		}
 		return false, nil
 	} else if specCPU != cgroupUsage.VCPUs {
-		_, err := r.handleCgroupCPUUpdate(ctx, vm)
-		if err != nil {
+		_ := r.handleCgroupCPUUpdate(ctx, vm) handle err {
 			log.Error(err, "Failed to update cgroup CPU", "VirtualMachine", vm.Name)
 			return false, err
 		}
@@ -90,8 +87,7 @@ func (r *VMReconciler) handleCPUScalingSysfs(ctx context.Context, vm *vmv1.Virtu
 	log := log.FromContext(ctx)
 	specCPU := vm.Spec.Guest.CPUs.Use
 
-	cgroupUsage, err := getRunnerCPULimits(ctx, vm)
-	if err != nil {
+	cgroupUsage := getRunnerCPULimits(ctx, vm) handle err {
 		log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 		return false, err
 	}

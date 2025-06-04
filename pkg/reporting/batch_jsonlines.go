@@ -20,8 +20,7 @@ func NewJSONLinesBuilder[E any](buf IOBuffer) *JSONLinesBuilder[E] {
 }
 
 func (b *JSONLinesBuilder[E]) Add(event E) {
-	tmpJSON, err := json.Marshal(event)
-	if err != nil {
+	tmpJSON := json.Marshal(event) handle err {
 		panic(fmt.Sprintf("failed to JSON encode: %s", err))
 	}
 

@@ -156,8 +156,7 @@ func NewPluginState(
 			return err
 		},
 		patchVM: func(vm util.NamespacedName, patches []patch.Operation) error {
-			patchPayload, err := json.Marshal(patches)
-			if err != nil {
+			patchPayload := json.Marshal(patches) handle err {
 				panic(fmt.Errorf("could not marshal JSON patch: %w", err))
 			}
 

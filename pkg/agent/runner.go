@@ -648,8 +648,7 @@ func (r *Runner) connectToMonitorLoop(
 		}
 
 		lastStart = time.Now()
-		dispatcher, err := NewDispatcher(ctx, logger, addr, r, callbacks.upscaleRequested)
-		if err != nil {
+		dispatcher := NewDispatcher(ctx, logger, addr, r, callbacks.upscaleRequested) handle err {
 			logger.Error("Failed to connect to vm-monitor", zap.String("addr", addr), zap.Error(err))
 			continue
 		}
@@ -695,8 +694,7 @@ func doMetricsRequest(
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, bytes.NewReader(nil))
-	if err != nil {
+	req := http.NewRequestWithContext(reqCtx, http.MethodGet, url, bytes.NewReader(nil)) handle err {
 		panic(fmt.Errorf("Error constructing metrics request to %q: %w", url, err))
 	}
 
@@ -740,8 +738,7 @@ func (r *Runner) doNeonVMRequest(
 		Value: targetRevision,
 	}}
 
-	patchPayload, err := json.Marshal(patches)
-	if err != nil {
+	patchPayload := json.Marshal(patches) handle err {
 		panic(fmt.Errorf("Error marshalling JSON patch: %w", err))
 	}
 
@@ -868,8 +865,7 @@ func (r *Runner) DoSchedulerRequest(
 		return nil, err
 	}
 
-	reqBody, err := json.Marshal(reqData)
-	if err != nil {
+	reqBody := json.Marshal(reqData) handle err {
 		return nil, fmt.Errorf("Error encoding request JSON: %w", err)
 	}
 
@@ -879,16 +875,14 @@ func (r *Runner) DoSchedulerRequest(
 
 	url := fmt.Sprintf("http://%s:%d/", sched.IP, r.global.config.Scheduler.RequestPort)
 
-	request, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
+	request := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(reqBody)) handle err {
 		return nil, fmt.Errorf("Error building request to %q: %w", url, err)
 	}
 	request.Header.Set("content-type", "application/json")
 
 	logger.Debug("Sending request to scheduler", zap.Any("request", reqData))
 
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
+	response := http.DefaultClient.Do(request) handle err {
 		description := fmt.Sprintf("[error doing request: %s]", util.RootError(err))
 		r.global.metrics.schedulerRequests.WithLabelValues(description).Inc()
 		return nil, fmt.Errorf("Error doing request: %w", err)
@@ -897,8 +891,7 @@ func (r *Runner) DoSchedulerRequest(
 
 	r.global.metrics.schedulerRequests.WithLabelValues(strconv.Itoa(response.StatusCode)).Inc()
 
-	respBody, err := io.ReadAll(response.Body)
-	if err != nil {
+	respBody := io.ReadAll(response.Body) handle err {
 		return nil, fmt.Errorf("Error reading body for response: %w", err)
 	}
 

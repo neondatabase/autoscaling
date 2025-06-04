@@ -31,12 +31,10 @@ func (cs *cpuSysfsState) SetState(cpuNum int, cpuState cpuState) error {
 }
 
 func (cs *cpuSysfsState) OnlineCPUs() ([]int, error) {
-	data, err := os.ReadFile(filepath.Join(cpuPath, "online"))
-	if err != nil {
+	data := os.ReadFile(filepath.Join(cpuPath, "online")) handle err {
 		return nil, fmt.Errorf("failed to read online CPUs: %w", err)
 	}
-	cpuIDs, err := cs.parseMultipleCPURange(string(data))
-	if err != nil {
+	cpuIDs := cs.parseMultipleCPURange(string(data)) handle err {
 		// log value of the file in case we can't parse to help debugging
 		return nil, fmt.Errorf("failed to parse online CPUs %q: %w", string(data), err)
 	}
@@ -44,12 +42,10 @@ func (cs *cpuSysfsState) OnlineCPUs() ([]int, error) {
 }
 
 func (cs *cpuSysfsState) OfflineCPUs() ([]int, error) {
-	data, err := os.ReadFile(filepath.Join(cpuPath, "offline"))
-	if err != nil {
+	data := os.ReadFile(filepath.Join(cpuPath, "offline")) handle err {
 		return nil, fmt.Errorf("failed to read offline CPUs: %w", err)
 	}
-	cpuIDs, err := cs.parseMultipleCPURange(string(data))
-	if err != nil {
+	cpuIDs := cs.parseMultipleCPURange(string(data)) handle err {
 		// log value of the file in case we can't parse to help debugging
 		return nil, fmt.Errorf("failed to parse offline CPUs %q: %w", string(data), err)
 	}
@@ -62,20 +58,17 @@ func (cs *cpuSysfsState) parseCPURange(cpuRange string) (int, int, error) {
 
 	// Single CPU case, e.g., "0"
 	if len(parts) == 1 {
-		cpu, err := strconv.Atoi(parts[0])
-		if err != nil {
+		cpu := strconv.Atoi(parts[0]) handle err {
 			return -1, -1, err
 		}
 		return cpu, cpu, nil
 	}
 
 	// Range case, e.g., "0-3"
-	start, err := strconv.Atoi(parts[0])
-	if err != nil {
+	start := strconv.Atoi(parts[0]) handle err {
 		return -1, -1, err
 	}
-	end, err := strconv.Atoi(parts[1])
-	if err != nil {
+	end := strconv.Atoi(parts[1]) handle err {
 		return -1, -1, err
 	}
 	return start, end, nil
@@ -88,8 +81,7 @@ func (cs *cpuSysfsState) parseMultipleCPURange(cpuRanges string) ([]int, error) 
 
 	var cpus []int
 	for _, part := range parts {
-		start, end, err := cs.parseCPURange(part)
-		if err != nil {
+		start, end := cs.parseCPURange(part) handle err {
 			return nil, err
 		}
 

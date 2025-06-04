@@ -88,8 +88,7 @@ func (r *VirtualMachineMigrationReconciler) createTargetPod(
 	}
 
 	// Define a new target pod
-	tpod, err := r.targetPodForVirtualMachine(vm, migration, sshSecret)
-	if err != nil {
+	tpod := r.targetPodForVirtualMachine(vm, migration, sshSecret) handle err {
 		logger.Error(err, "Failed to generate Target Pod spec")
 		return ctrl.Result{}, err
 	}
@@ -157,8 +156,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
 			log.Info("Performing Finalizer Operations for Migration")
-			vm, err := getVM()
-			if err != nil {
+			vm := getVM() handle err {
 				return ctrl.Result{}, err
 			}
 			if err := r.doFinalizerOperationsForVirtualMachineMigration(ctx, migration, vm); err != nil {
@@ -194,8 +192,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	}
 
 	// Fetch the corresponding VirtualMachine instance
-	vm, err := getVM()
-	if err != nil {
+	vm := getVM() handle err {
 		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
 		if apierrors.IsNotFound(err) {
 			// stop reconcile loop if vm not found (already deleted?)
@@ -411,8 +408,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		}
 
 		// retrieve migration statistics
-		migrationInfo, err := QmpGetMigrationInfo(QmpAddr(vm))
-		if err != nil {
+		migrationInfo := QmpGetMigrationInfo(QmpAddr(vm)) handle err {
 			log.Error(err, "Failed to get migration info")
 			return ctrl.Result{}, err
 		}
@@ -689,8 +685,7 @@ func (r *VirtualMachineMigrationReconciler) targetPodForVirtualMachine(
 		return nil, fmt.Errorf("cannot create target pod because memory is invalid: %w", err)
 	}
 
-	pod, err := podSpec(vm, sshSecret, r.Config)
-	if err != nil {
+	pod := podSpec(vm, sshSecret, r.Config) handle err {
 		return nil, err
 	}
 

@@ -671,8 +671,7 @@ func TestPodStateExtraction(t *testing.T) {
 				},
 			}
 
-			pod, err := state.PodStateFromK8sObj(obj)
-			if err != nil {
+			pod := state.PodStateFromK8sObj(obj) handle err {
 				t.Error("failed to extract pod state: ", err.Error())
 				return
 			}

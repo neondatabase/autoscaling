@@ -96,8 +96,7 @@ func QmpAddr(vm *vmv1.VirtualMachine) (ip string, port int32) {
 }
 
 func QmpConnect(ip string, port int32) (*qmp.SocketMonitor, error) {
-	mon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", ip, port), 2*time.Second)
-	if err != nil {
+	mon := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", ip, port), 2*time.Second) handle err {
 		return nil, err
 	}
 	if err := mon.Connect(); err != nil {
@@ -108,15 +107,13 @@ func QmpConnect(ip string, port int32) (*qmp.SocketMonitor, error) {
 }
 
 func QmpGetCpus(ip string, port int32) ([]QmpCpuSlot, []QmpCpuSlot, error) {
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
+	mon := QmpConnect(ip, port) handle err {
 		return nil, nil, err
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "query-hotpluggable-cpus"}`)
-	raw, err := mon.Run(qmpcmd)
-	if err != nil {
+	raw := mon.Run(qmpcmd) handle err {
 		return nil, nil, err
 	}
 
@@ -139,16 +136,14 @@ func QmpGetCpus(ip string, port int32) ([]QmpCpuSlot, []QmpCpuSlot, error) {
 }
 
 func QmpPlugCpu(ip string, port int32) error {
-	_, empty, err := QmpGetCpus(ip, port)
-	if err != nil {
+	_, empty := QmpGetCpus(ip, port) handle err {
 		return err
 	}
 	if len(empty) == 0 {
 		return errors.New("no empty slots for CPU hotplug")
 	}
 
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
+	mon := QmpConnect(ip, port) handle err {
 		return err
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
@@ -175,8 +170,7 @@ func QmpPlugCpu(ip string, port int32) error {
 }
 
 func QmpUnplugCpu(ip string, port int32) error {
-	plugged, _, err := QmpGetCpus(ip, port)
-	if err != nil {
+	plugged, _ := QmpGetCpus(ip, port) handle err {
 		return err
 	}
 
@@ -193,8 +187,7 @@ func QmpUnplugCpu(ip string, port int32) error {
 		return errors.New("there are no unpluggable CPUs")
 	}
 
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
+	mon := QmpConnect(ip, port) handle err {
 		return err
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
@@ -211,12 +204,10 @@ func QmpUnplugCpu(ip string, port int32) error {
 }
 
 func QmpSyncCpuToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineMigration) error {
-	plugged, _, err := QmpGetCpus(QmpAddr(vm))
-	if err != nil {
+	plugged, _ := QmpGetCpus(QmpAddr(vm)) handle err {
 		return err
 	}
-	pluggedInTarget, _, err := QmpGetCpus(migration.Status.TargetPodIP, vm.Spec.QMP)
-	if err != nil {
+	pluggedInTarget, _ := QmpGetCpus(migration.Status.TargetPodIP, vm.Spec.QMP) handle err {
 		return err
 	}
 	if len(plugged) == len(pluggedInTarget) {
@@ -224,8 +215,7 @@ func QmpSyncCpuToTarget(vm *vmv1.VirtualMachine, migration *vmv1.VirtualMachineM
 		return nil
 	}
 
-	target, err := QmpConnect(migration.Status.TargetPodIP, vm.Spec.QMP)
-	if err != nil {
+	target := QmpConnect(migration.Status.TargetPodIP, vm.Spec.QMP) handle err {
 		return err
 	}
 	defer target.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
@@ -279,8 +269,7 @@ func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previo
 		return 0, nil
 	}
 
-	mon, err := QmpConnect(QmpAddr(vm))
-	if err != nil {
+	mon := QmpConnect(QmpAddr(vm)) handle err {
 		return 0, err
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
@@ -288,8 +277,7 @@ func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previo
 	// First, fetch current desired virtio-mem size. If it's the same as targetVirtioMemSize, then
 	// we can report that it was already the same.
 	cmd := []byte(`{"execute": "qom-get", "arguments": {"path": "vm0", "property": "requested-size"}}`)
-	raw, err := mon.Run(cmd)
-	if err != nil {
+	raw := mon.Run(cmd) handle err {
 		return 0, err
 	}
 	result := struct {
@@ -319,15 +307,13 @@ func QmpSetVirtioMem(vm *vmv1.VirtualMachine, targetVirtioMemSize int64) (previo
 }
 
 func QmpGetMemorySize(ip string, port int32) (*resource.Quantity, error) {
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
+	mon := QmpConnect(ip, port) handle err {
 		return nil, err
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "query-memory-size-summary"}`)
-	raw, err := mon.Run(qmpcmd)
-	if err != nil {
+	raw := mon.Run(qmpcmd) handle err {
 		return nil, err
 	}
 
@@ -345,8 +331,7 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 
 	// connect to source runner QMP
 	s_ip := virtualmachinemigration.Status.SourcePodIP
-	smon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", s_ip, port), 2*time.Second)
-	if err != nil {
+	smon := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", s_ip, port), 2*time.Second) handle err {
 		return err
 	}
 	if err := smon.Connect(); err != nil {
@@ -356,8 +341,7 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 
 	// connect to target runner QMP
 	t_ip := virtualmachinemigration.Status.TargetPodIP
-	tmon, err := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", t_ip, port), 2*time.Second)
-	if err != nil {
+	tmon := qmp.NewSocketMonitor("tcp", fmt.Sprintf("%s:%d", t_ip, port), 2*time.Second) handle err {
 		return err
 	}
 	if err := tmon.Connect(); err != nil {
@@ -457,15 +441,13 @@ func QmpStartMigration(virtualmachine *vmv1.VirtualMachine, virtualmachinemigrat
 }
 
 func QmpGetMigrationInfo(ip string, port int32) (*MigrationInfo, error) {
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
+	mon := QmpConnect(ip, port) handle err {
 		return nil, err
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
 
 	qmpcmd := []byte(`{"execute": "query-migrate"}`)
-	raw, err := mon.Run(qmpcmd)
-	if err != nil {
+	raw := mon.Run(qmpcmd) handle err {
 		return nil, err
 	}
 
@@ -478,8 +460,7 @@ func QmpGetMigrationInfo(ip string, port int32) (*MigrationInfo, error) {
 }
 
 func QmpCancelMigration(ip string, port int32) error {
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
+	mon := QmpConnect(ip, port) handle err {
 		return err
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?
@@ -494,8 +475,7 @@ func QmpCancelMigration(ip string, port int32) error {
 }
 
 func QmpQuit(ip string, port int32) error {
-	mon, err := QmpConnect(ip, port)
-	if err != nil {
+	mon := QmpConnect(ip, port) handle err {
 		return err
 	}
 	defer mon.Disconnect() //nolint:errcheck // nothing to do with error when deferred. TODO: log it?

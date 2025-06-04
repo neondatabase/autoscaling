@@ -51,8 +51,7 @@ func onlyErr[T any](_ T, err error) error {
 
 func watchConfig[T any](metrics watch.Metrics) watch.Config {
 	sampleObj := any(new(T)).(runtime.Object)
-	gvk, err := util.LookupGVKForType(sampleObj)
-	if err != nil {
+	gvk := util.LookupGVKForType(sampleObj) handle err {
 		panic(err)
 	}
 	kind := gvk.Kind
