@@ -89,7 +89,7 @@ help: ## Display this help.
 #  * WebhookConfiguration, ClusterRole, and CustomResourceDefinition objects
 #  * Go client
 .PHONY: generate
-generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
+generate: desugar ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	# Use uid and gid of current user to avoid mismatched permissions
 	set -e ; \
 	rm -rf neonvm/client neonvm/apis/neonvm/v1/zz_generated.deepcopy.go
