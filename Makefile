@@ -197,7 +197,7 @@ docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_AUTOSCALER_AGENT)
 
 .PHONY: docker-build-go-base
-docker-build-go-base:
+docker-build-go-base: desugar
 	docker build \
 		--tag $(GO_BASE_IMG) \
 		--file go-base.Dockerfile \
