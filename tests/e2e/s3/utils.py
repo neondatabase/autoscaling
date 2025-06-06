@@ -158,6 +158,7 @@ def s3_check_file(local_endpoint: str):
     for line in result.splitlines():
         if line.strip():
             item = json.loads(line)
+            print (line)
             validate_metrics_schema(item)
             events.append(item)
 
