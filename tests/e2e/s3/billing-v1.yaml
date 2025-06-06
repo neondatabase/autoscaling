@@ -113,11 +113,6 @@ components:
 
     Event:
       type: object
-      discriminator:
-        propertyName: type
-        mapping:
-          absolute: "#/components/schemas/AbsoluteEvent"
-          incremental: "#/components/schemas/IncrementalEvent"
       oneOf:
         - $ref: "#/components/schemas/AbsoluteEvent"
         - $ref: "#/components/schemas/IncrementalEvent"
