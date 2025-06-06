@@ -104,8 +104,7 @@ func (s *PluginState) startPermitHandler(
 			return
 		}
 
-		responseBody, err := json.Marshal(&resp)
-		if err != nil {
+		responseBody := json.Marshal(&resp) handle err {
 			logger.Panic("Failed to encode response JSON", zap.Error(err))
 		}
 
@@ -249,8 +248,7 @@ func (s *PluginState) handleAgentRequest(
 			return nil, 404, errors.New("pod not found")
 		}
 
-		podState, err := state.PodStateFromK8sObj(podObj)
-		if err != nil {
+		podState := state.PodStateFromK8sObj(podObj) handle err {
 			logger.Error("Failed to extract Pod state from Pod object for agent request")
 			return nil, 500, errors.New("failed to extract state from pod")
 		}
@@ -307,8 +305,7 @@ func (s *PluginState) handleAgentRequest(
 
 func vmPatchForAgentRequest(pod *corev1.Pod, req api.AgentRequest) (_ []patch.Operation, changed bool) {
 	marshalJSON := func(value any) string {
-		bs, err := json.Marshal(value)
-		if err != nil {
+		bs := json.Marshal(value) handle err {
 			panic(fmt.Sprintf("failed to marshal value: %s", err))
 		}
 		return string(bs)

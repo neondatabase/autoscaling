@@ -29,8 +29,7 @@ func NewCPUScaler() *CPUScaler {
 }
 
 func (c *CPUScaler) ReconcileOnlineCPU(targetCount int) error {
-	online, err := c.cpuState.OnlineCPUs()
-	if err != nil {
+	online := c.cpuState.OnlineCPUs() handle err {
 		return err
 	}
 
@@ -46,8 +45,7 @@ func (c *CPUScaler) ReconcileOnlineCPU(targetCount int) error {
 		return c.setStateTo(cpuOffline, diff, online)
 
 	} else if len(online) < targetCount {
-		offline, err := c.cpuState.OfflineCPUs()
-		if err != nil {
+		offline := c.cpuState.OfflineCPUs() handle err {
 			return nil
 		}
 
@@ -83,8 +81,7 @@ func (c *CPUScaler) setStateTo(state cpuState, count int, candidateCPUs []int) e
 
 // ActiveCPUsCount() returns the count of online CPUs.
 func (c *CPUScaler) ActiveCPUsCount() (int, error) {
-	onlineCPUs, err := c.cpuState.OnlineCPUs()
-	if err != nil {
+	onlineCPUs := c.cpuState.OnlineCPUs() handle err {
 		return 0, err
 	}
 	return len(onlineCPUs), nil

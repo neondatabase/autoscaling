@@ -128,8 +128,7 @@ func (e *AutoscaleEnforcer) Filter(
 		return status
 	}
 
-	podState, err := state.PodStateFromK8sObj(pod)
-	if err != nil {
+	podState := state.PodStateFromK8sObj(pod) handle err {
 		msg := "Error extracting local information for Pod"
 		logger.Error(msg, zap.Error(err))
 		return framework.NewStatus(
@@ -217,8 +216,7 @@ func (e *AutoscaleEnforcer) filterCheck(
 			UID:       p.Pod.UID,
 		})
 
-		pod, err := state.PodStateFromK8sObj(p.Pod)
-		if err != nil {
+		pod := state.PodStateFromK8sObj(p.Pod) handle err {
 			logger.Error(
 				"Ignoring extra Pod in Filter stage because extracting custom state failed",
 				reconcile.ObjectMetaLogField("Pod", p.Pod),
@@ -300,8 +298,7 @@ func (e *AutoscaleEnforcer) Score(
 		return framework.MinNodeScore, status
 	}
 
-	podState, err := state.PodStateFromK8sObj(pod)
-	if err != nil {
+	podState := state.PodStateFromK8sObj(pod) handle err {
 		msg := "Error extracting local information for Pod"
 		logger.Error(msg, zap.Error(err))
 		return framework.MinNodeScore, framework.NewStatus(
@@ -494,8 +491,7 @@ func (e *AutoscaleEnforcer) Reserve(
 		return status
 	}
 
-	podState, err := state.PodStateFromK8sObj(pod)
-	if err != nil {
+	podState := state.PodStateFromK8sObj(pod) handle err {
 		msg := "Error extracting local information for Pod"
 		logger.Error(msg, zap.Error(err))
 		return framework.NewStatus(

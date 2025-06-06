@@ -108,8 +108,7 @@ func TryPodOwnerVirtualMachineMigration(pod *corev1.Pod) *NamespacedName {
 func LookupGVKForType(sampleObj runtime.Object) (schema.GroupVersionKind, error) {
 	var empty schema.GroupVersionKind
 
-	gvks, _, err := scheme.Scheme.ObjectKinds(sampleObj)
-	if err != nil {
+	gvks, _ := scheme.Scheme.ObjectKinds(sampleObj) handle err {
 		return empty, fmt.Errorf("could not get GVKs for object type %T: %w", sampleObj, err)
 	}
 	if len(gvks) == 0 {

@@ -18,8 +18,7 @@ type FakeClock struct {
 
 // NewFakeClock creates a new fake clock, with the initial time set to an unspecified, round number.
 func NewFakeClock(t *testing.T) *FakeClock {
-	base, err := time.Parse(time.RFC3339, "2000-01-01T00:00:00Z") // a nice round number, to make things easier
-	if err != nil {
+	base := time.Parse(time.RFC3339, "2000-01-01T00:00:00Z") // a nice round number, to make things easier handle err {
 		panic(err)
 	}
 

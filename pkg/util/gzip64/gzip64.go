@@ -37,13 +37,11 @@ func Decode(data string) ([]byte, error) {
 	input := strings.NewReader(data)
 
 	b64r := base64.NewDecoder(base64.StdEncoding, input)
-	gzr, err := gzip.NewReader(b64r)
-	if err != nil {
+	gzr := gzip.NewReader(b64r) handle err {
 		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 	}
 
-	output, err := io.ReadAll(gzr)
-	if err != nil {
+	output := io.ReadAll(gzr) handle err {
 		return nil, err
 	}
 

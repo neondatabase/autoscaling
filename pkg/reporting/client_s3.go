@@ -51,8 +51,7 @@ func NewS3Client(
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	s3Config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
-	if err != nil {
+	s3Config := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region)) handle err {
 		return nil, S3Error{Err: err}
 	}
 

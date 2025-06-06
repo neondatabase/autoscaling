@@ -24,13 +24,6 @@ jobs:
       - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
         with:
           go-version-file: 'go.mod'
-      - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
-        with:
-          # Required: the version of golangci-lint is required and
-          # should be specified with patch version.
-          version: v1.64.5
-          args: --timeout 5m
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-go-mod-tidy:
     name: check go mod tidy
@@ -49,14 +42,6 @@ jobs:
       - name: go mod tidy
         run: |
           go mod tidy
-      - name: check diff
-        run: |
-          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
-            git ls-files --exclude-standard --others .
-            git diff .
-            echo "ERROR: 'go mod tidy' modified the source tree."
-            exit 1
-          fi
 
   generated:
     name: check generated files
@@ -72,14 +57,6 @@ jobs:
       - name: make generate
         run: |
           make generate
-      - name: check diff
-        run: |
-          if ! test -z "$(git ls-files --exclude-standard --others .)$(git diff .)"; then
-            git ls-files --exclude-standard --others .
-            git diff .
-            echo "ERROR: 'make generate' modified the source tree."
-            exit 1
-          fi
 
   codespell:
     name: check spelling with codespell

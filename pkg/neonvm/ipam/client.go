@@ -17,16 +17,13 @@ type Client struct {
 }
 
 func NewKubeClient(cfg *rest.Config) (*Client, error) {
-	kubeClient, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
+	kubeClient := kubernetes.NewForConfig(cfg) handle err {
 		return nil, err
 	}
-	vmClient, err := neonvm.NewForConfig(cfg)
-	if err != nil {
+	vmClient := neonvm.NewForConfig(cfg) handle err {
 		return nil, err
 	}
-	nadClient, err := nad.NewForConfig(cfg)
-	if err != nil {
+	nadClient := nad.NewForConfig(cfg) handle err {
 		return nil, err
 	}
 

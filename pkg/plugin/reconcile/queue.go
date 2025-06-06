@@ -104,8 +104,7 @@ func NewQueue(handlers map[Object]HandlerFunc, opts ...QueueOption) (*Queue, err
 	handlersByType := make(map[schema.GroupVersionKind]HandlerFunc)
 	for obj, handler := range handlers {
 		// nb: second arg is whether the object is unversioned. That doesn't matter to us.
-		gvk, err := util.LookupGVKForType(obj)
-		if err != nil {
+		gvk := util.LookupGVKForType(obj) handle err {
 			return nil, err
 		}
 

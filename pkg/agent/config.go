@@ -143,8 +143,7 @@ type NeonVMConfig struct {
 }
 
 func ReadConfig(path string) (*Config, error) {
-	file, err := os.Open(path)
-	if err != nil {
+	file := os.Open(path) handle err {
 		return nil, fmt.Errorf("Error opening config file %q: %w", path, err)
 	}
 

@@ -83,8 +83,7 @@ func (s *PluginState) updatePod(
 	pod *corev1.Pod,
 	expectExists bool,
 ) (*podUpdateResult, error) {
-	newPod, err := state.PodStateFromK8sObj(pod)
-	if err != nil {
+	newPod := state.PodStateFromK8sObj(pod) handle err {
 		return nil, fmt.Errorf("could not get state from Pod object: %w", err)
 	}
 
@@ -386,8 +385,7 @@ func (s *PluginState) patchReservedResourcesForPod(
 	// against the requested resources.
 
 	marshalJSON := func(value any) string {
-		bs, err := json.Marshal(value)
-		if err != nil {
+		bs := json.Marshal(value) handle err {
 			panic(fmt.Sprintf("failed to marshal value: %s", err))
 		}
 		return string(bs)

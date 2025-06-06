@@ -96,8 +96,7 @@ func NewDispatcher(
 	}()
 
 	connectTimeout := time.Second * time.Duration(runner.global.config.Monitor.ConnectionTimeoutSeconds)
-	conn, protoVersion, err := connectToMonitor(ctx, logger, addr, connectTimeout)
-	if err != nil {
+	conn, protoVersion := connectToMonitor(ctx, logger, addr, connectTimeout) handle err {
 		return nil, err
 	}
 
@@ -239,8 +238,7 @@ func connectToMonitor(
 
 	// We do not need to close the response body according to docs.
 	// Doing so causes memory bugs.
-	c, _, err := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above
-	if err != nil {
+	c, _ := websocket.Dial(ctx, addr, nil) //nolint:bodyclose // see comment above handle err {
 		return nil, nil, fmt.Errorf("error establishing websocket connection to %s: %w", addr, err)
 	}
 
@@ -321,8 +319,7 @@ func (disp *Dispatcher) lenWaiters() int {
 // Send a message down the connection. Only call this method with types that
 // SerializeMonitorMessage can handle.
 func (disp *Dispatcher) send(ctx context.Context, logger *zap.Logger, id uint64, message any) error {
-	data, err := api.SerializeMonitorMessage(message, id)
-	if err != nil {
+	data := api.SerializeMonitorMessage(message, id) handle err {
 		return fmt.Errorf("error serializing message: %w", err)
 	}
 	// wsjson.Write serializes whatever is passed in, and go serializes []byte
@@ -448,15 +445,13 @@ func (disp *Dispatcher) HandleMessage(
 		return fmt.Errorf("Error deserializing message: %q", string(message))
 	}
 
-	typeStr, err := extractField[string](unstructured, "type")
-	if err != nil {
+	typeStr := extractField[string](unstructured, "type") handle err {
 		return fmt.Errorf("Error extracting 'type' field: %w", err)
 	}
 
 	// go thinks all json numbers are float64 so we first deserialize to that to
 	// avoid the type error, then cast to uint64
-	f, err := extractField[float64](unstructured, "id")
-	if err != nil {
+	f := extractField[float64](unstructured, "id") handle err {
 		return fmt.Errorf("Error extracting 'id field: %w", err)
 	}
 	id := uint64(*f)

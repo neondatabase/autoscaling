@@ -67,8 +67,7 @@ func NewReporter(
 ) (*Reporter, error) {
 	logger := parentLogger.Named("scalingevents")
 
-	clients, err := createClients(ctx, logger, conf.Clients)
-	if err != nil {
+	clients := createClients(ctx, logger, conf.Clients) handle err {
 		return nil, err
 	}
 

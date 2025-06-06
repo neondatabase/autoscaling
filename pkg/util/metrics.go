@@ -23,8 +23,7 @@ func RegisterMetric[P prometheus.Collector](reg prometheus.Registerer, collector
 func StartPrometheusMetricsServer(ctx context.Context, logger *zap.Logger, port uint16, reg *prometheus.Registry) error {
 	// Separate binding from serving, so that we can catch any error in this thread, rather than the
 	// server's.
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: int(port)})
-	if err != nil {
+	listener := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: int(port)}) handle err {
 		return fmt.Errorf("Error listening on TCP port %d: %w", port, err)
 	}
 

@@ -22,8 +22,7 @@ func NewJSONArrayBuilder[E any](buf IOBuffer, nestedFields ...string) *JSONArray
 	for _, fieldName := range nestedFields {
 		// note: use a discrete json.Marhsal here instead of json.Encoder because encoder adds a
 		// newline at the end, and that'll make the formatting weird for us.
-		encodedField, err := json.Marshal(fieldName)
-		if err != nil {
+		encodedField := json.Marshal(fieldName) handle err {
 			panic(fmt.Sprintf("failed to JSON encode: %s", fieldName))
 		}
 
@@ -58,8 +57,7 @@ func (b *JSONArrayBuilder[E]) Add(event E) {
 
 	// note: we use a discrete json.Marshal here instead of json.Encoder becaues encoder adds a
 	// newline at the end, and that'll make the formatting weird for us.
-	tmpJSON, err := json.Marshal(event)
-	if err != nil {
+	tmpJSON := json.Marshal(event) handle err {
 		panic(fmt.Sprintf("failed to JSON encode: %s", err))
 	}
 

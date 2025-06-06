@@ -21,19 +21,16 @@ func setRunnerCPULimits(ctx context.Context, vm *vmv1.VirtualMachine, cpu vmv1.M
 
 	update := api.VCPUChange{VCPUs: cpu}
 
-	data, err := json.Marshal(update)
-	if err != nil {
+	data := json.Marshal(update) handle err {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-	if err != nil {
+	req := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data)) handle err {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
+	resp := http.DefaultClient.Do(req) handle err {
 		return err
 	}
 	defer resp.Body.Close()
@@ -50,13 +47,11 @@ func getRunnerCPULimits(ctx context.Context, vm *vmv1.VirtualMachine) (*api.VCPU
 
 	url := fmt.Sprintf("http://%s:%d/cpu_current", vm.Status.PodIP, vm.Spec.RunnerPort)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
+	req := http.NewRequestWithContext(ctx, "GET", url, nil) handle err {
 		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
+	resp := http.DefaultClient.Do(req) handle err {
 		return nil, err
 	}
 

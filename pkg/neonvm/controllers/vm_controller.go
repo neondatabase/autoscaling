@@ -235,8 +235,7 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 
 	// Release overlay IP address
 	if vm.Spec.ExtraNetwork != nil {
-		ip, err := r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
-		if err != nil {
+		ip := r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}) handle err {
 			return fmt.Errorf("fail to release overlay IP: %w", err)
 		}
 		log.Info(fmt.Sprintf("Released overlay IP %s", ip.String()))
@@ -300,8 +299,7 @@ func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMac
 	}
 
 	log := log.FromContext(ctx)
-	ip, err := r.IPAM.AcquireIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
-	if err != nil {
+	ip := r.IPAM.AcquireIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}) handle err {
 		return err
 	}
 	vm.Status.ExtraNetIP = ip.IP.String()
@@ -336,8 +334,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 
 	// check if the certificate needs renewal for this running VM.
 	if enableTLS {
-		certSecret, err := r.reconcileCertificateSecret(ctx, vm)
-		if err != nil {
+		certSecret := r.reconcileCertificateSecret(ctx, vm) handle err {
 			return err
 		}
 		// VM is not ready to start yet.
@@ -407,8 +404,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			}
 
 			// Define a new pod
-			pod, err := r.podForVirtualMachine(vm, sshSecret)
-			if err != nil {
+			pod := r.podForVirtualMachine(vm, sshSecret) handle err {
 				log.Error(err, "Failed to define new Pod resource for VirtualMachine")
 				return err
 			}
@@ -517,8 +513,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			vm.Status.Node = vmRunner.Spec.NodeName
 
 			// get cgroups CPU details from runner pod
-			cgroupUsage, err := getRunnerCPULimits(ctx, vm)
-			if err != nil {
+			cgroupUsage := getRunnerCPULimits(ctx, vm) handle err {
 				log.Error(err, "Failed to get CPU details from runner", "VirtualMachine", vm.Name)
 				return err
 			}
@@ -534,8 +529,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			case vmv1.CpuScalingModeSysfs:
 				pluggedCPU = cgroupUsage.VCPUs.RoundedUp()
 			case vmv1.CpuScalingModeQMP:
-				cpuSlotsPlugged, _, err := QmpGetCpus(QmpAddr(vm))
-				if err != nil {
+				cpuSlotsPlugged, _ := QmpGetCpus(QmpAddr(vm)) handle err {
 					log.Error(err, "Failed to get CPU details from VirtualMachine", "VirtualMachine", vm.Name)
 					return err
 				}
@@ -550,8 +544,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			r.updateVMStatusCPU(ctx, vm, vmRunner, pluggedCPU, cgroupUsage)
 
 			// get Memory details from hypervisor and update VM status
-			memorySize, err := QmpGetMemorySize(QmpAddr(vm))
-			if err != nil {
+			memorySize := QmpGetMemorySize(QmpAddr(vm)) handle err {
 				log.Error(err, "Failed to get Memory details from VirtualMachine", "VirtualMachine", vm.Name)
 				return err
 			}
@@ -653,8 +646,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			// do nothing
 		}
 
-		cpuScaled, err := r.handleCPUScaling(ctx, vm, vmRunner)
-		if err != nil {
+		cpuScaled := r.handleCPUScaling(ctx, vm, vmRunner) handle err {
 			log.Error(err, "failed to handle CPU scaling")
 			return err
 		}
@@ -747,8 +739,7 @@ func (r *VMReconciler) doVirtioMemScaling(
 	targetSlotCount := int(vm.Spec.Guest.MemorySlots.Use - vm.Spec.Guest.MemorySlots.Min)
 
 	targetVirtioMemSize := int64(targetSlotCount) * vm.Spec.Guest.MemorySlotSize.Value()
-	previousTarget, err := QmpSetVirtioMem(vm, targetVirtioMemSize)
-	if err != nil {
+	previousTarget := QmpSetVirtioMem(vm, targetVirtioMemSize) handle err {
 		return false, err
 	}
 
@@ -765,8 +756,7 @@ func (r *VMReconciler) doVirtioMemScaling(
 	// Maybe we're already using the amount we want?
 	// Update the status to reflect the current size - and if it matches goalTotalSize, ram
 	// scaling is done.
-	currentTotalSize, err := QmpGetMemorySize(QmpAddr(vm))
-	if err != nil {
+	currentTotalSize := QmpGetMemorySize(QmpAddr(vm)) handle err {
 		return false, err
 	}
 
@@ -957,8 +947,7 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 		return nil
 	}
 
-	patchData, err := json.Marshal(patches)
-	if err != nil {
+	patchData := json.Marshal(patches) handle err {
 		panic(fmt.Errorf("error marshalling JSON patch: %w", err))
 	}
 
@@ -992,8 +981,7 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 		Memory: resource.NewQuantity(spec.Guest.MemorySlotSize.Value()*int64(memorySlots), resource.BinarySI),
 	}
 
-	usageJSON, err := json.Marshal(usage)
-	if err != nil {
+	usageJSON := json.Marshal(usage) handle err {
 		panic(fmt.Errorf("error marshalling JSON: %w", err))
 	}
 
@@ -1001,8 +989,7 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 }
 
 func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
-	resourcesJSON, err := json.Marshal(spec.Resources())
-	if err != nil {
+	resourcesJSON := json.Marshal(spec.Resources()) handle err {
 		panic(fmt.Errorf("error marshalling JSON: %w", err))
 	}
 
@@ -1014,8 +1001,7 @@ func extractVirtualMachineOvercommitSettingsJSON(spec vmv1.VirtualMachineSpec) *
 		return nil
 	}
 
-	settingsJSON, err := json.Marshal(*spec.Overcommit)
-	if err != nil {
+	settingsJSON := json.Marshal(*spec.Overcommit) handle err {
 		panic(fmt.Errorf("error marshalling JSON: %w", err))
 	}
 	return lo.ToPtr(string(settingsJSON))
@@ -1026,8 +1012,7 @@ func (r *VMReconciler) podForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 	sshSecret *corev1.Secret,
 ) (*corev1.Pod, error) {
-	pod, err := podSpec(vm, sshSecret, r.Config)
-	if err != nil {
+	pod := podSpec(vm, sshSecret, r.Config) handle err {
 		return nil, err
 	}
 
@@ -1041,8 +1026,7 @@ func (r *VMReconciler) podForVirtualMachine(
 }
 
 func (r *VMReconciler) sshSecretForVirtualMachine(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
-	secret, err := sshSecretSpec(vm)
-	if err != nil {
+	secret := sshSecretSpec(vm) handle err {
 		return nil, err
 	}
 
@@ -1056,8 +1040,7 @@ func (r *VMReconciler) sshSecretForVirtualMachine(vm *vmv1.VirtualMachine) (*cor
 
 func sshSecretSpec(vm *vmv1.VirtualMachine) (*corev1.Secret, error) {
 	// using ed25519 signatures it takes ~16us to finish
-	publicKey, privateKey, err := sshKeygen()
-	if err != nil {
+	publicKey, privateKey := sshKeygen() handle err {
 		return nil, err
 	}
 
@@ -1082,8 +1065,7 @@ func (r *VMReconciler) certReqForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 	key crypto.Signer,
 ) (*certv1.CertificateRequest, error) {
-	cert, err := certReqSpec(vm, key)
-	if err != nil {
+	cert := certReqSpec(vm, key) handle err {
 		return nil, err
 	}
 
@@ -1101,8 +1083,7 @@ func (r *VMReconciler) tmpKeySecretForVirtualMachine(
 	vm *vmv1.VirtualMachine,
 	key crypto.Signer,
 ) (*corev1.Secret, error) {
-	secret, err := tmpKeySecretSpec(vm, key)
-	if err != nil {
+	secret := tmpKeySecretSpec(vm, key) handle err {
 		return nil, err
 	}
 
@@ -1121,8 +1102,7 @@ func (r *VMReconciler) certSecretForVirtualMachine(
 	key crypto.Signer,
 	cert []byte,
 ) (*corev1.Secret, error) {
-	secret, err := certSecretSpec(vm, key, cert)
-	if err != nil {
+	secret := certSecretSpec(vm, key, cert) handle err {
 		return nil, err
 	}
 
@@ -1231,18 +1211,15 @@ func podSpec(
 	affinity := affinityForVirtualMachine(vm)
 
 	// Get the Operand image
-	image, err := imageForVmRunner()
-	if err != nil {
+	image := imageForVmRunner() handle err {
 		return nil, err
 	}
 
-	vmSpecJson, err := json.Marshal(vm.Spec)
-	if err != nil {
+	vmSpecJson := json.Marshal(vm.Spec) handle err {
 		return nil, fmt.Errorf("marshal VM Spec: %w", err)
 	}
 
-	vmStatusJson, err := json.Marshal(vm.Status)
-	if err != nil {
+	vmStatusJson := json.Marshal(vm.Status) handle err {
 		return nil, fmt.Errorf("marshal VM Status: %w", err)
 	}
 
@@ -1710,8 +1687,7 @@ func GetNADConfig() *NADConfig {
 // slices. If an error occurs during key generation or encoding, it returns nil
 // for both keys and the error.
 func sshKeygen() (publicKeyBytes []byte, privateKeyBytes []byte, err error) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
+	publicKey, privateKey := ed25519.GenerateKey(rand.Reader) handle err {
 		return nil, nil, err
 	}
 
@@ -1729,8 +1705,7 @@ func sshKeygen() (publicKeyBytes []byte, privateKeyBytes []byte, err error) {
 }
 
 func encodePrivateKey(privateKey ed25519.PrivateKey) ([]byte, error) {
-	privBlock, err := ssh.MarshalPrivateKey(privateKey, "")
-	if err != nil {
+	privBlock := ssh.MarshalPrivateKey(privateKey, "") handle err {
 		return nil, err
 	}
 	privatePEM := pem.EncodeToMemory(privBlock)
@@ -1739,8 +1714,7 @@ func encodePrivateKey(privateKey ed25519.PrivateKey) ([]byte, error) {
 }
 
 func encodePublicKey(publicKey ed25519.PublicKey) ([]byte, error) {
-	sshPublicKey, err := ssh.NewPublicKey(publicKey)
-	if err != nil {
+	sshPublicKey := ssh.NewPublicKey(publicKey) handle err {
 		return nil, err
 	}
 

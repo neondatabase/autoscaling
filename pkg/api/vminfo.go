@@ -182,8 +182,7 @@ func (vm VmInfo) NamespacedName() util.NamespacedName {
 
 func ExtractVmInfo(logger *zap.Logger, vm *vmv1.VirtualMachine) (*VmInfo, error) {
 	logger = logger.With(util.VMNameFields(vm))
-	info, err := extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources())
-	if err != nil {
+	info := extractVmInfoGeneric(logger, vm.Name, vm, vm.Spec.Resources()) handle err {
 		return nil, fmt.Errorf("error extracting VM info: %w", err)
 	}
 
@@ -194,8 +193,7 @@ func ExtractVmInfo(logger *zap.Logger, vm *vmv1.VirtualMachine) (*VmInfo, error)
 func ExtractVmInfoFromPod(logger *zap.Logger, pod *corev1.Pod) (*VmInfo, error) {
 	logger = logger.With(util.PodNameFields(pod))
 
-	resources, err := vmv1.VirtualMachineResourcesFromPod(pod)
-	if err != nil {
+	resources := vmv1.VirtualMachineResourcesFromPod(pod) handle err {
 		return nil, err
 	}
 

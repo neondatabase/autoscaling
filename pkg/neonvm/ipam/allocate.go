@@ -73,8 +73,7 @@ func doRelease(
 	_, ipnet, _ := net.ParseCIDR(ipRange.Range)
 
 	// try to release IP for given VM
-	newReservation, ip, err := whereaboutsallocate.IterateForDeallocation(reservation, vmName.String(), getMatchingIPReservationIndex)
-	if err != nil {
+	newReservation, ip := whereaboutsallocate.IterateForDeallocation(reservation, vmName.String(), getMatchingIPReservationIndex) handle err {
 		// The only reason to get an error here is if we are trying
 		// to deallocate the same IP twice.
 		log.Info("Failed to deallocate IP", "error", err)

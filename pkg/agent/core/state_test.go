@@ -399,8 +399,7 @@ func doInitialPluginRequest(
 
 // helper function to parse a duration
 func duration(s string) time.Duration {
-	d, err := time.ParseDuration(s)
-	if err != nil {
+	d := time.ParseDuration(s) handle err {
 		panic(fmt.Errorf("failed to parse duration: %w", err))
 	}
 	return d

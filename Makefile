@@ -89,7 +89,7 @@ help: ## Display this help.
 #  * WebhookConfiguration, ClusterRole, and CustomResourceDefinition objects
 #  * Go client
 .PHONY: generate
-generate: ## Generate boilerplate DeepCopy methods, manifests, and Go client
+generate: desugar ## Generate boilerplate DeepCopy methods, manifests, and Go client
 	# Use uid and gid of current user to avoid mismatched permissions
 	set -e ; \
 	rm -rf neonvm/client neonvm/apis/neonvm/v1/zz_generated.deepcopy.go
@@ -155,13 +155,21 @@ show-coverage: coverage-html
 ##@ Build
 
 .PHONY: build
-build: vet bin/vm-builder ## Build all neonvm binaries.
+build: desugar vet bin/vm-builder ## Build all neonvm binaries.
 	GOOS=linux go build -o bin/controller         neonvm-controller/cmd/*.go
 	GOOS=linux go build -o bin/vxlan-controller   neonvm-vxlan-controller/cmd/*.go
 	GOOS=linux go build -o bin/runner             neonvm-runner/cmd/*.go
 	GOOS=linux go build -o bin/daemon             neonvm-daemon/cmd/*.go
 	GOOS=linux go build -o bin/autoscaler-agent   autoscaler-agent/cmd/*.go
 	GOOS=linux go build -o bin/scheduler          autoscale-scheduler/cmd/*.go
+
+.PHONY: resugar
+resugar:
+	./scripts/resugar.sh
+
+.PHONY: desugar
+desugar:
+	./scripts/desugar.sh
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
@@ -189,7 +197,7 @@ docker-push: docker-build ## Push docker images to docker registry
 	docker push -q $(IMG_AUTOSCALER_AGENT)
 
 .PHONY: docker-build-go-base
-docker-build-go-base:
+docker-build-go-base: desugar
 	docker build \
 		--tag $(GO_BASE_IMG) \
 		--file go-base.Dockerfile \
