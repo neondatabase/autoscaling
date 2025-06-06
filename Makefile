@@ -248,8 +248,8 @@ docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscal
 		--file autoscale-scheduler/Dockerfile \
 		.
 
-.PHONY: docker-build-examples
-docker-build-examples: bin/vm-builder ## Build docker images for testing VMs
+.PHONY: docker-build-vm-postgres
+docker-build-vm-postgres: bin/vm-builder ## Build docker images for testing VMs
 	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
 
 .PHONY: docker-build-pg16-disk-test
@@ -398,21 +398,15 @@ load-images: check-local-context kubectl kind k3d ## Push docker images to the l
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then make k3d-load;  fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ];  then make kind-load; fi
 
-.PHONY: load-example-vms
-load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM image to the kind/k3d cluster.
+.PHONY: load-vm-postgres
+load-vm-postgres: check-local-context kubectl kind k3d ## Load the testing VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(E2E_TESTS_VM_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name $(CLUSTER_NAME); fi
-
-.PHONY: example-vms
-example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
 
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG16_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(PG16_DISK_TEST_IMG) --name $(CLUSTER_NAME); fi
-
-.PHONY: pg16-disk-test
-pg16-disk-test: docker-build-pg16-disk-test load-pg16-disk-test ## Build and push the pg16-disk-test VM test image to the kind/k3d cluster.
 
 .PHONY: kind-load
 kind-load: kind # Push docker images to the kind cluster.
@@ -433,6 +427,17 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 		$(IMG_SCHEDULER) \
 		$(IMG_AUTOSCALER_AGENT) \
 		--cluster $(CLUSTER_NAME) --mode direct
+
+##@ Example VM images
+
+.PHONY: vm-examples
+examples: vm-postgres pg16-disk-test ## Build example VM images
+
+.PHONY: vm-postgres
+vm-postgres: docker-build-vm-postgres load-vm-postgres
+
+.PHONY: pg16-disk-test
+pg16-disk-test: docker-build-pg16-disk-test load-pg16-disk-test
 
 ##@ End-to-End tests
 
