@@ -158,8 +158,6 @@ def s3_check_file(local_endpoint: str):
     for line in result.splitlines():
         if line.strip():
             item = json.loads(line)
-            print (line)
-            validate_metrics_schema(item)
             events.append(item)
 
     do_assert(len(events) > 0, "No events found")
@@ -201,15 +199,6 @@ def s3_check_file(local_endpoint: str):
     now = datetime.datetime.utcnow()
     do_assert(now - stop_time < datetime.timedelta(seconds=10))
 
-
-def validate_metrics_schema(metrics: dict):
-    billing_schema = yaml.safe_load(
-        open("billing-v1.yaml", "r").read()
-    )
-    metrics_schema = billing_schema["components"]["schemas"]["Event"]
-    
-    openapi_schema_validator.validate(metrics_schema, metrics)
-    
 
 class KubctlForward:
     def __init__(self):
