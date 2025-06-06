@@ -109,14 +109,18 @@ components:
         events:
           type: array
           items:
-            discriminator:
-              propertyName: type
-              mapping:
-                absolute: "#/components/schemas/AbsoluteEvent"
-                incremental: "#/components/schemas/IncrementalEvent"
-            oneOf:
-              - $ref: "#/components/schemas/AbsoluteEvent"
-              - $ref: "#/components/schemas/IncrementalEvent"
+            $ref: '#/components/schemas/Event'
+
+    Event:
+      type: object
+      discriminator:
+        propertyName: type
+        mapping:
+          absolute: "#/components/schemas/AbsoluteEvent"
+          incremental: "#/components/schemas/IncrementalEvent"
+      oneOf:
+        - $ref: "#/components/schemas/AbsoluteEvent"
+        - $ref: "#/components/schemas/IncrementalEvent"
 
     AbsoluteEvent:
       type: object

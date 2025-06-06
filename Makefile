@@ -473,7 +473,7 @@ pg16-disk-test: docker-build-pg16-disk-test load-pg16-disk-test
 ##@ End-to-End tests
 
 .PHONE: e2e-tools
-e2e-tools: k3d kind kubectl kuttl python-init ## Donwnload tools for e2e tests locally if necessary.
+e2e-tools: k3d kind kubectl kuttl python-init ## Download tools for e2e tests locally if necessary.
 
 .PHONE: e2e
 e2e: check-local-context e2e-tools ## Run e2e kuttl tests

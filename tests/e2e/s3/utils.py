@@ -155,12 +155,13 @@ def s3_check_file(local_endpoint: str):
     )
     result = json.loads(result)
 
-    do_assert("events" in result)
+    events = []
+    for line in result.splitlines():
+        if line.strip():
+            item = json.loads(line)
+            validate_metrics_schema(item)
+            events.append(item)
 
-    # Check schema
-    validate_metrics_schema(result)
-
-    events = result["events"]
     do_assert(len(events) > 0, "No events found")
 
     # Example events[0]:
@@ -205,7 +206,7 @@ def validate_metrics_schema(metrics: dict):
     billing_schema = yaml.safe_load(
         open("billing-v1.yaml", "r").read()
     )
-    metrics_schema = billing_schema["components"]["schemas"]["EventsBatch"]
+    metrics_schema = billing_schema["components"]["schemas"]["Event"]
     
     openapi_schema_validator.validate(metrics_schema, metrics)
     
