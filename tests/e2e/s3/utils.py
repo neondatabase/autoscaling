@@ -153,7 +153,6 @@ def s3_check_file(local_endpoint: str):
     result = subprocess.check_output(
         ["gzip", "-d", "-c"], input=response["Body"].read()
     )
-    result = json.loads(result)
 
     events = []
     for line in result.splitlines():
