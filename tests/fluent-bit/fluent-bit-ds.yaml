@@ -1,0 +1,83 @@
+# tests/fluent-bit/fluent-bit-ds.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluent-bit
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: fluent-bit
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fluent-bit
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fluent-bit
+    spec:
+      serviceAccountName: fluent-bit
+      tolerations: # Tolerate all taints to run on all nodes
+      - operator: Exists
+      volumes:
+      - name: fluent-bit-config
+        configMap:
+          name: fluent-bit-config
+      - name: flb-storage # Volume for Fluent Bit database/buffering
+        hostPath:
+          path: /var/log/flb-storage # Store DB on host node
+          type: DirectoryOrCreate
+      - name: logs-output # Mount host ./tests/logs
+        hostPath:
+          path: /logs # Path must match k3d/kind config target
+          type: Directory
+      # Input volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+          type: Directory
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+          type: DirectoryOrCreate
+      - name: runlog
+        hostPath:
+          path: /var/run/log
+          type: DirectoryOrCreate
+      containers:
+      - name: fluent-bit
+        image: fluent/fluent-bit:latest # Or pin to a specific version
+        ports:
+        - containerPort: 2020 # For HTTP Server
+        env:
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          limits:
+            memory: 500Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        volumeMounts:
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc/
+        - name: logs-output
+          mountPath: /logs
+        - name: flb-storage
+          mountPath: /var/log/flb-storage
+        # Input volumes:
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: runlog
+          mountPath: /var/run/log
+          readOnly: true
+        securityContext:
+          # Required to read log files owned by root and others
+          runAsUser: 0
+          # Often required for access to /var/log and device drivers
+          privileged: true

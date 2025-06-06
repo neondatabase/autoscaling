@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"strconv"
 	"time"
 
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -67,11 +66,6 @@ const (
 	typeAvailableVirtualMachine = "Available"
 	// typeDegradedVirtualMachine represents the status used when the custom resource is deleted and the finalizer operations are must to occur.
 	typeDegradedVirtualMachine = "Degraded"
-)
-
-const (
-	minSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
-	maxSupportedRunnerVersion api.RunnerProtoVersion = api.RunnerProtoV1
 )
 
 // VMReconciler reconciles a VirtualMachine object
@@ -213,11 +207,13 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		}
 	}
 
+	requeueAfter := 15 * time.Second
 	// Only quickly requeue if we're scaling or migrating. Otherwise, we aren't expecting any
 	// changes from QEMU, and it's wasteful to repeatedly check.
-	requeueAfter := time.Second
-	if vm.Status.Phase == vmv1.VmPending || vm.Status.Phase == vmv1.VmRunning {
-		requeueAfter = 15 * time.Second
+	if vm.Status.Phase == vmv1.VmScaling ||
+		vm.Status.Phase == vmv1.VmMigrating ||
+		vm.Status.Phase == vmv1.VmPreMigrating {
+		requeueAfter = time.Second
 	}
 
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -245,24 +241,6 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 		log.Info(fmt.Sprintf("Released overlay IP %s", ip.String()))
 	}
 	return nil
-}
-
-func getRunnerVersion(pod *corev1.Pod) (api.RunnerProtoVersion, error) {
-	val, ok := pod.Labels[vmv1.RunnerPodVersionLabel]
-	if !ok {
-		return api.RunnerProtoVersion(0), nil
-	}
-
-	uintVal, err := strconv.ParseUint(val, 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse label value as integer: %w", err)
-	}
-
-	return api.RunnerProtoVersion(uintVal), nil
-}
-
-func runnerVersionIsSupported(version api.RunnerProtoVersion) bool {
-	return version >= minSupportedRunnerVersion && version <= maxSupportedRunnerVersion
 }
 
 func (r *VMReconciler) updateVMStatusCPU(
@@ -537,17 +515,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			// update Node name where runner working
 			vm.Status.Node = vmRunner.Spec.NodeName
 
-			runnerVersion, err := getRunnerVersion(vmRunner)
-			if err != nil {
-				log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", vm.Name)
-				return err
-			}
-			if !runnerVersionIsSupported(runnerVersion) {
-				err := fmt.Errorf("runner version %v is not supported", runnerVersion)
-				log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", vm.Name)
-				return err
-			}
-
 			// get cgroups CPU details from runner pod
 			cgroupUsage, err := getRunnerCPULimits(ctx, vm)
 			if err != nil {
@@ -683,17 +650,6 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			return nil
 		default:
 			// do nothing
-		}
-
-		runnerVersion, err := getRunnerVersion(vmRunner)
-		if err != nil {
-			log.Error(err, "Failed to get runner version of VM runner pod", "VirtualMachine", vm.Name)
-			return err
-		}
-		if !runnerVersionIsSupported(runnerVersion) {
-			err := fmt.Errorf("runner version %v is not supported", runnerVersion)
-			log.Error(err, "VM runner pod has unsupported version", "VirtualMachine", vm.Name)
-			return err
 		}
 
 		cpuScaled, err := r.handleCPUScaling(ctx, vm, vmRunner)
