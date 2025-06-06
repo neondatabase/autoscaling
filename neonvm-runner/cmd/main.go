@@ -251,6 +251,7 @@ func run(logger *zap.Logger) error {
 					EmptyDisk: nil,
 					ConfigMap: nil,
 					Secret:    nil,
+					Projected: nil,
 					Tmpfs:     nil,
 				},
 			})
@@ -750,6 +751,7 @@ func monitorFiles(ctx context.Context, logger *zap.Logger, wg *sync.WaitGroup, v
 			// secrets/configmaps are mounted using the atomicwriter utility,
 			// which loads the directory into `..data`.
 			dataDir := fmt.Sprintf("/vm/mounts%s/..data", disk.MountPath)
+
 			secrets[dataDir] = disk.MountPath
 			secretsOrd = append(secretsOrd, dataDir)
 		}
