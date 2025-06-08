@@ -56,6 +56,20 @@ For more information, refer to [ARCHITECTURE.md](./ARCHITECTURE.md).
 > [!NOTE]
 > NeonVM and Autoscaling are not expected to work outside Linux x86.
 
+### Install dependencies
+
+To run autoscaling locally you need to install dependencies:
+- [`kubectl`]
+- [`kind`]/[`k3d`]
+- [`kuttl`] (for e2e tests)
+
+[`kubectl`]: https://kubernetes.io/docs/tasks/tools/#kubectl
+[`kind`]: https://kubernetes.io/docs/tasks/tools/#kind
+[`kuttl`]: https://kuttl.dev/
+[`k3d`]: https://k3d.io
+
+### Running locally
+
 Build NeonVM Linux kernel (it takes time, can be run only once)
 
 ```sh
@@ -83,7 +97,7 @@ make deploy
 Build and load the test VM:
 
 ```sh
-make pg16-disk-test
+make vm-examples
 ```
 
 Start the test VM:
@@ -117,24 +131,9 @@ cgexec -g memory:neon-test allocate-loop 256 2280
 
 [`allocate-loop`]: vm-examples/pg16-disk-test/allocate-loop.c
 
-### Testing
+### E2E tests
 
-To run e2e tests you need to install dependencies:
-- [`kubectl`]
-- [`kind`]/[`k3d`]
-- [`kuttl`]
-
-You can either download them from their websites or install using Homebrew: `brew install kubectl kind k3d kuttl`
-
+To run the end-to-end tests, you need to have [`kuttl`] installed. You can run the tests with:
 ```sh
-make kind-setup # or make k3d-setup, if you'd like to use k3d
-make kernel
-make deploy
-make example-vms
 make e2e
 ```
-
-[`kubectl`]: https://kubernetes.io/docs/tasks/tools/#kubectl
-[`kind`]: https://kubernetes.io/docs/tasks/tools/#kind
-[`kuttl`]: https://kuttl.dev/
-[`k3d`]: https://k3d.io

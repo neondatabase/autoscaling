@@ -63,10 +63,6 @@ jobs:
       skip: ${{ inputs.tag != '' }}
       tag: ${{ inputs.tag || needs.get-tag.outputs.tag }}
       kernel-image: ${{ inputs.kernel-image }}
-      # note: setting to preserve runner pods will mean that if !skip, they'll be built with those
-      # settings and used properly in the tests. But if skip (because inputs.tag != ''), then this
-      # setting will have no effect and the release images will be normal.
-      controller-preserve-runner-pods: true
       archs: '["amd64","arm64"]'
     secrets: inherit
 
@@ -216,7 +212,7 @@ jobs:
           # cluster means we can avoid dynamically editing the image used in the kuttl files.
           docker pull "$TEST_IMAGE"
           docker image tag "$TEST_IMAGE" "$IMG_E2E_TEST"
-          make load-example-vms
+          make load-vm-postgres
 
       - run: make arm_patch_e2e
         if: matrix.arch == 'arm64'
