@@ -1,0 +1,12 @@
+diff -ru a/arch/x86/mm/init.c b/arch/x86/mm/init.c
+--- a/arch/x86/mm/init.c	2025-06-08 16:42:31.054946174 +0100
++++ b/arch/x86/mm/init.c	2025-06-09 10:43:47.924514388 +0100
+@@ -131,7 +131,7 @@
+ 		unsigned int order;
+ 
+ 		order = get_order((unsigned long)num << PAGE_SHIFT);
+-		return (void *)__get_free_pages(GFP_ATOMIC | __GFP_ZERO, order);
++		return (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, order);
+ 	}
+ 
+ 	if ((pgt_buf_end + num) > pgt_buf_top || !can_use_brk_pgt) {
