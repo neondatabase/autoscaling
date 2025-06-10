@@ -1,6 +1,6 @@
 diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
---- a/arch/x86/mm/init_64.c	2025-06-09 10:43:05.419765067 +0100
-+++ b/arch/x86/mm/init_64.c	2025-06-08 16:45:06.997880988 +0100
+--- a/arch/x86/mm/init_64.c	2025-06-10 10:29:59.064194330 +0100
++++ b/arch/x86/mm/init_64.c	2025-06-10 10:30:44.777104632 +0100
 @@ -577,8 +577,10 @@
  		}
  
@@ -53,10 +53,10 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  	unsigned long ret = 0;
  
  	ret = init_memory_mapping(start, start + size, params->pgprot);
--	if (IS_ERR(ret))
-+	if (IS_ERR(ret)) {
+-	if (IS_ERR((void *)ret))
++	if (IS_ERR((void *)ret)) {
 +		printk(KERN_INFO "NEON DEBUG: init_memory_mapping() failed");
- 		return (int)PTR_ERR(ret);
+ 		return (int)PTR_ERR((void *)ret);
 +	}
  
  	return add_pages(nid, start_pfn, nr_pages, params);

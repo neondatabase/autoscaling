@@ -1,6 +1,6 @@
 diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
 --- a/arch/x86/mm/init_64.c	2025-05-02 06:59:33.000000000 +0100
-+++ b/arch/x86/mm/init_64.c	2025-06-08 16:35:26.510996613 +0100
++++ b/arch/x86/mm/init_64.c	2025-06-10 10:28:59.839018166 +0100
 @@ -504,7 +504,8 @@
  /*
   * Create PMD level page table mapping for physical addresses. The virtual
@@ -22,7 +22,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
 +		 * phys_{ppmd,pud,p4d}_init return allocation errors via ERR_PTR.
 +		 * phys_pte_init makes no allocations, so should not error.
 +		 */
-+		BUG_ON(IS_ERR(paddr_last));
++		BUG_ON(IS_ERR((void *)paddr_last));
  
  		spin_lock(&init_mm.page_table_lock);
  		pmd_populate_kernel_init(&init_mm, pmd, pte, init);
@@ -40,7 +40,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  							   paddr_end,
  							   page_size_mask,
  							   prot, init);
-+				if (IS_ERR(paddr_last))
++				if (IS_ERR((void *)paddr_last))
 +					return paddr_last;
  				continue;
  			}
@@ -63,7 +63,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  		pud_populate_init(&init_mm, pud, pmd, init);
  		spin_unlock(&init_mm.page_table_lock);
 +
-+		if (IS_ERR(paddr_last))
++		if (IS_ERR((void *)paddr_last))
 +			return paddr_last;
  	}
  
@@ -72,7 +72,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  			pud = pud_offset(p4d, 0);
  			paddr_last = phys_pud_init(pud, paddr, __pa(vaddr_end),
  					page_size_mask, prot, init);
-+			if (IS_ERR(paddr_last))
++			if (IS_ERR((void *)paddr_last))
 +				return paddr_last;
  			continue;
  		}
@@ -90,7 +90,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
 +		/*
 +		 * Bail only after updating p4d to keep progress from pud across retries.
 +		 */
-+		if (IS_ERR(paddr_last))
++		if (IS_ERR((void *)paddr_last))
 +			return paddr_last;
  	}
  
@@ -99,7 +99,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  						   __pa(vaddr_end),
  						   page_size_mask,
  						   prot, init);
-+			if (IS_ERR(paddr_last))
++			if (IS_ERR((void *)paddr_last))
 +				return paddr_last;
  			continue;
  		}
@@ -118,7 +118,7 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
 +		/*
 +		 * Bail only after updating pgd/p4d to keep progress from p4d across retries.
 +		 */
-+		if (IS_ERR(paddr_last))
++		if (IS_ERR((void *)paddr_last))
 +			return paddr_last;
 +
  		pgd_changed = true;
@@ -142,14 +142,14 @@ diff -ru a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
  
 -	init_memory_mapping(start, start + size, params->pgprot);
 +	ret = init_memory_mapping(start, start + size, params->pgprot);
-+	if (IS_ERR(ret))
-+		return (int)PTR_ERR(ret);
++	if (IS_ERR((void *)ret))
++		return (int)PTR_ERR((void *)ret);
  
  	return add_pages(nid, start_pfn, nr_pages, params);
  }
 diff -ru a/arch/x86/mm/init.c b/arch/x86/mm/init.c
 --- a/arch/x86/mm/init.c	2025-05-02 06:59:33.000000000 +0100
-+++ b/arch/x86/mm/init.c	2025-06-08 16:42:31.054946174 +0100
++++ b/arch/x86/mm/init.c	2025-06-10 10:28:19.494219038 +0100
 @@ -533,6 +533,7 @@
   * Setup the direct mapping of the physical memory at PAGE_OFFSET.
   * This runs before bootmem is initialized and gets pages directly from
@@ -167,7 +167,7 @@ diff -ru a/arch/x86/mm/init.c b/arch/x86/mm/init.c
  		ret = kernel_physical_mapping_init(mr[i].start, mr[i].end,
  						   mr[i].page_size_mask,
  						   prot);
-+		if (IS_ERR(ret))
++		if (IS_ERR((void *)ret))
 +			return ret;
 +	}
  

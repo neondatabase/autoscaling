@@ -1,6 +1,6 @@
 diff -ru a/arch/x86/mm/init.c b/arch/x86/mm/init.c
---- a/arch/x86/mm/init.c	2025-06-08 16:42:31.054946174 +0100
-+++ b/arch/x86/mm/init.c	2025-06-09 10:43:47.924514388 +0100
+--- a/arch/x86/mm/init.c	2025-06-10 10:28:19.494219038 +0100
++++ b/arch/x86/mm/init.c	2025-06-10 10:29:30.319623033 +0100
 @@ -131,7 +131,7 @@
  		unsigned int order;
  
