@@ -328,7 +328,7 @@ kernel-source: ## Download the current kernel source and expand existing patches
 	fi \
 
 .PHONY: kernel-patches
-kernel-patches: ## Generate kernel patch files from diffs in source directories
+kernel-patches: ## Generate kernel patch files from diffs between source directories
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	file="linux-$${kernel_version}.tar.xz"; \
 	dir="$$(pwd)/neonvm-kernel/sources/linux-$${kernel_version}"; \
@@ -348,6 +348,7 @@ kernel-patches: ## Generate kernel patch files from diffs in source directories
 			mv "$$tmpdir/b" "$$tmpdir/a"; \
 		fi; \
 		ln -s "$$dir/$$d" "$$tmpdir/b"; \
+		echo "Diffing to $$(basename $$(realpath "$$tmpdir/a")) to $$d..."; \
 		( cd "$$tmpdir" && { diff -ru a b || true; } ) > neonvm-kernel/patches/$$d.patch; \
 	done
 
