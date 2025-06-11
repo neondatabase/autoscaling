@@ -50,7 +50,7 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Name: "reconcile_failing_objects",
 				Help: "Number of objects that are failing to reconcile for each specific controller",
 			},
-			[]string{"controller", OutcomeLabel},
+			[]string{"controller", OutcomeLabel, "retried"},
 		)),
 		vmCreationToRunnerCreationTime: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
@@ -168,20 +168,24 @@ func (d *wrappedReconciler) refreshFailing(
 	outcome ReconcileOutcome,
 	tracker *failurelag.Tracker[client.ObjectKey],
 ) {
-	degraded := tracker.Degraded()
-	d.Metrics.failing.WithLabelValues(d.ControllerName, string(outcome)).
-		Set(float64(len(degraded)))
-
 	// Log each object on a separate line (even though we could just put them all on the same line)
 	// so that:
 	// 1. we avoid super long log lines (which can make log storage / querying unhappy), and
 	// 2. so that we can process it with Grafana Loki, which can't handle arrays
-	for _, obj := range degraded {
+	logFunc := func(obj client.ObjectKey, retried bool) {
 		log.Info(
 			fmt.Sprintf("Currently failing to reconcile %v object", d.ControllerName),
 			"outcome", outcome,
 			"object", obj,
+			"retried", retried,
 		)
+	}
+	for _, obj := range tracker.DegradedRetried() {
+		logFunc(obj, true)
+	}
+
+	for _, obj := range tracker.DegradedNotRetried() {
+		logFunc(obj, false)
 	}
 }
 
@@ -247,10 +251,16 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		log.Info("Successful reconciliation", "duration", duration.String(), "requeueAfter", res.RequeueAfter)
 	}
 	d.Metrics.ObserveReconcileDuration(outcome, duration)
+
 	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(FailureOutcome)).Set(float64(d.failing.DegradedCount()))
+		string(FailureOutcome), "true").Set(float64(d.failing.DegradedRetriedCount()))
 	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(ConflictOutcome)).Set(float64(d.conflicting.DegradedCount()))
+		string(FailureOutcome), "false").Set(float64(d.failing.DegradedNotRetriedCount()))
+
+	d.Metrics.failing.WithLabelValues(d.ControllerName,
+		string(ConflictOutcome), "true").Set(float64(d.conflicting.DegradedRetriedCount()))
+	d.Metrics.failing.WithLabelValues(d.ControllerName,
+		string(ConflictOutcome), "false").Set(float64(d.conflicting.DegradedNotRetriedCount()))
 
 	return res, err
 }
