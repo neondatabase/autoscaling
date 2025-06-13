@@ -1,7 +1,7 @@
-From 6db230a259847448ce2033108846ab22ddf41922 Mon Sep 17 00:00:00 2001
+From 11e5209ef9e94792580d376b6cf1e4305e2dae4c Mon Sep 17 00:00:00 2001
 From: Em Sharnoff <sharnoff@neon.tech>
 Date: Thu, 12 Jun 2025 10:36:21 +0100
-Subject: [PATCH 1/4] x86/mm: Update mapped addresses in phys_{pmd,pud}_init()
+Subject: [PATCH 1/5] x86/mm: Update mapped addresses in phys_{pmd,pud}_init()
 
 Currently kernel_physical_mapping_init() and its dependents return the
 last physical address mapped ('paddr_last'). This makes it harder to
@@ -24,15 +24,12 @@ the end of the loop (should mean it's called every 1Gi).
 
 Signed-off-by: Em Sharnoff <sharnoff@neon.tech>
 ---
-Changelog:
-- v4: Add this patch
----
  arch/x86/include/asm/pgtable.h |  3 +-
  arch/x86/mm/init.c             | 23 +++++----
  arch/x86/mm/init_32.c          |  6 ++-
- arch/x86/mm/init_64.c          | 94 +++++++++++++++++-----------------
+ arch/x86/mm/init_64.c          | 88 +++++++++++++++++-----------------
  arch/x86/mm/mm_internal.h      | 13 +++--
- 5 files changed, 71 insertions(+), 68 deletions(-)
+ 5 files changed, 69 insertions(+), 64 deletions(-)
 
 diff --git a/arch/x86/include/asm/pgtable.h b/arch/x86/include/asm/pgtable.h
 index 4c2d080d26b4..e21abb47f89e 100644
@@ -122,7 +119,7 @@ index ac41b1e0940d..50e2c77d1513 100644
  
  #ifdef CONFIG_HIGHMEM
 diff --git a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
-index ff253648706f..8c5a135d1e71 100644
+index ff253648706f..ae8c68e633c8 100644
 --- a/arch/x86/mm/init_64.c
 +++ b/arch/x86/mm/init_64.c
 @@ -504,13 +504,13 @@ phys_pte_init(pte_t *pte_page, unsigned long paddr, unsigned long paddr_end,
@@ -141,27 +138,7 @@ index ff253648706f..8c5a135d1e71 100644
  	unsigned long paddr_last = paddr_end;
  
  	int i = pmd_index(paddr);
-@@ -537,9 +537,8 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
- 			if (!pmd_leaf(*pmd)) {
- 				spin_lock(&init_mm.page_table_lock);
- 				pte = (pte_t *)pmd_page_vaddr(*pmd);
--				paddr_last = phys_pte_init(pte, paddr,
--							   paddr_end, prot,
--							   init);
-+				phys_pte_init(pte, paddr, paddr_end,
-+					      prot, init);
- 				spin_unlock(&init_mm.page_table_lock);
- 				continue;
- 			}
-@@ -576,28 +575,32 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
- 		}
- 
- 		pte = alloc_low_page();
--		paddr_last = phys_pte_init(pte, paddr, paddr_end, new_prot, init);
-+		phys_pte_init(pte, paddr, paddr_end, new_prot, init);
- 
- 		spin_lock(&init_mm.page_table_lock);
- 		pmd_populate_kernel_init(&init_mm, pmd, pte, init);
+@@ -583,21 +583,25 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
  		spin_unlock(&init_mm.page_table_lock);
  	}
  	update_page_count(PG_LEVEL_2M, pages);
@@ -191,7 +168,7 @@ index ff253648706f..8c5a135d1e71 100644
  	unsigned long vaddr = (unsigned long)__va(paddr);
  	int i = pud_index(vaddr);
  
-@@ -625,10 +628,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+@@ -625,10 +629,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
  		if (!pud_none(*pud)) {
  			if (!pud_leaf(*pud)) {
  				pmd = pmd_offset(pud, 0);
@@ -204,7 +181,7 @@ index ff253648706f..8c5a135d1e71 100644
  				continue;
  			}
  			/*
-@@ -646,7 +647,7 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+@@ -646,7 +648,7 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
  			if (page_size_mask & (1 << PG_LEVEL_1G)) {
  				if (!after_bootmem)
  					pages++;
@@ -213,7 +190,7 @@ index ff253648706f..8c5a135d1e71 100644
  				continue;
  			}
  			prot = pte_pgprot(pte_clrhuge(*(pte_t *)pud));
-@@ -659,13 +660,13 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+@@ -659,13 +661,13 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
  				     pfn_pud(paddr >> PAGE_SHIFT, prot_sethuge(prot)),
  				     init);
  			spin_unlock(&init_mm.page_table_lock);
@@ -230,7 +207,7 @@ index ff253648706f..8c5a135d1e71 100644
  
  		spin_lock(&init_mm.page_table_lock);
  		pud_populate_init(&init_mm, pud, pmd, init);
-@@ -674,22 +675,23 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+@@ -674,22 +676,23 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
  
  	update_page_count(PG_LEVEL_1G, pages);
  
@@ -261,7 +238,7 @@ index ff253648706f..8c5a135d1e71 100644
  
  	for (; vaddr < vaddr_end; vaddr = vaddr_next) {
  		p4d_t *p4d = p4d_page + p4d_index(vaddr);
-@@ -713,33 +715,32 @@ phys_p4d_init(p4d_t *p4d_page, unsigned long paddr, unsigned long paddr_end,
+@@ -713,33 +716,32 @@ phys_p4d_init(p4d_t *p4d_page, unsigned long paddr, unsigned long paddr_end,
  
  		if (!p4d_none(*p4d)) {
  			pud = pud_offset(p4d, 0);
@@ -302,7 +279,7 @@ index ff253648706f..8c5a135d1e71 100644
  	vaddr = (unsigned long)__va(paddr_start);
  	vaddr_end = (unsigned long)__va(paddr_end);
  	vaddr_start = vaddr;
-@@ -752,16 +753,14 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
+@@ -752,16 +754,14 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
  
  		if (pgd_val(*pgd)) {
  			p4d = (p4d_t *)pgd_page_vaddr(*pgd);
@@ -323,7 +300,7 @@ index ff253648706f..8c5a135d1e71 100644
  
  		spin_lock(&init_mm.page_table_lock);
  		if (pgtable_l5_enabled())
-@@ -777,7 +776,7 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
+@@ -777,7 +777,7 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
  	if (pgd_changed)
  		sync_global_pgds(vaddr_start, vaddr_end - 1);
  
@@ -332,7 +309,7 @@ index ff253648706f..8c5a135d1e71 100644
  }
  
  
-@@ -785,15 +784,15 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
+@@ -785,15 +785,15 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
   * Create page table mapping for the physical memory for specific physical
   * addresses. Note that it can only be used to populate non-present entries.
   * The virtual and physical addresses have to be aligned on PMD level
@@ -352,7 +329,7 @@ index ff253648706f..8c5a135d1e71 100644
  }
  
  /*
-@@ -802,14 +801,13 @@ kernel_physical_mapping_init(unsigned long paddr_start,
+@@ -802,14 +802,14 @@ kernel_physical_mapping_init(unsigned long paddr_start,
   * when updating the mapping. The caller is responsible to flush the TLBs after
   * the function returns.
   */
@@ -366,7 +343,8 @@ index ff253648706f..8c5a135d1e71 100644
 -					      page_size_mask, PAGE_KERNEL,
 -					      false);
 +	__kernel_physical_mapping_init(paddr_start, paddr_end,
-+				       page_size_mask, PAGE_KERNEL, false);
++				       page_size_mask, PAGE_KERNEL,
++				       false);
  }
  
  #ifndef CONFIG_NUMA

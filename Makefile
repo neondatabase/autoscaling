@@ -293,7 +293,7 @@ kernel: ## Build linux kernel.
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
 	docker buildx build \
-	    --build-arg KERNEL_VERSION=$$kernel_version \
+		--build-arg KERNEL_VERSION=$$kernel_version \
 		--target "kernel_${TARGET_ARCH}" \
 		--pull \
 		--load \
@@ -305,52 +305,35 @@ kernel: ## Build linux kernel.
 	docker rm -f $$id
 
 .PHONY: kernel-source
-kernel-source: ## Download the current kernel source and expand existing patches
+kernel-source: ## Set up git repo for the current kernel version and apply existing patches
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
-	mkdir -p "neonvm-kernel/sources"; \
-	file="neonvm-kernel/sources/linux-$${kernel_version}.tar.xz"; \
-	dir="neonvm-kernel/sources/linux-$${kernel_version}"; \
-	test -f "$$file" || ( \
-		set -x ; curl -fL "$$(neonvm-kernel/echo-source-url.sh "$$kernel_version")" -o "$$file" \
-	); \
-	( set -x ; rm -rf "$$dir"; mkdir -p "$$dir/base" ); \
-	(set -x ; tar --strip-components=1 -C "$$dir/base" -xf "$$file" ); \
-	if [ -d neonvm-kernel/patches ]; then \
-		last="base"; \
-		for p in $$(ls -1 neonvm-kernel/patches | sort); do \
-			d="$${p%%.patch}"; \
-			( set -x; \
-				cp --preserve --recursive "$$dir/$$last" "$$dir/$$d"; \
-				patch --set-utc --force --strip=1 -d "$$dir/$$d" < "neonvm-kernel/patches/$$p"; \
-			); \
-			last="$$d"; \
-		done \
-	fi \
+	dir="neonvm-kernel/linux"; \
+	mkdir -p "$$dir"; \
+	cd "$$dir"; \
+	test -e ".git" || { \
+		git init .; \
+		git remote add stable git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git; \
+		git config --add --local core.abbrev 12; \
+	}; \
+	git fetch --depth=1 stable refs/tags/v$${kernel_version}:refs/tags/v$${kernel_version}; \
+	git reset --hard v$${kernel_version}; \
+	for p in $$(find ../patches -type f -name '*.patch' | sort); do \
+		git am --no-gpg-sign --committer-date-is-author-date "$$p"; \
+	done
 
 .PHONY: kernel-patches
-kernel-patches: ## Generate kernel patch files from diffs between source directories
+kernel-patches: ## Generate kernel patch files from the git repo
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
-	file="linux-$${kernel_version}.tar.xz"; \
-	dir="$$(pwd)/neonvm-kernel/sources/linux-$${kernel_version}"; \
-	( set -x ; test -d "$$dir" ); \
-	rm -rf "neonvm-kernel/patches"; \
-	mkdir -p "neonvm-kernel/patches"; \
-	tmpdir="$$(mktemp -d /tmp/neonvm-kernel-diff-XXXXXX)"; \
-	trap "rm -r $$tmpdir" EXIT; \
-	for d in $$(ls -1 "$$dir" | sort); do \
-		if [ "$$d" = "base" ]; then \
-			continue; \
-		fi; \
-		if [ ! -d "$$tmpdir/b" ]; then \
-			ln -s "$$dir/base" "$$tmpdir/a"; \
-		else \
-			rm "$$tmpdir/a"; \
-			mv "$$tmpdir/b" "$$tmpdir/a"; \
-		fi; \
-		ln -s "$$dir/$$d" "$$tmpdir/b"; \
-		echo "Diffing to $$(basename $$(realpath "$$tmpdir/a")) to $$d..."; \
-		( cd "$$tmpdir" && { diff -ru a b || true; } ) > neonvm-kernel/patches/$$d.patch; \
-	done
+	dir='neonvm-kernel/linux'; \
+	( set -x ; test -e "$$dir/.git" ); \
+	latest_git_tag="$$( set -x ; git -C "$$dir" describe --tags --abbrev=0 )"; \
+	if [ "$${latest_git_tag}" != "v$${kernel_version}" ]; then \
+		echo "Mismatched base tag, expected v$${kernel_version} but found $${latest_git_tag}"; \
+		exit 1; \
+	fi; \
+	rm -rf 'neonvm-kernel/patches'; \
+	mkdir -p 'neonvm-kernel/patches'; \
+	git -C "$$dir" format-patch "--base=v$${kernel_version}" -o '../patches' "v$${kernel_version}"; \
 
 .PHONY: check-local-context
 check-local-context: ## Asserts that the current kubectl context is pointing at k3d or kind, to avoid accidentally applying to prod

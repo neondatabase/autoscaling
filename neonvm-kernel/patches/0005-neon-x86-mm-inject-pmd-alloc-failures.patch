@@ -1,0 +1,181 @@
+From bb619e52c1addfde5c7b9ec004ee22a00d197875 Mon Sep 17 00:00:00 2001
+From: Em Sharnoff <sharnoff@neon.tech>
+Date: Thu, 12 Jun 2025 21:21:55 +0100
+Subject: [PATCH 5/5] neon: x86/mm: inject pmd alloc failures
+
+Scaling from 1Gi (base) -> 4 Gi:
+
+  [   11.172493] virtio_mem virtio1: plugged size: 0x0
+  [   11.172620] virtio_mem virtio1: requested size: 0xc0000000
+  [   11.181021] NEON DEBUG: arch_add_memory(start=100000000, size=8000000)...
+  [   11.182067] Fallback order for Node 0: 0
+  [   11.182073] Built 1 zonelists, mobility grouping on.  Total pages: 266181
+  [   11.182300] Policy zone: DMA32
+  [   11.182496] NEON DEBUG: arch_add_memory(start=108000000, size=8000000)...
+  [   11.183574] NEON DEBUG: arch_add_memory(start=110000000, size=8000000)...
+  [   11.184620] NEON DEBUG: arch_add_memory(start=118000000, size=8000000)...
+  [   11.187711] NEON DEBUG: arch_add_memory(start=120000000, size=8000000)...
+  [   11.188632] NEON DEBUG: arch_add_memory(start=128000000, size=8000000)...
+  [   11.189485] NEON DEBUG: arch_add_memory(start=130000000, size=8000000)...
+  [   11.190285] NEON DEBUG: arch_add_memory(start=138000000, size=8000000)...
+  [   11.191133] NEON DEBUG: arch_add_memory(start=140000000, size=8000000)...
+  [   11.191875] NEON DEBUG: arch_add_memory(start=148000000, size=8000000)...
+  [   11.192696] NEON DEBUG: arch_add_memory(start=150000000, size=8000000)...
+  [   11.193542] NEON DEBUG: arch_add_memory(start=158000000, size=8000000)...
+  [   11.194345] NEON DEBUG: arch_add_memory(start=160000000, size=8000000)...
+  [   11.195193] NEON DEBUG: arch_add_memory(start=168000000, size=8000000)...
+  [   11.195963] NEON DEBUG: arch_add_memory(start=170000000, size=8000000)...
+  [   11.196775] NEON DEBUG: arch_add_memory(start=178000000, size=8000000)...
+  [   11.197621] NEON DEBUG: arch_add_memory(start=180000000, size=8000000)...
+  [   11.197707] NEON DEBUG: Injecting alloc_low_page() failure for PUD 000000006b94baaa paddr 180000000-1c0000000
+  [   11.197750] NEON DEBUG: arch_add_memory ~> init_memory_mapping() failed
+  [   11.197813] virtio_mem virtio1: adding memory failed: -12
+
+Scaling again, from 4Gi -> 5Gi:
+
+  [   19.065764] virtio_mem virtio1: plugged size: 0x80000000
+  [   19.065881] virtio_mem virtio1: requested size: 0x100000000
+  [   19.075047] NEON DEBUG: arch_add_memory(start=180000000, size=8000000)...
+  [   19.075054] NEON DEBUG: retrying paddr 180000000-1c0000000 with PUD 000000006b94baaa
+  [   19.075136] NEON DEBUG: allocating new PMD
+  [   19.076189] NEON DEBUG: arch_add_memory(start=188000000, size=8000000)...
+  [   19.077223] NEON DEBUG: arch_add_memory(start=190000000, size=8000000)...
+  [   19.078111] NEON DEBUG: arch_add_memory(start=198000000, size=8000000)...
+  [   19.078920] NEON DEBUG: arch_add_memory(start=1a0000000, size=8000000)...
+  [   19.081707] NEON DEBUG: arch_add_memory(start=1a8000000, size=8000000)...
+  [   19.083244] NEON DEBUG: arch_add_memory(start=1b0000000, size=8000000)...
+  [   19.084596] NEON DEBUG: arch_add_memory(start=1b8000000, size=8000000)...
+  [   19.085679] NEON DEBUG: arch_add_memory(start=1c0000000, size=8000000)...
+  [   19.086797] NEON DEBUG: arch_add_memory(start=1c8000000, size=8000000)...
+  [   19.087960] NEON DEBUG: arch_add_memory(start=1d0000000, size=8000000)...
+  [   19.088890] NEON DEBUG: arch_add_memory(start=1d8000000, size=8000000)...
+  [   19.089760] NEON DEBUG: arch_add_memory(start=1e0000000, size=8000000)...
+  [   19.090770] NEON DEBUG: arch_add_memory(start=1e8000000, size=8000000)...
+  [   19.091645] NEON DEBUG: arch_add_memory(start=1f0000000, size=8000000)...
+---
+ arch/x86/mm/init_64.c | 55 ++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 52 insertions(+), 3 deletions(-)
+
+diff --git a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
+index f2048f45d89e..48b629841c4a 100644
+--- a/arch/x86/mm/init_64.c
++++ b/arch/x86/mm/init_64.c
+@@ -501,6 +501,9 @@ phys_pte_init(pte_t *pte_page, unsigned long paddr, unsigned long paddr_end,
+ 	return paddr_last;
+ }
+ 
++static int neon_debug_inject_remaining = 3;
++static unsigned long neon_paddr_injected = 0;
++
+ /*
+  * Create PMD level page table mapping for physical addresses. The virtual
+  * and physical address have to be aligned at this level.
+@@ -606,6 +609,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 	unsigned long pages = 0, paddr_next;
+ 	unsigned long vaddr = (unsigned long)__va(paddr);
+ 	int ret;
++	bool inject_failure;
++	bool extended_debug;
+ 
+ 	int i = pud_index(vaddr);
+ 
+@@ -618,7 +623,16 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 		pud = pud_page + pud_index(vaddr);
+ 		paddr_next = (paddr & PUD_MASK) + PUD_SIZE;
+ 
++		extended_debug = after_bootmem &&
++				 neon_debug_inject_remaining == 0 &&
++				 neon_paddr_injected == paddr;
++
++		if (extended_debug)
++			printk(KERN_INFO "NEON DEBUG: retrying paddr %lx-%lx with PUD %p", paddr, paddr_next, pud);
++
+ 		if (paddr >= paddr_end) {
++			if (extended_debug)
++				printk(KERN_INFO "NEON DEBUG: paddr >= paddr_end (%lx >= %lx)", paddr, paddr_end);
+ 			if (!after_bootmem &&
+ 			    !e820__mapped_any(paddr & PUD_MASK, paddr_next,
+ 					     E820_TYPE_RAM) &&
+@@ -631,7 +645,11 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 		}
+ 
+ 		if (!pud_none(*pud)) {
++			if (extended_debug)
++				printk(KERN_INFO "NEON DEBUG: !pud_none");
+ 			if (!pud_leaf(*pud)) {
++				if (extended_debug)
++					printk(KERN_INFO "NEON DEBUG: !pud_leaf");
+ 				pmd = pmd_offset(pud, 0);
+ 				ret = phys_pmd_init(pmd, paddr, paddr_end,
+ 						    page_size_mask, prot, init);
+@@ -652,6 +670,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 			 * attributes.
+ 			 */
+ 			if (page_size_mask & (1 << PG_LEVEL_1G)) {
++				if (extended_debug)
++					printk(KERN_INFO "NEON DEBUG: skipping PMD, PG_LEVEL_1G");
+ 				if (!after_bootmem)
+ 					pages++;
+ 				add_paddr_range_mapped(paddr, paddr_next);
+@@ -661,6 +681,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 		}
+ 
+ 		if (page_size_mask & (1<<PG_LEVEL_1G)) {
++			if (extended_debug)
++				printk(KERN_INFO "NEON DEBUG: skipping PMD, PG_LEVEL_1G");
+ 			pages++;
+ 			spin_lock(&init_mm.page_table_lock);
+ 			set_pud_init(pud,
+@@ -671,7 +693,25 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 			continue;
+ 		}
+ 
+-		pmd = alloc_low_page();
++		inject_failure = false;
++		if (after_bootmem) {
++			if (neon_debug_inject_remaining > 0) {
++				if (neon_debug_inject_remaining == 1) {
++					printk(KERN_INFO "NEON DEBUG: Injecting alloc_low_page() failure for PUD %p paddr %lx-%lx", pud, paddr, paddr_next);
++					inject_failure = true;
++					neon_paddr_injected = paddr;
++				}
++				neon_debug_inject_remaining--;
++			}
++		}
++
++		if (extended_debug)
++			printk(KERN_INFO "NEON DEBUG: allocating new PMD");
++
++		if (inject_failure)
++			pmd = 0;
++		else
++			pmd = alloc_low_page();
+ 		if (!pmd)
+ 			return -ENOMEM;
+ 		ret = phys_pmd_init(pmd, paddr, paddr_end,
+@@ -1018,11 +1058,20 @@ int arch_add_memory(int nid, u64 start, u64 size,
+ 	unsigned long nr_pages = size >> PAGE_SHIFT;
+ 	int ret;
+ 
++	printk(KERN_INFO "NEON DEBUG: arch_add_memory(start=%llx, size=%llx)...", start, size);
++
+ 	ret = init_memory_mapping(start, start + size, params->pgprot);
+-	if (ret)
++	if (ret) {
++		printk(KERN_INFO "NEON DEBUG: arch_add_memory ~> init_memory_mapping() failed");
+ 		return ret;
++	}
+ 
+-	return add_pages(nid, start_pfn, nr_pages, params);
++
++	ret = add_pages(nid, start_pfn, nr_pages, params);
++	if (ret) {
++		printk(KERN_INFO "NEON DEBUG: arch_add_memory ~> add_pages() failed");
++	}
++	return ret;
+ }
+ 
+ static void __meminit free_pagetable(struct page *page, int order)
+-- 
+2.39.5
+

@@ -1,7 +1,7 @@
-From be4c08b35191f19a26dad8457d5f979d551f7e12 Mon Sep 17 00:00:00 2001
+From 97219abb00542690ee6b6db5403d7e85c5b2c78c Mon Sep 17 00:00:00 2001
 From: Em Sharnoff <sharnoff@neon.tech>
 Date: Thu, 12 Jun 2025 17:06:16 +0100
-Subject: [PATCH 3/4] x86/mm: Handle alloc failure in phys_*_init()
+Subject: [PATCH 3/5] x86/mm: Handle alloc failure in phys_*_init()
 
 During memory hotplug, allocation failures in phys_*_init() aren't
 handled, which results in a null pointer dereference if they occur.
@@ -11,14 +11,11 @@ from phys_*_init()").
 
 Signed-off-by: Em Sharnoff <sharnoff@neon.tech>
 ---
-Changelog:
-- v4: Split this patch out from the error handling changes
----
  arch/x86/mm/init_64.c | 8 ++++++++
  1 file changed, 8 insertions(+)
 
 diff --git a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
-index a210729ac71a..a8076d84dae3 100644
+index 7f6f200bb41f..f2048f45d89e 100644
 --- a/arch/x86/mm/init_64.c
 +++ b/arch/x86/mm/init_64.c
 @@ -576,6 +576,8 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
@@ -27,19 +24,19 @@ index a210729ac71a..a8076d84dae3 100644
  		pte = alloc_low_page();
 +		if (!pte)
 +			return -ENOMEM;
- 		ret = phys_pte_init(pte, paddr, paddr_end, new_prot, init);
+ 		paddr_last = phys_pte_init(pte, paddr, paddr_end, new_prot, init);
  
  		spin_lock(&init_mm.page_table_lock);
-@@ -677,6 +679,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+@@ -670,6 +672,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
  		}
  
  		pmd = alloc_low_page();
 +		if (!pmd)
 +			return -ENOMEM;
  		ret = phys_pmd_init(pmd, paddr, paddr_end,
- 			      page_size_mask, prot, init);
+ 				    page_size_mask, prot, init);
  
-@@ -741,6 +745,8 @@ phys_p4d_init(p4d_t *p4d_page, unsigned long paddr, unsigned long paddr_end,
+@@ -734,6 +738,8 @@ phys_p4d_init(p4d_t *p4d_page, unsigned long paddr, unsigned long paddr_end,
  		}
  
  		pud = alloc_low_page();
@@ -48,7 +45,7 @@ index a210729ac71a..a8076d84dae3 100644
  		ret = phys_pud_init(pud, paddr, __pa(vaddr_end),
  				    page_size_mask, prot, init);
  
-@@ -789,6 +795,8 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
+@@ -782,6 +788,8 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
  		}
  
  		p4d = alloc_low_page();
