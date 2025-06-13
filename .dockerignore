@@ -4,3 +4,6 @@ bin/
 testbin/
 
 rendered_manifests
+
+# Exclude files for local kernel development; these are not needed in the docker context.
+neonvm-kernel/sources/

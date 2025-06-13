@@ -163,9 +163,7 @@ jobs:
       - name: get kernel version
         id: get-kernel-version
         run: |
-          linux_config=$(ls neonvm-kernel/linux-config-*)  # returns something like "neonvm-kernel/linux-config-amd64-6.1.63"
-          kernel_version=${linux_config##*-}               # returns something like "amd64-6.1.63"
-
+          kernel_version="$(neonvm-kernel/echo-version.sh)" # returns something like "6.1.63"
           echo VM_KERNEL_VERSION=$kernel_version >> $GITHUB_OUTPUT
 
       - name: get docker tags

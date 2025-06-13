@@ -1,0 +1,379 @@
+From 11e5209ef9e94792580d376b6cf1e4305e2dae4c Mon Sep 17 00:00:00 2001
+From: Em Sharnoff <sharnoff@neon.tech>
+Date: Thu, 12 Jun 2025 10:36:21 +0100
+Subject: [PATCH 1/5] x86/mm: Update mapped addresses in phys_{pmd,pud}_init()
+
+Currently kernel_physical_mapping_init() and its dependents return the
+last physical address mapped ('paddr_last'). This makes it harder to
+cleanly handle allocation errors in those functions.
+
+'paddr_last' is used to update 'pfn_mapped'/'max_pfn_mapped', so:
+
+1. Introduce add_paddr_range_mapped() to do the update, translating from
+   physical addresses to pfns
+2. Call add_paddr_range_mapped() in phys_pud_init() where 'paddr_last'
+   would otherwise be updated due to 1Gi pages.
+   - Note: this includes places where we set 'paddr_last = paddr_next',
+     as was added in 20167d3421a0 ("x86-64: Fix accounting in
+     kernel_physical_mapping_init()")
+
+add_paddr_range_mapped() is probably too expensive to be called every
+time a page is updated, so instead, phys_pte_init() continues to return
+'paddr_last', and phys_pmd_init() calls add_paddr_range_mapped() only at
+the end of the loop (should mean it's called every 1Gi).
+
+Signed-off-by: Em Sharnoff <sharnoff@neon.tech>
+---
+ arch/x86/include/asm/pgtable.h |  3 +-
+ arch/x86/mm/init.c             | 23 +++++----
+ arch/x86/mm/init_32.c          |  6 ++-
+ arch/x86/mm/init_64.c          | 88 +++++++++++++++++-----------------
+ arch/x86/mm/mm_internal.h      | 13 +++--
+ 5 files changed, 69 insertions(+), 64 deletions(-)
+
+diff --git a/arch/x86/include/asm/pgtable.h b/arch/x86/include/asm/pgtable.h
+index 4c2d080d26b4..e21abb47f89e 100644
+--- a/arch/x86/include/asm/pgtable.h
++++ b/arch/x86/include/asm/pgtable.h
+@@ -1244,8 +1244,7 @@ extern int direct_gbpages;
+ void init_mem_mapping(void);
+ void early_alloc_pgt_buf(void);
+ void __init poking_init(void);
+-unsigned long init_memory_mapping(unsigned long start,
+-				  unsigned long end, pgprot_t prot);
++void init_memory_mapping(unsigned long start, unsigned long end, pgprot_t prot);
+ 
+ #ifdef CONFIG_X86_64
+ extern pgd_t trampoline_pgd_entry;
+diff --git a/arch/x86/mm/init.c b/arch/x86/mm/init.c
+index 101725c149c4..6c28f3dc1ece 100644
+--- a/arch/x86/mm/init.c
++++ b/arch/x86/mm/init.c
+@@ -529,16 +529,24 @@ bool pfn_range_is_mapped(unsigned long start_pfn, unsigned long end_pfn)
+ 	return false;
+ }
+ 
++/*
++ * Update max_pfn_mapped and range_pfn_mapped with the range of physical
++ * addresses mapped. The range may overlap with previous calls to this function.
++ */
++void add_paddr_range_mapped(unsigned long start_paddr, unsigned long end_paddr)
++{
++	add_pfn_range_mapped(start_paddr >> PAGE_SHIFT, end_paddr >> PAGE_SHIFT);
++}
++
+ /*
+  * Setup the direct mapping of the physical memory at PAGE_OFFSET.
+  * This runs before bootmem is initialized and gets pages directly from
+  * the physical memory. To access them they are temporarily mapped.
+  */
+-unsigned long __ref init_memory_mapping(unsigned long start,
+-					unsigned long end, pgprot_t prot)
++void __ref init_memory_mapping(unsigned long start,
++			       unsigned long end, pgprot_t prot)
+ {
+ 	struct map_range mr[NR_RANGE_MR];
+-	unsigned long ret = 0;
+ 	int nr_range, i;
+ 
+ 	pr_debug("init_memory_mapping: [mem %#010lx-%#010lx]\n",
+@@ -548,13 +556,10 @@ unsigned long __ref init_memory_mapping(unsigned long start,
+ 	nr_range = split_mem_range(mr, 0, start, end);
+ 
+ 	for (i = 0; i < nr_range; i++)
+-		ret = kernel_physical_mapping_init(mr[i].start, mr[i].end,
+-						   mr[i].page_size_mask,
+-						   prot);
++		kernel_physical_mapping_init(mr[i].start, mr[i].end,
++					     mr[i].page_size_mask, prot);
+ 
+-	add_pfn_range_mapped(start >> PAGE_SHIFT, ret >> PAGE_SHIFT);
+-
+-	return ret >> PAGE_SHIFT;
++	return;
+ }
+ 
+ /*
+diff --git a/arch/x86/mm/init_32.c b/arch/x86/mm/init_32.c
+index ac41b1e0940d..50e2c77d1513 100644
+--- a/arch/x86/mm/init_32.c
++++ b/arch/x86/mm/init_32.c
+@@ -245,7 +245,7 @@ static inline int is_x86_32_kernel_text(unsigned long addr)
+  * of max_low_pfn pages, by creating page tables starting from address
+  * PAGE_OFFSET:
+  */
+-unsigned long __init
++void __init
+ kernel_physical_mapping_init(unsigned long start,
+ 			     unsigned long end,
+ 			     unsigned long page_size_mask,
+@@ -382,7 +382,9 @@ kernel_physical_mapping_init(unsigned long start,
+ 		mapping_iter = 2;
+ 		goto repeat;
+ 	}
+-	return last_map_addr;
++
++	add_paddr_range_mapped(start, last_map_addr);
++	return;
+ }
+ 
+ #ifdef CONFIG_HIGHMEM
+diff --git a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
+index ff253648706f..ae8c68e633c8 100644
+--- a/arch/x86/mm/init_64.c
++++ b/arch/x86/mm/init_64.c
+@@ -504,13 +504,13 @@ phys_pte_init(pte_t *pte_page, unsigned long paddr, unsigned long paddr_end,
+ /*
+  * Create PMD level page table mapping for physical addresses. The virtual
+  * and physical address have to be aligned at this level.
+- * It returns the last physical address mapped.
+  */
+-static unsigned long __meminit
++static void __meminit
+ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
+ 	      unsigned long page_size_mask, pgprot_t prot, bool init)
+ {
+ 	unsigned long pages = 0, paddr_next;
++	unsigned long paddr_first = paddr;
+ 	unsigned long paddr_last = paddr_end;
+ 
+ 	int i = pmd_index(paddr);
+@@ -583,21 +583,25 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
+ 		spin_unlock(&init_mm.page_table_lock);
+ 	}
+ 	update_page_count(PG_LEVEL_2M, pages);
+-	return paddr_last;
++	/*
++	 * In case of recovery from previous state, add_paddr_range_mapped() may
++	 * be called with an overlapping range from previous operations.
++	 * It is idempotent, so this is ok.
++	 */
++	add_paddr_range_mapped(paddr_first, paddr_last);
++	return;
+ }
+ 
+ /*
+  * Create PUD level page table mapping for physical addresses. The virtual
+  * and physical address do not have to be aligned at this level. KASLR can
+  * randomize virtual addresses up to this level.
+- * It returns the last physical address mapped.
+  */
+-static unsigned long __meminit
++static void __meminit
+ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 	      unsigned long page_size_mask, pgprot_t _prot, bool init)
+ {
+ 	unsigned long pages = 0, paddr_next;
+-	unsigned long paddr_last = paddr_end;
+ 	unsigned long vaddr = (unsigned long)__va(paddr);
+ 	int i = pud_index(vaddr);
+ 
+@@ -625,10 +629,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 		if (!pud_none(*pud)) {
+ 			if (!pud_leaf(*pud)) {
+ 				pmd = pmd_offset(pud, 0);
+-				paddr_last = phys_pmd_init(pmd, paddr,
+-							   paddr_end,
+-							   page_size_mask,
+-							   prot, init);
++				phys_pmd_init(pmd, paddr, paddr_end,
++					      page_size_mask, prot, init);
+ 				continue;
+ 			}
+ 			/*
+@@ -646,7 +648,7 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 			if (page_size_mask & (1 << PG_LEVEL_1G)) {
+ 				if (!after_bootmem)
+ 					pages++;
+-				paddr_last = paddr_next;
++				add_paddr_range_mapped(paddr, paddr_next);
+ 				continue;
+ 			}
+ 			prot = pte_pgprot(pte_clrhuge(*(pte_t *)pud));
+@@ -659,13 +661,13 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 				     pfn_pud(paddr >> PAGE_SHIFT, prot_sethuge(prot)),
+ 				     init);
+ 			spin_unlock(&init_mm.page_table_lock);
+-			paddr_last = paddr_next;
++			add_paddr_range_mapped(paddr, paddr_next);
+ 			continue;
+ 		}
+ 
+ 		pmd = alloc_low_page();
+-		paddr_last = phys_pmd_init(pmd, paddr, paddr_end,
+-					   page_size_mask, prot, init);
++		phys_pmd_init(pmd, paddr, paddr_end,
++			      page_size_mask, prot, init);
+ 
+ 		spin_lock(&init_mm.page_table_lock);
+ 		pud_populate_init(&init_mm, pud, pmd, init);
+@@ -674,22 +676,23 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 
+ 	update_page_count(PG_LEVEL_1G, pages);
+ 
+-	return paddr_last;
++	return;
+ }
+ 
+-static unsigned long __meminit
++static void __meminit
+ phys_p4d_init(p4d_t *p4d_page, unsigned long paddr, unsigned long paddr_end,
+ 	      unsigned long page_size_mask, pgprot_t prot, bool init)
+ {
+-	unsigned long vaddr, vaddr_end, vaddr_next, paddr_next, paddr_last;
++	unsigned long vaddr, vaddr_end, vaddr_next, paddr_next;
+ 
+-	paddr_last = paddr_end;
+ 	vaddr = (unsigned long)__va(paddr);
+ 	vaddr_end = (unsigned long)__va(paddr_end);
+ 
+-	if (!pgtable_l5_enabled())
+-		return phys_pud_init((pud_t *) p4d_page, paddr, paddr_end,
+-				     page_size_mask, prot, init);
++	if (!pgtable_l5_enabled()) {
++		phys_pud_init((pud_t *) p4d_page, paddr, paddr_end,
++			      page_size_mask, prot, init);
++		return;
++	}
+ 
+ 	for (; vaddr < vaddr_end; vaddr = vaddr_next) {
+ 		p4d_t *p4d = p4d_page + p4d_index(vaddr);
+@@ -713,33 +716,32 @@ phys_p4d_init(p4d_t *p4d_page, unsigned long paddr, unsigned long paddr_end,
+ 
+ 		if (!p4d_none(*p4d)) {
+ 			pud = pud_offset(p4d, 0);
+-			paddr_last = phys_pud_init(pud, paddr, __pa(vaddr_end),
+-					page_size_mask, prot, init);
++			phys_pud_init(pud, paddr, __pa(vaddr_end),
++				      page_size_mask, prot, init);
+ 			continue;
+ 		}
+ 
+ 		pud = alloc_low_page();
+-		paddr_last = phys_pud_init(pud, paddr, __pa(vaddr_end),
+-					   page_size_mask, prot, init);
++		phys_pud_init(pud, paddr, __pa(vaddr_end),
++			      page_size_mask, prot, init);
+ 
+ 		spin_lock(&init_mm.page_table_lock);
+ 		p4d_populate_init(&init_mm, p4d, pud, init);
+ 		spin_unlock(&init_mm.page_table_lock);
+ 	}
+ 
+-	return paddr_last;
++	return;
+ }
+ 
+-static unsigned long __meminit
++static void __meminit
+ __kernel_physical_mapping_init(unsigned long paddr_start,
+ 			       unsigned long paddr_end,
+ 			       unsigned long page_size_mask,
+ 			       pgprot_t prot, bool init)
+ {
+ 	bool pgd_changed = false;
+-	unsigned long vaddr, vaddr_start, vaddr_end, vaddr_next, paddr_last;
++	unsigned long vaddr, vaddr_start, vaddr_end, vaddr_next;
+ 
+-	paddr_last = paddr_end;
+ 	vaddr = (unsigned long)__va(paddr_start);
+ 	vaddr_end = (unsigned long)__va(paddr_end);
+ 	vaddr_start = vaddr;
+@@ -752,16 +754,14 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
+ 
+ 		if (pgd_val(*pgd)) {
+ 			p4d = (p4d_t *)pgd_page_vaddr(*pgd);
+-			paddr_last = phys_p4d_init(p4d, __pa(vaddr),
+-						   __pa(vaddr_end),
+-						   page_size_mask,
+-						   prot, init);
++			phys_p4d_init(p4d, __pa(vaddr), __pa(vaddr_end),
++				      page_size_mask, prot, init);
+ 			continue;
+ 		}
+ 
+ 		p4d = alloc_low_page();
+-		paddr_last = phys_p4d_init(p4d, __pa(vaddr), __pa(vaddr_end),
+-					   page_size_mask, prot, init);
++		phys_p4d_init(p4d, __pa(vaddr), __pa(vaddr_end),
++			      page_size_mask, prot, init);
+ 
+ 		spin_lock(&init_mm.page_table_lock);
+ 		if (pgtable_l5_enabled())
+@@ -777,7 +777,7 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
+ 	if (pgd_changed)
+ 		sync_global_pgds(vaddr_start, vaddr_end - 1);
+ 
+-	return paddr_last;
++	return;
+ }
+ 
+ 
+@@ -785,15 +785,15 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
+  * Create page table mapping for the physical memory for specific physical
+  * addresses. Note that it can only be used to populate non-present entries.
+  * The virtual and physical addresses have to be aligned on PMD level
+- * down. It returns the last physical address mapped.
++ * down.
+  */
+-unsigned long __meminit
++void __meminit
+ kernel_physical_mapping_init(unsigned long paddr_start,
+ 			     unsigned long paddr_end,
+ 			     unsigned long page_size_mask, pgprot_t prot)
+ {
+-	return __kernel_physical_mapping_init(paddr_start, paddr_end,
+-					      page_size_mask, prot, true);
++	__kernel_physical_mapping_init(paddr_start, paddr_end,
++				       page_size_mask, prot, true);
+ }
+ 
+ /*
+@@ -802,14 +802,14 @@ kernel_physical_mapping_init(unsigned long paddr_start,
+  * when updating the mapping. The caller is responsible to flush the TLBs after
+  * the function returns.
+  */
+-unsigned long __meminit
++void __meminit
+ kernel_physical_mapping_change(unsigned long paddr_start,
+ 			       unsigned long paddr_end,
+ 			       unsigned long page_size_mask)
+ {
+-	return __kernel_physical_mapping_init(paddr_start, paddr_end,
+-					      page_size_mask, PAGE_KERNEL,
+-					      false);
++	__kernel_physical_mapping_init(paddr_start, paddr_end,
++				       page_size_mask, PAGE_KERNEL,
++				       false);
+ }
+ 
+ #ifndef CONFIG_NUMA
+diff --git a/arch/x86/mm/mm_internal.h b/arch/x86/mm/mm_internal.h
+index 3f37b5c80bb3..6fea5f7edd48 100644
+--- a/arch/x86/mm/mm_internal.h
++++ b/arch/x86/mm/mm_internal.h
+@@ -10,13 +10,12 @@ static inline void *alloc_low_page(void)
+ 
+ void early_ioremap_page_table_range_init(void);
+ 
+-unsigned long kernel_physical_mapping_init(unsigned long start,
+-					     unsigned long end,
+-					     unsigned long page_size_mask,
+-					     pgprot_t prot);
+-unsigned long kernel_physical_mapping_change(unsigned long start,
+-					     unsigned long end,
+-					     unsigned long page_size_mask);
++void add_paddr_range_mapped(unsigned long start_paddr, unsigned long end_paddr);
++
++void kernel_physical_mapping_init(unsigned long start, unsigned long end,
++								  unsigned long page_size_mask, pgprot_t prot);
++void kernel_physical_mapping_change(unsigned long start, unsigned long end,
++								    unsigned long page_size_mask);
+ void zone_sizes_init(void);
+ 
+ extern int after_bootmem;
+
+base-commit: c72e4daa7ab2814e402f2b67dd1681ea4db446af
+-- 
+2.39.5
+
