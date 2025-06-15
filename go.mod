@@ -83,7 +83,6 @@ require (
 	k8s.io/client-go v0.31.7
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubernetes v1.31.7
-	nhooyr.io/websocket v1.8.7
 	sigs.k8s.io/controller-runtime v0.19.7 // should match k8s dependencies versions
 )
 
@@ -227,3 +226,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+require github.com/coder/websocket v1.8.13
