@@ -85,6 +85,11 @@ func (in *DiskSource) DeepCopyInto(out *DiskSource) {
 		*out = new(corev1.SecretVolumeSource)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Projected != nil {
+		in, out := &in.Projected, &out.Projected
+		*out = new(corev1.ProjectedVolumeSource)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Tmpfs != nil {
 		in, out := &in.Tmpfs, &out.Tmpfs
 		*out = new(TmpfsDiskSource)
