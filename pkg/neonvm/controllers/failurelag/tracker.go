@@ -109,7 +109,7 @@ func (t *Tracker[T]) RecordFailure(key T) {
 	}
 
 	// We always add refresh event, even if the key is already degraded.
-	// If there were no more retries since, we will also mark the key as degradedNonRetried.
+	// If there were no more retries since, we will also mark the key as degradedNotRetried.
 	t.refreshQueue = append(t.refreshQueue, refreshAt[T]{
 		ts:  now.Add(t.period),
 		key: key,

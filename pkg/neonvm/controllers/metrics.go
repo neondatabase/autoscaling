@@ -113,6 +113,7 @@ type wrappedReconciler struct {
 	Reconciler             reconcile.Reconciler
 	Metrics                ReconcilerMetrics
 	refreshFailingInterval time.Duration
+	submitRequest          func(reconcile.Request)
 
 	failing     *failurelag.Tracker[client.ObjectKey]
 	conflicting *failurelag.Tracker[client.ObjectKey]
@@ -155,6 +156,7 @@ func WithMetrics(
 	cntrlName string,
 	failurePendingPeriod time.Duration,
 	refreshFailingInterval time.Duration,
+	submitRequest func(reconcile.Request),
 ) ReconcilerWithMetrics {
 	return &wrappedReconciler{
 		Reconciler:             reconciler,
@@ -163,6 +165,7 @@ func WithMetrics(
 		failing:                failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
 		conflicting:            failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
 		refreshFailingInterval: refreshFailingInterval,
+		submitRequest:          submitRequest,
 	}
 }
 
@@ -211,7 +214,28 @@ func (d *wrappedReconciler) runRefreshFailing(ctx context.Context) {
 		case <-time.After(d.refreshFailingInterval):
 			d.refreshFailing(log, FailureOutcome, d.failing)
 			d.refreshFailing(log, ConflictOutcome, d.conflicting)
+
+			d.requeueNotRetried(ctx, d.failing.DegradedNotRetried(), FailureOutcome)
+			d.requeueNotRetried(ctx, d.conflicting.DegradedNotRetried(), ConflictOutcome)
 		}
+	}
+}
+
+// requeueNotRetried is a helper function that requeues all NotRetried objects in the failing
+// tracker.
+func (d *wrappedReconciler) requeueNotRetried(ctx context.Context, keys []client.ObjectKey, outcome ReconcileOutcome) {
+	if d.submitRequest == nil {
+		// requeue is disabled
+		return
+	}
+	log := log.FromContext(ctx)
+
+	for _, key := range keys {
+		log.Info("Requeuing NotRetried object",
+			"outcome", outcome,
+			"object", key,
+		)
+		d.submitRequest(reconcile.Request{NamespacedName: key})
 	}
 }
 

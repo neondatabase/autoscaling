@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -51,6 +52,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/reqchan"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 	"github.com/neondatabase/autoscaling/pkg/util/gzip64"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
@@ -1613,15 +1615,23 @@ func podSpec(
 // SetupWithManager sets up the controller with the Manager.
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
-func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
+func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager, retryChan *reqchan.RequestChannel, forceRetryNotRetried bool) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachine"
+
+	var submitRequest func(reconcile.Request)
+	if forceRetryNotRetried {
+		submitRequest = retryChan.Add
+	}
+
 	reconciler := WithMetrics(
 		withCatchPanic(r),
 		r.Metrics,
 		cntrlName,
 		r.Config.FailurePendingPeriod,
 		r.Config.FailingRefreshInterval,
+		submitRequest,
 	)
+
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&certv1.CertificateRequest{}).
@@ -1629,6 +1639,7 @@ func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
+		WatchesRawSource(retryChan.Source()).
 		Complete(reconciler)
 	return reconciler, err
 }
