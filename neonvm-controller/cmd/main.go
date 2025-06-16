@@ -40,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -47,6 +48,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/reqchan"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
@@ -164,6 +166,9 @@ func main() {
 	}
 	defer ipam.Close()
 
+	retryChan := reqchan.NewRequestChannel()
+	defer retryChan.Close()
+
 	vmReconciler := &controllers.VMReconciler{
 		Client:  mgr.GetClient(),
 		Scheme:  mgr.GetScheme(),
@@ -171,7 +176,7 @@ func main() {
 		Metrics: reconcilerMetrics,
 		IPAM:    ipam,
 	}
-	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr)
+	vmReconcilerMetrics, err := vmReconciler.SetupWithManager(mgr, retryChan, cli.forceRetryNotRetried)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
 		panic(err)

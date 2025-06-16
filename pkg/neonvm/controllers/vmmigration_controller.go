@@ -660,6 +660,7 @@ func (r *VirtualMachineMigrationReconciler) SetupWithManager(mgr ctrl.Manager) (
 		cntrlName,
 		r.Config.FailurePendingPeriod,
 		r.Config.FailingRefreshInterval,
+		nil,
 	)
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachineMigration{}).
