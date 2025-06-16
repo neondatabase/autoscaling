@@ -84,8 +84,9 @@ ARG VERSION_SUFFIX
 RUN cd linux-${KERNEL_VERSION} \
 	&& make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
     && echo "Building tools" \
-    && cd linux-${KERNEL_VERSION}/tools/perf \
-    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
+    && cd tools/perf \
+    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- LDFLAGS="-static -L/usr/lib/x86_64-linux-gnu -Wl,--whole-archive -lzstd -Wl,--no-whole-archive" NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
+    #&& make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
@@ -93,6 +94,7 @@ RUN cd linux-${KERNEL_VERSION} \
 FROM --platform=linux/amd64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_amd64
 ARG KERNEL_VERSION
 COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
+COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/perf
 
 # Build the kernel on arm64
 FROM build-deps AS build_arm64
@@ -101,8 +103,9 @@ ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} \
 	&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
     && echo "Building tools" \
-    && cd linux-${KERNEL_VERSION}/tools/perf \
-    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
+    && cd tools/perf \
+    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
+    #&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
@@ -110,6 +113,7 @@ RUN cd linux-${KERNEL_VERSION} \
 FROM --platform=linux/arm64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_arm64
 ARG KERNEL_VERSION
 COPY --from=build_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
+COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/perf
 
 # Dummy default target without target architecture
 FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
