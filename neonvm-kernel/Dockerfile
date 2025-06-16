@@ -100,11 +100,27 @@ COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/pe
 FROM build-deps AS build_arm64
 ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
+RUN dpkg --add-architecture arm64 && \
+    apt-get update && \
+    apt-get -y install \
+    libtraceevent-dev:arm64 \
+    libelf-dev:arm64 \
+    libzstd-dev:arm64 \
+    zlib1g-dev:arm64 \
+    libnuma-dev:arm64 \
+    libslang2-dev:arm64 \
+    libdw-dev:arm64 \
+    libperl-dev:arm64 \
+    libbfd-dev:arm64 \
+    libiberty-dev:arm64 \
+    libcap-dev:arm64 \
+    libunwind-dev:arm64
 RUN cd linux-${KERNEL_VERSION} \
 	&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
     && echo "Building tools" \
     && cd tools/perf \
-    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
+    && make LDFLAGS="-static -L/usr/lib/aarch64-linux-gnu -Wl,--whole-archive -lzstd -Wl,--no-whole-archive" NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
+    #&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
     #&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
 
 # Copy the kernel image to a separate step
@@ -113,7 +129,7 @@ RUN cd linux-${KERNEL_VERSION} \
 FROM --platform=linux/arm64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_arm64
 ARG KERNEL_VERSION
 COPY --from=build_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
-COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/perf
+COPY --from=build_arm64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/perf
 
 # Dummy default target without target architecture
 FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
