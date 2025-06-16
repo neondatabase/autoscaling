@@ -25,6 +25,8 @@ const (
 	runtimeDiskPath = "/vm/images/runtime.iso"
 	mountedDiskPath = "/vm/images"
 
+	toolsDiskPath = "/vm/tools.iso"
+
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
 
@@ -34,15 +36,23 @@ const (
 // setupVMDisks creates the disks for the VM and returns the appropriate QEMU args
 func setupVMDisks(
 	logger *zap.Logger,
-	diskCacheSettings string,
+	cfg *Config,
 	enableSSH bool,
 	swapSize *resource.Quantity,
 	extraDisks []vmv1.Disk,
 ) ([]string, error) {
 	var qemuCmd []string
 
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, cfg.diskCacheSettings))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
+
+	{
+		name := "vm-tools"
+		if err := createISO9660FromPath(logger, name, toolsDiskPath, cfg.toolsPath); err != nil {
+			return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
+		}
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, toolsDiskPath))
+	}
 
 	if enableSSH {
 		name := "ssh-authorized-keys"
@@ -58,7 +68,7 @@ func setupVMDisks(
 		if err := createSwap(dPath, swapSize); err != nil {
 			return nil, fmt.Errorf("failed to create swap disk: %w", err)
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, diskCacheSettings))
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
 	}
 
 	for _, disk := range extraDisks {
@@ -73,7 +83,7 @@ func setupVMDisks(
 			if disk.EmptyDisk.Discard {
 				discard = ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, diskCacheSettings, discard))
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, cfg.diskCacheSettings, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -175,12 +185,16 @@ func createISO9660runtime(
 	}
 	if enableSSH {
 		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
-		mounts = append(mounts, "/neonvm/bin/mount  -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
+		mounts = append(mounts, "/neonvm/bin/mount -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
 	}
 
 	if swapSize != nil {
 		mounts = append(mounts, fmt.Sprintf("/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh %d", swapSize.Value()))
 	}
+
+	// Add tools.
+	mounts = append(mounts, "/neonvm/bin/mkdir -p /neonvm/tools")
+	mounts = append(mounts, "/neonvm/bin/mount -t iso9660 -o ro,exec $(/neonvm/bin/blkid -L vm-tools) /neonvm/tools")
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
