@@ -25,7 +25,26 @@ RUN apt-get update && apt-get -y install \
     python3 \
     cpio \
     zstd \
-    libncurses-dev
+    libncurses-dev \
+    clang \
+    llvm-dev \
+    libdw-dev \
+    libslang2-dev \
+    libbfd-dev \
+    libiberty-dev \
+    libcap-dev \
+    libunwind-dev \
+    zlib1g-dev \
+    libzstd-dev \
+    liblzma-dev \
+    libaio-dev \
+    libtraceevent-dev \
+    libpfm4-dev \
+    systemtap-sdt-dev \
+    musl \
+    musl-dev \
+    musl-tools \
+    pkg-config
 
 # Only require check-arg at this point, so the 'apt-get install' above is definitely cached.
 # We need to copy something in, otherwise 'docker buildx build' will just completely drop the
@@ -63,7 +82,10 @@ ARG KERNEL_VERSION
 ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 ARG VERSION_SUFFIX
 RUN cd linux-${KERNEL_VERSION} \
-	&& make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
+	&& make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
+    && echo "Building tools" \
+    && cd linux-${KERNEL_VERSION}/tools/perf \
+    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
@@ -77,7 +99,10 @@ FROM build-deps AS build_arm64
 ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} \
-	&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
+	&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
+    && echo "Building tools" \
+    && cd linux-${KERNEL_VERSION}/tools/perf \
+    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
