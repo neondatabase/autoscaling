@@ -11,13 +11,24 @@ type IPPoolSpec struct {
 	// Allocations is the set of allocated IPs for the given range. Its` indices are a direct mapping to the
 	// IP with the same index/offset for the pool's range.
 	Allocations map[string]IPAllocation `json:"allocations"`
+
+	// QuarantinedOffsets is the set of offsets that are quarantined from allocation.
+	// This is required to allow time for the FDB to get cleared out.
+	QuarantinedOffsets []string `json:"quarantinedOffsets,omitempty"`
+
+	// QuarantinedOffsetsPending is the set of offsets that are pending quarantine.
+	// We first collect IPs in this list, so that every IP is quarantined for the full period.
+	QuarantinedOffsetsPending []string `json:"quarantinedOffsetsPending,omitempty"`
+
+	// QuarantineStartTime is the time that the quarantine period started.
+	QuarantineStartTime metav1.Time `json:"quarantineStartTime,omitempty"`
 }
 
-// IPAllocation represents metadata about the pod/container owner of a specific IP
-// coped from Whereabout CNI as their allocation functions used
+// IPAllocation represents metadata about the owner of a specific IP.
+//
+// When VirtualMachine owns the IP, the OwnerID is the VM's NamespacedName.
 type IPAllocation struct {
-	ContainerID string `json:"id"`
-	PodRef      string `json:"podref,omitempty"`
+	OwnerID string `json:"id"`
 }
 
 //+genclient
