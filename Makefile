@@ -444,7 +444,7 @@ pg16-disk-test: docker-build-pg16-disk-test load-pg16-disk-test
 e2e-tools: k3d kind kubectl kuttl python-init ## Donwnload tools for e2e tests locally if necessary.
 
 .PHONE: e2e
-e2e: check-local-context e2e-tools ## Run e2e kuttl tests
+e2e: check-local-context e2e-tools examples ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
 
