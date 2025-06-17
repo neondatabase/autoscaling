@@ -81,6 +81,7 @@ func NewAutoscaleEnforcerPlugin(
 		reconcile.WithBaseContext(ctx),
 		reconcile.WithMiddleware(initEvents),
 		reconcile.WithQueueWaitDurationCallback(pluginMetrics.Reconcile.QueueWaitDurationCallback),
+		reconcile.WithQueueSizeCallback(pluginMetrics.Reconcile.QueueSizeCallback),
 		reconcile.WithResultCallback(pluginMetrics.Reconcile.ResultCallback),
 		reconcile.WithErrorStatsCallback(func(params reconcile.ObjectParams, stats reconcile.ErrorStats) {
 			pluginMetrics.Reconcile.ErrorStatsCallback(params, stats)

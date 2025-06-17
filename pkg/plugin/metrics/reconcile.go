@@ -84,10 +84,10 @@ func (r Reconcile) QueueWaitDurationCallback(duration time.Duration) {
 	r.waitDurations.Observe(duration.Seconds())
 }
 
-func (r Reconcile) QueueStatusCallback(waiting bool) {
+func (r Reconcile) QueueSizeCallback(size int) {
 	// update the timer so we record the amount of time during which at least some items were
 	// waiting in the queue.
-	r.waitingTimer.SetWaiting(waiting)
+	r.waitingTimer.SetWaiting(size != 0)
 }
 
 func (r Reconcile) ResultCallback(params reconcile.ObjectParams, duration time.Duration, err error) {

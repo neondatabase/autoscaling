@@ -16,7 +16,7 @@ type queueSettings struct {
 	baseContext    context.Context
 	middleware     []Middleware
 	waitCallback   QueueWaitDurationCallback
-	statusCallback QueueStatusCallback
+	sizeCallback   QueueSizeCallback
 	resultCallback ResultCallback
 	errorCallback  ErrorStatsCallback
 	panicCallback  PanicCallback
@@ -27,7 +27,7 @@ func defaultQueueSettings() *queueSettings {
 		baseContext:    context.Background(),
 		middleware:     []Middleware{},
 		waitCallback:   nil,
-		statusCallback: nil,
+		sizeCallback:   nil,
 		resultCallback: nil,
 		errorCallback:  nil,
 		panicCallback:  nil,
@@ -70,19 +70,19 @@ func WithQueueWaitDurationCallback(cb QueueWaitDurationCallback) QueueOption {
 	}
 }
 
-// QueueStatusCallback represents the signature of the callback that may be provided to add
-// observability for the amount of time that there are at least some items waiting in the queue.
+// QueueSizeCallback represents the signature of the callback that may be provided to add
+// observability to the ongoing length of the queue.
 //
-// Whenever the queue changes between empty and non-empty, this function will be called, with
-// 'waiting' indicating whether there are items in the queue.
-type QueueStatusCallback = func(waiting bool)
+// Whenever the number of queued items changes, this function will be called with the new length of
+// the queue (potentially zero, if there are no items).
+type QueueSizeCallback = func(size int)
 
-// WithQueueStatusCallback sets the QueueStatusCallback that will be called with the current status
-// of the queue (whether items are waiting) whenever the queue changes between empty and non-empty.
-func WithQueueStatusCallback(cb QueueStatusCallback) QueueOption {
+// WithQueueSizeCallback sets the QueueSizeCallback that will be called with the current size of the
+// queue whenever the number of waiting items changes.
+func WithQueueSizeCallback(cb QueueSizeCallback) QueueOption {
 	return QueueOption{
 		apply: func(s *queueSettings) {
-			s.statusCallback = cb
+			s.sizeCallback = cb
 		},
 	}
 }
