@@ -309,6 +309,7 @@ kernel: ## Build linux kernel.
 		neonvm-kernel; \
 	id=$$(docker create $$(cat $$iidfile)); \
 	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \
+	docker cp $$id:/tools neonvm-kernel/tools; \
 	docker rm -f $$id
 
 .PHONY: kernel-source
