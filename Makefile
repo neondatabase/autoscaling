@@ -201,7 +201,6 @@ docker-build-controller: docker-build-go-base ## Build docker image for NeonVM c
 		--tag $(IMG_CONTROLLER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) \
-		--build-arg BUILDTAGS=$(if $(PRESERVE_RUNNER_PODS),nodelete) \
 		--file neonvm-controller/Dockerfile \
 		.
 
@@ -248,8 +247,8 @@ docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscal
 		--file autoscale-scheduler/Dockerfile \
 		.
 
-.PHONY: docker-build-examples
-docker-build-examples: bin/vm-builder ## Build docker images for testing VMs
+.PHONY: docker-build-vm-postgres
+docker-build-vm-postgres: bin/vm-builder ## Build docker images for testing VMs
 	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
 
 .PHONY: docker-build-pg16-disk-test
@@ -374,7 +373,7 @@ render-release: $(RENDERED) kustomize
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
 .PHONY: deploy
-deploy: check-local-context docker-build load-images render-manifests kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: check-local-context docker-build load-images render-manifests kubectl deploy-fluent-bit ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	$(KUBECTL) apply -f $(RENDERED)/multus-dev.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
 	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
@@ -398,21 +397,15 @@ load-images: check-local-context kubectl kind k3d ## Push docker images to the l
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then make k3d-load;  fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ];  then make kind-load; fi
 
-.PHONY: load-example-vms
-load-example-vms: check-local-context kubectl kind k3d ## Load the testing VM image to the kind/k3d cluster.
+.PHONY: load-vm-postgres
+load-vm-postgres: check-local-context kubectl kind k3d ## Load the testing VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(E2E_TESTS_VM_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(E2E_TESTS_VM_IMG) --name $(CLUSTER_NAME); fi
-
-.PHONY: example-vms
-example-vms: docker-build-examples load-example-vms ## Build and push the testing VM images to the kind/k3d cluster.
 
 .PHONY: load-pg16-disk-test
 load-pg16-disk-test: check-local-context kubectl kind k3d ## Load the pg16-disk-test VM image to the kind/k3d cluster.
 	@if [ $$($(KUBECTL) config current-context) = k3d-$(CLUSTER_NAME) ]; then $(K3D) image import $(PG16_DISK_TEST_IMG) --cluster $(CLUSTER_NAME) --mode direct; fi
 	@if [ $$($(KUBECTL) config current-context) = kind-$(CLUSTER_NAME) ]; then $(KIND) load docker-image $(PG16_DISK_TEST_IMG) --name $(CLUSTER_NAME); fi
-
-.PHONY: pg16-disk-test
-pg16-disk-test: docker-build-pg16-disk-test load-pg16-disk-test ## Build and push the pg16-disk-test VM test image to the kind/k3d cluster.
 
 .PHONY: kind-load
 kind-load: kind # Push docker images to the kind cluster.
@@ -434,6 +427,17 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 		$(IMG_AUTOSCALER_AGENT) \
 		--cluster $(CLUSTER_NAME) --mode direct
 
+##@ Example VM images
+
+.PHONY: vm-examples
+examples: vm-postgres pg16-disk-test ## Build example VM images
+
+.PHONY: vm-postgres
+vm-postgres: docker-build-vm-postgres load-vm-postgres
+
+.PHONY: pg16-disk-test
+pg16-disk-test: docker-build-pg16-disk-test load-pg16-disk-test
+
 ##@ End-to-End tests
 
 .PHONE: e2e-tools
@@ -447,7 +451,7 @@ e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 ##@ Local kind cluster
 
 .PHONY: kind-setup
-kind-setup: kind kubectl ## Create local cluster by kind tool and prepared config
+kind-setup: kind kubectl logs-dir-setup ## Create local cluster by kind tool and prepared config
 	$(KIND) create cluster --name $(CLUSTER_NAME) --config kind/config.yaml
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n cert-manager rollout status deployment cert-manager
@@ -458,15 +462,22 @@ kind-setup: kind kubectl ## Create local cluster by kind tool and prepared confi
 	$(KUBECTL) --context kind-$(CLUSTER_NAME) -n kube-system rollout status deployment metrics-server
 
 .PHONY: kind-destroy
-kind-destroy: kind ## Destroy local kind cluster
+kind-destroy: kind kind-destroy-cluster logs-dir-cleanup
+
+.PHONY: kind-destroy-cluster
+kind-destroy-cluster:
 	$(KIND) delete cluster --name $(CLUSTER_NAME)
 
 ##@ Local k3d cluster
 
 # K3D_FIX_MOUNTS=1 used to allow foreign CNI (cilium, multus and so on), https://github.com/k3d-io/k3d/pull/1268
 .PHONY: k3d-setup
-k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
-	K3D_FIX_MOUNTS=1 $(K3D) cluster create $(CLUSTER_NAME) --config k3d/config.yaml $(if $(USE_REGISTRIES_FILE),--registry-config=k3d/registries.yaml)
+k3d-setup: k3d kubectl logs-dir-setup ## Create local cluster by k3d tool and prepared config
+	K3D_FIX_MOUNTS=1 $(K3D) cluster create $(CLUSTER_NAME) \
+		--config k3d/config.yaml \
+		--volume "$(PWD)/tests/logs:/logs@all" \
+		$(if $(USE_REGISTRIES_FILE),--registry-config=k3d/registries.yaml)
+		
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/cilium.yaml
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status daemonset  cilium
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status deployment cilium-operator
@@ -476,8 +487,26 @@ k3d-setup: k3d kubectl ## Create local cluster by k3d tool and prepared config
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/certs.yaml
 
 .PHONY: k3d-destroy
-k3d-destroy: k3d ## Destroy local k3d cluster
+k3d-destroy: k3d k3d-destroy-cluster logs-dir-cleanup
+
+.PHONY: k3d-destroy-cluster
+k3d-destroy-cluster:
 	$(K3D) cluster delete $(CLUSTER_NAME)
+
+##@ Logs
+
+.PHONY: logs-dir-setup
+logs-dir-setup:
+	@mkdir -p tests/logs
+
+.PHONY: deploy-fluent-bit
+deploy-fluent-bit: kubectl
+	$(KUBECTL) apply -f tests/fluent-bit/
+	$(KUBECTL) -n kube-system rollout status daemonset fluent-bit
+
+.PHONY: logs-dir-cleanup
+logs-dir-cleanup:
+	@rm -rf tests/logs/*
 
 ##@ Build Dependencies
 
