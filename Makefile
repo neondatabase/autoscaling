@@ -292,8 +292,10 @@ kernel: ## Build linux kernel.
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
+	version_suffix="-local-$$(date -u '+%FT%TZ')-$$(git describe --dirty)"; \
 	docker buildx build \
 		--build-arg KERNEL_VERSION=$$kernel_version \
+		--build-arg VERSION_SUFFIX=$$version_suffix \
 		--target "kernel_${TARGET_ARCH}" \
 		--pull \
 		--load \

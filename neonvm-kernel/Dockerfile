@@ -61,7 +61,9 @@ RUN set -e \
 FROM build-deps AS build_amd64
 ARG KERNEL_VERSION
 ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
-RUN cd linux-${KERNEL_VERSION} && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- -j `nproc`
+ARG VERSION_SUFFIX
+RUN cd linux-${KERNEL_VERSION} \
+	&& make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
@@ -74,7 +76,8 @@ COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vm
 FROM build-deps AS build_arm64
 ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
-RUN cd linux-${KERNEL_VERSION} && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j `nproc`
+RUN cd linux-${KERNEL_VERSION} \
+	&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
