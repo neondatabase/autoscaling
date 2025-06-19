@@ -1,7 +1,7 @@
-From a7dc5d7446180a15d4a2b7dfdfda6ffb0bad2f61 Mon Sep 17 00:00:00 2001
+From f8c9571c99071d00036e19c146e4d627ff7b0a4c Mon Sep 17 00:00:00 2001
 From: Em Sharnoff <sharnoff@neon.tech>
 Date: Thu, 12 Jun 2025 16:53:09 +0100
-Subject: [PATCH 2/5] x86/mm: Allow error returns from phys_*_init()
+Subject: [PATCH 2/4] x86/mm: Allow error returns from phys_*_init()
 
 Preparation for returning errors when alloc_low_page() fails.
 
@@ -337,7 +337,7 @@ index ae8c68e633c8..7f6f200bb41f 100644
  	return add_pages(nid, start_pfn, nr_pages, params);
  }
 diff --git a/arch/x86/mm/mem_encrypt_amd.c b/arch/x86/mm/mem_encrypt_amd.c
-index 86a476a426c2..2c10addc6c72 100644
+index 86a476a426c2..1740d9b55291 100644
 --- a/arch/x86/mm/mem_encrypt_amd.c
 +++ b/arch/x86/mm/mem_encrypt_amd.c
 @@ -423,9 +423,11 @@ static int __init early_set_memory_enc_dec(unsigned long vaddr,
@@ -349,7 +349,7 @@ index 86a476a426c2..2c10addc6c72 100644
 -					       split_page_size_mask);
 +		ret = kernel_physical_mapping_change(__pa(vaddr & pmask),
 +						     __pa((vaddr_end & pmask) + psize),
-+					       	     split_page_size_mask);
++						     split_page_size_mask);
 +		if (ret)
 +			return ret;
  	}

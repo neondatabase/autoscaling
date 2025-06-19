@@ -1,7 +1,7 @@
-From 97219abb00542690ee6b6db5403d7e85c5b2c78c Mon Sep 17 00:00:00 2001
+From 4cf57468e683439a01e8c7eccd850f12cd7c3e1e Mon Sep 17 00:00:00 2001
 From: Em Sharnoff <sharnoff@neon.tech>
 Date: Thu, 12 Jun 2025 17:06:16 +0100
-Subject: [PATCH 3/5] x86/mm: Handle alloc failure in phys_*_init()
+Subject: [PATCH 3/4] x86/mm: Handle alloc failure in phys_*_init()
 
 During memory hotplug, allocation failures in phys_*_init() aren't
 handled, which results in a null pointer dereference if they occur.
