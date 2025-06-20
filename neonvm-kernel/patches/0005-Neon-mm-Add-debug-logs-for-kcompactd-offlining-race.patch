@@ -1,0 +1,84 @@
+From 4cc23fd0fec5c3432e10af50ff51502b720939d9 Mon Sep 17 00:00:00 2001
+From: Em Sharnoff <sharnoff@neon.tech>
+Date: Fri, 20 Jun 2025 10:35:01 +0100
+Subject: [PATCH 5/5] [Neon] mm: Add debug logs for kcompactd/offlining race
+
+We are currently seeing a small base rate of a kernel bug where
+kcompactd is unable to handle a page fault during compaction.
+
+We suspect this *may* be due to a race condition between memory
+offlining and kcompactd, but it's hard to establish that concretely
+without more logs.
+
+So, let's add some debug logs indicating when kcompactd runs or
+offlining happens.
+---
+ mm/compaction.c     | 10 +++++++++-
+ mm/memory_hotplug.c |  4 ++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/mm/compaction.c b/mm/compaction.c
+index eb5474dea04d..03f3df6ea8e3 100644
+--- a/mm/compaction.c
++++ b/mm/compaction.c
+@@ -3062,6 +3062,8 @@ static void kcompactd_do_work(pg_data_t *pgdat)
+ 	};
+ 	enum compact_result ret;
+ 
++	printk(KERN_INFO "NEON DEBUG: kcompactd_do_work() start");
++
+ 	trace_mm_compaction_kcompactd_wake(pgdat->node_id, cc.order,
+ 							cc.highest_zoneidx);
+ 	count_compact_event(KCOMPACTD_WAKE);
+@@ -3081,8 +3083,10 @@ static void kcompactd_do_work(pg_data_t *pgdat)
+ 		if (ret != COMPACT_CONTINUE)
+ 			continue;
+ 
+-		if (kthread_should_stop())
++		if (kthread_should_stop()) {
++			printk(KERN_INFO "NEON DEBUG: kcompactd_do_work() early return");
+ 			return;
++		}
+ 
+ 		cc.zone = zone;
+ 		status = compact_zone(&cc, NULL);
+@@ -3120,6 +3124,8 @@ static void kcompactd_do_work(pg_data_t *pgdat)
+ 		pgdat->kcompactd_max_order = 0;
+ 	if (pgdat->kcompactd_highest_zoneidx >= cc.highest_zoneidx)
+ 		pgdat->kcompactd_highest_zoneidx = pgdat->nr_zones - 1;
++
++	printk(KERN_INFO "NEON DEBUG: kcompactd_do_work() finished");
+ }
+ 
+ void wakeup_kcompactd(pg_data_t *pgdat, int order, int highest_zoneidx)
+@@ -3207,7 +3213,9 @@ static int kcompactd(void *p)
+ 			unsigned int prev_score, score;
+ 
+ 			prev_score = fragmentation_score_node(pgdat);
++			printk(KERN_INFO "NEON DEBUG: kcompactd proactive compact_node()");
+ 			compact_node(pgdat, true);
++			printk(KERN_INFO "NEON DEBUG: kcompactd proactive compact_node() finished");
+ 			score = fragmentation_score_node(pgdat);
+ 			/*
+ 			 * Defer proactive compaction if the fragmentation
+diff --git a/mm/memory_hotplug.c b/mm/memory_hotplug.c
+index 0a42e9a8caba..11d0d8fb8d71 100644
+--- a/mm/memory_hotplug.c
++++ b/mm/memory_hotplug.c
+@@ -2400,9 +2400,13 @@ int offline_and_remove_memory(u64 start, u64 size)
+ 
+ 	lock_device_hotplug();
+ 
++	printk(KERN_INFO "NEON DEBUG: offline_and_remove_memory(start=%lu, size=%lu)", start, size);
++
+ 	tmp = online_types;
+ 	rc = walk_memory_blocks(start, size, &tmp, try_offline_memory_block);
+ 
++	printk(KERN_INFO "NEON DEBUG: offline_and_remove_memory(start=%lu, size=%lu) finished (rc=%d)", start, size, rc);
++
+ 	/*
+ 	 * In case we succeeded to offline all memory, remove it.
+ 	 * This cannot fail as it cannot get onlined in the meantime.
+-- 
+2.39.5
+
