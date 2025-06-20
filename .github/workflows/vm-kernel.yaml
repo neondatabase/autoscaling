@@ -163,9 +163,7 @@ jobs:
       - name: get kernel version
         id: get-kernel-version
         run: |
-          linux_config=$(ls neonvm-kernel/linux-config-*)  # returns something like "neonvm-kernel/linux-config-amd64-6.1.63"
-          kernel_version=${linux_config##*-}               # returns something like "amd64-6.1.63"
-
+          kernel_version="$(neonvm-kernel/echo-version.sh)" # returns something like "6.1.63"
           echo VM_KERNEL_VERSION=$kernel_version >> $GITHUB_OUTPUT
 
       - name: get docker tags
@@ -253,11 +251,20 @@ jobs:
 
           echo "tags=${PROCESSED_TAGS}" >> $GITHUB_OUTPUT
 
+      - name: Generate kernel version suffix
+        id: generate-version-suffix
+        run: |
+          commit="$(git log -n1 --format='format:%h')"
+          date="$(date -u '+%FT%TZ')"
+          echo "suffix=-neon-$commit-$date" | tee -a $GITHUB_OUTPUT
+
       - name: build linux kernel
         id: build-linux-kernel
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
-          build-args: KERNEL_VERSION=${{ needs.get-tags.outputs.kernel_version_tag }}
+          build-args: |
+            KERNEL_VERSION=${{ needs.get-tags.outputs.kernel_version_tag }}
+            VERSION_SUFFIX=${{ steps.generate-version-suffix.outputs.suffix }}
           context: neonvm-kernel
           # neonvm-kernel/Dockerfile has different targets for different architectures
           # so we need to specify the target explicitly
