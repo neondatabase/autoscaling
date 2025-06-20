@@ -86,7 +86,6 @@ RUN cd linux-${KERNEL_VERSION} \
     && echo "Building tools" \
     && cd tools/perf \
     && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- LDFLAGS="-static -L/usr/lib/x86_64-linux-gnu -Wl,--whole-archive -lzstd -Wl,--no-whole-archive" NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
-    #&& make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
@@ -120,8 +119,6 @@ RUN cd linux-${KERNEL_VERSION} \
     && echo "Building tools" \
     && cd tools/perf \
     && make LDFLAGS="-static -L/usr/lib/aarch64-linux-gnu -Wl,--whole-archive -lzstd -Wl,--no-whole-archive" NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
-    #&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
-    #&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LDFLAGS=-static NO_NUMA=1 NO_LIBPYTHON=1 NO_LIBPERL=1 NO_GTK2=1 NO_LIBPFM4=1 NO_SDT=1
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
