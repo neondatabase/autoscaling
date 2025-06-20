@@ -1,7 +1,7 @@
-From f8c9571c99071d00036e19c146e4d627ff7b0a4c Mon Sep 17 00:00:00 2001
+From 11fc4623ff5bd32636e7d935aaa097cfcd295cbf Mon Sep 17 00:00:00 2001
 From: Em Sharnoff <sharnoff@neon.tech>
 Date: Thu, 12 Jun 2025 16:53:09 +0100
-Subject: [PATCH 2/4] x86/mm: Allow error returns from phys_*_init()
+Subject: [PATCH 2/5] x86/mm: Allow error returns from phys_*_init()
 
 Preparation for returning errors when alloc_low_page() fails.
 

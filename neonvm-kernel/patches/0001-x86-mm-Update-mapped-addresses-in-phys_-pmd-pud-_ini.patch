@@ -1,7 +1,7 @@
 From 11e5209ef9e94792580d376b6cf1e4305e2dae4c Mon Sep 17 00:00:00 2001
 From: Em Sharnoff <sharnoff@neon.tech>
 Date: Thu, 12 Jun 2025 10:36:21 +0100
-Subject: [PATCH 1/4] x86/mm: Update mapped addresses in phys_{pmd,pud}_init()
+Subject: [PATCH 1/5] x86/mm: Update mapped addresses in phys_{pmd,pud}_init()
 
 Currently kernel_physical_mapping_init() and its dependents return the
 last physical address mapped ('paddr_last'). This makes it harder to
