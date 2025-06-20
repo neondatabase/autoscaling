@@ -166,12 +166,6 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	// to a default value.
 	{
 		changed := false
-		// examine targetArchitecture and set it to the default value if it is not set
-		if vm.Spec.TargetArchitecture == nil {
-			log.Info("Setting default target architecture", "default", vmv1.CPUArchitectureAMD64)
-			vm.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
-			changed = true
-		}
 
 		// examine cpuScalingMode and set it to the default value if it is not set
 		if vm.Spec.CpuScalingMode == nil {
@@ -1168,22 +1162,25 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	nodeSelector := a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 
 	// always add default values (arch==vm.Spec.Affinity or os==linux) even if there are already some values
+	nodeMatchExpressions := []corev1.NodeSelectorRequirement{
+		{
+			Key:      "kubernetes.io/os",
+			Operator: "In",
+			Values:   []string{"linux"},
+		},
+	}
+	if vm.Spec.TargetArchitecture != nil {
+		nodeMatchExpressions = append(nodeMatchExpressions, corev1.NodeSelectorRequirement{
+			Key:      "kubernetes.io/arch",
+			Operator: "In",
+			Values:   []string{string(*vm.Spec.TargetArchitecture)},
+		})
+	}
+
 	nodeSelector.NodeSelectorTerms = append(
 		nodeSelector.NodeSelectorTerms,
 		corev1.NodeSelectorTerm{
-			MatchExpressions: []corev1.NodeSelectorRequirement{
-				{
-					Key:      "kubernetes.io/os",
-					Operator: "In",
-					Values:   []string{"linux"},
-				},
-				{
-					Key:      "kubernetes.io/arch",
-					Operator: "In",
-					// vm.Spec.TargetArchitecture is guaranteed to be set by reconciler loop
-					Values: []string{string(*vm.Spec.TargetArchitecture)},
-				},
-			},
+			MatchExpressions: nodeMatchExpressions,
 		},
 	)
 

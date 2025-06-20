@@ -2962,7 +2962,6 @@ spec:
               serviceAccountName:
                 type: string
               targetArchitecture:
-                default: amd64
                 enum:
                 - amd64
                 - arm64
