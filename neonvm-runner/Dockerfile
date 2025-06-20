@@ -30,6 +30,7 @@ RUN apk add --no-cache \
     tini
 
 COPY neonvm-kernel/tools /vm/tools
+RUN ln -s /vm/tools/perf /usr/bin/perf
 COPY neonvm-runner/ssh_config /etc/ssh/ssh_config
 COPY neonvm-kernel/vmlinuz    /vm/kernel/vmlinuz
 
