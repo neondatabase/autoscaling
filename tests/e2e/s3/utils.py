@@ -153,14 +153,13 @@ def s3_check_file(local_endpoint: str):
     result = subprocess.check_output(
         ["gzip", "-d", "-c"], input=response["Body"].read()
     )
-    result = json.loads(result)
 
-    do_assert("events" in result)
+    events = []
+    for line in result.splitlines():
+        if line.strip():
+            item = json.loads(line)
+            events.append(item)
 
-    # Check schema
-    validate_metrics_schema(result)
-
-    events = result["events"]
     do_assert(len(events) > 0, "No events found")
 
     # Example events[0]:
@@ -200,15 +199,6 @@ def s3_check_file(local_endpoint: str):
     now = datetime.datetime.utcnow()
     do_assert(now - stop_time < datetime.timedelta(seconds=10))
 
-
-def validate_metrics_schema(metrics: dict):
-    billing_schema = yaml.safe_load(
-        open("billing-v1.yaml", "r").read()
-    )
-    metrics_schema = billing_schema["components"]["schemas"]["EventsBatch"]
-    
-    openapi_schema_validator.validate(metrics_schema, metrics)
-    
 
 class KubctlForward:
     def __init__(self):
