@@ -264,11 +264,11 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 // tryMerge attempts to merge s and next (assuming that next is after s), returning true only if
 // that merging was successful.
 //
-// Merging may fail if m.endTime != next.startTime or m.metrics != next.metrics.
-func (m *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
-	merged := m.endTime == next.startTime && m.metrics == next.metrics
+// Merging may fail if s.endTime != next.startTime or s.metrics != next.metrics.
+func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
+	merged := s.endTime == next.startTime && s.metrics == next.metrics
 	if merged {
-		m.endTime = next.endTime
+		s.endTime = next.endTime
 	}
 	return merged
 }
