@@ -115,13 +115,9 @@ func newBlobStorageKeyGenerator(prefix string) func() string {
 		now := time.Now()
 		id := shortuuid.New()
 
-		if prefix != "" {
-			prefix = strings.TrimRight(prefix, "/") + "/"
-		}
-
-		return fmt.Sprintf("%syear=%d/month=%02d/day=%02d/hour=%02d/%s_%s.ndjson.gz",
+		return fmt.Sprintf("%s/year=%d/month=%02d/day=%02d/%s_%s.ndjson.gz",
 			prefix,
-			now.Year(), now.Month(), now.Day(), now.Hour(),
+			now.Year(), now.Month(), now.Day(),
 			now.Format("15:04:05Z"),
 			id,
 		)
