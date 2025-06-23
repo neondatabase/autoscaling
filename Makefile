@@ -289,6 +289,7 @@ endif
 .PHONY: kernel
 kernel: ## Build linux kernel.
 	rm -f neonvm-kernel/vmlinuz; \
+	rm -rf neonvm-kernel/tools; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
 	trap "rm $$iidfile" EXIT; \
@@ -510,7 +511,7 @@ k3d-setup: k3d kubectl logs-dir-setup ## Create local cluster by k3d tool and pr
 		--config k3d/config.yaml \
 		--volume "$(PWD)/tests/logs:/logs@all" \
 		$(if $(USE_REGISTRIES_FILE),--registry-config=k3d/registries.yaml)
-		
+
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/cilium.yaml
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status daemonset  cilium
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status deployment cilium-operator
